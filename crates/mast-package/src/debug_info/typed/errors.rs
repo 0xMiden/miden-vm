@@ -21,14 +21,14 @@ pub enum TypedDebugInfoError {
     #[error("invalid bool '{0}' (expected true/false/0/1)")]
     InvalidBool(String),
 
-    #[error("invalid u64 '{0}'")]
-    InvalidU64(String),
+    #[error("invalid felt '{0}'")]
+    InvalidFelt(String),
 
-    #[error("invalid integer '{0}'")]
-    InvalidInt(String),
+    #[error("invalid {ty:?} value '{token}'")]
+    InvalidInt { token: String, ty: DebugPrimitiveType },
 
-    #[error("invalid float '{0}'")]
-    InvalidFloat(String),
+    #[error("invalid {ty:?} value '{token}'")]
+    InvalidFloat { token: String, ty: DebugPrimitiveType },
 
     #[error("invalid hex '{0}'")]
     InvalidHex(String),

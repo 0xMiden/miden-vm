@@ -129,11 +129,13 @@ fn encode_primitive(
             Ok(limbs_to_felts(value, n))
         },
         DebugPrimitiveType::F32 => {
-            let v: f32 = token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat(token))?;
+            let v: f32 =
+                token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat { token, ty: p })?;
             Ok(limbs_to_felts(v.to_bits() as u128, n))
         },
         DebugPrimitiveType::F64 => {
-            let v: f64 = token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat(token))?;
+            let v: f64 =
+                token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat { token, ty: p })?;
             Ok(limbs_to_felts(v.to_bits() as u128, n))
         },
         // 256-bit values exceed the `u128` limb path; no typed encoding is defined for them yet.
@@ -159,7 +161,7 @@ fn parse_unsigned(
     } else {
         token
             .parse::<u128>()
-            .map_err(|_| TypedDebugInfoError::InvalidInt(token.to_string()))?
+            .map_err(|_| TypedDebugInfoError::InvalidInt { token: token.to_string(), ty: p })?
     };
     if value > max_for_bits(bits) {
         return Err(int_out_of_range(token, p));
@@ -184,7 +186,7 @@ fn parse_signed(
     }
     let signed = token
         .parse::<i128>()
-        .map_err(|_| TypedDebugInfoError::InvalidInt(token.to_string()))?;
+        .map_err(|_| TypedDebugInfoError::InvalidInt { token: token.to_string(), ty: p })?;
     // Shift `i128::MIN`/`MAX` down to this width to get the range. At 128 bits the shift is 0.
     let min = i128::MIN >> (128 - bits);
     let max = i128::MAX >> (128 - bits);
@@ -203,7 +205,7 @@ fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
     let v: u64 = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u64::from_str_radix(hex, 16).map_err(|_| TypedDebugInfoError::InvalidHex(s.to_string()))?
     } else {
-        s.parse::<u64>().map_err(|_| TypedDebugInfoError::InvalidU64(s.to_string()))?
+        s.parse::<u64>().map_err(|_| TypedDebugInfoError::InvalidFelt(s.to_string()))?
     };
     Felt::try_from(v).map_err(|_| TypedDebugInfoError::FeltOutOfRange(s.to_string()))
 }
