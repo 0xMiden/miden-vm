@@ -12,6 +12,7 @@ use crate::{
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
+    utils::Idx,
 };
 
 /// Digest sources for a parsed serialized forest.
@@ -202,6 +203,36 @@ impl<'a> ResolvedSerializedForest<'a> {
         self.node_digest_for_entry(index, entry)
     }
 
+    pub(super) fn validate_commitment_input_sections(&self) -> Result<(), DeserializationError> {
+        let mut root_digests = Vec::with_capacity(self.procedure_root_count());
+        for index in 0..self.procedure_root_count() {
+            let root_id = self.procedure_root_at(index)?;
+            root_digests.push(self.node_digest_at(root_id.to_usize())?);
+        }
+        root_digests.sort_unstable();
+        validate_digest_section(
+            self.bytes,
+            self.layout.root_digest_offset(),
+            &root_digests,
+            "root commitment digest",
+        )?;
+
+        let mut dependency_digests = Vec::with_capacity(self.layout.external_node_count);
+        for index in 0..self.node_count() {
+            let entry = self.node_entry_at(index)?;
+            if matches!(entry, MastNodeEntry::External) {
+                dependency_digests.push(self.node_digest_for_entry(index, entry)?);
+            }
+        }
+        dependency_digests.sort_unstable();
+        validate_digest_section(
+            self.bytes,
+            self.layout.dependency_digest_offset(),
+            &dependency_digests,
+            "dependency commitment digest",
+        )
+    }
+
     /// Returns the digest for a node whose entry was already read and bounds-checked by the caller.
     fn node_digest_for_entry(
         &self,
@@ -215,6 +246,24 @@ impl<'a> ResolvedSerializedForest<'a> {
     pub(super) fn digest_slot_at(&self, index: usize) -> usize {
         self.digests.slot_by_node[index] as usize
     }
+}
+
+fn validate_digest_section(
+    bytes: &[u8],
+    digest_section_offset: usize,
+    expected: &[crate::Word],
+    section_name: &str,
+) -> Result<(), DeserializationError> {
+    for (index, expected_digest) in expected.iter().copied().enumerate() {
+        let actual = read_digest_entry(bytes, digest_section_offset, index)?;
+        if actual != expected_digest {
+            return Err(DeserializationError::InvalidValue(format!(
+                "{section_name} {index} does not match the serialized forest"
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn read_digest_entry(
