@@ -28,6 +28,10 @@ Fixed; don't re-litigate without strong reason.
 - **LookupMessage trait bounds**: every chiplet's `*Msg` impl uses the shape `where E: Algebra<E>,
   EF: Algebra<E>` — the blanket `impl<R: PrimeCharacteristicRing> Algebra<R> for R` plus the
   `Algebra<F>: PrimeCharacteristicRing` super-bound carries everything else.
+- **Transcript has no `Neg` opcodes**. Public uint negation is expressed as `Sub(0, x)`
+  with a typed zero leaf; public EC point negation is expressed as `Sub(∞, P)` with an
+  `EcCreate/PAI` node. The internal `EcMsm` chiplet still has its own expression-level
+  `neg` for signed MSM strategies; that is not a transcript opcode.
 - **Tests live under `src/tests/`**, not inline `#[cfg(test)] mod tests`, to keep production source
   files audit-friendly.
 - **Trace heights are powers of two**, padded with all-zero rows.

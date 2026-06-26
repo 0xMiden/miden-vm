@@ -345,7 +345,6 @@ Session::uint_leaf(value, bound_ptr) -> UintNode   // transient value leaf
 Session::uint_add(&a, &b) -> UintNode              // a + b mod p
 Session::uint_sub(&a, &b) -> UintNode              // a − b (as b + r = a)
 Session::uint_mul(&a, &b) -> UintNode              // a · b (κₐ = 1, κ_c = 0)
-Session::uint_neg(&a) -> UintNode                  // −a (is_c_zero)
 Session::uint_is(&a, &b) -> Truthy                 // the is predicate
 ```
 

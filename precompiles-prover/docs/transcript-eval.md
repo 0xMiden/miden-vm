@@ -210,9 +210,9 @@ value-binding and the fusion would no longer apply.
   Binding, the one exception being KeccakNode, which fuses (below).
 - **Eval chip** → the transcript chiplet,
   [`src/transcript/eval`](../src/transcript/eval/). Live arms: the VM
-  `AND` tree, uint leaves (pinned + transient), and uint ops (`Add` /
-  `Sub` / `Mul` / `Neg` / `Is`) — a uniform one-hot dispatch. The group
-  arms are the roadmap.
+  `Tag::AND` tree, uint leaves (pinned + transient), uint ops (`Add` / `Sub` /
+  `Mul` / `Is`), EC create/PAI, EC binops, and EcMsm absorb runs — a uniform
+  role-polymorphic dispatch.
 - **Keccak path** (live, fused): the sponge emits its digest to
   `Memory64` and the chunk chiplet content-commits the input;
   [`KeccakNode`](../src/hash/keccak/node/) ties digest ↔ chunks ↔ node

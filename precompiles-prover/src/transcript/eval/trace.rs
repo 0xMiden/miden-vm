@@ -49,23 +49,33 @@ use miden_core::Felt;
 use miden_core::field::QuadFelt;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::EcRequire;
-use crate::ec::trace::{EcGroupPtr, EcPointPtr, EcStoreRequires};
-use crate::logup::build_logup_aux_trace;
-use crate::relations::ProvideMult;
-use crate::transcript::eval::{
-    COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CURVE_B, COL_GROUP_PTR,
-    COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP,
-    COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_NEG, COL_IS_PINNED, COL_IS_SUB,
-    COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_MSM_EXPR, COL_MSM_IDX,
-    COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID, COL_PIN_PTR, COL_PTR, COL_RHS_BEGIN,
-    COL_SBOUND_PTR, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
+use crate::{
+    ec::{
+        EcRequire,
+        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
+    },
+    logup::build_logup_aux_trace,
+    relations::ProvideMult,
+    transcript::{
+        eval::{
+            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CURVE_B,
+            COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
+            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED,
+            COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_MSM_EXPR,
+            COL_MSM_IDX, COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID, COL_PIN_PTR, COL_PTR,
+            COL_RHS_BEGIN, COL_SBOUND_PTR, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
+        },
+        nodes::{EcOpId, UintOpId},
+        poseidon2::{
+            P2Cap, P2Digest,
+            trace::{PermSeqId, Poseidon2Requires},
+        },
+    },
+    uint::{
+        UintRequire,
+        trace::{UintPtr, UintStoreRequires},
+    },
 };
-use crate::transcript::nodes::{EcOpId, UintOpId};
-use crate::transcript::poseidon2::trace::{PermSeqId, Poseidon2Requires};
-use crate::transcript::poseidon2::{P2Cap, P2Digest};
-use crate::uint::UintRequire;
-use crate::uint::trace::{UintPtr, UintStoreRequires};
 
 /// A handle to a `Binding(hash, True)` claim, issued by the eval requires.
 ///
@@ -188,8 +198,7 @@ enum NodeKind {
     /// `(UintOp, op_id, 0, V)` cap, consumes the children's `Uint`
     /// bindings (`a_ptr` / `b_ptr`) plus one `UintAdd` / `UintMul`
     /// relation tuple, and binds `(hash, Uint, r_ptr, bound_ptr)` — or
-    /// `(hash, True)` for [`UintOpId::Is`]. `Neg` is unary: `rhs` is the
-    /// zero digest and `b_ptr = 0`; `Is` carries `b_ptr = a_ptr` and
+    /// `(hash, True)` for [`UintOpId::Is`]. `Is` carries `b_ptr = a_ptr` and
     /// `r_ptr = 0`.
     UintOp {
         op: UintOpId,
@@ -221,8 +230,9 @@ enum NodeKind {
         is_pai: bool,
     },
     /// EcBinOp — hashes two point child hashes under the `(EcBinOp,
-    /// op, 0, V)` cap. `Add` consumes one `EcGroupAdd(group, p, q, r)` and
-    /// binds `(hash, Group, r_ptr)`; `Is` consumes no relation (shared
+    /// op, 0, V)` cap. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
+    /// consumes the rearranged `EcGroupAdd(group, r, q, p)`, and both bind
+    /// `(hash, Group, r_ptr)`; `Is` consumes no relation (shared
     /// `p_ptr = q_ptr`) and binds `(hash, True)` (`r_ptr = group_ptr = 0`).
     EcBinOp {
         op: EcOpId,
@@ -248,9 +258,8 @@ enum NodeKind {
 }
 
 /// Interning key for a uint value node ([`UintNode`]): a transient `Leaf`
-/// by its (canonical) ptr, an `Op` by `(op, lhs hash, rhs hash)` (the
-/// unary `Neg`'s rhs is the zero digest) — the structural DAG identity, so
-/// a re-request collapses onto the existing row.
+/// by its (canonical) ptr, an `Op` by `(op, lhs hash, rhs hash)` — the
+/// structural DAG identity, so a re-request collapses onto the existing row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum UintKey {
     Leaf(UintPtr),
@@ -260,9 +269,9 @@ enum UintKey {
 /// Interning key for an EC value node ([`EcNode`]): a `Create` by its curve
 /// `(a_ptr, b_ptr)` + coord hashes (the curve rides the cap not the
 /// children, so identical coords on distinct curves stay distinct; ∞ uses
-/// the zero coord hashes), an `Op` by `(op, P hash, Q hash)` (the unary
-/// `Neg`'s rhs is the zero digest), an `Msm` claim by its `expr_ptr` (one
-/// node per expression; its hash chains the whole term run).
+/// the zero coord hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim
+/// by its `expr_ptr` (one node per expression; its hash chains the whole term
+/// run).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum EcKey {
     Create(u32, u32, P2Digest, P2Digest),
@@ -331,10 +340,7 @@ impl TranscriptEvalRequires {
         let out = self.fresh(hash);
         self.nodes.push(EvalNode {
             id: out.id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::And { lhs, rhs },
         });
         out
@@ -363,10 +369,7 @@ impl TranscriptEvalRequires {
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::UintLeaf {
                 ptr: ptr.addr(),
                 bound_ptr: bound_ptr.addr(),
@@ -400,86 +403,64 @@ impl TranscriptEvalRequires {
         store.require_uintval(ptr);
         let (id, hash) = self.push_uint_leaf(ptr, bound_ptr, false, value, p2);
         self.node_consumers.insert(id, 0);
-        let node = UintNode {
-            id,
-            hash,
-            ptr,
-            bound_ptr,
-        };
+        let node = UintNode { id, hash, ptr, bound_ptr };
         self.uint_dedup.insert(UintKey::Leaf(ptr), node);
         node
     }
 
-    /// Record a value-producing uint op (`Add` / `Sub` / `Mul` / `Neg`)
-    /// over `a` (and `b` for the binary ops — `None` exactly for `Neg`):
-    /// dedup by `(op, child hashes)` — a re-requested op returns the
-    /// existing shared-use handle — else record the relation-chiplet op
-    /// through `uints` (interning the result), drive the Poseidon2
-    /// absorption of `a.hash ‖ b.hash ‖ (UintOp, op, 0, V)` (zero rhs
-    /// for `Neg`), consume each child once, and bind the result to
-    /// `Binding(hash, Uint, r_ptr, bound_ptr)`. Returns the result's
-    /// handle.
+    /// Record a value-producing uint op (`Add` / `Sub` / `Mul`) over `a` and
+    /// `b`: dedup by `(op, child hashes)` — a re-requested op returns the
+    /// existing shared-use handle — else record the relation-chiplet op through
+    /// `uints` (interning the result), drive the Poseidon2 absorption of
+    /// `a.hash ‖ b.hash ‖ (UintOp, op, 0, V)`, consume each child once, and
+    /// bind the result to `Binding(hash, Uint, r_ptr, bound_ptr)`. Returns
+    /// the result's handle.
     pub fn uint_op(
         &mut self,
         op: UintOpId,
         a: &UintNode,
-        b: Option<&UintNode>,
+        b: &UintNode,
         mut uints: UintRequire<'_>,
         p2: &mut Poseidon2Requires,
     ) -> UintNode {
-        assert!(
-            b.is_none() == matches!(op, UintOpId::Neg),
-            "Neg is unary; Add/Sub/Mul are binary",
-        );
         assert!(!matches!(op, UintOpId::Is), "Is goes through record_is");
-        let rhs = b.map(|b| b.hash).unwrap_or_default();
-        let key = UintKey::Op(op, a.hash, rhs);
+        assert_eq!(a.bound_ptr, b.bound_ptr, "op operands must share a modulus");
+        let key = UintKey::Op(op, a.hash, b.hash);
         if let Some(&node) = self.uint_dedup.get(&key) {
             return node;
         }
 
         let r_ptr = match op {
-            UintOpId::Add => uints.add(a.ptr, b.expect("binary").ptr),
-            UintOpId::Sub => uints.sub(a.ptr, b.expect("binary").ptr),
-            UintOpId::Mul => uints.mac(1, a.ptr, b.expect("binary").ptr, 0, a.bound_ptr),
-            UintOpId::Neg => uints.neg(a.ptr),
+            UintOpId::Add => uints.add(a.ptr, b.ptr),
+            UintOpId::Sub => uints.sub(a.ptr, b.ptr),
+            UintOpId::Mul => uints.mac(1, a.ptr, b.ptr, 0, a.bound_ptr),
             UintOpId::Is => unreachable!("Is goes through record_is"),
         };
 
         let bound_ptr = a.bound_ptr;
         self.consume_uint(a);
-        if let Some(b) = b {
-            assert_eq!(a.bound_ptr, b.bound_ptr, "op operands must share a modulus");
-            self.consume_uint(b);
-        }
-        let absorption = p2.require_one_shot(P2Cap::uint_op(op), a.hash.as_array(), rhs.as_array());
+        self.consume_uint(b);
+        let absorption =
+            p2.require_one_shot(P2Cap::uint_op(op), a.hash.as_array(), b.hash.as_array());
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::UintOp {
                 op,
                 lhs: a.hash,
-                rhs,
+                rhs: b.hash,
                 a_ptr: a.ptr.addr(),
-                b_ptr: b.map_or(0, |b| b.ptr.addr()),
+                b_ptr: b.ptr.addr(),
                 r_ptr: r_ptr.addr(),
                 bound_ptr: bound_ptr.addr(),
             },
         });
         self.node_consumers.insert(id, 0);
-        let node = UintNode {
-            id,
-            hash,
-            ptr: r_ptr,
-            bound_ptr,
-        };
+        let node = UintNode { id, hash, ptr: r_ptr, bound_ptr };
         self.uint_dedup.insert(key, node);
         node
     }
@@ -501,20 +482,14 @@ impl TranscriptEvalRequires {
         );
         self.consume_uint(a);
         self.consume_uint(b);
-        let absorption = p2.require_one_shot(
-            P2Cap::uint_op(UintOpId::Is),
-            a.hash.as_array(),
-            b.hash.as_array(),
-        );
+        let absorption =
+            p2.require_one_shot(P2Cap::uint_op(UintOpId::Is), a.hash.as_array(), b.hash.as_array());
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let out = self.fresh(hash);
         self.nodes.push(EvalNode {
             id: out.id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::UintOp {
                 op: UintOpId::Is,
                 lhs: a.hash,
@@ -569,10 +544,7 @@ impl TranscriptEvalRequires {
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::EcCreate {
                 x_hash: x.hash,
                 y_hash: y.hash,
@@ -627,10 +599,7 @@ impl TranscriptEvalRequires {
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::EcCreate {
                 x_hash: P2Digest::default(),
                 y_hash: P2Digest::default(),
@@ -645,11 +614,7 @@ impl TranscriptEvalRequires {
             },
         });
         self.node_consumers.insert(id, 0);
-        let node = EcNode {
-            id,
-            hash,
-            point: pai,
-        };
+        let node = EcNode { id, hash, point: pai };
         self.ec_dedup.insert(key, node);
         node
     }
@@ -674,21 +639,15 @@ impl TranscriptEvalRequires {
         let r = ec.add(p.point, q.point, 1);
         self.consume_ec(p);
         self.consume_ec(q);
-        let absorption = p2.require_one_shot(
-            P2Cap::ec_op(EcOpId::Add),
-            p.hash.as_array(),
-            q.hash.as_array(),
-        );
+        let absorption =
+            p2.require_one_shot(P2Cap::ec_op(EcOpId::Add), p.hash.as_array(), q.hash.as_array());
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::EcBinOp {
                 op: EcOpId::Add,
                 lhs: p.hash,
@@ -729,77 +688,21 @@ impl TranscriptEvalRequires {
         let r = ec.sub(p.point, q.point, 1);
         self.consume_ec(p);
         self.consume_ec(q);
-        let absorption = p2.require_one_shot(
-            P2Cap::ec_op(EcOpId::Sub),
-            p.hash.as_array(),
-            q.hash.as_array(),
-        );
+        let absorption =
+            p2.require_one_shot(P2Cap::ec_op(EcOpId::Sub), p.hash.as_array(), q.hash.as_array());
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
             id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::EcBinOp {
                 op: EcOpId::Sub,
                 lhs: p.hash,
                 rhs: q.hash,
                 p_ptr: p.point.addr(),
                 q_ptr: q.point.addr(),
-                r_ptr: r.addr(),
-                group_ptr: group.addr(),
-            },
-        });
-        self.node_consumers.insert(id, 0);
-        let node = EcNode { id, hash, point: r };
-        self.ec_dedup.insert(key, node);
-        node
-    }
-
-    /// Record a EcBinOp/Neg node `R = −P` — the cancel-case primitive
-    /// `P + R = ∞`. Dedups by `(Neg, P hash, 0)`; else drives `ec.neg`
-    /// (negate the y-coord + the cancel relation at provide mult 1) for
-    /// `(group, R, pai)`, the Poseidon2 absorption of `P.hash ‖ 0 ‖
-    /// (EcBinOp, Neg, 0, V)`, consumes `P`, and binds `(hash, Group,
-    /// r_ptr)`. The cancel ∞ result rides the `q_ptr` (b_ptr) slot. Returns
-    /// the shared-use [`EcNode`].
-    pub fn ec_neg(
-        &mut self,
-        p: &EcNode,
-        mut ec: EcRequire<'_>,
-        p2: &mut Poseidon2Requires,
-    ) -> EcNode {
-        let key = EcKey::Op(EcOpId::Neg, p.hash, P2Digest::default());
-        if let Some(&node) = self.ec_dedup.get(&key) {
-            return node;
-        }
-        let (group, r, pai) = ec.neg(p.point, 1);
-        self.consume_ec(p);
-        let absorption = p2.require_one_shot(
-            P2Cap::ec_op(EcOpId::Neg),
-            p.hash.as_array(),
-            P2Digest::default().as_array(),
-        );
-        let _ = p2.require_digest(absorption.digest);
-        let hash = absorption.digest;
-        let id = self.next_id;
-        self.next_id += 1;
-        self.nodes.push(EvalNode {
-            id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
-            kind: NodeKind::EcBinOp {
-                op: EcOpId::Neg,
-                lhs: p.hash,
-                rhs: P2Digest::default(),
-                p_ptr: p.point.addr(),
-                q_ptr: pai.addr(), // the ∞ result rides the b_ptr slot
                 r_ptr: r.addr(),
                 group_ptr: group.addr(),
             },
@@ -822,20 +725,14 @@ impl TranscriptEvalRequires {
         );
         self.consume_ec(p);
         self.consume_ec(q);
-        let absorption = p2.require_one_shot(
-            P2Cap::ec_op(EcOpId::Is),
-            p.hash.as_array(),
-            q.hash.as_array(),
-        );
+        let absorption =
+            p2.require_one_shot(P2Cap::ec_op(EcOpId::Is), p.hash.as_array(), q.hash.as_array());
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let out = self.fresh(hash);
         self.nodes.push(EvalNode {
             id: out.id,
-            absorbed: Some(Absorbed {
-                hash,
-                perm_seq_id: absorption.head(),
-            }),
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
             kind: NodeKind::EcBinOp {
                 op: EcOpId::Is,
                 lhs: p.hash,
@@ -912,11 +809,7 @@ impl TranscriptEvalRequires {
             },
         });
         self.node_consumers.insert(id, 0);
-        let node = EcNode {
-            id,
-            hash: h_claim,
-            point: val,
-        };
+        let node = EcNode { id, hash: h_claim, point: val };
         self.ec_dedup.insert(EcKey::Msm(expr), node);
         node
     }
@@ -1030,12 +923,8 @@ pub fn generate_trace(
             let out_mult = match &n.kind {
                 NodeKind::Zero => return None, // merged below
                 NodeKind::And { .. }
-                | NodeKind::UintLeaf {
-                    is_pinned: true, ..
-                }
-                | NodeKind::UintOp {
-                    op: UintOpId::Is, ..
-                }
+                | NodeKind::UintLeaf { is_pinned: true, .. }
+                | NodeKind::UintOp { op: UintOpId::Is, .. }
                 | NodeKind::EcBinOp { op: EcOpId::Is, .. } => 1,
                 NodeKind::UintLeaf { .. }
                 | NodeKind::UintOp { .. }
@@ -1083,11 +972,7 @@ pub fn generate_trace(
     // balance; see `docs/lookup-argument.md`.)
     trace.resize(height * NUM_MAIN_COLS, Felt::ZERO);
 
-    debug_assert_eq!(
-        public_root,
-        root_hash(&trace),
-        "row 0's hash must pin public_root"
-    );
+    debug_assert_eq!(public_root, root_hash(&trace), "row 0's hash must pin public_root");
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
@@ -1098,7 +983,6 @@ fn uint_op_col(op: UintOpId) -> usize {
         UintOpId::Add => COL_IS_ADD,
         UintOpId::Sub => COL_IS_SUB,
         UintOpId::Mul => COL_IS_MUL,
-        UintOpId::Neg => COL_IS_NEG,
         UintOpId::Is => COL_IS_IS,
     }
 }
@@ -1107,7 +991,6 @@ fn ec_op_col(op: EcOpId) -> usize {
     match op {
         EcOpId::Add => COL_IS_ADD,
         EcOpId::Sub => COL_IS_SUB,
-        EcOpId::Neg => COL_IS_NEG,
         EcOpId::Is => COL_IS_IS,
     }
 }
@@ -1132,14 +1015,7 @@ fn push_node_row(
     // EcMsm is the one multi-row node: lay its absorb run (one row per term,
     // the last the boundary). The capacity cells thread `stateᵢ`; only the
     // boundary carries the value ptr + the Group-binding `out_mult`.
-    if let NodeKind::EcMsm {
-        absorbs,
-        expr,
-        group,
-        val,
-        bound,
-    } = &node.kind
-    {
+    if let NodeKind::EcMsm { absorbs, expr, group, val, bound } = &node.kind {
         let k = absorbs.len();
         for (idx, a) in absorbs.iter().enumerate() {
             let is_last = idx == k - 1;
@@ -1193,14 +1069,8 @@ fn push_node_row(
         NodeKind::And { lhs, rhs } => {
             write_children(&mut row, lhs, rhs);
             row[COL_IS_AND] = Felt::ONE;
-        }
-        NodeKind::UintLeaf {
-            ptr,
-            bound_ptr,
-            is_pinned,
-            lo,
-            hi,
-        } => {
+        },
+        NodeKind::UintLeaf { ptr, bound_ptr, is_pinned, lo, hi } => {
             for i in 0..NUM_HASH {
                 row[COL_LHS_BEGIN + i] = lo[i];
                 row[COL_RHS_BEGIN + i] = hi[i];
@@ -1213,7 +1083,7 @@ fn push_node_row(
             // pinned leaf; 0 keeps a transient's hash content-addressed.
             row[COL_PIN_PTR] = Felt::from(if *is_pinned { *ptr } else { 0 });
             row[COL_PARAM_A] = Felt::from(*bound_ptr); // cap slot 1 = bound_ptr
-        }
+        },
         NodeKind::UintOp {
             op,
             lhs,
@@ -1231,7 +1101,7 @@ fn push_node_row(
             row[COL_A_PTR] = Felt::from(*a_ptr);
             row[COL_B_PTR] = Felt::from(*b_ptr);
             row[COL_PARAM_A] = Felt::from(*op as u8); // cap slot 1 = op id
-        }
+        },
         NodeKind::EcCreate {
             x_hash,
             y_hash,
@@ -1245,11 +1115,7 @@ fn push_node_row(
             is_pai,
         } => {
             write_children(&mut row, x_hash, y_hash); // (x, y) coord hashes (0 on PAI)
-            row[if *is_pai {
-                COL_IS_EC_PAI
-            } else {
-                COL_IS_EC_CREATE
-            }] = Felt::ONE;
+            row[if *is_pai { COL_IS_EC_PAI } else { COL_IS_EC_CREATE }] = Felt::ONE;
             row[COL_PTR] = Felt::from(*point_ptr); // the point (finite / PAI)
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr); // modulus
             row[COL_A_PTR] = Felt::from(*x_ptr); // x coord (0 on PAI)
@@ -1259,12 +1125,9 @@ fn push_node_row(
             row[COL_CURVE_B] = Felt::from(*b_ptr); // cap slot 2 = curve b
             // The group's scalar bound (curve order `n` once an MSM fixed it,
             // else the coord bound) — pins the `EcGroup` consume's F_s field.
-            row[COL_SBOUND_PTR] = Felt::from(
-                ec_store
-                    .group_sbound(EcGroupPtr::from_addr(*group_ptr))
-                    .addr(),
-            );
-        }
+            row[COL_SBOUND_PTR] =
+                Felt::from(ec_store.group_sbound(EcGroupPtr::from_addr(*group_ptr)).addr());
+        },
         NodeKind::EcBinOp {
             op,
             lhs,
@@ -1279,10 +1142,10 @@ fn push_node_row(
             row[ec_op_col(*op)] = Felt::ONE;
             row[COL_PTR] = Felt::from(*r_ptr); // result (0 for Is)
             row[COL_A_PTR] = Felt::from(*p_ptr); // P
-            row[COL_B_PTR] = Felt::from(*q_ptr); // Q (∞ on Neg)
+            row[COL_B_PTR] = Felt::from(*q_ptr); // Q
             row[COL_PARAM_A] = Felt::from(*op as u8); // cap slot 1 = op id
             row[COL_GROUP_PTR] = Felt::from(*group_ptr); // 0 for Is
-        }
+        },
         NodeKind::EcMsm { .. } => unreachable!("EcMsm is laid as a multi-row run above"),
     }
     trace.extend(row);

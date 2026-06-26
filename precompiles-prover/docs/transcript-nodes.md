@@ -85,32 +85,30 @@ local AIR constraints. The pins are part of the version-1 spec —
 violating them is rejected as a malformed node, distinct from a
 version mismatch.
 
-- **Tags 0, 1**: `param_a = 0`, `param_b = 0`.
-- **Tag 2**: `param_a = bound_ptr` (never 0 — ptr 0 is not a store
-  address), `param_b = pin_ptr` (`is_pinned·ptr`: the store address
-  of a pinned leaf, 0 for a transient).
-- **Tag 4**: `param_a = op_id ∈ [1, 5]`, `param_b = 0`. Both param
-  slots belong to the op-discriminant namespace; future per-op
-  parameters land in `param_b`.
-- **Tag 5**: `param_a = a_ptr`, `param_b = b_ptr` — the store
-  addresses of the curve's pinned `a`, `b` (never 0). This is the
-  only node where the curve `(a, b)` enters the DAG.
-- **Tag 6**: `param_a = op_id ∈ [1, 4]`, `param_b = 0` — uniform
-  with tag 4: no curve param in the cap, the curve threads
-  transitively through the operands' hashes.
-- **Tag 7**: `param_b = 0` (param_a is `len_bytes`, unconstrained
-  here — the Keccak chip enforces its own range via the
-  `n_chunks = ⌈len_bytes / 32⌉` relationship).
+- **VM `AND`**: the entire cap is fixed to `[1, 0, 0, 0]`.
+- **VM `CHUNKS`**: the entire cap is fixed to `[2, 0, 0, 0]`.
+- **VM Keccak-256 assertion**: cap slot 1 is the assertion discriminant `0`,
+  cap slot 2 is `len_bytes`, and cap slot 3 is `0`.
+- **Local UintLeaf**: `param_a = bound_ptr` (never 0 — ptr 0 is not a store
+  address), `param_b = pin_ptr` (`is_pinned·ptr`: the store address of a pinned
+  leaf, 0 for a transient).
+- **Local UintOp**: `param_a = op_id ∈ [1, 4]`, `param_b = 0`. Both param slots
+  belong to the op-discriminant namespace; future per-op parameters land in
+  `param_b`.
+- **Local EcCreate**: `param_a = a_ptr`, `param_b = b_ptr` — the store addresses
+  of the curve's pinned `a`, `b` (never 0). This is the only node where the
+  curve `(a, b)` enters the DAG.
+- **Local EcBinOp**: `param_a = op_id ∈ [1, 3]`, `param_b = 0` — uniform with
+  UintOp: no curve param in the cap, the curve threads transitively through the
+  operands' hashes.
 
-### Tag 1 (Chunk) — not an eval-chip node
+### VM `CHUNKS` — not an eval-chip node
 
-Tag 1 is the generic chunk capacity domain separator, not an eval-chip
-dispatch row. The chunk chiplet uses it when starting an absorption
-chain over input chunks: capacity init is
-`state[8..12] = (1, 0, 0, CURRENT_VERSION)`. KeccakNode also uses the
-same capacity inline to hash the 8 packed digest felts as a semantic
-one-chunk payload. That digest commitment is not a physical extra
-ChunkAir row.
+VM `CHUNKS = [2, 0, 0, 0]` is the generic chunk capacity domain separator,
+not an eval-chip dispatch row. The chunk chiplet uses it when committing input
+chunks. KeccakNode also uses the same capacity inline to hash the 8 packed
+digest felts as a one-chunk payload. That digest commitment is not a physical
+extra ChunkAir row.
 
 ### Tag 3 (unused)
 
@@ -129,8 +127,7 @@ discriminated by `param_a = op_id` (registered in code as
 | 1 | `Add` | a, b | `r = a + b mod p` |
 | 2 | `Sub` | a, b | `r = a − b mod p` |
 | 3 | `Mul` | a, b | `r = a · b mod p` |
-| 4 | `Neg` | a, `0⁴` | `r = −a mod p` (unary; the rhs slot is pinned zero) |
-| 5 | `Is`  | a, b | assert `a ≡ b`, binds `True` |
+| 4 | `Is`  | a, b | assert `a ≡ b`, binds `True` |
 
 The value ops bind `(h, Uint, r_ptr, bound_ptr)`; `Is` binds
 `(h, True, 0, 0)` — the predicate that folds uint equalities into the
@@ -141,12 +138,11 @@ tuple, and the node's own binding all carry one shared `bound_ptr`.
 
 Each value-op row consumes one **pointered relation tuple** from
 the matching relation chiplet — `UintAdd(bound_ptr, ·, ·, ·)` for
-`Add` / `Sub` (the arrangement `b + r = a`) / `Neg` (the
-`is_c_zero` form, `c_ptr = 0`), `UintMul(1, 0, a, b, bound_ptr,
-r, bound_ptr)` for `Mul` — which is where all value soundness
-lives; the eval row is pure ptr wiring. `Is` consumes no relation:
-it reads both children's bindings through one shared ptr column,
-so equality is enforced by bus balance alone.
+`Add` / `Sub` (the arrangement `b + r = a`), and
+`UintMul(1, 0, a, b, bound_ptr, r, bound_ptr)` for `Mul` — which
+is where all value soundness lives; the eval row is pure ptr wiring.
+`Is` consumes no relation: it reads both children's bindings through
+one shared ptr column, so equality is enforced by bus balance alone.
 
 ### Tag 5 (EcCreate)
 
@@ -174,16 +170,15 @@ A point operation over child hashes, discriminated by
 |---|---|---|---|---|
 | 1 | `Add` | P, Q | `(g, p, q) = r` | `(h, Group, r)` |
 | 2 | `Sub` | P, Q | `(g, r, q) = p`  (so `r + q = p`) | `(h, Group, r)` |
-| 3 | `Neg` | P, `0⁴` | `(g, p, r) = pai`  (so `p + r = ∞`) | `(h, Group, r)` |
-| 4 | `Is`  | P, Q | — | `(h, True)` |
+| 3 | `Is`  | P, Q | — | `(h, True)` |
 
 Uniform with `UintOp`: **no curve param in the cap** — the curve
 threads through the operands' `Group` binding hashes and is pinned by
-the `EcGroupAdd` provide. `Add` / `Sub` / `Neg` each consume one
-`EcGroupAdd` tuple — the arrangements mirror uint's `a + b = c` /
-`b + r = a` / `a + r = 0`, where all value soundness lives; the eval
-row is pure ptr wiring. `Is` consumes no relation: both children's
-`Group` bindings read through one shared `point_ptr`, so equality is
+the `EcGroupAdd` provide. `Add` / `Sub` each consume one `EcGroupAdd`
+tuple — the arrangements mirror uint's `a + b = c` / `b + r = a`, where all
+value soundness lives; the eval row is pure ptr wiring. `Is` consumes no
+relation: both children's `Group` bindings read through one shared `point_ptr`,
+so equality is
 enforced by bus balance alone, and binds `True` to fold the result into
 the transcript root.
 
@@ -195,7 +190,7 @@ separate eval-chip row. The node hashes:
 ```text
 H_keccak = H(
     rate = H_input_chunks[4] || H_digest_chunks[4],
-    cap  = [Keccak, len_bytes, 0, V],
+    cap  = [Keccak256Precompile::id(), 0, len_bytes, 0],
 )
 ```
 

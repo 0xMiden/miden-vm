@@ -112,7 +112,7 @@ impl P2Cap {
     }
 
     /// `(NodeTag::EcBinOp, op_id, 0, CURRENT_VERSION)` — capacity for a
-    /// group add / sub / neg / eq node over two child point hashes. Like
+    /// group add / sub / eq node over two child point hashes. Like
     /// [`uint_op`](Self::uint_op), only the op discriminant is committed;
     /// the curve threads transitively from the operands' `EcCreate`
     /// caps, never restated here.

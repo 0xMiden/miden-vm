@@ -20,8 +20,8 @@
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
 //! `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` /
-//! `uint_sub` / `uint_neg` / `uint_mul`, the `uint_is` predicate), and the
-//! `Truthy` folds. Each value op lays one eval uint-op node over its
+//! `uint_sub` / `uint_mul`, the `uint_is` predicate), and the `Truthy`
+//! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
 //! intern with canonical `(value, modulus)` dedup, so equal values share
 //! a ptr — the `uint_is` completeness contract — and nodes intern by
@@ -37,6 +37,8 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::ec::EcStores;
 use crate::ec::add::trace::generate_trace as ec_add_trace;
+use crate::ec::msm::require;
+use crate::ec::msm::trace::EcExprPtr;
 use crate::ec::msm::trace::{EcMsmRequires, generate_trace as msm_trace};
 use crate::ec::trace::generate_traces as ec_store_traces;
 use crate::hash::chunk::trace::{ChunkRequires, generate_trace as chunk_trace};
@@ -44,8 +46,6 @@ use crate::hash::keccak::digest::KeccakDigest;
 use crate::hash::keccak::node::trace::{KeccakNodeRequires, generate_trace as keccak_node_trace};
 use crate::hash::keccak::round::{RoundRequires, generate_trace as round_trace};
 use crate::hash::keccak::sponge::trace::{SpongeRequires, generate_trace as sponge_trace};
-use crate::ec::msm::require;
-use crate::ec::msm::trace::EcExprPtr;
 use crate::math::{U256, to_limbs32};
 use crate::primitives::bitwise64::{Bitwise64Requires, generate_trace as bw64_trace};
 use crate::primitives::byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace};
@@ -146,13 +146,8 @@ impl Session {
             self.uint.store.intern_pinned(ptr, value, bound)
         };
         let bound = self.uint.store.pinned(bound_ptr);
-        self.eval.pin_uint(
-            handle,
-            bound,
-            to_limbs32(value),
-            &mut self.uint.store,
-            &mut self.p2,
-        )
+        self.eval
+            .pin_uint(handle, bound, to_limbs32(value), &mut self.uint.store, &mut self.p2)
     }
 
     /// Commit a uint value into the DAG as a *transient* uint leaf —
@@ -171,13 +166,8 @@ impl Session {
     pub fn uint_leaf(&mut self, value: U256, bound_ptr: u32) -> UintNode {
         let bound = self.uint.store.pinned(bound_ptr);
         let ptr = self.uint.store.intern(value, bound);
-        self.eval.uint_leaf(
-            ptr,
-            bound,
-            to_limbs32(value),
-            &mut self.uint.store,
-            &mut self.p2,
-        )
+        self.eval
+            .uint_leaf(ptr, bound, to_limbs32(value), &mut self.uint.store, &mut self.p2)
     }
 
     /// The DAG node `a + b mod p`: hashes `(UintOp, Add, 0, V)` over the
@@ -185,13 +175,13 @@ impl Session {
     /// [`UintAdd`](crate::relations::BusId::UintAdd) relation tuple, and
     /// binds the reduced sum. Returns the result's shared-use handle.
     pub fn uint_add(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Add, a, Some(b))
+        self.uint_op(UintOpId::Add, a, b)
     }
 
     /// The DAG node `a − b mod p` — the `UintAdd` arrangement
-    /// `b + r = a`, so no negative anything exists anywhere.
+    /// `b + r = a`, so no transcript-level negation opcode is needed.
     pub fn uint_sub(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Sub, a, Some(b))
+        self.uint_op(UintOpId::Sub, a, b)
     }
 
     /// The DAG node `a · b mod p`: consumes one
@@ -199,14 +189,7 @@ impl Session {
     /// the plain `κₐ = 1, κ_c = 0` arrangement (the dummy `c_ptr` is the
     /// modulus — no zero uint involved).
     pub fn uint_mul(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Mul, a, Some(b))
-    }
-
-    /// The DAG node `−a mod p` — unary (the preimage's rhs slot is zero),
-    /// via the `is_c_zero` add mode `a + r ≡ 0`: no stored zero, and
-    /// `−0 = 0` falls out (`k = 0`).
-    pub fn uint_neg(&mut self, a: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Neg, a, None)
+        self.uint_op(UintOpId::Mul, a, b)
     }
 
     /// The `is` predicate: the DAG node asserting `a ≡ b`, consuming both
@@ -227,14 +210,8 @@ impl Session {
     /// point_ptr)`. Returns the shared-use [`EcNode`]. Panics if `(x, y)`
     /// is not on the curve.
     pub fn ec_create(&mut self, a_ptr: u32, b_ptr: u32, x: &UintNode, y: &UintNode) -> EcNode {
-        self.eval.ec_create(
-            a_ptr,
-            b_ptr,
-            x,
-            y,
-            self.ec.require(self.uint.require()),
-            &mut self.p2,
-        )
+        self.eval
+            .ec_create(a_ptr, b_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// Declare the **scalar field** of `point`'s group: from here its MSM
@@ -247,9 +224,7 @@ impl Session {
     /// the very ones the MSM consumes). Idempotent on the same handle.
     pub fn constrain_scalar_bound(&mut self, point: &EcNode, sbound_ptr: u32) {
         let group = self.ec.store.point_params(point.point).0;
-        self.ec
-            .store
-            .set_scalar_bound(group, UintPtr::from_addr(sbound_ptr));
+        self.ec.store.set_scalar_bound(group, UintPtr::from_addr(sbound_ptr));
     }
 
     /// Create the group's point-at-infinity on the pinned curve
@@ -269,8 +244,7 @@ impl Session {
     /// [`EcGroupAdd`](crate::relations::BusId::EcGroupAdd) relation tuple
     /// (the group law, provided at mult 1) and binds `(h, Group, r_ptr)`.
     pub fn ec_add(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
-        self.eval
-            .ec_add(p, q, self.ec.require(self.uint.require()), &mut self.p2)
+        self.eval.ec_add(p, q, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// The `is` predicate over points: asserts `P ≡ Q` (point-ptr
@@ -282,20 +256,12 @@ impl Session {
         self.eval.ec_is(p, q, &mut self.p2)
     }
 
-    /// The DAG node `R = −P` — the cancel-case primitive `P + R = ∞`
-    /// (one `EcGroupAdd` at mult 1), binding `(h, Group, r_ptr)`.
-    pub fn ec_neg(&mut self, p: &EcNode) -> EcNode {
-        self.eval
-            .ec_neg(p, self.ec.require(self.uint.require()), &mut self.p2)
-    }
-
     /// The DAG node `R = P − Q` — one `EcBinOp/Sub` row consuming the
     /// *rearranged* `EcGroupAdd(g, R, Q, P)` (`R + Q = P`) at mult 1,
     /// binding `(h, Group, r_ptr)`. One row, one block — the EC parallel
     /// of uint sub.
     pub fn ec_sub(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
-        self.eval
-            .ec_sub(p, q, self.ec.require(self.uint.require()), &mut self.p2)
+        self.eval.ec_sub(p, q, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// Promote a stored point to the 1-term MSM expression `⟨P × 1⟩` (value
@@ -363,9 +329,7 @@ impl Session {
                 assert_ne!(terms[i].0.point, terms[j].0.point, "duplicate base in ec_msm claim");
             }
             assert!(
-                chiplet
-                    .iter()
-                    .any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
+                chiplet.iter().any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
                 "(base, scalar) pair is not a term of this MSM expression",
             );
         }
@@ -403,9 +367,8 @@ impl Session {
     /// Delegate a value op to the eval layer's [`uint_op`]
     /// (TranscriptEvalRequires::uint_op), lending it the uint recording
     /// layer and the Poseidon2 accumulator (disjoint field borrows).
-    fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: Option<&UintNode>) -> UintNode {
-        self.eval
-            .uint_op(op, a, b, self.uint.require(), &mut self.p2)
+    fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: &UintNode) -> UintNode {
+        self.eval.uint_op(op, a, b, self.uint.require(), &mut self.p2)
     }
 
     /// A `ZERO_HASH` leaf claim — the trivial truthy, and the usual base

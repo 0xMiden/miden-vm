@@ -18,15 +18,15 @@ use crate::{
 /// `coeffs` is `c₀ ‥ c_N` (little-endian by degree), `N = coeffs.len() − 1
 /// ≥ 1`; every value must already be reduced below the modulus.
 ///
-/// - **Path A** negates the point: `n = −x`, then the plain Horner `(((c_N)·n + c_{N−1})·n + …)·n +
-///   c₀` — `1` neg, `N` muls, `N` adds.
+/// - **Path A** subtracts from a typed zero: `n = 0 − x`, then the plain Horner `(((c_N)·n +
+///   c_{N−1})·n + …)·n + c₀` — `1` sub, `N` muls, `N` adds.
 /// - **Path B** sign-flips the odd coefficients instead, absorbing every negation into a
 ///   subtraction: Horner over `x` itself with `A_i = x·A_{i+1} ± c_i` (`+` for even `i`, `−` for
 ///   odd), and an odd *leading* coefficient folded into the first step (`A_{N−1} = c_{N−1} −
 ///   c_N·x`) so no negation is ever needed — `N` muls, `N` adds/subs.
 ///
 /// Per degree, the statement costs `2N` `UintMul` and `2N + 1` `UintAdd`
-/// relation ops (plus the `N + 2` value leaves and the closing `Is`),
+/// relation ops (plus the `N + 3` value leaves and the closing `Is`),
 /// which is what makes it a uint-throughput workload: arithmetic
 /// dominates, keccak chiplets stay empty. The paths' accumulators
 /// coincide in *value* at every even step (path A holds `(−1)^i·A_i`),
@@ -45,8 +45,9 @@ pub fn horner_sign_paths(
     let x_leaf = session.uint_leaf(x, bound_ptr);
     let c: Vec<UintNode> = coeffs.iter().map(|&v| session.uint_leaf(v, bound_ptr)).collect();
 
-    // Path A: Horner over −x with the original coefficients.
-    let neg_x = session.uint_neg(&x_leaf);
+    // Path A: Horner over 0 − x with the original coefficients.
+    let zero = session.uint_leaf(U256::ZERO, bound_ptr);
+    let neg_x = session.uint_sub(&zero, &x_leaf);
     let mut acc_a = c[n];
     for i in (0..n).rev() {
         let m = session.uint_mul(&acc_a, &neg_x);
@@ -54,7 +55,7 @@ pub fn horner_sign_paths(
     }
 
     // Path B: the subtractions carry the flipped signs.
-    let (mut acc_b, rest) = if n % 2 == 0 {
+    let (mut acc_b, rest) = if n.is_multiple_of(2) {
         (c[n], n)
     } else {
         let t = session.uint_mul(&c[n], &x_leaf);
