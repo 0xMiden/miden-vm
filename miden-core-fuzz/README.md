@@ -1,6 +1,6 @@
-# MastForest Fuzzing
+# Miden core fuzzing
 
-This crate tests MastForest deserialization and validation against bad inputs.
+This crate tests Miden core deserialization surfaces against bad inputs, including `MastForest`, `ExecutionProof`, precompile requests, and deferred-state proof wire formats.
 
 ## Prerequisites
 
@@ -123,6 +123,18 @@ cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuz
 
 ```bash
 cargo +nightly fuzz run precompile_request_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`deferred_state_wire_deserialize`** — Tests `DeferredStateWire::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`deferred_state_wire_serde_deserialize`** — Tests `DeferredStateWire` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 ### Package Deserialization Targets

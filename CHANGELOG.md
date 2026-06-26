@@ -23,6 +23,24 @@
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 - [BREAKING] Split the execution AIR into Core + Chiplets AIRs ([#3115](https://github.com/0xMiden/miden-vm/pull/3115)).
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
+- [BREAKING] Complete adapting trace generation to row-major ([#3171](https://github.com/0xMiden/miden-vm/pull/3171)).
+- Brought the core-lib `u256` module to full parity with the `u64` and `u128` modules ([#3167](https://github.com/0xMiden/miden-vm/pull/3167)).
+- [BREAKING] Removed `prettier::pretty_print_csv`, `MastNodeId::from_usize_safe`, `DecoratorId::from_u32_bounded`, `OpBatch::end_indices`, — unused private API ([#3197](https://github.com/0xMiden/miden-vm/pull/3197)).
+- [BREAKING] Removed MASM `trace` decorators, remaining decorator execution scaffolding, the CLI `--trace` flag, trace-specific processor and host APIs, and decorator wire slots from the unreleased MAST format `0.0.4` ([#3208](https://github.com/0xMiden/miden-vm/pull/3208)).
+- [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
+- Removed the legacy LALRPOP parser backend
+- [BREAKING] Miden Assembly module structure must now be explicitly declared via `mod name`/`pub mod name`. The assembler will now
+  ensure that only modules declared in this way are included in an artifact. For more details, see ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] `Assembler::compile_and_statically_link_from_dir` is now `Assembler::compile_and_statically_link_from_root`, this is related to the change to MASM module structure mentioned above.
+  This change is necessary, as we now trace library structure via explicit module declarations, rather than implicitly from filesystem structure.
+- [BREAKING] Import syntax in MASM has changed to be more explicit in distinguishing item vs module imports. Module imports are of the form `use some::module` or `use some::module as alias`, and may not have `pub` visibility; while item imports are of the form `use {item} from some::module` or `use {item1, item2 as alias} from some::module`, and may have `pub` visibility. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] Re-exports in MASM (i.e. `pub use ...`) may no longer re-export modules. Normal imports (i.e. `use ...`) are not affected by this change. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] Imports in MASM may no longer refer to other imports in scope. Imports are now resolved in the global namespace (i.e. as if the path is absolute). The sole exception to this are imports which are submodule-relative - these now require an explicit `self::` prefix to tell the assembler that these should be resolved relative to a specific submodule. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
+- Added the content-addressed deferred-DAG core model (`miden_core::deferred`), including structured tags/nodes, canonical wire serialization, the `Precompile` trait, and `PrecompileRegistry`.
+- [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
+- Moved `proptest` test support behind optional features so `rand` 0.9 is not in the default dependency tree ([#3241](https://github.com/0xMiden/miden-vm/pull/3241)).
+- Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).
 - [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
 - [BREAKING] Enabled `clippy::unnecessary_wraps` lint and removed all unnecessary `Option`/`Result` wrappings across the workspace ([#3143](https://github.com/0xMiden/miden-vm/pull/3143)).
 - [BREAKING] Complete adapting trace generation to row-major ([#3171](https://github.com/0xMiden/miden-vm/pull/3171)).
