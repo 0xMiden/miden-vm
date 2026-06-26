@@ -1,0 +1,6 @@
+#! Top-level module of the `miden::precompiles` namespace.
+#!
+#! Concrete deferred precompile wrappers are added in later commits.
+
+pub mod crypto
+pub mod math
