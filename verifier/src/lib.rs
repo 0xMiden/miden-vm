@@ -18,6 +18,10 @@ use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
+type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
+
+const EIDOS_PREPROCESSED_LOG_BLOWUP: u8 = 3;
+
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
@@ -85,7 +89,7 @@ pub fn verify(
 /// - `security_level`: The security level (in bits) of the verified proof.
 /// - `transcript_state`: A [`Word`] containing the rolling commitment to all precompile requests,
 ///   computed by recomputing and recording each precompile commitment in a transcript. The state is
-///   itself a complete digest — no separate finalization step is needed.
+///   itself a complete digest; no separate finalization step is needed.
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -144,27 +148,33 @@ fn verify_stark(
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes, None)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes, None)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes, None)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes, None)
         },
         HashFunction::Eidos => {
             let config = config::eidos_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(
+                &config,
+                &public_values,
+                &kernel_felts,
+                &proof_bytes,
+                eidos_preprocessed_commitment(&config),
+            )
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes, None)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -210,6 +220,7 @@ fn verify_stark_proof<SC>(
     public_values: &[Felt],
     kernel_felts: &[Felt],
     proof_bytes: &[u8],
+    preprocessed_commitment: Option<PreprocessedCommitment<SC>>,
 ) -> Result<(), StarkVerificationError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -243,16 +254,36 @@ where
     )
     .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 
-    let preprocessed_commitment =
-        Preprocessed::build(&statement, config).map(|preprocessed| preprocessed.commitment());
+    let preprocessed_commitment = preprocessed_commitment.or_else(|| {
+        Preprocessed::build(&statement, config).map(|preprocessed| preprocessed.commitment())
+    });
     VerifierInstance::new(config, &statement, preprocessed_commitment)?
         .verify(&proof, challenger)?;
     Ok(())
 }
 
+fn eidos_preprocessed_commitment(
+    config: &config::EidosConfig,
+) -> Option<PreprocessedCommitment<config::EidosConfig>> {
+    if config.pcs().log_blowup() != EIDOS_PREPROCESSED_LOG_BLOWUP {
+        return None;
+    }
+
+    // Root of the fixed Miden preprocessed table under the Eidos LMCS at blowup 2^3.
+    Some(
+        [
+            8101824786889297799,
+            5557459202643843712,
+            8609469204800341145,
+            5780773595731865481,
+        ]
+        .into(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::{vec, vec::Vec};
 
     use super::*;
 
@@ -291,7 +322,7 @@ mod tests {
         let config = config::poseidon2_config(params);
         let proof_bytes = Vec::from_iter(core::iter::repeat_n(0, MAX_STARK_PROOF_BYTES + 1));
 
-        let err = verify_stark_proof(&config, &[], &[], &proof_bytes).unwrap_err();
+        let err = verify_stark_proof(&config, &[], &[], &proof_bytes, None).unwrap_err();
 
         assert!(
             matches!(
@@ -303,5 +334,22 @@ mod tests {
             ),
             "expected explicit proof byte limit to reject oversized proof, got {err:?}"
         );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn eidos_preprocessed_commitment_matches_fixed_table() {
+        let config = config::eidos_config(config::pcs_params());
+        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+            MidenMultiAir::new(),
+            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let commitment =
+            Preprocessed::build(&statement, &config).map(|preprocessed| preprocessed.commitment());
+
+        assert_eq!(commitment, eidos_preprocessed_commitment(&config));
     }
 }

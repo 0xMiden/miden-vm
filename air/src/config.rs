@@ -376,9 +376,7 @@ pub fn rpo_config(
 }
 
 /// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>> {
+pub fn poseidon2_config(params: PcsParams) -> Poseidon2Config {
     alg_config(params, Poseidon2Permutation256)
 }
 
@@ -447,8 +445,11 @@ pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, Blake
 /// Miden VM STARK transcript domain for the Eidos challenger.
 const EIDOS_VM_STARK_TRANSCRIPT_V1: u32 = (2 << 8) | 1;
 
+/// Concrete STARK configuration type for Eidos.
+pub type EidosConfig = MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
+
 /// Creates an Eidos-based STARK configuration.
-pub fn eidos_config(params: PcsParams) -> MidenStarkConfig<EidosLmcs, MidenEidosChallenger> {
+pub fn eidos_config(params: PcsParams) -> EidosConfig {
     let lmcs = lmcs_config();
     let transcript_init_cv = Eidos::transcript_init_cv(EIDOS_VM_STARK_TRANSCRIPT_V1);
     let challenger = MidenEidosChallenger::new(transcript_init_cv, RELATION_DIGEST.into());
