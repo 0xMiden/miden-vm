@@ -5,11 +5,11 @@ use super::{EventId, EventName};
 // SYSTEM EVENTS
 // ================================================================================================
 
-/// Defines a set of actions which can be initiated from the VM to inject new data into the advice
-/// provider.
+/// Defines a set of host-side actions which can be initiated from the VM.
 ///
-/// These actions can affect all 3 components of the advice provider: Merkle store, advice stack,
-/// and advice map.
+/// Most actions update or query one of the three advice-provider components: Merkle store, advice
+/// stack, or advice map. Deferred-DAG actions update host-side deferred state, and evaluation may
+/// also push canonical node data to the advice stack.
 ///
 /// All actions, except for `MerkleNodeMerge`, `Ext2Inv` and `UpdateMerkleNode` can be invoked
 /// directly from Miden assembly via dedicated instructions.
@@ -17,7 +17,7 @@ use super::{EventId, EventName};
 /// System event IDs are derived from blake3-hashing their names (prefixed with "sys::").
 ///
 /// The enum variant order matches the indices in SYSTEM_EVENT_LOOKUP, allowing efficient const
-/// lookup via `to_event_id()`. The discriminants are implicitly 0, 1, 2, ... 15.
+/// lookup via `to_event_id()`. The discriminants are implicitly 0, 1, 2, ... `COUNT - 1`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum SystemEvent {
@@ -292,6 +292,114 @@ pub enum SystemEvent {
     /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
     /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
     HpermToMap,
+
+    // DEFERRED-DAG SYSTEM EVENTS
+    // --------------------------------------------------------------------------------------------
+    /// Registers and eagerly evaluates a deferred node whose full payload is on the operand stack.
+    ///
+    /// `TAG` is one word (4 field elements). `PAYLOAD_LO || PAYLOAD_HI` is eight field elements:
+    /// either one [`crate::deferred::DataChunk`], two child digests (`lhs || rhs`) for a join, one
+    /// `lhs || rhs` pair for a pair-list node, or `child_digest || params` for a unary node. Exact
+    /// [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed
+    /// id-2 tags are rejected during tag decode. Unary `params` are literal payload data and are
+    /// separate from the tag's immediate arguments. The installed registry decodes `TAG` via
+    /// [`crate::deferred::DeferredState::decode`]; `TRUE` is not accepted by this event. Tags that
+    /// semantically require more data chunks or pairs are rejected during precompile-specific
+    /// evaluation. Registration is performed by [`crate::deferred::DeferredState::register`], so
+    /// semantic failures surface immediately.
+    ///
+    /// This event does not push advice and does not return the node digest. Assembly code that
+    /// later uses that digest must compute it in-circuit from the same `TAG` and payload.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack:  unchanged
+    ///   Advice stack:   unchanged
+    ///   Deferred state: node registered and semantically evaluated
+    DeferredRegister,
+
+    /// Evaluates a registered deferred node and pushes its canonical tag and payload as advice.
+    ///
+    /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
+    /// state. The handler evaluates it with [`crate::deferred::DeferredState::evaluate_digest`],
+    /// fetches the canonical node, and pushes its tag followed by its payload to the advice stack.
+    ///
+    /// The tag is emitted first in advice-pop order so `adv_pushw adv_pushw adv_pushw` leaves
+    /// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack for a single 8-felt payload. Data
+    /// payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving canonical
+    /// chunk order. Join and unary payloads use the same two-word LIFO convention; join leaves
+    /// `[lhs, rhs, TAG, ...]`, and unary leaves `[child_digest, params, TAG, ...]`. `TRUE` pushes
+    /// only `Tag::TRUE`. These felts are an unbound host hint, so proof-relevant code must bind
+    /// them to circuit-visible data before relying on them.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical tag, then canonical payload words for `adv_pushw` LIFO
+    /// consumption
+    DeferredEvaluate,
+
+    /// Evaluates a registered deferred node and pushes only its canonical tag as advice.
+    ///
+    /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
+    /// state. `TRUE` pushes `Tag::TRUE`.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical tag only
+    DeferredEvaluateTag,
+
+    /// Evaluates a registered deferred node and pushes only its canonical payload as advice.
+    ///
+    /// This is the payload-only compatibility event. Data payloads push two words per 8-felt chunk
+    /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
+    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join and unary
+    /// payloads use the same two-word LIFO convention; join leaves `[lhs, rhs, ...]`, and unary
+    /// leaves `[child_digest, params, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These
+    /// felts are an unbound host hint, so proof-relevant code must bind them to circuit-visible
+    /// data before relying on them.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical payload only, word-ordered for `adv_pushw` LIFO consumption
+    DeferredEvaluatePayload,
+
+    /// Registers and eagerly evaluates a memory-backed deferred node.
+    ///
+    /// `TAG` is one word (4 field elements). The installed registry decodes `TAG` to determine the
+    /// memory-backed payload shape. The stack-supplied `n_chunks` determines the memory range and
+    /// is shared with any in-circuit digest loop. Data tags read exactly `n_chunks` 8-felt
+    /// [`crate::deferred::DataChunk`] values from memory starting at `ptr`; exact
+    /// [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) registers those chunks as framework-owned
+    /// opaque data, while other data tags remain precompile-owned. Malformed id-2 tags are rejected
+    /// during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs. Join and unary
+    /// tags require `n_chunks == 1` and interpret the single chunk as `lhs || rhs` or
+    /// `child_digest || params`, with unary `params` remaining literal payload data. `TRUE` is not
+    /// accepted. The handler performs a cheap budget pre-check before allocating or reading memory,
+    /// then delegates registration to [`crate::deferred::DeferredState::register`].
+    ///
+    /// This event does not push advice and does not return the node digest. Assembly code that
+    /// later uses that digest must compute it in-circuit from the same `TAG` and memory range
+    /// using the digest rule for the decoded payload shape.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, TAG, ptr, n_chunks, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack:  unchanged
+    ///   Advice stack:   unchanged
+    ///   Deferred state: node registered and semantically evaluated
+    DeferredRegisterData,
 }
 
 impl SystemEvent {
@@ -364,6 +472,11 @@ impl SystemEvent {
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
             Self::HpermToMap,
+            Self::DeferredRegister,
+            Self::DeferredEvaluate,
+            Self::DeferredEvaluateTag,
+            Self::DeferredEvaluatePayload,
+            Self::DeferredRegisterData,
         ]
     }
 }
@@ -405,7 +518,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 19;
+    pub const COUNT: usize = 24;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -507,6 +620,31 @@ impl SystemEvent {
             event: SystemEvent::HpermToMap,
             name: "sys::hperm_to_map",
         },
+        SystemEventEntry {
+            id: EventId::from_u64(3200266522440553751),
+            event: SystemEvent::DeferredRegister,
+            name: "sys::adv::register_deferred",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(12566028600487412345),
+            event: SystemEvent::DeferredEvaluate,
+            name: "sys::adv::evaluate_deferred",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(15463062559264590613),
+            event: SystemEvent::DeferredEvaluateTag,
+            name: "sys::adv::evaluate_deferred_tag",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(8091749904895009326),
+            event: SystemEvent::DeferredEvaluatePayload,
+            name: "sys::adv::evaluate_deferred_payload",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(13021247594355482329),
+            event: SystemEvent::DeferredRegisterData,
+            name: "sys::adv::register_deferred_data",
+        },
     ];
 }
 
@@ -557,16 +695,16 @@ mod test {
                 i, entry.event, i, event
             );
 
-            // Verify LOOKUP entry ID matches the computed ID
-            let computed_id = event.event_id();
+            // Verify LOOKUP entry ID matches enum lookup.
+            let looked_up_id = event.event_id();
             assert_eq!(
                 entry.id,
-                computed_id,
-                "LOOKUP[{}].id is EventId::from_u64({}), but {:?}.to_event_id() returns EventId::from_u64({})",
+                looked_up_id,
+                "LOOKUP[{}].id is EventId::from_u64({}), but {:?}.event_id() returns EventId::from_u64({})",
                 i,
                 entry.id.as_u64(),
                 event,
-                computed_id.as_u64()
+                looked_up_id.as_u64()
             );
 
             // Verify name has correct "sys::" prefix
@@ -614,7 +752,12 @@ mod test {
                 | SystemEvent::HdwordToMap
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::HpermToMap => {},
+                | SystemEvent::HpermToMap
+                | SystemEvent::DeferredRegister
+                | SystemEvent::DeferredEvaluate
+                | SystemEvent::DeferredEvaluateTag
+                | SystemEvent::DeferredEvaluatePayload
+                | SystemEvent::DeferredRegisterData => {},
             }
         }
     }

@@ -8,6 +8,7 @@ use miden_assembly::{
 };
 use miden_core::{
     ONE, Word,
+    deferred::{PrecompileError, PrecompileRegistry},
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
@@ -16,6 +17,7 @@ use miden_core::{
     operations::Operation,
     program::StackInputs,
     serde::{Deserializable, Serializable},
+    testing::precompile::Hash,
 };
 use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
@@ -47,6 +49,32 @@ mod memory;
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
+
+#[test]
+fn processor_state_exposes_deferred_read_only_accessors() {
+    let mut processor = FastProcessor::new(StackInputs::default())
+        .with_deferred_precompiles(PrecompileRegistry::default().with_precompile(Hash))
+        .unwrap();
+    let chunks = vec![core::array::from_fn(|i| Felt::from_u32(1 + i as u32))];
+    let original = Hash::preimage_node(Hash::BYTES_PER_CHUNK, chunks.clone());
+    let canonical = Hash::digest_node(Hash::hash(&chunks));
+    let digest = processor.deferred_state_mut().register(original).unwrap();
+    let canonical_digest = canonical.digest();
+
+    let state = processor.state();
+    assert_eq!(state.get_canonical_deferred_digest(digest), Some(canonical_digest));
+    assert_eq!(state.get_canonical_deferred_node(digest), Some((canonical_digest, &canonical)));
+    assert_eq!(
+        state.require_canonical_deferred_node(digest).unwrap(),
+        (canonical_digest, &canonical)
+    );
+
+    let unknown = Word::new([Felt::from_u32(99), ZERO, ZERO, ZERO]);
+    assert!(matches!(
+        state.require_canonical_deferred_node(unknown),
+        Err(PrecompileError::MissingNode)
+    ));
 }
 
 #[test]

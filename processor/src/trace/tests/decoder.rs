@@ -1,6 +1,6 @@
 //! Decoder virtual-table bus tests.
 //!
-//! Covers the block-stack table (merged with u32 range checks and the log-precompile
+//! Covers the block-stack table (merged with u32 range checks and the log-deferred
 //! capacity bus) and the block-hash + op-group table column.
 //!
 //! Under the LogUp framework the interactions look like "+1 / encode(Msg)" on push rows

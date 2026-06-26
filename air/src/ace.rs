@@ -6,12 +6,12 @@
 //! ```text
 //! 0  =  Σ aux_bound[0..NUM_LOGUP_COMMITTED_FINALS]
 //!         + c_block_hash
-//!         + c_log_precompile
+//!         + c_log_deferred
 //!         + c_kernel_rom
 //! ```
 //!
 //! Two of the three corrections depend only on fixed-length public inputs
-//! (`c_bh`, `c_lp`), so they are rebuilt directly inside the DAG as rational
+//! (`c_bh`, `c_log_deferred`), so they are rebuilt directly inside the DAG as rational
 //! fractions `(n, d)` and folded into a running rational `(N, D)` without any
 //! in-circuit inversion. The kernel-ROM correction depends on the variable-
 //! length kernel digest list which the circuit can't walk, so MASM computes
@@ -31,7 +31,7 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{MidenAir, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
+use crate::{MidenAir, PV_DEFERRED_ROOT, PV_PROGRAM_HASH};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -444,7 +444,7 @@ pub fn multi_air_logup_boundary_config(
     use crate::constraints::lookup::messages::BusId;
 
     // Three rational corrections feeding the combined boundary identity. The open-bus
-    // corrections (block-hash + log-precompile) belong to Core's column 0; the kernel-ROM
+    // corrections (block-hash + log-deferred) belong to Core's column 0; the kernel-ROM
     // correction belongs to Chiplets.
     let ph_msg = vec![
         PublicInput(PV_PROGRAM_HASH),
@@ -455,17 +455,17 @@ pub fn multi_air_logup_boundary_config(
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
     ];
-    let default_lp_msg = vec![
+    let initial_deferred_root_msg = vec![
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
     ];
-    let final_lp_msg = vec![
-        PublicInput(PV_TRANSCRIPT_STATE),
-        PublicInput(PV_TRANSCRIPT_STATE + 1),
-        PublicInput(PV_TRANSCRIPT_STATE + 2),
-        PublicInput(PV_TRANSCRIPT_STATE + 3),
+    let final_deferred_root_msg = vec![
+        PublicInput(PV_DEFERRED_ROOT),
+        PublicInput(PV_DEFERRED_ROOT + 1),
+        PublicInput(PV_DEFERRED_ROOT + 2),
+        PublicInput(PV_DEFERRED_ROOT + 3),
     ];
 
     // Sum every per-AIR boundary slot. With `num_aux_values()` returning 1 for both
@@ -484,13 +484,13 @@ pub fn multi_air_logup_boundary_config(
             },
             BusFraction {
                 sign: Sign::Plus,
-                bus: BusId::LogPrecompileTranscript as usize,
-                message: default_lp_msg,
+                bus: BusId::LogDeferredRoot as usize,
+                message: initial_deferred_root_msg,
             },
             BusFraction {
                 sign: Sign::Minus,
-                bus: BusId::LogPrecompileTranscript as usize,
-                message: final_lp_msg,
+                bus: BusId::LogDeferredRoot as usize,
+                message: final_deferred_root_msg,
             },
         ],
         scalar_corrections: vec![InputKey::VlpiReduction(0)],

@@ -6,7 +6,7 @@ use miden_air::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use miden_core::{crypto::hash::Blake3_256, deferred::DeferredState, serde::Serializable};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -50,6 +50,7 @@ pub struct TraceBuildInputs {
 #[derive(Debug)]
 pub(crate) struct TraceBuildOutput {
     stack_outputs: StackOutputs,
+    deferred_state: DeferredState,
     final_precompile_transcript: PrecompileTranscript,
     precompile_requests: Vec<PrecompileRequest>,
     precompile_requests_digest: [u8; 32],
@@ -61,11 +62,13 @@ impl TraceBuildOutput {
             stack,
             mut advice,
             memory: _,
+            deferred_state,
             final_precompile_transcript,
         } = execution_output;
 
         Self {
             stack_outputs: stack,
+            deferred_state,
             final_precompile_transcript,
             precompile_requests: advice.take_precompile_requests(),
             precompile_requests_digest: [0; 32],
@@ -116,6 +119,11 @@ impl TraceBuildInputs {
         &self.trace_output.final_precompile_transcript
     }
 
+    /// Returns the final deferred state captured for the execution being replayed.
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.trace_output.deferred_state
+    }
+
     /// Returns the program info captured for the execution being replayed.
     pub fn program_info(&self) -> &ProgramInfo {
         &self.program_info
@@ -163,14 +171,15 @@ impl TraceBuildInputs {
 /// The trace consists of the following components:
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state, deferred precompile requests, and the final
-///   precompile transcript).
+/// - Information about execution outputs (stack state, final deferred state, deferred precompile
+///   requests, and the final precompile transcript).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     main_trace: MainTrace,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
+    deferred_state: DeferredState,
     precompile_requests: Vec<PrecompileRequest>,
     final_precompile_transcript: PrecompileTranscript,
     trace_len_summary: TraceLenSummary,
@@ -188,6 +197,7 @@ impl ExecutionTrace {
     ) -> Self {
         let TraceBuildOutput {
             stack_outputs,
+            deferred_state,
             final_precompile_transcript,
             precompile_requests,
             ..
@@ -197,6 +207,7 @@ impl ExecutionTrace {
             main_trace,
             program_info,
             stack_outputs,
+            deferred_state,
             precompile_requests,
             final_precompile_transcript,
             trace_len_summary,
@@ -227,7 +238,7 @@ impl ExecutionTrace {
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
-            self.final_precompile_transcript.state(),
+            self.deferred_state.root(),
         )
     }
 
@@ -254,6 +265,11 @@ impl ExecutionTrace {
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
         self.final_precompile_transcript
+    }
+
+    /// Returns the final deferred state generated during program execution.
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
     }
 
     /// Returns the owned execution outputs required for proof packaging.

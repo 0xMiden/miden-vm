@@ -252,7 +252,7 @@ where
                     )?;
                 OperationHelperRegisters::Empty
             },
-            Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer)
+            Operation::LogDeferred => crypto_ops::op_log_deferred(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
             Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,

@@ -660,10 +660,7 @@ where
 mod tests {
     use alloc::vec;
 
-    use miden_core::{
-        mast::{DynNodeBuilder, MastForestContributor},
-        precompile::PrecompileTranscriptState,
-    };
+    use miden_core::mast::{DynNodeBuilder, MastForestContributor};
 
     use super::*;
     use crate::{
@@ -722,7 +719,7 @@ mod tests {
             clk: 0u32.into(),
             ctx: ContextId::root(),
             fn_hash: Word::default(),
-            pc_transcript_state: PrecompileTranscriptState::default(),
+            deferred_root: Word::default(),
         };
 
         let processor = ReplayProcessor::new(

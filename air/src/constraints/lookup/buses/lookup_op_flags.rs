@@ -62,7 +62,7 @@ pub struct LookupOpFlags<E> {
     mstream: E,
     pipe: E,
     evalcircuit: E,
-    log_precompile: E,
+    log_deferred: E,
     hornerbase: E,
     hornerext: E,
 
@@ -153,7 +153,7 @@ where
         let push = deg5(opcodes::PUSH);
         let dyncall = deg5(opcodes::DYNCALL);
         let evalcircuit = deg5(opcodes::EVALCIRCUIT);
-        let log_precompile = deg5(opcodes::LOGPRECOMPILE);
+        let log_deferred = deg5(opcodes::LOGDEFERRED);
         let hornerbase = deg5(opcodes::HORNERBASE);
         let hornerext = deg5(opcodes::HORNEREXT);
 
@@ -236,7 +236,7 @@ where
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,
@@ -297,7 +297,7 @@ impl LookupOpFlags<Felt> {
             opcodes::MSTREAM => f.mstream = Felt::ONE,
             opcodes::PIPE => f.pipe = Felt::ONE,
             opcodes::EVALCIRCUIT => f.evalcircuit = Felt::ONE,
-            opcodes::LOGPRECOMPILE => f.log_precompile = Felt::ONE,
+            opcodes::LOGDEFERRED => f.log_deferred = Felt::ONE,
             opcodes::HORNERBASE => f.hornerbase = Felt::ONE,
             opcodes::HORNEREXT => f.hornerext = Felt::ONE,
             opcodes::END => f.end = Felt::ONE,
@@ -381,7 +381,7 @@ impl LookupOpFlags<Felt> {
             mstream: Felt::ZERO,
             pipe: Felt::ZERO,
             evalcircuit: Felt::ZERO,
-            log_precompile: Felt::ZERO,
+            log_deferred: Felt::ZERO,
             hornerbase: Felt::ZERO,
             hornerext: Felt::ZERO,
             mload: Felt::ZERO,
@@ -445,7 +445,7 @@ impl LookupOpFlags<Felt> {
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,
@@ -522,7 +522,7 @@ accessors!(
     mstream,
     pipe,
     evalcircuit,
-    log_precompile,
+    log_deferred,
     hornerbase,
     hornerext,
     // Degree-7 individual ops
@@ -654,7 +654,7 @@ mod tests {
             ("u32and", opcodes::U32AND, LookupOpFlags::<Felt>::u32and),
             ("u32xor", opcodes::U32XOR, LookupOpFlags::<Felt>::u32xor),
             ("evalcircuit", opcodes::EVALCIRCUIT, LookupOpFlags::<Felt>::evalcircuit),
-            ("log_precompile", opcodes::LOGPRECOMPILE, LookupOpFlags::<Felt>::log_precompile),
+            ("log_deferred", opcodes::LOGDEFERRED, LookupOpFlags::<Felt>::log_deferred),
         ];
 
         for (name, opcode, get_flag) in cases {
@@ -710,7 +710,7 @@ mod tests {
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,

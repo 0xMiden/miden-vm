@@ -4,6 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -143,6 +144,9 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
+    /// Deferred witness accumulated during execution and returned for verifier rehydration.
+    deferred_state: DeferredState,
+
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
@@ -156,6 +160,7 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
+            deferred_state: self.deferred_state,
             final_precompile_transcript: self.pc_transcript,
         }
     }
@@ -234,9 +239,12 @@ impl FastProcessor {
     ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
-    /// [`Self::with_advice`] or use [`Self::new_with_options`].
+    /// [`Self::with_advice`] or use [`Self::new_with_options`]. Installed deferred precompiles and
+    /// any accumulated deferred state are preserved; only the remaining deferred-state budget is
+    /// updated to match the new options.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        self.deferred_state.set_max_elements(options.max_deferred_elements());
         self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
@@ -276,6 +284,11 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
+            deferred_state: DeferredState::new(
+                Arc::new(PrecompileRegistry::new()),
+                options.max_deferred_elements(),
+            )
+            .expect("empty deferred registry initialization cannot fail"),
             options,
             pc_transcript: PrecompileTranscript::new(),
         })
@@ -300,6 +313,31 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Installs deferred precompiles into this processor's deferred state.
+    ///
+    /// The default processor uses an empty deferred registry. Call this when executing programs
+    /// that link against concrete deferred precompile packages such as `miden-precompiles`.
+    pub fn with_deferred_precompiles(
+        mut self,
+        precompiles: PrecompileRegistry,
+    ) -> Result<Self, ExecutionError> {
+        self.deferred_state
+            .extend_precompiles(precompiles)
+            .map_err(ExecutionError::deferred_error_no_context)?;
+        Ok(self)
+    }
+
+    /// Returns the deferred witness accumulated during execution.
+    #[inline(always)]
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
+    }
+
+    #[inline(always)]
+    pub(super) fn deferred_state_mut(&mut self) -> &mut DeferredState {
+        &mut self.deferred_state
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -619,13 +657,14 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile transcript at the end of execution.
+/// The output of a program execution, containing the state of the stack, advice provider, memory,
+/// final deferred state, and final precompile transcript at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub deferred_state: DeferredState,
     pub final_precompile_transcript: PrecompileTranscript,
 }
 
