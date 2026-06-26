@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.24.1 (TBD)
+
+- Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers.
+
 ## v0.24.0 (2026-06-24)
 
 #### Enhancements
