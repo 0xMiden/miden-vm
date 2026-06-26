@@ -51,6 +51,7 @@ pub mod log_precompile {
     //
     //   Input  (current row): `[_, STMNT, _, ...]`
     //     - stack[4..8] = STMNT — the per-call statement word.
+    //     - capacity is fixed by the opcode to the precompile transcript domain `[1, 0, 0, 0]`.
     //   Output (next row):    `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
     //     - stack[0..4] = STATE_NEW (rate0 output, kept by the wrapper);
     //     - stack[4..12] hold output rate1 / capacity (discarded).
