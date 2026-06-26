@@ -8,6 +8,7 @@
 - Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
+- [BREAKING] MAST forest payloads now include sorted root and dependency digests, so commitment inputs round trip ([#3294](https://github.com/0xMiden/miden-vm/pull/3294)).
 
 ## v0.24.0 (2026-06-24)
 
