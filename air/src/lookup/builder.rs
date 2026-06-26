@@ -483,7 +483,7 @@ pub trait LookupBatch {
 /// LogUp sum that are not tied to any main-trace row.
 ///
 /// Typical sources are committed-final boundary terminals (kernel ROM init, block hash
-/// seed, log-precompile terminals, public-input bus seeds). Each emission contributes
+/// seed, log-deferred terminals, public-input bus seeds). Each emission contributes
 /// one signed fraction to the overall balance; no column / row / group scoping, no
 /// flag gating, no `Deg` (boundary terms are plain field elements, not polynomials).
 ///

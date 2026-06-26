@@ -397,7 +397,7 @@ fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
+    felts.extend_from_slice(pub_inputs.deferred_root().as_ref());
     let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
     fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
     fixed_len

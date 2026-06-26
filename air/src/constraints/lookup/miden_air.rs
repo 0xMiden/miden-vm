@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
+use crate::{PV_DEFERRED_ROOT, PV_PROGRAM_HASH, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
@@ -20,11 +20,11 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 /// Emits the Core-trace boundary corrections.
 ///
-/// Block-hash seed and log-precompile transcript terminals both cancel against bus
+/// Block-hash seed and log-deferred root terminals both cancel against bus
 /// accumulators on Core columns:
 /// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
-/// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
-///   merged column).
+/// - The `LogDeferredRoot` bus carries deferred-root state on `MAIN_COLUMN_SHAPE[0]` (block_stack +
+///   range + log-cap merged column).
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let pv = boundary.public_values();
     let program_hash: [B::F; 4] = [
@@ -33,11 +33,11 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         pv[PV_PROGRAM_HASH + 2],
         pv[PV_PROGRAM_HASH + 3],
     ];
-    let final_state: [B::F; 4] = [
-        pv[PV_TRANSCRIPT_STATE],
-        pv[PV_TRANSCRIPT_STATE + 1],
-        pv[PV_TRANSCRIPT_STATE + 2],
-        pv[PV_TRANSCRIPT_STATE + 3],
+    let final_deferred_root: [B::F; 4] = [
+        pv[PV_DEFERRED_ROOT],
+        pv[PV_DEFERRED_ROOT + 1],
+        pv[PV_DEFERRED_ROOT + 2],
+        pv[PV_DEFERRED_ROOT + 3],
     ];
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
@@ -64,9 +64,9 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         },
     );
 
-    // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-    boundary.add("log_precompile_initial", LogPrecompileMsg { state: [B::F::ZERO; 4] });
-    boundary.remove("log_precompile_final", LogPrecompileMsg { state: final_state });
+    // Log-deferred root terminals: +1 / d_initial − 1 / d_final.
+    boundary.add("log_deferred_initial", LogDeferredMsg { state: [B::F::ZERO; 4] });
+    boundary.remove("log_deferred_final", LogDeferredMsg { state: final_deferred_root });
 }
 
 /// Emits the Chiplets-trace boundary corrections.
