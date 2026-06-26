@@ -276,7 +276,7 @@ coords and `EcBinOp` from a point op) whose hash commits to the term sequence
 | node | produces a `Group` point from… |
 |---|---|
 | `EcCreate` (tag 5) | coordinates |
-| `EcBinOp` (tag 6) | a point op (Add/Sub/Neg) over `EcGroupAdd` |
+| `EcBinOp` (tag 6) | a point op (Add/Sub) over `EcGroupAdd` |
 | **`EcMsm`** (tag 8) | a term-absorption run |
 
 Because EC nodes hash **in the eval chiplet** (unlike Keccak, which hashes its

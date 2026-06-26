@@ -206,9 +206,9 @@ uints sharing `bound_ptr`. A `0` ptr slot is the unstored zero (the
 `is_b_zero` / `is_c_zero` forms).
 
 - **Provider** — [UintAdd](uint-add.md): at the op's consumer count.
-- **Consumers** — [TranscriptEval](transcript-eval.md) (add / sub / neg
-  `UintOp` nodes), [EcGroupAdd](ec-group-add.md) (the `x₁ = x₂` / `y₁ =
-  y₂` coordinate-equality certificates, the `is_b_zero` form),
+- **Consumers** — [TranscriptEval](transcript-eval.md) (add / sub `UintOp`
+  nodes), [EcGroupAdd](ec-group-add.md) (the `x₁ = x₂` / `y₁ = y₂`
+  coordinate-equality certificates, the `is_b_zero` form),
   [EcMsm](ec-msm.md) (per-term scalar merge on combine, scalar negate on neg).
 
 ## 12 — UintMul

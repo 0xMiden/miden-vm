@@ -19,9 +19,9 @@
 //! | 1      | `Chunk`            | generic chunk capacity domain separator    |
 //! | 2      | `UintLeaf`         | uint leaf (u32-LE in the rate)             |
 //! | 3      | unused             | intentionally unassigned                   |
-//! | 4      | `UintOp`           | uint add / sub / mul / neg / is ([`UintOpId`]) |
-//! | 5      | `EcCreate`      | curve-point construction                   |
-//! | 6      | `EcBinOp`       | group add / sub / eq                       |
+//! | 4      | `UintOp`           | uint add / sub / mul / is ([`UintOpId`])  |
+//! | 5      | `EcCreate`         | curve-point construction                  |
+//! | 6      | `EcBinOp`          | group add / sub / is                      |
 //! | 7      | `Keccak`           | `keccak(chunks) == digest` relation        |
 //! | 8      | `EcMsm`            | multi-scalar-mul claim (absorb-run sponge) |
 
@@ -62,10 +62,9 @@ pub enum NodeTag {
 /// | `Add` | a, b | `UintAdd(bp, a, b, r)` — `r = a + b mod p` |
 /// | `Sub` | a, b | `UintAdd(bp, b, r, a)` — `r = a − b mod p` |
 /// | `Mul` | a, b | `UintMul(1, 0, a, b, bp, r, bp)` — `r = a·b mod p` |
-/// | `Neg` | a, `0⁴` | `UintAdd(bp, a, r, 0)` — `r = −a mod p` (`is_c_zero`) |
 /// | `Is` | a, b | none — `a ≡ b` asserted as binding-ptr equality |
 ///
-/// `Add`/`Sub`/`Mul`/`Neg` bind `(h, Uint, r_ptr, bound_ptr)`; `Is` binds
+/// `Add`/`Sub`/`Mul` bind `(h, Uint, r_ptr, bound_ptr)`; `Is` binds
 /// `(h, True)` — the predicate that folds uint values into the spine.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -73,8 +72,7 @@ pub enum UintOpId {
     Add = 1,
     Sub = 2,
     Mul = 3,
-    Neg = 4,
-    Is = 5,
+    Is = 4,
 }
 
 /// Operation discriminant of a [`NodeTag::EcBinOp`] node, committed as
@@ -89,24 +87,21 @@ pub enum UintOpId {
 /// |---|---|---|
 /// | `Add` | P, Q | `EcGroupAdd(g, p, q, r)` — `R = P + Q` |
 /// | `Sub` | P, Q | `EcGroupAdd(g, r, q, p)` — `R = P − Q` |
-/// | `Neg` | P, `0⁴` | `EcGroupAdd(g, p, r, pai)` — `R = −P` (reserved id 3) |
 /// | `Is` | P, Q | none — `P ≡ Q` asserted as binding-ptr equality |
 ///
-/// `Add`/`Sub`/`Neg` bind `(h, Group, r_ptr)`; `Is` binds `(h, True)` —
+/// `Add`/`Sub` bind `(h, Group, r_ptr)`; `Is` binds `(h, True)` —
 /// the predicate folding a curve point into the transcript spine.
 /// `Sub` (2) consumes the *rearranged* relation `EcGroupAdd(g, r, q, p)`
 /// — `R + Q = P` with the bound `R` the subtraction result — exactly as
 /// [`UintOpId::Sub`] rearranges its `UintAdd`. The witness `R = P − Q` is
 /// interned, then the add relation re-derives and certifies `R + Q = P`
-/// (deduping the result onto `P`). `Neg` (3) is the cancel-case op
-/// `P + (−P) = ∞`. The ids stay fixed so committed hashes are stable.
+/// (deduping the result onto `P`).
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EcOpId {
     Add = 1,
     Sub = 2,
-    Neg = 3,
-    Is = 4,
+    Is = 3,
 }
 
 /// Transcript protocol version, bound into every node's hash via the

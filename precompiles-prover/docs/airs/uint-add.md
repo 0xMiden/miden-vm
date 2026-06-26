@@ -13,8 +13,8 @@ A **relation** chiplet (it mints no value): it asserts modular addition
 in by pointer over the [`UintVal`](relation-registry.md#10--uintval) bus;
 this chiplet ties those pointers to the modular-sum identity and
 **provides** the [`UintAdd`](relation-registry.md#11--uintadd) relation,
-consumed by the transcript-eval chip's add / sub / neg `UintOp` nodes and
-by the EC group law's coordinate certificates.
+consumed by the transcript-eval chip's add / sub `UintOp` nodes and by the EC
+group law's coordinate certificates.
 
 Two zero-sentinel modes share the layout: `is_c_zero` proves `a + b ≡ 0`
 (negation, with an unstored zero result) and `is_b_zero` proves

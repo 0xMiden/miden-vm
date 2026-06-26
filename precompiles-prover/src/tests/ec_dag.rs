@@ -18,11 +18,7 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::{
-        EcPointStoreAir,
-        add::{COL_CANCEL, COL_DBL, EcGroupAddAir, PERIOD as ADD_PERIOD, ROW_TERM, TERM_CELL_MULT},
-        groups::EcGroupsAir,
-    },
+    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir},
     hash::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
@@ -34,9 +30,8 @@ use crate::{
     tests::integration::fold_balance,
     transcript::{
         eval::{
-            COL_A_PTR, COL_B_PTR, COL_IS_ADD, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
-            COL_IS_IS, COL_IS_NEG, COL_IS_SUB, COL_PTR, NUM_MAIN_COLS as EVAL_COLS,
-            TranscriptEvalAir,
+            COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB,
+            COL_PTR, NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
         },
         poseidon2::Poseidon2Air,
     },
@@ -119,11 +114,11 @@ fn ec_dag_add_proves() {
     proof.verify().expect("EC DAG round-trip must verify");
 }
 
-/// Create `G`; then `−G` via `ec_neg` (the cancel-case primitive) and
-/// `3G − G = 2G` via `ec_sub` (one `EcBinOp/Sub` row consuming the
-/// rearranged `EcGroupAdd(g, R, Q, P)` — `R + Q = P`), each `ec_is`'d
-/// against the independently created k256 KAT.
-fn ec_dag_neg_sub_traces() -> SessionTraces {
+/// Create `G`; then `−G` via `ec_sub(∞, G)` and `3G − G = 2G` via
+/// `ec_sub` (one `EcBinOp/Sub` row consuming the rearranged
+/// `EcGroupAdd(g, R, Q, P)` — `R + Q = P`), each `ec_is`'d against the
+/// independently created k256 KAT.
+fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);
     let (g2x, g2y) = k256_coords(&(g + g));
@@ -143,8 +138,9 @@ fn ec_dag_neg_sub_traces() -> SessionTraces {
 
     let g_pt = create(&mut s, gx, gy);
 
-    // −G via Neg (cancel through the DAG), checked vs k256.
-    let neg_g = s.ec_neg(&g_pt);
+    // −G via Sub from the group's point-at-infinity, checked vs k256.
+    let inf = s.ec_pai(A_PTR, B_PTR, FP);
+    let neg_g = s.ec_sub(&inf, &g_pt);
     let neg_kat = create(&mut s, ngx, ngy);
     let neg_claim = s.ec_is(&neg_g, &neg_kat);
 
@@ -159,18 +155,18 @@ fn ec_dag_neg_sub_traces() -> SessionTraces {
 }
 
 #[test]
-fn ec_dag_neg_sub_matches_k256() {
-    let traces = ec_dag_neg_sub_traces();
+fn ec_dag_sub_from_pai_matches_k256() {
+    let traces = ec_dag_sub_from_pai_traces();
     traces.check();
 }
 
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
-fn ec_dag_neg_sub_proves() {
-    ec_dag_neg_sub_traces()
+fn ec_dag_sub_from_pai_proves() {
+    ec_dag_sub_from_pai_traces()
         .prove()
         .verify()
-        .expect("EC DAG neg/sub round-trip must verify");
+        .expect("EC DAG sub-from-PAI/sub round-trip must verify");
 }
 
 /// Create ∞ via `ec_pai`, then the three group-law pass-throughs through
@@ -270,7 +266,11 @@ fn ec_dag_double_proves() {
 
 /// Net unmatched LogUp denominators across the full 14-chiplet stack
 /// (0 ⟺ every bus closes), with the `eval` main replaced by `eval_main`.
-fn dag_residual(traces: &SessionTraces, eval_main: &RowMajorMatrix<Felt>, rng: &mut impl Rng) -> usize {
+fn dag_residual(
+    traces: &SessionTraces,
+    eval_main: &RowMajorMatrix<Felt>,
+    rng: &mut impl Rng,
+) -> usize {
     dag_residual_with(traces, eval_main, traces.mains()[13], rng)
 }
 
@@ -316,7 +316,7 @@ fn first_row_with_flag(main: &RowMajorMatrix<Felt>, col: usize) -> usize {
 }
 
 /// First eval row that is an EC op (`is_ec_op`) carrying the shared op flag
-/// `op_col` — the grouped encoding identifies an EC Neg / Sub / … by the
+/// `op_col` — the grouped encoding identifies an EC Add / Sub / Is by the
 /// (family, op) pair rather than a dedicated column.
 fn first_ec_op_row(main: &RowMajorMatrix<Felt>, op_col: usize) -> usize {
     (0..main.height())
@@ -328,7 +328,11 @@ fn first_ec_op_row(main: &RowMajorMatrix<Felt>, op_col: usize) -> usize {
 }
 
 /// Clone a main, overwriting cells of one row (width from the matrix).
-fn tamper(main: &RowMajorMatrix<Felt>, row: usize, cells: &[(usize, Felt)]) -> RowMajorMatrix<Felt> {
+fn tamper(
+    main: &RowMajorMatrix<Felt>,
+    row: usize,
+    cells: &[(usize, Felt)],
+) -> RowMajorMatrix<Felt> {
     let ncols = main.width();
     let mut m = main.clone();
     for &(col, v) in cells {
@@ -380,35 +384,13 @@ fn dag_finite_forged_as_pai_unbalances() {
 }
 
 #[test]
-fn dag_neg_infinity_slot_forged_unbalances() {
-    // On a Neg row the cancel result (∞) rides the b_ptr slot. Repoint it
-    // off the group's PAI: locally valid (b_ptr is bus-pinned, not local),
-    // but the EcGroupAdd consume (group, P, R, b_ptr) no longer matches the
-    // cancel provide (…, ∞).
-    let traces = ec_dag_neg_sub_traces();
-    let mut rng = StdRng::seed_from_u64(0xec_da9_f02);
-    let eval = traces.mains()[7];
-    assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
-
-    let row = first_ec_op_row(eval, COL_IS_NEG);
-    let pai = eval.values[row * EVAL_COLS + COL_B_PTR]; // the ∞ ptr (cancel result-slot)
-    let forged = tamper(eval, row, &[(COL_B_PTR, pai + Felt::ONE)]);
-    eval_locally_holds(&traces, &forged);
-    assert_ne!(
-        dag_residual(&traces, &forged, &mut rng),
-        0,
-        "the bus must catch a forged ∞ result-slot",
-    );
-}
-
-#[test]
 fn dag_sub_result_forged_unbalances() {
     // A Sub row binds its result R on COL_PTR (locally free — bus-pinned)
     // and consumes the rearranged EcGroupAdd(g, R, Q, P). Repoint R: locally
     // valid, but the consume's operand-R no longer matches the EcGroupAdd
     // provide, and the Group binding the row provides (h ↔ R) dangles its
     // `ec_is` consumer — the rearrangement is load-bearing, not decorative.
-    let traces = ec_dag_neg_sub_traces();
+    let traces = ec_dag_sub_from_pai_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f03);
     let eval = traces.mains()[7];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
@@ -421,102 +403,5 @@ fn dag_sub_result_forged_unbalances() {
         dag_residual(&traces, &forged, &mut rng),
         0,
         "the bus must catch a forged Sub result",
-    );
-}
-
-/// `G + G = 2G` (the double arm, claimed against k256) plus an **unused**
-/// `Neg(G)`. The double block's `EcGroupAdd(G, G, 2G)` provide and the
-/// `Neg`'s cancel block `(G, −G, ∞)` are what the forgery below reroutes.
-fn ec_dag_neg_double_traces() -> SessionTraces {
-    let g = ProjectivePoint::GENERATOR;
-    let (gx, gy) = k256_coords(&g);
-    let (g2x, g2y) = k256_coords(&(g + g));
-
-    let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
-
-    let gx_n = s.uint_leaf(gx, FP);
-    let gy_n = s.uint_leaf(gy, FP);
-    let g_pt = s.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
-    let dbl = s.ec_add(&g_pt, &g_pt); // double: provides EcGroupAdd(G, G, 2G)
-    let neg = s.ec_neg(&g_pt); // Neg: lays the cancel block (G, −G, ∞)
-    // Consume the Neg with a tautology (`Neg(G) ≡ Neg(G)`) so it isn't a
-    // stray node. Unlike an `Is` against a KAT, a self-`Is` pins the Neg's
-    // result to *nothing external*, leaving the result-slot's soundness to
-    // col 7 alone — exactly the surface under test.
-    let neg_self = s.ec_is(&neg, &neg);
-
-    let g2x_n = s.uint_leaf(g2x, FP);
-    let g2y_n = s.uint_leaf(g2y, FP);
-    let g2_kat = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
-    let dbl_claim = s.ec_is(&dbl, &g2_kat);
-
-    let root = s.assert_and_fold([modulus, a_t, b_t, dbl_claim, neg_self]);
-    s.finish(root)
-}
-
-#[test]
-fn dag_neg_result_forged_unbalances() {
-    // The deep forgery the col-7 ∞-pin closes: bind `Neg(G)` to a *wrong*
-    // finite point by repointing its EcGroupAdd result-slot (`b_ptr`) to a
-    // real finite sum that already has a matching provide. Pick the wrong
-    // result `R = G`; then `P + R = G + G = 2G`, which the double block
-    // provides as `(G, G, 2G)`. Forge the Neg row's result (`ptr`) → G and
-    // ∞-slot (`b_ptr`) → 2G, then serve the now-doubled `(G, G, 2G)` consume
-    // by bumping the double block's provide mult 1→2 and zeroing the cancel
-    // block's mult (the Neg no longer consumes it).
-    //
-    // col 6 (EcGroupAdd) and every other pre-fix bus still close — *without*
-    // col 7 this forged `Neg(G) = G` is fully balanced (the soundness hole).
-    // col 7's `EcPoint(b_ptr, is_pai = 1)` consume now reads
-    // `EcPoint(2G, is_pai = 1)`, which no store row provides (2G is finite),
-    // and the honest ∞ provide routed by `neg` loses its consumer — two
-    // unmatched denominators. That pin is exactly what forces `R = −P`.
-    let traces = ec_dag_neg_double_traces();
-    let mut rng = StdRng::seed_from_u64(0xec_da9_f04);
-    let eval = traces.mains()[7];
-    let add = traces.mains()[13];
-    assert_eq!(dag_residual_with(&traces, eval, add, &mut rng), 0, "honest stack must balance",);
-
-    // Operand `G`'s ptr (the Neg row's `a_ptr`), the Neg's honest result −G
-    // (its `ptr`), and `2G`'s ptr (the double row's result).
-    let neg_row = first_ec_op_row(eval, COL_IS_NEG);
-    let ptr_g = eval.values[neg_row * EVAL_COLS + COL_A_PTR];
-    let ptr_neg = eval.values[neg_row * EVAL_COLS + COL_PTR];
-    let dbl_row = first_ec_op_row(eval, COL_IS_ADD);
-    let ptr_2g = eval.values[dbl_row * EVAL_COLS + COL_PTR];
-
-    // The self-`Is(neg, neg)` row consumes the Neg's binding at ptr(−G);
-    // rebinding the Neg result means repointing that consume too — else col 5
-    // catches the binding mismatch, masking col 7. (Match the ec-Is row: the
-    // shared is_is flag also rides uint-Is rows, so gate on is_ec_op too.)
-    let is_row = (0..eval.height())
-        .find(|&r| {
-            eval.values[r * EVAL_COLS + COL_IS_EC_OP] == Felt::ONE
-                && eval.values[r * EVAL_COLS + COL_IS_IS] == Felt::ONE
-                && eval.values[r * EVAL_COLS + COL_A_PTR] == ptr_neg
-        })
-        .expect("Is(neg, neg) row");
-
-    // Forge the Neg row (result → G, ∞-slot → 2G) and the self-Is consume.
-    let forged_eval = tamper(eval, neg_row, &[(COL_PTR, ptr_g), (COL_B_PTR, ptr_2g)]);
-    let forged_eval = tamper(&forged_eval, is_row, &[(COL_A_PTR, ptr_g), (COL_B_PTR, ptr_g)]);
-
-    // Reroute the ec_add provides: the double serves two consumers now, the
-    // cancel none. Only the provide-mult term cell changes — the per-block
-    // EcPoint operand consumes are mult-independent, so the store is
-    // untouched (no cascade), isolating col 7 as the sole catch.
-    let dbl_term = (first_row_with_flag(add, COL_DBL) / ADD_PERIOD) * ADD_PERIOD + ROW_TERM;
-    let cancel_term = (first_row_with_flag(add, COL_CANCEL) / ADD_PERIOD) * ADD_PERIOD + ROW_TERM;
-    let forged_add = tamper(add, dbl_term, &[(TERM_CELL_MULT, Felt::from(2u32))]);
-    let forged_add = tamper(&forged_add, cancel_term, &[(TERM_CELL_MULT, Felt::ZERO)]);
-
-    eval_locally_holds(&traces, &forged_eval);
-    assert_ne!(
-        dag_residual_with(&traces, &forged_eval, &forged_add, &mut rng),
-        0,
-        "col 7 must catch a Neg result bound to a finite point (∞-slot not ∞)",
     );
 }
