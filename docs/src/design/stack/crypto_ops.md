@@ -384,11 +384,12 @@ $$
 
 ## LOG_PRECOMPILE
 
-The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling precompile-transcript state. The transcript is a linear hash tree over Poseidon2:
-`STATE_NEW = Poseidon2::merge(STATE_PREV, STMNT)`. Initialization and boundary enforcement are
-handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a
-high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_precompile` operation merges a precomputed per-call statement word `STMNT` into the
+rolling precompile transcript state. The update is a domain-separated Poseidon2 merge with fixed
+capacity word `[1, 0, 0, 0]`:
+`STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))`. Initialization and boundary
+enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
+for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -404,8 +405,9 @@ with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑dete
 helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`,
-with the following stack transition:
+The operation evaluates
+`[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, [1,0,0,0]])`, with the following
+stack transition:
 
 ```
 Before:  [_,         STMNT,      _,       ...]
@@ -437,16 +439,16 @@ $$
 \begin{aligned}
 \mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
 \mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-0                              &              &&\text{(constant capacity input)}
+\mathsf{DOMAIN}_i              &= \bigl([1,0,0,0]\bigr)_i &&\text{(fixed capacity word)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
 The input message reduces the Poseidon2 state in the canonical order
-`[STATE_PREV, STMNT, ZERO]`:
+`[STATE_PREV, STMNT, [1,0,0,0]]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{DOMAIN}_i.
 $$
 
 One controller row later, the `op_retstate` response provides the permuted state
@@ -478,16 +480,12 @@ The above constraint enforces that the specified input and output controller row
 in the trace of the hash chiplet. In the controller/permutation split design these two controller
 rows are consecutive, so their addresses differ by exactly 1.
 
-Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
-variables in the trace, it should be possible to combine the bus constraint in a way that avoids
-increasing the degree of the overall bus expression.
-
 ### Transcript-state Initialization
 
 Inside the VM, the transcript state is tracked via the virtual-table bus: each update removes the
 previous entry before inserting the next one.
 
-We denote the messages for removing and inserting the message as
+We denote the messages for removing and inserting the state as
 
 $$
 v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_PREV}_j
@@ -524,6 +522,5 @@ $$
 v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
 $$
 
-Because the fold is a 2‑to‑1 hash (`merge(STATE_PREV, STMNT)`), the state is itself a complete
-digest at every step. The transcript digest is just the final state — no extra finalization step
-is required.
+Because the domain-separated Poseidon2 merge outputs a digest word directly, the precompile
+transcript state is itself the digest at every step. The transcript digest is just the final state.
