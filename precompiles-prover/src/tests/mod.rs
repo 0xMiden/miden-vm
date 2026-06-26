@@ -27,8 +27,7 @@ mod uint_dag;
 mod uint_mul;
 mod utils;
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;
 use p3_matrix::dense::RowMajorMatrix;

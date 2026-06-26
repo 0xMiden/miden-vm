@@ -52,23 +52,19 @@
 //!
 //! `ptr` and `bound_ptr` are cycle-constant per block.
 //!
-//! - **`UintVal`** (aux col 0): the `v` lo row and the hub *provide*
-//!   `UintVal(ptr, bound_ptr, offset, recombined-4×32)` with multiplicity
-//!   `−uintval_mult` (the hub cell); the `bound` rows *consume*
-//!   `UintVal(bound_ptr, bound_ptr, offset, direct-4×32)` with `+1`. Both
-//!   ptr-slots of the consume are `bound_ptr`, so it only matches a
-//!   *self-referential* provider — the modulus row. With `uintval_mult` =
-//!   the consumer count, the bus self-balances.
-//! - **`Range16`** (aux col 1): each `v`/`comp` 16-bit limb is range-
-//!   checked (8/row × 4 rows = 32/uint), forcing limbs `< 2¹⁶` so the SZ
-//!   no-wrap bound holds. Provided externally by the byte-pair-LUT chiplet.
+//! - **`UintVal`** (aux col 0): the `v` lo row and the hub *provide* `UintVal(ptr, bound_ptr,
+//!   offset, recombined-4×32)` with multiplicity `−uintval_mult` (the hub cell); the `bound` rows
+//!   *consume* `UintVal(bound_ptr, bound_ptr, offset, direct-4×32)` with `+1`. Both ptr-slots of
+//!   the consume are `bound_ptr`, so it only matches a *self-referential* provider — the modulus
+//!   row. With `uintval_mult` = the consumer count, the bus self-balances.
+//! - **`Range16`** (aux col 1): each `v`/`comp` 16-bit limb is range- checked (8/row × 4 rows =
+//!   32/uint), forcing limbs `< 2¹⁶` so the SZ no-wrap bound holds. Provided externally by the
+//!   byte-pair-LUT chiplet.
 
 pub mod add;
 pub mod mul;
 pub mod require;
 pub mod trace;
-
-pub use require::{UintRequire, UintStores};
 
 use core::array;
 
@@ -77,17 +73,20 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::stark::air::ExtensionBuilder;
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
+pub use require::{UintRequire, UintStores};
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    primitives::byte_pair_lut::Range16Msg,
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, next_main},
 };
-use crate::primitives::byte_pair_lut::Range16Msg;
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, next_main};
 
 // MESSAGES
 // ================================================================================================
@@ -125,15 +124,7 @@ where
         let [c0, c1, c2, c3] = self.limbs.clone();
         challenges.encode(
             BusId::UintVal as usize,
-            [
-                self.ptr.clone(),
-                self.bound_ptr.clone(),
-                self.offset.clone(),
-                c0,
-                c1,
-                c2,
-                c3,
-            ],
+            [self.ptr.clone(), self.bound_ptr.clone(), self.offset.clone(), c0, c1, c2, c3],
         )
     }
 }
@@ -253,9 +244,7 @@ impl BaseAir<Felt> for UintStoreAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         let o = Felt::ONE;
         let z = Felt::ZERO;
@@ -271,7 +260,9 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
             vec![z, z, z, z, z, z, z, o], // TERM    (row 7)
         ]
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -375,9 +366,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
             + (carry_hi_term - hi_direct) * bound_hi.clone();
 
         builder.when_first_row().assert_zero_ext(id.clone());
-        builder
-            .when_transition()
-            .assert_zero_ext(id_next - id.clone() - contrib);
+        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
         builder.assert_zero_ext(id * term_sel.clone());
 
         // No first-row anchor: the gap chain alone forces injective ptrs
@@ -497,11 +486,11 @@ where
             array::from_fn(|k| next[2 * k].into() + two16.clone() * next[2 * k + 1].into());
         let direct: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
 
-        let provide_deg = Deg { n: 2, d: 1 };
-        let consume_deg = Deg { n: 1, d: 1 };
+        let provide_deg = Deg { v: 2, u: 1 };
+        let consume_deg = Deg { v: 1, u: 1 };
         // Flattened columns hold ≤ 2 fractions (degree-3 numerator over a
         // degree-2 denominator product); col 0 a single degree-2 fraction.
-        let pair_deg = Deg { n: 3, d: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
         // Flattened LogUp (lqd 1): the same fractions — UintVal provides /
         // consumes, the ptr-gap and per-limb Range16s, and the raw UintLimbs
@@ -512,7 +501,7 @@ where
         let raw_next: [LB::Expr; 8] = array::from_fn(|j| next[j].into());
         let neg_limbs_mult_next: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].into();
         let neg_limbs_mult_here: LB::Expr = LB::Expr::ZERO - local[HUB_CELL_UINTLIMBS_MULT].into();
-        let rc_deg = Deg { n: 1, d: 1 };
+        let rc_deg = Deg { v: 1, u: 1 };
 
         // col 0: UintVal provide-lo (running sum, single degree-2 fraction).
         builder.next_column(
@@ -609,9 +598,7 @@ where
                                 b.insert(
                                     "range16-gap",
                                     term_sel.clone(),
-                                    Range16Msg {
-                                        w: local[TERM_CELL_GAP].into(),
-                                    },
+                                    Range16Msg { w: local[TERM_CELL_GAP].into() },
                                     consume_deg,
                                 );
                             },
@@ -639,17 +626,13 @@ where
                                     b.insert(
                                         "range16-limb",
                                         g0,
-                                        Range16Msg {
-                                            w: local[j0].into(),
-                                        },
+                                        Range16Msg { w: local[j0].into() },
                                         rc_deg,
                                     );
                                     b.insert(
                                         "range16-limb",
                                         g1,
-                                        Range16Msg {
-                                            w: local[j1].into(),
-                                        },
+                                        Range16Msg { w: local[j1].into() },
                                         rc_deg,
                                     );
                                 },

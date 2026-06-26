@@ -23,9 +23,11 @@
 //! Each returns the combined [`EcExprPtr`]; tie it to a claimed point with
 //! [`Session::ec_msm`].
 
-use crate::ec::msm::trace::EcExprPtr;
-use crate::math::U256;
-use crate::session::{EcNode, Session};
+use crate::{
+    ec::msm::trace::EcExprPtr,
+    math::U256,
+    session::{EcNode, Session},
+};
 
 /// Build `Σ sᵢ·Pᵢ` by **Straus's algorithm** (a.k.a. Shamir's trick for
 /// `k = 2`): a joint MSB→LSB double-and-add over the `2ᵏ`-entry subset-sum
@@ -75,10 +77,7 @@ pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     // selected table entry (the column's set-bases sum).
     let mut acc: Option<EcExprPtr> = None;
     for i in (0..bits).rev() {
-        let mask: usize = (0..k)
-            .filter(|&j| scalars[j].bit(i))
-            .map(|j| 1usize << j)
-            .sum();
+        let mask: usize = (0..k).filter(|&j| scalars[j].bit(i)).map(|j| 1usize << j).sum();
         let sel = table[mask];
         acc = match acc {
             None => sel,
@@ -88,7 +87,7 @@ pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
                     Some(t) => session.msm_combine(doubled, t),
                     None => doubled,
                 })
-            }
+            },
         };
     }
     acc.expect("at least one scalar must be nonzero")
@@ -154,7 +153,7 @@ pub fn joint_naf(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
                     Some(t) => session.msm_combine(doubled, t),
                     None => doubled,
                 })
-            }
+            },
         };
     }
     acc.expect("at least one scalar must be nonzero")
@@ -218,7 +217,7 @@ pub fn wnaf_scalarmul(session: &mut Session, table: &WnafTable, k: U256) -> EcEx
                     Some(t) => session.msm_combine(doubled, t),
                     None => doubled,
                 })
-            }
+            },
         };
     }
     acc.expect("wnaf_scalarmul needs k > 0")
@@ -262,10 +261,7 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 /// here); each base's [`WnafTable`] is built per call. Returns the combined
 /// MSM expression. Panics if `terms` is empty or every scalar is zero.
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
-    let tables: Vec<WnafTable> = terms
-        .iter()
-        .map(|(p, _)| wnaf_table(session, p, w))
-        .collect();
+    let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
     let digits: Vec<Vec<i8>> = terms.iter().map(|(_, k)| wnaf(*k, w)).collect();
     let len = digits.iter().map(Vec::len).max().unwrap_or(0);
 
@@ -323,9 +319,7 @@ fn wnaf(mut k: U256, w: usize) -> Vec<i8> {
     while k > U256::ZERO {
         let d: i64 = if k.bit(0) {
             // low `w` bits of `k`, then fold into the signed window.
-            let low = (0..w)
-                .filter(|&j| k.bit(j))
-                .fold(0u64, |a, j| a | (1u64 << j));
+            let low = (0..w).filter(|&j| k.bit(j)).fold(0u64, |a, j| a | (1u64 << j));
             let d = if low >= half {
                 low as i64 - modulus as i64
             } else {

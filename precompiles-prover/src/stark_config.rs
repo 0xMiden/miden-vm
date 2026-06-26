@@ -3,13 +3,14 @@
 //! This module provides a Poseidon2-based STARK configuration using `miden_core::Felt`
 //! as the base field, matching Miden VM's field choice.
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::hash::poseidon2::Poseidon2Permutation256;
-use miden_lifted_stark::GenericStarkConfig;
-use miden_lifted_stark::lmcs::config::LmcsConfig;
-use miden_lifted_stark::pcs::PcsParams;
-use miden_lifted_stark::proof::{StarkDigest, StarkProofData};
+use miden_lifted_stark::{
+    GenericStarkConfig,
+    lmcs::config::LmcsConfig,
+    pcs::PcsParams,
+    proof::{StarkDigest, StarkProofData},
+};
 use miden_stateful_hasher::StatefulSponge;
 use p3_challenger::DuplexChallenger;
 use p3_dft::Radix2DitParallel;
@@ -79,18 +80,10 @@ pub fn test_challenger() -> Challenger {
 
 /// Create the LMCS instance.
 pub fn test_lmcs() -> Lmcs {
-    LmcsConfig::new(
-        Sponge::new(Poseidon2Permutation256),
-        Compress::new(Poseidon2Permutation256),
-    )
+    LmcsConfig::new(Sponge::new(Poseidon2Permutation256), Compress::new(Poseidon2Permutation256))
 }
 
 /// Create the full test STARK configuration.
 pub fn test_config() -> TestConfig {
-    GenericStarkConfig::new(
-        test_pcs_params(),
-        test_lmcs(),
-        Dft::default(),
-        test_challenger(),
-    )
+    GenericStarkConfig::new(test_pcs_params(), test_lmcs(), Dft::default(), test_challenger())
 }

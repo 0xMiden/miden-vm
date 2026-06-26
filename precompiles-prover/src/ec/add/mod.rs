@@ -92,16 +92,18 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::{EcGroupMsg, EcPointMsg};
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    ec::{EcGroupMsg, EcPointMsg},
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    primitives::byte_pair_lut::Range16Msg,
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::{add::UintAddMsg, mul::UintMulMsg},
+    utils::{current_main, next_main},
 };
-use crate::primitives::byte_pair_lut::Range16Msg;
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::add::UintAddMsg;
-use crate::uint::mul::UintMulMsg;
-use crate::utils::{current_main, next_main};
 
 // MESSAGES
 // ================================================================================================
@@ -156,10 +158,8 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(
-            BusId::EcOnCurveCert as usize,
-            [self.group_ptr.clone(), self.r_ptr.clone()],
-        )
+        challenges
+            .encode(BusId::EcOnCurveCert as usize, [self.group_ptr.clone(), self.r_ptr.clone()])
     }
 }
 
@@ -263,9 +263,7 @@ impl BaseAir<Felt> for EcGroupAddAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         ROLE_ROWS
             .iter()
@@ -276,7 +274,9 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
             })
             .collect()
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -340,14 +340,12 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
 
         // Closure-cert scaffolding (Phase 1). A mint op (its result freshly
         // allocated → strictly-maximal ptr) is pinned two ways:
-        //  - case guard: mint ⟹ generic ∨ double (the only fresh-result
-        //    cases). Forbids `mints` on cancel (result is the ∞ row — a
-        //    high-ptr ∞ could otherwise satisfy the ordering) and on
-        //    pass-throughs (result is an operand).
-        //  - strict ordering: r_ptr > p_ptr ∧ r_ptr > q_ptr, via the
-        //    witnessed limb diffs `r − p − 1 = lo + 2¹⁶·hi` (limbs
-        //    Range16-checked in the LookupAir). Read on the res row, where r
-        //    is local and p / q are the term cells (next).
+        //  - case guard: mint ⟹ generic ∨ double (the only fresh-result cases). Forbids `mints` on
+        //    cancel (result is the ∞ row — a high-ptr ∞ could otherwise satisfy the ordering) and
+        //    on pass-throughs (result is an operand).
+        //  - strict ordering: r_ptr > p_ptr ∧ r_ptr > q_ptr, via the witnessed limb diffs `r − p −
+        //    1 = lo + 2¹⁶·hi` (limbs Range16-checked in the LookupAir). Read on the res row, where
+        //    r is local and p / q are the term cells (next).
         let dbl_g: AB::Expr = local[COL_DBL].into();
         let gen_g: AB::Expr = local[COL_GEN].into();
         builder.assert_zero(mints.clone() * (AB::Expr::ONE - dbl_g - gen_g));
@@ -474,12 +472,12 @@ where
         let two: LB::Expr = LB::Expr::from(Felt::from(2u32));
         let three: LB::Expr = LB::Expr::from(Felt::from(3u32));
 
-        let f2 = Deg { n: 2, d: 1 };
-        let col_deg = Deg { n: 8, d: 7 };
+        let f2 = Deg { v: 2, u: 1 };
+        let col_deg = Deg { v: 8, u: 7 };
         // Mint column: 4 Range16 consumes + 1 cert provide, each a deg-2
         // gate (at_res · mints) over a deg-1 message ⇒ over 5 fractions the
         // numerator is 2 + 4·1 = 6, denominator 5.
-        let mint_col_deg = Deg { n: 6, d: 5 };
+        let mint_col_deg = Deg { v: 6, u: 5 };
 
         // Col 0 (running sum): the provide + the point / group bindings,
         // all emitted in the res-row window (term cells via next), except
@@ -888,10 +886,7 @@ where
                                 b.insert(
                                     "provide-ecgroupadd-cert",
                                     LB::Expr::ZERO - gate,
-                                    EcOnCurveCertMsg {
-                                        group_ptr: cert_group,
-                                        r_ptr: cert_r,
-                                    },
+                                    EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
                                     f2,
                                 );
                             },

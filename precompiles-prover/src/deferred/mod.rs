@@ -2,31 +2,23 @@
 
 use std::sync::Arc;
 
-use miden_core::Felt;
-// Temporary bridge: the synthetic VM `DeferredState` tests use renamed VM dev-deps while the
-// production prover still depends on the older Miden/p3 line. Rust therefore sees two distinct
-// `Felt` types. When the prover moves to the same VM crates in production, remove `VmFelt` and the
-// canonical-u64 conversions below.
-use miden_core_vm::{
-    Felt as VmFelt, ZERO as VM_ZERO,
-    deferred::{
-        DeferredState, Digest as VmDigest, Node, PrecompileRegistry, TRUE_DIGEST as VM_TRUE_DIGEST,
-    },
+use miden_core::{
+    Felt, ZERO,
+    deferred::{DeferredState, Digest, Node, PrecompileRegistry, TRUE_DIGEST},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_precompiles_vm::Keccak256Precompile;
+use miden_precompiles::Keccak256Precompile;
 
-use crate::hash::keccak::sponge::trace::keccak_oracle;
-use crate::transcript::poseidon2::P2Digest;
+use crate::{hash::keccak::sponge::trace::keccak_oracle, transcript::poseidon2::P2Digest};
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
 #[derive(Debug)]
 pub(crate) struct SyntheticKeccakDeferredState {
     pub(crate) state: DeferredState,
-    pub(crate) input_digest: VmDigest,
-    pub(crate) expected_digest: VmDigest,
-    pub(crate) assertion_digest: VmDigest,
-    pub(crate) vm_root: VmDigest,
+    pub(crate) input_digest: Digest,
+    pub(crate) expected_digest: Digest,
+    pub(crate) assertion_digest: Digest,
+    pub(crate) vm_root: Digest,
     pub(crate) root: P2Digest,
 }
 
@@ -55,10 +47,7 @@ pub(crate) fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredSta
     let vm_root = state
         .log_statement(assertion_digest)
         .expect("true Keccak assertion should log into the deferred root");
-    debug_assert_eq!(
-        vm_root,
-        Node::and(VM_TRUE_DIGEST, assertion_digest).digest()
-    );
+    debug_assert_eq!(vm_root, Node::and(TRUE_DIGEST, assertion_digest).digest());
     debug_assert_eq!(state.root(), vm_root);
 
     SyntheticKeccakDeferredState {
@@ -72,39 +61,24 @@ pub(crate) fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredSta
 }
 
 /// Converts a VM deferred digest into the prover's Poseidon2 digest type.
-///
-/// This is only needed while tests link both the old prover `miden-core` and the local VM
-/// `miden-core-vm` dev-dependency. Once those dependency lines unify, roots should already be
-/// `P2Digest`-compatible without a field-element translation step.
-pub(crate) fn vm_digest_to_p2(digest: VmDigest) -> P2Digest {
-    P2Digest(digest.into_elements().map(vm_felt_to_prover_felt))
+pub(crate) fn vm_digest_to_p2(digest: Digest) -> P2Digest {
+    P2Digest(digest.into_elements())
 }
 
-fn pack_input_chunks(input: &[u8]) -> Vec<[VmFelt; 8]> {
+fn pack_input_chunks(input: &[u8]) -> Vec<[Felt; 8]> {
     let mut felts = bytes_to_packed_u32_elements(input);
     let n_chunks = felts.len().div_ceil(8).max(1);
-    felts.resize(n_chunks * 8, VM_ZERO);
-    felts
-        .chunks_exact(8)
-        .map(|chunk| core::array::from_fn(|i| chunk[i]))
-        .collect()
+    felts.resize(n_chunks * 8, ZERO);
+    felts.chunks_exact(8).map(|chunk| core::array::from_fn(|i| chunk[i])).collect()
 }
 
-fn keccak_digest_chunks(input: &[u8]) -> Vec<[VmFelt; 8]> {
+fn keccak_digest_chunks(input: &[u8]) -> Vec<[Felt; 8]> {
     // The VM crate re-exports `HashFunction` but not the concrete `Keccak256Hash` spec, so use the
     // prover oracle's u32-limb layout here. The `state.register(assert_node(...))` call above
     // validates these chunks against the VM Keccak precompile before the root is accepted.
-    vec![
-        keccak_oracle(input)
-            .to_u32s()
-            .map(|limb| VmFelt::from_u32(limb)),
-    ]
+    vec![keccak_oracle(input).to_u32s().map(Felt::from_u32)]
 }
 
 fn len_bytes(input: &[u8]) -> u32 {
     u32::try_from(input.len()).expect("Keccak MVP inputs fit in a VM u32 length tag")
-}
-
-fn vm_felt_to_prover_felt(felt: VmFelt) -> Felt {
-    Felt::new(felt.as_canonical_u64()).expect("VM digest elements are canonical prover felts")
 }

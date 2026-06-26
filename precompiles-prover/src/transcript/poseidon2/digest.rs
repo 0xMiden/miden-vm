@@ -9,8 +9,10 @@
 
 use miden_core::Felt;
 
-use crate::transcript::deferred_tags;
-use crate::transcript::nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId};
+use crate::transcript::{
+    deferred_tags,
+    nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId},
+};
 
 /// Output digest of a Poseidon2 absorption — `state[0..4]` after the
 /// last block's permutation.

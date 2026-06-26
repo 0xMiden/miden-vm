@@ -8,43 +8,41 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
+};
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::ec::add::trace::EcAddRequires;
-use crate::ec::groups::{
-    COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
+use crate::{
+    ec::{
+        COL_GROUP_PTR, COL_IS_PAI, COL_PTR, COL_SBOUND_PTR, COL_X_PTR, COL_Y_PTR, EcPointStoreAir,
+        EcRequire, NUM_MAIN_COLS,
+        add::trace::EcAddRequires,
+        groups::{
+            COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
+        },
+        trace::{EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces},
+    },
+    math::{U256, from_hex},
+    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::{
+        UintRequire, UintStoreAir,
+        add::trace::UintAddRequires,
+        mul::{
+            UintMulAir,
+            trace::{UintMulRequires, generate_trace as mul_trace},
+        },
+        trace::{UintStoreRequires, generate_trace as store_trace},
+    },
 };
-use crate::ec::trace::{EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces};
-use crate::ec::{
-    COL_GROUP_PTR, COL_IS_PAI, COL_PTR, COL_SBOUND_PTR, COL_X_PTR, COL_Y_PTR, EcPointStoreAir,
-    EcRequire, NUM_MAIN_COLS,
-};
-use crate::math::{U256, from_hex};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace,
-};
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::add::trace::UintAddRequires;
-use crate::uint::mul::UintMulAir;
-use crate::uint::mul::trace::{UintMulRequires, generate_trace as mul_trace};
-use crate::uint::trace::{UintStoreRequires, generate_trace as store_trace};
-use crate::uint::{UintRequire, UintStoreAir};
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 /// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
@@ -91,20 +89,12 @@ fn fixture(bound: U256, a: U256, b: U256, x: U256, y: U256) -> Fixture {
     let mut ec = EcStoreRequires::new();
     let mut ec_add = EcAddRequires::new();
 
-    let mut req = EcRequire::new(
-        &mut ec,
-        &mut ec_add,
-        UintRequire::new(&mut store, &mut adds, &mut muls),
-    );
+    let mut req =
+        EcRequire::new(&mut ec, &mut ec_add, UintRequire::new(&mut store, &mut adds, &mut muls));
     let (g, _pai) = req.create_group(a, b, fp);
     let point = req.add_point(g, x, y);
 
-    Fixture {
-        store,
-        muls,
-        ec,
-        point,
-    }
+    Fixture { store, muls, ec, point }
 }
 
 /// secp256k1: y² = x³ + 7, with the standard base point.
@@ -175,23 +165,16 @@ fn check_groups(main: &RowMajorMatrix<Felt>) {
 
 #[test]
 fn ec_stores_hold_and_balance() {
-    let mut rng = StdRng::seed_from_u64(0xEC_0001);
+    let mut rng = StdRng::seed_from_u64(0xec_0001);
     let t = k1_fixture().traces();
     // Group table: group @1 pads to height 2. Point store: PAI @1,
     // point @2 — exactly height 2, no pad.
     assert_eq!(t.groups.height(), 2);
     assert_eq!(t.points.height(), 2);
-    assert_eq!(
-        t.points.values[COL_IS_PAI],
-        Felt::ONE,
-        "row 0 is the canonical PAI",
-    );
+    assert_eq!(t.points.values[COL_IS_PAI], Felt::ONE, "row 0 is the canonical PAI",);
     assert_eq!(t.points.values[NUM_MAIN_COLS + COL_IS_PAI], Felt::ZERO);
     // The vacuous scalar bound defaults to the F_p handle on both sides.
-    assert_eq!(
-        t.groups.values[G_COL_SBOUND_PTR],
-        t.points.values[COL_SBOUND_PTR],
-    );
+    assert_eq!(t.groups.values[G_COL_SBOUND_PTR], t.points.values[COL_SBOUND_PTR],);
 
     check_groups(&t.groups);
     check_points(&t.points);
@@ -204,7 +187,7 @@ fn ec_store_ed25519_image_torsion_point() {
     // rational 2-torsion point (A/3, 0): a finite point whose y is the
     // stored zero — cleanly distinct from PAI — passing membership with
     // w = y² = 0. Constants machine-verified against the map derivation.
-    let mut rng = StdRng::seed_from_u64(0xEC_25519);
+    let mut rng = StdRng::seed_from_u64(0xec_25519);
     let bound = from_hex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEC");
     let a_w = from_hex("2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA984914A144");
     let b_w = from_hex("7B425ED097B425ED097B425ED097B425ED097B425ED097B4260B5E9C7710C864");
@@ -222,7 +205,7 @@ fn constrained_scalar_bound_balances() {
     // constrain the group's scalar field with it: every EcGroup tuple
     // site (group row, point rows) must carry the F_s handle instead of
     // the vacuous F_p default, and the bus still closes.
-    let mut rng = StdRng::seed_from_u64(0xEC_F5);
+    let mut rng = StdRng::seed_from_u64(0xec_f5);
     let mut fx = k1_fixture();
     let n_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364140");
     let fs = fx.store.pin_modulus(2, n_minus_1);
@@ -246,7 +229,7 @@ fn forged_scalar_bound_unbalances() {
     // A point row claiming a different scalar bound than its group's:
     // every local constraint holds, but the 5-tuple EcGroup consume
     // matches no provide.
-    let mut rng = StdRng::seed_from_u64(0xEC_F5BAD);
+    let mut rng = StdRng::seed_from_u64(0xec_f5bad);
     let t = k1_fixture().traces();
     let mut forged = t.points.clone();
     forged.values[NUM_MAIN_COLS + COL_SBOUND_PTR] = Felt::from(7u32);
@@ -261,7 +244,7 @@ fn off_curve_point_unbalances() {
     // uint: every local constraint still holds — the cells are bindings,
     // not equations — but the y² membership MAC consume now names a tuple
     // nothing proves, so the bus rejects what the AIR alone cannot see.
-    let mut rng = StdRng::seed_from_u64(0xEC_0FF);
+    let mut rng = StdRng::seed_from_u64(0xec_0ff);
     let fx = k1_fixture();
     let (_, coords) = fx.ec.point_params(fx.point);
     let (x_ptr, _) = coords.expect("finite point");
@@ -313,7 +296,7 @@ fn duplicate_point_ptr_rejected() {
 fn phantom_group_unbalances() {
     // A point claiming a group that was never created: constraints hold,
     // the EcGroup consume finds no provider.
-    let mut rng = StdRng::seed_from_u64(0xEC_9457);
+    let mut rng = StdRng::seed_from_u64(0xec_9457);
     let t = k1_fixture().traces();
     let mut forged = t.points.clone();
     forged.values[NUM_MAIN_COLS + COL_GROUP_PTR] = Felt::from(7u32);
@@ -339,7 +322,7 @@ fn group_ptr_chain_is_ungated() {
 fn forged_group_mult_unbalances() {
     // Zeroing the group row's provide mult leaves the point rows'
     // EcGroup consumes dangling — the dual of the phantom group.
-    let mut rng = StdRng::seed_from_u64(0xEC_3017);
+    let mut rng = StdRng::seed_from_u64(0xec_3017);
     let t = k1_fixture().traces();
     let mut forged = t.groups.clone();
     forged.values[crate::ec::groups::COL_MULT] = Felt::ZERO;

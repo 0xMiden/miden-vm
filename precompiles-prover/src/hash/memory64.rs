@@ -23,8 +23,10 @@
 
 use miden_core::field::Algebra;
 
-use crate::logup::{Challenges, LookupMessage};
-use crate::relations::BusId;
+use crate::{
+    logup::{Challenges, LookupMessage},
+    relations::BusId,
+};
 
 /// Base address for the chunk chiplet's flat input-tape sub-namespace.
 /// The chunk chiplet provides input lanes on
@@ -56,9 +58,7 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(
-            BusId::Memory64 as usize,
-            [self.addr.clone(), self.lo.clone(), self.hi.clone()],
-        )
+        challenges
+            .encode(BusId::Memory64 as usize, [self.addr.clone(), self.lo.clone(), self.hi.clone()])
     }
 }

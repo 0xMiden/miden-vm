@@ -2,50 +2,40 @@
 //!
 //! Provides two relations:
 //!
-//! - [`Logic64Msg`]: tuple `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` where
-//!   `op ∈ {AndNot, Xor}`, `a, b, c ∈ [0, 2^64)` carried as 32-bit
-//!   halves (Goldilocks `p ≈ 2^64 − 2^32 + 1` cannot represent every
-//!   `u64` canonically).
-//! - [`Rol64Msg`]: tuple `(a_lo, a_hi, b_lo, b_hi, k)` where `b = rol_64(a, log2(k))`
-//!   and `k = 2^s` is a power of two with `s < 31`. The AIR does not
-//!   enforce `k` to be a power of two; callers supply `k` from a
-//!   periodic column of valid values and
-//!   [`Bitwise64Requires::require_rol`] asserts the bound at
-//!   IR-construction time.
+//! - [`Logic64Msg`]: tuple `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` where `op ∈ {AndNot, Xor}`,
+//!   `a, b, c ∈ [0, 2^64)` carried as 32-bit halves (Goldilocks `p ≈ 2^64 − 2^32 + 1` cannot
+//!   represent every `u64` canonically).
+//! - [`Rol64Msg`]: tuple `(a_lo, a_hi, b_lo, b_hi, k)` where `b = rol_64(a, log2(k))` and `k = 2^s`
+//!   is a power of two with `s < 31`. The AIR does not enforce `k` to be a power of two; callers
+//!   supply `k` from a periodic column of valid values and [`Bitwise64Requires::require_rol`]
+//!   asserts the bound at IR-construction time.
 //!
 //! The chiplet requires:
-//! - [`BytePairLutMsg`] byte-wise on LOGIC rows (8 lookups per row,
-//!   verifying `c = op(a, b)` byte-by-byte and implicitly
-//!   range-checking each byte to `[0, 256)`).
-//! - [`Range16Msg`] limb-wise on ROL rows (8 lookups per row,
-//!   range-checking the 16-bit limbs of `(lo+2^32)·k` and `(hi+2^32)·k`).
+//! - [`BytePairLutMsg`] byte-wise on LOGIC rows (8 lookups per row, verifying `c = op(a, b)`
+//!   byte-by-byte and implicitly range-checking each byte to `[0, 256)`).
+//! - [`Range16Msg`] limb-wise on ROL rows (8 lookups per row, range-checking the 16-bit limbs of
+//!   `(lo+2^32)·k` and `(hi+2^32)·k`).
 //!
 //! ## Trace layout
 //!
 //! Three row modes, gated by `(is_logic, is_rol)`:
 //!
-//! - **LOGIC** (`is_logic = 1, is_rol = 0`): provides `Logic64(op, a, b, c)`
-//!   and issues 8 byte-wise `BytePairLut` requires. `op_or_k` carries
-//!   the op tag (0 = AndNot, 1 = Xor); `b_limbs` carry the 8 bytes of
-//!   `b`. The result `c` lives in the *next* row's `a_bytes`, locked
-//!   there by the byte requires (chain trick).
-//! - **ROL** (`is_logic = 0, is_rol = 1`): provides `Rol64(a, b, k)`
-//!   and issues 8 limb-wise `Range16` requires. `op_or_k` carries `k`
-//!   (a power of two `< 2^31`); `b_limbs` carry the 8 16-bit limbs of
-//!   `((lo+2^32)·k, (hi+2^32)·k)` — first 4 are `(lo+2^32)·k` LSB-first,
-//!   next 4 are `(hi+2^32)·k`. The +2^32 offset ensures the products
-//!   escape the aliasable range `[0, 2^32-2]`, eliminating the need for
-//!   canonical-decomposition witnesses. The rolled output `b` is
-//!   constructed by pairing each low-half limb with the high-half
-//!   limb sharing its post-rotate bit window —
-//!   `c0 = b_limbs[0] + b_limbs[6]`, `c1 = b_limbs[1] + b_limbs[7]`,
-//!   `c2 = b_limbs[2] + b_limbs[4]`, `c3 = b_limbs[3] + b_limbs[5]` —
-//!   then `b_lo = c0 + c1·2^16 - k`,
-//!   `b_hi = c2 + c3·2^16 - k` (subtracting `k` cancels the offset
-//!   contribution).
-//! - **Carrier / padding** (`is_logic = 0, is_rol = 0`): no provide,
-//!   no requires. Used to hold a chain value between LOGIC rows (so
-//!   the previous LOGIC's byte requires resolve) or as zero padding.
+//! - **LOGIC** (`is_logic = 1, is_rol = 0`): provides `Logic64(op, a, b, c)` and issues 8 byte-wise
+//!   `BytePairLut` requires. `op_or_k` carries the op tag (0 = AndNot, 1 = Xor); `b_limbs` carry
+//!   the 8 bytes of `b`. The result `c` lives in the *next* row's `a_bytes`, locked there by the
+//!   byte requires (chain trick).
+//! - **ROL** (`is_logic = 0, is_rol = 1`): provides `Rol64(a, b, k)` and issues 8 limb-wise
+//!   `Range16` requires. `op_or_k` carries `k` (a power of two `< 2^31`); `b_limbs` carry the 8
+//!   16-bit limbs of `((lo+2^32)·k, (hi+2^32)·k)` — first 4 are `(lo+2^32)·k` LSB-first, next 4 are
+//!   `(hi+2^32)·k`. The +2^32 offset ensures the products escape the aliasable range `[0, 2^32-2]`,
+//!   eliminating the need for canonical-decomposition witnesses. The rolled output `b` is
+//!   constructed by pairing each low-half limb with the high-half limb sharing its post-rotate bit
+//!   window — `c0 = b_limbs[0] + b_limbs[6]`, `c1 = b_limbs[1] + b_limbs[7]`, `c2 = b_limbs[2] +
+//!   b_limbs[4]`, `c3 = b_limbs[3] + b_limbs[5]` — then `b_lo = c0 + c1·2^16 - k`, `b_hi = c2 +
+//!   c3·2^16 - k` (subtracting `k` cancels the offset contribution).
+//! - **Carrier / padding** (`is_logic = 0, is_rol = 0`): no provide, no requires. Used to hold a
+//!   chain value between LOGIC rows (so the previous LOGIC's byte requires resolve) or as zero
+//!   padding.
 //!
 //! `b_limbs` is shared across LOGIC and ROL with different bit-width
 //! semantics: 8-bit bytes on LOGIC (range-checked via byte requires);
@@ -75,16 +65,16 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-    build_logup_aux_trace,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES, build_logup_aux_trace,
+    },
+    primitives::byte_pair_lut::{BytePairLutMsg, BytePairLutRequires, BytePairOp, Range16Msg},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, halves_le, next_main, pack_le, split_u64_u32},
 };
-use crate::primitives::byte_pair_lut::{
-    BytePairLutMsg, BytePairLutRequires, BytePairOp, Range16Msg,
-};
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, halves_le, next_main, pack_le, split_u64_u32};
 
 // COLUMN LAYOUT
 // ================================================================================================
@@ -169,10 +159,9 @@ impl Logic64Op {
 /// op result.
 ///
 /// - `op ∈ {0 = AndNot, 1 = Xor}`
-/// - `a_lo, a_hi, …, c_hi ∈ [0, 2^32)` — 32-bit halves of `a`, `b`, `c`,
-///   LSB-first (`a = a_lo + 2^32 · a_hi`). Goldilocks `p ≈ 2^64 − 2^32 + 1`
-///   cannot represent every `u64` canonically, so we encode halves
-///   rather than the full 64-bit value.
+/// - `a_lo, a_hi, …, c_hi ∈ [0, 2^32)` — 32-bit halves of `a`, `b`, `c`, LSB-first (`a = a_lo +
+///   2^32 · a_hi`). Goldilocks `p ≈ 2^64 − 2^32 + 1` cannot represent every `u64` canonically, so
+///   we encode halves rather than the full 64-bit value.
 ///
 /// Provided by [`Bitwise64Air`] on bus [`BusId::Logic64`]. Encoded as
 /// `bus_prefix[Logic64] + β⁰·op + β¹·a_lo + … + β⁶·c_hi`.
@@ -211,13 +200,11 @@ where
 /// LogUp message for the `Rol64` relation: a 5-tuple
 /// `(a_lo, a_hi, b_lo, b_hi, k)` describing a 64-bit rotate-left.
 ///
-/// - `a_lo, a_hi, b_lo, b_hi ∈ [0, 2^32)` — 32-bit halves of input `a`
-///   and rolled output `b`.
-/// - `k = 2^s` with `s ∈ [0, 31)` — the rotation amount as a multiplier.
-///   `b = rol_64(a, s)`. The AIR does not enforce that `k` is a power
-///   of two or that `s < 31`; callers source `k` from a periodic
-///   column of valid values, and [`Bitwise64Requires::require_rol`]
-///   asserts the bound at IR-construction time.
+/// - `a_lo, a_hi, b_lo, b_hi ∈ [0, 2^32)` — 32-bit halves of input `a` and rolled output `b`.
+/// - `k = 2^s` with `s ∈ [0, 31)` — the rotation amount as a multiplier. `b = rol_64(a, s)`. The
+///   AIR does not enforce that `k` is a power of two or that `s < 31`; callers source `k` from a
+///   periodic column of valid values, and [`Bitwise64Requires::require_rol`] asserts the bound at
+///   IR-construction time.
 ///
 /// Provided by [`Bitwise64Air`] on bus [`BusId::Rol64`]. Encoded as
 /// `bus_prefix[Rol64] + β⁰·a_lo + β¹·a_hi + β²·b_lo + β³·b_hi + β⁴·k`.
@@ -413,10 +400,7 @@ impl Bitwise64Requires {
     /// dead Carrier holding the uncapped tail). Diagnostic for the
     /// per-perm floor test and trace-size measurement.
     pub fn active_rows(&self) -> usize {
-        build_chains(&self.requests)
-            .iter()
-            .map(|ch| ch.logics.len() + 1)
-            .sum()
+        build_chains(&self.requests).iter().map(|ch| ch.logics.len() + 1).sum()
     }
 }
 
@@ -493,11 +477,11 @@ fn build_chains(requests: &[Request]) -> Vec<Chain> {
                 Request::Logic { op, a, b } => {
                     logics.push(LogicOp { op, a, b });
                     cur = next[idx];
-                }
+                },
                 Request::Rol { k, .. } => {
                     cap = Some(RolCap { k });
                     cur = None;
-                }
+                },
             }
         }
         chains.push(Chain { logics, cap });
@@ -540,14 +524,7 @@ pub fn generate_trace(requires: Bitwise64Requires) -> RowMajorMatrix<Felt> {
 
     for chain in &chains {
         for link in &chain.logics {
-            push_row(
-                &mut values,
-                PendingRow::Real {
-                    op: link.op,
-                    a: link.a,
-                    b: link.b,
-                },
-            );
+            push_row(&mut values, PendingRow::Real { op: link.op, a: link.a, b: link.b });
         }
         let tail = chain.tail();
         push_row(
@@ -571,7 +548,7 @@ fn push_row(values: &mut Vec<Felt>, row: PendingRow) {
             values.extend(b.to_le_bytes().map(Felt::from));
             // op_or_k = op tag; is_logic = 1; is_rol = 0.
             values.extend([Felt::from(op.tag()), Felt::from(1u8), Felt::ZERO]);
-        }
+        },
         PendingRow::Rol { a, k } => {
             values.extend(a.to_le_bytes().map(Felt::from));
             // b_limbs: 8 × 16-bit limbs of ((lo+2^32)·k, (hi+2^32)·k).
@@ -589,22 +566,22 @@ fn push_row(values: &mut Vec<Felt>, row: PendingRow) {
                 Felt::ZERO,
                 Felt::from(1u8),
             ]);
-        }
+        },
         PendingRow::Carrier { a } => {
             values.extend(a.to_le_bytes().map(Felt::from));
             // Zero b_limbs (8) + zero op_or_k + zero is_logic + zero is_rol.
             values.extend([Felt::ZERO; 11]);
-        }
+        },
     }
 }
 
 /// Decompose a `u64` into four 16-bit limbs LSB-first.
 fn u64_as_four_u16_limbs(x: u64) -> [u16; 4] {
     [
-        (x & 0xFFFF) as u16,
-        ((x >> 16) & 0xFFFF) as u16,
-        ((x >> 32) & 0xFFFF) as u16,
-        ((x >> 48) & 0xFFFF) as u16,
+        (x & 0xffff) as u16,
+        ((x >> 16) & 0xffff) as u16,
+        ((x >> 32) & 0xffff) as u16,
+        ((x >> 48) & 0xffff) as u16,
     ]
 }
 
@@ -712,10 +689,9 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
 
 /// Per-column emission shape, mutex-aware:
 /// - col 0: 2 mutex provides → max 1 active per row.
-/// - col 1: 8-way batch of byte requires (always 8 pushes per row,
-///   with multiplicity = is_logic baked in).
-/// - col 2: 8-way batch of Range16 requires (always 8 pushes,
-///   multiplicity = is_rol).
+/// - col 1: 8-way batch of byte requires (always 8 pushes per row, with multiplicity = is_logic
+///   baked in).
+/// - col 2: 8-way batch of Range16 requires (always 8 pushes, multiplicity = is_rol).
 const COLUMN_SHAPE: [usize; 3] = [1, 8, 8];
 
 impl<LB> LookupAir<LB> for Bitwise64Air
@@ -775,16 +751,16 @@ where
         // documentation (production adapters ignore them); names make
         // the call sites legible.
         //
-        // - Per interaction: payload deg 1 (committed columns), signed
-        //   multiplicity deg 1 → `n=1, d=1`.
-        // - Col 0 mutex group of 2 provides: `U_g = 1 + Σ (v_i−1)·flag_i`
-        //   ⇒ deg 2; `V_g = ±Σ flag_i` ⇒ deg 1.
-        // - Cols 1, 2 8-way batches: `(N, D) = (Σ is_X·∏v_{j≠i}, ∏v)` ⇒
-        //   each side deg 8. Group/column inherit the batch's shape
-        //   (single batch per group, single group per column).
-        let interaction_deg = Deg { n: 1, d: 1 };
-        let provides_deg = Deg { n: 1, d: 2 };
-        let requires_deg = Deg { n: 8, d: 8 };
+        // - Per interaction: payload deg 1 (committed columns), signed multiplicity deg 1 → `n=1,
+        //   d=1`.
+        // - Col 0 mutex group of 2 provides: `U_g = 1 + Σ (v_i−1)·flag_i` ⇒ deg 2; `V_g = ±Σ
+        //   flag_i` ⇒ deg 1.
+        // - Cols 1, 2 8-way batches: `(N, D) = (Σ is_X·∏v_{j≠i}, ∏v)` ⇒ each side deg 8.
+        //   Group/column inherit the batch's shape (single batch per group, single group per
+        //   column).
+        let interaction_deg = Deg { v: 1, u: 1 };
+        let provides_deg = Deg { v: 1, u: 2 };
+        let requires_deg = Deg { v: 8, u: 8 };
 
         // ---- col 0: mutex group, 2 self-provides ------------------
         // `g.remove` carries multiplicity = -1 implicitly (provide).
@@ -881,9 +857,7 @@ where
                                     b.insert(
                                         "limb_i",
                                         is_rol.clone(),
-                                        Range16Msg {
-                                            w: b_limbs[i].into(),
-                                        },
+                                        Range16Msg { w: b_limbs[i].into() },
                                         interaction_deg,
                                     );
                                 }

@@ -14,8 +14,10 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::logup::{Challenges, LookupMessage};
-use crate::relations::BusId;
+use crate::{
+    logup::{Challenges, LookupMessage},
+    relations::BusId,
+};
 
 /// Typed value a node binds to on the [`Binding`](BusId::Binding) bus.
 ///
@@ -50,8 +52,8 @@ pub enum ValueTag {
 /// - `h` — the node's hash (`Poseidon2(preimage)[0..4]`), the bus key.
 /// - `value_tag` — the [`ValueTag`] discriminant.
 /// - `ptr` — canonical value handle for value-bindings; `0` for `True`.
-/// - `bound_ptr` — for a `Uint` value, the ptr of the uint storing its
-///   modulus `p − 1`; `0` for `True`.
+/// - `bound_ptr` — for a `Uint` value, the ptr of the uint storing its modulus `p − 1`; `0` for
+///   `True`.
 ///
 /// Encoded as `bus_prefix[Binding] + β⁰·h0 + β¹·h1 + β²·h2 + β³·h3 +
 /// β⁴·value_tag + β⁵·ptr + β⁶·bound_ptr`.
@@ -112,15 +114,7 @@ where
         let [h0, h1, h2, h3] = self.h.clone();
         challenges.encode(
             BusId::Binding as usize,
-            [
-                h0,
-                h1,
-                h2,
-                h3,
-                self.value_tag.clone(),
-                self.ptr.clone(),
-                self.bound_ptr.clone(),
-            ],
+            [h0, h1, h2, h3, self.value_tag.clone(), self.ptr.clone(), self.bound_ptr.clone()],
         )
     }
 }

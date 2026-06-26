@@ -4,13 +4,19 @@
 //! `truth` constructor's tag / ptr pinning, and prefix disjointness from
 //! a neighbouring bus.
 
-use miden_core::Felt;
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 
-use crate::logup::{Challenges, LookupMessage};
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::binding::{BindingMsg, ValueTag};
-use crate::transcript::poseidon2::Poseidon2InMsg;
+use crate::{
+    logup::{Challenges, LookupMessage},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::{
+        binding::{BindingMsg, ValueTag},
+        poseidon2::Poseidon2InMsg,
+    },
+};
 
 #[test]
 fn binding_msg_encodes_with_binding_bus_prefix() {
@@ -18,12 +24,7 @@ fn binding_msg_encodes_with_binding_bus_prefix() {
     let beta = QuadFelt::from_u64(29);
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
-    let h = [
-        Felt::from(11u32),
-        Felt::from(22u32),
-        Felt::from(33u32),
-        Felt::from(44u32),
-    ];
+    let h = [Felt::from(11u32), Felt::from(22u32), Felt::from(33u32), Felt::from(44u32)];
     let ptr = Felt::from(7u32);
     let bound_ptr = Felt::from(9u32);
     let msg = BindingMsg {
@@ -56,12 +57,7 @@ fn binding_truth_sets_true_tag_and_zero_ptr() {
     let beta = QuadFelt::from_u64(3);
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
-    let h = [
-        Felt::from(5u32),
-        Felt::from(6u32),
-        Felt::from(7u32),
-        Felt::from(8u32),
-    ];
+    let h = [Felt::from(5u32), Felt::from(6u32), Felt::from(7u32), Felt::from(8u32)];
     // truth() pins value_tag = True (0) and ptr = 0, so the encoding
     // reduces to the bus prefix + the h expansion alone.
     let enc = BindingMsg::truth(h).encode(&challenges);

@@ -35,21 +35,24 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::add::{EcGroupAddMsg, EcOnCurveCertMsg};
-use crate::ec::{EcGroupMsg, EcPointMsg};
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    ec::{
+        EcGroupMsg, EcPointMsg,
+        add::{EcGroupAddMsg, EcOnCurveCertMsg},
+    },
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    primitives::byte_pair_lut::Range16Msg,
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::{UintValMsg, add::UintAddMsg},
+    utils::{current_main, next_main},
 };
-use crate::primitives::byte_pair_lut::Range16Msg;
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::UintValMsg;
-use crate::uint::add::UintAddMsg;
-use crate::utils::{current_main, next_main};
 
 // MESSAGES
 // ================================================================================================
@@ -139,11 +142,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
             BusId::MsmClaimTerm as usize,
-            [
-                self.expr_ptr.clone(),
-                self.base_ptr.clone(),
-                self.scalar_ptr.clone(),
-            ],
+            [self.expr_ptr.clone(), self.base_ptr.clone(), self.scalar_ptr.clone()],
         )
     }
 }
@@ -283,10 +282,6 @@ impl BaseAir<Felt> for EcMsmAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        Vec::new()
-    }
-
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -356,9 +351,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // boundary. ptr → (run) is injective by construction.
         let expr_ptr: AB::Expr = local[COL_EXPR_PTR].into();
         let expr_ptr_next: AB::Expr = next[COL_EXPR_PTR].into();
-        builder
-            .when_first_row()
-            .assert_zero(expr_ptr - AB::Expr::ONE);
+        builder.when_first_row().assert_zero(expr_ptr - AB::Expr::ONE);
         builder
             .when_transition()
             .assert_zero(expr_ptr_next - local[COL_EXPR_PTR].into() - is_boundary.clone());
@@ -394,9 +387,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         ] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
-            builder
-                .when_transition()
-                .assert_zero(not_boundary.clone() * (there - here));
+            builder.when_transition().assert_zero(not_boundary.clone() * (there - here));
         }
 
         // Intro: a 1-row run (boundary), value = base (a ptr equality; the
@@ -567,12 +558,12 @@ where
         let bnd_b = is_combine.clone() * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
 
-        let one_deg = Deg { n: 1, d: 1 };
-        let two_deg = Deg { n: 2, d: 1 };
-        let col0_deg = Deg { n: 6, d: 5 };
-        let col1_deg = Deg { n: 4, d: 3 };
-        let col2_deg = Deg { n: 6, d: 4 };
-        let col3_deg = Deg { n: 6, d: 4 };
+        let one_deg = Deg { v: 1, u: 1 };
+        let two_deg = Deg { v: 2, u: 1 };
+        let col0_deg = Deg { v: 6, u: 5 };
+        let col1_deg = Deg { v: 4, u: 3 };
+        let col2_deg = Deg { v: 6, u: 4 };
+        let col3_deg = Deg { v: 6, u: 4 };
 
         // ---- col 0: provides (MsmTerm every row, MsmExpr on the boundary)
         //             + intro's literal-1 UintVal pair.

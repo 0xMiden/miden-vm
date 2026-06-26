@@ -12,53 +12,51 @@
 
 use std::collections::HashMap;
 
-use k256::ProjectivePoint;
-use k256::Scalar;
 use k256::elliptic_curve::sec1::ToEncodedPoint; // to_encoded_point()
+use k256::{ProjectivePoint, Scalar};
 use miden_air::lookup::Challenges;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::ec::add::trace::{EcAddRequires, generate_trace as ec_add_trace};
-use crate::ec::add::{
-    CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
-    NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
-};
-use crate::ec::groups::EcGroupsAir;
-use crate::ec::trace::{
-    EcGroupPtr, EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces,
-};
-use crate::ec::{COL_IS_CERT, EcPointStoreAir, EcRequire, NUM_MAIN_COLS as POINT_COLS};
 // `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
 // (ignored) prove round-trip.
 use crate::logup::{NUM_PUBLIC_VALUES, sigma_sum};
-use crate::math::{U256, from_hex};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace,
+use crate::{
+    ec::{
+        COL_IS_CERT, EcPointStoreAir, EcRequire, NUM_MAIN_COLS as POINT_COLS,
+        add::{
+            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
+            NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
+            trace::{EcAddRequires, generate_trace as ec_add_trace},
+        },
+        groups::EcGroupsAir,
+        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces},
+    },
+    math::{U256, from_hex},
+    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::ChipletAir,
+    stark_config::{test_challenger, test_config},
+    tests::integration::fold_balance,
+    uint::{
+        UintRequire, UintStoreAir,
+        add::{
+            UintAddAir,
+            trace::{UintAddRequires, generate_trace as uint_add_trace},
+        },
+        mul::{
+            UintMulAir,
+            trace::{UintMulRequires, generate_trace as uint_mul_trace},
+        },
+        trace::{UintPtr, UintStoreRequires, generate_trace as uint_trace},
+    },
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::session::ChipletAir;
-use crate::stark_config::{test_challenger, test_config};
-use crate::tests::integration::fold_balance;
-use crate::uint::add::UintAddAir;
-use crate::uint::add::trace::{UintAddRequires, generate_trace as uint_add_trace};
-use crate::uint::mul::UintMulAir;
-use crate::uint::mul::trace::{UintMulRequires, generate_trace as uint_mul_trace};
-use crate::uint::trace::UintPtr;
-use crate::uint::trace::{UintStoreRequires, generate_trace as uint_trace};
-use crate::uint::{UintRequire, UintStoreAir};
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 // secp256k1 KATs (machine-verified small multiples of G).
@@ -176,9 +174,7 @@ struct EcStackMultiAir {
 
 impl EcStackMultiAir {
     fn new() -> Self {
-        Self {
-            airs: stack_airs().to_vec(),
-        }
+        Self { airs: stack_airs().to_vec() }
     }
 }
 
@@ -307,13 +303,7 @@ fn k1_stack() -> K1 {
     let (group, pai) = ec.create_group(from_hex("0"), from_hex("7"), fp);
     let g_pt = ec.add_point(group, from_hex(GX), from_hex(GY));
     let g2_pt = ec.add_point(group, from_hex(G2X), from_hex(G2Y));
-    K1 {
-        stack,
-        group,
-        pai,
-        g_pt,
-        g2_pt,
-    }
+    K1 { stack, group, pai, g_pt, g2_pt }
 }
 
 /// Local-constraint check on the EcGroupAdd chiplet alone (the tamper
@@ -423,13 +413,9 @@ fn ec_add_matches_k256() {
     // The lattice is validated against k256 inside the builder; here we
     // also close the subset: per-chiplet constraints + full bus balance.
     let traces = k256_validated_stack().traces();
-    let mut rng = StdRng::seed_from_u64(0xEC_ADD_C256);
+    let mut rng = StdRng::seed_from_u64(0xec_add_c256);
     traces.check();
-    assert_eq!(
-        stack_residual(&traces.mains(), &mut rng),
-        0,
-        "subset must balance"
-    );
+    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0, "subset must balance");
 }
 
 #[test]
@@ -481,13 +467,9 @@ fn generic_add_computes_kat() {
         Felt::from(r.addr()),
         "the res row hosts the result ptr",
     );
-    assert_eq!(
-        traces.ec_add_main().height(),
-        PERIOD,
-        "one add op = one block"
-    );
+    assert_eq!(traces.ec_add_main().height(), PERIOD, "one add op = one block");
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_001);
+    let mut rng = StdRng::seed_from_u64(0xecadd_001);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -510,7 +492,7 @@ fn duplicate_adds_collapse() {
         "two identical adds collapse onto one block",
     );
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_DED);
+    let mut rng = StdRng::seed_from_u64(0xecadd_ded);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -528,12 +510,9 @@ fn double_binds_canonically() {
     assert_eq!(k1.stack.point_coords(r), (from_hex(G2X), from_hex(G2Y)));
 
     let traces = k1.stack.traces();
-    assert_eq!(
-        block0_flags(traces.ec_add_main()),
-        [0, 0, 0, 1, 0].map(Felt::from_u32)
-    );
+    assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 0, 1, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_002);
+    let mut rng = StdRng::seed_from_u64(0xecadd_002);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -549,12 +528,9 @@ fn cancel_resolves_to_canonical_pai() {
     assert_eq!(r, k1.pai);
 
     let traces = k1.stack.traces();
-    assert_eq!(
-        block0_flags(traces.ec_add_main()),
-        [0, 0, 1, 0, 0].map(Felt::from_u32)
-    );
+    assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 1, 0, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_003);
+    let mut rng = StdRng::seed_from_u64(0xecadd_003);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -579,7 +555,7 @@ fn pai_passthroughs_tie_results() {
         "∞ + ∞ sets both pass flags",
     );
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_004);
+    let mut rng = StdRng::seed_from_u64(0xecadd_004);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -605,12 +581,9 @@ fn ed25519_torsion_doubles_to_pai() {
     assert_eq!(r, pai, "2-torsion doubling cancels to ∞");
 
     let traces = stack.traces();
-    assert_eq!(
-        block0_flags(traces.ec_add_main()),
-        [0, 0, 1, 0, 0].map(Felt::from_u32)
-    );
+    assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 1, 0, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xECADD_25519);
+    let mut rng = StdRng::seed_from_u64(0xecadd_25519);
     traces.check();
     assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
 }
@@ -667,7 +640,7 @@ fn double_forged_as_generic_unbalances() {
     let traces = k1.stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_DBL, 0), (COL_GEN, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xECADD_A01);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a01);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -685,7 +658,7 @@ fn generic_forged_as_double_unbalances() {
     let traces = k1.stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_DBL, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xECADD_A02);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a02);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -710,12 +683,10 @@ fn cancel_forged_on_distinct_x_unbalances() {
     // Clear mints too: a real forger vacates the (now-false) mint claim, so
     // the cancel x-equality certificate — not the ptr-ordering — is what
     // must reject this (an honest generic mint set mints = 1 here).
-    let mut forged = tamper_block0(
-        traces.ec_add_main(),
-        &[(COL_GEN, 0), (COL_CANCEL, 1), (COL_MINTS, 0)],
-    );
+    let mut forged =
+        tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_CANCEL, 1), (COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, pai.addr());
-    let mut rng = StdRng::seed_from_u64(0xECADD_A06);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a06);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -735,12 +706,10 @@ fn finite_forged_as_pai_unbalances() {
     let q_ptr = k1.g2_pt;
     let traces = k1.stack.traces();
 
-    let mut forged = tamper_block0(
-        traces.ec_add_main(),
-        &[(COL_GEN, 0), (COL_PAI_P, 1), (COL_MINTS, 0)],
-    );
+    let mut forged =
+        tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_PAI_P, 1), (COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, q_ptr.addr());
-    let mut rng = StdRng::seed_from_u64(0xECADD_A03);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a03);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -763,7 +732,7 @@ fn double_forged_as_cancel_unbalances() {
 
     let mut forged = tamper_block0(traces.ec_add_main(), &[(COL_DBL, 0), (COL_CANCEL, 1)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, pai.addr());
-    let mut rng = StdRng::seed_from_u64(0xECADD_A04);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a04);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -786,7 +755,7 @@ fn forged_result_ptr_unbalances() {
     // here we want the EcPoint-mismatch bus catch.
     let mut forged = tamper_block0(traces.ec_add_main(), &[(COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, g_pt.addr());
-    let mut rng = StdRng::seed_from_u64(0xECADD_A05);
+    let mut rng = StdRng::seed_from_u64(0xecadd_a05);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
@@ -852,13 +821,8 @@ fn cert_point_forged_as_trio_unbalances() {
     let r = k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
     let traces = k1.stack.traces();
 
-    let forged = tamper_ec_points(
-        traces.ec_points_main(),
-        r.addr() as usize - 1,
-        COL_IS_CERT,
-        0,
-    );
-    let mut rng = StdRng::seed_from_u64(0xECADD_CE3);
+    let forged = tamper_ec_points(traces.ec_points_main(), r.addr() as usize - 1, COL_IS_CERT, 0);
+    let mut rng = StdRng::seed_from_u64(0xecadd_ce3);
     let mut mains = traces.mains();
     mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);

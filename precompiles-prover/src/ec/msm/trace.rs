@@ -20,11 +20,13 @@ use super::{
     COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_TAKE_BOTH, COL_VAL, COL_VAL_A,
     COL_VAL_B, EcMsmAir, NUM_MAIN_COLS,
 };
-use crate::ec::trace::{EcGroupPtr, EcPointPtr};
-use crate::logup::build_logup_aux_trace;
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::ProvideMult;
-use crate::uint::trace::{UintPtr, UintStoreRequires};
+use crate::{
+    ec::trace::{EcGroupPtr, EcPointPtr},
+    logup::build_logup_aux_trace,
+    primitives::byte_pair_lut::BytePairLutRequires,
+    relations::ProvideMult,
+    uint::trace::{UintPtr, UintStoreRequires},
+};
 
 /// Handle to a recorded MSM expression — its allocator-assigned
 /// `expr_ptr` (consecutive from 1).
@@ -162,9 +164,7 @@ impl EcMsmRequires {
 
     /// The expression a prior `combine(a, b)` produced, if any.
     pub fn lookup_combine(&self, a: EcExprPtr, b: EcExprPtr) -> Option<EcExprPtr> {
-        self.dedup
-            .get(&DedupKey::Combine(a.addr(), b.addr()))
-            .copied()
+        self.dedup.get(&DedupKey::Combine(a.addr(), b.addr())).copied()
     }
 
     /// The expression a prior `neg(a)` produced, if any.
@@ -268,8 +268,7 @@ impl EcMsmRequires {
             claim_mult: 0,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup
-            .insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
+        self.dedup.insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
         e
     }
 
@@ -442,13 +441,13 @@ pub fn generate_trace(
                 if is_boundary {
                     let a_diff = expr_ptr - e.a_expr - 1;
                     let b_diff = expr_ptr - e.b_expr - 1;
-                    set(COL_A_DIFF_LO, a_diff & 0xFFFF);
+                    set(COL_A_DIFF_LO, a_diff & 0xffff);
                     set(COL_A_DIFF_HI, a_diff >> 16);
-                    set(COL_B_DIFF_LO, b_diff & 0xFFFF);
+                    set(COL_B_DIFF_LO, b_diff & 0xffff);
                     set(COL_B_DIFF_HI, b_diff >> 16);
-                    bpl.require_range16((a_diff & 0xFFFF) as u16);
+                    bpl.require_range16((a_diff & 0xffff) as u16);
                     bpl.require_range16((a_diff >> 16) as u16);
-                    bpl.require_range16((b_diff & 0xFFFF) as u16);
+                    bpl.require_range16((b_diff & 0xffff) as u16);
                     bpl.require_range16((b_diff >> 16) as u16);
                 }
             } else if is_neg {
@@ -473,9 +472,9 @@ pub fn generate_trace(
                     set(COL_NEG_YR, e.neg_yr);
                     set(COL_NEG_MINTED, e.neg_minted);
                     let a_diff = expr_ptr - e.a_expr - 1;
-                    set(COL_A_DIFF_LO, a_diff & 0xFFFF);
+                    set(COL_A_DIFF_LO, a_diff & 0xffff);
                     set(COL_A_DIFF_HI, a_diff >> 16);
-                    bpl.require_range16((a_diff & 0xFFFF) as u16);
+                    bpl.require_range16((a_diff & 0xffff) as u16);
                     bpl.require_range16((a_diff >> 16) as u16);
                 }
             } else {
@@ -545,11 +544,8 @@ mod tests {
         let group = EcGroupPtr::from_addr(1);
         let sbound = UintPtr::from_addr(7);
         let one = UintPtr::from_addr(9);
-        let (g, q, r) = (
-            EcPointPtr::from_addr(3),
-            EcPointPtr::from_addr(4),
-            EcPointPtr::from_addr(5),
-        );
+        let (g, q, r) =
+            (EcPointPtr::from_addr(3), EcPointPtr::from_addr(4), EcPointPtr::from_addr(5));
         let mut req = EcMsmRequires::new();
         let ga = req.intro(group, sbound, g, one);
         let qb = req.intro(group, sbound, q, one);
@@ -617,16 +613,10 @@ mod tests {
             EcPointPtr::from_addr(6),
         );
         // The value-negation cells: shared x = gq.x, y_a = gq.y, y_R = ngq.y.
-        let (neg_x, neg_ya, neg_yr) = (
-            UintPtr::from_addr(4),
-            UintPtr::from_addr(5),
-            UintPtr::from_addr(6),
-        );
-        let (a_ptr, b_ptr, bound_ptr) = (
-            UintPtr::from_addr(2),
-            UintPtr::from_addr(3),
-            UintPtr::from_addr(1),
-        );
+        let (neg_x, neg_ya, neg_yr) =
+            (UintPtr::from_addr(4), UintPtr::from_addr(5), UintPtr::from_addr(6));
+        let (a_ptr, b_ptr, bound_ptr) =
+            (UintPtr::from_addr(2), UintPtr::from_addr(3), UintPtr::from_addr(1));
         let mut req = EcMsmRequires::new();
         let ga = req.intro(group, sbound, g, one);
         let qb = req.intro(group, sbound, q, one);
@@ -658,19 +648,7 @@ mod tests {
                 out_scalar: one,
             },
         ];
-        let c = req.combine(
-            group,
-            sbound,
-            a_ptr,
-            b_ptr,
-            bound_ptr,
-            ga,
-            qb,
-            g,
-            q,
-            gq,
-            combine_rows,
-        );
+        let c = req.combine(group, sbound, a_ptr, b_ptr, bound_ptr, ga, qb, g, q, gq, combine_rows);
         let neg_rows = vec![
             NegRow {
                 i: 0,
