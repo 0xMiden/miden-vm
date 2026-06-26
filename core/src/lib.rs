@@ -16,6 +16,7 @@ pub const WORD_SIZE: usize = Word::NUM_ELEMENTS;
 
 pub mod advice;
 pub mod chiplets;
+pub mod deferred;
 pub mod events;
 pub mod mast;
 pub mod operations;
@@ -23,6 +24,9 @@ pub mod precompile;
 pub mod program;
 pub mod proof;
 pub mod utils;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub mod field {
     pub use miden_crypto::field::*;

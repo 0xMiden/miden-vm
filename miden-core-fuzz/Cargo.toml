@@ -178,6 +178,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "deferred_state_wire_deserialize"
+path = "fuzz_targets/deferred_state_wire_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "deferred_state_wire_serde_deserialize"
+path = "fuzz_targets/deferred_state_wire_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "package_deserialize"
 path = "fuzz_targets/package_deserialize.rs"
 test = false
