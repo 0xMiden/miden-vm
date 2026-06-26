@@ -16,10 +16,14 @@
 //! that — the only relation the chiplets *prove* is the arithmetic
 //! itself, which is all the `is` predicate needs.
 
-use crate::math::{U256, add_reduce, mac_reduce, sub_reduce};
-use crate::uint::add::trace::UintAddRequires;
-use crate::uint::mul::trace::UintMulRequires;
-use crate::uint::trace::{Uint, UintPtr, UintStoreRequires};
+use crate::{
+    math::{U256, add_reduce, mac_reduce, sub_reduce},
+    uint::{
+        add::trace::UintAddRequires,
+        mul::trace::UintMulRequires,
+        trace::{Uint, UintPtr, UintStoreRequires},
+    },
+};
 
 /// Borrowed view over the uint chiplet accumulators; construct one per
 /// recording burst (it is `&mut`-cheap and holds no state of its own).
@@ -64,10 +68,7 @@ impl<'a> UintRequire<'a> {
     pub fn add(&mut self, a_ptr: UintPtr, b_ptr: UintPtr) -> UintPtr {
         let (a, bound) = self.resolve(a_ptr);
         let (b, _) = self.resolve(b_ptr);
-        assert_eq!(
-            a.bound_ptr, b.bound_ptr,
-            "add operands must share a modulus"
-        );
+        assert_eq!(a.bound_ptr, b.bound_ptr, "add operands must share a modulus");
         let c = add_reduce(a.value, b.value, bound);
         let c_ptr = self.store.intern(c, a.bound_ptr);
         self.add.record(a_ptr, b_ptr, c_ptr, a.bound_ptr, 1);
@@ -80,10 +81,7 @@ impl<'a> UintRequire<'a> {
     pub fn sub(&mut self, x_ptr: UintPtr, y_ptr: UintPtr) -> UintPtr {
         let (x, bound) = self.resolve(x_ptr);
         let (y, _) = self.resolve(y_ptr);
-        assert_eq!(
-            x.bound_ptr, y.bound_ptr,
-            "sub operands must share a modulus"
-        );
+        assert_eq!(x.bound_ptr, y.bound_ptr, "sub operands must share a modulus");
         let z = sub_reduce(x.value, y.value, bound);
         let z_ptr = self.store.intern(z, x.bound_ptr);
         self.add.record(y_ptr, z_ptr, x_ptr, x.bound_ptr, 1);
@@ -108,15 +106,8 @@ impl<'a> UintRequire<'a> {
     pub fn add_to_zero(&mut self, a_ptr: UintPtr, b_ptr: UintPtr) {
         let (a, bound) = self.resolve(a_ptr);
         let (b, _) = self.resolve(b_ptr);
-        assert_eq!(
-            a.bound_ptr, b.bound_ptr,
-            "add operands must share a modulus"
-        );
-        assert_eq!(
-            add_reduce(a.value, b.value, bound),
-            U256::ZERO,
-            "a + b must reduce to zero",
-        );
+        assert_eq!(a.bound_ptr, b.bound_ptr, "add operands must share a modulus");
+        assert_eq!(add_reduce(a.value, b.value, bound), U256::ZERO, "a + b must reduce to zero",);
         self.add.record_to_zero(a_ptr, b_ptr, a.bound_ptr, 1);
     }
 
@@ -159,8 +150,7 @@ impl<'a> UintRequire<'a> {
         );
         let r = mac_reduce(kappa_a, a.value, b.value, kappa_c, c.value, bound);
         let r_ptr = self.store.intern(r, a.bound_ptr);
-        self.mul
-            .record(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
+        self.mul.record(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
         r_ptr
     }
 
@@ -190,8 +180,7 @@ impl<'a> UintRequire<'a> {
             r.value,
             "κₐ·a·b + κ_c·c must reduce to the stored r",
         );
-        self.mul
-            .record(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
+        self.mul.record(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
     }
 }
 

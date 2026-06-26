@@ -6,29 +6,31 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use miden_core::Felt;
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 use miden_lifted_air::{BaseAir, LiftedAir};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::hash::chunk::trace::ChunkRequires;
-use crate::hash::keccak::round::RoundRequires;
-use crate::hash::keccak::sponge::trace::{
-    Invocation, SpongeRequires, generate_trace, keccak_oracle,
+use crate::{
+    hash::{
+        chunk::trace::ChunkRequires,
+        keccak::{
+            round::RoundRequires,
+            sponge::{
+                COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR, COL_PADDED_HI,
+                COL_SPONGE_SEQ_ID, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS,
+                NUM_MAIN_COLS, NUM_PERIODIC_COLS, SPONGE_PERIOD,
+                trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
+            },
+        },
+    },
+    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::poseidon2::trace::Poseidon2Requires,
 };
-use crate::hash::keccak::sponge::{
-    COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR, COL_PADDED_HI, COL_SPONGE_SEQ_ID,
-    KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS,
-    NUM_PERIODIC_COLS, SPONGE_PERIOD,
-};
-use crate::logup::{
-    Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-};
-use crate::primitives::bitwise64::Bitwise64Requires;
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::poseidon2::trace::Poseidon2Requires;
 
 fn build_sponge_requires(
     invs: &[Invocation],
@@ -62,11 +64,7 @@ fn keccak_sponge_msg_encodes_with_keccak_sponge_bus_prefix() {
     let sponge_seq_id = Felt::from(42u32);
     let chunk_ptr = Felt::from(12u32);
     let len_bytes = Felt::from(200u32);
-    let msg = KeccakSpongeMsg {
-        sponge_seq_id,
-        chunk_ptr,
-        len_bytes,
-    };
+    let msg = KeccakSpongeMsg { sponge_seq_id, chunk_ptr, len_bytes };
 
     let enc = msg.encode(&challenges);
 
@@ -113,12 +111,10 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 #[test]
 fn main_column_layout_partitions_27_indices() {
     // The 27 main witness columns are partitioned into:
-    //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block,
-    //     chunk_ptr (indices 0..4).
-    //   - padding-state machine (10): is_zero_p, is_chunk_avail,
-    //     b_0..b_7 (indices 5..14).
-    //   - per-row lane values (12): chunk, state_prev, state_new,
-    //     state_out, cleared, padded — all u32-lo/hi (indices 15..26).
+    //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block, chunk_ptr (indices 0..4).
+    //   - padding-state machine (10): is_zero_p, is_chunk_avail, b_0..b_7 (indices 5..14).
+    //   - per-row lane values (12): chunk, state_prev, state_new, state_out, cleared, padded — all
+    //     u32-lo/hi (indices 15..26).
     //
     // The boundary checks below pin the 5/10/12 split so that any
     // future column shuffling fails fast.
@@ -136,10 +132,7 @@ fn main_column_layout_partitions_27_indices() {
     // Total matches the spec.
     assert_eq!(NUM_MAIN_COLS, 27);
     // `BaseAir::width()` agrees.
-    assert_eq!(
-        <KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir),
-        NUM_MAIN_COLS
-    );
+    assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
 }
 
 #[test]
@@ -160,11 +153,11 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn periodic_columns_match_program() {
-    // `LiftedAir::periodic_columns()` is plumbed through to the
+    // `BaseAir::periodic_columns()` is plumbed through to the
     // verifier; ensure it returns exactly what `sponge_program()`
     // produced (same shape, same values).
     let air = KeccakSpongeAir;
-    let cols = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::periodic_columns(&air);
+    let cols = <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&air);
     assert_eq!(cols.len(), NUM_PERIODIC_COLS);
     for c in &cols {
         assert_eq!(c.len(), SPONGE_PERIOD);
@@ -192,14 +185,14 @@ fn constraints_hold_on_empty_invocation() {
     // Empty input — the padding-only edge case. One block with the
     // pad row at slot 0 (`byte_offset = 0`) and no chunk-tape lanes
     // consumed (the chunk chiplet emits 0 chunks for an empty input).
-    check_invocation(0xE_0_0_0, Invocation { input: vec![] });
+    check_invocation(0xe_0_0_0, Invocation { input: vec![] });
 }
 
 #[test]
 fn constraints_hold_on_single_byte_invocation() {
     // 1-byte input — pad at slot 0, `byte_offset = 1`. The lane-0
     // chunk has 1 real input byte + 7 chunk-alignment zero-pad bytes.
-    check_invocation(0xE_0_0_1, Invocation { input: vec![0xAB] });
+    check_invocation(0xe_0_0_1, Invocation { input: vec![0xab] });
 }
 
 #[test]
@@ -207,8 +200,8 @@ fn constraints_hold_on_partial_lane_input() {
     // 11-byte input — pad at slot 1, `byte_offset = 3`. Covers the
     // "real input + intra-lane pad byte" case where the pad row's
     // ANDNOT properly preserves the leading bytes.
-    let input: Vec<u8> = (0..11).map(|i| i as u8 ^ 0x5A).collect();
-    check_invocation(0xE_0_0_B, Invocation { input });
+    let input: Vec<u8> = (0..11).map(|i| i as u8 ^ 0x5a).collect();
+    check_invocation(0xe_0_0_b, Invocation { input });
 }
 
 #[test]
@@ -220,9 +213,9 @@ fn constraints_hold_on_full_single_block() {
     // writes). Also the max-overshoot case: 5 chunks = 20 lanes vs
     // one block's 17 rate slots, so the 3 overshoot lanes are mopped
     // up on the extra rows [26,29).
-    let mut rng = StdRng::seed_from_u64(0xE_0_8_7);
+    let mut rng = StdRng::seed_from_u64(0xe_0_8_7);
     let input: Vec<u8> = (0..135).map(|_| rng.random()).collect();
-    check_invocation(0xE_0_8_7, Invocation { input });
+    check_invocation(0xe_0_8_7, Invocation { input });
 }
 
 #[test]
@@ -232,9 +225,9 @@ fn constraints_hold_on_block_aligned_input() {
     // (`byte_offset = 0`). Stresses the cross-block state propagation
     // (perm-0's output flows into block 1's `state_prev`) and the
     // garbage-tail lanes that chunk-alignment spills into block 1.
-    let mut rng = StdRng::seed_from_u64(0xE_0_8_8);
+    let mut rng = StdRng::seed_from_u64(0xe_0_8_8);
     let input: Vec<u8> = (0..136).map(|_| rng.random()).collect();
-    check_invocation(0xE_0_8_8, Invocation { input });
+    check_invocation(0xe_0_8_8, Invocation { input });
 }
 
 #[test]
@@ -244,9 +237,9 @@ fn constraints_hold_on_multi_block_input() {
     // chunk-tape segment is 7 chunks = 28 lanes; block 1 consumes
     // 11 (8 real + 3 chunk-alignment garbage-tail lanes the
     // past-pad chain discards).
-    let mut rng = StdRng::seed_from_u64(0xE_0_C_8);
+    let mut rng = StdRng::seed_from_u64(0xe_0_c_8);
     let input: Vec<u8> = (0..200).map(|_| rng.random()).collect();
-    check_invocation(0xE_0_C_8, Invocation { input });
+    check_invocation(0xe_0_c_8, Invocation { input });
 }
 
 #[test]
@@ -255,9 +248,9 @@ fn constraints_hold_on_overshoot_two_lanes() {
     // = 36 lanes, so overshoot = 2. The last block fills all 17 rate
     // slots, carries `is_chunk_avail` through the capacity / 0x80 rows,
     // and consumes the 2 overshoot lanes on extra rows [26,28).
-    let mut rng = StdRng::seed_from_u64(0xE_1_0_F);
+    let mut rng = StdRng::seed_from_u64(0xe_1_0_f);
     let input: Vec<u8> = (0..271).map(|_| rng.random()).collect();
-    check_invocation(0xE_1_0_F, Invocation { input });
+    check_invocation(0xe_1_0_f, Invocation { input });
 }
 
 #[test]
@@ -266,9 +259,9 @@ fn constraints_hold_on_overshoot_one_lane() {
     // = 52 lanes, so overshoot = 1, consumed on extra row 26 of the
     // last block. 3 blocks → 96 rows padded to 128, so this also
     // exercises the dead-row trace tail and the cyclic wrap.
-    let mut rng = StdRng::seed_from_u64(0xE_1_9_7);
+    let mut rng = StdRng::seed_from_u64(0xe_1_9_7);
     let input: Vec<u8> = (0..407).map(|_| rng.random()).collect();
-    check_invocation(0xE_1_9_7, Invocation { input });
+    check_invocation(0xe_1_9_7, Invocation { input });
 }
 
 #[test]
@@ -279,7 +272,7 @@ fn constraints_hold_on_overshoot_then_invocation_seam() {
     // its overshoot tail, the relaxed chain must carry `chunk_ptr`
     // contiguously into the second — no seam gap, since the sponge now
     // consumes all 4·num_chunks lanes the chiplet emits.
-    let mut rng = StdRng::seed_from_u64(0xE_1_5E);
+    let mut rng = StdRng::seed_from_u64(0xe_1_5e);
     let a: Vec<u8> = (0..271).map(|_| rng.random()).collect();
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
@@ -296,9 +289,9 @@ fn constraints_hold_with_dead_rows() {
     // (last dead row → row 0, a new invocation) must not demand
     // `is_zero = 1` on the dead row. Any non-power-of-two block count
     // exercises this.
-    let mut rng = StdRng::seed_from_u64(0xDEAD_12C);
+    let mut rng = StdRng::seed_from_u64(0xdead_12c);
     let input: Vec<u8> = (0..300).map(|_| rng.random()).collect();
-    check_invocation(0xDEAD_12C, Invocation { input });
+    check_invocation(0xdead_12c, Invocation { input });
 }
 
 #[test]
@@ -308,7 +301,7 @@ fn constraints_hold_on_empty_input() {
     // as garbage-tail (`is_chunk_avail = 1` on lanes 0..4 while
     // `past_pad = 1`). Exercises the pad-at-byte-0 + chunk-consume overlap
     // on the first and only block.
-    check_invocation(0xE_1_9_0_7, Invocation { input: vec![] });
+    check_invocation(0xe_1_9_0_7, Invocation { input: vec![] });
 }
 
 #[test]
@@ -348,7 +341,7 @@ fn constraints_hold_on_empty_then_nonempty_seam() {
     // Empty invocation immediately followed by a normal one — the empty
     // block's chunk_ptr advance (4 lanes) must carry contiguously across
     // the invocation seam into the next.
-    let mut rng = StdRng::seed_from_u64(0xE_1_5EA);
+    let mut rng = StdRng::seed_from_u64(0xe_1_5ea);
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
         build_sponge_requires(&[Invocation { input: vec![] }, Invocation { input: b }]);
@@ -365,7 +358,7 @@ fn constraints_hold_on_multiple_invocations() {
     // (33 bytes → 2 chunks) leaves `chunk_ptr` at a non-multiple-of-4
     // offset for the second (40 bytes), confirming the per-invocation
     // base needn't be 4-aligned under the relaxed chain.
-    let mut rng = StdRng::seed_from_u64(0x5EA_3);
+    let mut rng = StdRng::seed_from_u64(0x5ea_3);
     let a: Vec<u8> = (0..33).map(|_| rng.random()).collect();
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
@@ -396,7 +389,7 @@ fn corrupt_and_check(
 fn corruption_non_binary_act_breaks_booleanity() {
     // Set `act` at row 5 to 2 — violates `act · (1 − act) = 0`.
     use crate::hash::keccak::sponge::COL_ACT;
-    corrupt_and_check(0xC0_BB, Invocation { input: vec![0xAB] }, |main| {
+    corrupt_and_check(0xc0_bb, Invocation { input: vec![0xab] }, |main| {
         main.values[5 * NUM_MAIN_COLS + COL_ACT] = Felt::from(2u8);
     });
 }
@@ -410,7 +403,7 @@ fn corruption_nonzero_chunk_on_chunks_unavailable_breaks_zero_fill() {
     // `is_chunk_avail = 0` and the zero-fill constraint pins
     // `chunk_lo = chunk_hi = 0` there. Writing a non-zero value into
     // `chunk_lo` at row 5 violates Z1.
-    corrupt_and_check(0xC0_2E, Invocation { input: vec![0xAB] }, |main| {
+    corrupt_and_check(0xc0_2e, Invocation { input: vec![0xab] }, |main| {
         main.values[5 * NUM_MAIN_COLS + COL_CHUNK_LO] = Felt::from(1u8);
     });
 }
@@ -425,9 +418,9 @@ fn corruption_new_invocation_after_non_last_block() {
     // seam) rejects it: a new invocation may only follow a padded last
     // block. Guards the anti-truncation property the act gate preserves.
     use crate::hash::keccak::sponge::COL_IS_FIRST_BLOCK_OF_INVOCATION;
-    let mut rng = StdRng::seed_from_u64(0xC0_F1);
+    let mut rng = StdRng::seed_from_u64(0xc0_f1);
     let input: Vec<u8> = (0..271).map(|_| rng.random()).collect();
-    corrupt_and_check(0xC0_F1, Invocation { input }, |main| {
+    corrupt_and_check(0xc0_f1, Invocation { input }, |main| {
         for row in SPONGE_PERIOD..2 * SPONGE_PERIOD {
             main.values[row * NUM_MAIN_COLS + COL_IS_FIRST_BLOCK_OF_INVOCATION] = Felt::ONE;
         }
@@ -440,7 +433,7 @@ fn corruption_seq_id_breaks_row_counter_transition() {
     // Skip a value in `sponge_seq_id` (row 1 = 7 instead of 1) — both the
     // row-0 transition (`seq_id_1 − seq_id_0 − 1 = 6 ≠ 0`) and the
     // row-1 transition (`seq_id_2 − seq_id_1 − 1 = −6 ≠ 0`) fail.
-    corrupt_and_check(0xC0_5E, Invocation { input: vec![0xAB] }, |main| {
+    corrupt_and_check(0xc0_5e, Invocation { input: vec![0xab] }, |main| {
         main.values[1 * NUM_MAIN_COLS + COL_SPONGE_SEQ_ID] = Felt::from(7u8);
     });
 }
@@ -459,11 +452,12 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // `check_local` builds the aux trace through `LiftedAir::build_aux_trace`,
     // so the corruption must live in that override (the 0.26 API no longer
     // accepts a standalone `AuxBuilder` — the AIR owns the aux build).
-    use crate::hash::keccak::sponge::NUM_AUX_COLS;
     use miden_air::BaseAir;
     use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
+
+    use crate::hash::keccak::sponge::NUM_AUX_COLS;
 
     #[derive(Debug, Clone, Copy)]
     struct AuxCorruptAir;
@@ -476,13 +470,13 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
         fn num_public_values(&self) -> usize {
             <KeccakSpongeAir as BaseAir<Felt>>::num_public_values(&KeccakSpongeAir)
         }
+
+        fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+            <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir)
+        }
     }
 
     impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
-        fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::periodic_columns(&KeccakSpongeAir)
-        }
-
         fn num_randomness(&self) -> usize {
             <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
         }
@@ -518,7 +512,7 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
         }
     }
 
-    let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input: vec![0xAB] }]);
+    let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input: vec![0xab] }]);
     let main = generate_trace(sponge_req);
     crate::tests::check_local(AuxCorruptAir, &main);
 }

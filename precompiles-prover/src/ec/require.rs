@@ -8,12 +8,15 @@
 //! recorded with their demand routed — a caller only ever sees group /
 //! point ptr handles.
 
-use crate::ec::add::trace::{EcAddCase, EcAddOp, EcAddRequires};
-use crate::ec::trace::{EcGroupPtr, EcPointPtr, EcStoreRequires};
-use crate::math::{U256, add_reduce, mac_reduce, mod_inv, sub_reduce};
-use crate::relations::ProvideMult;
-use crate::uint::UintRequire;
-use crate::uint::trace::UintPtr;
+use crate::{
+    ec::{
+        add::trace::{EcAddCase, EcAddOp, EcAddRequires},
+        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
+    },
+    math::{U256, add_reduce, mac_reduce, mod_inv, sub_reduce},
+    relations::ProvideMult,
+    uint::{UintRequire, trace::UintPtr},
+};
 
 /// Borrowed view over the EC chiplet accumulators plus the uint layer;
 /// construct one per recording burst.
@@ -111,11 +114,7 @@ impl<'a> EcRequire<'a> {
         x_ptr: UintPtr,
         y_ptr: UintPtr,
     ) -> (EcGroupPtr, EcPointPtr) {
-        assert_ne!(
-            self.uint.value(b_ptr),
-            U256::ZERO,
-            "b = 0 puts (0,0) on the curve"
-        );
+        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
         let group = self.store.create_group(a_ptr, b_ptr, bound);
         self.store.add_pai(group);
         let point = self.add_point_at(group, x_ptr, y_ptr);
@@ -139,11 +138,7 @@ impl<'a> EcRequire<'a> {
         b_ptr: UintPtr,
         bound: UintPtr,
     ) -> (EcGroupPtr, EcPointPtr) {
-        assert_ne!(
-            self.uint.value(b_ptr),
-            U256::ZERO,
-            "b = 0 puts (0,0) on the curve"
-        );
+        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
         let group = self.store.create_group(a_ptr, b_ptr, bound);
         let pai = self.store.add_pai(group);
         self.store.require_ecgroup(group);
@@ -178,10 +173,7 @@ impl<'a> EcRequire<'a> {
         let (a, b, bound) = self.store.group_params(group);
         let (p_group, p_coords) = self.store.point_params(p);
         let (q_group, q_coords) = self.store.point_params(q);
-        assert!(
-            p_group == group && q_group == group,
-            "add operands must belong to the group"
-        );
+        assert!(p_group == group && q_group == group, "add operands must belong to the group");
 
         // Case selection by value; the AIR re-derives the claim
         // adversarially from the flags + the per-case certificate
@@ -192,7 +184,7 @@ impl<'a> EcRequire<'a> {
                 // the AIR's ties force `p = q = r`.
                 assert_eq!(p, q, "∞ + ∞ takes the canonical PAI twice");
                 (EcAddCase::PaiBoth, p, None, false)
-            }
+            },
             (None, Some(_)) => (EcAddCase::PaiP, q, None, false),
             (Some(_), None) => (EcAddCase::PaiQ, p, None, false),
             (Some((px, py)), Some((qx, qy))) => {
@@ -245,7 +237,7 @@ impl<'a> EcRequire<'a> {
                     let (transients, r, fresh) = self.add_tail(s, lambda, inv, px, py, qx, group);
                     (EcAddCase::Double, r, Some(transients), fresh)
                 }
-            }
+            },
         };
 
         // The op's cross-chiplet demand (the operands' / result's
@@ -327,10 +319,9 @@ impl<'a> EcRequire<'a> {
             // Q = ∞ ⇒ R = P (also covers ∞ − ∞ = ∞ via the None map).
             (_, None) => p_coords.map(|(px, py)| (self.uint.value(px), self.uint.value(py))),
             // P = ∞ ⇒ R = −Q.
-            (None, Some((qx, qy))) => Some((
-                self.uint.value(qx),
-                sub_reduce(U256::ZERO, self.uint.value(qy), m),
-            )),
+            (None, Some((qx, qy))) => {
+                Some((self.uint.value(qx), sub_reduce(U256::ZERO, self.uint.value(qy), m)))
+            },
             (Some((px, py)), Some((qx, qy))) => {
                 let (x1, y1) = (self.uint.value(px), self.uint.value(py));
                 let x2 = self.uint.value(qx);
@@ -357,7 +348,7 @@ impl<'a> EcRequire<'a> {
                     m,
                 );
                 Some((x3, y3))
-            }
+            },
         }
     }
 

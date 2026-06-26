@@ -72,14 +72,12 @@
 //! Two ext-field aux registers beyond the LogUp columns (σ-excluded via
 //! `num_logup_cols = 3`):
 //!
-//! - **`S`** (staging): builds `κₐ·a(β)` over the a-rows, holds through
-//!   the b-rows (whose `id` contribution `S·Σbⱼβʲ` lands the degree-2
-//!   product at constraint degree 3), resets, builds `bound(β)`, holds
-//!   through the q-rows (`−(S+1)·Σqᵢβⁱ` — the `+1` is `p = bound + 1`),
-//!   resets. One register serves both products via the periodic keep
-//!   gate [`S_KEEP`].
-//! - **`id`**: accumulates every role's contribution; `when_first_row`
-//!   pins 0, the term row asserts 0.
+//! - **`S`** (staging): builds `κₐ·a(β)` over the a-rows, holds through the b-rows (whose `id`
+//!   contribution `S·Σbⱼβʲ` lands the degree-2 product at constraint degree 3), resets, builds
+//!   `bound(β)`, holds through the q-rows (`−(S+1)·Σqᵢβⁱ` — the `+1` is `p = bound + 1`), resets.
+//!   One register serves both products via the periodic keep gate [`S_KEEP`].
+//! - **`id`**: accumulates every role's contribution; `when_first_row` pins 0, the term row asserts
+//!   0.
 //!
 //! ## Padding
 //!
@@ -100,14 +98,17 @@ use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    primitives::byte_pair_lut::Range16Msg,
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::{UintLimbsMsg, UintValMsg},
+    utils::{current_main, next_main},
 };
-use crate::primitives::byte_pair_lut::Range16Msg;
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::{UintLimbsMsg, UintValMsg};
-use crate::utils::{current_main, next_main};
 
 // MESSAGES
 // ================================================================================================
@@ -293,9 +294,7 @@ impl BaseAir<Felt> for UintMulAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for UintMulAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // One one-hot per row role, then the S-keep gate.
         (0..PERIOD)
@@ -304,12 +303,12 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
                 col[row] = Felt::ONE;
                 col
             })
-            .chain(std::iter::once(
-                S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect(),
-            ))
+            .chain(std::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
             .collect()
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for UintMulAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -382,9 +381,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             + hi_sum.clone() * sel[ROW_P_HI].clone();
         let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
         builder.when_first_row().assert_zero_ext(s.clone());
-        builder
-            .when_transition()
-            .assert_zero_ext(s_next - s.clone() * keep - build);
+        builder.when_transition().assert_zero_ext(s_next - s.clone() * keep - build);
 
         // id contributions.
         // The product: S = κₐ·a(β) through the b-rows.
@@ -392,9 +389,8 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             + s.clone() * hi_sum.clone() * sel[ROW_B_HI].clone();
         // The quotient: S = bound(β) through the q-rows; q(β)·(bound(β)+1)
         // with q₀..q₉ on q_lo (all ten cells) and q₁₀..q₁₆ on q_hi.
-        let q_lo_sum: AB::ExprEF = (0..NUM_CELLS).fold(AB::ExprEF::ZERO, |acc, i| {
-            acc + bp[i].clone() * AB::Expr::from(local[i])
-        });
+        let q_lo_sum: AB::ExprEF = (0..NUM_CELLS)
+            .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
         let q_hi_sum: AB::ExprEF = (0..NUM_Q_LIMBS - NUM_CELLS).fold(AB::ExprEF::ZERO, |acc, i| {
             acc + bp[NUM_CELLS + i].clone() * AB::Expr::from(local[i])
         });
@@ -402,9 +398,8 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             * (q_lo_sum * sel[ROW_Q_LO].clone() + q_hi_sum * sel[ROW_Q_HI].clone());
         // The linear operands: 4×32 limbs at even powers, both halves on
         // one row. κ_c is read from the term row (next).
-        let val_sum: AB::ExprEF = (0..8).fold(AB::ExprEF::ZERO, |acc, m| {
-            acc + bp[2 * m].clone() * AB::Expr::from(local[m])
-        });
+        let val_sum: AB::ExprEF = (0..8)
+            .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
         let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next.clone())
             - val_sum * sel[ROW_R].clone();
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
@@ -426,9 +421,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         let contrib: AB::ExprEF = product - quotient + linear + carries;
         builder.when_first_row().assert_zero_ext(id.clone());
-        builder
-            .when_transition()
-            .assert_zero_ext(id_next - id.clone() - contrib);
+        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
         builder.assert_zero_ext(id * sel[ROW_TERM].clone());
 
         // act is the boolean block-active flag (cycle-constant).
@@ -447,14 +440,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // Cycle-constancy: ptrs / κₐ / act are constant within a block
         // (every row but the terminal one).
         let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_TERM].clone();
-        for col in [
-            COL_A_PTR,
-            COL_B_PTR,
-            COL_R_PTR,
-            COL_BOUND_PTR,
-            COL_KAPPA_A,
-            COL_ACT,
-        ] {
+        for col in [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
             builder.assert_zero(not_term.clone() * (there - here));
@@ -516,11 +502,11 @@ where
         // consumes share col 0 (7 fractions); the eight bus-facing cell
         // positions fill col 1; the two liquid positions, the two κ cells
         // and the four 4×32 consumes fill col 2.
-        let provide_deg = Deg { n: 2, d: 1 };
-        let consume_deg = Deg { n: 2, d: 1 };
-        let rc_deg = Deg { n: 2, d: 1 };
+        let provide_deg = Deg { v: 2, u: 1 };
+        let consume_deg = Deg { v: 2, u: 1 };
+        let rc_deg = Deg { v: 2, u: 1 };
         // Flattened columns hold ≤ 2 degree-2 fractions → constraint degree ≤ 3.
-        let pair_deg = Deg { n: 3, d: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
         let raw: [LB::Expr; 8] = array::from_fn(|i| local[i].into());
         let val_lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
@@ -574,19 +560,11 @@ where
         ]
         .into_iter()
         .map(|(row, ptr)| {
-            let offset = if row % 2 == 1 {
-                LB::Expr::ONE
-            } else {
-                LB::Expr::ZERO
-            };
+            let offset = if row % 2 == 1 { LB::Expr::ONE } else { LB::Expr::ZERO };
             (sel[row].clone() * act.clone(), ptr, offset)
         })
         .collect();
-        for group in raw_consumes
-            .chunks(2)
-            .map(|c| c.to_vec())
-            .collect::<Vec<_>>()
-        {
+        for group in raw_consumes.chunks(2).map(|c| c.to_vec()).collect::<Vec<_>>() {
             builder.next_column(
                 |col| {
                     col.group(
@@ -624,9 +602,8 @@ where
         // host q limbs + the dedicated γ rows; cell 8 adds the solid
         // spills + r; cell 9 the same minus the γ rows (their cell 9 is
         // spare).
-        let g_sum: LB::Expr = (ROW_G0..=ROW_G4)
-            .map(|r| sel[r].clone())
-            .fold(LB::Expr::ZERO, |acc, s| acc + s);
+        let g_sum: LB::Expr =
+            (ROW_G0..=ROW_G4).map(|r| sel[r].clone()).fold(LB::Expr::ZERO, |acc, s| acc + s);
         let solid_sum: LB::Expr = [ROW_A_LO, ROW_A_HI, ROW_B_LO, ROW_B_HI, ROW_P_LO, ROW_P_HI]
             .map(|r| sel[r].clone())
             .into_iter()
@@ -641,9 +618,8 @@ where
         };
 
         // cols 4..8: Range16 on all ten cell positions, two per column.
-        let cell_specs: Vec<(LB::Expr, usize)> = (0..NUM_CELLS)
-            .map(|cell| (cell_gate(cell) * act.clone(), cell))
-            .collect();
+        let cell_specs: Vec<(LB::Expr, usize)> =
+            (0..NUM_CELLS).map(|cell| (cell_gate(cell) * act.clone(), cell)).collect();
         for group in cell_specs.chunks(2).map(|c| c.to_vec()).collect::<Vec<_>>() {
             builder.next_column(
                 |col| {
@@ -658,9 +634,7 @@ where
                                         b.insert(
                                             "range16-cell",
                                             mult,
-                                            Range16Msg {
-                                                w: local[cell].into(),
-                                            },
+                                            Range16Msg { w: local[cell].into() },
                                             rc_deg,
                                         );
                                     }
@@ -694,9 +668,7 @@ where
                                 b.insert(
                                     "range16-kappa-c",
                                     sel[ROW_TERM].clone() * act.clone(),
-                                    Range16Msg {
-                                        w: kappa_c_local.clone(),
-                                    },
+                                    Range16Msg { w: kappa_c_local.clone() },
                                     rc_deg,
                                 );
                             },

@@ -5,13 +5,14 @@
 //! resulting AIR/witness pair.
 
 use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::hash::keccak::reference::{KECCAK_RC, keccak_f1600, keccak_round};
-use crate::hash::keccak::round::{
-    KeccakRoundAir, NUM_ROUNDS, PERM_CYCLE, extract_output, extract_outputs,
-    generate_trace_from_states,
+use crate::hash::keccak::{
+    reference::{KECCAK_RC, keccak_f1600, keccak_round},
+    round::{
+        KeccakRoundAir, NUM_ROUNDS, PERM_CYCLE, extract_output, extract_outputs,
+        generate_trace_from_states,
+    },
 };
 
 // TESTS
@@ -33,8 +34,11 @@ fn chiplet_one_round(state: [u64; 25], rc: u64) -> [u64; 25] {
 /// Sponge inputs use natural row-major addressing: `state[i]` at
 /// addr `i`.
 fn extract_output_one_round(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
-    use crate::hash::keccak::round::program::{SLOT_CHI_XOR_BEGIN, SLOT_IOTA};
-    use crate::hash::keccak::round::{IP_BOUNDARY, ROUND_PERIOD, slots};
+    use crate::hash::keccak::round::{
+        IP_BOUNDARY, ROUND_PERIOD,
+        program::{SLOT_CHI_XOR_BEGIN, SLOT_IOTA},
+        slots,
+    };
 
     let program = slots();
     // Size memory to cover the highest seeded address: the last RC
@@ -156,7 +160,7 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
     // A handful of arbitrary patterns.
     let mut state = [0u64; 25];
     for i in 0..25 {
-        state[i] = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        state[i] = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     }
     let expected = keccak_f1600(state);
     let got = extract_output(&state, &KECCAK_RC);
@@ -165,7 +169,7 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
 
 #[test]
 fn extract_output_matches_reference_keccak_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xCACA0);
+    let mut rng = StdRng::seed_from_u64(0xcaca0);
     for trial in 0..3 {
         let mut state = [0u64; 25];
         for lane in state.iter_mut() {
@@ -189,7 +193,7 @@ fn keccak_round_constraints_hold_on_canonical_input() {
 
 #[test]
 fn keccak_round_constraints_hold_on_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xC037F);
+    let mut rng = StdRng::seed_from_u64(0xc037f);
     let mut state = [0u64; 25];
     for lane in state.iter_mut() {
         *lane = rng.random();
@@ -205,7 +209,7 @@ fn keccak_round_constraints_hold_on_random_input() {
 /// satisfaction. Trace height = `3 * 3200 = 9600` padded to `16384`.
 #[test]
 fn keccak_round_multi_perm_oracle_and_constraints() {
-    let mut rng = StdRng::seed_from_u64(0xC0FFEE);
+    let mut rng = StdRng::seed_from_u64(0xc0ffee);
     let mut states = [[0u64; 25]; 3];
     for state in states.iter_mut() {
         for lane in state.iter_mut() {
@@ -218,10 +222,7 @@ fn keccak_round_multi_perm_oracle_and_constraints() {
     assert_eq!(got, expected, "per-perm oracle agreement");
 
     let main = generate_trace_from_states(&states, &KECCAK_RC);
-    assert_eq!(
-        main.height(),
-        (states.len() * PERM_CYCLE).next_power_of_two()
-    );
+    assert_eq!(main.height(), (states.len() * PERM_CYCLE).next_power_of_two());
 
     crate::tests::check_local(KeccakRoundAir, &main);
 }
@@ -235,11 +236,12 @@ fn bw64_per_perm_floor_holds() {
     // narrow, input-dependent band (≈3769–3789: value collisions shift the
     // matching; L=1 lands at 3771), so we pin one fixed pseudo-random state.
     // A chaining or round-program regression moves the count and trips this.
-    use crate::hash::keccak::round::{RoundRequires, generate_trace};
-    use crate::primitives::bitwise64::Bitwise64Requires;
-    use crate::primitives::byte_pair_lut::BytePairLutRequires;
+    use crate::{
+        hash::keccak::round::{RoundRequires, generate_trace},
+        primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
+    };
 
-    let mut rng = StdRng::seed_from_u64(0x00B1_7C64);
+    let mut rng = StdRng::seed_from_u64(0x00b1_7c64);
     let init: [u64; 25] = std::array::from_fn(|_| rng.random());
 
     let mut round = RoundRequires::new();

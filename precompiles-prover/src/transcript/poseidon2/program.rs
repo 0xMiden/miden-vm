@@ -17,11 +17,9 @@
 //!
 //! The 12 `ark` columns carry per-lane round constants:
 //! - rows 0..3:  `ARK_EXT_INITIAL[0..4]`
-//! - rows 4..10: `ARK_INT[3·triple + k]` in lanes 0..3 (triple = row − 4),
-//!               zeros in lanes 3..12.
-//! - row 11:     `ARK_EXT_TERMINAL[0]` (the internal constant
-//!               `ARK_INT[21]` for row 11's int leg is hardcoded into
-//!               the constraint).
+//! - rows 4..10: `ARK_INT[3·triple + k]` in lanes 0..3 (triple = row − 4), zeros in lanes 3..12.
+//! - row 11:     `ARK_EXT_TERMINAL[0]` (the internal constant `ARK_INT[21]` for row 11's int leg is
+//!   hardcoded into the constraint).
 //! - rows 12..14: `ARK_EXT_TERMINAL[1..4]`
 //! - row 15:     all zero.
 

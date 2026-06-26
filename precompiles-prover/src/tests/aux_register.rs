@@ -18,17 +18,17 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_PUBLIC_VALUES,
-    NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+use crate::{
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, next_main},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, next_main};
 
 const COL_X: usize = 0;
 const NUM_MAIN_COLS: usize = 1;
@@ -106,9 +106,7 @@ impl LiftedAir<Felt, QuadFelt> for SpikeAir {
         builder.when_first_row().assert_zero_ext(acc.clone());
         // Transition: acc_next − acc·β − x = 0 (the wrap row is excluded).
         let x_expr: AB::Expr = x_local.into();
-        builder
-            .when_transition()
-            .assert_zero_ext(acc_next - acc * beta - x_expr);
+        builder.when_transition().assert_zero_ext(acc_next - acc * beta - x_expr);
 
         // Phase 2: LogUp over one empty column ⇒ σ = 0.
         let mut lb =
@@ -141,20 +139,17 @@ where
         // One LogUp column that emits no bus tuples: its running sum stays
         // 0, so σ = 0. The register at aux col 1 is excluded from this
         // sum by the `num_logup_cols` bound.
-        builder.next_column(|_col| {}, Deg { n: 1, d: 1 });
+        builder.next_column(|_col| {}, Deg { v: 1, u: 1 });
     }
 }
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 #[test]
 fn ext_register_verifies_and_stays_out_of_sigma() {
-    let mut rng = StdRng::seed_from_u64(0x5217E);
+    let mut rng = StdRng::seed_from_u64(0x5217e);
     let n = 16usize;
     let x: Vec<Felt> = (0..n).map(|_| Felt::from(rng.random::<u32>())).collect();
     let main = RowMajorMatrix::new(x, NUM_MAIN_COLS);

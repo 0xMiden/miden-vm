@@ -17,27 +17,36 @@
 //! allocation order, stamping the 27-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::hash::chunk::trace::{ChunkRequires, ChunkSeqId, Invocation as ChunkInvocation};
-use crate::hash::keccak::digest::KeccakDigest;
-use crate::hash::keccak::reference::{KECCAK_RC, keccak_f1600, keccak_round};
-use crate::hash::keccak::round::{NUM_ROUNDS, RoundRequires};
-use crate::hash::keccak::sponge::program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN};
-use crate::hash::keccak::sponge::{
-    COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT, COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO,
-    COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO,
-    COL_SPONGE_SEQ_ID, COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO, KeccakSpongeAir,
-    NUM_MAIN_COLS, SPONGE_PERIOD,
+use crate::{
+    hash::{
+        chunk::trace::{ChunkRequires, ChunkSeqId, Invocation as ChunkInvocation},
+        keccak::{
+            digest::KeccakDigest,
+            reference::{KECCAK_RC, keccak_f1600, keccak_round},
+            round::{NUM_ROUNDS, RoundRequires},
+            sponge::{
+                COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT, COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO,
+                COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO,
+                COL_SPONGE_SEQ_ID, COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO,
+                KeccakSpongeAir, NUM_MAIN_COLS, SPONGE_PERIOD,
+                program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
+            },
+        },
+    },
+    logup::build_logup_aux_trace,
+    primitives::{
+        bitwise64::{Bitwise64Requires, Logic64Op},
+        byte_pair_lut::BytePairLutRequires,
+    },
+    transcript::poseidon2::{
+        digest::P2Digest,
+        trace::{PermSpan, Poseidon2Requires},
+    },
+    utils::split_u64,
 };
-use crate::logup::build_logup_aux_trace;
-use crate::primitives::bitwise64::{Bitwise64Requires, Logic64Op};
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::transcript::poseidon2::digest::P2Digest;
-use crate::transcript::poseidon2::trace::{PermSpan, Poseidon2Requires};
-use crate::utils::split_u64;
 
 /// Keccak rate (bytes per absorption block).
 const RATE_BYTES: usize = 136;
@@ -209,12 +218,7 @@ impl SpongeRequires {
         // loop below consumes as a full garbage-tail (pad at byte 0), so
         // the keccak digest is `keccak256("")` while `H_input_chunks`
         // still binds a real P2 chain tail.
-        let chunk_out = chunk_req.require(
-            &ChunkInvocation {
-                input: inv.input.clone(),
-            },
-            p2,
-        );
+        let chunk_out = chunk_req.require(&ChunkInvocation { input: inv.input.clone() }, p2);
         let (chunk_head, chunk_content_digest, chunk_content_perm_span) =
             (chunk_out.chunk_head, chunk_out.digest, chunk_out.perm_span);
 
@@ -256,16 +260,11 @@ impl SpongeRequires {
 /// otherwise lay sponge rows that the node-layer dedup hit then
 /// discards).
 pub fn keccak_oracle(input: &[u8]) -> KeccakDigest {
-    let inv = Invocation {
-        input: input.to_vec(),
-    };
+    let inv = Invocation { input: input.to_vec() };
     let layout = InvocationLayout::of(&inv);
     let blocks = compute_block_snapshots(&inv, &layout);
     KeccakDigest::from_state(
-        &blocks
-            .last()
-            .expect("compute_block_snapshots yields ≥1 block")
-            .perm_out,
+        &blocks.last().expect("compute_block_snapshots yields ≥1 block").perm_out,
     )
 }
 
@@ -641,36 +640,12 @@ mod tests {
         assert_eq!(Invocation { input: vec![] }.num_blocks(), 1);
         // Just-fits cases.
         assert_eq!(Invocation { input: vec![0; 7] }.num_blocks(), 1);
-        assert_eq!(
-            Invocation {
-                input: vec![0; 135]
-            }
-            .num_blocks(),
-            1
-        );
+        assert_eq!(Invocation { input: vec![0; 135] }.num_blocks(), 1);
         // 136-byte input needs a trailing pad block (the 0x01 byte
         // can't fit alongside a full rate-block of input).
-        assert_eq!(
-            Invocation {
-                input: vec![0; 136]
-            }
-            .num_blocks(),
-            2
-        );
-        assert_eq!(
-            Invocation {
-                input: vec![0; 200]
-            }
-            .num_blocks(),
-            2
-        );
-        assert_eq!(
-            Invocation {
-                input: vec![0; 272]
-            }
-            .num_blocks(),
-            3
-        );
+        assert_eq!(Invocation { input: vec![0; 136] }.num_blocks(), 2);
+        assert_eq!(Invocation { input: vec![0; 200] }.num_blocks(), 2);
+        assert_eq!(Invocation { input: vec![0; 272] }.num_blocks(), 3);
     }
 
     #[test]
@@ -685,12 +660,6 @@ mod tests {
         // 200 bytes → 7 chunks = 28 lanes (block 0 consumes 17,
         // block 1 consumes the remaining 11 incl. 3 garbage-tail
         // lanes past the input).
-        assert_eq!(
-            Invocation {
-                input: vec![0; 200]
-            }
-            .chunk_lanes(),
-            28
-        );
+        assert_eq!(Invocation { input: vec![0; 200] }.chunk_lanes(), 28);
     }
 }

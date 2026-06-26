@@ -17,17 +17,17 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::logup::build_logup_aux_trace;
-use crate::math::{U256, to_limbs16, to_limbs32};
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::ProvideMult;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AUX_WIDTH, CARRY_CELLS_BEGIN, HUB_CELL_UINTLIMBS_MULT, HUB_CELL_UINTVAL_MULT, NUM_LIMBS,
     NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP, UintStoreAir,
+};
+use crate::{
+    logup::build_logup_aux_trace,
+    math::{U256, to_limbs16, to_limbs32},
+    primitives::byte_pair_lut::BytePairLutRequires,
+    relations::ProvideMult,
 };
 
 /// Handle to an interned uint — the store's currency. Only the store
@@ -169,10 +169,7 @@ impl UintStoreRequires {
     /// be interned canonically onto them.
     pub fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
         let ptr = UintPtr(addr);
-        assert!(
-            value <= self.uint(bound).value,
-            "value exceeds its modulus bound"
-        );
+        assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
         self.insert_pinned(ptr, value, bound);
         ptr
     }
@@ -183,25 +180,14 @@ impl UintStoreRequires {
             "pinned uint ptr {} outside the pin namespace [1, 2^16)",
             ptr.0,
         );
-        assert!(
-            !self.uints.contains_key(&ptr),
-            "duplicate uint ptr {}",
-            ptr.0,
-        );
+        assert!(!self.uints.contains_key(&ptr), "duplicate uint ptr {}", ptr.0,);
         let prev = self.by_value.insert((value, bound_ptr), ptr);
         assert!(
             prev.is_none(),
             "value already interned at ptr {} — pin before computing",
             prev.unwrap().0,
         );
-        self.uints.insert(
-            ptr,
-            Uint {
-                value,
-                ptr,
-                bound_ptr,
-            },
-        );
+        self.uints.insert(ptr, Uint { value, ptr, bound_ptr });
         self.demand.require(bound_ptr);
     }
 
@@ -214,10 +200,7 @@ impl UintStoreRequires {
             "address {addr} outside the pin namespace [1, 2^16)",
         );
         let ptr = UintPtr(addr);
-        assert!(
-            self.uints.contains_key(&ptr),
-            "no uint pinned at address {addr}",
-        );
+        assert!(self.uints.contains_key(&ptr), "no uint pinned at address {addr}",);
         ptr
     }
 
@@ -243,21 +226,11 @@ impl UintStoreRequires {
         if let Some(&ptr) = self.by_value.get(&(value, bound)) {
             return ptr;
         }
-        assert!(
-            value <= self.uint(bound).value,
-            "value exceeds its modulus bound"
-        );
+        assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
         let ptr = UintPtr(self.next_transient);
         self.next_transient += 1;
         self.by_value.insert((value, bound), ptr);
-        self.uints.insert(
-            ptr,
-            Uint {
-                value,
-                ptr,
-                bound_ptr: bound,
-            },
-        );
+        self.uints.insert(ptr, Uint { value, ptr, bound_ptr: bound });
         self.demand.require(bound);
         ptr
     }
@@ -288,17 +261,10 @@ impl Default for UintStoreRequires {
 fn padded_blocks(requires: &UintStoreRequires) -> Vec<Uint> {
     let n_real = requires.uints.len();
     let n_padded = n_real.next_power_of_two().max(1);
-    let next_ptr = requires
-        .uints
-        .last_key_value()
-        .map_or(1, |(&ptr, _)| ptr.0 + 1);
+    let next_ptr = requires.uints.last_key_value().map_or(1, |(&ptr, _)| ptr.0 + 1);
     let pad = (0..n_padded - n_real).map(|i| {
         let ptr = UintPtr(next_ptr + i as u32);
-        Uint {
-            value: U256::ZERO,
-            ptr,
-            bound_ptr: ptr,
-        }
+        Uint { value: U256::ZERO, ptr, bound_ptr: ptr }
     });
     requires.uints.values().copied().chain(pad).collect()
 }
@@ -336,9 +302,7 @@ pub fn generate_trace(
     let mut vals = Vec::with_capacity(blocks.len() * PERIOD * NUM_MAIN_COLS);
     for (i, u) in blocks.iter().enumerate() {
         let bound_value = bound_value(requires, u, i >= n_real);
-        let comp = bound_value
-            .checked_sub(u.value)
-            .expect("stored value exceeds its bound");
+        let comp = bound_value.checked_sub(u.value).expect("stored value exceeds its bound");
         let v16 = to_limbs16(u.value);
         let comp16 = to_limbs16(comp);
         let bound32 = to_limbs32(bound_value);

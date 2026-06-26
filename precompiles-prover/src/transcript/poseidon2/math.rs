@@ -57,10 +57,9 @@ pub fn apply_init_plus_ext<E: PrimeCharacteristicRing>(
 /// and the witness constraints' degree at 7.
 ///
 /// Returns:
-/// - `next_state`: state after all 3 rounds, affine (deg 1) in the trace
-///   columns.
-/// - `witness_checks`: three expressions that must each be zero (deg 7):
-///   `w_k − (y_0^{(k)} + ark_int[k])^7`.
+/// - `next_state`: state after all 3 rounds, affine (deg 1) in the trace columns.
+/// - `witness_checks`: three expressions that must each be zero (deg 7): `w_k − (y_0^{(k)} +
+///   ark_int[k])^7`.
 pub fn apply_packed_internals<E: PrimeCharacteristicRing>(
     h: &[E; STATE_WIDTH],
     w: &[E; 3],
@@ -90,8 +89,8 @@ pub fn apply_packed_internals<E: PrimeCharacteristicRing>(
 /// entries to deliver one value.
 ///
 /// Returns:
-/// - `next_state`: state after int + ext, deg 7 in the trace columns
-///   (one S-box layer over an affine substitution).
+/// - `next_state`: state after int + ext, deg 7 in the trace columns (one S-box layer over an
+///   affine substitution).
 /// - `witness_check`: `w0 − (h[0] + ark_int_const)^7`, deg 7.
 pub fn apply_internal_plus_ext<E: PrimeCharacteristicRing>(
     h: &[E; STATE_WIDTH],

@@ -5,36 +5,32 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
+};
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::math::{U256, from_limbs16, mac_reduce, to_limbs16};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace,
+use crate::{
+    math::{U256, from_limbs16, mac_reduce, to_limbs16},
+    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    tests::uint::{random_modulus, random_uint_below},
+    uint::{
+        UintStoreAir,
+        mul::{
+            NUM_MAIN_COLS, PERIOD, ROW_Q_HI, ROW_R, UintMulAir,
+            trace::{UintMulRequires, canonical_q, gamma_halves, generate_trace, op_block},
+        },
+        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
+    },
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::tests::uint::{random_modulus, random_uint_below};
-use crate::uint::UintStoreAir;
-use crate::uint::mul::trace::{
-    UintMulRequires, canonical_q, gamma_halves, generate_trace, op_block,
-};
-use crate::uint::mul::{NUM_MAIN_COLS, PERIOD, ROW_Q_HI, ROW_R, UintMulAir};
-use crate::uint::trace::{UintPtr, UintStoreRequires, generate_trace as store_trace};
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 /// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
@@ -126,14 +122,7 @@ fn check_and_balance(
 #[test]
 fn mac_reduce_small_values() {
     // Hand-checked: p = 97, 3·(5·7) + 2·3 = 111 ≡ 14 (mod 97).
-    let r = mac_reduce(
-        3,
-        U256::from(5u8),
-        U256::from(7u8),
-        2,
-        U256::from(3u8),
-        U256::from(96u8),
-    );
+    let r = mac_reduce(3, U256::from(5u8), U256::from(7u8), 2, U256::from(3u8), U256::from(96u8));
     assert_eq!(r, U256::from(14u8));
 }
 
@@ -170,9 +159,9 @@ fn mul_scaled_17_limb_quotient() {
     // κₐ = 3 against a near-2²⁵⁵ modulus with a = b = p − 1 pushes the
     // quotient past 2²⁵⁶: the 17th limb (q_hi cell 6) must be live, and
     // constraints + buses must still close (the ECC `3x²` shape).
-    let mut rng = StdRng::seed_from_u64(0x3_5CA1E);
+    let mut rng = StdRng::seed_from_u64(0x3_5ca1e);
     let mut bound16 = to_limbs16(random_modulus(&mut rng));
-    bound16[15] = 0x7FFF;
+    bound16[15] = 0x7fff;
     let bound = from_limbs16(&bound16);
     let c = random_uint_below(&mut rng, bound);
 
@@ -193,7 +182,7 @@ fn mul_scaled_17_limb_quotient() {
 fn mul_ops_balance_with_padding() {
     // Three ops (two scaled, one squaring a@2 by itself) pad to four
     // blocks; the all-zero act = 0 padding block must stay off every bus.
-    let mut rng = StdRng::seed_from_u64(0x3_9AD5);
+    let mut rng = StdRng::seed_from_u64(0x3_9ad5);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);
@@ -216,7 +205,7 @@ fn mul_ops_balance_with_padding() {
 fn mul_div_arrangement() {
     // z = x ÷ y is provable as y·z + 0·c ≡ x: κ_c = 0 kills the addend,
     // so c_ptr can dummy onto the modulus — no zero uint needed.
-    let mut rng = StdRng::seed_from_u64(0xD1F);
+    let mut rng = StdRng::seed_from_u64(0xd1f);
     let bound = random_modulus(&mut rng);
     let y = random_uint_below(&mut rng, bound);
     let z = random_uint_below(&mut rng, bound);
@@ -236,7 +225,7 @@ fn mul_zero_operand() {
     // a = 0 degenerates the product: S = 0 through the b-rows, q = 0,
     // r = c. The zero-heavy block must still satisfy constraints and
     // balance (the layout-by-structure regression shape).
-    let mut rng = StdRng::seed_from_u64(0x0_FACE);
+    let mut rng = StdRng::seed_from_u64(0x0_face);
     let bound = random_modulus(&mut rng);
     let zero = U256::ZERO;
     let b = random_uint_below(&mut rng, bound);
@@ -257,7 +246,7 @@ fn mul_rejects_wrong_result() {
     // Tamper the looked-up r limbs: the SZ id is nonzero at the term row
     // and check_constraints rejects (the bus would also mismatch, but the
     // identity fails first).
-    let mut rng = StdRng::seed_from_u64(0xBAD_3);
+    let mut rng = StdRng::seed_from_u64(0xbad_3);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);
@@ -280,7 +269,7 @@ fn mul_q_range_checks_are_load_bearing() {
     // check_constraints PASSES. Only the Range16 consume of the oversized
     // limb has no provider: the forged block must surface as a bus
     // residual, proving the range checks (not the identity) reject it.
-    let mut rng = StdRng::seed_from_u64(0x9_F0E6E);
+    let mut rng = StdRng::seed_from_u64(0x9_f0e6e);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);

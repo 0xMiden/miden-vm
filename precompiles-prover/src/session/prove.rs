@@ -8,8 +8,7 @@
 //! round-trip under the test config, so a program never re-declares the
 //! harness.
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{
     BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, ReductionError, Statement,
 };
@@ -18,25 +17,22 @@ use miden_lifted_stark::{
 };
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::EcPointStoreAir;
-use crate::ec::add::EcGroupAddAir;
-use crate::ec::groups::EcGroupsAir;
-use crate::ec::msm::EcMsmAir;
-use crate::hash::chunk::ChunkAir;
-use crate::hash::keccak::node::KeccakNodeAir;
-use crate::hash::keccak::round::KeccakRoundAir;
-use crate::hash::keccak::sponge::KeccakSpongeAir;
-use crate::logup::sigma_sum;
-use crate::primitives::bitwise64::Bitwise64Air;
-use crate::primitives::byte_pair_lut::BytePairLutAir;
-use crate::session::{NUM_CHIPLETS, SessionTraces};
-use crate::stark_config::{TestDigest, TestProof, test_challenger, test_config};
-use crate::transcript::eval::TranscriptEvalAir;
-use crate::transcript::poseidon2::P2Digest;
-use crate::transcript::poseidon2::Poseidon2Air;
-use crate::uint::UintStoreAir;
-use crate::uint::add::UintAddAir;
-use crate::uint::mul::UintMulAir;
+use crate::{
+    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
+    hash::{
+        chunk::ChunkAir,
+        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
+    },
+    logup::sigma_sum,
+    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    session::{NUM_CHIPLETS, SessionTraces},
+    stark_config::{TestDigest, TestProof, test_challenger, test_config},
+    transcript::{
+        eval::TranscriptEvalAir,
+        poseidon2::{P2Digest, Poseidon2Air},
+    },
+    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
+};
 
 /// The fifteen chiplet AIRs wrapped into one enum — the heterogeneous
 /// `MultiAir::Air` type. Variant order is the canonical
@@ -112,15 +108,18 @@ impl BaseAir<Felt> for ChipletAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         delegate!(self, preprocessed_trace)
     }
+    fn preprocessed_width(&self) -> usize {
+        delegate!(self, preprocessed_width)
+    }
     fn num_public_values(&self) -> usize {
         delegate!(self, num_public_values)
+    }
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        delegate!(self, periodic_columns)
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
-    fn preprocessed_width(&self) -> usize {
-        delegate!(self, preprocessed_width)
-    }
     fn num_randomness(&self) -> usize {
         delegate!(self, num_randomness)
     }
@@ -130,9 +129,6 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn num_aux_values(&self) -> usize {
         delegate!(self, num_aux_values)
     }
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        delegate!(self, periodic_columns)
-    }
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
@@ -140,14 +136,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
         aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        delegate!(
-            self,
-            build_aux_trace,
-            main,
-            air_inputs,
-            aux_inputs,
-            challenges
-        )
+        delegate!(self, build_aux_trace, main, air_inputs, aux_inputs, challenges)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         delegate!(self, eval, builder);
@@ -164,9 +153,7 @@ pub struct ChipletMultiAir {
 
 impl ChipletMultiAir {
     pub fn new() -> Self {
-        Self {
-            airs: ChipletAir::all().to_vec(),
-        }
+        Self { airs: ChipletAir::all().to_vec() }
     }
 }
 

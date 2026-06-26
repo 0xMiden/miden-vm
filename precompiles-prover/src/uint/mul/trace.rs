@@ -16,20 +16,20 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::logup::build_logup_aux_trace;
-use crate::math::{self, U256, to_limbs16, to_limbs32};
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::ProvideMult;
-use crate::uint::trace::{UintPtr, UintStoreRequires};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR, GAMMA_OFFSET,
     GAMMA_SLOTS, NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A_HI, ROW_A_LO,
     ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM, S_KEEP,
     TERM_CELL_C_PTR, TERM_CELL_KAPPA_C, TERM_CELL_MULT, UintMulAir,
+};
+use crate::{
+    logup::build_logup_aux_trace,
+    math::{self, U256, to_limbs16, to_limbs32},
+    primitives::byte_pair_lut::BytePairLutRequires,
+    relations::ProvideMult,
+    uint::trace::{UintPtr, UintStoreRequires},
 };
 
 /// One scaled MAC op `κₐ·a·b + κ_c·c ≡ r (mod p)`: the operand / result
@@ -72,14 +72,7 @@ impl MulOp {
         };
         debug_assert_eq!(
             vals.r,
-            math::mac_reduce(
-                self.kappa_a,
-                vals.a,
-                vals.b,
-                self.kappa_c,
-                vals.c,
-                vals.bound
-            ),
+            math::mac_reduce(self.kappa_a, vals.a, vals.b, self.kappa_c, vals.c, vals.bound),
             "r must equal (κₐ·a·b + κ_c·c) mod p",
         );
         vals
@@ -89,15 +82,9 @@ impl MulOp {
 /// The canonical 17-limb quotient of an op — `q < κₐ·p ≤ 2²⁷²`.
 pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> [u32; NUM_Q_LIMBS] {
     let (q, rem) = math::mac_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound);
-    debug_assert_eq!(
-        rem, vals.r,
-        "the op's r must be the canonical MAC remainder"
-    );
-    debug_assert!(
-        q >> 272 == math::U320::ZERO,
-        "quotient exceeds 17 limbs (κₐ out of contract?)",
-    );
-    array::from_fn(|i| (q.as_limbs()[i / 4] >> 16 * (i % 4)) as u32 & 0xFFFF)
+    debug_assert_eq!(rem, vals.r, "the op's r must be the canonical MAC remainder");
+    debug_assert!(q >> 272 == math::U320::ZERO, "quotient exceeds 17 limbs (κₐ out of contract?)",);
+    array::from_fn(|i| (q.as_limbs()[i / 4] >> 16 * (i % 4)) as u32 & 0xffff)
 }
 
 /// The 31 carry coefficients of the SZ identity, committed sign-offset:
@@ -117,11 +104,7 @@ pub(crate) fn gamma_halves(
     vals: &MulVals,
     q: &[u32; NUM_Q_LIMBS],
 ) -> [(u16, u16); NUM_GAMMA] {
-    let (a, b, bound) = (
-        to_limbs16(vals.a),
-        to_limbs16(vals.b),
-        to_limbs16(vals.bound),
-    );
+    let (a, b, bound) = (to_limbs16(vals.a), to_limbs16(vals.b), to_limbs16(vals.bound));
     let c32 = to_limbs32(vals.c);
     let r32 = to_limbs32(vals.r);
     let d = |k: usize| -> i128 {
@@ -155,11 +138,7 @@ pub(crate) fn gamma_halves(
         *half = (g_offset as u16, (g_offset >> 16) as u16);
         prev = g;
     }
-    debug_assert_eq!(
-        d(NUM_GAMMA) + prev,
-        0,
-        "E_pre must vanish at t (top coefficient)",
-    );
+    debug_assert_eq!(d(NUM_GAMMA) + prev, 0, "E_pre must vanish at t (top coefficient)",);
     out
 }
 
@@ -205,21 +184,13 @@ impl UintMulRequires {
         bound: UintPtr,
         mult: ProvideMult,
     ) {
-        let op = MulOp {
-            kappa_a,
-            kappa_c,
-            a,
-            b,
-            c,
-            r,
-            bound,
-        };
+        let op = MulOp { kappa_a, kappa_c, a, b, c, r, bound };
         match self.dedup.get(&op) {
             Some(&i) => self.ops[i].1 += mult,
             None => {
                 self.dedup.insert(op, self.ops.len());
                 self.ops.push((op, mult));
-            }
+            },
         }
     }
 }
@@ -379,49 +350,38 @@ pub(crate) fn build_aux(
         let kappa_a = QuadFelt::from(cell(COL_KAPPA_A));
         let act = cell(COL_ACT);
 
-        let lo_sum = (0..8).fold(QuadFelt::ZERO, |acc, i| {
-            acc + bp[i] * QuadFelt::from(cell(i))
-        });
-        let hi_sum = (0..8).fold(QuadFelt::ZERO, |acc, i| {
-            acc + bp[8 + i] * QuadFelt::from(cell(i))
-        });
-        let val_sum = (0..8).fold(QuadFelt::ZERO, |acc, m| {
-            acc + bp[2 * m] * QuadFelt::from(cell(m))
-        });
+        let lo_sum = (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
+        let hi_sum =
+            (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp[8 + i] * QuadFelt::from(cell(i)));
+        let val_sum =
+            (0..8).fold(QuadFelt::ZERO, |acc, m| acc + bp[2 * m] * QuadFelt::from(cell(m)));
 
         let role_contrib: QuadFelt = match row_kind {
             _ if row_kind == ROW_B_LO => s_reg * lo_sum,
             _ if row_kind == ROW_B_HI => s_reg * hi_sum,
             _ if row_kind == ROW_Q_LO => {
                 -((s_reg + QuadFelt::ONE)
-                    * (0..NUM_CELLS).fold(QuadFelt::ZERO, |acc, i| {
-                        acc + bp[i] * QuadFelt::from(cell(i))
-                    }))
-            }
+                    * (0..NUM_CELLS)
+                        .fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i))))
+            },
             _ if row_kind == ROW_Q_HI => {
                 -((s_reg + QuadFelt::ONE)
                     * (0..NUM_Q_LIMBS - NUM_CELLS).fold(QuadFelt::ZERO, |acc, i| {
                         acc + bp[NUM_CELLS + i] * QuadFelt::from(cell(i))
                     }))
-            }
+            },
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
                 let kappa_c = main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_KAPPA_C];
                 QuadFelt::from(kappa_c) * val_sum
-            }
+            },
             _ => QuadFelt::ZERO,
         };
         let gamma_contrib: QuadFelt =
-            slots_by_row[row_kind]
-                .iter()
-                .fold(QuadFelt::ZERO, |acc, &(s, c)| {
-                    let v = if s % 2 == 0 {
-                        cell(c) - act * offset
-                    } else {
-                        cell(c)
-                    };
-                    acc + slot_weight(s) * QuadFelt::from(v)
-                });
+            slots_by_row[row_kind].iter().fold(QuadFelt::ZERO, |acc, &(s, c)| {
+                let v = if s % 2 == 0 { cell(c) - act * offset } else { cell(c) };
+                acc + slot_weight(s) * QuadFelt::from(v)
+            });
         id += role_contrib + gamma_contrib;
 
         let build: QuadFelt = match row_kind {

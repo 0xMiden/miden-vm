@@ -16,25 +16,24 @@ pub mod trace;
 
 use core::array;
 
+pub use message::ChunkChainMsg;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg};
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::{deferred_tags, poseidon2::Poseidon2InMsg},
+    utils::{current_main, next_main},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::deferred_tags;
-use crate::transcript::poseidon2::Poseidon2InMsg;
-use crate::utils::{current_main, next_main};
-
-pub use message::ChunkChainMsg;
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -81,12 +80,12 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 // ================================================================================================
 
 /// Three aux columns, following the `bitwise64` chaining pattern:
-/// - col 0: running σ + Memory64 fractions (one group, one batch of 4
-///   product inserts — all four lanes every active row).
-/// - col 1: Poseidon2 fractions (one group, one batch of 3 product
-///   inserts — rate0/rate1 every row, InCap on chain heads).
-/// - col 2: ChunkChain fractions (one group, one batch of 1 insert —
-///   chain-head emit, mult `−act·is_head`).
+/// - col 0: running σ + Memory64 fractions (one group, one batch of 4 product inserts — all four
+///   lanes every active row).
+/// - col 1: Poseidon2 fractions (one group, one batch of 3 product inserts — rate0/rate1 every row,
+///   InCap on chain heads).
+/// - col 2: ChunkChain fractions (one group, one batch of 1 insert — chain-head emit, mult
+///   `−act·is_head`).
 ///
 /// Col 0 hosts the σ-closing, so its last-row close is gated by
 /// `is_transition` / `is_last_row` (degree-1 selectors): a col-0 batch
@@ -262,16 +261,16 @@ where
         let rate1_chunk = [f[4].clone(), f[5].clone(), f[6].clone(), f[7].clone()];
         let cap_chunk = deferred_tags::chunks().map(|felt| LB::Expr::from(felt));
 
-        let interaction_deg = Deg { n: 1, d: 1 };
+        let interaction_deg = Deg { v: 1, u: 1 };
         // Col 0 Memory64: one batch, 4 product inserts. d = 4; every
         // insert mult is `−act` (deg 1) → n = 1 + 3 = 4.
-        let m64_deg = Deg { n: 4, d: 4 };
+        let m64_deg = Deg { v: 4, u: 4 };
         // Col 1 Poseidon2In: one batch, 3 product inserts. d = 3; worst
         // insert mult deg 2 (cap) → n = 2 + 2 = 4.
-        let p2_deg = Deg { n: 4, d: 3 };
+        let p2_deg = Deg { v: 4, u: 3 };
         // Col 2 ChunkChain: one batch, 1 insert. d = 1; insert mult
         // `−act · is_head` (deg 2) → n = 2.
-        let chunkchain_deg = Deg { n: 2, d: 1 };
+        let chunkchain_deg = Deg { v: 2, u: 1 };
 
         // ---- col 0: Memory64 lane provides --------------------
         builder.next_column(

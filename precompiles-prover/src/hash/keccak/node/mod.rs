@@ -7,21 +7,19 @@
 //!
 //! Per row, the chip:
 //!
-//! 1. Issues `KeccakSponge(sponge_seq_id_head, 4·chunk_seq_id_head, len_bytes)`
-//!    — pins the invocation's sponge anchor and chunk-tape base.
-//! 2. Consumes a `ChunkChain(chunk_seq_id_head, perm_seq_id_chunks)` provide
-//!    from the chunk chiplet — bundles the chunk chain's two foreign keys.
-//! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round
-//!    chiplet's perm-N digest-output addresses, mult 2 (matching the
-//!    round chiplet's `dst_mult`).
-//! 4. Drives one Poseidon2 perm to hash `D[8 felts]` (rate0 = lanes 0-1,
-//!    rate1 = lanes 2-3) under VM `Tag::CHUNKS = [2, 0, 0, 0]` →
-//!    `H_digest_chunks`.
-//! 5. Reads `H_input_chunks` from `Poseidon2Out` at `perm_seq_id_chunks +
-//!    n_chunks − 1` — the chunks chain tail.
-//! 6. Drives a second Poseidon2 perm over `[H_input_chunks | H_digest_chunks]`
-//!    (rate0 = H_input_chunks, rate1 = H_digest_chunks) under the VM Keccak-256
-//!    assertion tag `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
+//! 1. Issues `KeccakSponge(sponge_seq_id_head, 4·chunk_seq_id_head, len_bytes)` — pins the
+//!    invocation's sponge anchor and chunk-tape base.
+//! 2. Consumes a `ChunkChain(chunk_seq_id_head, perm_seq_id_chunks)` provide from the chunk chiplet
+//!    — bundles the chunk chain's two foreign keys.
+//! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round chiplet's perm-N
+//!    digest-output addresses, mult 2 (matching the round chiplet's `dst_mult`).
+//! 4. Drives one Poseidon2 perm to hash `D[8 felts]` (rate0 = lanes 0-1, rate1 = lanes 2-3) under
+//!    VM `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
+//! 5. Reads `H_input_chunks` from `Poseidon2Out` at `perm_seq_id_chunks + n_chunks − 1` — the
+//!    chunks chain tail.
+//! 6. Drives a second Poseidon2 perm over `[H_input_chunks | H_digest_chunks]` (rate0 =
+//!    H_input_chunks, rate1 = H_digest_chunks) under the VM Keccak-256 assertion tag
+//!    `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
@@ -42,22 +40,23 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::hash::chunk::ChunkChainMsg;
-use crate::hash::keccak::sponge::KeccakSpongeMsg;
-use crate::hash::memory64::Memory64Msg;
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::{
+        binding::BindingMsg,
+        deferred_tags,
+        poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
+    },
+    utils::{current_main, next_main},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::binding::BindingMsg;
-use crate::transcript::deferred_tags;
-use crate::transcript::poseidon2::{Poseidon2InMsg, Poseidon2OutMsg};
-use crate::utils::{current_main, next_main};
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -65,12 +64,11 @@ use crate::utils::{current_main, next_main};
 // 30 main witness columns:
 //
 // - Structural (1):     act.
-// - Heads / lengths (6): sponge_seq_id_head, n_sponge_perms,
-//   chunk_seq_id_head, n_chunks, perm_seq_id_chunks, len_bytes.
+// - Heads / lengths (6): sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
+//   perm_seq_id_chunks, len_bytes.
 // - Internal P2 cycles (2): perm_seq_id_digest_chunks, perm_seq_id_keccak.
 // - Keccak digest (8):  D, interleaved as (lo, hi) per lane × 4 lanes.
-// - Computed hashes (12): H_input_chunks[4] || H_digest_chunks[4]
-//   || H_keccak[4].
+// - Computed hashes (12): H_input_chunks[4] || H_digest_chunks[4] || H_keccak[4].
 // - Consumer count (1): out_mult, a plain count pinned by Binding balance.
 
 /// Sticky-downward activity flag. Gates every bus multiplicity.
@@ -161,14 +159,13 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 
 /// Four aux columns, each with one group / one batch:
 ///
-/// - col 0: running σ + `KeccakSponge` provide + `Binding(_, True, 0, 0)`
-///   provide + `ChunkChain` consume + `Poseidon2Out(H_input_chunks)` consume
-///   (4 inserts).
+/// - col 0: running σ + `KeccakSponge` provide + `Binding(_, True, 0, 0)` provide + `ChunkChain`
+///   consume + `Poseidon2Out(H_input_chunks)` consume (4 inserts).
 /// - col 1: four `Memory64` D-limb consumes (one per digest lane).
-/// - col 2: digest-chunks P2 perm — three `Poseidon2In` consumes (rate0,
-///   rate1, cap) + one `Poseidon2Out(H_digest_chunks)` consume.
-/// - col 3: keccak-node P2 perm — three `Poseidon2In` consumes + one
-///   `Poseidon2Out(H_keccak)` consume.
+/// - col 2: digest-chunks P2 perm — three `Poseidon2In` consumes (rate0, rate1, cap) + one
+///   `Poseidon2Out(H_digest_chunks)` consume.
+/// - col 3: keccak-node P2 perm — three `Poseidon2In` consumes + one `Poseidon2Out(H_keccak)`
+///   consume.
 ///
 /// All cols keep mults at degree ≤ 1 (× `act` or `out_mult`). The
 /// ungated fraction columns (1, 2, 3) land at `4 + 1 = 5`, but col 0
@@ -250,12 +247,8 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // and chunk chiplet's row-0 anchors. Ungated by `act` — an
         // all-inactive trace's prover sets them to 0 anyway, and the
         // gating cost (one mult) is not worth it.
-        builder
-            .when_first_row()
-            .assert_zero(sponge_seq_id_head.clone());
-        builder
-            .when_first_row()
-            .assert_zero(chunk_seq_id_head.clone());
+        builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
+        builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
 
         // Activity -----------------------------------------------
         // Binary, sticky-downward (matches chunk / sponge convention).
@@ -380,14 +373,14 @@ where
         let d_rate0 = [d[0].clone(), d[1].clone(), d[2].clone(), d[3].clone()];
         let d_rate1 = [d[4].clone(), d[5].clone(), d[6].clone(), d[7].clone()];
 
-        let interaction_deg = Deg { n: 1, d: 1 };
+        let interaction_deg = Deg { v: 1, u: 1 };
         // All aux columns: 1 batch of 4 inserts, each mult deg 1
         // (× act). d = 4, n = 4. Ungated fraction columns (1, 2, 3)
         // land at max(1 + 4, 4) = 5; col 0 carries the σ-closing's
         // `is_transition` / `is_last_row` gate (+1 over the old ungated
         // σ/n form), so it lands at 6. Max constraint deg 6 →
         // log_quotient_degree = 3.
-        let aux_deg = Deg { n: 4, d: 4 };
+        let aux_deg = Deg { v: 4, u: 4 };
 
         // ---- col 0: KS + Binding + ChunkChain + P2Out(H_input_chunks) ----
         builder.next_column(
