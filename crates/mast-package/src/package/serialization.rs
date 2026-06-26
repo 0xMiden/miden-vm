@@ -49,8 +49,15 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::num::NonZeroU16;
 
-use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
+use miden_assembly_syntax::ast::{
+    self, AttributeSet, PathBuf,
+    types::{
+        AddressSpace, ArrayType, CallConv, EnumType, FunctionType, NameAndType, PointerType,
+        StructType, Type, TypeRepr, Variant,
+    },
+};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -85,6 +92,351 @@ const VERSION: [u8; 3] = [6, 0, 0];
 /// The budget is intentionally finite to reject malicious length prefixes, but larger than the
 /// source length because collection deserialization uses conservative per-element size estimates.
 const PACKAGE_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
+
+// Bounds recursive type nesting during package deserialization to match midenc-hir-type's
+// serializer while validating constructor preconditions before any layout code runs.
+const MAX_PACKAGE_TYPE_NESTING: usize = 128;
+
+// PACKAGE TYPE METADATA DESERIALIZATION
+// ================================================================================================
+
+fn read_package_function_type_metadata<R: ByteReader>(
+    source: &mut R,
+) -> Result<FunctionType, DeserializationError> {
+    read_package_function_type_metadata_with_depth(source, MAX_PACKAGE_TYPE_NESTING)
+}
+
+fn read_package_function_type_metadata_with_depth<R: ByteReader>(
+    source: &mut R,
+    depth: usize,
+) -> Result<FunctionType, DeserializationError> {
+    let abi = match source.read_u8()? {
+        0 => CallConv::Fast,
+        1 => CallConv::C,
+        2 => CallConv::Wasm,
+        3 => CallConv::ComponentModel,
+        invalid => {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid CallConv tag: {invalid}"
+            )));
+        },
+    };
+
+    let arity = source.read_usize()?;
+    let max_params = source.max_alloc(1);
+    if arity > max_params {
+        return Err(DeserializationError::InvalidValue(format!(
+            "function params count {arity} exceeds budget {max_params}"
+        )));
+    }
+    let mut params = Vec::with_capacity(arity);
+    for _ in 0..arity {
+        params.push(read_package_type_metadata_with_depth(source, depth)?);
+    }
+
+    let num_results = source.read_usize()?;
+    let max_results = source.max_alloc(1);
+    if num_results > max_results {
+        return Err(DeserializationError::InvalidValue(format!(
+            "function results count {num_results} exceeds budget {max_results}"
+        )));
+    }
+    let mut results = Vec::with_capacity(num_results);
+    for _ in 0..num_results {
+        results.push(read_package_type_metadata_with_depth(source, depth)?);
+    }
+
+    Ok(FunctionType::new(abi, params, results))
+}
+
+fn read_package_type_metadata<R: ByteReader>(source: &mut R) -> Result<Type, DeserializationError> {
+    read_package_type_metadata_with_depth(source, MAX_PACKAGE_TYPE_NESTING)
+}
+
+fn read_package_type_metadata_with_depth<R: ByteReader>(
+    source: &mut R,
+    depth: usize,
+) -> Result<Type, DeserializationError> {
+    let tag = source.read_u8()?;
+    let is_recursive = matches!(tag, 16..=21);
+    if is_recursive && depth == 0 {
+        return Err(DeserializationError::InvalidValue(String::from("type nesting exceeds limit")));
+    }
+    let next_depth = depth.saturating_sub(1);
+
+    match tag {
+        0 => Ok(Type::Unknown),
+        1 => Ok(Type::Never),
+        2 => Ok(Type::I1),
+        3 => Ok(Type::I8),
+        4 => Ok(Type::U8),
+        5 => Ok(Type::I16),
+        6 => Ok(Type::U16),
+        7 => Ok(Type::I32),
+        8 => Ok(Type::U32),
+        9 => Ok(Type::I64),
+        10 => Ok(Type::U64),
+        11 => Ok(Type::I128),
+        12 => Ok(Type::U128),
+        13 => Ok(Type::U256),
+        14 => Ok(Type::F64),
+        15 => Ok(Type::Felt),
+        16 => {
+            let addrspace = match source.read_u8()? {
+                0 => AddressSpace::Byte,
+                1 => AddressSpace::Element,
+                invalid => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "invalid AddressSpace tag: {invalid}"
+                    )));
+                },
+            };
+            let pointee = read_package_type_metadata_with_depth(source, next_depth)?;
+            Ok(Type::Ptr(Arc::new(PointerType { addrspace, pointee })))
+        },
+        17 => read_package_struct_type_metadata(source, next_depth),
+        18 => {
+            let arity = source.read_usize()?;
+            let ty = read_package_type_metadata_with_depth(source, next_depth)?;
+            Ok(Type::Array(Arc::new(ArrayType { ty, len: arity })))
+        },
+        19 => {
+            let ty = read_package_type_metadata_with_depth(source, next_depth)?;
+            Ok(Type::List(Arc::new(ty)))
+        },
+        20 => {
+            let function = read_package_function_type_metadata_with_depth(source, next_depth)?;
+            Ok(Type::Function(Arc::new(function)))
+        },
+        21 => read_package_enum_type_metadata(source, next_depth),
+        invalid => Err(DeserializationError::InvalidValue(format!("invalid Type tag: {invalid}"))),
+    }
+}
+
+fn read_package_struct_type_metadata<R: ByteReader>(
+    source: &mut R,
+    next_depth: usize,
+) -> Result<Type, DeserializationError> {
+    let name = if source.read_bool()? {
+        Some(Arc::<str>::from(String::read_from(source)?.into_boxed_str()))
+    } else {
+        None
+    };
+    let repr = match source.read_u8()? {
+        0 => TypeRepr::Default,
+        1 => TypeRepr::Align(read_package_type_alignment(source, "alignment")?),
+        2 => TypeRepr::Packed(read_package_type_alignment(source, "packed alignment")?),
+        3 => TypeRepr::Transparent,
+        4 => TypeRepr::BigEndian,
+        invalid => {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid TypeRepr tag: {invalid}"
+            )));
+        },
+    };
+    // Keep this in sync with midenc-hir-type's Type::Struct writer, which encodes the field
+    // count as a single byte.
+    let num_fields = source.read_u8()? as usize;
+    let mut fields = Vec::with_capacity(num_fields);
+    for _ in 0..num_fields {
+        let name = if source.read_bool()? {
+            Some(Arc::<str>::from(String::read_from(source)?.into_boxed_str()))
+        } else {
+            None
+        };
+        let ty = read_package_type_metadata_with_depth(source, next_depth)?;
+        fields.push(NameAndType { name, ty });
+    }
+
+    validate_package_struct_layout(repr, fields.iter().map(|field| &field.ty))?;
+    Ok(Type::Struct(Arc::new(StructType::from_parts(name, repr, fields))))
+}
+
+fn read_package_enum_type_metadata<R: ByteReader>(
+    source: &mut R,
+    next_depth: usize,
+) -> Result<Type, DeserializationError> {
+    let name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
+    let discriminant = read_package_type_metadata_with_depth(source, next_depth)?;
+    if !discriminant.is_integer() || matches!(discriminant, Type::U256) {
+        return Err(DeserializationError::InvalidValue(format!(
+            "invalid enum discriminant type: {discriminant}"
+        )));
+    }
+    let discriminant_size_in_bits = discriminant.size_in_bits();
+
+    let num_variants = source.read_usize()?;
+    let max_variants = source.max_alloc(1);
+    if num_variants > max_variants {
+        return Err(DeserializationError::InvalidValue(format!(
+            "enum variant count {num_variants} exceeds budget {max_variants}"
+        )));
+    }
+    let mut variants = Vec::with_capacity(num_variants);
+    for _ in 0..num_variants {
+        let name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
+        let value = if source.read_bool()? {
+            Some(read_package_type_metadata_with_depth(source, next_depth)?)
+        } else {
+            None
+        };
+        let discriminant_value = if source.read_bool()? {
+            Some(match discriminant_size_in_bits {
+                n if n <= 8 => source.read_u8()? as u128,
+                n if n <= 16 => source.read_u16()? as u128,
+                n if n <= 32 => source.read_u32()? as u128,
+                n if n <= 64 => source.read_u64()? as u128,
+                _ => source.read_u128()?,
+            })
+        } else {
+            None
+        };
+        variants.push(Variant { name, value, discriminant_value });
+    }
+
+    for variant in variants.iter().filter_map(|variant| variant.value.as_ref()) {
+        validate_package_struct_layout(TypeRepr::Default, [&discriminant, variant])?;
+    }
+    let enum_ty = EnumType::new(name, discriminant, variants)
+        .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+    Ok(Type::Enum(Arc::new(enum_ty)))
+}
+
+fn read_package_type_alignment<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<NonZeroU16, DeserializationError> {
+    let align = source.read_u16()?;
+    let align = NonZeroU16::new(align).ok_or_else(|| {
+        DeserializationError::InvalidValue(format!("invalid type repr: {label} must be non-zero"))
+    })?;
+    if !align.get().is_power_of_two() {
+        return Err(DeserializationError::InvalidValue(format!(
+            "invalid type repr: {label} must be a power of two"
+        )));
+    }
+    Ok(align)
+}
+
+fn validate_package_struct_layout<'a>(
+    repr: TypeRepr,
+    field_types: impl IntoIterator<Item = &'a Type>,
+) -> Result<(), DeserializationError> {
+    let fields = field_types
+        .into_iter()
+        .map(package_type_layout)
+        .collect::<Result<Vec<_>, _>>()?;
+    if repr.is_transparent() && fields.iter().filter(|field| field.size != 0).count() > 1 {
+        return Err(DeserializationError::InvalidValue(
+            "invalid transparent representation for struct".into(),
+        ));
+    }
+
+    let default_align = fields.iter().map(|field| field.align).max().unwrap_or(1);
+    let struct_align = match repr {
+        TypeRepr::Align(align) => u64::from(align.get()).max(default_align),
+        TypeRepr::Packed(align) => u64::from(align.get()).min(default_align),
+        TypeRepr::Transparent | TypeRepr::Default | TypeRepr::BigEndian => default_align,
+    };
+    let mut offset = 0u64;
+    for field in fields {
+        let field_align = if let TypeRepr::Packed(align) = repr {
+            u64::from(align.get()).min(field.align)
+        } else {
+            field.align
+        };
+        offset = align_up_checked(offset, field_align)?;
+        offset = offset.checked_add(field.size).ok_or_else(|| {
+            DeserializationError::InvalidValue("type layout size overflow".into())
+        })?;
+        if offset > u64::from(u32::MAX) {
+            return Err(DeserializationError::InvalidValue(
+                "type layout size exceeds supported range".into(),
+            ));
+        }
+    }
+    let size = align_up_checked(offset, struct_align)?;
+    if size > u64::from(u32::MAX) {
+        return Err(DeserializationError::InvalidValue(
+            "type layout size exceeds supported range".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct PackageTypeLayout {
+    size: u64,
+    align: u64,
+}
+
+fn package_type_layout(ty: &Type) -> Result<PackageTypeLayout, DeserializationError> {
+    let layout = match ty {
+        Type::Unknown | Type::Never => PackageTypeLayout { size: 0, align: 1 },
+        Type::I1 | Type::I8 | Type::U8 => PackageTypeLayout { size: 1, align: 1 },
+        Type::I16 | Type::U16 => PackageTypeLayout { size: 2, align: 2 },
+        // Keep this in sync with midenc-hir-type's byte-addressable layout: felts have
+        // a near-64-bit value range, but are stored as 32-bit memory chunks.
+        Type::I32 | Type::U32 | Type::Felt | Type::Ptr(_) | Type::Function(_) => {
+            PackageTypeLayout { size: 4, align: 4 }
+        },
+        Type::I64 | Type::U64 | Type::F64 => PackageTypeLayout { size: 8, align: 4 },
+        Type::I128 | Type::U128 => PackageTypeLayout { size: 16, align: 16 },
+        Type::U256 => PackageTypeLayout { size: 32, align: 16 },
+        Type::Struct(struct_ty) => PackageTypeLayout {
+            size: struct_ty.size() as u64,
+            align: struct_ty.min_alignment() as u64,
+        },
+        Type::Enum(enum_ty) => PackageTypeLayout {
+            size: enum_ty.size_in_bytes() as u64,
+            align: enum_ty.min_alignment() as u64,
+        },
+        Type::Array(array_ty) => {
+            let element = package_type_layout(array_ty.element_type())?;
+            let size = match array_ty.len() {
+                0 => 0,
+                1 => element.size,
+                len => {
+                    let padded = align_up_checked(element.size, element.align)?;
+                    let rest = padded.checked_mul((len - 1) as u64).ok_or_else(|| {
+                        DeserializationError::InvalidValue("type layout size overflow".into())
+                    })?;
+                    element.size.checked_add(rest).ok_or_else(|| {
+                        DeserializationError::InvalidValue("type layout size overflow".into())
+                    })?
+                },
+            };
+            PackageTypeLayout { size, align: element.align }
+        },
+        Type::List(_) => {
+            return Err(DeserializationError::InvalidValue(
+                "list type has no defined package layout".into(),
+            ));
+        },
+    };
+
+    if !layout.align.is_power_of_two() {
+        return Err(DeserializationError::InvalidValue(
+            "type alignment must be power of two".into(),
+        ));
+    }
+    if layout.align > u64::from(u16::MAX) || layout.size > u64::from(u32::MAX) {
+        return Err(DeserializationError::InvalidValue(
+            "type layout exceeds supported range".into(),
+        ));
+    }
+    Ok(layout)
+}
+
+fn align_up_checked(value: u64, align: u64) -> Result<u64, DeserializationError> {
+    debug_assert!(align.is_power_of_two());
+    let mask = align - 1;
+    value
+        .checked_add(mask)
+        .map(|value| value & !mask)
+        .ok_or_else(|| DeserializationError::InvalidValue("type layout size overflow".into()))
+}
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -708,7 +1060,6 @@ impl ProcedureExport {
         source: &mut R,
         mast: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        use miden_assembly_syntax::ast::types::FunctionType;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
         let node = if source.read_bool()? {
             let node_id = MastNodeId::from_u32_safe(source.read_u32()?, mast)?;
@@ -736,7 +1087,7 @@ impl ProcedureExport {
             ));
         }
         let signature = if source.read_bool()? {
-            Some(FunctionType::read_from(source)?)
+            Some(read_package_function_type_metadata(source)?)
         } else {
             None
         };
@@ -754,7 +1105,6 @@ impl ProcedureExport {
 
 impl Deserializable for ProcedureExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use miden_assembly_syntax::ast::types::FunctionType;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
         let node = if source.read_bool()? {
             Some(MastNodeId::new_unchecked(source.read_u32()?))
@@ -768,7 +1118,7 @@ impl Deserializable for ProcedureExport {
         };
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
-            Some(FunctionType::read_from(source)?)
+            Some(read_package_function_type_metadata(source)?)
         } else {
             None
         };
@@ -808,9 +1158,8 @@ impl Serializable for TypeExport {
 
 impl Deserializable for TypeExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use miden_assembly_syntax::ast::types::Type;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
-        let ty = Type::read_from(source)?;
+        let ty = read_package_type_metadata(source)?;
         Ok(Self { path, ty })
     }
 }
@@ -825,12 +1174,18 @@ mod tests {
         vec,
         vec::Vec,
     };
-    use core::assert_matches;
+    use core::{assert_matches, num::NonZeroU16};
     use std::collections::BTreeMap;
     #[cfg(feature = "std")]
     use std::fs;
 
-    use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName};
+    use miden_assembly_syntax::ast::{
+        Ident, Path as AstPath, PathBuf, ProcedureName,
+        types::{
+            AddressSpace, ArrayType, CallConv, EnumType, FunctionType, NameAndType, PointerType,
+            StructType, Type, TypeRepr, Variant,
+        },
+    };
     use miden_core::{
         Felt, Word,
         advice::AdviceMap,
@@ -848,11 +1203,11 @@ mod tests {
 
     use super::{
         MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section,
-        VERSION,
+        VERSION, package_type_layout,
     };
     use crate::{
         Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
-        PackageSubmodule, ProcedureExport, SectionId, TargetType,
+        PackageSubmodule, ProcedureExport, SectionId, TargetType, TypeExport,
         debug_info::{
             DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
             DebugSourceNodeId,
@@ -1215,6 +1570,172 @@ mod tests {
     }
 
     #[test]
+    fn type_export_rejects_non_power_of_two_struct_alignment() {
+        let mut bytes = Vec::new();
+        absolute_path("test::Ty").write_into(&mut bytes);
+        bytes.write_u8(17); // Type::Struct
+        bytes.write_bool(false); // no struct name
+        bytes.write_u8(1); // TypeRepr::Align
+        bytes.write_u16(3); // non-power-of-two alignment
+        bytes.write_u8(0); // no fields
+
+        let mut reader = SliceReader::new(&bytes);
+        let err = TypeExport::read_from(&mut reader)
+            .expect_err("non-power-of-two struct alignment should be rejected");
+        assert_matches!(
+            err,
+            DeserializationError::InvalidValue(message) if message.contains("power of two")
+        );
+    }
+
+    #[test]
+    fn package_type_layout_matches_felt_memory_model() {
+        let layout = package_type_layout(&Type::Felt).unwrap();
+        assert_eq!(layout.size, 4);
+        assert_eq!(layout.align, 4);
+    }
+
+    #[test]
+    fn type_export_roundtrips_representative_package_types() {
+        for ty in representative_package_types() {
+            let export = TypeExport { path: absolute_path("test::Ty"), ty };
+            let bytes = export.to_bytes();
+
+            let decoded =
+                TypeExport::read_from_bytes(&bytes).expect("type export should roundtrip");
+
+            assert_eq!(bytes, decoded.to_bytes());
+        }
+    }
+
+    #[test]
+    fn procedure_export_roundtrips_representative_signatures() {
+        for cc in [CallConv::Fast, CallConv::C, CallConv::Wasm, CallConv::ComponentModel] {
+            let signature = FunctionType::new(
+                cc,
+                [
+                    Type::Felt,
+                    pointer_type(AddressSpace::Byte, Type::U32),
+                    array_type(Type::U16, 3),
+                ],
+                [struct_type(TypeRepr::Default), enum_type()],
+            );
+            let export = ProcedureExport::new(
+                absolute_path("test::proc"),
+                None,
+                Word::default(),
+                Some(signature),
+            );
+            let bytes = export.to_bytes();
+
+            let decoded = ProcedureExport::read_from_bytes(&bytes)
+                .expect("procedure export should roundtrip");
+
+            assert_eq!(bytes, decoded.to_bytes());
+        }
+    }
+
+    fn representative_package_types() -> Vec<Type> {
+        let mut types = vec![
+            Type::Unknown,
+            Type::Never,
+            Type::I1,
+            Type::I8,
+            Type::U8,
+            Type::I16,
+            Type::U16,
+            Type::I32,
+            Type::U32,
+            Type::I64,
+            Type::U64,
+            Type::I128,
+            Type::U128,
+            Type::U256,
+            Type::F64,
+            Type::Felt,
+            pointer_type(AddressSpace::Byte, Type::Felt),
+            pointer_type(AddressSpace::Element, Type::U32),
+            array_type(Type::U16, 3),
+            Type::List(Arc::new(Type::I32)),
+            Type::Function(Arc::new(FunctionType::new(
+                CallConv::ComponentModel,
+                [Type::Felt, pointer_type(AddressSpace::Byte, Type::U32)],
+                [array_type(Type::U8, 4)],
+            ))),
+            enum_type(),
+            multi_field_struct_type(),
+        ];
+
+        for repr in [
+            TypeRepr::Default,
+            TypeRepr::Align(NonZeroU16::new(8).unwrap()),
+            TypeRepr::Packed(NonZeroU16::new(1).unwrap()),
+            TypeRepr::Transparent,
+            TypeRepr::BigEndian,
+        ] {
+            types.push(struct_type(repr));
+        }
+
+        types
+    }
+
+    fn pointer_type(addrspace: AddressSpace, pointee: Type) -> Type {
+        Type::Ptr(Arc::new(PointerType { addrspace, pointee }))
+    }
+
+    fn array_type(ty: Type, len: usize) -> Type {
+        Type::Array(Arc::new(ArrayType { ty, len }))
+    }
+
+    fn struct_type(repr: TypeRepr) -> Type {
+        let fields = vec![NameAndType {
+            name: Some(Arc::from("value")),
+            ty: Type::Felt,
+        }];
+        Type::Struct(Arc::new(StructType::from_parts(Some(Arc::from("Wrapper")), repr, fields)))
+    }
+
+    fn multi_field_struct_type() -> Type {
+        let fields = vec![
+            NameAndType {
+                name: Some(Arc::from("left")),
+                ty: Type::Felt,
+            },
+            NameAndType {
+                name: Some(Arc::from("right")),
+                ty: array_type(Type::U8, 4),
+            },
+        ];
+        Type::Struct(Arc::new(StructType::from_parts(
+            Some(Arc::from("Pair")),
+            TypeRepr::Default,
+            fields,
+        )))
+    }
+
+    fn enum_type() -> Type {
+        Type::Enum(Arc::new(
+            EnumType::new(
+                Arc::from("Choice"),
+                Type::U8,
+                vec![
+                    Variant {
+                        name: Arc::from("None"),
+                        value: None,
+                        discriminant_value: Some(0),
+                    },
+                    Variant {
+                        name: Arc::from("Some"),
+                        value: Some(Type::U16),
+                        discriminant_value: Some(1),
+                    },
+                ],
+            )
+            .expect("valid enum type"),
+        ))
+    }
+
+    #[test]
     fn package_read_from_bytes_rejects_fuzzed_oom_payload() {
         // This fuzz payload encodes counts large enough to cause excessive allocation or read work.
         // If this starts succeeding, package byte-slice deserialization is no longer budgeted.
@@ -1471,10 +1992,7 @@ mod tests {
         let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
         let exports = BTreeMap::from_iter([(
             bad.clone(),
-            PackageExport::Type(crate::TypeExport {
-                path: bad,
-                ty: miden_assembly_syntax::ast::types::Type::Felt,
-            }),
+            PackageExport::Type(TypeExport { path: bad, ty: Type::Felt }),
         )]);
 
         let manifest = PackageManifest {

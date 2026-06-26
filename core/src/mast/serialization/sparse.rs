@@ -21,7 +21,7 @@ const SPARSE_VERSION: [u8; 3] = [0, 0, 0];
 fn sparse_mast_forest_min_serialized_size() -> usize {
     SPARSE_MAGIC.len()
         + SPARSE_VERSION.len()
-        + usize::min_serialized_size() * 7
+        + usize::min_serialized_size() * 8
         + Word::min_serialized_size()
         + usize::min_serialized_size()
 }
@@ -65,6 +65,7 @@ pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target
     target.write_usize(forest.digest_entries().len());
     target.write_usize(external_full_node_count);
     target.write_usize(non_external_count);
+    target.write_usize(forest.dependency_digests().len());
     target.write_usize(basic_block_data.len());
 
     for &root in forest.procedure_roots() {
@@ -72,6 +73,12 @@ pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target
     }
 
     forest.commitment().write_into(target);
+    for &digest in forest.commitment_root_digests() {
+        digest.write_into(target);
+    }
+    for &digest in forest.dependency_digests() {
+        digest.write_into(target);
+    }
     target.write_bytes(&basic_block_data);
 
     for id in full_ids {
@@ -158,6 +165,8 @@ pub(super) fn read_sparse_from<R: ByteReader>(
         MastNodeEntry::SERIALIZED_SIZE,
         "non-external full-node count",
     )?;
+    let dependency_digest_count =
+        read_bounded_count(&mut reader, Word::min_serialized_size(), "dependency digest count")?;
     let basic_block_data_len = read_bounded_count(&mut reader, 1, "basic-block data length")?;
 
     let counted_full = external_full_node_count
@@ -173,6 +182,10 @@ pub(super) fn read_sparse_from<R: ByteReader>(
 
     let roots = read_id_section(&mut reader, root_count, source_node_count, "procedure root")?;
     let commitment = Word::read_from(&mut reader)?;
+    let commitment_root_digests =
+        read_sorted_digest_section(&mut reader, root_count, "root commitment digest")?;
+    let dependency_digests =
+        read_sorted_digest_section(&mut reader, dependency_digest_count, "dependency digest")?;
     let basic_block_data = reader.read_slice(basic_block_data_len)?.to_vec();
     let full_ids = read_id_section(&mut reader, full_node_count, source_node_count, "full node")?;
     validate_strictly_increasing_ids(&full_ids, "full node")?;
@@ -219,6 +232,8 @@ pub(super) fn read_sparse_from<R: ByteReader>(
         roots,
         advice_map,
         commitment,
+        commitment_root_digests,
+        dependency_digests,
     )
 }
 
@@ -269,6 +284,23 @@ fn read_id_section<R: ByteReader>(
         ids.push(read_node_id(source, node_count, label)?);
     }
     Ok(ids)
+}
+
+fn read_sorted_digest_section<R: ByteReader>(
+    source: &mut R,
+    count: usize,
+    label: &str,
+) -> Result<Vec<Word>, DeserializationError> {
+    let mut digests = Vec::with_capacity(count);
+    for _ in 0..count {
+        digests.push(Word::read_from(source)?);
+    }
+    if !digests.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} section is not strictly sorted"
+        )));
+    }
+    Ok(digests)
 }
 
 fn read_node_id<R: ByteReader>(

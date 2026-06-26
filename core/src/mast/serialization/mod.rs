@@ -58,6 +58,10 @@
 //! - digests for all non-external nodes (`Vec<Word>`, ordered by node index)
 //! - lookup is also dense-by-kind: the Nth non-external node uses slot N in this section
 //!
+//! (Commitment input sections)
+//! - root node digests (`Vec<Word>`, sorted by digest)
+//! - external node digests (`Vec<Word>`, sorted by digest)
+//!
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
 //!
@@ -208,13 +212,14 @@ const FLAGS_RESERVED_MASK: u8 = 0xfd;
 ///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
 ///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
 ///   debug-presence flag.
+/// - [0, 0, 5]: Added sorted root digest and sorted external digest commitment input sections.
 ///
 /// Legacy wire versions (pre-#3192 decorator terminology):
 ///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
 ///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
 ///   [0,0,3] removed the unused decorator-count wire field.
 ///   [0,0,4] eliminated the decorator wire slots entirely.
-const VERSION: [u8; 3] = [0, 0, 4];
+const VERSION: [u8; 3] = [0, 0, 5];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -277,7 +282,7 @@ impl MastForest {
             mast_node_entry.write_into(target);
         }
 
-        for digest in external_digests {
+        for &digest in &external_digests {
             digest.write_into(target);
         }
 
@@ -287,12 +292,28 @@ impl MastForest {
             }
         }
 
+        for digest in sorted_root_digests(self) {
+            digest.write_into(target);
+        }
+
+        external_digests.sort_unstable();
+        for digest in external_digests {
+            digest.write_into(target);
+        }
+
         self.advice_map.write_into(target);
     }
 }
 
 pub(super) fn write_hashless_into<W: ByteWriter>(forest: &MastForest, target: &mut W) {
     forest.write_into_with_options(target, true);
+}
+
+fn sorted_root_digests(forest: &MastForest) -> Vec<Word> {
+    let mut digests: Vec<Word> =
+        forest.roots.iter().map(|&root_id| forest.nodes[root_id].digest()).collect();
+    digests.sort_unstable();
+    digests
 }
 
 /// Trusted read backing mode for read-only MAST forest access.
@@ -408,6 +429,7 @@ impl<'a> MastForestWireView<'a> {
         let (_flags, layout) = read_header_and_scan_layout(&mut scanner, false)?;
         let advice_map = WireAdviceMapView::new(bytes, layout.advice_map_offset())?;
         check_no_trailing_payload(bytes, advice_map.end_offset())?;
+        ResolvedSerializedForest::new(bytes, layout)?.validate_commitment_input_sections()?;
 
         Ok(Self {
             bytes,
@@ -672,6 +694,14 @@ impl MastForestWireView<'_> {
         self.layout.node_hash_offset()
     }
 
+    fn root_digest_offset(&self) -> usize {
+        self.layout.root_digest_offset()
+    }
+
+    fn dependency_digest_offset(&self) -> usize {
+        self.layout.dependency_digest_offset()
+    }
+
     fn digest_slot_at(&self, index: usize) -> usize {
         self.resolved()
             .expect("digest slots should be readable for a valid serialized view")
@@ -746,6 +776,7 @@ fn read_usize_at(bytes: &[u8], offset: &mut usize) -> Result<usize, Deserializat
 impl Deserializable for MastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let (_flags, forest) = decode_from_reader(source, false)?;
+        forest.validate_commitment_input_sections()?;
         forest.into_materialized()
     }
 
@@ -761,19 +792,51 @@ impl Deserializable for MastForest {
 }
 
 impl super::UntrustedMastForest {
+    pub(super) fn validate_commitment_input_sections(&self) -> Result<(), DeserializationError> {
+        validate_commitment_input_sections_from_parts(
+            &self.bytes,
+            self.layout,
+            self.remaining_allocation_budget,
+        )
+    }
+
     pub(super) fn into_materialized(self) -> Result<MastForest, DeserializationError> {
-        let resolved = if let Some(allocation_budget) = self.remaining_allocation_budget {
-            ResolvedSerializedForest::new_with_allocation_budget(
-                &self.bytes,
-                self.layout,
-                allocation_budget,
-            )?
+        let (forest, _bytes, _layout, _remaining_allocation_budget) =
+            self.into_materialized_with_serialized_parts()?;
+        Ok(forest)
+    }
+
+    pub(super) fn into_materialized_with_serialized_parts(
+        self,
+    ) -> Result<(MastForest, Vec<u8>, ForestLayout, Option<usize>), DeserializationError> {
+        let bytes = self.bytes;
+        let layout = self.layout;
+        let advice_map = self.advice_map;
+        let remaining_allocation_budget = self.remaining_allocation_budget;
+
+        let resolved = if let Some(allocation_budget) = remaining_allocation_budget {
+            ResolvedSerializedForest::new_with_allocation_budget(&bytes, layout, allocation_budget)?
         } else {
-            ResolvedSerializedForest::new(&self.bytes, self.layout)?
+            ResolvedSerializedForest::new(&bytes, layout)?
         };
 
-        resolved.materialize(self.advice_map)
+        let forest = resolved.materialize(advice_map)?;
+        Ok((forest, bytes, layout, remaining_allocation_budget))
     }
+}
+
+pub(super) fn validate_commitment_input_sections_from_parts(
+    bytes: &[u8],
+    layout: ForestLayout,
+    remaining_allocation_budget: Option<usize>,
+) -> Result<(), DeserializationError> {
+    let resolved = if let Some(allocation_budget) = remaining_allocation_budget {
+        ResolvedSerializedForest::new_with_allocation_budget(bytes, layout, allocation_budget)?
+    } else {
+        ResolvedSerializedForest::new(bytes, layout)?
+    };
+
+    resolved.validate_commitment_input_sections()
 }
 
 pub(super) fn read_untrusted_with_flags<R: ByteReader>(
