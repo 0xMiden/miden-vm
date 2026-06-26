@@ -68,6 +68,7 @@ use core::array;
 
 use miden_core::{
     Felt,
+    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::AirBuilder;
@@ -83,7 +84,7 @@ use crate::logup::{
 };
 use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 use crate::transcript::binding::{BindingMsg, ValueTag};
-use crate::transcript::deferred_tags;
+
 use crate::transcript::nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId};
 use crate::transcript::poseidon2::{Poseidon2InMsg, Poseidon2OutMsg};
 use crate::uint::UintValMsg;
@@ -408,9 +409,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         // Activity: binary, sticky-downward.
         builder.assert_bool(local[COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
 
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
@@ -423,9 +422,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // transcript root. (Empty transcript: row 0 is a ZERO_HASH leaf,
         // so `h = 0` forces `public_root = 0`.)
         for i in 0..NUM_HASH {
-            builder
-                .when_first_row()
-                .assert_zero(h[i].clone() - public_root[i].clone());
+            builder.when_first_row().assert_zero(h[i].clone() - public_root[i].clone());
         }
 
         // Inactive rows provide nothing: pin `out_mult = 0` so the
@@ -679,12 +676,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // (hence the root) is the caller's, decoupled from the chiplet's `idx`.
         let msm_idx: AB::Expr = local[COL_MSM_IDX].into();
         let msm_idx_next: AB::Expr = next[COL_MSM_IDX].into();
-        builder
-            .when_first_row()
-            .assert_zero(is_ec_msm.clone() * msm_idx.clone());
-        builder
-            .when_transition()
-            .assert_zero(starts.clone() * msm_idx_next.clone());
+        builder.when_first_row().assert_zero(is_ec_msm.clone() * msm_idx.clone());
+        builder.when_transition().assert_zero(starts.clone() * msm_idx_next.clone());
         builder
             .when_transition()
             .assert_zero(continues.clone() * (msm_idx_next - msm_idx - AB::Expr::ONE));
@@ -817,7 +810,7 @@ where
         // op discriminant: ptrs are bus-level witness data, and the modulus is
         // threaded by the lookups, not the cap. The cap also admits the
         // threaded `absorb_cap` for EcMsm rows.
-        let and_cap = deferred_tags::and();
+        let and_cap = Tag::AND.as_word();
         let versioned_node =
             is_uint_leaf.clone() + is_uint_op.clone() + is_create.clone() + is_ec_op.clone();
         let cap = [
@@ -934,10 +927,7 @@ where
                                 b.insert(
                                     "p2out",
                                     node,
-                                    Poseidon2OutMsg {
-                                        perm_seq_id,
-                                        digest: h.clone(),
-                                    },
+                                    Poseidon2OutMsg { perm_seq_id, digest: h.clone() },
                                     one_deg,
                                 );
                             },

@@ -7,12 +7,13 @@
 //! collapse to the same primitive type — the compiler can't catch a
 //! digest accidentally fed in as a cap (or vice versa).
 
-use miden_core::Felt;
-
-use crate::transcript::{
-    deferred_tags,
-    nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId},
+use miden_core::{
+    Felt,
+    deferred::{Digest, Tag},
 };
+use miden_precompiles::Keccak256Precompile;
+
+use crate::transcript::nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId};
 
 /// Output digest of a Poseidon2 absorption — `state[0..4]` after the
 /// last block's permutation.
@@ -22,6 +23,12 @@ pub struct P2Digest(pub [Felt; 4]);
 impl P2Digest {
     pub fn as_array(&self) -> [Felt; 4] {
         self.0
+    }
+}
+
+impl From<Digest> for P2Digest {
+    fn from(digest: Digest) -> Self {
+        Self(digest.into_elements())
     }
 }
 
@@ -40,20 +47,24 @@ impl P2Cap {
     /// VM `Tag::CHUNKS` (`[2, 0, 0, 0]`) — generic chunk-content
     /// capacity used by chunk chains and one-chunk Keccak digest commitments.
     pub fn chunk() -> Self {
-        Self(deferred_tags::chunks())
+        Self(Tag::CHUNKS.as_word())
     }
 
     /// VM `Tag::AND` (`[1, 0, 0, 0]`) — capacity for the transcript eval
     /// chip's AND-node hash combining two proven-true child hashes.
     pub fn and() -> Self {
-        Self(deferred_tags::and())
+        Self(Tag::AND.as_word())
     }
 
     /// VM Keccak-256 assertion tag (`[Keccak256Precompile::id(), 0,
     /// len_bytes, 0]`) — capacity for the Keccak-node transcript hash.
     pub fn keccak256_assertion(len_bytes: Felt) -> Self {
-        let [precompile_id, assertion_disc, _zero_len, zero] = deferred_tags::keccak_assert(0);
-        Self([precompile_id, assertion_disc, len_bytes, zero])
+        Self([
+            Keccak256Precompile::id(),
+            Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID),
+            len_bytes,
+            Felt::ZERO,
+        ])
     }
 
     /// `(NodeTag::UintLeaf, bound_ptr, pin_ptr, CURRENT_VERSION)` —

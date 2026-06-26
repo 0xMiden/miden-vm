@@ -168,10 +168,9 @@ inter-chunk addresses by construction.
 
 The `tag` field (`0` / `1` / `2`) is the rate0 / rate1 / capacity
 selector minted by `Poseidon2InMsg::{rate0, rate1, cap}`. The capacity
-payload is VM `Tag::CHUNKS.as_word() = [2, 0, 0, 0]`, sourced through
-`src/transcript/deferred_tags.rs`. These rate/cap consumes are exactly the
-P2 chiplet's per-cycle `in_multiplicity`; the chiplet never touches
-`out_multiplicity` (the digest side).
+payload is VM `Tag::CHUNKS.as_word() = [2, 0, 0, 0]`. These rate/cap
+consumes are exactly the P2 chiplet's per-cycle `in_multiplicity`; the
+chiplet never touches `out_multiplicity` (the digest side).
 
 ### Mutex batching
 
