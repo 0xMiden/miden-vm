@@ -10,13 +10,15 @@
 //! constructs the lower-layer `require` views as needed (mirroring how the
 //! `Session` itself wired them).
 
-use crate::ec::EcStores;
-use crate::ec::msm::trace::{CombineRow, EcExprPtr, EcMsmRequires, NegRow};
-use crate::ec::trace::EcPointPtr;
-use crate::math::from_hex;
-use crate::uint::UintRequire;
-use crate::uint::UintStores;
-use crate::uint::trace::UintPtr;
+use crate::{
+    ec::{
+        EcStores,
+        msm::trace::{CombineRow, EcExprPtr, EcMsmRequires, NegRow},
+        trace::EcPointPtr,
+    },
+    math::from_hex,
+    uint::{UintRequire, UintStores, trace::UintPtr},
+};
 
 /// Promote a stored point `P` to the 1-term MSM expression `⟨P × 1⟩`
 /// (value `= P`) — the base of any addition chain. The scalar `1` is
@@ -65,9 +67,7 @@ pub fn combine(
     let val = ec.require(uint.require()).add(val_a, val_b, 1);
     ec.store.require_ecgroup(group);
 
-    let c = msm.combine(
-        group, sbound, a_ptr, b_ptr, bound_ptr, a, b, val_a, val_b, val, rows,
-    );
+    let c = msm.combine(group, sbound, a_ptr, b_ptr, bound_ptr, a, b, val_a, val_b, val, rows);
     msm.consume_op(a, 1);
     msm.consume_op(b, 1);
     c
@@ -111,11 +111,7 @@ pub fn neg(
     // rides the `EcOnCurveCert` the boundary provides when it freshly mints R
     // (R is on-curve because val_a is). The `−y_a` value is interned by the
     // store's `neg`; the boundary consumes the resulting `UintAdd`.
-    let (px, py) = ec
-        .store
-        .point_params(val_a)
-        .1
-        .expect("neg of the point at infinity");
+    let (px, py) = ec.store.point_params(val_a).1.expect("neg of the point at infinity");
     let neg_py = uint.require().neg(py);
     let (val, minted) = ec.store.add_point_cert(group, px, neg_py);
     ec.store.require_ecpoint(val_a); // the boundary reads val_a's coords …

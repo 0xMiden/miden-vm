@@ -10,16 +10,19 @@
 //! in-circuit resolve through the eval `EcMsm` seam — the positionless
 //! `MsmClaimTerm` set match, so the absorb (root) order is the caller's.
 
-use k256::ProjectivePoint;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
+use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_core::Felt;
 use p3_matrix::Matrix;
 
-use crate::math::{U256, from_hex};
-use crate::session::strategies::{joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table};
-use crate::session::{EcNode, Session};
-use crate::tests::check_local_inputs;
-use crate::transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir};
+use crate::{
+    math::{U256, from_hex},
+    session::{
+        EcNode, Session,
+        strategies::{joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table},
+    },
+    tests::check_local_inputs,
+    transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
+};
 
 const P_MINUS_1: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E";
 /// secp256k1 group order minus one (`n − 1`) — the *scalar* field's bound,
@@ -341,10 +344,7 @@ fn msm_wnaf_traces() -> crate::session::SessionTraces {
     let g_table = wnaf_table(&mut s, &g_pt, 4);
     let q_table = wnaf_table(&mut s, &q_pt, 4);
     // Stage 2: separate scalar-muls over the tables, then combine.
-    let acc = wnaf_msm(
-        &mut s,
-        &[(&g_table, from_hex("3")), (&q_table, from_hex("5"))],
-    );
+    let acc = wnaf_msm(&mut s, &[(&g_table, from_hex("3")), (&q_table, from_hex("5"))]);
 
     let s3 = s.uint_leaf(from_hex("3"), FP);
     let s5 = s.uint_leaf(from_hex("5"), FP);
@@ -489,11 +489,7 @@ fn msm_dedup_traces() -> crate::session::SessionTraces {
     let c1 = s.msm_combine(ga, qb);
     let c2 = s.msm_combine(ga, qb);
     assert_eq!(c1, c2, "combine(G, Q) must dedup");
-    assert_eq!(
-        s.msm_expr_count(),
-        3,
-        "only ⟨G⟩, ⟨Q⟩, ⟨G,Q⟩ laid — the repeats collapsed",
-    );
+    assert_eq!(s.msm_expr_count(), 3, "only ⟨G⟩, ⟨Q⟩, ⟨G,Q⟩ laid — the repeats collapsed",);
 
     let one = s.uint_leaf(from_hex("1"), FP);
     let r_pt = create(&mut s, rx, ry);
@@ -513,10 +509,7 @@ fn msm_dedup_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_dedup_proves() {
-    msm_dedup_traces()
-        .prove()
-        .verify()
-        .expect("deduped MSM round-trip must verify");
+    msm_dedup_traces().prove().verify().expect("deduped MSM round-trip must verify");
 }
 
 /// The claim `⟨G×1, Q×1⟩` (value `G + Q`) resolved with the two `(base,
@@ -632,9 +625,5 @@ fn msm_resolve_run_expr_must_be_constant() {
 
     // Locally valid before the fix (no other constraint reads COL_MSM_EXPR);
     // the constancy constraint is what now rejects it.
-    check_local_inputs(
-        TranscriptEvalAir,
-        &forged,
-        traces.public_root().as_array().to_vec(),
-    );
+    check_local_inputs(TranscriptEvalAir, &forged, traces.public_root().as_array().to_vec());
 }

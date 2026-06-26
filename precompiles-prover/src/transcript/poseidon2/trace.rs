@@ -29,12 +29,16 @@ use std::collections::HashMap;
 use miden_core::{Felt, chiplets::hasher::Hasher, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::build_logup_aux_trace;
-use crate::relations::ProvideMult;
-use crate::transcript::poseidon2::digest::{P2Cap, P2Digest};
-use crate::transcript::poseidon2::math::STATE_WIDTH;
-use crate::transcript::poseidon2::program::PERIOD;
-use crate::transcript::poseidon2::{NUM_MAIN_COLS, NUM_WITNESSES, Poseidon2Air};
+use crate::{
+    logup::build_logup_aux_trace,
+    relations::ProvideMult,
+    transcript::poseidon2::{
+        NUM_MAIN_COLS, NUM_WITNESSES, Poseidon2Air,
+        digest::{P2Cap, P2Digest},
+        math::STATE_WIDTH,
+        program::PERIOD,
+    },
+};
 
 // ABSORPTION OUTPUT
 // ================================================================================================
@@ -286,10 +290,7 @@ impl Poseidon2Requires {
             out_mult,
         });
         self.by_digest.insert(digest, idx);
-        AbsorptionOutput {
-            digest,
-            span: PermSpan::new(range),
-        }
+        AbsorptionOutput { digest, span: PermSpan::new(range) }
     }
 }
 
@@ -324,14 +325,8 @@ pub fn generate_trace(requires: Poseidon2Requires) -> RowMajorMatrix<Felt> {
             );
             let is_absorb = block_idx > 0;
             let state_in = state_from_chunks(rate0, rate1, cap);
-            let state_out = write_cycle(
-                &mut trace,
-                cycle_idx,
-                state_in,
-                rec.in_mult,
-                rec.out_mult,
-                is_absorb,
-            );
+            let state_out =
+                write_cycle(&mut trace, cycle_idx, state_in, rec.in_mult, rec.out_mult, is_absorb);
             cap = chunk_from_state(&state_out, 8);
         }
     }
@@ -362,9 +357,7 @@ fn state_from_chunks(rate0: [Felt; 4], rate1: [Felt; 4], cap: [Felt; 4]) -> [Fel
 }
 
 fn chunk_from_state(state: &[Felt; STATE_WIDTH], offset: usize) -> [Felt; 4] {
-    state[offset..offset + 4]
-        .try_into()
-        .expect("4-felt slice fits")
+    state[offset..offset + 4].try_into().expect("4-felt slice fits")
 }
 
 /// Append one 16-row Poseidon2 cycle to `trace`, evolving the state step
@@ -386,15 +379,7 @@ fn write_cycle(
     let mut state = initial_state;
 
     // Row 0: initial state, no witnesses.
-    push_row(
-        trace,
-        &state,
-        &[Felt::ZERO; 3],
-        perm_seq_id,
-        in_mult,
-        out_mult,
-        absorb,
-    );
+    push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
 
     // Step from row 0 to row 1: init linear + ext1.
     Hasher::apply_matmul_external(&mut state);
@@ -404,15 +389,7 @@ fn write_cycle(
 
     // Rows 1-3: single ext (ARK_EXT_INITIAL[1..4]), no witnesses.
     for r in 1..=3 {
-        push_row(
-            trace,
-            &state,
-            &[Felt::ZERO; 3],
-            perm_seq_id,
-            in_mult,
-            out_mult,
-            absorb,
-        );
+        push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
@@ -430,15 +407,7 @@ fn write_cycle(
             state[0] = sbox_out;
             Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
         }
-        push_row(
-            trace,
-            &pre_state,
-            &witnesses,
-            perm_seq_id,
-            in_mult,
-            out_mult,
-            absorb,
-        );
+        push_row(trace, &pre_state, &witnesses, perm_seq_id, in_mult, out_mult, absorb);
     }
 
     // Row 11: int22 + ext5 merged. Witness w[0] only.
@@ -462,30 +431,14 @@ fn write_cycle(
 
     // Rows 12-14: single ext (ARK_EXT_TERMINAL[1..4]), no witnesses.
     for r in 1..=3 {
-        push_row(
-            trace,
-            &state,
-            &[Felt::ZERO; 3],
-            perm_seq_id,
-            in_mult,
-            out_mult,
-            absorb,
-        );
+        push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
     // Row 15: boundary — final state, no transition.
-    push_row(
-        trace,
-        &state,
-        &[Felt::ZERO; 3],
-        perm_seq_id,
-        in_mult,
-        out_mult,
-        absorb,
-    );
+    push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
 
     state
 }

@@ -24,6 +24,7 @@ members = [
     "miden-vm",
     "precompiles",
     "precompiles/codegen",
+    "precompiles-prover",
     "processor",
     "prover",
     "verifier",

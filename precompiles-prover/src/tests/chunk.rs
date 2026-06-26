@@ -8,23 +8,26 @@
 //! `check_constraints` catches corruption.
 
 use miden_air::BaseAir;
-use miden_core::Felt;
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 use miden_lifted_air::LiftedAir;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::hash::chunk::trace::{ChunkRequires, Invocation, generate_trace};
-use crate::hash::chunk::{
-    COL_ACT, COL_CHUNK_SEQ_ID, COL_F_BEGIN, COL_F_END, COL_IS_HEAD, COL_PERM_SEQ_ID, ChunkAir,
-    ChunkChainMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
+use crate::{
+    hash::{
+        chunk::{
+            COL_ACT, COL_CHUNK_SEQ_ID, COL_F_BEGIN, COL_F_END, COL_IS_HEAD, COL_PERM_SEQ_ID,
+            ChunkAir, ChunkChainMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
+            trace::{ChunkRequires, Invocation, generate_trace},
+        },
+        memory64::Memory64Msg,
+    },
+    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::poseidon2::trace::Poseidon2Requires,
 };
-use crate::hash::memory64::Memory64Msg;
-use crate::logup::{
-    Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-};
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::poseidon2::trace::Poseidon2Requires;
 
 fn build_chunk_requires(invocations: &[Invocation]) -> (ChunkRequires, Poseidon2Requires) {
     let mut p2 = Poseidon2Requires::new();
@@ -61,10 +64,7 @@ fn chunk_chain_msg_encodes_with_chunk_chain_bus_prefix() {
 
     let chunk_seq_id_head = Felt::from(13u32);
     let perm_seq_id_head = Felt::from(17u32);
-    let msg = ChunkChainMsg {
-        chunk_seq_id_head,
-        perm_seq_id_head,
-    };
+    let msg = ChunkChainMsg { chunk_seq_id_head, perm_seq_id_head };
     let enc = msg.encode(&challenges);
 
     // Expected: bus_prefix[ChunkChain] + β⁰·chunk_seq_id_head +
@@ -95,12 +95,7 @@ fn chunk_chain_bus_has_disjoint_prefix() {
         perm_seq_id_head: b,
     }
     .encode(&challenges);
-    let enc_memory64 = Memory64Msg {
-        addr: a,
-        lo: b,
-        hi: Felt::ZERO,
-    }
-    .encode(&challenges);
+    let enc_memory64 = Memory64Msg { addr: a, lo: b, hi: Felt::ZERO }.encode(&challenges);
 
     assert_ne!(enc_chunk_chain, enc_memory64);
 }
@@ -186,14 +181,14 @@ fn constraints_hold_on_pad_block_tail() {
     // 136 → 5 chunks, last chunk one real lane (8 bytes) + zero lanes.
     // 200 → 7 chunks.
     check_with_seed(0x88, &[inv(136, 0x88)]);
-    check_with_seed(0xC8, &[inv(200, 0xC8)]);
+    check_with_seed(0xc8, &[inv(200, 0xc8)]);
 }
 
 #[test]
 fn constraints_hold_on_multiple_invocations() {
     // Back-to-back invocations: is_head fires on each first chunk;
     // the chunk_seq_id / perm_seq_id chains run across the seam.
-    check_with_seed(0x5EA, &[inv(33, 0xA1), inv(40, 0xB2), inv(129, 0xC3)]);
+    check_with_seed(0x5ea, &[inv(33, 0xa1), inv(40, 0xb2), inv(129, 0xc3)]);
 }
 
 #[test]
@@ -203,7 +198,7 @@ fn constraints_hold_with_perm_seq_id_jump_at_head() {
     // interleaved with another caller). The jump lands on a chain
     // head (is_head_next = 1), so the chain gate vanishes and the
     // constraints still hold.
-    let (chunk_req, _p2) = build_chunk_requires(&[inv(33, 0xA1), inv(40, 0xB2)]);
+    let (chunk_req, _p2) = build_chunk_requires(&[inv(33, 0xa1), inv(40, 0xb2)]);
     let mut main = generate_trace(chunk_req);
     // inv0 = 2 chunks (rows 0,1), inv1 = 2 chunks (rows 2,3). Row 2 is
     // a head (is_head = 1). Bump perm_seq_id on rows 2,3 by a gap.
@@ -232,7 +227,7 @@ fn corrupt_and_check(
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_act() {
-    corrupt_and_check(0xC0, &[inv(33, 0x21)], |main| {
+    corrupt_and_check(0xc0, &[inv(33, 0x21)], |main| {
         main.values[0 * NUM_MAIN_COLS + COL_ACT] = Felt::from(2u8);
     });
 }
@@ -240,7 +235,7 @@ fn corruption_non_binary_act() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_head() {
-    corrupt_and_check(0xC1, &[inv(33, 0x21)], |main| {
+    corrupt_and_check(0xc1, &[inv(33, 0x21)], |main| {
         main.values[0 * NUM_MAIN_COLS + COL_IS_HEAD] = Felt::from(2u8);
     });
 }
@@ -248,7 +243,7 @@ fn corruption_non_binary_is_head() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_chunk_seq_id_breaks_chain() {
-    corrupt_and_check(0xC3, &[inv(200, 0xC8)], |main| {
+    corrupt_and_check(0xc3, &[inv(200, 0xc8)], |main| {
         main.values[1 * NUM_MAIN_COLS + COL_CHUNK_SEQ_ID] = Felt::from(7u8);
     });
 }
@@ -259,7 +254,7 @@ fn corruption_perm_seq_id_jump_mid_chain() {
     // 200 bytes → 7 chunks in one invocation (rows 0..7). Row 3 is
     // interior (is_head_next = 0 at the 2→3 and 3→4 transitions), so
     // bumping perm_seq_id there breaks the within-chain +1.
-    corrupt_and_check(0xC4, &[inv(200, 0xC8)], |main| {
+    corrupt_and_check(0xc4, &[inv(200, 0xc8)], |main| {
         let cell = &mut main.values[3 * NUM_MAIN_COLS + COL_PERM_SEQ_ID];
         *cell += Felt::from(5u8);
     });
@@ -270,7 +265,7 @@ fn corruption_perm_seq_id_jump_mid_chain() {
 fn corruption_is_head_on_dead_row() {
     // 200 → 7 chunks → height 8; row 7 is a dead pad row (act = 0).
     // Setting is_head there violates is_head · (1 − act) = 0.
-    corrupt_and_check(0xC5, &[inv(200, 0xC8)], |main| {
+    corrupt_and_check(0xc5, &[inv(200, 0xc8)], |main| {
         main.values[7 * NUM_MAIN_COLS + COL_IS_HEAD] = Felt::ONE;
     });
 }

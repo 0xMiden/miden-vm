@@ -11,39 +11,37 @@
 
 use std::collections::HashMap;
 
-use k256::ProjectivePoint;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
+use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use miden_core::{Felt, field::QuadFelt};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::ec::EcPointStoreAir;
-use crate::ec::add::{
-    COL_CANCEL, COL_DBL, EcGroupAddAir, PERIOD as ADD_PERIOD, ROW_TERM, TERM_CELL_MULT,
+use crate::{
+    ec::{
+        EcPointStoreAir,
+        add::{COL_CANCEL, COL_DBL, EcGroupAddAir, PERIOD as ADD_PERIOD, ROW_TERM, TERM_CELL_MULT},
+        groups::EcGroupsAir,
+    },
+    hash::{
+        chunk::ChunkAir,
+        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
+    },
+    math::{U256, from_hex},
+    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::{Session, SessionTraces},
+    tests::integration::fold_balance,
+    transcript::{
+        eval::{
+            COL_A_PTR, COL_B_PTR, COL_IS_ADD, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
+            COL_IS_IS, COL_IS_NEG, COL_IS_SUB, COL_PTR, NUM_MAIN_COLS as EVAL_COLS,
+            TranscriptEvalAir,
+        },
+        poseidon2::Poseidon2Air,
+    },
+    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
-use crate::ec::groups::EcGroupsAir;
-use crate::hash::chunk::ChunkAir;
-use crate::hash::keccak::node::KeccakNodeAir;
-use crate::hash::keccak::round::KeccakRoundAir;
-use crate::hash::keccak::sponge::KeccakSpongeAir;
-use crate::math::{U256, from_hex};
-use crate::primitives::bitwise64::Bitwise64Air;
-use crate::primitives::byte_pair_lut::BytePairLutAir;
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::session::{Session, SessionTraces};
-use crate::tests::integration::fold_balance;
-use crate::transcript::eval::{
-    COL_A_PTR, COL_B_PTR, COL_IS_ADD, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS,
-    COL_IS_NEG, COL_IS_SUB, COL_PTR, NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
-};
-use crate::transcript::poseidon2::Poseidon2Air;
-use crate::uint::UintStoreAir;
-use crate::uint::add::UintAddAir;
-use crate::uint::mul::UintMulAir;
 
 /// secp256k1: `p − 1`, curve `y² = x³ + 7` (a = 0, b = 7), pinned at the
 /// protocol addresses below.
@@ -53,10 +51,7 @@ const A_PTR: u32 = 2;
 const B_PTR: u32 = 3;
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 /// Big-endian field bytes → our `U256` (through the KAT hex path).
@@ -222,10 +217,7 @@ fn ec_dag_pai_passthroughs_hold() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn ec_dag_pai_proves() {
-    ec_dag_pai_traces()
-        .prove()
-        .verify()
-        .expect("EC DAG PAI round-trip must verify");
+    ec_dag_pai_traces().prove().verify().expect("EC DAG PAI round-trip must verify");
 }
 
 /// `G + G = 2G` through the DAG — the tangent (double) arm, `ec_add(P, P)`,
@@ -364,7 +356,7 @@ fn dag_finite_forged_as_pai_unbalances() {
     // provide (is_pai = 0) loses its consumer, and the coord children's
     // Uint bindings dangle.
     let traces = ec_dag_3g_traces();
-    let mut rng = StdRng::seed_from_u64(0xEC_DA9_F01);
+    let mut rng = StdRng::seed_from_u64(0xec_da9_f01);
     let eval = traces.mains()[7];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
@@ -394,7 +386,7 @@ fn dag_neg_infinity_slot_forged_unbalances() {
     // but the EcGroupAdd consume (group, P, R, b_ptr) no longer matches the
     // cancel provide (…, ∞).
     let traces = ec_dag_neg_sub_traces();
-    let mut rng = StdRng::seed_from_u64(0xEC_DA9_F02);
+    let mut rng = StdRng::seed_from_u64(0xec_da9_f02);
     let eval = traces.mains()[7];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
@@ -417,7 +409,7 @@ fn dag_sub_result_forged_unbalances() {
     // provide, and the Group binding the row provides (h ↔ R) dangles its
     // `ec_is` consumer — the rearrangement is load-bearing, not decorative.
     let traces = ec_dag_neg_sub_traces();
-    let mut rng = StdRng::seed_from_u64(0xEC_DA9_F03);
+    let mut rng = StdRng::seed_from_u64(0xec_da9_f03);
     let eval = traces.mains()[7];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
@@ -483,14 +475,10 @@ fn dag_neg_result_forged_unbalances() {
     // and the honest ∞ provide routed by `neg` loses its consumer — two
     // unmatched denominators. That pin is exactly what forces `R = −P`.
     let traces = ec_dag_neg_double_traces();
-    let mut rng = StdRng::seed_from_u64(0xEC_DA9_F04);
+    let mut rng = StdRng::seed_from_u64(0xec_da9_f04);
     let eval = traces.mains()[7];
     let add = traces.mains()[13];
-    assert_eq!(
-        dag_residual_with(&traces, eval, add, &mut rng),
-        0,
-        "honest stack must balance",
-    );
+    assert_eq!(dag_residual_with(&traces, eval, add, &mut rng), 0, "honest stack must balance",);
 
     // Operand `G`'s ptr (the Neg row's `a_ptr`), the Neg's honest result −G
     // (its `ptr`), and `2G`'s ptr (the double row's result).

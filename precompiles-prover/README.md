@@ -1,4 +1,4 @@
-# precompile-experiments
+# miden-precompiles-prover
 
 A scratch repository for prototyping a chiplet-based zkVM dedicated to
 cryptographic precompiles. It began with `Keccak-f[1600]` and now spans

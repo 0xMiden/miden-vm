@@ -7,26 +7,29 @@
 //! corruption.
 
 use miden_air::BaseAir;
-use miden_core::Felt;
-use miden_core::chiplets::hasher::Hasher;
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    Felt,
+    chiplets::hasher::Hasher,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 use miden_lifted_air::LiftedAir;
 use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::logup::{
-    Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-};
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult};
-use crate::transcript::deferred_tags;
-use crate::transcript::poseidon2::math::STATE_WIDTH;
-use crate::transcript::poseidon2::program::{NUM_PERIODIC_COLS, PERIOD};
-use crate::transcript::poseidon2::trace::{AbsorptionOutput, Poseidon2Requires, generate_trace};
-use crate::transcript::poseidon2::{
-    COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, COL_PERM_SEQ_ID, COL_STATE_BEGIN,
-    NUM_AUX_COLS, NUM_MAIN_COLS, NUM_WITNESSES, P2Cap, P2Digest, POSEIDON2_IN_TAG_RATE0,
-    Poseidon2Air, Poseidon2InMsg, Poseidon2OutMsg,
+use crate::{
+    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult},
+    transcript::{
+        deferred_tags,
+        poseidon2::{
+            COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, COL_PERM_SEQ_ID,
+            COL_STATE_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, NUM_WITNESSES, P2Cap, P2Digest,
+            POSEIDON2_IN_TAG_RATE0, Poseidon2Air, Poseidon2InMsg, Poseidon2OutMsg,
+            math::STATE_WIDTH,
+            program::{NUM_PERIODIC_COLS, PERIOD},
+            trace::{AbsorptionOutput, Poseidon2Requires, generate_trace},
+        },
+    },
 };
 
 // HELPERS
@@ -69,10 +72,7 @@ fn build_requires(absorptions: &[Absorption]) -> (Poseidon2Requires, Vec<Absorpt
     let outputs: Vec<AbsorptionOutput> = absorptions
         .iter()
         .map(|abs| {
-            assert!(
-                abs.in_multiplicity > 0,
-                "absorption needs in_multiplicity > 0"
-            );
+            assert!(abs.in_multiplicity > 0, "absorption needs in_multiplicity > 0");
             let mut last = None;
             for _ in 0..abs.in_multiplicity {
                 last = Some(p2.require_absorption(P2Cap(abs.cap), abs.blocks.iter().copied()));
@@ -140,12 +140,7 @@ fn poseidon2_in_msg_encodes_with_in_bus_prefix() {
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let perm_seq_id = Felt::from(42u32);
-    let chunk = [
-        Felt::from(1u32),
-        Felt::from(2u32),
-        Felt::from(3u32),
-        Felt::from(4u32),
-    ];
+    let chunk = [Felt::from(1u32), Felt::from(2u32), Felt::from(3u32), Felt::from(4u32)];
     let msg = Poseidon2InMsg::rate0(perm_seq_id, chunk);
     let enc = msg.encode(&challenges);
 
@@ -175,12 +170,7 @@ fn poseidon2_in_msg_tags_produce_distinct_encodings() {
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let perm_seq_id = Felt::from(1u32);
-    let chunk = [
-        Felt::from(0u32),
-        Felt::from(0u32),
-        Felt::from(0u32),
-        Felt::from(0u32),
-    ];
+    let chunk = [Felt::from(0u32), Felt::from(0u32), Felt::from(0u32), Felt::from(0u32)];
 
     let enc_r0 = Poseidon2InMsg::rate0(perm_seq_id, chunk).encode(&challenges);
     let enc_r1 = Poseidon2InMsg::rate1(perm_seq_id, chunk).encode(&challenges);
@@ -198,16 +188,8 @@ fn poseidon2_out_msg_encodes_with_out_bus_prefix() {
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let perm_seq_id = Felt::from(7u32);
-    let digest = [
-        Felt::from(100u32),
-        Felt::from(200u32),
-        Felt::from(300u32),
-        Felt::from(400u32),
-    ];
-    let msg = Poseidon2OutMsg {
-        perm_seq_id,
-        digest,
-    };
+    let digest = [Felt::from(100u32), Felt::from(200u32), Felt::from(300u32), Felt::from(400u32)];
+    let msg = Poseidon2OutMsg { perm_seq_id, digest };
     let enc = msg.encode(&challenges);
 
     let bus_prefix = alpha
@@ -230,19 +212,10 @@ fn poseidon2_in_and_out_buses_have_disjoint_prefixes() {
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let perm_seq_id = Felt::from(5u32);
-    let chunk = [
-        Felt::from(9u32),
-        Felt::from(8u32),
-        Felt::from(7u32),
-        Felt::from(6u32),
-    ];
+    let chunk = [Felt::from(9u32), Felt::from(8u32), Felt::from(7u32), Felt::from(6u32)];
 
     let enc_in = Poseidon2InMsg::rate0(perm_seq_id, chunk).encode(&challenges);
-    let enc_out = Poseidon2OutMsg {
-        perm_seq_id,
-        digest: chunk,
-    }
-    .encode(&challenges);
+    let enc_out = Poseidon2OutMsg { perm_seq_id, digest: chunk }.encode(&challenges);
     assert_ne!(enc_in, enc_out);
 }
 
@@ -258,10 +231,7 @@ fn main_column_layout_matches_spec() {
     assert_eq!(COL_STATE_BEGIN, 4);
     assert_eq!(NUM_WITNESSES, 3);
     assert_eq!(NUM_MAIN_COLS, 19);
-    assert_eq!(
-        <Poseidon2Air as BaseAir<Felt>>::width(&Poseidon2Air),
-        NUM_MAIN_COLS,
-    );
+    assert_eq!(<Poseidon2Air as BaseAir<Felt>>::width(&Poseidon2Air), NUM_MAIN_COLS,);
 }
 
 #[test]
@@ -286,7 +256,7 @@ fn log_quotient_degree_matches_design_target() {
 #[test]
 fn periodic_columns_have_period_16() {
     let air = Poseidon2Air;
-    let cols = <Poseidon2Air as LiftedAir<Felt, QuadFelt>>::periodic_columns(&air);
+    let cols = <Poseidon2Air as BaseAir<Felt>>::periodic_columns(&air);
     assert_eq!(cols.len(), NUM_PERIODIC_COLS);
     for c in &cols {
         assert_eq!(c.len(), PERIOD);
@@ -319,7 +289,7 @@ fn one_shot_digest_matches_reference_on_zero_input() {
 
 #[test]
 fn one_shot_digest_matches_reference_on_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xC011_5E_ED);
+    let mut rng = StdRng::seed_from_u64(0xc011_5e_ed);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     let absorption = Absorption::one_shot(cap, rate0, rate1);
@@ -330,15 +300,11 @@ fn one_shot_digest_matches_reference_on_random_input() {
 
 #[test]
 fn three_block_digest_matches_chained_reference_permutation() {
-    let mut rng = StdRng::seed_from_u64(0xC0A1_CED);
+    let mut rng = StdRng::seed_from_u64(0xc0a1_ced);
     let cap = random_chunk(&mut rng);
     let absorption = Absorption {
         cap,
-        blocks: vec![
-            random_block(&mut rng),
-            random_block(&mut rng),
-            random_block(&mut rng),
-        ],
+        blocks: vec![random_block(&mut rng), random_block(&mut rng), random_block(&mut rng)],
         in_multiplicity: 1,
         out_multiplicity: 1,
     };
@@ -350,7 +316,7 @@ fn three_block_digest_matches_chained_reference_permutation() {
 
 #[test]
 fn multi_absorption_outputs_have_non_overlapping_perm_spans() {
-    let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
+    let mut rng = StdRng::seed_from_u64(0xdead_beef);
     let absorptions = vec![
         Absorption::one_shot(
             random_chunk(&mut rng),
@@ -388,26 +354,22 @@ fn multi_absorption_outputs_have_non_overlapping_perm_spans() {
 #[test]
 fn constraints_hold_on_one_shot_zero_input() {
     check_absorptions(
-        0xA1_00,
-        &[Absorption::one_shot(
-            [Felt::ZERO; 4],
-            [Felt::ZERO; 4],
-            [Felt::ZERO; 4],
-        )],
+        0xa1_00,
+        &[Absorption::one_shot([Felt::ZERO; 4], [Felt::ZERO; 4], [Felt::ZERO; 4])],
     );
 }
 
 #[test]
 fn constraints_hold_on_one_shot_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xA1_01);
+    let mut rng = StdRng::seed_from_u64(0xa1_01);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
-    check_absorptions(0xA1_01, &[Absorption::one_shot(cap, rate0, rate1)]);
+    check_absorptions(0xa1_01, &[Absorption::one_shot(cap, rate0, rate1)]);
 }
 
 #[test]
 fn constraints_hold_on_two_block_absorption() {
-    let mut rng = StdRng::seed_from_u64(0xA2_00);
+    let mut rng = StdRng::seed_from_u64(0xa2_00);
     let cap = random_chunk(&mut rng);
     let absorption = Absorption {
         cap,
@@ -415,34 +377,30 @@ fn constraints_hold_on_two_block_absorption() {
         in_multiplicity: 1,
         out_multiplicity: 1,
     };
-    check_absorptions(0xA2_00, &[absorption]);
+    check_absorptions(0xa2_00, &[absorption]);
 }
 
 #[test]
 fn constraints_hold_on_three_block_absorption() {
-    let mut rng = StdRng::seed_from_u64(0xA3_00);
+    let mut rng = StdRng::seed_from_u64(0xa3_00);
     let cap = random_chunk(&mut rng);
     let absorption = Absorption {
         cap,
-        blocks: vec![
-            random_block(&mut rng),
-            random_block(&mut rng),
-            random_block(&mut rng),
-        ],
+        blocks: vec![random_block(&mut rng), random_block(&mut rng), random_block(&mut rng)],
         in_multiplicity: 1,
         out_multiplicity: 1,
     };
-    check_absorptions(0xA3_00, &[absorption]);
+    check_absorptions(0xa3_00, &[absorption]);
 }
 
 #[test]
 fn constraints_hold_on_interned_absorption() {
     // Single absorption serving 7 identical caller requests.
-    let mut rng = StdRng::seed_from_u64(0xA4_00);
+    let mut rng = StdRng::seed_from_u64(0xa4_00);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     check_absorptions(
-        0xA4_00,
+        0xa4_00,
         &[Absorption {
             cap,
             blocks: vec![(rate0, rate1)],
@@ -461,11 +419,11 @@ fn constraints_hold_on_multiplicity_beyond_range16_cap() {
     // carrying a mult *past* 2^16 must still close the trace — proof the
     // cell is no longer tied to a 16-bit range check.
     let over_cap = (1u32 << 16) + 1;
-    let mut rng = StdRng::seed_from_u64(0xA4_FF);
+    let mut rng = StdRng::seed_from_u64(0xa4_ff);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     check_absorptions(
-        0xA4_FF,
+        0xa4_ff,
         &[Absorption {
             cap,
             blocks: vec![(rate0, rate1)],
@@ -481,11 +439,11 @@ fn constraints_hold_on_asymmetric_multiplicities() {
     // chiplet provides 1 copy of the In-side tuples and 7 copies of
     // the Out-side tuple, all balancing against the caller-side
     // consumes.
-    let mut rng = StdRng::seed_from_u64(0xDA6_C0DE);
+    let mut rng = StdRng::seed_from_u64(0xda6_c0de);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     check_absorptions(
-        0xDA6_C0DE,
+        0xda6_c0de,
         &[Absorption {
             cap,
             blocks: vec![(rate0, rate1)],
@@ -498,7 +456,7 @@ fn constraints_hold_on_asymmetric_multiplicities() {
 #[test]
 fn constraints_hold_on_mixed_one_shot_and_chain() {
     // Two unrelated 1-shot absorptions followed by a 2-block chain.
-    let mut rng = StdRng::seed_from_u64(0xA5_00);
+    let mut rng = StdRng::seed_from_u64(0xa5_00);
     let one_shot_a = Absorption::one_shot(
         random_chunk(&mut rng),
         random_chunk(&mut rng),
@@ -515,7 +473,7 @@ fn constraints_hold_on_mixed_one_shot_and_chain() {
         in_multiplicity: 1,
         out_multiplicity: 1,
     };
-    check_absorptions(0xA5_00, &[one_shot_a, one_shot_b, chain]);
+    check_absorptions(0xa5_00, &[one_shot_a, one_shot_b, chain]);
 }
 
 // NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption
@@ -534,11 +492,7 @@ fn corrupt_and_check(
 
 fn rng_one_shot(seed: u64) -> Absorption {
     let mut rng = StdRng::seed_from_u64(seed);
-    Absorption::one_shot(
-        random_chunk(&mut rng),
-        random_chunk(&mut rng),
-        random_chunk(&mut rng),
-    )
+    Absorption::one_shot(random_chunk(&mut rng), random_chunk(&mut rng), random_chunk(&mut rng))
 }
 
 fn rng_two_block(seed: u64) -> Absorption {
@@ -556,7 +510,7 @@ fn rng_two_block(seed: u64) -> Absorption {
 fn corruption_seq_id_breaks_row_counter() {
     // Skip a value in `perm_seq_id` — both the cycle-constancy and the
     // cycle-boundary increment constraints fail.
-    corrupt_and_check(0xC0_5E, &[rng_one_shot(0xC0_5E)], |main| {
+    corrupt_and_check(0xc0_5e, &[rng_one_shot(0xc0_5e)], |main| {
         main.values[NUM_MAIN_COLS + COL_PERM_SEQ_ID] = Felt::from(99u8);
     });
 }
@@ -564,7 +518,7 @@ fn corruption_seq_id_breaks_row_counter() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_absorb_breaks_booleanity() {
-    corrupt_and_check(0xC0_BB, &[rng_one_shot(0xC0_BB)], |main| {
+    corrupt_and_check(0xc0_bb, &[rng_one_shot(0xc0_bb)], |main| {
         for r in 0..PERIOD {
             main.values[r * NUM_MAIN_COLS + COL_IS_ABSORB] = Felt::from(2u8);
         }
@@ -575,7 +529,7 @@ fn corruption_non_binary_is_absorb_breaks_booleanity() {
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_in_multiplicity_non_constant_breaks_constancy() {
     // in_multiplicity must be constant within a cycle.
-    corrupt_and_check(0xC0_60, &[rng_one_shot(0xC0_60)], |main| {
+    corrupt_and_check(0xc0_60, &[rng_one_shot(0xc0_60)], |main| {
         main.values[7 * NUM_MAIN_COLS + COL_IN_MULTIPLICITY] = Felt::from(2u8);
     });
 }
@@ -584,7 +538,7 @@ fn corruption_in_multiplicity_non_constant_breaks_constancy() {
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_out_multiplicity_non_constant_breaks_constancy() {
     // out_multiplicity must also be constant within a cycle.
-    corrupt_and_check(0xC0_61, &[rng_one_shot(0xC0_61)], |main| {
+    corrupt_and_check(0xc0_61, &[rng_one_shot(0xc0_61)], |main| {
         main.values[7 * NUM_MAIN_COLS + COL_OUT_MULTIPLICITY] = Felt::from(2u8);
     });
 }
@@ -597,7 +551,7 @@ fn corruption_capacity_mismatch_in_chain_breaks_carry() {
     // capacity. The chiplet auto-threads on trace gen, so the
     // capacity is correct out of the box; we have to break it
     // post-hoc.
-    corrupt_and_check(0xC0_CA, &[rng_two_block(0xC0_CA)], |main| {
+    corrupt_and_check(0xc0_ca, &[rng_two_block(0xc0_ca)], |main| {
         // Row 0 of cycle 1 = trace row 16. Bump state[8] (first
         // capacity lane) by 1 — breaks the cap-carry constraint.
         let row_offset = PERIOD * NUM_MAIN_COLS;
@@ -608,7 +562,7 @@ fn corruption_capacity_mismatch_in_chain_breaks_carry() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_is_absorb_non_constant_breaks_within_cycle() {
-    corrupt_and_check(0xC0_AB, &[rng_two_block(0xC0_AB)], |main| {
+    corrupt_and_check(0xc0_ab, &[rng_two_block(0xc0_ab)], |main| {
         // Flip is_absorb on row 5 of cycle 1 (originally 1, now 0).
         let row_offset = (PERIOD + 5) * NUM_MAIN_COLS;
         main.values[row_offset + COL_IS_ABSORB] = Felt::ZERO;
@@ -618,7 +572,7 @@ fn corruption_is_absorb_non_constant_breaks_within_cycle() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_state_at_step_breaks_transition() {
-    corrupt_and_check(0xC0_57, &[rng_one_shot(0xC0_57)], |main| {
+    corrupt_and_check(0xc0_57, &[rng_one_shot(0xc0_57)], |main| {
         // Perturb state[0] at row 5 (one of the packed-internal
         // rows). The packed-internal next-state constraint fires
         // and observes the inconsistency.
@@ -632,7 +586,7 @@ fn corruption_is_absorb_at_row_0_breaks_boundary() {
     // is_absorb must be 0 at row 0: chains cannot wrap the trace.
     // Set is_absorb = 1 across every row of cycle 0 (matches
     // cycle-constancy + breaks the when_first_row boundary).
-    corrupt_and_check(0xC0_AB_00, &[rng_one_shot(0xC0_AB_00)], |main| {
+    corrupt_and_check(0xc0_ab_00, &[rng_one_shot(0xc0_ab_00)], |main| {
         for r in 0..PERIOD {
             main.values[r * NUM_MAIN_COLS + COL_IS_ABSORB] = Felt::ONE;
         }

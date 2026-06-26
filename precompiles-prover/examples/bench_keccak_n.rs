@@ -28,12 +28,9 @@
 use std::time::Instant;
 
 use miden_lifted_air::LiftedAir;
+use miden_precompiles_prover::session::{ChipletAir, Session};
 use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use precompile_experiments::session::ChipletAir;
-use precompile_experiments::session::Session;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 fn main() {
     // `PROFILE=1` installs a span timer (stderr) so the prover's phase
@@ -48,14 +45,8 @@ fn main() {
             .init();
     }
 
-    let n: usize = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8);
-    let l: usize = std::env::args()
-        .nth(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(32);
+    let n: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(8);
+    let l: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(32);
 
     // Both degenerate cases are supported: N = 0 (empty batch → the
     // all-dead, valid empty-transcript trace) and L = 0 (empty input →
@@ -73,11 +64,11 @@ fn main() {
     // Derive N distinct deterministic inputs from one seed; PRF the
     // bytes so adjacent indices don't accidentally collide. Each keccak
     // yields a claim handle; fold them into the transcript root.
-    let seed = 0xC0FFEE_DECADE_u64;
+    let seed = 0xc0ffee_decade_u64;
     let mut input = vec![0u8; l];
     let mut claims = Vec::with_capacity(n);
     for k in 0..n {
-        let mut rng = StdRng::seed_from_u64(seed ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15));
+        let mut rng = StdRng::seed_from_u64(seed ^ (k as u64).wrapping_mul(0x9e3779b97f4a7c15));
         for b in &mut input {
             *b = rng.random();
         }
@@ -157,7 +148,7 @@ fn main() {
         Ok(()) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify roundtrip OK");
-        }
+        },
         Err(err) => {
             println!("verify_multi     : {verify_elapsed:?} → {err:?}");
             println!();
@@ -166,7 +157,7 @@ fn main() {
             println!("  `check_trace_balance` net multiplicities per encoded denom");
             println!("  across all chiplets (as `full_stack_bus_balance_closes` does)");
             println!("  to localize the unmatched (bus, payload) tuple.");
-        }
+        },
     }
 
     println!();

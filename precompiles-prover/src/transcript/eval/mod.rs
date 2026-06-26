@@ -839,29 +839,29 @@ where
 
         // Per-insert mult degrees: the one-hot gates (perm `node`, AND / op
         // consumes, `Range16`) are deg 1; the `−out_mult` provides are deg 2.
-        let one_deg = Deg { n: 1, d: 1 };
-        let two_deg = Deg { n: 2, d: 1 };
+        let one_deg = Deg { v: 1, u: 1 };
+        let two_deg = Deg { v: 2, u: 1 };
         // Per-insert message degrees beyond 1: the value provide's
         // `transient`-scaled fields and the role-mixed UintAdd consume are
         // deg 2 (denominator 2).
-        let mixed_deg = Deg { n: 1, d: 2 };
+        let mixed_deg = Deg { v: 1, u: 2 };
         // col 0: the deg-2 True provide dominates the 4-fraction batch ⇒
         // numerator 5. col 1: all perm mults deg 1 ⇒ 4. col 2: the forked
         // Binding provide carries a deg-2 message (transient·ptr) ⇒ denom 4.
         // cols 3/4: two fractions each, raw / role-mixed fields.
-        let col0_deg = Deg { n: 5, d: 4 };
-        let col1_deg = Deg { n: 4, d: 4 };
-        let col2_deg = Deg { n: 4, d: 4 };
-        let col3_deg = Deg { n: 2, d: 2 };
-        let col4_deg = Deg { n: 3, d: 3 };
+        let col0_deg = Deg { v: 5, u: 4 };
+        let col1_deg = Deg { v: 4, u: 4 };
+        let col2_deg = Deg { v: 4, u: 4 };
+        let col3_deg = Deg { v: 2, u: 2 };
+        let col4_deg = Deg { v: 3, u: 3 };
         // col 5 (Group binding) mirrors col 0: two deg-1 consumes + a deg-2
         // provide. col 6 (EC relations): EcGroup + EcPoint (deg-1) + the
         // role-mixed (Add/Neg) EcGroupAdd (deg-2 message), like col 4.
-        let col5_deg = Deg { n: 5, d: 4 };
-        let col6_deg = Deg { n: 4, d: 4 };
+        let col5_deg = Deg { v: 5, u: 4 };
+        let col6_deg = Deg { v: 4, u: 4 };
         // col 7 (Neg ∞-pin): one EcPoint consume gated `is_ec_op · is_neg`
         // (degree-2 in the grouped encoding; constraint degree 2 — trivial).
-        let col7_deg = Deg { n: 2, d: 1 };
+        let col7_deg = Deg { v: 2, u: 1 };
 
         // ---- col 0: Binding bus, True path (consume lhs/rhs on AND rows;
         //             provide h as True on AND / zero / Is rows) + Range16
@@ -1321,7 +1321,7 @@ where
         let m_val: LB::Expr = local[COL_PTR].into();
         let m_idx: LB::Expr = local[COL_MSM_IDX].into();
         let m_expr: LB::Expr = local[COL_MSM_EXPR].into();
-        let col8_deg = Deg { n: 5, d: 4 };
+        let col8_deg = Deg { v: 5, u: 4 };
         builder.next_column(
             |col| {
                 col.group(

@@ -21,17 +21,19 @@
 //! `perm_seq_id` continuing `+1` to satisfy the relaxed chain on dead
 //! rows.
 
-use core::array;
-use core::ops::Range;
+use core::{array, ops::Range};
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS};
-use crate::logup::build_logup_aux_trace;
-use crate::transcript::poseidon2::digest::{P2Cap, P2Digest};
-use crate::transcript::poseidon2::trace::{PermSpan, Poseidon2Requires};
+use crate::{
+    hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
+    logup::build_logup_aux_trace,
+    transcript::poseidon2::{
+        digest::{P2Cap, P2Digest},
+        trace::{PermSpan, Poseidon2Requires},
+    },
+};
 
 /// Chunk granularity in bytes (256 bits = 8 u32 felts).
 const CHUNK_BYTES: usize = 32;
@@ -150,10 +152,7 @@ impl ChunkRequires {
     /// so the span is always non-empty.
     pub fn require(&mut self, inv: &Invocation, p2: &mut Poseidon2Requires) -> ChunkOutput {
         let f_per_chunk = inv.pack_chunks();
-        debug_assert!(
-            !f_per_chunk.is_empty(),
-            "num_chunks().max(1) guarantees ≥1 chunk",
-        );
+        debug_assert!(!f_per_chunk.is_empty(), "num_chunks().max(1) guarantees ≥1 chunk",);
         let rate_pairs: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
             .iter()
             .map(|f| {
@@ -207,10 +206,7 @@ pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
     let mut next_perm_seq_id = 0u32;
 
     for rec in &requires.records {
-        debug_assert_eq!(
-            chunk_seq_id, rec.chunk_seq_id_range.start,
-            "contiguous chunk_seq_id"
-        );
+        debug_assert_eq!(chunk_seq_id, rec.chunk_seq_id_range.start, "contiguous chunk_seq_id");
         let perm_start = rec.perm_span.head().seq();
         for (c, f) in rec.f_per_chunk.iter().enumerate() {
             // chunk_seq_id, perm_seq_id, act, is_head, f[8].

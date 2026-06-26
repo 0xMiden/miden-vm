@@ -12,11 +12,10 @@
 //! main trace.
 //!
 //! The fall-out wiring:
-//! - `chunk_seq_id_head` / `chunk_ptr` and `sponge_seq_id_head` come
-//!   from the [`SpongeOutput`].
+//! - `chunk_seq_id_head` / `chunk_ptr` and `sponge_seq_id_head` come from the [`SpongeOutput`].
 //! - `perm_seq_id_chunks` is the chunk-content P2 absorption head.
-//! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the
-//!   two one-shot P2 absorptions this layer drives.
+//! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the two one-shot P2 absorptions
+//!   this layer drives.
 //!
 //! [`hash_digest_chunks`] / [`hash_keccak_node`] are kept exported so older
 //! standalone tests (which build [`KeccakNodeInvocation`]s by hand,
@@ -25,25 +24,29 @@
 
 use std::collections::HashMap;
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::hash::chunk::trace::ChunkRequires;
-use crate::hash::chunk::trace::ChunkSeqId;
-use crate::hash::keccak::digest::KeccakDigest;
-use crate::hash::keccak::node::{KeccakNodeAir, NUM_HASH, NUM_MAIN_COLS};
-use crate::hash::keccak::round::RoundRequires;
-use crate::hash::keccak::sponge::trace::SpongeSeqId;
-use crate::hash::keccak::sponge::trace::{
-    Invocation as SpongeInvocation, SpongeRequires, keccak_oracle,
+use crate::{
+    hash::{
+        chunk::trace::{ChunkRequires, ChunkSeqId},
+        keccak::{
+            digest::KeccakDigest,
+            node::{KeccakNodeAir, NUM_HASH, NUM_MAIN_COLS},
+            round::RoundRequires,
+            sponge::trace::{
+                Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
+            },
+        },
+    },
+    logup::build_logup_aux_trace,
+    primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
+    relations::ProvideMult,
+    transcript::poseidon2::{
+        digest::{P2Cap, P2Digest},
+        trace::{PermSeqId, Poseidon2Requires},
+    },
 };
-use crate::logup::build_logup_aux_trace;
-use crate::primitives::bitwise64::Bitwise64Requires;
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::ProvideMult;
-use crate::transcript::poseidon2::digest::{P2Cap, P2Digest};
-use crate::transcript::poseidon2::trace::{PermSeqId, Poseidon2Requires};
 
 /// One Keccak invocation as seen by this chiplet — everything bundled
 /// into one transcript-DAG node.
@@ -263,9 +266,7 @@ impl KeccakNodeRequires {
         }
 
         // Miss path: full allocation through sponge + 2× P2 one-shots.
-        let sponge_inv = SpongeInvocation {
-            input: input.to_vec(),
-        };
+        let sponge_inv = SpongeInvocation { input: input.to_vec() };
         let sponge_out =
             sponge_req.require(&sponge_inv, chunk_req, round_req, bw64_req, bpl_req, p2);
         debug_assert_eq!(sponge_out.keccak_digest, keccak_digest);
@@ -316,18 +317,10 @@ impl KeccakNodeRequires {
         let node_row = self.next_row;
         self.next_row += 1;
         let idx = self.records.len();
-        self.records.push(NodeRecord {
-            invocation,
-            h_keccak,
-            keccak_digest,
-        });
+        self.records.push(NodeRecord { invocation, h_keccak, keccak_digest });
         self.by_keccak.insert(keccak_digest, idx);
 
-        KeccakNodeOutput {
-            keccak_digest,
-            h_keccak,
-            node_row,
-        }
+        KeccakNodeOutput { keccak_digest, h_keccak, node_row }
     }
 
     /// Total rows laid (= active rows in the keccak-node main trace).

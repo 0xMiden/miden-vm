@@ -11,48 +11,42 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
+};
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use super::uint::{random_modulus, random_uint_below};
-use crate::hash::chunk::ChunkAir;
-use crate::hash::keccak::node::KeccakNodeAir;
-use crate::hash::keccak::round::KeccakRoundAir;
-use crate::hash::keccak::sponge::KeccakSpongeAir;
-use crate::math::{U256, add_reduce, mac_reduce};
-use crate::primitives::bitwise64::Bitwise64Air;
-use crate::primitives::byte_pair_lut::BytePairLutAir;
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::session::statements::horner_sign_paths;
-use crate::session::{NUM_CHIPLETS, Session, SessionTraces};
-use crate::transcript::eval::{
-    COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PARAM_A, COL_PTR,
-    NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
+use crate::{
+    hash::{
+        chunk::ChunkAir,
+        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
+    },
+    math::{U256, add_reduce, mac_reduce},
+    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::{NUM_CHIPLETS, Session, SessionTraces, statements::horner_sign_paths},
+    transcript::{
+        eval::{
+            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PARAM_A, COL_PTR,
+            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
+        },
+        nodes::UintOpId,
+        poseidon2::Poseidon2Air,
+    },
+    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
-use crate::transcript::nodes::UintOpId;
-use crate::transcript::poseidon2::Poseidon2Air;
-use crate::uint::UintStoreAir;
-use crate::uint::add::UintAddAir;
-use crate::uint::mul::UintMulAir;
 
 /// The modulus pin's protocol address in these tests.
 const FP: u32 = 1;
 
 fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
     core::array::from_fn(|_| {
-        QuadFelt::new([
-            Felt::new(rng.random()).unwrap(),
-            Felt::new(rng.random()).unwrap(),
-        ])
+        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()])
     })
 }
 
@@ -104,9 +98,7 @@ fn stack_residual(
     fold_balance(&UintStoreAir, mains[8], challenges, &mut net);
     fold_balance(&UintAddAir, mains[9], challenges, &mut net);
     fold_balance(&UintMulAir, mains[10], challenges, &mut net);
-    net.into_values()
-        .filter(|(m, _)| *m != Felt::ZERO)
-        .collect()
+    net.into_values().filter(|(m, _)| *m != Felt::ZERO).collect()
 }
 
 fn assert_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
@@ -144,7 +136,7 @@ fn find_op_row(eval: &RowMajorMatrix<Felt>, flag_col: usize) -> usize {
 /// relation tuples.
 #[test]
 fn horner_sign_alternation_full_stack() {
-    let mut rng = StdRng::seed_from_u64(0x0DA6_4011);
+    let mut rng = StdRng::seed_from_u64(0x0da6_4011);
     let bound = random_modulus(&mut rng);
     let x_v = random_uint_below(&mut rng, bound);
     let c_v: [U256; 4] = core::array::from_fn(|_| random_uint_below(&mut rng, bound));
@@ -185,7 +177,7 @@ fn horner_sign_alternation_full_stack() {
 /// the expected value — which dedups onto `w`'s ptr.
 #[test]
 fn op_dedup_collapses_repeated_nodes() {
-    let mut rng = StdRng::seed_from_u64(0x0DED_0001);
+    let mut rng = StdRng::seed_from_u64(0x0ded_0001);
     let bound = random_modulus(&mut rng);
     let x_v = random_uint_below(&mut rng, bound);
     let y_v = random_uint_below(&mut rng, bound);
@@ -237,7 +229,7 @@ fn op_dedup_collapses_repeated_nodes() {
 #[test]
 #[should_panic(expected = "stray uint value node")]
 fn stray_value_node_panics_at_finish() {
-    let mut rng = StdRng::seed_from_u64(0x057A_0001);
+    let mut rng = StdRng::seed_from_u64(0x057a_0001);
     let bound = random_modulus(&mut rng);
     let v = random_uint_below(&mut rng, bound);
 
@@ -254,7 +246,7 @@ fn stray_value_node_panics_at_finish() {
 #[test]
 #[should_panic(expected = "unprovable")]
 fn unequal_is_panics() {
-    let mut rng = StdRng::seed_from_u64(0x057A_0002);
+    let mut rng = StdRng::seed_from_u64(0x057a_0002);
     let bound = random_modulus(&mut rng);
     let v = random_uint_below(&mut rng, bound);
     let w = v ^ U256::ONE;
@@ -270,7 +262,7 @@ fn unequal_is_panics() {
 #[test]
 #[should_panic(expected = "share a modulus")]
 fn cross_modulus_op_panics() {
-    let mut rng = StdRng::seed_from_u64(0x057A_0003);
+    let mut rng = StdRng::seed_from_u64(0x057a_0003);
     let bound_p = random_modulus(&mut rng);
     let bound_q = random_modulus(&mut rng);
 
@@ -286,7 +278,7 @@ fn cross_modulus_op_panics() {
 #[test]
 #[should_panic(expected = "exceeds its modulus bound")]
 fn out_of_range_leaf_panics() {
-    let mut rng = StdRng::seed_from_u64(0x057A_0004);
+    let mut rng = StdRng::seed_from_u64(0x057a_0004);
     let bound = random_modulus(&mut rng);
     let v = bound + U256::ONE; // random_modulus keeps the bound below 2²⁵⁵
 
@@ -322,7 +314,7 @@ fn mul_statement(rng: &mut impl Rng) -> SessionTraces {
 /// nothing provides / consumes — the bus catches it twice over.
 #[test]
 fn forged_result_ptr_unbalances() {
-    let mut rng = StdRng::seed_from_u64(0xF043_0001);
+    let mut rng = StdRng::seed_from_u64(0xf043_0001);
     let traces = mul_statement(&mut rng);
 
     let mut tampered = traces.mains()[7].clone();
@@ -334,10 +326,7 @@ fn forged_result_ptr_unbalances() {
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = stack_residual(&mains, &challenges);
-    assert!(
-        !residual.is_empty(),
-        "a forged r_ptr must unbalance the bus"
-    );
+    assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
 /// Re-encoding an op's discriminant — flag *and* `param_a` swapped
@@ -349,7 +338,7 @@ fn forged_result_ptr_unbalances() {
 /// algebra.
 #[test]
 fn reencoded_op_id_passes_constraints_but_unbalances() {
-    let mut rng = StdRng::seed_from_u64(0xF043_0002);
+    let mut rng = StdRng::seed_from_u64(0xf043_0002);
     let bound = random_modulus(&mut rng);
     let x_v = random_uint_below(&mut rng, bound);
     let y_v = random_uint_below(&mut rng, bound);
@@ -399,7 +388,7 @@ fn eval_chip_stays_at_lqd_2() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn horner_sign_alternation_proves() {
-    let mut rng = StdRng::seed_from_u64(0x0DA6_4012);
+    let mut rng = StdRng::seed_from_u64(0x0da6_4012);
     let bound = random_modulus(&mut rng);
     let x_v = random_uint_below(&mut rng, bound);
     let c_v: [U256; 4] = core::array::from_fn(|_| random_uint_below(&mut rng, bound));
@@ -411,8 +400,5 @@ fn horner_sign_alternation_proves() {
 
     let root = session.assert_and_fold([modulus, claim]);
     let traces = session.finish(root);
-    traces
-        .prove()
-        .verify()
-        .expect("the uint-DAG stack must verify");
+    traces.prove().verify().expect("the uint-DAG stack must verify");
 }
