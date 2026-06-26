@@ -16,22 +16,23 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
-
-use crate::hash::keccak::reference::KECCAK_RC;
-use crate::hash::memory64::Memory64Msg;
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
-};
-use crate::primitives::bitwise64::{Bitwise64Requires, Logic64Msg, Logic64Op, Rol64Msg};
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, next_main, split_u64};
-
 pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slots};
+
+use crate::{
+    hash::{keccak::reference::KECCAK_RC, memory64::Memory64Msg},
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+    },
+    primitives::{
+        bitwise64::{Bitwise64Requires, Logic64Msg, Logic64Op, Rol64Msg},
+        byte_pair_lut::BytePairLutRequires,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, next_main, split_u64},
+};
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -69,10 +70,9 @@ pub const NUM_MAIN_COLS: usize = 10;
 
 /// Two aux columns, one per bus on the row:
 ///
-/// - col 0: memory64 bus — batch of 3 (dst provide, `src_a` require,
-///   `src_b` require). Mixed-sign multiplicities in the same batch:
-///   `mult = -dst_mult` for the provide, `+is_active` and `+is_logic`
-///   for the requires.
+/// - col 0: memory64 bus — batch of 3 (dst provide, `src_a` require, `src_b` require). Mixed-sign
+///   multiplicities in the same batch: `mult = -dst_mult` for the provide, `+is_active` and
+///   `+is_logic` for the requires.
 /// - col 1: bitwise64 bus — batch of 2 (Logic64 + Rol64 requires).
 pub const NUM_AUX_COLS: usize = 2;
 
@@ -109,13 +109,13 @@ impl BaseAir<Felt> for KeccakRoundAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         round_program().to_vec()
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -292,9 +292,9 @@ where
         // Per-emission and per-column degree annotations. Framework
         // metadata — production adapters ignore these; the names keep
         // the call sites legible.
-        let interaction_deg = Deg { n: 1, d: 1 };
-        let triple_deg = Deg { n: 3, d: 3 };
-        let pair_deg = Deg { n: 2, d: 2 };
+        let interaction_deg = Deg { v: 1, u: 1 };
+        let triple_deg = Deg { v: 3, u: 3 };
+        let pair_deg = Deg { v: 2, u: 2 };
 
         // ---- col 0: memory64 bus — provide + 2 requires in one batch
         // Mixed-sign multiplicities: `mult = -dst_mult` for the provide
@@ -783,18 +783,18 @@ pub fn generate_trace(
             match spec.op {
                 Op::Xor => {
                     bw64_req.require(bpl_req, Logic64Op::Xor, a, b);
-                }
+                },
                 Op::Andnot => {
                     bw64_req.require(bpl_req, Logic64Op::AndNot, a, b);
-                }
+                },
                 Op::Rol(s) => {
                     bw64_req.require_rol(bpl_req, a, 1u64 << s);
-                }
+                },
                 Op::XorRol(s) => {
                     let r = bw64_req.require(bpl_req, Logic64Op::Xor, a, b);
                     bw64_req.require_rol(bpl_req, r, 1u64 << s);
-                }
-                Op::Nop => {}
+                },
+                Op::Nop => {},
             }
         }
 

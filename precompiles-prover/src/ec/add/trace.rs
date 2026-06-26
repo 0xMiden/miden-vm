@@ -13,18 +13,19 @@ use std::collections::HashMap;
 use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::trace::{EcGroupPtr, EcPointPtr, EcStoreRequires};
-use crate::logup::build_logup_aux_trace;
-use crate::relations::ProvideMult;
-use crate::uint::trace::UintPtr;
-
 use super::{
     CELL_GROUP, CELL_R, CELL_SBOUND, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CANCEL,
     COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_PX, COL_PY, COL_QX, COL_QY, COL_RP_HI,
     COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_CELLS, NUM_MAIN_COLS, PERIOD, ROW_RES,
     ROW_SLOPE, ROW_TAIL, ROW_TERM, TERM_CELL_MULT, TERM_CELL_P, TERM_CELL_Q,
 };
-use crate::primitives::byte_pair_lut::BytePairLutRequires;
+use crate::{
+    ec::trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
+    logup::build_logup_aux_trace,
+    primitives::byte_pair_lut::BytePairLutRequires,
+    relations::ProvideMult,
+    uint::trace::UintPtr,
+};
 
 /// Which row of the case lattice an op claims.
 /// [`EcRequire`](crate::ec::require::EcRequire) derives this from the
@@ -179,7 +180,7 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
     let (rp_lo, rp_hi, rq_lo, rq_hi) = if op.mints {
         let rp = op.r.addr() - op.p.addr() - 1;
         let rq = op.r.addr() - op.q.addr() - 1;
-        (rp & 0xFFFF, rp >> 16, rq & 0xFFFF, rq >> 16)
+        (rp & 0xffff, rp >> 16, rq & 0xffff, rq >> 16)
     } else {
         (0, 0, 0, 0)
     };
@@ -240,9 +241,9 @@ pub fn generate_trace(
         if op.mints {
             let rp = op.r.addr() - op.p.addr() - 1;
             let rq = op.r.addr() - op.q.addr() - 1;
-            bpl.require_range16((rp & 0xFFFF) as u16);
+            bpl.require_range16((rp & 0xffff) as u16);
             bpl.require_range16((rp >> 16) as u16);
-            bpl.require_range16((rq & 0xFFFF) as u16);
+            bpl.require_range16((rq & 0xffff) as u16);
             bpl.require_range16((rq >> 16) as u16);
         }
         vals.extend(op_block(op, *mult, ec));

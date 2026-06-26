@@ -12,10 +12,13 @@ pub mod messages;
 pub mod program;
 pub mod trace;
 
-pub use digest::{P2Cap, P2Digest};
-
 use core::array;
 
+pub use digest::{P2Cap, P2Digest};
+pub use messages::{
+    POSEIDON2_IN_TAG_CAP, POSEIDON2_IN_TAG_RATE0, POSEIDON2_IN_TAG_RATE1, Poseidon2InMsg,
+    Poseidon2OutMsg,
+};
 use miden_core::{
     Felt,
     chiplets::hasher::Hasher,
@@ -24,24 +27,23 @@ use miden_core::{
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-};
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::poseidon2::math::{
-    STATE_WIDTH, apply_init_plus_ext, apply_internal_plus_ext, apply_packed_internals,
-    apply_single_ext,
-};
-use crate::transcript::poseidon2::program::{
-    ARK_INT_LAST_IDX, PCOL_ARK_BEGIN, PCOL_IS_EXT, PCOL_IS_INIT_EXT, PCOL_IS_INT_EXT,
-    PCOL_IS_PACKED_INT, poseidon2_program,
-};
-use crate::utils::{current_main, next_main};
-
-pub use messages::{
-    POSEIDON2_IN_TAG_CAP, POSEIDON2_IN_TAG_RATE0, POSEIDON2_IN_TAG_RATE1, Poseidon2InMsg,
-    Poseidon2OutMsg,
+use crate::{
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::poseidon2::{
+        math::{
+            STATE_WIDTH, apply_init_plus_ext, apply_internal_plus_ext, apply_packed_internals,
+            apply_single_ext,
+        },
+        program::{
+            ARK_INT_LAST_IDX, PCOL_ARK_BEGIN, PCOL_IS_EXT, PCOL_IS_INIT_EXT, PCOL_IS_INT_EXT,
+            PCOL_IS_PACKED_INT, poseidon2_program,
+        },
+    },
+    utils::{current_main, next_main},
 };
 
 // MAIN COLUMN LAYOUT
@@ -49,11 +51,10 @@ pub use messages::{
 //
 // 19 main witness columns split into three groups:
 //
-// - Cycle-constant (4): perm_seq_id, in_multiplicity, out_multiplicity,
-//                       is_absorb.
+// - Cycle-constant (4): perm_seq_id, in_multiplicity, out_multiplicity, is_absorb.
 // - Sponge state (12):  state[0..12] (rate0[4], rate1[4], capacity[4]).
-// - S-box witnesses (3): w[0..3], used on packed-internal rows 4..10
-//                       and (`w[0]` only) on int+ext row 11.
+// - S-box witnesses (3): w[0..3], used on packed-internal rows 4..10 and (`w[0]` only) on int+ext
+//   row 11.
 //
 // See `docs/chiplets/poseidon2.md` §"Per-row format".
 
@@ -93,11 +94,9 @@ pub const COL_CAPACITY_BEGIN: usize = COL_STATE_BEGIN + 8;
 
 /// One aux column hosting all bus emissions in a single group with two
 /// periodic-disjoint mutex batches:
-/// - Batch A (gated by `is_init_ext`): 3 Poseidon2In provides, fires at
-///   row 0 of each cycle.
-/// - Batch B (gated by `p_last_in_cycle`): 1 Poseidon2Out provide + 2
-///   Range16 requires (for in_multiplicity and out_multiplicity), fires
-///   at row 15 of each cycle.
+/// - Batch A (gated by `is_init_ext`): 3 Poseidon2In provides, fires at row 0 of each cycle.
+/// - Batch B (gated by `p_last_in_cycle`): 1 Poseidon2Out provide + 2 Range16 requires (for
+///   in_multiplicity and out_multiplicity), fires at row 15 of each cycle.
 ///
 /// Both Range16 requires read the cycle-constant multiplicities (same
 /// values at any row); placing them at row 15 balances the mutex
@@ -141,16 +140,16 @@ impl BaseAir<Felt> for Poseidon2Air {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
+
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        poseidon2_program().to_vec()
+    }
 }
 
 // LIFTED AIR
 // ================================================================================================
 
 impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        poseidon2_program().to_vec()
-    }
-
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -403,23 +402,23 @@ where
         let neg_out_mult: LB::Expr =
             (LB::Expr::ZERO - out_multiplicity.clone()) * (LB::Expr::ONE - is_absorb_next.clone());
 
-        let interaction_deg = Deg { n: 1, d: 1 };
+        let interaction_deg = Deg { v: 1, u: 1 };
         // Batch A (row 0, gated by `is_init_ext`): 3 Poseidon2In provides.
         //   d_A = 3; max inner mult deg = 2 (in_cap); n_A deg = 2 + 2 = 4.
-        let row0_batch_deg = Deg { n: 4, d: 3 };
+        let row0_batch_deg = Deg { v: 4, u: 3 };
         // Batch B (row 15, gated by `p_last_in_cycle`): out_rate0 + two
         //   Range16 requires (for in_multiplicity and out_multiplicity).
         //   Both multiplicities are cycle-constant so the row choice is
         //   semantically free; placing both Range16s at row 15 balances
         //   the mutex batches 3+3.
         //   d_B = 3; max inner mult deg = 2 (out_rate0); n_B deg = 2 + 2 = 4.
-        let row15_batch_deg = Deg { n: 4, d: 3 };
+        let row15_batch_deg = Deg { v: 4, u: 3 };
         // Mutex group: f_A · f_B = is_init_ext · p_last_in_cycle = 0.
         //   u_g = 1 + (d_A − 1)·f_A + (d_B − 1)·f_B → deg max(3+1, 3+1) = 4.
         //   v_g = n_A·f_A + n_B·f_B → deg max(4+1, 4+1) = 5.
         // Column constraint = max(1 + u_g, v_g) = 5. Chiplet log_quot
         // stays at 3 (still dominated by the deg-9 step transitions).
-        let group_deg = Deg { n: 5, d: 4 };
+        let group_deg = Deg { v: 5, u: 4 };
 
         builder.next_column(
             |col| {
@@ -464,10 +463,7 @@ where
                                 b.insert(
                                     "out_rate0",
                                     neg_out_mult,
-                                    Poseidon2OutMsg {
-                                        perm_seq_id: perm_seq_id.clone(),
-                                        digest,
-                                    },
+                                    Poseidon2OutMsg { perm_seq_id: perm_seq_id.clone(), digest },
                                     interaction_deg,
                                 );
                             },

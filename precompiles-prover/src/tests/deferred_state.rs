@@ -1,7 +1,9 @@
-use miden_core_vm::deferred::{Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST};
+use miden_core::deferred::{Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST};
 
-use crate::deferred::{synthetic_keccak_state, vm_digest_to_p2};
-use crate::session::{Session, SessionTraces};
+use crate::{
+    deferred::{synthetic_keccak_state, vm_digest_to_p2},
+    session::{Session, SessionTraces},
+};
 
 fn keccak_session_traces(input: &[u8]) -> SessionTraces {
     let mut session = Session::new();
@@ -22,18 +24,8 @@ fn synthetic_keccak_deferred_state_reconstructs_root() {
     );
     assert_eq!(synthetic.root, vm_digest_to_p2(synthetic.vm_root));
     assert!(synthetic.state.get_node(&synthetic.input_digest).is_some());
-    assert!(
-        synthetic
-            .state
-            .get_node(&synthetic.expected_digest)
-            .is_some()
-    );
-    assert!(
-        synthetic
-            .state
-            .get_node(&synthetic.assertion_digest)
-            .is_some()
-    );
+    assert!(synthetic.state.get_node(&synthetic.expected_digest).is_some());
+    assert!(synthetic.state.get_node(&synthetic.assertion_digest).is_some());
 }
 
 #[test]
@@ -85,7 +77,5 @@ fn keccak_deferred_state_root_proves_and_verifies() {
 
     let proof = traces.prove();
     assert_eq!(proof.public_root(), synthetic.root);
-    proof
-        .verify()
-        .expect("Keccak deferred-state proof should verify");
+    proof.verify().expect("Keccak deferred-state proof should verify");
 }

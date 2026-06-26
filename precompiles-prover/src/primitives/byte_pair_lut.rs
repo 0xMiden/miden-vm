@@ -2,14 +2,12 @@
 //!
 //! Provides two relations over the same trace rows:
 //!
-//! - [`BytePairLutMsg`]: tuple `(op, a, b, c)` where `op ∈ {AndNot, Xor}`,
-//!   `a, b ∈ [0, 256)`, and `c = op.apply(a, b)`. Used by callers that
-//!   need a byte-level bitwise op result, with the inputs implicitly
-//!   range-checked to bytes.
-//! - [`Range16Msg`]: tuple `(w,)` where `w ∈ [0, 2^16)`. Used by callers
-//!   that need a 16-bit range check on a packed 16-bit Felt without
-//!   spending a bytewise-op slot. The chiplet splits `w = a + 256·b`
-//!   (LSB byte first) and provides for the matching row.
+//! - [`BytePairLutMsg`]: tuple `(op, a, b, c)` where `op ∈ {AndNot, Xor}`, `a, b ∈ [0, 256)`, and
+//!   `c = op.apply(a, b)`. Used by callers that need a byte-level bitwise op result, with the
+//!   inputs implicitly range-checked to bytes.
+//! - [`Range16Msg`]: tuple `(w,)` where `w ∈ [0, 2^16)`. Used by callers that need a 16-bit range
+//!   check on a packed 16-bit Felt without spending a bytewise-op slot. The chiplet splits `w = a +
+//!   256·b` (LSB byte first) and provides for the matching row.
 //!
 //! The data `a`, `b` and the precomputed bytewise results `c_andnot`,
 //! `c_xor` are **preprocessed** (verifier-known) columns; only three
@@ -43,13 +41,15 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-    build_logup_aux_trace,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES, build_logup_aux_trace,
+    },
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult},
+    utils::current_main,
 };
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult};
-use crate::utils::current_main;
 
 // OPERATION
 // ================================================================================================
@@ -205,7 +205,7 @@ impl BytePairLutRequires {
     /// The chiplet splits `w = a + 256·b` (LSB byte first) and bumps the
     /// `range16` multiplicity on the matching row.
     pub fn require_range16(&mut self, w: u16) {
-        let a = (w & 0xFF) as u8;
+        let a = (w & 0xff) as u8;
         let b = (w >> 8) as u8;
         self.counts[pair_idx(a, b)].range16 += 1;
     }
@@ -215,7 +215,7 @@ impl BytePairLutRequires {
     }
 
     pub fn multiplicity_range16(&self, w: u16) -> ProvideMult {
-        let a = (w & 0xFF) as u8;
+        let a = (w & 0xff) as u8;
         let b = (w >> 8) as u8;
         self.counts[pair_idx(a, b)].range16
     }
@@ -236,7 +236,7 @@ pub(crate) fn preprocessed_table() -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(TRACE_HEIGHT * NUM_PREPROCESSED_COLS);
     for idx in 0..NUM_BYTE_PAIRS {
         let a = (idx >> 8) as u8;
-        let b = (idx & 0xFF) as u8;
+        let b = (idx & 0xff) as u8;
         values.extend([
             Felt::from(a),
             Felt::from(b),
@@ -263,11 +263,7 @@ pub fn generate_trace(requires: BytePairLutRequires) -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(TRACE_HEIGHT * NUM_MAIN_COLS);
 
     for mults in &requires.counts {
-        values.extend([
-            Felt::from(mults.andnot),
-            Felt::from(mults.xor),
-            Felt::from(mults.range16),
-        ]);
+        values.extend([Felt::from(mults.andnot), Felt::from(mults.xor), Felt::from(mults.range16)]);
     }
 
     RowMajorMatrix::new(values, NUM_MAIN_COLS)
@@ -306,12 +302,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
             BusId::BytePairLut as usize,
-            [
-                self.op.clone(),
-                self.a.clone(),
-                self.b.clone(),
-                self.c.clone(),
-            ],
+            [self.op.clone(), self.a.clone(), self.b.clone(), self.c.clone()],
         )
     }
 }
@@ -357,6 +348,10 @@ impl BaseAir<Felt> for BytePairLutAir {
         Some(preprocessed_table())
     }
 
+    fn preprocessed_width(&self) -> usize {
+        NUM_PREPROCESSED_COLS
+    }
+
     fn num_public_values(&self) -> usize {
         // The shared 4-felt transcript root (declared, unread by BPL);
         // the natural last-row σ-closing needs no `inv_n`.
@@ -365,10 +360,6 @@ impl BaseAir<Felt> for BytePairLutAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
-    fn preprocessed_width(&self) -> usize {
-        NUM_PREPROCESSED_COLS
-    }
-
     fn num_randomness(&self) -> usize {
         // Single global (α, β) pair shared across all relations; each
         // relation's bus_prefix keeps encodings unambiguous.
@@ -463,8 +454,8 @@ where
         let neg_xor: LB::Expr = LB::Expr::ZERO - mult_xor;
         let neg_range16: LB::Expr = LB::Expr::ZERO - mult_range16;
 
-        let interaction_deg = Deg { n: 1, d: 1 };
-        let batch_deg = Deg { n: 3, d: 3 };
+        let interaction_deg = Deg { v: 1, u: 1 };
+        let batch_deg = Deg { v: 3, u: 3 };
         let group_deg = batch_deg;
         let column_deg = group_deg;
 

@@ -5,18 +5,20 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::primitives::bitwise64::{
-    A_BYTES_RANGE, AUX_PROVIDE, B_LIMBS_RANGE, Bitwise64Air, Bitwise64Requires, COL_IS_LOGIC,
-    COL_IS_ROL, COL_OP_OR_K, Logic64Op, NUM_AUX_COLS, NUM_MAIN_COLS, generate_trace,
+use crate::{
+    primitives::{
+        bitwise64::{
+            A_BYTES_RANGE, AUX_PROVIDE, B_LIMBS_RANGE, Bitwise64Air, Bitwise64Requires,
+            COL_IS_LOGIC, COL_IS_ROL, COL_OP_OR_K, Logic64Op, NUM_AUX_COLS, NUM_MAIN_COLS,
+            generate_trace,
+        },
+        byte_pair_lut::{BytePairLutRequires, BytePairOp},
+    },
+    utils::split_u64_u32,
 };
-use crate::primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp};
-use crate::utils::split_u64_u32;
 
 fn test_alpha_beta() -> [QuadFelt; 2] {
-    [
-        QuadFelt::from(Felt::from(7u8)),
-        QuadFelt::from(Felt::from(11u8)),
-    ]
+    [QuadFelt::from(Felt::from(7u8)), QuadFelt::from(Felt::from(11u8))]
 }
 
 /// Prover-driven aux-trace build, used as the test entry point for
@@ -37,8 +39,8 @@ fn build_aux(
 
 #[test]
 fn op_apply_matches_native() {
-    let a = 0xDEAD_BEEF_CAFE_BABEu64;
-    let b = 0x0123_4567_89AB_CDEFu64;
+    let a = 0xdead_beef_cafe_babeu64;
+    let b = 0x0123_4567_89ab_cdefu64;
     assert_eq!(Logic64Op::AndNot.apply(a, b), (!a) & b);
     assert_eq!(Logic64Op::Xor.apply(a, b), a ^ b);
 }
@@ -67,7 +69,7 @@ fn single_logic_emits_real_then_trailing_carrier() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     let a = 0x1122_3344_5566_7788u64;
-    let b = 0xAABB_CCDD_EEFF_0011u64;
+    let b = 0xaabb_ccdd_eeff_0011u64;
     let c = requires.require(&mut bpl, Logic64Op::Xor, a, b);
     assert_eq!(c, a ^ b);
 
@@ -103,7 +105,7 @@ fn unchained_logics_get_intermediate_carriers() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     // Two LOGIC triples whose c's don't match the next a — no chaining possible.
-    requires.require(&mut bpl, Logic64Op::Xor, 0xAA, 0xBB);
+    requires.require(&mut bpl, Logic64Op::Xor, 0xaa, 0xbb);
     requires.require(&mut bpl, Logic64Op::Xor, 0x22, 0x33);
 
     let trace = generate_trace(requires);
@@ -121,9 +123,9 @@ fn unchained_logics_get_intermediate_carriers() {
 fn chained_logics_skip_intermediate_carriers() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xAA, 0xBB);
-    let c2 = requires.require(&mut bpl, Logic64Op::Xor, c1, 0xCC); // chain: a == previous c
-    let _c3 = requires.require(&mut bpl, Logic64Op::AndNot, c2, 0xDD); // chain again
+    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xaa, 0xbb);
+    let c2 = requires.require(&mut bpl, Logic64Op::Xor, c1, 0xcc); // chain: a == previous c
+    let _c3 = requires.require(&mut bpl, Logic64Op::AndNot, c2, 0xdd); // chain again
 
     let trace = generate_trace(requires);
     // 3 chained reals + 1 trailing carrier = 4 rows.
@@ -166,8 +168,8 @@ fn require_rol_after_chained_logic_emits_rol_directly() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     // Establish chain so ROL input matches previous LOGIC's c.
-    let c = requires.require(&mut bpl, Logic64Op::Xor, 0x1234_5678_9ABC_DEF0, 0);
-    assert_eq!(c, 0x1234_5678_9ABC_DEF0);
+    let c = requires.require(&mut bpl, Logic64Op::Xor, 0x1234_5678_9abc_def0, 0);
+    assert_eq!(c, 0x1234_5678_9abc_def0);
     // ROL(c, 32 = 2^5).
     let b = requires.require_rol(&mut bpl, c, 32);
     assert_eq!(b, c.rotate_left(5));
@@ -198,11 +200,11 @@ fn require_rol_after_chained_logic_emits_rol_directly() {
     let lo_offset_k = (c_lo + (1u64 << 32)) * 32;
     let hi_offset_k = (c_hi + (1u64 << 32)) * 32;
     for i in 0..4 {
-        let limb = ((lo_offset_k >> (16 * i)) & 0xFFFF) as u16;
+        let limb = ((lo_offset_k >> (16 * i)) & 0xffff) as u16;
         assert_eq!(row1[B_LIMBS_RANGE.start + i], Felt::from(limb));
     }
     for i in 0..4 {
-        let limb = ((hi_offset_k >> (16 * i)) & 0xFFFF) as u16;
+        let limb = ((hi_offset_k >> (16 * i)) & 0xffff) as u16;
         assert_eq!(row1[B_LIMBS_RANGE.start + 4 + i], Felt::from(limb));
     }
 }
@@ -214,7 +216,7 @@ fn require_rol_without_chain_panics() {
     let mut requires = Bitwise64Requires::new();
     // No prior LOGIC produces this value, so at trace-gen the ROL can't
     // claim a producer — build_chains panics.
-    requires.require_rol(&mut bpl, 0xDEAD_BEEF, 16);
+    requires.require_rol(&mut bpl, 0xdead_beef, 16);
     generate_trace(requires);
 }
 
@@ -256,7 +258,7 @@ fn require_rol_after_unchained_logic_inserts_carrier() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     // First LOGIC.
-    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xAA, 0xBB);
+    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xaa, 0xbb);
     // Second LOGIC, unchained — a Carrier{c1} is inserted before it.
     let c2 = requires.require(&mut bpl, Logic64Op::Xor, c1, 0); // chain to c1, c2 = c1.
     assert_eq!(c2, c1);
@@ -286,7 +288,7 @@ fn require_rol_recycles_non_tail_carrier() {
     // chain.
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xAA, 0xBB);
+    let c1 = requires.require(&mut bpl, Logic64Op::Xor, 0xaa, 0xbb);
     // Pick (a2, b2) so that a2 != c1 (else the second require would
     // chain-extend and the c1 carrier would be tail-recycled away).
     let c2 = requires.require(&mut bpl, Logic64Op::Xor, 0x33, 0x44);
@@ -301,11 +303,7 @@ fn require_rol_recycles_non_tail_carrier() {
     let is_logic = |r: usize| trace.values[r * NUM_MAIN_COLS + COL_IS_LOGIC];
     let is_rol = |r: usize| trace.values[r * NUM_MAIN_COLS + COL_IS_ROL];
     assert_eq!(is_logic(0), Felt::from(1u8), "row 0 LOGIC (Real_1)");
-    assert_eq!(
-        is_rol(1),
-        Felt::from(1u8),
-        "row 1 ROL (recycled c1 carrier)"
-    );
+    assert_eq!(is_rol(1), Felt::from(1u8), "row 1 ROL (recycled c1 carrier)");
     assert_eq!(is_logic(2), Felt::from(1u8), "row 2 LOGIC (Real_2)");
     assert_eq!(is_rol(3), Felt::ZERO, "row 3 trailing carrier for c2");
     assert_eq!(is_logic(3), Felt::ZERO, "row 3 trailing carrier for c2");
@@ -325,7 +323,7 @@ fn air_quotient_degree_matches_constraint_plan() {
 fn build_aux_trace_starts_at_zero() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    requires.require(&mut bpl, Logic64Op::Xor, 0xAABB, 0xCCDD);
+    requires.require(&mut bpl, Logic64Op::Xor, 0xaabb, 0xccdd);
     let (_main, aux, _sigma) = build_aux(requires);
     // Only col 0 (the running sum) carries the σ/n cyclic boundary
     // `aux[0] = 0`. Cols 1, 2 are per-row fraction values whose row-0
@@ -337,7 +335,7 @@ fn build_aux_trace_starts_at_zero() {
 fn build_aux_trace_shape_is_three_columns() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    requires.require(&mut bpl, Logic64Op::Xor, 0xAABB, 0xCCDD);
+    requires.require(&mut bpl, Logic64Op::Xor, 0xaabb, 0xccdd);
     let (main, aux, _sigma) = build_aux(requires);
     assert_eq!(aux.height(), main.height());
     assert_eq!(aux.width(), NUM_AUX_COLS);
@@ -349,7 +347,7 @@ fn rol_offset_limbs_escape_aliasable_range() {
     // are always ≥ 2^32, escaping the aliasable range [0, 2^32-2].
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    let c = requires.require(&mut bpl, Logic64Op::Xor, 0x1234_5678_9ABC_DEF0, 0);
+    let c = requires.require(&mut bpl, Logic64Op::Xor, 0x1234_5678_9abc_def0, 0);
     requires.require_rol(&mut bpl, c, 32);
 
     let trace = generate_trace(requires);
@@ -367,11 +365,11 @@ fn rol_offset_limbs_escape_aliasable_range() {
 
     // Verify the trace limbs match the expected offset computation.
     for i in 0..4 {
-        let expected_limb = ((lo_offset_k >> (16 * i)) & 0xFFFF) as u16;
+        let expected_limb = ((lo_offset_k >> (16 * i)) & 0xffff) as u16;
         assert_eq!(row1[B_LIMBS_RANGE.start + i], Felt::from(expected_limb));
     }
     for i in 0..4 {
-        let expected_limb = ((hi_offset_k >> (16 * i)) & 0xFFFF) as u16;
+        let expected_limb = ((hi_offset_k >> (16 * i)) & 0xffff) as u16;
         assert_eq!(row1[B_LIMBS_RANGE.start + 4 + i], Felt::from(expected_limb));
     }
 }
@@ -381,8 +379,5 @@ fn num_public_values_matches_shared_root() {
     // 0.26 hands every AIR the same `air_inputs` slice — the 4-felt
     // transcript root. Each chiplet declares that shared count even when it
     // reads none of it (bitwise64 ignores the root entirely).
-    assert_eq!(
-        Bitwise64Air.num_public_values(),
-        crate::logup::NUM_PUBLIC_VALUES
-    );
+    assert_eq!(Bitwise64Air.num_public_values(), crate::logup::NUM_PUBLIC_VALUES);
 }

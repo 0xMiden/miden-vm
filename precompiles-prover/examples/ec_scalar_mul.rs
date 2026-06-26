@@ -25,18 +25,17 @@
 
 use std::time::Instant;
 
-use k256::FieldBytes;
-use k256::ProjectivePoint;
-use k256::Scalar;
-use k256::elliptic_curve::PrimeField;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
+use k256::{
+    FieldBytes, ProjectivePoint, Scalar,
+    elliptic_curve::{PrimeField, sec1::ToEncodedPoint},
+};
 use miden_lifted_air::LiftedAir;
+use miden_precompiles_prover::{
+    math::{U256, from_hex},
+    session::{ChipletAir, EcNode, Session},
+};
 use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use precompile_experiments::math::{U256, from_hex};
-use precompile_experiments::session::{ChipletAir, EcNode, Session};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Protocol pin addresses: modulus, curve `a`, curve `b`.
 const FP: u32 = 1;
@@ -52,10 +51,7 @@ fn be(bytes: impl AsRef<[u8]>) -> U256 {
 /// Affine coordinates of a finite k256 point as a `U256` pair.
 fn coords(p: &ProjectivePoint) -> (U256, U256) {
     let enc = p.to_affine().to_encoded_point(false);
-    (
-        be(enc.x().expect("finite point")),
-        be(enc.y().expect("finite point")),
-    )
+    (be(enc.x().expect("finite point")), be(enc.y().expect("finite point")))
 }
 
 /// A pseudorandom full-size scalar in `[2^255, n)`: the top bit is forced
@@ -88,14 +84,8 @@ fn scalar_mul(session: &mut Session, base: &EcNode, k: U256) -> EcNode {
 }
 
 fn main() {
-    let n: usize = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8);
-    let seed: u64 = std::env::args()
-        .nth(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0xEC);
+    let n: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(8);
+    let seed: u64 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(0xec);
     assert!(n >= 1, "need at least one instance");
 
     // secp256k1: y² = x³ + 7 over Fp, base point G, group order `order`.
@@ -219,7 +209,7 @@ fn main() {
         Ok(()) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify roundtrip OK — proved {n} scalar muls on secp256k1");
-        }
+        },
         Err(err) => println!("verify_multi     : {verify_elapsed:?} → {err:?}"),
     }
 }

@@ -4,31 +4,27 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
-use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use crate::math::{U256, from_limbs16, to_limbs16, to_limbs32};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace,
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::trace::{UintStoreRequires, generate_trace};
-use crate::uint::{NUM_MAIN_COLS, UintStoreAir};
+use miden_core::{Felt, field::QuadFelt};
+use miden_lifted_air::LiftedAir;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
+
+use crate::{
+    math::{U256, from_limbs16, to_limbs16, to_limbs32},
+    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::{
+        NUM_MAIN_COLS, UintStoreAir,
+        trace::{UintStoreRequires, generate_trace},
+    },
+};
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 /// A random modulus (the stored bound `p − 1`): all 16 limbs nonzero, the
@@ -38,7 +34,7 @@ fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
 /// 256-bit uint reasonably often exceeds it.
 pub(crate) fn random_modulus(rng: &mut impl Rng) -> U256 {
     let mut m: [u16; 16] = core::array::from_fn(|_| rng.random::<u16>().max(1));
-    m[15] = (rng.random::<u16>() & 0x7FFF).max(0x100);
+    m[15] = (rng.random::<u16>() & 0x7fff).max(0x100);
     from_limbs16(&m)
 }
 
@@ -99,7 +95,7 @@ fn fold_balance<A>(
 
 #[test]
 fn uint_store_constraints_hold() {
-    let mut rng = StdRng::seed_from_u64(0xACE1);
+    let mut rng = StdRng::seed_from_u64(0xace1);
     let store = sample_store(&mut rng);
     let main = generate_trace(store, &mut BytePairLutRequires::new());
     assert_eq!(main.height(), 32, "3 uints + 1 padding block × 8 rows");
@@ -112,17 +108,14 @@ fn uint_store_constraints_hold() {
     // 4–6. Some γⱼ must be nonzero.
     let carried = (4..8).any(|j| main.values[(8 + 5) * NUM_MAIN_COLS + j] != Felt::ZERO)
         || (4..7).any(|j| main.values[(8 + 6) * NUM_MAIN_COLS + j] != Felt::ZERO);
-    assert!(
-        carried,
-        "random value block must carry (comp = bound − v borrowed)",
-    );
+    assert!(carried, "random value block must carry (comp = bound − v borrowed)",);
 
     crate::tests::check_local(UintStoreAir, &main);
 }
 
 #[test]
 fn uint_store_buses_balance_against_bpl() {
-    let mut rng = StdRng::seed_from_u64(0xBA1A);
+    let mut rng = StdRng::seed_from_u64(0xba1a);
     let store = sample_store(&mut rng);
 
     // The byte-pair LUT provides exactly the Range16 demand the store
@@ -149,7 +142,7 @@ fn uint_store_buses_balance_against_bpl() {
 #[test]
 #[should_panic]
 fn uint_store_rejects_tampered_value() {
-    let mut rng = StdRng::seed_from_u64(0xBAD5EED);
+    let mut rng = StdRng::seed_from_u64(0xbad5eed);
     let bound = random_modulus(&mut rng);
     let mut store = UintStoreRequires::new();
     store.pin_modulus(1, bound); // modulus (self-ref)
@@ -169,7 +162,7 @@ fn uint_store_rejects_out_of_range_value() {
     // equal bound. The 256-bit addition then overflows (top carry c₇ = 1),
     // but the trace has no c₇ slot (only c₀..c₆) — so the SZ leaves a
     // 2³²·β⁷ residual, id ≠ 0 at the term row, and check_constraints rejects.
-    let mut rng = StdRng::seed_from_u64(0xB00D_0035);
+    let mut rng = StdRng::seed_from_u64(0xb00d_0035);
     let bound = random_modulus(&mut rng);
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound); // modulus (self-ref)
@@ -207,7 +200,7 @@ fn uint_store_rejects_out_of_range_value() {
 
 #[test]
 fn uint_store_gaps_and_self_ref_padding() {
-    let mut rng = StdRng::seed_from_u64(0x6A9);
+    let mut rng = StdRng::seed_from_u64(0x6a9);
     let bound = random_modulus(&mut rng);
     // Modulus at ptr 5 (self-ref; the first block needs no anchor); a value
     // at ptr 9 (gap 3); a self-referential zero uint at ptr 100 (gap 90) —
@@ -233,10 +226,7 @@ fn uint_store_gaps_and_self_ref_padding() {
     fold_balance(&UintStoreAir, &uint_main, &challenges, &mut net);
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
-    assert_eq!(
-        residual, 0,
-        "non-trivial gaps + self-ref padding still balance"
-    );
+    assert_eq!(residual, 0, "non-trivial gaps + self-ref padding still balance");
 }
 
 #[test]
@@ -245,7 +235,7 @@ fn uint_store_empty_pads_to_one_block() {
     // padding block (ptr 1), so an idle store still has a valid
     // power-of-two trace whose buses net out (provide mult 1 = its own
     // bound consume; Range16 zeros against BPL).
-    let mut rng = StdRng::seed_from_u64(0xE39);
+    let mut rng = StdRng::seed_from_u64(0xe39);
     let store = UintStoreRequires::new();
     let mut bpl = BytePairLutRequires::new();
     let main = generate_trace(store, &mut bpl);

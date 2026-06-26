@@ -29,30 +29,25 @@
 //!
 //! Per active row (one node):
 //!
-//! - **internal node** (`is_and = 1`): unhash `lhs||rhs` under the VM
-//!   `AND` tag → `h`; consume `Binding(lhs, True)` and `Binding(rhs, True)`;
-//!   provide `Binding(h, True)` with multiplicity `out_mult` = number of parents.
-//! - **root** (first row): same unhash + consumes, but `out_mult = 0`
-//!   (no parent) ⇒ provides nothing, *absorbing* the Binding σ; its `h` is
-//!   pinned to `public_root` by `when_first_row`. No separate flag is
-//!   needed — `out_mult = 0` is forced by bus balance.
-//! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 4×32 value →
-//!   `h` under the uint cap; consume both `UintVal` halves; provide
-//!   `Binding(h, True)` when `is_pinned` (folded into the spine) else
-//!   `Binding(h, Uint, ptr, bound_ptr)` (a transient value-binding).
-//! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the
-//!   op cap; consume the children's `Uint` bindings at the witnessed
-//!   `a_ptr` / `b_ptr` (`Neg` is unary: `rhs = 0`, no rhs consume; `Is`
-//!   forces `b_ptr = a_ptr` — equality asserted by the bus); consume one
-//!   relation tuple wiring those ptrs to the witnessed result `ptr`;
-//!   provide `Binding(h, Uint, ptr, bound_ptr)` — or `Binding(h, True)`
-//!   for `Is`, the predicate folding uint values into the spine. All
-//!   value soundness lives at the relation chiplets + store; this row is
-//!   pure ptr wiring. Ptrs never enter the hash — the result is
-//!   nondeterministic, memoized on the binding.
-//! - **ZERO_HASH leaf** (`is_zero = 1`): no unhash, no consumes; `h = 0`
-//!   pinned; provides `Binding(0, True)` with multiplicity `out_mult`. The
-//!   `True` base case / AND identity, usable as any node's child.
+//! - **internal node** (`is_and = 1`): unhash `lhs||rhs` under the VM `AND` tag → `h`; consume
+//!   `Binding(lhs, True)` and `Binding(rhs, True)`; provide `Binding(h, True)` with multiplicity
+//!   `out_mult` = number of parents.
+//! - **root** (first row): same unhash + consumes, but `out_mult = 0` (no parent) ⇒ provides
+//!   nothing, *absorbing* the Binding σ; its `h` is pinned to `public_root` by `when_first_row`. No
+//!   separate flag is needed — `out_mult = 0` is forced by bus balance.
+//! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 4×32 value → `h` under the uint cap;
+//!   consume both `UintVal` halves; provide `Binding(h, True)` when `is_pinned` (folded into the
+//!   spine) else `Binding(h, Uint, ptr, bound_ptr)` (a transient value-binding).
+//! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the op cap; consume the
+//!   children's `Uint` bindings at the witnessed `a_ptr` / `b_ptr` (`Neg` is unary: `rhs = 0`, no
+//!   rhs consume; `Is` forces `b_ptr = a_ptr` — equality asserted by the bus); consume one relation
+//!   tuple wiring those ptrs to the witnessed result `ptr`; provide `Binding(h, Uint, ptr,
+//!   bound_ptr)` — or `Binding(h, True)` for `Is`, the predicate folding uint values into the
+//!   spine. All value soundness lives at the relation chiplets + store; this row is pure ptr
+//!   wiring. Ptrs never enter the hash — the result is nondeterministic, memoized on the binding.
+//! - **ZERO_HASH leaf** (`is_zero = 1`): no unhash, no consumes; `h = 0` pinned; provides
+//!   `Binding(0, True)` with multiplicity `out_mult`. The `True` base case / AND identity, usable
+//!   as any node's child.
 //!
 //! Bus balance: every node's `out_mult` equals its consumer count, so the
 //! `Binding` σ nets to zero internally — the only external anchor is the
@@ -70,26 +65,29 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::add::EcGroupAddMsg;
-use crate::ec::msm::{MsmClaimTermMsg, MsmExprMsg};
-use crate::ec::{EcGroupMsg, EcPointMsg};
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    ec::{
+        EcGroupMsg, EcPointMsg,
+        add::EcGroupAddMsg,
+        msm::{MsmClaimTermMsg, MsmExprMsg},
+    },
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    transcript::{
+        binding::{BindingMsg, ValueTag},
+        deferred_tags,
+        nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId},
+        poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
+    },
+    uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
+    utils::{current_main, next_main},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::transcript::binding::{BindingMsg, ValueTag};
-use crate::transcript::deferred_tags;
-use crate::transcript::nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId};
-use crate::transcript::poseidon2::{Poseidon2InMsg, Poseidon2OutMsg};
-use crate::uint::UintValMsg;
-use crate::uint::add::UintAddMsg;
-use crate::uint::mul::UintMulMsg;
-use crate::utils::{current_main, next_main};
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -98,8 +96,7 @@ use crate::utils::{current_main, next_main};
 //
 // - Structural (2): act, perm_seq_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
-// - One-hot node kind (8): is_zero, is_and, is_uint_leaf, is_add, is_sub,
-//   is_mul, is_neg, is_is.
+// - One-hot node kind (8): is_zero, is_and, is_uint_leaf, is_add, is_sub, is_mul, is_neg, is_is.
 // - Sharing (1): out_mult.
 // - Uint leaf (4): is_pinned, ptr, bound_ptr, pin_ptr.
 // - Uint op (2): a_ptr, b_ptr (`ptr` doubles as the result ptr).
@@ -309,39 +306,32 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 //
 // Five aux columns:
 //
-// - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND
-//   rows), provide `h` as `True` (AND / zero / `Is` rows) +
-//   `Range16(out_mult)` (1 fraction, ungated).
-// - col 1: the unhash Poseidon2 perm — `In{rate0, rate1, cap}` + `Out`
-//   (4 fractions). Shared by every hashing kind; the cap is
-//   `(tag-by-flag, param_a, pin_ptr, V)`, all slots degree-1.
-// - col 2: Binding bus, value path — consume both `UintVal` halves on
-//   uint-leaf rows (the 4×32 view is the perm rate) + provide the row's
-//   value binding (uint-leaf and value-op rows), `(1 − is_pinned)`-scaled
-//   so a pinned leaf's collapses to the `True` form.
-// - col 3: Binding bus, op-children path — consume the lhs / rhs `Uint`
-//   bindings at `a_ptr` / `b_ptr` (raw fields; the op gates zero the
-//   mults elsewhere).
-// - col 4: the relation consumes — one `UintAdd` (add / sub / neg, roles
-//   wired per-op) + one `UintMul` (mul; κ slots are the constants 1 / 0).
+// - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND rows), provide `h` as `True`
+//   (AND / zero / `Is` rows) + `Range16(out_mult)` (1 fraction, ungated).
+// - col 1: the unhash Poseidon2 perm — `In{rate0, rate1, cap}` + `Out` (4 fractions). Shared by
+//   every hashing kind; the cap is `(tag-by-flag, param_a, pin_ptr, V)`, all slots degree-1.
+// - col 2: Binding bus, value path — consume both `UintVal` halves on uint-leaf rows (the 4×32 view
+//   is the perm rate) + provide the row's value binding (uint-leaf and value-op rows), `(1 −
+//   is_pinned)`-scaled so a pinned leaf's collapses to the `True` form.
+// - col 3: Binding bus, op-children path — consume the lhs / rhs `Uint` bindings at `a_ptr` /
+//   `b_ptr` (raw fields; the op gates zero the mults elsewhere).
+// - col 4: the relation consumes — one `UintAdd` (add / sub / neg, roles wired per-op) + one
+//   `UintMul` (mul; κ slots are the constants 1 / 0).
 //
-// - col 5: Binding bus, Group path — consume the P / Q operand `Group`
-//   bindings (group add / is) + provide the created / result point's
-//   `Group` binding (group create ∪ add), `−out_mult`-scaled.
-// - col 6: the EC relation consumes — `EcGroup` + `EcPoint` (group
-//   create) and `EcGroupAdd` (group add); raw degree-1 fields, gated.
-// - col 7: the `Neg` ∞-result pin — one `EcPoint(is_pai = 1)` consume of
-//   the EcGroupAdd result-slot (`b_ptr`). col 6 asserts `(point @ b_ptr)
-//   = P + R`; pinning that point to ∞ forces `R = −P` (else the slot is
-//   free and `Neg` binds any point). Its own column so the lone consume
-//   adds width, not blowup.
-// - col 8: the EcMsm absorb-run consumes (its own column so they don't
-//   push cols 5/6 past deg 5 / lqd 2). Per absorb row: `Binding(Pᵢ.hash,
-//   Group, Pᵢ_ptr)`, `Binding(sᵢ.hash, Uint, sᵢ_ptr)`, `MsmClaimTerm(expr,
-//   Pᵢ_ptr, sᵢ_ptr)` (positionless — set match, so the absorb order is the
-//   caller's); at the boundary `MsmExpr(expr, group, val, k = idx + 1)`.
-//   The claim's own `Group` binding *provide* (`h_claim → val`) rides
-//   col 5's existing Group provide (its gate extended by `is_msm_last`).
+// - col 5: Binding bus, Group path — consume the P / Q operand `Group` bindings (group add / is) +
+//   provide the created / result point's `Group` binding (group create ∪ add), `−out_mult`-scaled.
+// - col 6: the EC relation consumes — `EcGroup` + `EcPoint` (group create) and `EcGroupAdd` (group
+//   add); raw degree-1 fields, gated.
+// - col 7: the `Neg` ∞-result pin — one `EcPoint(is_pai = 1)` consume of the EcGroupAdd result-slot
+//   (`b_ptr`). col 6 asserts `(point @ b_ptr) = P + R`; pinning that point to ∞ forces `R = −P`
+//   (else the slot is free and `Neg` binds any point). Its own column so the lone consume adds
+//   width, not blowup.
+// - col 8: the EcMsm absorb-run consumes (its own column so they don't push cols 5/6 past deg 5 /
+//   lqd 2). Per absorb row: `Binding(Pᵢ.hash, Group, Pᵢ_ptr)`, `Binding(sᵢ.hash, Uint, sᵢ_ptr)`,
+//   `MsmClaimTerm(expr, Pᵢ_ptr, sᵢ_ptr)` (positionless — set match, so the absorb order is the
+//   caller's); at the boundary `MsmExpr(expr, group, val, k = idx + 1)`. The claim's own `Group`
+//   binding *provide* (`h_claim → val`) rides col 5's existing Group provide (its gate extended by
+//   `is_msm_last`).
 //
 // The uniform one-hot keeps every bus mult ≤ degree-2; cols 0/1/2/5/8 top
 // out at constraint deg 5 (cols 3/4/6 lower, col 7 trivial), so
@@ -408,9 +398,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         // Activity: binary, sticky-downward.
         builder.assert_bool(local[COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
 
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
@@ -423,9 +411,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // transcript root. (Empty transcript: row 0 is a ZERO_HASH leaf,
         // so `h = 0` forces `public_root = 0`.)
         for i in 0..NUM_HASH {
-            builder
-                .when_first_row()
-                .assert_zero(h[i].clone() - public_root[i].clone());
+            builder.when_first_row().assert_zero(h[i].clone() - public_root[i].clone());
         }
 
         // Inactive rows provide nothing: pin `out_mult = 0` so the
@@ -679,12 +665,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // (hence the root) is the caller's, decoupled from the chiplet's `idx`.
         let msm_idx: AB::Expr = local[COL_MSM_IDX].into();
         let msm_idx_next: AB::Expr = next[COL_MSM_IDX].into();
-        builder
-            .when_first_row()
-            .assert_zero(is_ec_msm.clone() * msm_idx.clone());
-        builder
-            .when_transition()
-            .assert_zero(starts.clone() * msm_idx_next.clone());
+        builder.when_first_row().assert_zero(is_ec_msm.clone() * msm_idx.clone());
+        builder.when_transition().assert_zero(starts.clone() * msm_idx_next.clone());
         builder
             .when_transition()
             .assert_zero(continues.clone() * (msm_idx_next - msm_idx - AB::Expr::ONE));
@@ -839,29 +821,29 @@ where
 
         // Per-insert mult degrees: the one-hot gates (perm `node`, AND / op
         // consumes, `Range16`) are deg 1; the `−out_mult` provides are deg 2.
-        let one_deg = Deg { n: 1, d: 1 };
-        let two_deg = Deg { n: 2, d: 1 };
+        let one_deg = Deg { v: 1, u: 1 };
+        let two_deg = Deg { v: 2, u: 1 };
         // Per-insert message degrees beyond 1: the value provide's
         // `transient`-scaled fields and the role-mixed UintAdd consume are
         // deg 2 (denominator 2).
-        let mixed_deg = Deg { n: 1, d: 2 };
+        let mixed_deg = Deg { v: 1, u: 2 };
         // col 0: the deg-2 True provide dominates the 4-fraction batch ⇒
         // numerator 5. col 1: all perm mults deg 1 ⇒ 4. col 2: the forked
         // Binding provide carries a deg-2 message (transient·ptr) ⇒ denom 4.
         // cols 3/4: two fractions each, raw / role-mixed fields.
-        let col0_deg = Deg { n: 5, d: 4 };
-        let col1_deg = Deg { n: 4, d: 4 };
-        let col2_deg = Deg { n: 4, d: 4 };
-        let col3_deg = Deg { n: 2, d: 2 };
-        let col4_deg = Deg { n: 3, d: 3 };
+        let col0_deg = Deg { v: 5, u: 4 };
+        let col1_deg = Deg { v: 4, u: 4 };
+        let col2_deg = Deg { v: 4, u: 4 };
+        let col3_deg = Deg { v: 2, u: 2 };
+        let col4_deg = Deg { v: 3, u: 3 };
         // col 5 (Group binding) mirrors col 0: two deg-1 consumes + a deg-2
         // provide. col 6 (EC relations): EcGroup + EcPoint (deg-1) + the
         // role-mixed (Add/Neg) EcGroupAdd (deg-2 message), like col 4.
-        let col5_deg = Deg { n: 5, d: 4 };
-        let col6_deg = Deg { n: 4, d: 4 };
+        let col5_deg = Deg { v: 5, u: 4 };
+        let col6_deg = Deg { v: 4, u: 4 };
         // col 7 (Neg ∞-pin): one EcPoint consume gated `is_ec_op · is_neg`
         // (degree-2 in the grouped encoding; constraint degree 2 — trivial).
-        let col7_deg = Deg { n: 2, d: 1 };
+        let col7_deg = Deg { v: 2, u: 1 };
 
         // ---- col 0: Binding bus, True path (consume lhs/rhs on AND rows;
         //             provide h as True on AND / zero / Is rows) + Range16
@@ -934,10 +916,7 @@ where
                                 b.insert(
                                     "p2out",
                                     node,
-                                    Poseidon2OutMsg {
-                                        perm_seq_id,
-                                        digest: h.clone(),
-                                    },
+                                    Poseidon2OutMsg { perm_seq_id, digest: h.clone() },
                                     one_deg,
                                 );
                             },
@@ -1321,7 +1300,7 @@ where
         let m_val: LB::Expr = local[COL_PTR].into();
         let m_idx: LB::Expr = local[COL_MSM_IDX].into();
         let m_expr: LB::Expr = local[COL_MSM_EXPR].into();
-        let col8_deg = Deg { n: 5, d: 4 };
+        let col8_deg = Deg { v: 5, u: 4 };
         builder.next_column(
             |col| {
                 col.group(

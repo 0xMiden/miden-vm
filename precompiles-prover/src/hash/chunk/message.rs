@@ -13,8 +13,10 @@
 
 use miden_core::field::Algebra;
 
-use crate::logup::{Challenges, LookupMessage};
-use crate::relations::BusId;
+use crate::{
+    logup::{Challenges, LookupMessage},
+    relations::BusId,
+};
 
 /// LogUp message for the [`ChunkChain`](BusId::ChunkChain) relation: a
 /// 2-tuple `(chunk_seq_id_head, perm_seq_id_head)` binding the head of
@@ -38,10 +40,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
             BusId::ChunkChain as usize,
-            [
-                self.chunk_seq_id_head.clone(),
-                self.perm_seq_id_head.clone(),
-            ],
+            [self.chunk_seq_id_head.clone(), self.perm_seq_id_head.clone()],
         )
     }
 }

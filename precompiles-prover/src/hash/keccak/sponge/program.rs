@@ -18,18 +18,16 @@
 //! - `p_first` — 1 iff `p_idx == 0`; row-0-of-period boundary.
 //! - `p_rate_block` — 1 iff `p_idx ∈ [0, 17)`; rate XORin rows.
 //! - `p_capacity` — 1 iff `p_idx ∈ [17, 25)`; capacity rows.
-//! - `p_rc_active` — 1 iff `p_idx ∈ [0, 24)`; rows where the sponge
-//!   provides `RC[p_idx]` to the round chiplet (Keccak has only 24 RCs,
-//!   so slot 24 — the last capacity lane — carries no RC).
-//! - `p_squeeze_active` — 1 iff `p_idx ∈ [4, 25)`; non-digest state-lane
-//!   rows that consume the last-perm output on last-block periods.
+//! - `p_rc_active` — 1 iff `p_idx ∈ [0, 24)`; rows where the sponge provides `RC[p_idx]` to the
+//!   round chiplet (Keccak has only 24 RCs, so slot 24 — the last capacity lane — carries no RC).
+//! - `p_squeeze_active` — 1 iff `p_idx ∈ [4, 25)`; non-digest state-lane rows that consume the
+//!   last-perm output on last-block periods.
 //! - `p_pad_0x80` — 1 iff `p_idx == 25`; the dedicated lane-16 0x80 row.
-//! - `p_extra` — 1 iff `p_idx ∈ [26, 29)`; extra chunk-consume rows
-//!   where the last block mops up overshoot lanes past the rate (gated
-//!   to the last block by `b_sum` in the AIR; pure NOP otherwise).
-//! - `rc_val_lo`, `rc_val_hi` — the u32 halves of `RC[p_idx]` on
-//!   `p_rc_active` rows, `0` elsewhere. Provided to Memory64 at the
-//!   round chiplet's RC slot IP.
+//! - `p_extra` — 1 iff `p_idx ∈ [26, 29)`; extra chunk-consume rows where the last block mops up
+//!   overshoot lanes past the rate (gated to the last block by `b_sum` in the AIR; pure NOP
+//!   otherwise).
+//! - `rc_val_lo`, `rc_val_hi` — the u32 halves of `RC[p_idx]` on `p_rc_active` rows, `0` elsewhere.
+//!   Provided to Memory64 at the round chiplet's RC slot IP.
 
 use miden_core::Felt;
 
@@ -110,24 +108,24 @@ pub const NUM_RC: usize = 24;
 pub const KECCAK_RC: [u64; NUM_RC] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,
-    0x8000_0000_0000_808A,
+    0x8000_0000_0000_808a,
     0x8000_0000_8000_8000,
-    0x0000_0000_0000_808B,
+    0x0000_0000_0000_808b,
     0x0000_0000_8000_0001,
     0x8000_0000_8000_8081,
     0x8000_0000_0000_8009,
-    0x0000_0000_0000_008A,
+    0x0000_0000_0000_008a,
     0x0000_0000_0000_0088,
     0x0000_0000_8000_8009,
-    0x0000_0000_8000_000A,
-    0x0000_0000_8000_808B,
-    0x8000_0000_0000_008B,
+    0x0000_0000_8000_000a,
+    0x0000_0000_8000_808b,
+    0x8000_0000_0000_008b,
     0x8000_0000_0000_8089,
     0x8000_0000_0000_8003,
     0x8000_0000_0000_8002,
     0x8000_0000_0000_0080,
-    0x0000_0000_0000_800A,
-    0x8000_0000_8000_000A,
+    0x0000_0000_0000_800a,
+    0x8000_0000_8000_000a,
     0x8000_0000_8000_8081,
     0x8000_0000_0000_8080,
     0x0000_0000_8000_0001,

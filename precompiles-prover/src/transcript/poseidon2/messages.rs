@@ -1,13 +1,12 @@
 //! LogUp messages for the Poseidon2 chiplet.
 //!
 //! Two messages, one per bus:
-//! - [`Poseidon2InMsg`] (bus [`BusId::Poseidon2In`]) carries a 6-tuple
-//!   `(perm_seq_id, tag, c0, c1, c2, c3)` with `tag ∈ {0, 1, 2}` selecting
-//!   rate0 / rate1 / capacity. The chiplet provides three of these per
-//!   active row 0 (chain heads emit all three; chain interiors omit cap).
-//! - [`Poseidon2OutMsg`] (bus [`BusId::Poseidon2Out`]) carries a 5-tuple
-//!   `(perm_seq_id, d0, d1, d2, d3)` for the post-permutation digest. The
-//!   chiplet provides one per active row 15 of a chain-tail cycle.
+//! - [`Poseidon2InMsg`] (bus [`BusId::Poseidon2In`]) carries a 6-tuple `(perm_seq_id, tag, c0, c1,
+//!   c2, c3)` with `tag ∈ {0, 1, 2}` selecting rate0 / rate1 / capacity. The chiplet provides three
+//!   of these per active row 0 (chain heads emit all three; chain interiors omit cap).
+//! - [`Poseidon2OutMsg`] (bus [`BusId::Poseidon2Out`]) carries a 5-tuple `(perm_seq_id, d0, d1, d2,
+//!   d3)` for the post-permutation digest. The chiplet provides one per active row 15 of a
+//!   chain-tail cycle.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -28,8 +27,8 @@ pub const POSEIDON2_IN_TAG_CAP: u8 = 2;
 /// Poseidon2 input state.
 ///
 /// - `perm_seq_id` — sequential permutation identifier, unique per cycle.
-/// - `tag` — chunk selector: `0 = rate0` (state[0..4]),
-///   `1 = rate1` (state[4..8]), `2 = capacity` (state[8..12]).
+/// - `tag` — chunk selector: `0 = rate0` (state[0..4]), `1 = rate1` (state[4..8]), `2 = capacity`
+///   (state[8..12]).
 /// - `c0..c3` — the four felts of the selected chunk.
 ///
 /// Encoded as `bus_prefix[Poseidon2In] + β⁰·perm_seq_id + β¹·tag +
@@ -110,9 +109,6 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let [d0, d1, d2, d3] = self.digest.clone();
-        challenges.encode(
-            BusId::Poseidon2Out as usize,
-            [self.perm_seq_id.clone(), d0, d1, d2, d3],
-        )
+        challenges.encode(BusId::Poseidon2Out as usize, [self.perm_seq_id.clone(), d0, d1, d2, d3])
     }
 }

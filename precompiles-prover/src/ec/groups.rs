@@ -36,18 +36,18 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-
-use miden_lifted_air::AirBuilder;
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::EcGroupMsg;
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    ec::EcGroupMsg,
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, next_main},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, next_main};
 
 // COLUMN LAYOUT
 // ================================================================================================
@@ -91,10 +91,6 @@ impl BaseAir<Felt> for EcGroupsAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        Vec::new()
-    }
-
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -128,9 +124,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
         // included (they are just mult = 0 rows), so ptr → tuple is
         // injective by construction. The wrap edge is dropped, keeping
         // the cyclic last → first transition free.
-        builder
-            .when_transition()
-            .assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
+        builder.when_transition().assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
         builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
 
         // Phase 2: LogUp.
@@ -169,8 +163,8 @@ where
         // Pads zero the mult cell, so the provide needs no act gate.
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
 
-        let provide_deg = Deg { n: 1, d: 1 };
-        let col_deg = Deg { n: 1, d: 1 };
+        let provide_deg = Deg { v: 1, u: 1 };
+        let col_deg = Deg { v: 1, u: 1 };
 
         builder.next_column(
             |col| {
