@@ -128,7 +128,10 @@ fn blake3_bench(c: &mut Criterion) {
             group.bench_function("execute_sync", |b| {
                 b.iter_batched(
                     || fixture.clone(),
-                    |fixture| black_box(execute_program(&fixture)),
+                    |fixture| {
+                        execute_program(&fixture);
+                        black_box(())
+                    },
                     BatchSize::SmallInput,
                 );
             });
