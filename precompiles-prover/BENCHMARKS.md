@@ -10,9 +10,10 @@ by carrying the same benches through both configurations.
 
 - **Hardware** — Apple M3 Max, 16 cores, 64 GB RAM.
 - **Toolchain** — `rustc 1.94.1` (release; `cargo run --release --example …`).
-- **Prover params** — `miden-lifted-stark` 0.26, `log_blowup = 3` (blowup 8),
-  4 FRI queries (the repo's test config in `stark_config.rs`). `D_max = 3`
-  on `main` (`PoseidonAir` × KeccakSponge pin the shared quotient).
+- **Prover params at measurement time** — `miden-lifted-stark` 0.26,
+  `log_blowup = 3` (blowup 8), 4 FRI queries (the repo's test config in
+  `stark_config.rs`). `D_max = 3` on `main` (`PoseidonAir` × KeccakSponge
+  pin the shared quotient). Re-run before treating these as current numbers.
 - **Two commitment hashers measured side-by-side**
   - **P2** — Poseidon2 over Goldilocks for the LMCS sponge / Merkle
     compression / Fiat-Shamir challenger (the repo's current default).
@@ -361,7 +362,7 @@ The BLAKE3 numbers below come from a short-lived edit to
 [`src/stark_config.rs`](src/stark_config.rs) applied only for the
 measurement run — `main` stays on the production Poseidon2 commitment
 hash. The swap is three type aliases plus their constructors (plus
-`p3-blake3 = "0.5.2"` added to `Cargo.toml`):
+`p3-blake3` added to `Cargo.toml` at the matching Plonky3 version):
 
 | component | before (P2, on `main`) | swapped to (BLAKE3, measurement-only) |
 |---|---|---|

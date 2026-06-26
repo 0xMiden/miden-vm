@@ -38,9 +38,11 @@ use core::array;
 
 use miden_core::{
     Felt,
+    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_precompiles::Keccak256Precompile;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -52,7 +54,6 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        deferred_tags,
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     utils::{current_main, next_main},
@@ -360,13 +361,12 @@ where
             - LB::Expr::from(Felt::from(128u8));
 
         // Capacities.
-        let cap_digest_chunks = deferred_tags::chunks().map(|felt| LB::Expr::from(felt));
-        let [keccak_id, assertion_disc, _zero_len, zero] = deferred_tags::keccak_assert(0);
+        let cap_digest_chunks = Tag::CHUNKS.as_word().map(|felt| LB::Expr::from(felt));
         let cap_keccak = [
-            LB::Expr::from(keccak_id),
-            LB::Expr::from(assertion_disc),
+            LB::Expr::from(Keccak256Precompile::id()),
+            LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
             len_bytes.clone(),
-            LB::Expr::from(zero),
+            LB::Expr::ZERO,
         ];
 
         // Rate splits.

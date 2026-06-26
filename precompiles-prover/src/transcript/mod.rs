@@ -9,7 +9,6 @@
 //! Uint / group leaf + eval arms join as the language grows.
 
 pub mod binding;
-pub mod deferred_tags;
 pub mod eval;
 pub mod nodes;
 pub mod poseidon2;

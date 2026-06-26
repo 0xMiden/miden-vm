@@ -10,7 +10,6 @@ mod bitwise64;
 mod byte_pair_lut;
 mod chunk;
 mod deferred_state;
-mod deferred_tags;
 mod ec;
 mod ec_add;
 mod ec_dag;

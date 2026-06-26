@@ -81,9 +81,8 @@ cargo run --release --example ec_scalar_mul             # EC scalar multiplicati
 cargo run --release --example bench_uint_horner         # 256-bit uint throughput (Horner eval)
 ```
 
-The crate pins `miden-vm` via a SHA-pinned git dependency (see `Cargo.toml`)
-and depends on `miden-lifted-air` / `miden-lifted-stark = "0.26"` from crates.io
-(p3 0.5.2 / miden-crypto 0.24 unchanged — no substrate bump).
+The crate is a VM workspace member and uses the workspace `miden-*`
+dependencies. See `Cargo.toml` for the lifted-STARK and Plonky3 versions.
 
 ## Layout
 

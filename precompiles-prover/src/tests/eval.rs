@@ -11,8 +11,7 @@
 //! the eval chip's local constraints + its internal σ recurrence, not
 //! cross-chiplet bus balance — that's the full-stack integration test.
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, deferred::Tag, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
@@ -22,7 +21,7 @@ use rand::{Rng, SeedableRng};
 use crate::ec::trace::EcStoreRequires;
 use crate::logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES};
 use crate::math::{U256, from_limbs32};
-use crate::transcript::deferred_tags;
+
 use crate::transcript::eval::trace::{
     TranscriptEvalRequires, Truthy, generate_trace, transcript_node_hash,
 };
@@ -66,13 +65,7 @@ fn lay_uint_leaf(
     value: [u32; 8],
 ) {
     let mut scratch = UintStoreRequires::new();
-    req.uint_leaf(
-        UintPtr::forged(ptr),
-        UintPtr::forged(bound_ptr),
-        value,
-        &mut scratch,
-        p2,
-    );
+    req.uint_leaf(UintPtr::forged(ptr), UintPtr::forged(bound_ptr), value, &mut scratch, p2);
 }
 
 /// `K` random keccak-style claims left-folded from a `ZERO_HASH` base
@@ -87,10 +80,7 @@ fn build_eval_trace(rng: &mut impl Rng, k: usize) -> (RowMajorMatrix<Felt>, P2Di
         acc = fold_one(&mut req, &mut p2, acc, h);
     }
     let public_root = acc.hash();
-    (
-        generate_trace(req, acc, &EcStoreRequires::new()),
-        public_root,
-    )
+    (generate_trace(req, acc, &EcStoreRequires::new()), public_root)
 }
 
 fn check_with_k(seed: u64, k: usize) {
@@ -143,10 +133,7 @@ fn main_column_layout_matches_declared_width() {
     // Layout is a contiguous partition by construction (each COL_* is
     // `prev + 1`); the load-bearing invariant is that the AIR's declared
     // width matches NUM_MAIN_COLS.
-    assert_eq!(
-        <TranscriptEvalAir as BaseAir<Felt>>::width(&TranscriptEvalAir),
-        NUM_MAIN_COLS,
-    );
+    assert_eq!(<TranscriptEvalAir as BaseAir<Felt>>::width(&TranscriptEvalAir), NUM_MAIN_COLS,);
 }
 
 #[test]
@@ -235,7 +222,7 @@ fn transcript_node_hash_uses_vm_and_cap() {
     let lhs = P2Digest([Felt::from(11u32); 4]);
     let rhs = P2Digest([Felt::from(22u32); 4]);
     let expected = Poseidon2Requires::digest_of(
-        P2Cap(deferred_tags::and()),
+        P2Cap(Tag::AND.as_word()),
         &[(lhs.as_array(), rhs.as_array())],
     );
 
@@ -287,10 +274,7 @@ fn zero_leaves_merge_into_one_row() {
         .filter(|&r| main.values[r * NUM_MAIN_COLS + COL_IS_ZERO] == Felt::ONE)
         .collect();
     assert_eq!(zero_rows.len(), 1, "two zero leaves merge into one row");
-    assert_eq!(
-        main.values[zero_rows[0] * NUM_MAIN_COLS + COL_OUT_MULT],
-        Felt::from(2u8),
-    );
+    assert_eq!(main.values[zero_rows[0] * NUM_MAIN_COLS + COL_OUT_MULT], Felt::from(2u8),);
 
     // The merged trace still validates.
     crate::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
@@ -355,23 +339,13 @@ fn constraints_hold_on_larger_tree() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_act() {
-    check_corrupted(
-        0xC0,
-        1,
-        |main| main.values[COL_ACT] = Felt::from(2u8),
-        |_| {},
-    );
+    check_corrupted(0xC0, 1, |main| main.values[COL_ACT] = Felt::from(2u8), |_| {});
 }
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_zero() {
-    check_corrupted(
-        0xC1,
-        3,
-        |main| main.values[COL_IS_ZERO] = Felt::from(2u8),
-        |_| {},
-    );
+    check_corrupted(0xC1, 3, |main| main.values[COL_IS_ZERO] = Felt::from(2u8), |_| {});
 }
 
 #[test]
@@ -436,13 +410,7 @@ fn corruption_pinned_leaf_pin_ptr_mismatch() {
     let zero = req.zero();
     let value: [u32; 8] = core::array::from_fn(|_| rng.random());
     let mut scratch = UintStoreRequires::new();
-    let pinned = req.pin_uint(
-        UintPtr::forged(7),
-        UintPtr::forged(7),
-        value,
-        &mut scratch,
-        &mut p2,
-    );
+    let pinned = req.pin_uint(UintPtr::forged(7), UintPtr::forged(7), value, &mut scratch, &mut p2);
     let root = fold_one(&mut req, &mut p2, zero, pinned);
     let public_root = root.hash();
     let mut main = generate_trace(req, root, &EcStoreRequires::new());

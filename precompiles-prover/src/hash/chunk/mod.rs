@@ -19,6 +19,7 @@ use core::array;
 pub use message::ChunkChainMsg;
 use miden_core::{
     Felt,
+    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
@@ -31,7 +32,7 @@ use crate::{
         LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::{deferred_tags, poseidon2::Poseidon2InMsg},
+    transcript::poseidon2::Poseidon2InMsg,
     utils::{current_main, next_main},
 };
 
@@ -259,7 +260,7 @@ where
 
         let rate0_chunk = [f[0].clone(), f[1].clone(), f[2].clone(), f[3].clone()];
         let rate1_chunk = [f[4].clone(), f[5].clone(), f[6].clone(), f[7].clone()];
-        let cap_chunk = deferred_tags::chunks().map(|felt| LB::Expr::from(felt));
+        let cap_chunk = Tag::CHUNKS.as_word().map(|felt| LB::Expr::from(felt));
 
         let interaction_deg = Deg { v: 1, u: 1 };
         // Col 0 Memory64: one batch, 4 product inserts. d = 4; every

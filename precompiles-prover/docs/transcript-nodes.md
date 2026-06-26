@@ -62,11 +62,10 @@ into every node's hash without consuming a rate slot.
 
 ## Tag enumeration
 
-VM-owned caps are sourced through
-[`src/transcript/deferred_tags.rs`](../src/transcript/deferred_tags.rs).
-The remaining local caps are registered in
-[`src/transcript/nodes.rs`](../src/transcript/nodes.rs) (`NodeTag` enum +
-`CURRENT_VERSION`).
+VM-owned caps come directly from `miden_core::deferred::Tag` and
+`miden_precompiles::Keccak256Precompile`. The remaining local caps are
+registered in [`src/transcript/nodes.rs`](../src/transcript/nodes.rs)
+(`NodeTag` enum + `CURRENT_VERSION`).
 
 | Capacity word | Name | `val[8]` |
 |---|---|---|
