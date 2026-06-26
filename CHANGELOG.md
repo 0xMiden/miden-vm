@@ -11,6 +11,7 @@
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering.
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
+- [BREAKING] MAST forest payloads now include sorted root and dependency digests, so commitment inputs round trip ([#3294](https://github.com/0xMiden/miden-vm/pull/3294)).
 
 ## v0.24.0 (2026-06-24)
 
