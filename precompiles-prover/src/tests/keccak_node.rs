@@ -6,27 +6,37 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption of the activity flag, boundary, and continuity edges.
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::hash::chunk::trace::ChunkSeqId;
-use crate::hash::keccak::node::trace::{
-    KeccakNodeInvocation, generate_trace_from_invocations, hash_digest_chunks, hash_keccak_node,
+use crate::{
+    hash::{
+        chunk::trace::ChunkSeqId,
+        keccak::{
+            node::{
+                COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_H_DIGEST_CHUNKS_BEGIN,
+                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS,
+                COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS,
+                COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS,
+                NUM_MAIN_COLS,
+                trace::{
+                    KeccakNodeInvocation, generate_trace_from_invocations, hash_digest_chunks,
+                    hash_keccak_node,
+                },
+            },
+            sponge::trace::SpongeSeqId,
+        },
+    },
+    logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    transcript::{
+        deferred_tags,
+        poseidon2::{
+            P2Cap,
+            trace::{PermSeqId, Poseidon2Requires},
+        },
+    },
 };
-use crate::hash::keccak::node::{
-    COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_H_DIGEST_CHUNKS_BEGIN,
-    COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS, COL_N_SPONGE_PERMS,
-    COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS, COL_PERM_SEQ_ID_KECCAK,
-    COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS, NUM_MAIN_COLS,
-};
-use crate::hash::keccak::sponge::trace::SpongeSeqId;
-use crate::logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES};
-use crate::transcript::deferred_tags;
-use crate::transcript::poseidon2::P2Cap;
-use crate::transcript::poseidon2::trace::{PermSeqId, Poseidon2Requires};
 
 // HELPERS
 // ================================================================================================
@@ -102,10 +112,7 @@ fn main_column_layout_partitions_30_indices() {
     assert_eq!(COL_H_KECCAK_BEGIN, 25);
     assert_eq!(COL_OUT_MULT, 29);
     assert_eq!(NUM_MAIN_COLS, 30);
-    assert_eq!(
-        <KeccakNodeAir as BaseAir<Felt>>::width(&KeccakNodeAir),
-        NUM_MAIN_COLS,
-    );
+    assert_eq!(<KeccakNodeAir as BaseAir<Felt>>::width(&KeccakNodeAir), NUM_MAIN_COLS,);
 }
 
 #[test]
@@ -174,9 +181,9 @@ fn constraints_hold_on_single_invocation() {
 
 #[test]
 fn constraints_hold_on_multi_invocation_with_continuity() {
-    let inv0 = anchored_inv(0xA0, 50);
-    let inv1 = next_inv(&inv0, 0xA1, 100);
-    let inv2 = next_inv(&inv1, 0xA2, 200);
+    let inv0 = anchored_inv(0xa0, 50);
+    let inv1 = next_inv(&inv0, 0xa1, 100);
+    let inv2 = next_inv(&inv1, 0xa2, 200);
     check_with_invocations(0x02, &[inv0, inv1, inv2]);
 }
 
@@ -205,7 +212,7 @@ fn corrupt_and_check(
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_act() {
-    corrupt_and_check(0xC0, &[anchored_inv(0x11, 50)], |main| {
+    corrupt_and_check(0xc0, &[anchored_inv(0x11, 50)], |main| {
         main.values[COL_ACT] = Felt::from(2u8);
     });
 }
@@ -215,7 +222,7 @@ fn corruption_non_binary_act() {
 fn corruption_sponge_seq_id_head_boundary() {
     // when_first_row · sponge_seq_id_head = 0 — non-zero at row 0
     // violates the boundary.
-    corrupt_and_check(0xC1, &[anchored_inv(0x11, 50)], |main| {
+    corrupt_and_check(0xc1, &[anchored_inv(0x11, 50)], |main| {
         main.values[COL_SPONGE_SEQ_ID_HEAD] = Felt::from(7u8);
     });
 }
@@ -223,7 +230,7 @@ fn corruption_sponge_seq_id_head_boundary() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_chunk_seq_id_head_boundary() {
-    corrupt_and_check(0xC2, &[anchored_inv(0x11, 50)], |main| {
+    corrupt_and_check(0xc2, &[anchored_inv(0x11, 50)], |main| {
         main.values[COL_CHUNK_SEQ_ID_HEAD] = Felt::from(11u8);
     });
 }
@@ -233,9 +240,9 @@ fn corruption_chunk_seq_id_head_boundary() {
 fn corruption_sponge_continuity() {
     // Break the sponge-namespace continuity: bump invocation 1's
     // sponge_seq_id_head off the `+32·n_sponge_perms` step.
-    let inv0 = anchored_inv(0xA0, 50);
-    let inv1 = next_inv(&inv0, 0xA1, 100);
-    corrupt_and_check(0xC3, &[inv0, inv1], |main| {
+    let inv0 = anchored_inv(0xa0, 50);
+    let inv1 = next_inv(&inv0, 0xa1, 100);
+    corrupt_and_check(0xc3, &[inv0, inv1], |main| {
         main.values[NUM_MAIN_COLS + COL_SPONGE_SEQ_ID_HEAD] += Felt::ONE;
     });
 }
@@ -243,9 +250,9 @@ fn corruption_sponge_continuity() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_chunk_continuity() {
-    let inv0 = anchored_inv(0xA0, 50);
-    let inv1 = next_inv(&inv0, 0xA1, 100);
-    corrupt_and_check(0xC4, &[inv0, inv1], |main| {
+    let inv0 = anchored_inv(0xa0, 50);
+    let inv1 = next_inv(&inv0, 0xa1, 100);
+    corrupt_and_check(0xc4, &[inv0, inv1], |main| {
         main.values[NUM_MAIN_COLS + COL_CHUNK_SEQ_ID_HEAD] += Felt::ONE;
     });
 }
@@ -262,9 +269,9 @@ fn corruption_act_sticky_down_violated() {
     // Sticky-down `(1−act)·act_next = 0` forbids any 0→1 transition.
     // Generate a 2-invocation trace (height 2), then flip row 0
     // inactive — row 1 stays active, giving the forbidden 0→1.
-    let inv0 = anchored_inv(0xA0, 50);
-    let inv1 = next_inv(&inv0, 0xA1, 100);
-    corrupt_and_check(0xC6, &[inv0, inv1], |main| {
+    let inv0 = anchored_inv(0xa0, 50);
+    let inv1 = next_inv(&inv0, 0xa1, 100);
+    corrupt_and_check(0xc6, &[inv0, inv1], |main| {
         main.values[COL_ACT] = Felt::ZERO;
     });
 }

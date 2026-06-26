@@ -270,9 +270,7 @@ where
             self.ab
                 .when_transition()
                 .assert_zero_ext(u.clone() * (acc_next - all_curr_sum.clone()) - v.clone());
-            self.ab
-                .when_last_row()
-                .assert_zero_ext(u * (sigma - all_curr_sum) - v);
+            self.ab.when_last_row().assert_zero_ext(u * (sigma - all_curr_sum) - v);
         } else {
             // Fraction column. Per-row equation D_i·acc[i] = N_i must
             // hold on every row (no last-row exception); ungated.

@@ -44,21 +44,20 @@
 
 use std::time::Instant;
 
-use k256::FieldBytes;
-use k256::ProjectivePoint;
-use k256::Scalar;
-use k256::elliptic_curve::PrimeField;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
-use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use precompile_experiments::math::{U256, U512, U576, from_hex};
-use precompile_experiments::session::strategies::{
-    WnafTable, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table,
+use k256::{
+    FieldBytes, ProjectivePoint, Scalar,
+    elliptic_curve::{PrimeField, sec1::ToEncodedPoint},
 };
-use precompile_experiments::session::{ChipletAir, EcNode, Session, Truthy, UintNode};
+use miden_lifted_air::LiftedAir;
+use miden_precompiles_prover::{
+    math::{U256, U512, U576, from_hex},
+    session::{
+        ChipletAir, EcNode, Session, Truthy, UintNode,
+        strategies::{WnafTable, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table},
+    },
+};
+use p3_matrix::Matrix;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 const FP: u32 = 1;
 const A_PTR: u32 = 2;
@@ -99,10 +98,7 @@ fn be(bytes: impl AsRef<[u8]>) -> U256 {
 
 fn coords(p: &ProjectivePoint) -> (U256, U256) {
     let enc = p.to_affine().to_encoded_point(false);
-    (
-        be(enc.x().expect("finite point")),
-        be(enc.y().expect("finite point")),
-    )
+    (be(enc.x().expect("finite point")), be(enc.y().expect("finite point")))
 }
 
 /// A `bits`-bit scalar (`bits ≤ 255`, so always `< n`), top bit forced.
@@ -219,12 +215,9 @@ fn verify_signature(
             let q_table = wnaf_table(s, &q_pt, WNAF_W);
             wnaf_msm(
                 s,
-                &[
-                    (g_table.expect("the wnaf strategy needs G's table"), u1),
-                    (&q_table, u2),
-                ],
+                &[(g_table.expect("the wnaf strategy needs G's table"), u1), (&q_table, u2)],
             )
-        }
+        },
         Strategy::Glv => unreachable!("glv is routed to verify_signature_glv"),
     };
 
@@ -253,10 +246,7 @@ struct Signed {
 
 impl Signed {
     fn new(neg: bool, mag: U512) -> Self {
-        Self {
-            neg: neg && mag != U512::ZERO,
-            mag,
-        }
+        Self { neg: neg && mag != U512::ZERO, mag }
     }
     fn from_u256(v: U256) -> Self {
         Self::new(false, U512::from(v))
@@ -304,10 +294,7 @@ fn glv_decompose(k: U256, lambda: U256, n: U256) -> [(bool, U256); 2] {
     // Half extended-Euclid: keep (r, t) with r ≡ t·λ (mod n); stop at the
     // first remainder below √n.
     let (mut r0, mut r1) = (U512::from(n), U512::from(lambda));
-    let (mut t0, mut t1) = (
-        Signed::from_u256(U256::ZERO),
-        Signed::from_u256(U256::from(1u64)),
-    );
+    let (mut t0, mut t1) = (Signed::from_u256(U256::ZERO), Signed::from_u256(U256::from(1u64)));
     while !below_sqrt_n(r1) {
         let q = r0 / r1;
         let (r2, t2) = (r0 - q * r1, t0.sub(Signed::new(false, q).mul(t1)));
@@ -364,12 +351,11 @@ fn signed_hat(s: &mut Session, neg: bool, mag: &UintNode) -> UintNode {
 /// soundness claims that make it an honest `R = u₁·G + u₂·Q` rather than an
 /// arbitrary 4-base sum:
 ///
-/// 1. **Endomorphism.** Each `φ(P)` base is built by [`create_phi`]: its
-///    x-coordinate is bound to `β·x_P mod p` (a `UintMul`) and `EcCreate`
-///    proves it on-curve — so `φ(P) = λ·P` is enforced, not trusted.
-/// 2. **Split.** `uᵢ ≡ k_iₐ + k_iᵦ·λ (mod n)` is checked by `UintMul` +
-///    `UintAdd` + `Is` over the scalar field `n`, on the *same* scalar nodes
-///    the MSM consumes.
+/// 1. **Endomorphism.** Each `φ(P)` base is built by [`create_phi`]: its x-coordinate is bound to
+///    `β·x_P mod p` (a `UintMul`) and `EcCreate` proves it on-curve — so `φ(P) = λ·P` is enforced,
+///    not trusted.
+/// 2. **Split.** `uᵢ ≡ k_iₐ + k_iᵦ·λ (mod n)` is checked by `UintMul` + `UintAdd` + `Is` over the
+///    scalar field `n`, on the *same* scalar nodes the MSM consumes.
 ///
 /// Unlike a generated split, the halves come from a real [`glv_decompose`]
 /// of each full `uᵢ`, so they are **signed**. The sign rides the *base* via
@@ -419,11 +405,7 @@ fn verify_signature_glv(
     );
     let bound = U256::from(1u64) << (GLV_BITS + 2); // √n basis is ≤ ~129 bits
     for (_, m) in [k1a, k1b, k2a, k2b] {
-        assert!(
-            m < bound,
-            "GLV half exceeds the ~{}-bit ladder bound",
-            GLV_BITS
-        );
+        assert!(m < bound, "GLV half exceeds the ~{}-bit ladder bound", GLV_BITS);
     }
     // Show the signed ~128-bit halves — the `−` ones are routed through ec_neg;
     // the max bit-width is the joint ladder's doubling count (vs 256 unsplit).
@@ -461,12 +443,7 @@ fn verify_signature_glv(
     // GLV has already halved the doublings.
     let acc = joint_wnaf(
         s,
-        &[
-            (base_g, k1a.1),
-            (base_pg, k1b.1),
-            (base_q, k2a.1),
-            (base_pq, k2b.1),
-        ],
+        &[(base_g, k1a.1), (base_pg, k1b.1), (base_q, k2a.1), (base_pq, k2b.1)],
         GLV_W,
     );
     let (vx, vy) = s.msm_value_coords(acc);
@@ -478,10 +455,7 @@ fn verify_signature_glv(
     let m2a = s.uint_leaf(k2a.1, SN_PTR);
     let m2b = s.uint_leaf(k2b.1, SN_PTR);
     let r_pt = create(s, &r_ref);
-    let value = s.ec_msm(
-        acc,
-        &[(base_g, m1a), (base_pg, m1b), (base_q, m2a), (base_pq, m2b)],
-    );
+    let value = s.ec_msm(acc, &[(base_g, m1a), (base_pg, m1b), (base_q, m2a), (base_pq, m2b)]);
     let msm_claim = s.ec_is(&value, &r_pt);
 
     // Split certs: uᵢ ≡ âₐ + âᵦ·λ (mod n), âⱼ = ±|kⱼ| (uint_neg for a negative
@@ -525,19 +499,10 @@ fn main() {
             .init();
     }
 
-    let n: usize = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(4);
-    let bits: usize = std::env::args()
-        .nth(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(255);
+    let n: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(4);
+    let bits: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(255);
     let strat = Strategy::parse(&std::env::args().nth(3).unwrap_or_default());
-    let seed: u64 = std::env::args()
-        .nth(4)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0xEC5DA);
+    let seed: u64 = std::env::args().nth(4).and_then(|s| s.parse().ok()).unwrap_or(0xec5da);
     assert!(n >= 1, "N >= 1");
     assert!((1..=255).contains(&bits), "bits in 1..=255");
 
@@ -546,10 +511,7 @@ fn main() {
 
     println!("=================================================");
     println!("ec_msm_ecdsa: prove {n} × (R = u1*G + u2*Q) on secp256k1");
-    println!(
-        "  {bits}-bit scalars, seed 0x{seed:X}, strategy: {}",
-        strat.name(),
-    );
+    println!("  {bits}-bit scalars, seed 0x{seed:X}, strategy: {}", strat.name(),);
     println!("=================================================");
 
     let gen_start = Instant::now();
@@ -593,7 +555,7 @@ fn main() {
     // (the selected strategy), and resolves in-circuit; all N claims fold
     // into one root.
     for k in 0..n {
-        let sig_seed = seed ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15);
+        let sig_seed = seed ^ (k as u64).wrapping_mul(0x9e3779b97f4a7c15);
         match strat {
             Strategy::Glv => {
                 let (beta_p, lambda_n, phi_g_pt) = glv.as_ref().expect("glv sets up shared bases");
@@ -607,7 +569,7 @@ fn main() {
                     lambda_n,
                     sig_seed,
                 ));
-            }
+            },
             _ => claims.push(verify_signature(
                 &mut session,
                 g,
@@ -676,11 +638,8 @@ fn main() {
     match verify_result {
         Ok(()) => {
             println!("verify_multi     : {verify_elapsed:?}");
-            println!(
-                "✓ prove+verify OK — proved {n} × 2-base MSM ({}) on secp256k1",
-                strat.name(),
-            );
-        }
+            println!("✓ prove+verify OK — proved {n} × 2-base MSM ({}) on secp256k1", strat.name(),);
+        },
         Err(err) => println!("verify_multi     : {verify_elapsed:?} → {err:?}"),
     }
 }

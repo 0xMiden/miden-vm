@@ -84,13 +84,16 @@ use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::UintValMsg,
+    utils::{current_main, next_main},
 };
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::UintValMsg;
-use crate::utils::{current_main, next_main};
 
 // MESSAGES
 // ================================================================================================
@@ -243,9 +246,7 @@ impl BaseAir<Felt> for UintAddAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for UintAddAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         ROLE_ROWS
             .iter()
@@ -256,7 +257,9 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
             })
             .collect()
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for UintAddAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -322,15 +325,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         // over the *next* row (the hub rows fire their hi-half terms
         // against the following row's limbs) — plus the per-half carry
         // term Σⱼ limbⱼ·(β^{j+1} − t·βʲ) (lo: j=0..3, hi: j=4..6).
-        let lo_sum: AB::ExprEF = (0..4).fold(AB::ExprEF::ZERO, |s, k| {
-            s + bp[k].clone() * AB::Expr::from(local[k])
-        });
-        let hi_sum: AB::ExprEF = (0..4).fold(AB::ExprEF::ZERO, |s, k| {
-            s + bp[4 + k].clone() * AB::Expr::from(local[k])
-        });
-        let hi_sum_next: AB::ExprEF = (0..4).fold(AB::ExprEF::ZERO, |s, k| {
-            s + bp[4 + k].clone() * AB::Expr::from(next[k])
-        });
+        let lo_sum: AB::ExprEF =
+            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[k].clone() * AB::Expr::from(local[k]));
+        let hi_sum: AB::ExprEF =
+            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[4 + k].clone() * AB::Expr::from(local[k]));
+        let hi_sum_next: AB::ExprEF =
+            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[4 + k].clone() * AB::Expr::from(next[k]));
         let carry_lo_term: AB::ExprEF = (0..4).fold(AB::ExprEF::ZERO, |s, j| {
             let w = bp[j + 1].clone() - bp[j].clone() * t32.clone();
             s + w * AB::Expr::from(local[j])
@@ -377,9 +377,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
             - carry_hi_term * cneg_hi.clone();
 
         builder.when_first_row().assert_zero_ext(id.clone());
-        builder
-            .when_transition()
-            .assert_zero_ext(id_next - id.clone() - contrib);
+        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
         builder.assert_zero_ext(id * term_sel.clone());
 
         // k is the boolean reduction bit (a K-hub cell).
@@ -544,12 +542,12 @@ where
         let b_active_next: LB::Expr = LB::Expr::ONE - next[B_HUB_CELL_IS_B_ZERO].into();
         let b_active_here: LB::Expr = LB::Expr::ONE - local[B_HUB_CELL_IS_B_ZERO].into();
 
-        let consume_deg = Deg { n: 2, d: 1 };
-        let gated_consume_deg = Deg { n: 3, d: 1 };
-        let provide_deg = Deg { n: 2, d: 1 };
+        let consume_deg = Deg { v: 2, u: 1 };
+        let gated_consume_deg = Deg { v: 3, u: 1 };
+        let provide_deg = Deg { v: 2, u: 1 };
         // Flattened columns hold ≤ 2 fractions; the mixed p-hi+provide column
         // is a 2-denominator batch (degree-3 numerator, degree-2 denominator).
-        let cp_col_deg = Deg { n: 3, d: 2 };
+        let cp_col_deg = Deg { v: 3, u: 2 };
 
         // (consume flag, ptr, offset, limbs, deg) per operand half, split
         // across two fraction columns so neither exceeds the degree
@@ -564,13 +562,7 @@ where
                 limbs.clone(),
                 consume_deg,
             ),
-            (
-                sel[PCOL_A_HI].clone(),
-                a_ptr.clone(),
-                LB::Expr::ONE,
-                limbs.clone(),
-                consume_deg,
-            ),
+            (sel[PCOL_A_HI].clone(), a_ptr.clone(), LB::Expr::ONE, limbs.clone(), consume_deg),
             (
                 sel[PCOL_B_LO].clone() * b_active_next,
                 b_ptr.clone(),
@@ -608,13 +600,7 @@ where
                 limbs.clone(),
                 consume_deg,
             ),
-            (
-                sel[PCOL_P_HI].clone(),
-                bound_ptr.clone(),
-                LB::Expr::ONE,
-                limbs,
-                consume_deg,
-            ),
+            (sel[PCOL_P_HI].clone(), bound_ptr.clone(), LB::Expr::ONE, limbs, consume_deg),
         ];
 
         // Flattened LogUp (lqd 1), one/two fractions per column. The four

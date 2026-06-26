@@ -62,16 +62,15 @@ pub use constraint::{
     CombinedWindow, CyclicConstraintBatch, CyclicConstraintColumn, CyclicConstraintGroup,
     CyclicConstraintLookupBuilder, LookupMainWindow,
 };
-
 // Re-export miden-vm's framework so chiplets only need one `use`.
 pub use miden_air::lookup::{
     BoundaryBuilder, Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
     LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder, accumulate,
     build_lookup_fractions,
 };
+use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 // CHALLENGES
 // ================================================================================================
@@ -129,7 +128,5 @@ pub const NUM_SIGMA_VALUES: usize = 1;
 /// identity `Σ σ = 0` holds iff the returned value is zero, which
 /// `eval_external` surfaces as its single assertion expression.
 pub fn sigma_sum(aux_values: &[&[QuadFelt]]) -> QuadFelt {
-    aux_values
-        .iter()
-        .fold(QuadFelt::ZERO, |acc, av| acc + av[0])
+    aux_values.iter().fold(QuadFelt::ZERO, |acc, av| acc + av[0])
 }

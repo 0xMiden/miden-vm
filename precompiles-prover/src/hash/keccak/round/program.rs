@@ -4,19 +4,18 @@
 //! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The nine
 //! columns are:
 //!
-//! - `is_xor`, `is_andnot`, `is_rol` — selector flags. A fused XORROL row
-//!   sets both `is_xor` and `is_rol`.
-//! - `is_xorrol` — 1 exactly on fused XORROL rows (= `is_xor · is_rol`,
-//!   precomputed). Lets the chiplet recover a one-per-row "reads src_a"
-//!   count from the otherwise-overlapping selectors without a degree bump.
+//! - `is_xor`, `is_andnot`, `is_rol` — selector flags. A fused XORROL row sets both `is_xor` and
+//!   `is_rol`.
+//! - `is_xorrol` — 1 exactly on fused XORROL rows (= `is_xor · is_rol`, precomputed). Lets the
+//!   chiplet recover a one-per-row "reads src_a" count from the otherwise-overlapping selectors
+//!   without a degree bump.
 //! - `back_a`, `back_b` — source A / B back-offsets (`src_addr = ip - back`).
 //! - `k` — ROL shift multiplier `2^s` (0 when `is_rol = 0`).
 //! - `dst_mult` — destination provide multiplicity (0 on NOP rows).
-//! - `p_last` — 1 at slot 127 (the round's last slot), 0 elsewhere.
-//!   Used as the round-boundary indicator for the `act` within-round-
-//!   constant constraint: a row with `p_last = 1` is the row whose
-//!   transition into the next slot crosses a round boundary, so `act`
-//!   is allowed to change there.
+//! - `p_last` — 1 at slot 127 (the round's last slot), 0 elsewhere. Used as the round-boundary
+//!   indicator for the `act` within-round- constant constraint: a row with `p_last = 1` is the row
+//!   whose transition into the next slot crosses a round boundary, so `act` is allowed to change
+//!   there.
 //!
 //! Slot layout (period 128):
 //!
@@ -217,11 +216,9 @@ impl Source {
 /// - `Nop`: all selectors and dst_mult zero. RC slot or padding.
 /// - `Xor`: pure XOR (`is_xor = 1`, `k = 0`).
 /// - `Andnot`: pure ANDNOT (`is_andnot = 1`, `k = 0`).
-/// - `Rol(s)`: pure ROL by `s ∈ [1, 30]` bits (`is_rol = 1`, `k = 2^s`).
-///   Reads only src_a.
-/// - `XorRol(s)`: fused XOR-then-ROL (`is_xor = 1`, `is_rol = 1`,
-///   `k = 2^s`). `s ≥ 1` enforced at construction; `s = 0` degenerates
-///   to plain `Xor`.
+/// - `Rol(s)`: pure ROL by `s ∈ [1, 30]` bits (`is_rol = 1`, `k = 2^s`). Reads only src_a.
+/// - `XorRol(s)`: fused XOR-then-ROL (`is_xor = 1`, `is_rol = 1`, `k = 2^s`). `s ≥ 1` enforced at
+///   construction; `s = 0` degenerates to plain `Xor`.
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     Nop,
@@ -358,8 +355,7 @@ fn slot_table() -> [SlotSpec; ROUND_PERIOD] {
     // (pre-π) lane via π⁻¹ and emit either:
     //   - 1 row (ρ = 0 or ρ ≤ 30): XORROL(A[in], D[in_x], ρ).
     //   - 2 rows (30 < ρ ≤ 60): XORROL(_, _, 30) then XORROL(_, 0, ρ−30).
-    //   - 3 rows (60 < ρ ≤ 63): XORROL(_, _, 30), XORROL(_, 0, 30),
-    //     XORROL(_, 0, ρ−60).
+    //   - 3 rows (60 < ρ ≤ 63): XORROL(_, _, 30), XORROL(_, 0, 30), XORROL(_, 0, ρ−60).
     // Trailing rows are XORROL with `src_b = ZERO slot` (not pure ROL):
     // the dummy `Xor` lets Bitwise64's IR materialize a LOGIC predecessor
     // and a Carrier that the Rol row recycles, satisfying the
@@ -456,11 +452,7 @@ fn emit_apply_rpi(s: &mut [SlotSpec; ROUND_PERIOD], out_x: usize, out_y: usize) 
     // column for free. For in_y != 0 the lane *is* chained here, so keep it
     // in src_a — swapping those is a net loss (measured: blanket-swapping
     // all lanes costs +234 rows/keccak).
-    let (apply_a, apply_b) = if in_y == 0 {
-        (d_src, a_src)
-    } else {
-        (a_src, d_src)
-    };
+    let (apply_a, apply_b) = if in_y == 0 { (d_src, a_src) } else { (a_src, d_src) };
 
     // dst_mult for the final B[x][y] cell: read 3× in χ (as base for
     // (x, y), +1 arg for (x−1, y), +2 arg for (x−2, y)).

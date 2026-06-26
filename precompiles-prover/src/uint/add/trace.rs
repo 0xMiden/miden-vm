@@ -13,17 +13,17 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::logup::build_logup_aux_trace;
-use crate::math::{U256, add_reduce, from_limbs32, to_limbs32};
-use crate::relations::ProvideMult;
-use crate::uint::trace::{UintPtr, UintStoreRequires};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AUX_WIDTH, B_HUB_CELL_IS_B_ZERO, C_HUB_CELL_IS_C_ZERO, COL_A_PTR, COL_ACT, K_HUB_CELL_K,
     NUM_MAIN_COLS, PERIOD, UintAddAir,
+};
+use crate::{
+    logup::build_logup_aux_trace,
+    math::{U256, add_reduce, from_limbs32, to_limbs32},
+    relations::ProvideMult,
+    uint::trace::{UintPtr, UintStoreRequires},
 };
 
 /// One modular-addition op `a + b ≡ c (mod p)`: the three operand
@@ -97,15 +97,7 @@ impl UintAddRequires {
         bound: UintPtr,
         mult: ProvideMult,
     ) {
-        self.push(
-            AddOp {
-                a,
-                b: Some(b),
-                c: Some(c),
-                bound,
-            },
-            mult,
-        );
+        self.push(AddOp { a, b: Some(b), c: Some(c), bound }, mult);
     }
 
     /// Record `a + b ≡ 0 (mod p)` — the **negation** primitive (`b = −a`).
@@ -113,15 +105,7 @@ impl UintAddRequires {
     /// needs no reference to a stored zero (which can't be pinned untyped
     /// for an arbitrary modulus).
     pub fn record_to_zero(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr, mult: ProvideMult) {
-        self.push(
-            AddOp {
-                a,
-                b: Some(b),
-                c: None,
-                bound,
-            },
-            mult,
-        );
+        self.push(AddOp { a, b: Some(b), c: None, bound }, mult);
     }
 
     /// Record `a + 0 ≡ c (mod p)` — the **equality certificate** `a = c`
@@ -130,15 +114,7 @@ impl UintAddRequires {
     /// shared modulus the identity is exactly value equality — the EC
     /// group law's `x₁ = x₂` / `y₁ = y₂` case ties.
     pub fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
-        self.push(
-            AddOp {
-                a,
-                b: None,
-                c: Some(c),
-                bound,
-            },
-            mult,
-        );
+        self.push(AddOp { a, b: None, c: Some(c), bound }, mult);
     }
 
     fn push(&mut self, op: AddOp, mult: ProvideMult) {
@@ -147,7 +123,7 @@ impl UintAddRequires {
             None => {
                 self.dedup.insert(op, self.ops.len());
                 self.ops.push((op, mult));
-            }
+            },
         }
     }
 }
@@ -171,17 +147,9 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
     let bound_v = value(op.bound);
     let b_v = op.b.map_or(U256::ZERO, value);
     let c_v = op.c.map_or(U256::ZERO, value);
-    debug_assert_eq!(
-        add_reduce(value(op.a), b_v, bound_v),
-        c_v,
-        "a + b must reduce to c",
-    );
-    let (a, b, c, bound) = (
-        to_limbs32(value(op.a)),
-        to_limbs32(b_v),
-        to_limbs32(c_v),
-        to_limbs32(bound_v),
-    );
+    debug_assert_eq!(add_reduce(value(op.a), b_v, bound_v), c_v, "a + b must reduce to c",);
+    let (a, b, c, bound) =
+        (to_limbs32(value(op.a)), to_limbs32(b_v), to_limbs32(c_v), to_limbs32(bound_v));
 
     // k = (a + b ≥ p) = (a + b > bound), and γ⁺ = the carries of a + b.
     let (gamma_pos, top) = add_carries(|j| a[j] as u64 + b[j] as u64);
@@ -201,15 +169,7 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
         top, top_neg,
         "a + b and c + k·p must share the bit-256 carry (a + b = c + k·p)",
     );
-    Witness {
-        a,
-        b,
-        c,
-        bound,
-        k,
-        gamma_pos,
-        gamma_neg,
-    }
+    Witness { a, b, c, bound, k, gamma_pos, gamma_neg }
 }
 
 /// Build the UintAdd main trace from the recorded ops — one op = one
@@ -247,13 +207,7 @@ pub fn generate_trace(
             std::array::from_fn(|k| Felt::from(v[if hi { 4 + k } else { k }]))
         };
         let carry_row = |g: &[u16; 7], from: usize, count: usize| -> [Felt; 4] {
-            std::array::from_fn(|k| {
-                if k < count {
-                    Felt::from(g[from + k])
-                } else {
-                    Felt::ZERO
-                }
-            })
+            std::array::from_fn(|k| if k < count { Felt::from(g[from + k]) } else { Felt::ZERO })
         };
         let scalar_row = |s: Felt| -> [Felt; 4] { [s, Felt::ZERO, Felt::ZERO, Felt::ZERO] };
         let rows: [[Felt; 4]; PERIOD] = [
@@ -331,21 +285,15 @@ pub(crate) fn build_aux(
         // hubs read locally and fire against the next row's limbs.
         let cell_next = |c: usize| -> Felt { main.values[(r + 1) * NUM_MAIN_COLS + c] };
         let lo_sum = (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[c] * QuadFelt::from(limb(c)));
-        let hi_sum = (0..4).fold(QuadFelt::ZERO, |s, c| {
-            s + bp[4 + c] * QuadFelt::from(limb(c))
-        });
-        let carry_lo = (0..4).fold(QuadFelt::ZERO, |s, j| {
-            (s) + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(j))
-        });
+        let hi_sum = (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[4 + c] * QuadFelt::from(limb(c)));
+        let carry_lo = (0..4)
+            .fold(QuadFelt::ZERO, |s, j| (s) + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(j)));
         let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, m| {
             let j = 4 + m;
             s + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(m))
         });
-        let hi_next = || {
-            (0..4).fold(QuadFelt::ZERO, |s, c| {
-                s + bp[4 + c] * QuadFelt::from(cell_next(c))
-            })
-        };
+        let hi_next =
+            || (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[4 + c] * QuadFelt::from(cell_next(c)));
         let contrib: QuadFelt = match r % PERIOD {
             0 => lo_sum, // a_lo
             1 => hi_sum, // a_hi
@@ -353,32 +301,32 @@ pub(crate) fn build_aux(
             2 => {
                 let b_active = QuadFelt::ONE - QuadFelt::from(cell_next(B_HUB_CELL_IS_B_ZERO));
                 lo_sum * b_active
-            }
+            },
             // B-hub: b's hi half against the next row's limbs.
             3 => {
                 let b_active = QuadFelt::ONE - QuadFelt::from(limb(B_HUB_CELL_IS_B_ZERO));
                 hi_next() * b_active
-            }
+            },
             // c_lo: dropped when is_c_zero (the next row's C-hub cell).
             5 => {
                 let c_active = QuadFelt::ONE - QuadFelt::from(cell_next(C_HUB_CELL_IS_C_ZERO));
                 -(lo_sum * c_active)
-            }
+            },
             // C-hub: c's hi half against the next row's limbs.
             6 => {
                 let c_active = QuadFelt::ONE - QuadFelt::from(limb(C_HUB_CELL_IS_C_ZERO));
                 -(hi_next() * c_active)
-            }
+            },
             // p_lo: −k·(bound_lo(β) + 1), k from the next row's K-hub.
             8 => {
                 let k = QuadFelt::from(cell_next(K_HUB_CELL_K));
                 -(k * lo_sum + bp[0] * k)
-            }
+            },
             // K-hub: −k·bound_hi(β) against the next row's limbs.
             9 => {
                 let k = QuadFelt::from(limb(K_HUB_CELL_K));
                 -(k * hi_next())
-            }
+            },
             11 => carry_lo,      // cpos_lo
             12 => carry_hi,      // cpos_hi
             13 => -carry_lo,     // cneg_lo

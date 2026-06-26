@@ -2,18 +2,15 @@
 //!
 //! Per-invocation request tuple carrying:
 //!
-//! - `sponge_seq_id` — the sponge row at which the invocation's first
-//!   block begins absorbing (= the sponge's row counter at that row).
-//!   The transcript chiplet uses it to derive the digest address in
-//!   the round chiplet's IP space.
-//! - `chunk_ptr` — the chunk-tape base offset for this invocation
-//!   (= the sponge's `chunk_ptr` cursor value at that row). Shared
-//!   identifier with the chunk chiplet's per-invocation segment base;
-//!   pins the sponge's `chunk_ptr` at the invocation start (the
-//!   `chunk_ptr` chain is relaxed at invocation seams — see
-//!   `docs/chiplets/keccak-sponge.md`).
-//! - `len_bytes` — the length of the input in bytes; flows directly
-//!   into the sponge's `bytes_left_0` witness column on consume.
+//! - `sponge_seq_id` — the sponge row at which the invocation's first block begins absorbing (= the
+//!   sponge's row counter at that row). The transcript chiplet uses it to derive the digest address
+//!   in the round chiplet's IP space.
+//! - `chunk_ptr` — the chunk-tape base offset for this invocation (= the sponge's `chunk_ptr`
+//!   cursor value at that row). Shared identifier with the chunk chiplet's per-invocation segment
+//!   base; pins the sponge's `chunk_ptr` at the invocation start (the `chunk_ptr` chain is relaxed
+//!   at invocation seams — see `docs/chiplets/keccak-sponge.md`).
+//! - `len_bytes` — the length of the input in bytes; flows directly into the sponge's
+//!   `bytes_left_0` witness column on consume.
 //!
 //! Provided by the transcript chiplet (or whatever orchestrator
 //! triggers Keccak), consumed by the sponge chiplet at the first row
@@ -25,8 +22,10 @@
 
 use miden_core::field::Algebra;
 
-use crate::logup::{Challenges, LookupMessage};
-use crate::relations::BusId;
+use crate::{
+    logup::{Challenges, LookupMessage},
+    relations::BusId,
+};
 
 /// LogUp message for the per-invocation Keccak sponge request: a 3-tuple
 /// `(sponge_seq_id, chunk_ptr, len_bytes)`.
@@ -51,11 +50,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
             BusId::KeccakSponge as usize,
-            [
-                self.sponge_seq_id.clone(),
-                self.chunk_ptr.clone(),
-                self.len_bytes.clone(),
-            ],
+            [self.sponge_seq_id.clone(), self.chunk_ptr.clone(), self.len_bytes.clone()],
         )
     }
 }

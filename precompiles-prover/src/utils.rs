@@ -2,17 +2,14 @@
 //!
 //! Two themes:
 //!
-//! - **Field-element packing** ([`pack_le`], [`halves_le`]) — LSB-first
-//!   base-`base` digit reconstruction. Generic over the expression type
-//!   `E` and the variable type `V`, so the same helpers serve constraint
-//!   evaluation against either an `AirBuilder` or a `LookupBuilder`.
-//!   Both use Horner's method.
-//! - **Two-row window access** ([`current_main`], [`next_main`]) — extract
-//!   a fixed-size `[V; N]` from the current or next slice of any
-//!   [`WindowAccess`]-bearing window. Used to pull a row out of
-//!   `builder.main()` (or any other windowed source) and release the
-//!   window's borrow before calling further mutating methods on the
-//!   builder.
+//! - **Field-element packing** ([`pack_le`], [`halves_le`]) — LSB-first base-`base` digit
+//!   reconstruction. Generic over the expression type `E` and the variable type `V`, so the same
+//!   helpers serve constraint evaluation against either an `AirBuilder` or a `LookupBuilder`. Both
+//!   use Horner's method.
+//! - **Two-row window access** ([`current_main`], [`next_main`]) — extract a fixed-size `[V; N]`
+//!   from the current or next slice of any [`WindowAccess`]-bearing window. Used to pull a row out
+//!   of `builder.main()` (or any other windowed source) and release the window's borrow before
+//!   calling further mutating methods on the builder.
 //!
 //! Typical packing bases:
 //!
@@ -35,10 +32,7 @@ use p3_air::WindowAccess;
 /// canonical Goldilocks range (i.e. `base < 2^64 − 2^32 + 1`).
 pub fn pack_le<E: Algebra<Felt>, V: Copy + Into<E>>(items: &[V], base: u64) -> E {
     let base = Felt::new(base).expect("base fits in canonical Goldilocks range");
-    items
-        .iter()
-        .rev()
-        .fold(E::ZERO, |acc, &item| acc * base + item.into())
+    items.iter().rev().fold(E::ZERO, |acc, &item| acc * base + item.into())
 }
 
 /// Split `items` in half and [`pack_le`] each half independently.
@@ -96,7 +90,7 @@ where
 /// construction, where doing the multiply in `u64` then converting is
 /// cheaper than going through `Felt` mid-stream.
 pub fn split_u64_u32(x: u64) -> [u64; 2] {
-    [x & 0xFFFF_FFFF, x >> 32]
+    [x & 0xffff_ffff, x >> 32]
 }
 
 /// Split a `u64` into 32-bit halves as `[lo, hi]` field elements.

@@ -4,8 +4,10 @@
 //! the public DAG surface, shared between the test suite and the
 //! `src/bin/` benches so a construction is written (and audited) once.
 
-use crate::math::U256;
-use crate::session::{Session, UintNode};
+use crate::{
+    math::U256,
+    session::{Session, UintNode},
+};
 
 /// Build `P(−x)` by two different DAG shapes over the modulus pinned at
 /// `bound_ptr` and return the two accumulators — equal in value (so
@@ -16,14 +18,12 @@ use crate::session::{Session, UintNode};
 /// `coeffs` is `c₀ ‥ c_N` (little-endian by degree), `N = coeffs.len() − 1
 /// ≥ 1`; every value must already be reduced below the modulus.
 ///
-/// - **Path A** negates the point: `n = −x`, then the plain Horner
-///   `(((c_N)·n + c_{N−1})·n + …)·n + c₀` — `1` neg, `N` muls, `N` adds.
-/// - **Path B** sign-flips the odd coefficients instead, absorbing every
-///   negation into a subtraction: Horner over `x` itself with
-///   `A_i = x·A_{i+1} ± c_i` (`+` for even `i`, `−` for odd), and an odd
-///   *leading* coefficient folded into the first step
-///   (`A_{N−1} = c_{N−1} − c_N·x`) so no negation is ever needed —
-///   `N` muls, `N` adds/subs.
+/// - **Path A** negates the point: `n = −x`, then the plain Horner `(((c_N)·n + c_{N−1})·n + …)·n +
+///   c₀` — `1` neg, `N` muls, `N` adds.
+/// - **Path B** sign-flips the odd coefficients instead, absorbing every negation into a
+///   subtraction: Horner over `x` itself with `A_i = x·A_{i+1} ± c_i` (`+` for even `i`, `−` for
+///   odd), and an odd *leading* coefficient folded into the first step (`A_{N−1} = c_{N−1} −
+///   c_N·x`) so no negation is ever needed — `N` muls, `N` adds/subs.
 ///
 /// Per degree, the statement costs `2N` `UintMul` and `2N + 1` `UintAdd`
 /// relation ops (plus the `N + 2` value leaves and the closing `Is`),
@@ -43,10 +43,7 @@ pub fn horner_sign_paths(
     assert!(n >= 1, "horner_sign_paths needs degree ≥ 1");
 
     let x_leaf = session.uint_leaf(x, bound_ptr);
-    let c: Vec<UintNode> = coeffs
-        .iter()
-        .map(|&v| session.uint_leaf(v, bound_ptr))
-        .collect();
+    let c: Vec<UintNode> = coeffs.iter().map(|&v| session.uint_leaf(v, bound_ptr)).collect();
 
     // Path A: Horner over −x with the original coefficients.
     let neg_x = session.uint_neg(&x_leaf);

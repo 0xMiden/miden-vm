@@ -4,34 +4,32 @@
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
-use miden_lifted_air::LiftedAir;
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use crate::math::{U256, add_reduce, sub_reduce};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace,
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
 };
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::tests::uint::{random_modulus, random_uint_below};
-use crate::uint::UintStoreAir;
-use crate::uint::add::trace::{UintAddRequires, generate_trace};
-use crate::uint::add::{NUM_MAIN_COLS, PERIOD, UintAddAir};
-use crate::uint::trace::{UintStoreRequires, generate_trace as store_trace};
+use miden_core::{Felt, field::QuadFelt};
+use miden_lifted_air::LiftedAir;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
+
+use crate::{
+    math::{U256, add_reduce, sub_reduce},
+    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    tests::uint::{random_modulus, random_uint_below},
+    uint::{
+        UintStoreAir,
+        add::{
+            NUM_MAIN_COLS, PERIOD, UintAddAir,
+            trace::{UintAddRequires, generate_trace},
+        },
+        trace::{UintStoreRequires, generate_trace as store_trace},
+    },
+};
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([
-        Felt::from(rng.random::<u32>()),
-        Felt::from(rng.random::<u32>()),
-    ])
+    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
 }
 
 /// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
@@ -88,7 +86,7 @@ fn sample_add(
 
 #[test]
 fn add_constraints_hold() {
-    let mut rng = StdRng::seed_from_u64(0xADD_1);
+    let mut rng = StdRng::seed_from_u64(0xadd_1);
     let (add, mut store, k) = sample_add(&mut rng, false);
     let main = generate_trace(add, &mut store);
     assert_eq!(main.height(), PERIOD, "one op = one period-16 block");
@@ -108,7 +106,7 @@ fn add_constraints_hold() {
 fn add_with_reduction() {
     // k = 1: a + b ≥ p, so the modulus is subtracted. Exercises the k·bound
     // term + the −k correction in the SZ.
-    let mut rng = StdRng::seed_from_u64(0xADD_C0DE);
+    let mut rng = StdRng::seed_from_u64(0xadd_c0de);
     let (add, mut store, k) = sample_add(&mut rng, true);
     assert_eq!(k, 1, "forced reduction must set k = 1");
     let main = generate_trace(add, &mut store);
@@ -121,7 +119,7 @@ fn add_with_reduction() {
 fn add_rejects_wrong_result() {
     // Tamper the witnessed result c: a + b − c − k·p ≠ 0 ⇒ the SZ `id` is
     // nonzero at the term row and check_constraints rejects.
-    let mut rng = StdRng::seed_from_u64(0xBAD_ADD);
+    let mut rng = StdRng::seed_from_u64(0xbad_add);
     let (add, mut store, _k) = sample_add(&mut rng, false);
     let mut main = generate_trace(add, &mut store);
     // c_lo is row 5; bump its low limb.
@@ -132,7 +130,7 @@ fn add_rejects_wrong_result() {
 
 #[test]
 fn add_buses_balance_against_store() {
-    let mut rng = StdRng::seed_from_u64(0xBA1_ADD);
+    let mut rng = StdRng::seed_from_u64(0xba1_add);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);
@@ -179,7 +177,7 @@ fn duplicate_relations_collapse() {
     // multiplicities accumulating on its term row — the relation-level
     // interning that lets two consumers (e.g. an eval op node and an EC
     // certificate) share a block.
-    let mut rng = StdRng::seed_from_u64(0xDED0_ADD);
+    let mut rng = StdRng::seed_from_u64(0xded0_add);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);
@@ -208,7 +206,7 @@ fn duplicate_relations_collapse() {
 fn sub_as_arrangement() {
     // z = x − y is provable as the add arrangement y + z ≡ x (mod p): feed
     // (a, b, c) = (y, z, x). Constraints hold + buses balance.
-    let mut rng = StdRng::seed_from_u64(0x50B);
+    let mut rng = StdRng::seed_from_u64(0x50b);
     let bound = random_modulus(&mut rng);
     let x = random_uint_below(&mut rng, bound);
     let y = random_uint_below(&mut rng, bound);
@@ -236,7 +234,7 @@ fn add_pad_blocks_stay_off_the_bus() {
     // gone there is no provider for `(0, 0, off, 0…)` tuples, and an
     // ungated pad block would unbalance the bus. Constraints must also
     // hold across the act = 0 rows.
-    let mut rng = StdRng::seed_from_u64(0x9AD_B10C);
+    let mut rng = StdRng::seed_from_u64(0x9ad_b10c);
     let bound = random_modulus(&mut rng);
     let operands: Vec<U256> = (0..3).map(|_| random_uint_below(&mut rng, bound)).collect();
 
@@ -280,7 +278,7 @@ fn add_inactive_block_cannot_provide() {
     // limbs (the SZ `id` closes on 0 + 0 − 0 = 0) and a witnessed term-row
     // mult would provide a *false* `UintAdd` tuple onto the bus. The
     // `term_sel·(1−act)·mult = 0` constraint must reject a nonzero pad mult.
-    let mut rng = StdRng::seed_from_u64(0xAC7_F0E);
+    let mut rng = StdRng::seed_from_u64(0xac7_f0e);
     let bound = random_modulus(&mut rng);
     let operands: Vec<U256> = (0..3).map(|_| random_uint_below(&mut rng, bound)).collect();
     let mut store = UintStoreRequires::new();
@@ -307,7 +305,7 @@ fn negation_holds_and_balances() {
     // a + (−a) ≡ 0 (mod p) via add_to_zero: c is the unstored zero, so there
     // is no result ptr and no c lookup. Constraints hold and — crucially —
     // the buses balance with *no* zero provider in the store.
-    let mut rng = StdRng::seed_from_u64(0x4E6);
+    let mut rng = StdRng::seed_from_u64(0x4e6);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     assert_ne!(a, U256::ZERO, "need a ≠ 0");
@@ -348,7 +346,7 @@ fn equality_certificate_holds_and_balances() {
     // a + 0 ≡ c with a, c the same stored uint (canonical interning lands
     // equal values on one ptr): the is_b_zero block proves value equality
     // with no b lookup and no zero pin. Constraints hold, buses balance.
-    let mut rng = StdRng::seed_from_u64(0xE0_0001);
+    let mut rng = StdRng::seed_from_u64(0xe0_0001);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
 
@@ -367,11 +365,7 @@ fn equality_certificate_holds_and_balances() {
 
     // b rows (2–4) stay zero; the B-hub flags is_b_zero.
     assert_eq!(main.values[3 * NUM_MAIN_COLS], Felt::ONE, "B-hub flag set");
-    assert_eq!(
-        main.values[2 * NUM_MAIN_COLS],
-        Felt::ZERO,
-        "b_lo limbs zero"
-    );
+    assert_eq!(main.values[2 * NUM_MAIN_COLS], Felt::ZERO, "b_lo limbs zero");
 
     crate::tests::check_local(UintAddAir, &main);
 
@@ -395,7 +389,7 @@ fn is_b_zero_rejects_unequal_values() {
     // Forge the is_b_zero flag onto an honest a + b = c block (zeroing the
     // b rows so the suppressed consumes don't betray it first): the SZ id
     // now reads a − c − k·p ≠ 0 and the term-row assert rejects.
-    let mut rng = StdRng::seed_from_u64(0xE0_BAD);
+    let mut rng = StdRng::seed_from_u64(0xe0_bad);
     let (add, mut store, _k) = sample_add(&mut rng, false);
     let mut main = generate_trace(add, &mut store);
     main.values[3 * NUM_MAIN_COLS] = Felt::ONE; // B-hub: is_b_zero := 1
@@ -416,7 +410,7 @@ fn is_b_zero_rejects_unequal_values() {
 fn is_b_zero_rejects_named_operand_ptr() {
     // The tuple sentinel is constraint-tied on the b side too:
     // is_b_zero · b_ptr = 0.
-    let mut rng = StdRng::seed_from_u64(0xE0_5E47);
+    let mut rng = StdRng::seed_from_u64(0xe0_5e47);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
 
@@ -440,7 +434,7 @@ fn is_c_zero_rejects_named_result_ptr() {
     // The tuple sentinel is constraint-tied: is_c_zero · c_ptr = 0. A
     // prover claiming a zero result while naming a real c_ptr in the tuple
     // must be rejected.
-    let mut rng = StdRng::seed_from_u64(0xC0_5E47);
+    let mut rng = StdRng::seed_from_u64(0xc0_5e47);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let a_neg = sub_reduce(U256::ZERO, a, bound);

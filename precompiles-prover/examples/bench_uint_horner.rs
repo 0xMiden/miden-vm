@@ -24,14 +24,12 @@
 use std::time::Instant;
 
 use miden_lifted_air::LiftedAir;
+use miden_precompiles_prover::{
+    math::{U256, from_hex},
+    session::{ChipletAir, Session, statements::horner_sign_paths},
+};
 use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
-use precompile_experiments::math::{U256, from_hex};
-use precompile_experiments::session::ChipletAir;
-use precompile_experiments::session::Session;
-use precompile_experiments::session::statements::horner_sign_paths;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// The modulus pin's protocol address.
 const FP: u32 = 1;
@@ -41,7 +39,7 @@ const FP: u32 = 1;
 fn random_uint_below(rng: &mut impl Rng, bound: U256) -> U256 {
     let mut limbs: [u64; 4] = core::array::from_fn(|_| rng.random());
     let top = u64::from(rng.random::<u16>() % (bound.as_limbs()[3] >> 48) as u16);
-    limbs[3] = limbs[3] & 0xFFFF_FFFF_FFFF | top << 48;
+    limbs[3] = limbs[3] & 0xffff_ffff_ffff | top << 48;
     U256::from_limbs(limbs)
 }
 
@@ -59,10 +57,7 @@ fn main() {
             .init();
     }
 
-    let n: usize = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(64);
+    let n: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(64);
     assert!(n >= 1, "polynomial degree must be ≥ 1");
 
     // secp256k1 Fp − 1: the chiplet stack is modulus-agnostic, the k1
@@ -83,11 +78,9 @@ fn main() {
     let mut session = Session::new();
     let modulus = session.pin_uint(FP, p_minus_1, FP);
 
-    let mut rng = StdRng::seed_from_u64(0x4042_1D06);
+    let mut rng = StdRng::seed_from_u64(0x4042_1d06);
     let x = random_uint_below(&mut rng, p_minus_1);
-    let coeffs: Vec<U256> = (0..=n)
-        .map(|_| random_uint_below(&mut rng, p_minus_1))
-        .collect();
+    let coeffs: Vec<U256> = (0..=n).map(|_| random_uint_below(&mut rng, p_minus_1)).collect();
 
     let (acc_a, acc_b) = horner_sign_paths(&mut session, x, &coeffs, FP);
     let claim = session.uint_is(&acc_a, &acc_b);
@@ -160,7 +153,7 @@ fn main() {
         Ok(()) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify roundtrip OK");
-        }
+        },
         Err(err) => {
             println!("verify_multi     : {verify_elapsed:?} → {err:?}");
             println!();
@@ -168,7 +161,7 @@ fn main() {
             println!("  identity (Σ σ = 0) didn't close — sum miden-air's");
             println!("  `check_trace_balance` net multiplicities per encoded denom");
             println!("  across all chiplets to localize the unmatched tuple.");
-        }
+        },
     }
 
     println!();

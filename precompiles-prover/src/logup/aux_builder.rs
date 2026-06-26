@@ -5,14 +5,12 @@
 //! and accumulation ([`accumulate`]) phases are reused unchanged; only the
 //! column-0 handling differs:
 //!
-//! - Stock miden: take the running sum's terminal as `committed_final`,
-//!   truncate the (n+1)-row matrix to n rows, and return
-//!   `(aux_trace, vec![committed_final])`.
-//! - Here: take that same terminal as `σ = Σ_r delta_r` and return it
-//!   verbatim — column 0 is the plain running sum (`aux[0] = 0`,
-//!   `aux[r] = Σ_{i<r} delta_i`). The constraint side closes it on the
-//!   last row (`when_last: D₀·(σ − Σ acc) − N₀ = 0`, see `constraint.rs`),
-//!   so no `σ/n` drift correction and no reserved dead row are needed.
+//! - Stock miden: take the running sum's terminal as `committed_final`, truncate the (n+1)-row
+//!   matrix to n rows, and return `(aux_trace, vec![committed_final])`.
+//! - Here: take that same terminal as `σ = Σ_r delta_r` and return it verbatim — column 0 is the
+//!   plain running sum (`aux[0] = 0`, `aux[r] = Σ_{i<r} delta_i`). The constraint side closes it on
+//!   the last row (`when_last: D₀·(σ − Σ acc) − N₀ = 0`, see `constraint.rs`), so no `σ/n` drift
+//!   correction and no reserved dead row are needed.
 
 use miden_core::{
     field::{ExtensionField, Field},

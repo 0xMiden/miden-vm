@@ -4,30 +4,20 @@
 //! constraint at every row of the trace, catching any mismatch between
 //! witness generation and constraint definitions.
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::Matrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::primitives::bitwise64::{
-    Bitwise64Air, Bitwise64Requires, Logic64Op, generate_trace as bw64_trace,
-};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, BytePairOp, generate_trace as bpl_trace,
+use crate::primitives::{
+    bitwise64::{Bitwise64Air, Bitwise64Requires, Logic64Op, generate_trace as bw64_trace},
+    byte_pair_lut::{BytePairLutAir, BytePairLutRequires, BytePairOp, generate_trace as bpl_trace},
 };
 
 /// Generate random challenges for LogUp arguments.
 fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
     [
-        QuadFelt::new([
-            Felt::new(rng.random()).unwrap(),
-            Felt::new(rng.random()).unwrap(),
-        ]),
-        QuadFelt::new([
-            Felt::new(rng.random()).unwrap(),
-            Felt::new(rng.random()).unwrap(),
-        ]),
+        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
+        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
     ]
 }
 
@@ -37,7 +27,7 @@ fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
 
 #[test]
 fn bpl_constraints_hold_on_random_byte_ops() {
-    let mut rng = StdRng::seed_from_u64(0xBEE);
+    let mut rng = StdRng::seed_from_u64(0xbee);
     let mut requires = BytePairLutRequires::new();
 
     // Random byte-pair lookups.
@@ -80,11 +70,7 @@ fn bpl_constraints_hold_on_saturated_table() {
     }
 
     let main = bpl_trace(requires);
-    assert_eq!(
-        main.height(),
-        1 << 16,
-        "saturated table should have 2^16 rows"
-    );
+    assert_eq!(main.height(), 1 << 16, "saturated table should have 2^16 rows");
 
     crate::tests::check_local(BytePairLutAir, &main);
 }
@@ -95,7 +81,7 @@ fn bpl_constraints_hold_on_saturated_table() {
 
 #[test]
 fn bw64_constraints_hold_on_random_logic_ops() {
-    let mut rng = StdRng::seed_from_u64(0xB164);
+    let mut rng = StdRng::seed_from_u64(0xb164);
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
 
@@ -118,7 +104,7 @@ fn bw64_constraints_hold_on_random_logic_ops() {
 #[test]
 fn bw64_constraints_hold_on_chained_logic() {
     // Test chaining: each op's output feeds the next op's input.
-    let mut rng = StdRng::seed_from_u64(0xC4A1);
+    let mut rng = StdRng::seed_from_u64(0xc4a1);
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
 
@@ -167,7 +153,7 @@ fn bw64_constraints_hold_on_logic_then_rol() {
 fn bw64_constraints_hold_on_all_rotation_amounts() {
     // Test all in-range rotation amounts (k = 2^s for s in 0..31; see
     // `Bitwise64Requires::require_rol` for the bound's derivation).
-    let mut rng = StdRng::seed_from_u64(0xA11807);
+    let mut rng = StdRng::seed_from_u64(0xa11807);
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
 
@@ -194,9 +180,9 @@ fn bw64_constraints_hold_on_edge_case_values() {
         0u64,
         u64::MAX,
         0x5555_5555_5555_5555, // alternating bits
-        0xAAAA_AAAA_AAAA_AAAA,
-        0x0000_0000_FFFF_FFFF, // low half set
-        0xFFFF_FFFF_0000_0000, // high half set
+        0xaaaa_aaaa_aaaa_aaaa,
+        0x0000_0000_ffff_ffff, // low half set
+        0xffff_ffff_0000_0000, // high half set
         1,
         u64::MAX - 1,
     ];
@@ -223,12 +209,16 @@ fn bw64_constraints_hold_on_edge_case_values() {
 // Chunk + Poseidon2 integration tests
 // ============================================================================
 
-use crate::hash::chunk::trace::{ChunkRequires, Invocation, generate_trace as chunk_trace};
-use crate::hash::chunk::{
-    COL_PERM_SEQ_ID as CHUNK_COL_PERM_SEQ_ID, ChunkAir, NUM_MAIN_COLS as CHUNK_NUM_MAIN_COLS,
+use crate::{
+    hash::chunk::{
+        COL_PERM_SEQ_ID as CHUNK_COL_PERM_SEQ_ID, ChunkAir, NUM_MAIN_COLS as CHUNK_NUM_MAIN_COLS,
+        trace::{ChunkRequires, Invocation, generate_trace as chunk_trace},
+    },
+    transcript::poseidon2::{
+        Poseidon2Air,
+        trace::{Poseidon2Requires, generate_trace as p2_trace},
+    },
 };
-use crate::transcript::poseidon2::Poseidon2Air;
-use crate::transcript::poseidon2::trace::{Poseidon2Requires, generate_trace as p2_trace};
 
 fn rand_inv(seed: u64, len: usize) -> Invocation {
     let mut rng = StdRng::seed_from_u64(seed);
@@ -242,7 +232,7 @@ fn rand_inv(seed: u64, len: usize) -> Invocation {
 /// confirming the `perm_seq_id` foreign key wires through cleanly.
 #[test]
 fn chunk_and_p2_traces_verify_with_shared_challenges() {
-    let invs = vec![rand_inv(0xA1, 33), rand_inv(0xB2, 40), rand_inv(0xC3, 129)];
+    let invs = vec![rand_inv(0xa1, 33), rand_inv(0xb2, 40), rand_inv(0xc3, 129)];
 
     let mut p2 = Poseidon2Requires::new();
     let mut chunk_req = ChunkRequires::new();
@@ -273,13 +263,9 @@ fn chunk_and_p2_traces_verify_with_shared_challenges() {
 /// two chunk-row sets that consume those cycles.
 #[test]
 fn identical_chunk_invocations_share_p2_but_duplicate_chunks() {
-    let bytes: Vec<u8> = (0..96).map(|i| (i ^ 0x5A) as u8).collect(); // 3 chunks
-    let inv_a = Invocation {
-        input: bytes.clone(),
-    };
-    let inv_b = Invocation {
-        input: bytes.clone(),
-    };
+    let bytes: Vec<u8> = (0..96).map(|i| (i ^ 0x5a) as u8).collect(); // 3 chunks
+    let inv_a = Invocation { input: bytes.clone() };
+    let inv_b = Invocation { input: bytes.clone() };
 
     let mut p2 = Poseidon2Requires::new();
     let mut chunk_req = ChunkRequires::new();
@@ -317,11 +303,17 @@ fn identical_chunk_invocations_share_p2_but_duplicate_chunks() {
 // FULL STACK — Keccak-node Requires dedup + downstream collapse
 // ============================================================================
 
-use crate::hash::keccak::node::trace::{KeccakNodeRequires, generate_trace as keccak_node_trace};
-use crate::hash::keccak::node::{KeccakNodeAir, NUM_MAIN_COLS as KN_NUM_MAIN_COLS};
-use crate::hash::keccak::round::RoundRequires;
-use crate::hash::keccak::sponge::trace::{SpongeRequires, generate_trace as sponge_trace};
-use crate::hash::keccak::sponge::{KeccakSpongeAir, NUM_MAIN_COLS as KS_NUM_MAIN_COLS};
+use crate::hash::keccak::{
+    node::{
+        KeccakNodeAir, NUM_MAIN_COLS as KN_NUM_MAIN_COLS,
+        trace::{KeccakNodeRequires, generate_trace as keccak_node_trace},
+    },
+    round::RoundRequires,
+    sponge::{
+        KeccakSpongeAir, NUM_MAIN_COLS as KS_NUM_MAIN_COLS,
+        trace::{SpongeRequires, generate_trace as sponge_trace},
+    },
+};
 
 /// Two identical Keccak invocations through `KeccakNodeRequires`
 /// collapse to one keccak-node row with `out_mult = 2`, one sponge
@@ -329,7 +321,7 @@ use crate::hash::keccak::sponge::{KeccakSpongeAir, NUM_MAIN_COLS as KS_NUM_MAIN_
 /// cycle range. The downstream digest is shared.
 #[test]
 fn keccak_node_intern_collapses_identical_invocations() {
-    let input: Vec<u8> = (0..96).map(|i| (i ^ 0xA5) as u8).collect();
+    let input: Vec<u8> = (0..96).map(|i| (i ^ 0xa5) as u8).collect();
 
     let mut p2 = Poseidon2Requires::new();
     let mut chunk = ChunkRequires::new();
@@ -339,28 +331,14 @@ fn keccak_node_intern_collapses_identical_invocations() {
     let mut sponge = SpongeRequires::new();
     let mut node = KeccakNodeRequires::new();
 
-    let out_a = node.require(
-        &input,
-        &mut sponge,
-        &mut chunk,
-        &mut round,
-        &mut bw64,
-        &mut bpl,
-        &mut p2,
-    );
+    let out_a =
+        node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2);
     let chunk_rows_after_a = chunk.total_chunks();
     let sponge_rows_after_a = sponge.total_active_rows();
     let p2_cycles_after_a = p2.total_cycles();
 
-    let out_b = node.require(
-        &input,
-        &mut sponge,
-        &mut chunk,
-        &mut round,
-        &mut bw64,
-        &mut bpl,
-        &mut p2,
-    );
+    let out_b =
+        node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2);
 
     // Dedup at the node layer.
     assert_eq!(node.total_rows(), 1);
@@ -418,15 +396,7 @@ fn keccak_node_distinct_invocations_lay_disjoint_rows() {
     let outs: Vec<_> = inputs
         .iter()
         .map(|input| {
-            node.require(
-                input,
-                &mut sponge,
-                &mut chunk,
-                &mut round,
-                &mut bw64,
-                &mut bpl,
-                &mut p2,
-            )
+            node.require(input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2)
         })
         .collect();
 
@@ -463,7 +433,7 @@ use crate::hash::keccak::round::KeccakRoundAir;
 /// chiplets impose.)
 #[test]
 fn full_stack_chiplets_validate_under_shared_challenges() {
-    let input: Vec<u8> = (0..23).map(|i| (i ^ 0x5A) as u8).collect();
+    let input: Vec<u8> = (0..23).map(|i| (i ^ 0x5a) as u8).collect();
 
     let mut session = Session::new();
     let (_, claim) = session.keccak(&input);
@@ -505,16 +475,18 @@ fn full_stack_chiplets_validate_under_shared_challenges() {
 
 use std::collections::HashMap;
 
-use miden_air::lookup::Challenges;
-use miden_air::lookup::LookupAir;
-use miden_air::lookup::debug::check_trace_balance;
-use miden_air::lookup::debug::trace::DebugTraceBuilder;
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
+};
 use miden_lifted_air::LiftedAir;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::session::Session;
-use crate::transcript::eval::TranscriptEvalAir;
+use crate::{
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::Session,
+    transcript::eval::TranscriptEvalAir,
+};
 
 /// Fold one chiplet's per-denom balance into the cross-chiplet accumulator.
 /// `net[denom] = (multiplicity summed across chiplets, a sample message repr
@@ -557,7 +529,7 @@ fn full_stack_bus_balance_closes() {
     let mut input = vec![0u8; l];
     let mut claims = Vec::with_capacity(n);
     for k in 0..n {
-        let mut rng = StdRng::seed_from_u64(0xB175 ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15));
+        let mut rng = StdRng::seed_from_u64(0xb175 ^ (k as u64).wrapping_mul(0x9e3779b97f4a7c15));
         for b in &mut input {
             *b = rng.random();
         }
@@ -568,7 +540,7 @@ fn full_stack_bus_balance_closes() {
     let traces = session.finish(root);
     let mains = traces.mains();
 
-    let mut rng = StdRng::seed_from_u64(0x9A11);
+    let mut rng = StdRng::seed_from_u64(0x9a11);
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
@@ -583,10 +555,7 @@ fn full_stack_bus_balance_closes() {
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "cross-chiplet bus imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -605,7 +574,7 @@ fn full_stack_bus_balance_closes_with_empty_input() {
     // tail has a provider, and that the chunk / sponge / P2 buses close
     // for the zero chunk consumed as a full garbage-tail.
     let mut session = Session::new();
-    let mut rng = StdRng::seed_from_u64(0xE_2D7);
+    let mut rng = StdRng::seed_from_u64(0xe_2d7);
     let nonempty: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let mut claims = Vec::with_capacity(2);
     for input in [Vec::<u8>::new(), nonempty] {
@@ -629,10 +598,7 @@ fn full_stack_bus_balance_closes_with_empty_input() {
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "empty-input bus imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -643,11 +609,15 @@ fn full_stack_bus_balance_closes_with_empty_input() {
 }
 
 use super::uint::{random_modulus, random_uint_below};
-use crate::math::{from_hex, to_limbs32};
-use crate::ec::trace::EcStoreRequires;
-use crate::transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace};
-use crate::uint::UintStoreAir;
-use crate::uint::trace::{UintStoreRequires, generate_trace as uint_trace};
+use crate::{
+    ec::trace::EcStoreRequires,
+    math::{from_hex, to_limbs32},
+    transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
+    uint::{
+        UintStoreAir,
+        trace::{UintStoreRequires, generate_trace as uint_trace},
+    },
+};
 
 /// The uint-leaf seam end-to-end: the eval chip pulls a stored uint's two
 /// `UintVal` halves, hashes them into `Binding(h, Uint, ptr, bound_ptr)`,
@@ -656,7 +626,7 @@ use crate::uint::trace::{UintStoreRequires, generate_trace as uint_trace};
 /// — every bus (UintVal, Poseidon2In/Out, Binding, Range16) must close.
 #[test]
 fn uint_leaf_binds_against_uint_store() {
-    let mut rng = StdRng::seed_from_u64(0x0157_57E1);
+    let mut rng = StdRng::seed_from_u64(0x0157_57e1);
 
     // A uint at ptr 5 (value v) under a random modulus stored at ptr 1;
     // v is in range under that bound.
@@ -698,10 +668,7 @@ fn uint_leaf_binds_against_uint_store() {
     fold_balance(&Poseidon2Air, &p2_main, &challenges, &mut net);
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "uint-leaf↔store imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -718,7 +685,7 @@ fn uint_leaf_binds_against_uint_store() {
 /// would find no provider and the Binding bus would not close.
 #[test]
 fn pinned_uint_leaf_folds_into_spine() {
-    let mut rng = StdRng::seed_from_u64(0x9114_ED15);
+    let mut rng = StdRng::seed_from_u64(0x9114_ed15);
 
     // A random modulus stored self-referentially at ptr 1.
     let bound = random_modulus(&mut rng);
@@ -765,10 +732,7 @@ fn pinned_uint_leaf_folds_into_spine() {
     fold_balance(&Poseidon2Air, &p2_main, &challenges, &mut net);
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "pinned-uint spine-fold imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -814,10 +778,7 @@ fn full_stack_pins_uints() {
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "uint-pinning stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -845,7 +806,7 @@ fn full_stack_pins_uints() {
 fn relocated_modulus_pin_unbalances() {
     use crate::transcript::eval::{COL_IS_PINNED, COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS};
 
-    let mut rng = StdRng::seed_from_u64(0x4E10_CA7E);
+    let mut rng = StdRng::seed_from_u64(0x4e10_ca7e);
 
     // X squats at the protocol's modulus address 1; the real p − 1 hides
     // at ptr 7, typed under 1.
@@ -926,7 +887,7 @@ fn full_stack_pins_k1_constants() {
 
     assert_eq!(mains[8].height(), 64, "5 pins + 3 padding blocks × 8 rows");
 
-    let mut rng = StdRng::seed_from_u64(0x5EC9_2561);
+    let mut rng = StdRng::seed_from_u64(0x5ec9_2561);
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
@@ -940,10 +901,7 @@ fn full_stack_pins_k1_constants() {
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
 
-    let residual: Vec<_> = net
-        .into_iter()
-        .filter(|(_, (m, _))| *m != Felt::ZERO)
-        .collect();
+    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
         residual.is_empty(),
         "k1-constants stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",

@@ -25,6 +25,7 @@ members = [
     "miden-vm",
     "precompiles",
     "crates/lib/core/codegen",
+    "precompiles-prover",
     "processor",
     "prover",
     "verifier",

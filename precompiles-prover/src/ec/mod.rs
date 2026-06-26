@@ -2,15 +2,12 @@
 //!
 //! Three chiplets, two stores and a relation:
 //!
-//! - [`groups::EcGroupsAir`] — the **group table**: one row per group
-//!   binding `group_ptr → (a, b, bound, scalar_bound)`; *provides*
-//!   [`EcGroup`](crate::relations::BusId::EcGroup).
-//! - [`EcPointStoreAir`] (this module) — the **point store**: one row
-//!   per point; *provides* [`EcPoint`](crate::relations::BusId::EcPoint),
-//!   *consumes* its group's tuple and — unless `is_pai` — the
-//!   curve-membership MAC trio.
-//! - [`add::EcGroupAddAir`] — the complete group-law addition over the
-//!   two stores.
+//! - [`groups::EcGroupsAir`] — the **group table**: one row per group binding `group_ptr → (a, b,
+//!   bound, scalar_bound)`; *provides* [`EcGroup`](crate::relations::BusId::EcGroup).
+//! - [`EcPointStoreAir`] (this module) — the **point store**: one row per point; *provides*
+//!   [`EcPoint`](crate::relations::BusId::EcPoint), *consumes* its group's tuple and — unless
+//!   `is_pai` — the curve-membership MAC trio.
+//! - [`add::EcGroupAddAir`] — the complete group-law addition over the two stores.
 //!
 //! Both stores are **binding stores**, deliberately the thinnest
 //! chiplets in the stack: one row per entity, no periodic columns, a
@@ -57,26 +54,25 @@ pub mod msm;
 pub mod require;
 pub mod trace;
 
-pub use require::{EcRequire, EcStores};
-
+use add::EcOnCurveCertMsg;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-
-use miden_lifted_air::AirBuilder;
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
+pub use require::{EcRequire, EcStores};
 
-use crate::logup::{
-    Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-    LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+use crate::{
+    logup::{
+        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        NUM_SIGMA_VALUES,
+    },
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    uint::mul::UintMulMsg,
+    utils::{current_main, next_main},
 };
-use crate::relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::uint::mul::UintMulMsg;
-use crate::utils::{current_main, next_main};
-
-use add::EcOnCurveCertMsg;
 
 // MESSAGES
 // ================================================================================================
@@ -211,10 +207,6 @@ impl BaseAir<Felt> for EcPointStoreAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        Vec::new()
-    }
-
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -339,11 +331,11 @@ where
         let one: LB::Expr = LB::Expr::ONE;
         let zero: LB::Expr = LB::Expr::ZERO;
 
-        let provide_deg = Deg { n: 1, d: 1 };
-        let consume_deg = Deg { n: 1, d: 1 };
-        let member_deg = Deg { n: 3, d: 1 };
-        let cert_deg = Deg { n: 2, d: 1 };
-        let col_deg = Deg { n: 8, d: 6 };
+        let provide_deg = Deg { v: 1, u: 1 };
+        let consume_deg = Deg { v: 1, u: 1 };
+        let member_deg = Deg { v: 3, u: 1 };
+        let cert_deg = Deg { v: 2, u: 1 };
+        let col_deg = Deg { v: 8, u: 6 };
 
         builder.next_column(
             |col| {

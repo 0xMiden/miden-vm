@@ -1,6 +1,5 @@
-use miden_core::{Felt, ONE, ZERO};
-use miden_core_vm::deferred::Tag as VmTag;
-use miden_precompiles_vm::Keccak256Precompile as VmKeccak256Precompile;
+use miden_core::{Felt, ONE, ZERO, deferred::Tag as VmTag};
+use miden_precompiles::Keccak256Precompile as VmKeccak256Precompile;
 
 use crate::transcript::deferred_tags;
 
@@ -19,10 +18,7 @@ fn framework_tags_match_vm_source_of_truth() {
         VmTag::AND.as_word().map(|felt| felt.as_canonical_u64()),
     );
 
-    assert_eq!(
-        deferred_tags::chunks(),
-        [Felt::from_u32(2), ZERO, ZERO, ZERO]
-    );
+    assert_eq!(deferred_tags::chunks(), [Felt::from_u32(2), ZERO, ZERO, ZERO]);
     assert_eq!(deferred_tags::and(), [ONE, ZERO, ZERO, ZERO]);
 }
 
@@ -44,10 +40,7 @@ fn keccak_assert_tag_layout_is_id_discriminant_len_zero() {
 
     for len in [0, 1, 31, 32, 33, 135, 136, 137] {
         let tag = deferred_tags::keccak_assert(len);
-        assert_eq!(
-            tag[0].as_canonical_u64(),
-            VmKeccak256Precompile::id().as_canonical_u64()
-        );
+        assert_eq!(tag[0].as_canonical_u64(), VmKeccak256Precompile::id().as_canonical_u64());
         assert_eq!(tag[1], Felt::from_u32(VmKeccak256Precompile::ASSERT_TAG_ID));
         assert_eq!(tag[2], Felt::from_u32(len));
         assert_eq!(tag[3], ZERO);

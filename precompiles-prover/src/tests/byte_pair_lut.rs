@@ -5,19 +5,18 @@ use miden_core::{
 use miden_lifted_air::{BaseAir, LiftedAir};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::logup::{Challenges, lookup_challenges_from_slice};
-use crate::primitives::byte_pair_lut::{
-    BytePairLutAir, BytePairLutRequires, BytePairOp, COL_MULT_ANDNOT, COL_MULT_RANGE16,
-    COL_MULT_XOR, NUM_AUX_COLS, NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_C_ANDNOT,
-    PRE_C_XOR, TRACE_HEIGHT, generate_trace, preprocessed_table,
+use crate::{
+    logup::{Challenges, lookup_challenges_from_slice},
+    primitives::byte_pair_lut::{
+        BytePairLutAir, BytePairLutRequires, BytePairOp, COL_MULT_ANDNOT, COL_MULT_RANGE16,
+        COL_MULT_XOR, NUM_AUX_COLS, NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PRE_A, PRE_B,
+        PRE_C_ANDNOT, PRE_C_XOR, TRACE_HEIGHT, generate_trace, preprocessed_table,
+    },
+    relations::BusId,
 };
-use crate::relations::BusId;
 
 fn test_alpha_beta() -> [QuadFelt; 2] {
-    [
-        QuadFelt::from(Felt::from(7u8)),
-        QuadFelt::from(Felt::from(11u8)),
-    ]
+    [QuadFelt::from(Felt::from(7u8)), QuadFelt::from(Felt::from(11u8))]
 }
 
 fn test_challenges() -> Challenges<QuadFelt> {
@@ -26,8 +25,8 @@ fn test_challenges() -> Challenges<QuadFelt> {
 
 #[test]
 fn andnot_uses_keccak_chi_convention() {
-    assert_eq!(BytePairOp::AndNot.apply(0xF0, 0xCC), (!0xF0u8) & 0xCC);
-    assert_eq!(BytePairOp::Xor.apply(0xAB, 0xCD), 0xAB ^ 0xCD);
+    assert_eq!(BytePairOp::AndNot.apply(0xf0, 0xcc), (!0xf0u8) & 0xcc);
+    assert_eq!(BytePairOp::Xor.apply(0xab, 0xcd), 0xab ^ 0xcd);
 }
 
 #[test]
@@ -39,27 +38,27 @@ fn op_tags_match_relation_encoding() {
 #[test]
 fn require_increments_multiplicity() {
     let mut requires = BytePairLutRequires::new();
-    let r = requires.require(BytePairOp::Xor, 0xAB, 0xCD);
-    assert_eq!(r, 0xAB ^ 0xCD);
-    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xAB, 0xCD), 1);
+    let r = requires.require(BytePairOp::Xor, 0xab, 0xcd);
+    assert_eq!(r, 0xab ^ 0xcd);
+    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xab, 0xcd), 1);
 
-    requires.require(BytePairOp::Xor, 0xAB, 0xCD);
-    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xAB, 0xCD), 2);
-    assert_eq!(requires.multiplicity(BytePairOp::AndNot, 0xAB, 0xCD), 0);
+    requires.require(BytePairOp::Xor, 0xab, 0xcd);
+    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xab, 0xcd), 2);
+    assert_eq!(requires.multiplicity(BytePairOp::AndNot, 0xab, 0xcd), 0);
 }
 
 #[test]
 fn require_range16_increments_dedicated_multiplicity() {
     let mut requires = BytePairLutRequires::new();
     // w = 0xABCD → low byte 0xCD, high byte 0xAB.
-    requires.require_range16(0xABCD);
-    assert_eq!(requires.multiplicity_range16(0xABCD), 1);
+    requires.require_range16(0xabcd);
+    assert_eq!(requires.multiplicity_range16(0xabcd), 1);
     // Compute-op multiplicities on the same row stay zero.
-    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xCD, 0xAB), 0);
-    assert_eq!(requires.multiplicity(BytePairOp::AndNot, 0xCD, 0xAB), 0);
+    assert_eq!(requires.multiplicity(BytePairOp::Xor, 0xcd, 0xab), 0);
+    assert_eq!(requires.multiplicity(BytePairOp::AndNot, 0xcd, 0xab), 0);
 
-    requires.require_range16(0xABCD);
-    assert_eq!(requires.multiplicity_range16(0xABCD), 2);
+    requires.require_range16(0xabcd);
+    assert_eq!(requires.multiplicity_range16(0xabcd), 2);
 }
 
 /// Row index for `(a, b)` in the fixed lex-order trace.
@@ -88,7 +87,7 @@ fn empty_requires_enumerates_all_pairs_with_zero_mults() {
 
     // Spot-check a handful of rows: the preprocessed table lex-enumerates
     // (a, b) with the correct results; the witness mults are all zero.
-    for (a, b) in [(0u8, 0u8), (1, 2), (5, 3), (0xAB, 0xCD), (255, 255)] {
+    for (a, b) in [(0u8, 0u8), (1, 2), (5, 3), (0xab, 0xcd), (255, 255)] {
         let p = pre_row(&table, row_idx(a, b));
         assert_eq!(p[PRE_A], Felt::from(a));
         assert_eq!(p[PRE_B], Felt::from(b));
@@ -130,10 +129,7 @@ fn trace_height_is_fixed_at_2_pow_16() {
     requires.require(BytePairOp::Xor, 0x10, 0x20);
     requires.require(BytePairOp::AndNot, 0x10, 0x20);
     assert_eq!(generate_trace(requires).height(), TRACE_HEIGHT);
-    assert_eq!(
-        generate_trace(BytePairLutRequires::new()).height(),
-        TRACE_HEIGHT
-    );
+    assert_eq!(generate_trace(BytePairLutRequires::new()).height(), TRACE_HEIGHT);
 }
 
 #[test]
@@ -263,16 +259,11 @@ fn populate_aux_trace_exposed_residue_matches_full_sum() {
         let c = op.apply(a, b);
         encs.push(challenges.encode(
             BusId::BytePairLut as usize,
-            [
-                Felt::from(op.tag()),
-                Felt::from(a),
-                Felt::from(b),
-                Felt::from(c),
-            ],
+            [Felt::from(op.tag()), Felt::from(a), Felt::from(b), Felt::from(c)],
         ));
     }
     for &w in r16_calls {
-        let lo = (w & 0xFF) as u8;
+        let lo = (w & 0xff) as u8;
         let hi = (w >> 8) as u8;
         let w_felt = Felt::from(lo) + Felt::from(256u16) * Felt::from(hi);
         encs.push(challenges.encode(BusId::Range16 as usize, [w_felt]));
@@ -288,8 +279,5 @@ fn num_public_values_matches_shared_root() {
     // 0.26 hands every AIR the same `air_inputs` slice — the 4-felt
     // transcript root. The BPL table reads none of it but declares the
     // shared count. (The old σ/n `inv_n` public input is gone.)
-    assert_eq!(
-        BytePairLutAir.num_public_values(),
-        crate::logup::NUM_PUBLIC_VALUES
-    );
+    assert_eq!(BytePairLutAir.num_public_values(), crate::logup::NUM_PUBLIC_VALUES);
 }

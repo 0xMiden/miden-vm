@@ -13,25 +13,25 @@ pub mod message;
 pub mod program;
 pub mod trace;
 
+pub use message::KeccakSpongeMsg;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::AirBuilder;
-use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_matrix::dense::RowMajorMatrix;
-
-use crate::hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg};
-use crate::logup::{
-    CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
-};
-use crate::primitives::bitwise64::{Logic64Msg, Logic64Op};
-use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-use crate::utils::{current_main, next_main};
-
-pub use message::KeccakSpongeMsg;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
+
+use crate::{
+    hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
+    logup::{
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+    },
+    primitives::bitwise64::{Logic64Msg, Logic64Op},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::{current_main, next_main},
+};
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -40,8 +40,8 @@ pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 //
 // - Structural (5):    sponge_seq_id, act, bytes_left, is_first_block_of_invocation, chunk_ptr.
 // - Padding state (10): is_zero_p, is_chunk_avail, b_0..b_7.
-// - Per-row lane (12): chunk, state_prev, state_new, state_out,
-//                      cleared, padded — each as u32 lo/hi.
+// - Per-row lane (12): chunk, state_prev, state_new, state_out, cleared, padded — each as u32
+//   lo/hi.
 //
 // See `docs/chiplets/keccak-sponge.md` §"Columns" for the definitions.
 
@@ -150,14 +150,11 @@ pub const NUM_MAIN_COLS: usize = 27;
 /// the running-sum σ, hosts its own Memory64 mutex group, and
 /// absorbs the per-row fraction values from cols 1, 2:
 ///
-/// - col 0: running σ + Memory64 fractions (mutex group of
-///   state-lane + lane-16 0x80 batches, `u_g` deg 4); absorbs col 1
-///   and col 2 values into its running-sum recurrence.
-/// - col 1: Logic64 fractions (mutex group of pad-row + verbatim +
-///   lane-16 0x80 batches).
-/// - col 2: KeccakSponge + Memory64 chunk-consume fractions (one
-///   batch of 2 independent inserts; different buses, bus-prefix-
-///   distinguished encodings).
+/// - col 0: running σ + Memory64 fractions (mutex group of state-lane + lane-16 0x80 batches, `u_g`
+///   deg 4); absorbs col 1 and col 2 values into its running-sum recurrence.
+/// - col 1: Logic64 fractions (mutex group of pad-row + verbatim + lane-16 0x80 batches).
+/// - col 2: KeccakSponge + Memory64 chunk-consume fractions (one batch of 2 independent inserts;
+///   different buses, bus-prefix- distinguished encodings).
 ///
 /// Max per-LogUp-column constraint deg = 7 → `log_quotient_degree = 3`.
 /// Col 0 hosts the σ-closing, so its last-row close is gated by the
@@ -213,6 +210,10 @@ impl BaseAir<Felt> for KeccakSpongeAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
+
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        sponge_program().to_vec()
+    }
 }
 
 // LOGIC64 MASK TABLES (indexed by `byte_offset ∈ [0, 8)`)
@@ -232,10 +233,10 @@ impl BaseAir<Felt> for KeccakSpongeAir {
 /// ANDNOT message: `cleared = (NOT andnot_mask) AND chunk` zeroes
 /// chunk bytes at positions `[j, 8)`.
 pub const ANDNOT_MASK_LO: [u32; 8] = [
-    0xFFFF_FFFF,
-    0xFFFF_FF00,
-    0xFFFF_0000,
-    0xFF00_0000,
+    0xffff_ffff,
+    0xffff_ff00,
+    0xffff_0000,
+    0xff00_0000,
     0x0000_0000,
     0x0000_0000,
     0x0000_0000,
@@ -244,14 +245,14 @@ pub const ANDNOT_MASK_LO: [u32; 8] = [
 
 /// `ANDNOT_MASK[j].hi` (u32) for `byte_offset = j`.
 pub const ANDNOT_MASK_HI: [u32; 8] = [
-    0xFFFF_FFFF,
-    0xFFFF_FFFF,
-    0xFFFF_FFFF,
-    0xFFFF_FFFF,
-    0xFFFF_FFFF,
-    0xFFFF_FF00,
-    0xFFFF_0000,
-    0xFF00_0000,
+    0xffff_ffff,
+    0xffff_ffff,
+    0xffff_ffff,
+    0xffff_ffff,
+    0xffff_ffff,
+    0xffff_ff00,
+    0xffff_0000,
+    0xff00_0000,
 ];
 
 /// `PADDING_MASK[j].lo` (u32) for `byte_offset = j`. Equals the low
@@ -290,10 +291,6 @@ pub const PAD_CONST_HI: u32 = 0x8000_0000;
 // ================================================================================================
 
 impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        sponge_program().to_vec()
-    }
-
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -558,14 +555,13 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
 // ================================================================================================
 
 /// Per-column emission shape:
-/// - col 0: 6 inserts (Memory64 group with 2 mutex batches —
-///   state-lane batch of 4, lane-16 0x80 batch of 2).
-/// - col 1: 5 inserts (Logic64 group with 3 mutex batches —
-///   pad-row of 3, verbatim of 1, lane-16 0x80 of 1).
-/// - col 2: 2 inserts (KeccakSponge + Memory64 chunk-consume, one
-///   batch of two independent inserts). The chunk-consume fires on
-///   rate rows and, on the last block, the extra rows [26,29) that
-///   mop up overshoot lanes (gated by `p_extra · b_sum`).
+/// - col 0: 6 inserts (Memory64 group with 2 mutex batches — state-lane batch of 4, lane-16 0x80
+///   batch of 2).
+/// - col 1: 5 inserts (Logic64 group with 3 mutex batches — pad-row of 3, verbatim of 1, lane-16
+///   0x80 of 1).
+/// - col 2: 2 inserts (KeccakSponge + Memory64 chunk-consume, one batch of two independent
+///   inserts). The chunk-consume fires on rate rows and, on the last block, the extra rows [26,29)
+///   that mop up overshoot lanes (gated by `p_extra · b_sum`).
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [6, 5, 2];
 
 impl<LB> LookupAir<LB> for KeccakSpongeAir
@@ -683,24 +679,24 @@ where
         let andnot_op = LB::Expr::from(Felt::from(Logic64Op::AndNot.tag()));
         let xor_op = LB::Expr::from(Felt::from(Logic64Op::Xor.tag()));
 
-        let interaction_deg = Deg { n: 1, d: 1 };
+        let interaction_deg = Deg { v: 1, u: 1 };
         // Col 0 Memory64 mutex group: d_A = 4 (state-lane batch),
         // d_B = 2 (lane-16 0x80 batch); periodic outer flags.
-        let m64_batch_a_deg = Deg { n: 4, d: 4 };
-        let m64_batch_b_deg = Deg { n: 2, d: 2 };
-        let m64_group_deg = Deg { n: 5, d: 4 };
+        let m64_batch_a_deg = Deg { v: 4, u: 4 };
+        let m64_batch_b_deg = Deg { v: 2, u: 2 };
+        let m64_group_deg = Deg { v: 5, u: 4 };
         // Col 1 Logic64 mutex group: d_C = 3 (pad-row batch), d_D
         // = d_E = 1 (verbatim, lane-16); witness outer flags (deg 1).
-        let l64_batch_c_deg = Deg { n: 3, d: 3 };
-        let l64_batch_d_deg = Deg { n: 1, d: 1 };
-        let l64_batch_e_deg = Deg { n: 1, d: 1 };
-        let l64_group_deg = Deg { n: 4, d: 4 };
+        let l64_batch_c_deg = Deg { v: 3, u: 3 };
+        let l64_batch_d_deg = Deg { v: 1, u: 1 };
+        let l64_batch_e_deg = Deg { v: 1, u: 1 };
+        let l64_group_deg = Deg { v: 4, u: 4 };
         // Col 2 KS + chunk-consume batch. The chunk-consume mult now
         // carries `p_extra · b_sum` (last-block extra-lane gate), so its
         // degree is 4 (act · (p_rate_block + p_extra·b_sum) ·
         // is_chunk_avail); the KS-request mult stays deg 3. Still one
         // tier below the col-0 group → the chiplet stays log_quot 3.
-        let aux_batch_deg = Deg { n: 4, d: 2 };
+        let aux_batch_deg = Deg { v: 4, u: 2 };
 
         // ---- col 0: Memory64 — state-lane (4) ⊕ lane-16 0x80 (2) ----
         builder.next_column(
@@ -736,11 +732,7 @@ where
                                 b.insert(
                                     "rc",
                                     mult_rc,
-                                    Memory64Msg {
-                                        addr: addr_rc,
-                                        lo: rc_lo,
-                                        hi: rc_hi,
-                                    },
+                                    Memory64Msg { addr: addr_rc, lo: rc_lo, hi: rc_hi },
                                     interaction_deg,
                                 );
                                 b.insert(

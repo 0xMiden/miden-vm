@@ -21,20 +21,17 @@ use std::collections::{BTreeMap, HashMap};
 use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::logup::build_logup_aux_trace;
-use crate::relations::ProvideMult;
-use crate::uint::trace::UintPtr;
-
-use super::groups::{
-    COL_A_PTR as G_COL_A_PTR, COL_B_PTR as G_COL_B_PTR, COL_BOUND_PTR as G_COL_BOUND_PTR,
-    COL_MULT as G_COL_MULT, COL_PTR as G_COL_PTR, COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir,
-    NUM_MAIN_COLS as G_NUM_MAIN_COLS,
-};
 use super::{
     COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_ECPOINT_MULT, COL_GROUP_PTR, COL_IS_CERT,
     COL_IS_PAI, COL_PTR, COL_SBOUND_PTR, COL_U_PTR, COL_W_PTR, COL_X_PTR, COL_Y_PTR,
     EcPointStoreAir, NUM_MAIN_COLS,
+    groups::{
+        COL_A_PTR as G_COL_A_PTR, COL_B_PTR as G_COL_B_PTR, COL_BOUND_PTR as G_COL_BOUND_PTR,
+        COL_MULT as G_COL_MULT, COL_PTR as G_COL_PTR, COL_SBOUND_PTR as G_COL_SBOUND_PTR,
+        EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
+    },
 };
+use crate::{logup::build_logup_aux_trace, relations::ProvideMult, uint::trace::UintPtr};
 
 /// Handle to a stored EC group — minted only by
 /// [`EcStoreRequires::create_group`], so holding one is proof the group
@@ -148,12 +145,7 @@ impl EcStoreRequires {
             return existing;
         }
         let ptr = EcGroupPtr(self.groups.len() as u32 + 1);
-        self.groups.push(Group {
-            a,
-            b,
-            bound,
-            scalar_bound: None,
-        });
+        self.groups.push(Group { a, b, bound, scalar_bound: None });
         self.by_curve.insert((a, b, bound), ptr);
         ptr
     }
@@ -193,11 +185,7 @@ impl EcStoreRequires {
         let ptr = EcPointPtr(self.points.len() as u32 + 1);
         self.points.push(Point {
             group,
-            binding: Some(PointBinding {
-                x,
-                y,
-                membership: Some((u, w)),
-            }),
+            binding: Some(PointBinding { x, y, membership: Some((u, w)) }),
         });
         self.by_coords.insert((group, x, y), ptr);
         ptr
@@ -224,11 +212,7 @@ impl EcStoreRequires {
         let ptr = EcPointPtr(self.points.len() as u32 + 1);
         self.points.push(Point {
             group,
-            binding: Some(PointBinding {
-                x,
-                y,
-                membership: None,
-            }),
+            binding: Some(PointBinding { x, y, membership: None }),
         });
         self.by_coords.insert((group, x, y), ptr);
         (ptr, true)
@@ -237,12 +221,7 @@ impl EcStoreRequires {
     /// The existing finite point at `(group, x, y)`, if any — the gate
     /// the require layer checks before recording membership, so a
     /// deduped point pays no second MAC trio.
-    pub fn point_by_coords(
-        &self,
-        group: EcGroupPtr,
-        x: UintPtr,
-        y: UintPtr,
-    ) -> Option<EcPointPtr> {
+    pub fn point_by_coords(&self, group: EcGroupPtr, x: UintPtr, y: UintPtr) -> Option<EcPointPtr> {
         self.by_coords.get(&(group, x, y)).copied()
     }
 
@@ -256,10 +235,7 @@ impl EcStoreRequires {
         }
         *self.group_demand.entry(group).or_insert(0) += 1;
         let ptr = EcPointPtr(self.points.len() as u32 + 1);
-        self.points.push(Point {
-            group,
-            binding: None,
-        });
+        self.points.push(Point { group, binding: None });
         self.pai_rows.insert(group, ptr);
         ptr
     }
@@ -316,9 +292,7 @@ impl EcStoreRequires {
 /// bound-ref analogue), the add relation's `EcGroup` / `EcPoint`
 /// consumes in [`super::add::trace::generate_trace`], run first by the
 /// Session sweep.
-pub fn generate_traces(
-    requires: EcStoreRequires,
-) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     (groups_trace(&requires), points_trace(&requires))
 }
 
@@ -339,13 +313,8 @@ fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
             row[G_COL_B_PTR] = Felt::from(group.b.addr());
             row[G_COL_BOUND_PTR] = Felt::from(group.bound.addr());
             row[G_COL_SBOUND_PTR] = Felt::from(group.scalar_bound.unwrap_or(group.bound).addr());
-            row[G_COL_MULT] = Felt::from(
-                requires
-                    .group_demand
-                    .get(&EcGroupPtr(ptr))
-                    .copied()
-                    .unwrap_or(0),
-            );
+            row[G_COL_MULT] =
+                Felt::from(requires.group_demand.get(&EcGroupPtr(ptr)).copied().unwrap_or(0));
         }
         vals.extend(row);
     }
@@ -378,13 +347,8 @@ fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
         row[COL_IS_PAI] = Felt::from(point.binding.is_none() as u32);
         // Closure-cert points are finite (binding Some) with no trio.
         row[COL_IS_CERT] = Felt::from(point.binding.is_some_and(|b| b.membership.is_none()) as u32);
-        row[COL_ECPOINT_MULT] = Felt::from(
-            requires
-                .point_demand
-                .get(&EcPointPtr(ptr))
-                .copied()
-                .unwrap_or(0),
-        );
+        row[COL_ECPOINT_MULT] =
+            Felt::from(requires.point_demand.get(&EcPointPtr(ptr)).copied().unwrap_or(0));
         row[COL_ACT] = Felt::ONE;
         vals.extend(row);
     }
