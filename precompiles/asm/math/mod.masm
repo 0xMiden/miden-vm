@@ -1,0 +1,15 @@
+#! Arithmetic deferred precompile wrappers.
+#!
+#! This scaffold reserves the `miden::precompiles::math` namespace.
+
+#! Returns whether the raw little-endian u256 limbs on the operand stack are all zero.
+#! Input:  [VALUE_U32[8], ...]
+#! Output: [is_zero, ...]
+pub proc is_zero_raw_u256
+    eq.0
+    repeat.7
+        swap
+        eq.0
+        and
+    end
+end

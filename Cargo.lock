@@ -1675,6 +1675,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-precompiles"
+version = "0.25.0"
+dependencies = [
+ "miden-assembly",
+ "miden-core",
+ "miden-mast-package",
+ "miden-package-registry",
+ "miden-processor",
+ "miden-utils-sync",
+]
+
+[[package]]
 name = "miden-processor"
 version = "0.25.0"
 dependencies = [
