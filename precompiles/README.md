@@ -13,6 +13,8 @@ The crate also embeds the `miden::precompiles` MASM package. Link [`PrecompilesL
 ## Provided precompiles
 
 - **Hashes** (`keccak256`, `sha512`): a reusable `preimage → digest` assertion protocol with MASM wrappers under `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`). The wrappers register generic `CHUNKS` inputs and expected digests, request the digest from a host event, then log a deferred hash assertion checked by the verifier-side registry.
+- **Uint and prime-field arithmetic** (`u256`, `k1_base`, `k1_scalar`, `r1_base`, `r1_scalar`, `ed25519_base`, `ed25519_scalar`): generated MASM wrappers under `miden::precompiles::math` that register typed integer/field nodes, request untrusted helper witnesses where needed, and log assertions checked by the `UintPrecompile`.
+- **Curve operations** (`secp256k1`, `secp256r1`, `ed25519`): generated MASM wrappers for curve membership, addition, doubling, scalar multiplication, and multi-scalar multiplication over the supported curve domains, checked by the `CurvePrecompile`.
 
 ## Crate features
 
@@ -21,6 +23,7 @@ Miden precompiles can be compiled with the following features:
 - `std` - enabled by default and relies on the Rust standard library.
 - `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
   - Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
+- `codegen-tools` - enables the generated-MASM regeneration binary used by drift checks.
 
 To compile with `no_std`, disable default features via `--no-default-features` flag.
 

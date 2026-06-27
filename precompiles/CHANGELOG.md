@@ -12,3 +12,8 @@
   `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`) that
   register generic `CHUNKS` inputs/expected digests and log hash assertions; `registry()` installs
   both.
+- Added generated MASM wrappers and Rust deferred precompiles for u256, prime-field arithmetic, and
+  supported curve operations over secp256k1, secp256r1, and Ed25519 domains; `registry()` installs
+  the `UintPrecompile` and `CurvePrecompile`.
+- Added the `regenerate-precompile-masm` codegen tool plus `make check-precompile-masm` drift checks
+  for generated math/curve MASM artifacts.
