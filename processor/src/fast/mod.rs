@@ -307,10 +307,12 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
-    /// Installs deferred precompiles into this processor's deferred state.
+    /// Low-level hook for installing deferred precompiles into this processor's deferred state.
     ///
-    /// The default processor uses an empty deferred registry. Call this when executing programs
-    /// that link against concrete deferred precompile packages such as `miden-precompiles`.
+    /// `FastProcessor` starts with the framework's empty registry because it is the raw processor
+    /// layer. Use this hook for direct processor integration, custom registries, or tests.
+    /// High-level VM/prover/CLI entry points install the official `miden-precompiles` registry
+    /// automatically.
     pub fn with_deferred_precompiles(
         mut self,
         precompiles: PrecompileRegistry,

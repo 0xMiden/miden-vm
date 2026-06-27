@@ -18,19 +18,12 @@
 
 use alloc::{
     string::{String, ToString},
-    sync::Arc,
     vec,
     vec::Vec,
 };
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
-use miden_core::{
-    Felt, Word,
-    deferred::{DeferredState, IntegrityError, PrecompileRegistry},
-    field::QuadFelt,
-    program::{ProgramInfo, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction},
-};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
@@ -66,10 +59,6 @@ pub enum VerifierError {
     ProofDeserializationError(String),
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),
-    #[error("recursive verifier advice generation supports Poseidon2 proofs, got {0:?}")]
-    UnsupportedHashFunction(HashFunction),
-    #[error("deferred-DAG integrity check failed: {0}")]
-    DeferredIntegrity(#[from] IntegrityError),
     #[error("transcript error: {0}")]
     Transcript(#[from] CryptoVerifierError),
 }
@@ -83,42 +72,12 @@ type BatchMerkleResult = (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>);
 // PUBLIC API
 // ================================================================================================
 
-/// Builds advice inputs for the MASM recursive verifier from a full execution proof.
-///
-/// This helper mirrors the verifier's deferred-wire rehydration: it rehydrates the proof-carried
-/// deferred wire under the supplied registry, derives the final deferred root from the rehydrated
-/// state, builds the trusted public inputs, then delegates to [`generate_advice_inputs`] with the
-/// inner STARK proof bytes.
-pub fn generate_advice_inputs_from_execution_proof(
-    proof: &ExecutionProof,
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    precompiles: &PrecompileRegistry,
-) -> Result<VerifierData, VerifierError> {
-    let hash_fn = proof.hash_fn();
-    if hash_fn != HashFunction::Poseidon2 {
-        return Err(VerifierError::UnsupportedHashFunction(hash_fn));
-    }
-
-    let state = DeferredState::from_wire(
-        Arc::new(precompiles.clone()),
-        proof.deferred_state(),
-        // Mirror verifier-side behavior until verification exposes a deferred-wire budget option.
-        usize::MAX,
-    )?;
-    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs, state.root());
-
-    generate_advice_inputs(proof.stark_proof(), pub_inputs)
-}
-
 /// Deserialize raw Poseidon2 STARK proof bytes and build advice inputs for the MASM recursive
 /// verifier.
 ///
-/// This lower-level helper trusts the caller-supplied [`PublicInputs`]. It does not inspect an
-/// [`ExecutionProof`] or rehydrate deferred-state wire, so callers must supply the exact final
-/// deferred root committed by the proof. Prefer [`generate_advice_inputs_from_execution_proof`]
-/// when starting from an execution proof.
+/// This helper trusts the caller-supplied [`PublicInputs`]. It does not inspect an execution proof
+/// or rehydrate deferred-state wire, so callers must supply the exact final deferred root committed
+/// by the proof.
 pub fn generate_advice_inputs(
     proof_bytes: &[u8],
     pub_inputs: PublicInputs,
