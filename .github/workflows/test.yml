@@ -110,6 +110,23 @@ jobs:
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
 
+  check-precompile-masm:
+    name: check precompile MASM artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Check precompile MASM artifacts for drift
+        run: make check-precompile-masm
+
   run-examples:
     name: run masm examples
     runs-on: warp-ubuntu-latest-x64-8x
