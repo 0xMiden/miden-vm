@@ -1,4 +1,5 @@
-#! Core hash helpers.
+#! Keccak256 and SHA512 procedures call the corresponding
+#! `::miden::precompiles::crypto::hashes` implementations.
 
 pub mod blake3
 pub mod keccak256
