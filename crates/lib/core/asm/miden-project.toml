@@ -1,10 +1,13 @@
 [package]
 name = "miden-core"
-version = "0.22.0"
+version = "0.24.0"
 
 [lib]
 namespace = "miden::core"
 path = "mod.masm"
+
+[dependencies]
+miden-precompiles = { version = "0.24", linkage = "dynamic" }
 
 [profile.release]
 # Always produce debug information, as it can be stripped later by the VM

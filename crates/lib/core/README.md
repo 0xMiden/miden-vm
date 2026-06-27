@@ -9,6 +9,8 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
+`CoreLibrary` also includes the official deferred precompile wrappers under the `miden::precompiles` namespace, so users do not need to link or load a separate precompiles package for standard Miden programs.
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 
@@ -16,11 +18,13 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::collections::smt](./docs/collections/smt.md)
 - [miden::core::collections::sorted_array](./docs/collections/sorted_array.md)
 - [miden::core::crypto::dsa::ecdsa_k256_keccak](./docs/crypto/dsa/ecdsa_k256_keccak.md)
+- [miden::core::crypto::dsa::eddsa_ed25519](./docs/crypto/dsa/eddsa_ed25519.md)
 - [miden::core::crypto::dsa::falcon512_poseidon2](./docs/crypto/dsa/falcon512_poseidon2.md)
 - [miden::core::crypto::hashes::poseidon2](./docs/crypto/hashes/poseidon2.md)
 - [miden::core::crypto::hashes::blake3](./docs/crypto/hashes/blake3.md)
 - [miden::core::crypto::hashes::keccak256](./docs/crypto/hashes/keccak256.md)
 - [miden::core::crypto::hashes::sha256](./docs/crypto/hashes/sha256.md)
+- [miden::core::crypto::hashes::sha512](./docs/crypto/hashes/sha512.md)
 - [miden::core::math::u256](./docs/math/u256.md)
 - [miden::core::math::u64](./docs/math/u64.md)
 - [miden::core::mem](./docs/mem.md)
@@ -35,6 +39,8 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::stark::verifier](./docs/stark/verifier.md)
 - [miden::core::sys](./docs/sys.md)
 - [miden::core::word](./docs/word.md)
+
+> **Compatibility status:** The `miden::core::crypto::hashes::{keccak256, sha512}` and `miden::core::crypto::dsa::{ecdsa_k256_keccak, eddsa_ed25519}` modules are restored for namespace/API stability. Their MASM procedure bodies are currently skeletons that trap rather than return placeholder hash or verification results. They are intended to delegate to `::miden::precompiles::*` in a follow-up. Users should continue to load `CoreLibrary` for the `miden::core` namespace; that future delegation is an implementation detail of the core compatibility modules.
 
 ## Status
 At this point, all implementations listed above are considered to be experimental and are subject to change.
