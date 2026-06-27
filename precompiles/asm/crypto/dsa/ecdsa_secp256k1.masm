@@ -1,0 +1,398 @@
+use miden::precompiles::math::k1_base
+use miden::precompiles::math::k1_scalar
+use miden::precompiles::math::secp256k1
+
+# ECDSA SECP256K1 TRAPPING VERIFIER
+# ================================================================================================
+#
+# Public API:
+# - assert_verify_prehash(pubkey_ptr, digest_ptr, sig_ptr)
+#
+# Input memory uses math-native little-endian u32 limb encoding:
+# - pubkey_ptr[0..8]  = qx, pubkey_ptr[8..16] = qy
+# - digest_ptr[0..8]  = raw prehash z
+# - sig_ptr[0..8]     = r, sig_ptr[8..16]     = s
+#
+# All input pointers are expected to be double-word aligned and to point at u32-range felts.
+# Deferred-precompile assumptions used by this verifier:
+# - public-key coordinates, prehash limbs, and signature limbs are registered as canonical
+#   VALUE digests by the k1 base/scalar and curve precompiles;
+# - raw prehash z is a 256-bit value, so z < 2^256 < 2n and one conditional subtraction reduces it;
+# - the verifier passes U1/U2 scalar digests to the curve scalar multiplication wrappers;
+# - scalar/curve equality constraints below are partly enforced by deferred precompile logging.
+
+# SECP256K1 scalar modulus n, little-endian u32 limbs.
+const K1_N_LO = [0xd0364141, 0xbfd25e8c, 0xaf48a03b, 0xbaaedce6]
+const K1_N_HI = [0xfffffffe, 0xffffffff, 0xffffffff, 0xffffffff]
+
+# PUBLIC PROCEDURES
+# ================================================================================================
+
+#! Verifies a secp256k1 ECDSA signature over a pre-hashed message.
+#!
+#! Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]
+#! Output: [...]
+#!
+#! Memory layout uses math-native little-endian u32 limb encoding:
+#! - pubkey_ptr[0..8]  = qx, pubkey_ptr[8..16] = qy
+#! - digest_ptr[0..8]  = raw 256-bit prehash z
+#! - sig_ptr[0..8]     = SIG_R, sig_ptr[8..16] = SIG_S
+#!
+#! Assumptions/deferred checks:
+#! - pointers are double-word aligned and backed by u32-range felts;
+#! - Q is a canonical secp256k1 curve VALUE digest built from the public-key limbs;
+#! - SIG_R, SIG_S, and Z are canonical k1 scalar VALUE digests built from memory limbs;
+#! - raw z < 2^256 < 2n, so one subtraction is enough after loading the prehash;
+#! - SIG_R != 0 is checked here, and k1_scalar::inv traps/binds correctness for SIG_S != 0;
+#! - U1/U2 are passed as scalar digests to the curve scalar multiplication wrappers;
+#! - scalar/curve equality constraints are logged through deferred precompile machinery.
+@locals(0)
+pub proc assert_verify_prehash
+    exec.prepare_verify_prehash_inputs
+    # => [pubkey_ptr, U1, U2, SIG_R, ...]
+
+    exec.msm_mul_scalar
+    # => [VERIFY_POINT, SIG_R, ...]
+
+    exec.assert_x_eq_scalar_k1
+end
+
+# INTERNAL PROCEDURES
+# ================================================================================================
+
+#! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
+#!
+#! Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]
+#! Output: [pubkey_ptr, U1_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+@locals(0)
+proc prepare_verify_prehash_inputs
+    swap
+    # => [digest_ptr, pubkey_ptr, sig_ptr, ...]
+    exec.load_reduced_z_k1_from_ptr
+    # => [Z, pubkey_ptr, sig_ptr, ...]
+
+    movup.5
+    # => [sig_ptr, Z, pubkey_ptr, ...]
+    exec.load_signature_k1
+    # => [SIG_S, SIG_R, Z, pubkey_ptr, ...]
+
+    exec.k1_scalar::inv
+    # => [S_INV, SIG_R, Z, pubkey_ptr, ...]
+
+    dupw
+    movupw.3
+    exec.k1_scalar::mul
+    # => [U1 = Z*S_INV, S_INV, SIG_R, pubkey_ptr, ...]
+
+    dupw.1
+    dupw.3
+    exec.k1_scalar::mul
+    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, pubkey_ptr, ...]
+
+    swapw.2
+    # => [S_INV, U1, U2, SIG_R, pubkey_ptr, ...]
+    dropw
+    # => [U1, U2, SIG_R, pubkey_ptr, ...]
+
+    movup.12
+    # => [pubkey_ptr, U1, U2, SIG_R, ...]
+end
+
+#! Computes `[U1]G + [U2]Q` using a two-pair MSM.
+#!
+#! Input:  [pubkey_ptr, U1_DIGEST, U2_DIGEST, ...]
+#! Output: [MSM_POINT_DIGEST, ...]
+@locals(0)
+proc msm_mul_scalar
+    exec.secp256k1::load_mem
+    # => [Q_DIGEST, U1_DIGEST, U2_DIGEST, ...]
+
+    swapw
+    # => [U1_DIGEST, Q_DIGEST, U2_DIGEST, ...]
+    movupw.2
+    # => [U2_DIGEST, U1_DIGEST, Q_DIGEST, ...]
+    swapw
+    # => [U1_DIGEST, U2_DIGEST, Q_DIGEST, ...]
+
+    exec.secp256k1::msm2_generator
+    # => [MSM_POINT_DIGEST, ...]
+end
+
+#! Subtracts one u32 limb and an incoming borrow from a value limb.
+#!
+#! Input:  [N_I, borrow_in, A_I, ...]
+#! Output: [DIFF_I, borrow_out, ...]
+#!
+#! Preconditions: A_I and N_I are u32 values, and borrow_in is boolean.
+@locals(0)
+proc sub_limb_with_borrow
+    movup.2
+    # => [A_I, N_I, borrow_in, ...]
+    swap
+    # => [N_I, A_I, borrow_in, ...]
+    u32overflowing_sub
+    # => [borrow_n, A_MINUS_N, borrow_in, ...]
+
+    swap
+    # => [A_MINUS_N, borrow_n, borrow_in, ...]
+    movup.2
+    # => [borrow_in, A_MINUS_N, borrow_n, ...]
+    u32overflowing_sub
+    # => [borrow_in_sub, DIFF_I, borrow_n, ...]
+
+    movup.2
+    # => [borrow_n, borrow_in_sub, DIFF_I, ...]
+    or
+    # => [borrow_out, DIFF_I, ...]
+    swap
+    # => [DIFF_I, borrow_out, ...]
+end
+
+#! Computes the next borrow for VALUE - MODULUS without materializing the diff limb.
+#!
+#! Input:  [mod_ptr, borrow_in, A_I, ...]
+#! Output: [mod_ptr + 1, borrow_out, ...]
+#!
+#! Preconditions: A_I and mem[mod_ptr] are u32 values, and borrow_in is boolean.
+@locals(0)
+proc borrow_limb_from_ptr
+    dup mem_load
+    # => [N_I, mod_ptr, borrow_in, A_I, ...]
+    movup.2
+    # => [borrow_in, N_I, mod_ptr, A_I, ...]
+
+    if.true
+        # borrow_in = 1: A_I - N_I - 1 underflows iff A_I <= N_I,
+        # equivalently N_I >= A_I.
+        # => [N_I, mod_ptr, A_I, ...]
+        dup.2 u32gte
+        # => [borrow_out, mod_ptr, A_I, ...]
+    else
+        # borrow_in = 0: A_I - N_I underflows iff A_I < N_I,
+        # equivalently N_I > A_I.
+        # => [N_I, mod_ptr, A_I, ...]
+        dup.2 u32gt
+        # => [borrow_out, mod_ptr, A_I, ...]
+    end
+
+    swap.2 drop
+    # => [mod_ptr, borrow_out, ...]
+    add.1
+    # => [mod_ptr + 1, borrow_out, ...]
+end
+
+#! Computes the final borrow of VALUE - MODULUS, consuming VALUE.
+#!
+#! Input:  [mod_ptr, VALUE_U32[8], ...]
+#! Output: [mod_ptr + 8, borrow, ...]
+#!
+#! Preconditions: VALUE and mem[mod_ptr..mod_ptr+8] are u32 values.
+@locals(0)
+proc borrow_u256_sub_mod_ptr_unchecked
+    push.0 swap
+    # => [mod_ptr, borrow=0, VALUE_U32[8], ...]
+
+    repeat.8
+        exec.borrow_limb_from_ptr
+    end
+    # => [mod_ptr + 8, borrow, ...]
+end
+
+#! Subtracts one modulus limb from one value limb and appends the diff after all pending limbs.
+#!
+#! Input:  [mod_ptr, borrow_in, A_I, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, ...]
+#! Output: [mod_ptr + 1, borrow_out, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, DIFF_I, ...]
+#!
+#! The output placement uses `movdn.9`: for every limb, the number of stack items between DIFF_I and
+#! its final position is always 9 (`mod_ptr`, `borrow`, and seven other u256 limbs).
+@locals(0)
+proc sub_limb_with_borrow_from_ptr
+    dup mem_load
+    # => [N_I, mod_ptr, borrow_in, A_I, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, ...]
+    swap movdn.3
+    # => [N_I, borrow_in, A_I, mod_ptr, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, ...]
+    exec.sub_limb_with_borrow
+    # => [DIFF_I, borrow_out, mod_ptr, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, ...]
+
+    movdn.9
+    # => [borrow_out, mod_ptr, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, DIFF_I, ...]
+    swap add.1
+    # => [mod_ptr + 1, borrow_out, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, DIFF_I, ...]
+end
+
+#! Subtracts the modulus at mod_ptr from VALUE.
+#!
+#! Input:  [mod_ptr, VALUE_U32[8], ...]
+#! Output: [mod_ptr + 8, VALUE_MINUS_MODULUS_U32[8], ...]
+#!
+#! Preconditions:
+#! - VALUE and mem[mod_ptr..mod_ptr+8] are u32 values;
+#! - VALUE >= MODULUS, so the final borrow is zero.
+@locals(0)
+proc sub_u256_mod_ptr_unchecked
+    push.0 swap
+    # => [mod_ptr, borrow=0, VALUE_U32[8], ...]
+
+    repeat.8
+        exec.sub_limb_with_borrow_from_ptr
+    end
+    # => [mod_ptr + 8, borrow, DIFF_U32[8], ...]
+
+    swap assertz.err="internal scalar reduction underflow"
+    # => [mod_ptr + 8, DIFF_U32[8], ...]
+end
+
+#! Reduces a 256-bit little-endian u32 value modulo the secp256k1 scalar modulus with one
+#! conditional subtraction.
+#!
+#! Input:  [VALUE_U32[8], ...]
+#! Output: [REDUCED_U32[8], ...]
+#!
+#! Preconditions for callers:
+#! - VALUE_U32[8] is already u32-constrained;
+#! - VALUE < 2n, so one subtraction is sufficient.
+#!
+#! The modulus is staged once into this proc's locals and passed by pointer to loop-shaped helpers.
+#! The branch condition is the final borrow of VALUE - n, computed on a duplicate of VALUE so the
+#! original remains available for the conditional subtraction.
+@locals(8)
+proc reduce_u256_mod_k1_scalar_unchecked
+    dupw.1 dupw.1
+    # => [VALUE_COPY_U32[8], VALUE_U32[8], ...]
+
+    locaddr.0 dup
+    # => [mod_ptr, mod_ptr, VALUE_COPY_U32[8], VALUE_U32[8], ...]
+    push.K1_N_LO movup.4 mem_storew_le dropw
+    # => [mod_ptr, VALUE_COPY_U32[8], VALUE_U32[8], ...]
+    push.K1_N_HI dup.4 add.4 mem_storew_le dropw
+    # => [mod_ptr, VALUE_COPY_U32[8], VALUE_U32[8], ...]
+
+    exec.borrow_u256_sub_mod_ptr_unchecked
+    # => [mod_ptr + 8, borrow, VALUE_U32[8], ...]
+
+    sub.8
+    # => [mod_ptr, borrow, VALUE_U32[8], ...]
+    swap
+    # => [borrow, mod_ptr, VALUE_U32[8], ...]
+
+    if.false
+        # borrow = 0 iff VALUE >= n, so subtract once.
+        # => [mod_ptr, VALUE_U32[8], ...]
+        exec.sub_u256_mod_ptr_unchecked
+        # => [mod_ptr + 8, VALUE_MINUS_N_U32[8], ...]
+    end
+    # => [mod_ptr_or_mod_ptr_plus_8, REDUCED_U32[8], ...]
+
+    drop
+    # => [REDUCED_U32[8], ...]
+end
+
+#! Loads raw prehash limbs from memory, reduces z modulo secp256k1 n, and registers the result as a
+#! k1 scalar VALUE digest.
+#!
+#! Input:  [digest_ptr, ...]
+#! Output: [Z_SCALAR_DIGEST, ...]
+#!
+#! Preconditions: digest_ptr is double-word aligned and points to eight u32-range felts.
+#! The raw prehash satisfies z < 2^256 < 2n, so one conditional subtraction is sufficient.
+@locals(0)
+proc load_reduced_z_k1_from_ptr
+    padw padw padw
+    # => [R0=0w, R1=0w, C=0w, digest_ptr, ...]
+    mem_stream
+    # => [Z_LO_RAW, Z_HI_RAW, C=0w, digest_ptr + 8, ...]
+
+    u32assertw.err="invalid ECDSA digest low word"
+    # => [Z_LO_RAW, Z_HI_RAW, C=0w, digest_ptr + 8, ...]
+    swapw
+    # => [Z_HI_RAW, Z_LO_RAW, C=0w, digest_ptr + 8, ...]
+    u32assertw.err="invalid ECDSA digest high word"
+    # => [Z_HI_RAW, Z_LO_RAW, C=0w, digest_ptr + 8, ...]
+    swapw
+    # => [Z_LO_RAW, Z_HI_RAW, C=0w, digest_ptr + 8, ...]
+
+    movupw.2 dropw
+    # => [Z_LO_RAW, Z_HI_RAW, digest_ptr + 8, ...]
+    movup.8 drop
+    # => [Z_LO_RAW, Z_HI_RAW, ...]
+
+    exec.reduce_u256_mod_k1_scalar_unchecked
+    # => [Z_REDUCED_U32[8], ...]
+    exec.k1_scalar::load
+    # => [Z_SCALAR_DIGEST, ...]
+end
+
+#! Loads SIG_R and SIG_S from a signature pointer as k1 scalar VALUE digests, checks SIG_R != 0,
+#! and returns SIG_S on top because callers immediately invert SIG_S.
+#!
+#! Input:  [sig_ptr, ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+#!
+#! Memory layout:
+#! - sig_ptr[0..8]   = SIG_R as math-native little-endian u32 limbs
+#! - sig_ptr[8..16]  = SIG_S as math-native little-endian u32 limbs
+proc load_signature_k1
+    exec.k1_scalar::load_mem_stream
+    # => [SIG_R, sig_ptr + 8, ...]
+
+    movup.4
+    # => [sig_ptr + 8, SIG_R, ...]
+    exec.k1_scalar::load_mem_stream
+    # => [SIG_S, sig_ptr + 16, SIG_R, ...]
+
+    movup.4 drop
+    # => [SIG_S, SIG_R, ...]
+
+    # ECDSA requires SIG_R != 0 and SIG_S != 0.
+    # Check SIG_R here. We do not check SIG_S here because k1_scalar::inv(SIG_S) traps on SIG_S = 0
+    # and binds the inverse relation for nonzero SIG_S.
+    dupw.1
+    # => [SIG_R, SIG_S, SIG_R, ...]
+    exec.k1_scalar::push_zero_digest
+    eqw
+    # => [is_sig_r_zero, ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
+    assertz.err="invalid ECDSA signature: r is zero"
+    # => [ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
+    dropw dropw
+    # => [SIG_S, SIG_R, ...]
+end
+
+#! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
+#! directly compares the resulting scalar VALUE digest against SIG_R.
+#!
+#! Input:  [VERIFY_POINT_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+#! Output: [...]
+#!
+#! Preconditions/provenance:
+#! - SIG_R_SCALAR_VALUE_DIGEST is a canonical k1 scalar VALUE digest, e.g. from load_signature_k1;
+#! - secp256k1::eval binds VERIFY_POINT_DIGEST to the returned canonical curve VALUE payload;
+#! - after identity rejection succeeds, X_OR_TRUE_DIGEST/Y_OR_TRUE_DIGEST are real coordinate digests.
+@locals(0)
+proc assert_x_eq_scalar_k1
+    exec.secp256k1::eval
+    # => [VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    # Reject the identity using the VALUE digest returned by the single eval above. We do not need
+    # VERIFY_POINT_VALUE_DIGEST after this check, so assert immediately and then drop the compared words.
+    exec.secp256k1::push_identity
+    # => [IDENTITY_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    eqw
+    # => [is_identity, IDENTITY_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    assertz.err="invalid ECDSA verification point: identity"
+    # => [IDENTITY_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    dropw dropw
+    # => [X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    swapw dropw
+    # => [X_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    exec.k1_base::eval
+    # => [X_U32[8], SIG_R_SCALAR_VALUE_DIGEST, ...]
+    # k1_base::eval returns canonical u32 limbs and x < p < 2n, so the unchecked reducer is valid.
+    exec.reduce_u256_mod_k1_scalar_unchecked
+    # => [X_MOD_N_U32[8], SIG_R_SCALAR_VALUE_DIGEST, ...]
+    exec.k1_scalar::load
+    # => [X_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    assert_eqw.err="ECDSA verification failed: x(VERIFY_POINT) != SIG_R"
+    # => [...]
+end

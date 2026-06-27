@@ -17,3 +17,6 @@
   the `UintPrecompile` and `CurvePrecompile`.
 - Added the `regenerate-precompile-masm` codegen tool plus `make check-precompile-masm` drift checks
   for generated math/curve MASM artifacts.
+- Added curve-precompile-based signature wrappers under `miden::precompiles::crypto::dsa`:
+  `ecdsa_secp256k1::assert_verify_prehash` for native secp256k1 ECDSA prehash verification and
+  `eddsa_ed25519::assert_verify` for native Ed25519/SHA-512 verification.
