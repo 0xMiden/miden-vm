@@ -1,18 +1,17 @@
 use std::{array, sync::Arc};
 
-use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
+    deferred::PrecompileRegistry,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, prove_sync,
-    recursive_verifier::{VerifierData, generate_advice_inputs},
+    recursive_verifier::{VerifierData, generate_advice_inputs_from_execution_proof},
     stack_inputs_from_ints,
 };
 use rand::{Rng, SeedableRng};
@@ -124,15 +123,17 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // build public inputs and generate the advice data needed for recursive proof verification
-    let pub_inputs = PublicInputs::new(
+    // These programs are deferred-free, so an empty registry is intentional; the helper still
+    // derives the final deferred root from the proof-carried wire instead of assuming TRUE.
+    let precompiles = PrecompileRegistry::new();
+    generate_advice_inputs_from_execution_proof(
+        &proof,
         program_info,
         stack_inputs,
         stack_outputs,
-        PrecompileTranscriptState::default(),
-    );
-    let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
+        &precompiles,
+    )
+    .unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

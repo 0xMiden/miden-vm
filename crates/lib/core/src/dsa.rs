@@ -1,7 +1,11 @@
 //! Digital Signature Algorithm (DSA) helper functions.
 //!
-//! This module provides functions for signing messages and encoding signatures in the format
-//! expected by the corresponding MASM verification procedures.
+//! This module provides helpers for signature schemes whose MASM verification procedures are in the
+//! core library.
+//!
+//! The ECDSA and EdDSA helpers target the compatibility
+//! `::miden::core::crypto::dsa::*` wrappers. These wrappers are currently restored as MASM
+//! skeletons and are intended to delegate to the official precompiles later.
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
@@ -13,8 +17,9 @@
 
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
-/// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` MASM procedure.
+/// Functions in this module generate advice data for the compatibility
+/// `::miden::core::crypto::dsa::ecdsa_k256_keccak` wrappers. These wrappers are currently restored
+/// as MASM skeletons and are intended to delegate to the official precompiles later.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
@@ -24,8 +29,8 @@ pub mod ecdsa_k256_keccak {
     use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
-    /// associated public key into a vector of field elements in the format expected by
-    /// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
+    /// associated public key into a vector of field elements in the format expected by the
+    /// compatibility `::miden::core::crypto::dsa::ecdsa_k256_keccak::verify` wrapper.
     ///
     /// See [`encode_signature()`] for more info.
     pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
@@ -35,7 +40,8 @@ pub mod ecdsa_k256_keccak {
     }
 
     /// Encodes the provided public key and signature into a vector of field elements in the format
-    /// expected by `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
+    /// expected by the compatibility `::miden::core::crypto::dsa::ecdsa_k256_keccak::verify`
+    /// wrapper.
     ///
     /// 1. The compressed secp256k1 public key encoded as 9 packed-u32 felts (33 bytes total).
     /// 2. The ECDSA signature encoded as 17 packed-u32 felts (66 bytes total).
@@ -57,8 +63,9 @@ pub mod ecdsa_k256_keccak {
 
 /// EdDSA Ed25519 with SHA-512 signature helpers.
 ///
-/// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::eddsa_ed25519::verify` MASM procedure.
+/// Functions in this module generate advice data for the compatibility
+/// `::miden::core::crypto::dsa::eddsa_ed25519` wrappers. These wrappers are currently restored as
+/// MASM skeletons and are intended to delegate to the official precompiles later.
 pub mod eddsa_ed25519 {
     extern crate alloc;
 
@@ -68,8 +75,8 @@ pub mod eddsa_ed25519 {
     use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
-    /// associated public key into a vector of field elements in the format expected by
-    /// `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
+    /// associated public key into a vector of field elements in the format expected by the
+    /// compatibility `::miden::core::crypto::dsa::eddsa_ed25519::verify` wrapper.
     ///
     /// See [`encode_signature()`] for more info.
     pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
@@ -79,7 +86,7 @@ pub mod eddsa_ed25519 {
     }
 
     /// Encodes the provided public key and signature into a vector of field elements in the format
-    /// expected by `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
+    /// expected by the compatibility `::miden::core::crypto::dsa::eddsa_ed25519::verify` wrapper.
     ///
     /// The encoding format is:
     /// 1. The Ed25519 public key encoded as 8 packed-u32 felts (32 bytes total).
