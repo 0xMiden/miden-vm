@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    precompile::PrecompileRequest,
+    deferred::DeferredStateWire,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -22,15 +22,16 @@ use crate::{
 
 /// A proof of correct execution of Miden VM.
 ///
-/// The proof contains the STARK proof, the hash function used during proof generation, and a set
-/// of precompile requests deferred during proof generation. However, the proof does not contain
-/// public inputs needed to verify the proof.
+/// The proof contains the STARK proof, the hash function used during proof generation, and the
+/// deferred-state wire opening needed to rehydrate the deferred DAG under a verifier-supplied
+/// precompile registry. However, the proof does not contain public inputs needed to verify the
+/// STARK proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
-    pub pc_requests: Vec<PrecompileRequest>,
+    pub deferred_state: DeferredStateWire,
 }
 
 impl ExecutionProof {
@@ -38,13 +39,13 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// and list of all deferred [PrecompileRequest]s.
+    /// and deferred-state wire opening.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
-        pc_requests: Vec<PrecompileRequest>,
+        deferred_state: DeferredStateWire,
     ) -> Self {
-        Self { proof, hash_fn, pc_requests }
+        Self { proof, hash_fn, deferred_state }
     }
 
     // PUBLIC ACCESSORS
@@ -60,9 +61,9 @@ impl ExecutionProof {
         self.hash_fn
     }
 
-    /// Returns the list of precompile requests made during the execution of the program.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.pc_requests
+    /// Returns the deferred-state wire opening carried by this proof.
+    pub const fn deferred_state(&self) -> &DeferredStateWire {
+        &self.deferred_state
     }
 
     /// Returns conjectured security level of this proof in bits.
@@ -96,9 +97,9 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the hash function, proof bytes, and precompile requests.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
-        (self.hash_fn, self.proof, self.pc_requests)
+    /// Returns the hash function, proof bytes, and deferred-state wire opening.
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredStateWire) {
+        (self.hash_fn, self.proof, self.deferred_state)
     }
 }
 
@@ -208,7 +209,7 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.pc_requests.write_into(target);
+        self.deferred_state.write_into(target);
     }
 }
 
@@ -216,9 +217,9 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
+        let deferred_state = DeferredStateWire::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, pc_requests })
+        Ok(ExecutionProof { proof, hash_fn, deferred_state })
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -251,7 +252,7 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Vec::new(),
             hash_fn: HashFunction::Blake3_256,
-            pc_requests: Vec::new(),
+            deferred_state: DeferredStateWire::default(),
         }
     }
 }
@@ -260,7 +261,8 @@ impl ExecutionProof {
 mod tests {
     use super::*;
     use crate::{
-        events::EventId,
+        Felt,
+        deferred::{TRUE_INDEX, Tag, WireEntry},
         serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
     };
 
@@ -291,11 +293,37 @@ mod tests {
     }
 
     #[test]
-    fn execution_proof_from_bytes_accepts_many_minimal_precompile_requests() {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+    fn execution_proof_round_trips_empty_deferred_wire() {
+        let proof = ExecutionProof::new(
+            alloc::vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            DeferredStateWire::default(),
+        );
+
+        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+
+        assert_eq!(decoded, proof);
+    }
+
+    #[test]
+    fn execution_proof_round_trips_non_empty_deferred_wire() {
+        let tag = Tag::from_word([
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+        ]);
+        let deferred_wire = DeferredStateWire {
+            entries: alloc::vec![
+                WireEntry::Data {
+                    tag,
+                    chunks: alloc::vec![[Felt::new_unchecked(1); 8]],
+                },
+                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
+            ],
+        };
+        let proof =
+            ExecutionProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
 
@@ -317,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_proof_rejects_over_budget_pc_requests_len() {
+    fn execution_proof_rejects_over_budget_deferred_wire_entries_len() {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
         bytes.write_u8(HashFunction::Blake3_256 as u8);

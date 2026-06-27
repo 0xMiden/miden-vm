@@ -145,6 +145,8 @@ impl ProveCmd {
         // execute program and generate proof
         let processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+                .map_err(|err| Report::msg(format!("{err}")))?
+                .with_deferred_precompiles(miden_precompiles::registry())
                 .map_err(|err| Report::msg(format!("{err}")))?;
         let trace_inputs = match (package_debug_info.as_ref(), entrypoint_source_node) {
             (Some(debug_info), Some(entrypoint_source_node_id)) => processor

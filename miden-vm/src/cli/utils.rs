@@ -81,7 +81,7 @@ pub fn get_masm_program(
         // Assembler debug mode is always enabled (issue #1821)
         let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)?;
 
-        // Link standard library
+        // Link standard libraries
         assembler
             .link_package(CoreLibrary::default().package(), Linkage::Dynamic)
             .wrap_err("Failed to load stdlib")?;
