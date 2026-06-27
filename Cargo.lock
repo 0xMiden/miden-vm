@@ -1815,6 +1815,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-mast-package",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-verifier",

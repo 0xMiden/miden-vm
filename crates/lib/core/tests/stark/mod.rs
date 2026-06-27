@@ -1,9 +1,10 @@
 use std::{array, sync::Arc};
 
+use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::PrecompileRegistry,
+    deferred::{DeferredState, PrecompileRegistry},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     proof::HashFunction,
 };
@@ -11,7 +12,7 @@ use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, prove_sync,
-    recursive_verifier::{VerifierData, generate_advice_inputs_from_execution_proof},
+    recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
 use rand::{Rng, SeedableRng};
@@ -123,17 +124,18 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // These programs are deferred-free, so an empty registry is intentional; the helper still
-    // derives the final deferred root from the proof-carried wire instead of assuming TRUE.
-    let precompiles = PrecompileRegistry::new();
-    generate_advice_inputs_from_execution_proof(
-        &proof,
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        &precompiles,
+    // These programs are deferred-free, so an empty registry is intentional; still rehydrate the
+    // proof-carried deferred wire instead of assuming TRUE.
+    let deferred_state = DeferredState::from_wire(
+        Arc::new(PrecompileRegistry::new()),
+        proof.deferred_state(),
+        usize::MAX,
     )
-    .unwrap()
+    .unwrap();
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
+
+    generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

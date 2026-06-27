@@ -10,13 +10,16 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::proof::{ExecutionProof, HashFunction};
-#[cfg(not(target_family = "wasm"))]
-pub use miden_processor::execute_sync;
+/// Low-level processor type for callers that need direct execution control.
+///
+/// Prefer the high-level [`execute`] and [`execute_sync`] facade functions for default
+/// execution; they install the built-in deferred precompile registry automatically.
+pub use miden_processor::FastProcessor;
 pub use miden_processor::{
-    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    FutureMaybeSend, Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost, TraceBuildInputs,
-    TraceGenerationContext, ZERO, advice, crypto, execute, field, operation::Operation, serde,
-    trace, trace::ExecutionTrace, utils,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend,
+    Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost, TraceBuildInputs,
+    TraceGenerationContext, ZERO, advice, crypto, field, operation::Operation, serde, trace,
+    trace::ExecutionTrace, utils,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_from_trace_sync;
@@ -28,6 +31,52 @@ pub use miden_verifier::VerificationError;
 
 #[cfg(feature = "internal")]
 pub mod internal;
+
+/// Executes the provided program with the built-in deferred precompile registry.
+///
+/// The `host` parameter is used to provide the external environment to the program being executed,
+/// such as access to the advice provider and libraries that the program depends on.
+///
+/// # Errors
+/// Returns an error if program execution fails for any reason.
+#[tracing::instrument("execute_program", skip_all)]
+pub async fn execute(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: advice::AdviceInputs,
+    host: &mut impl Host,
+    options: ExecutionOptions,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .with_deferred_precompiles(miden_precompiles::registry())?;
+
+    processor.execute(program, host).await
+}
+
+/// Synchronous wrapper for [`execute`].
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the async [`execute`]
+/// method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use [`execute`] instead in async
+/// contexts.
+#[cfg(not(target_family = "wasm"))]
+#[tracing::instrument("execute_program_sync", skip_all)]
+pub fn execute_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: advice::AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ExecutionOptions,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .with_deferred_precompiles(miden_precompiles::registry())?;
+
+    processor.execute_sync(program, host)
+}
 
 /// Executes and proves a Miden program with the built-in precompile registry.
 pub async fn prove(

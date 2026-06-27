@@ -3,15 +3,13 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::proof::ExecutionProof;
+use miden_core::{deferred::DeferredState, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
-    AdviceInputs, ProgramInfo, ProvingOptions, StackInputs, StackOutputs, prove_sync,
+    AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
-use miden_utils_testing::{
-    recursive_verifier::generate_advice_inputs_from_execution_proof, stack_inputs_from_ints,
-};
+use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 
@@ -67,15 +65,16 @@ fn assert_recursive_verify(
 ) {
     assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
 
-    let precompiles = miden_precompiles::registry();
-    let verifier_inputs = generate_advice_inputs_from_execution_proof(
-        proof,
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        &precompiles,
+    let deferred_state = DeferredState::from_wire(
+        Arc::new(miden_precompiles::registry()),
+        proof.deferred_state(),
+        usize::MAX,
     )
-    .expect("recursive verifier advice construction failed");
+    .expect("deferred wire should rehydrate under official precompiles");
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
+    let verifier_inputs = generate_advice_inputs(proof.stark_proof(), pub_inputs)
+        .expect("recursive verifier advice construction failed");
 
     let source = "
         use miden::core::sys::vm
@@ -245,6 +244,8 @@ mod fast_parallel {
     ) -> TraceBuildInputs {
         FastProcessor::new_with_options(stack_inputs, advice_inputs, parallel_execution_options())
             .expect("processor advice inputs should fit advice map limits")
+            .with_deferred_precompiles(miden_precompiles::registry())
+            .expect("official precompiles should install")
             .execute_trace_inputs_sync(program, host)
             .expect("Fast processor execution failed")
     }
