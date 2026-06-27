@@ -1,9 +1,3 @@
-#! Compatibility skeleton for the legacy `::miden::core::crypto::dsa::eddsa_ed25519` API.
-#!
-#! This module restores namespace/API stability for callers that import the old core crypto path.
-#! The procedure below intentionally traps instead of returning fake verification results. It will
-#! delegate to the corresponding `::miden::precompiles::*` implementation later.
-
 # ENCODING CONVENTIONS
 # ================================================================================================
 #
@@ -16,9 +10,6 @@
 # ================================================================================================
 
 #! Verifies an Ed25519 EdDSA signature compatible with `miden-crypto::eddsa_25519_sha512`.
-#!
-#! Compatibility skeleton: this procedure currently traps to preserve the old public API without
-#! producing placeholder verification results. It will delegate to `::miden::precompiles::*` later.
 #!
 #! This wrapper mirrors `miden-crypto::eddsa_25519_sha512`: given a public key commitment and the
 #! original message, it reconstructs the calldata expected by the precompile (public key bytes,
@@ -46,7 +37,6 @@
 #! The procedure traps if:
 #! - The public key does not hash to `PK_COMM` (invalid commitment)
 #! - The signature verification fails
-#! - The compatibility skeleton is reached before its implementation is restored
 pub proc verify
     push.0 assert.err="eddsa_ed25519::verify implementation pending"
 end

@@ -45,7 +45,7 @@ This bus is typically implemented as some kind of lookup argument, and in Miden 
 Miden VM uses multiple communication buses:
 
 - The chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, ACE, and Kernel ROM). It is implemented using multiset checks.
-- The hash/kernel bus [$b_{hash\_kernel}$](../chiplets/index.md#chiplets-bus), which combines several multiset-backed channels (hash sibling table, kernel ROM procedure table, ACE memory requests, and precompile transcript updates).
+- The hash/kernel bus [$b_{hash\_kernel}$](../chiplets/index.md#chiplets-bus), which combines several multiset-backed channels (hash sibling table, kernel ROM procedure table, ACE memory requests, and deferred-root updates).
 - The ACE wiring bus [$v_{wiring}$](../chiplets/ace.md#circuit-evaluation), which ties together ACE node wiring. It is implemented using LogUp.
 - The range checker bus [$b_{range}$](../range.md#communication-bus), which facilitates requests between the [stack](../stack/u32_ops.md) and [memory](../chiplets/memory.md) components and the [range checker](../range.md). It is implemented using LogUp.
 

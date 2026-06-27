@@ -1,84 +1,93 @@
 # Precompiles
 
-Precompiles let Miden programs defer expensive computations to the host while still producing
-auditable evidence inside the STARK. This page describes how the VM, host, prover, and verifier
-coordinate to maintain a sequential commitment to every precompile invocation.
+Precompiles let Miden programs defer expensive computations to host-side implementations while
+still binding the claimed result into the VM proof. The current proof-bound model is the
+content-addressed deferred DAG described in [Deferred computation](../deferred/index.md): programs
+register deferred nodes, log statement digests that evaluate to `TRUE`, proofs carry
+`DeferredStateWire`, and verifiers rehydrate that wire under a supplied `PrecompileRegistry`.
 
-## Core data
+Concrete proof-bound wrappers live in the `miden-precompiles` crate and are exposed to MASM under
+the `miden::precompiles` namespace.
+
+## Current data model
 
 | Concept | Description |
 | ------- | ----------- |
-| `PrecompileRequest` | Minimal calldata for a precompile, recorded by the host when the event handler runs. It contains exactly the information needed to deterministically recompute the result and the commitment. Requests are included in the proof artifact. |
-| `PrecompileCommitment` | A word pair `(TAG, COMM)` computed by the MASM wrapper, and deterministically recomputable from the corresponding `PrecompileRequest`. `COMM` typically commits to inputs, and may also include outputs for long results; the three free elements in `TAG` carry metadata and/or simple results. Together `(TAG, COMM)` represent the full request (inputs + outputs). |
-| `PrecompileTranscript` | A rolling digest of every precompile request, updated by a domain-separated Poseidon2 merge: `state' = rate0(Poseidon2([state, STMNT, [1,0,0,0]]))`, using the fixed capacity word `[1, 0, 0, 0]`. The state is itself a complete digest at every step. The verifier reconstructs the same transcript by re‑evaluating each request and recording its commitment. |
+| `Tag` | A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`, semantic `AND`, and opaque framework `CHUNKS`; precompile ids are derived from precompile names and interpret the remaining three `args` felts locally. |
+| `Node` | A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data chunks, join child digests, unary `child_digest || params`, pair lists of `lhs_digest || rhs_digest` chunks, or the framework `TRUE` sentinel. |
+| `Precompile` | A host implementation that owns one precompile id, decodes the structural shape for its tags, evaluates nodes to canonical form, and optionally contributes canonical constants through `init()`. |
+| `PrecompileRegistry` | The verifier/host dispatcher for trusted precompile implementations. Verification must use the registry that corresponds to the proof-bound precompile set being accepted. |
+| `DeferredState` | The host-side DAG witness accumulated during execution. It tracks registered nodes, evaluates them under the registry, and maintains the rolling deferred root. |
+| `DeferredStateWire` | The canonical proof-carried wire format for the root-reachable deferred DAG. It is passive data until rehydrated and validated with `DeferredState::from_wire`. |
+| Deferred root | A single digest public value. Each logged statement appends `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. |
 
 ## Lifecycle overview
 
-1. **Wrapper emits event** – The MASM wrapper stages inputs (e.g., on stack/memory) and emits the event for the target precompile.
-2. **Host handler runs** – The host executes the event handler, reads required inputs from the current process state, stores a `PrecompileRequest` (raw calldata) for later verification, and pushes the precompile result to the VM via the advice stack.
-3. **Wrapper constructs commitment** – The wrapper pops result(s) from advice, computes `(TAG, COMM)` per the precompile’s convention, and prepares to log the operation.
-4. **`sys::log_precompile_request` records the commitment in the transcript** – The wrapper calls the helper with `[COMM, TAG, ...]` on top of the stack. The helper:
-   - Computes the per‑call statement word `STMNT = Poseidon2::merge(COMM, TAG)` via `hmerge`.
-   - Pads scratch words at `stack[0..4]` and `stack[8..12]`, leaving `STMNT` at `stack[4..8]`, then invokes the `log_precompile` opcode, which updates the rolling transcript state via `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))`. `STATE_PREV` is supplied non‑deterministically via helper registers.
-   - Drops the three output words `[STATE_NEW, OUT_RATE1, OUT_CAP]` so they are not visible to the caller.
-5. **Transcript-state tracking via vtable** – The transcript state is tracked inside the VM via the chiplets’ virtual table; the host never tracks it. The table always stores the current state. On each `log_precompile`:
-   - The previous state is removed from the table.
-   - The permutation links `STATE_PREV --[STMNT]--> STATE_NEW`.
-   - The next state is inserted back into the table.
-   This enforces that updates can only occur by applying the permutation.
-6. **Trace output and proof** – The transcript state is used to construct the vtable auxiliary column, while the prover stores only the ordered `PrecompileRequest`s in the proof.
-7. **Verifier reconstruction** – The verifier replays each request via a `PrecompileVerifier` to recompute `(TAG, COMM)`, records them into a fresh transcript, and enforces the initial/final state via public inputs. To check correct linking, the verifier initializes the column with an initial insertion of the empty state and a removal of the final state; the final state is provided as a public input to the AIR.
-8. **Final state is the transcript digest** – Because the domain-separated Poseidon2 merge outputs a digest word directly, the state is itself the transcript digest at every step.
+1. **Wrapper registers nodes** – A `miden::precompiles` MASM procedure stages node payloads on the
+   operand stack or in memory and emits `adv.register_deferred` / `adv.register_deferred_data`.
+   Registration stores the node in host-side `DeferredState`, checks structural child closure, and
+   evaluates the node immediately under the installed registry.
+2. **Wrapper binds digests in-circuit** – The wrapper computes any proof-relevant node digest from the
+   same stack or memory data visible to the circuit. A digest supplied only by advice is not a sound
+   proof binding.
+3. **Wrapper evaluates only through explicit predicates** – When a wrapper uses
+   `adv.evaluate_deferred*` to obtain host-computed canonical data, it must re-bind that advice output
+   to circuit-visible data and log a statement digest that the verifier can re-evaluate.
+4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
+   `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
+   Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
+   host-side deferred state records the corresponding `AND` node.
+5. **Prover serializes the wire** – The prover serializes `trace.deferred_state().to_wire()` into
+   `ExecutionProof` and uses the final deferred root as the STARK public input.
+6. **Verifier rehydrates and checks** – The verifier decodes `DeferredStateWire` with the caller's
+   `PrecompileRegistry`, rejects non-canonical or semantically false wires, compares the rehydrated
+   root to the public deferred root, and then verifies the STARK proof.
 
 ## Responsibilities
 
 | Participant | Responsibilities |
 | ----------- | ---------------- |
-| VM | Executes `log_precompile`, maintains the rolling transcript state internally, and participates in state initialization via the chiplets’ virtual table. |
-| Host | Executes the event handler, reads inputs from process state, stores `PrecompileRequest`, and returns the result via the advice provider (typically the advice stack; map/Merkle store as needed). |
-| MASM wrapper | Collects inputs and emits the event; pops results from advice; computes `(TAG, COMM)`; calls `sys::log_precompile_request`. |
-| Prover | Includes the precompile requests in the proof. |
-| Verifier | Replays requests via registered verifiers, rebuilds the transcript, and enforces the initial/final state via variable‑length public inputs. The final state is itself the transcript digest. |
+| VM | Executes deferred advice events and `log_deferred`, maintains the rolling deferred root, and exposes the final root as a public value. |
+| Host / advice provider | Maintains `DeferredState`, runs trusted precompile implementations, and supplies evaluation advice when wrappers request it. |
+| MASM wrapper | Registers concrete deferred nodes, computes node/statement digests from circuit-visible data, logs only registered statements that should evaluate to `TRUE`, and hides helper outputs from callers when appropriate. |
+| Prover | Includes the canonical `DeferredStateWire` in `ExecutionProof`. |
+| Verifier | Rehydrates `DeferredStateWire` under a supplied `PrecompileRegistry`, checks the final deferred root, and verifies the STARK proof. |
 
 ## Conventions
 
-- Tag layout: `TAG = [event_id, meta1, meta2, meta3]`.
-  - First element is the precompile’s `event_id`.
-  - The remaining three elements carry metadata or simple results:
-    - Examples: byte length of inputs; boolean validity of a signature; flag bits.
-- Commitment layout: `COMM`
-  - Typically commits to inputs.
-  - May also include outputs when results are long, so that `(TAG, COMM)` together represent the full request (inputs + outputs).
-  - The exact composition is precompile‑specific and defined by its verifier specification.
-- `log_precompile` stack effect: `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
-  where `Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]) = [STATE_NEW, OUT_RATE1, OUT_CAP]`,
-  the fixed capacity word is `[1, 0, 0, 0]`, and `STATE_PREV` is supplied non‑deterministically
-  via the user op helper registers. `STMNT` lives at stack[4..8] so its bus message lanes share
-  with HPERM's rate1.
-- `sys::log_precompile_request` stack effect: `[COMM, TAG, ...] -> [...]`. The helper computes
-  `STMNT = Poseidon2::merge(COMM, TAG)` and records it into the transcript via `log_precompile`.
-
-- Input encoding:
-  - By convention, inputs are encoded as packed u32 values in field elements (4 bytes per element, little‑endian). If the input length is not a multiple of 4, the final u32 is zero‑padded. Because of this packing, wrappers commonly include the byte length in `TAG` to distinguish data bytes from padding.
+- Tag layout: `TAG = [precompile_id, arg0, arg1, arg2]`.
+  - `precompile_id` selects the framework or owning precompile.
+  - `arg0..arg2` are interpreted by the selected precompile.
+  - Framework id `0` is `Tag::TRUE`; framework id `1` is `Tag::AND`; framework id `2` is
+    `Tag::CHUNKS`.
+- Payload shapes are declared by the selected precompile's `decode(args)`, but semantic lengths are
+  tag-specific and validated by the owning precompile:
+  - `NodeType::Data` accepts one or more opaque 8-felt chunks. For memory-backed registration,
+    the stack-supplied `n_chunks` determines how many chunks are read.
+  - `NodeType::Join` reads `lhs_digest || rhs_digest`.
+  - `NodeType::Unary` reads `child_digest || params`; `params` is literal payload data, not a child
+    edge.
+  - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
+    encode a pair count in tag arguments must check the actual payload length during evaluation.
+- `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` where
+  `STMNT` occupies stack offsets `4..8`. Wrappers usually drop the three output words after the root
+  transition has been constrained.
+- Input and memory layouts are precompile-specific. The `miden-precompiles` wrappers define the
+  native formats for hash, arithmetic, curve, and signature precompiles.
 
 ## Examples
 
-- Hash function
-  - Inputs: byte sequence at a given memory location; Output: digest (long).
-  - Wrapper emits the event; handler reads memory and returns digest via advice; wrapper computes:
-    - `TAG = [event_id, len_bytes, 0, 0]`
-    - `COMM = Poseidon2( Poseidon2(input_words) || Poseidon2(digest_words) )` (bind input and digest)
-  - Wrapper calls `sys::log_precompile_request` with `[COMM, TAG, ...]` to record the commitment in the transcript.
+- Hash wrappers such as `miden::precompiles::crypto::hashes::keccak256` and
+  `miden::precompiles::crypto::hashes::sha512` register the input/result nodes needed for the hash
+  claim and log a statement digest that verifies the claimed digest.
+- Signature wrappers under `miden::precompiles::crypto::dsa` register the public key, message or
+  prehash, signature, and verification predicate nodes, then log the predicate statement.
 
-- Signature scheme
-  - Inputs: public key, message (or prehash), signature; may include flag bits indicating special operation options. Output: `is_valid` (boolean).
-  - Wrapper emits the event; handler verifies and may push auxiliary results; wrapper computes:
-    - `TAG = [event_id, is_valid, flags, 0]` (encode simple result and flags)
-    - `COMM = Poseidon2( prepared_inputs[..] )` (inputs‑only is typical when outputs are simple)
-  - Wrapper calls `sys::log_precompile_request` to record the request commitment and result tag in the transcript.
 
 ## Related reading
 
-- [`log_precompile` instruction](../../user_docs/assembly/instruction_reference.md) – stack behaviour and semantics.
-- `PrecompileTranscript` implementation (`core/src/precompile.rs`) – transcript details in the codebase.
-- Kernel ROM chiplet initialization pattern (`../chiplets/kernel_rom.md`) – example use of variable‑length public inputs to initialize a chiplet/aux column via the bus.
+- [Deferred computation](../deferred/index.md) – deferred DAG model, `DeferredStateWire`, and verification.
+- [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack behaviour
+  and opcode semantics.
+- `DeferredStateWire` implementation (`core/src/deferred/wire.rs`) – proof-carried deferred witness
+  details.

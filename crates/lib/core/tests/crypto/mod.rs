@@ -1,3 +1,4 @@
+mod dsa;
 mod falcon;
 
 mod aead;

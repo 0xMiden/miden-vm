@@ -191,7 +191,7 @@ Instructions for moving data between the stack and other sources like program co
 | `adv_loadw`  | `[0,0,0,0, ...]` | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                                     |
 | `adv_pipe`   | `[A,B,C,a,...]`  | `[A',B',C,a+8,...]` | 1      | Pops 2 words from advice stack, overwrites top 2 words (positions 0-7). C (positions 8-11) unchanged. Writes both words to memory at `a` and `a+4`. `a' = a+8`. Fails if advice stack has `< 8` values. |
 
-#### Injecting into Advice Provider (System Events - 3 cycles)
+#### Advice Provider and Deferred-State System Events (3 cycles)
 
 _Push to Advice Stack:_
 
@@ -201,6 +201,59 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes its canonical tag and payload felts to the advice stack. See deferred DAG details below. |
+| `adv.evaluate_deferred_tag` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical tag to the advice stack. |
+| `adv.evaluate_deferred_payload` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical payload felts to the advice stack. |
+
+_Deferred DAG (host-side registration; no advice output):_
+
+| Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
+| ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. See deferred DAG details below. |
+| `adv.register_deferred_data` | `[TAG, ptr, n_chunks, ...]` | `[TAG, ptr, n_chunks, ...]` | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. See deferred DAG details below. |
+
+Deferred DAG details:
+
+- `TAG` and every digest are one word (4 field elements). One deferred data chunk is 8 field
+  elements, i.e. two words.
+- `adv.register_deferred` accepts exactly one stack-resident payload block:
+  `PAYLOAD_LO || PAYLOAD_HI` (8 field elements).
+  - Data tags interpret those eight felts as a one-chunk data payload.
+  - Join tags interpret them as `lhs_digest || rhs_digest`.
+  - Pair-list tags interpret them as one `lhs_digest || rhs_digest` pair.
+  - Unary tags interpret them as `child_digest || params`; `params` is literal payload data, not a
+    child digest.
+
+  `TRUE` is not accepted by this instruction. Tags that semantically require more data chunks or
+  pairs fail during precompile evaluation. Code that later uses the node digest must compute it
+  in-circuit from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
+- `adv.register_deferred_data` accepts data, pair-list, join, and unary tags. Its stack input includes
+  an explicit `n_chunks` count, and the host reads the same memory range that in-circuit digest code
+  must hash.
+  - Data tags read exactly `n_chunks` 8-felt chunks from word-aligned `ptr`.
+  - Pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs.
+  - Join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
+  - Unary tags require `n_chunks == 1` and interpret the chunk as `child_digest || params`.
+
+  `TRUE` is not accepted. Code that later uses the node digest must compute it in-circuit from the
+  same `TAG`, `ptr`, and `n_chunks` using the digest rule for the decoded payload shape.
+- `adv.evaluate_deferred` requires `NODE_DIGEST` to be already registered. It pushes the canonical
+  tag followed by the canonical payload in advice-pop order. For a single 8-felt payload,
+  `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack.
+  `TRUE` emits only `Tag::TRUE`.
+- `adv.evaluate_deferred_tag` pushes only the canonical tag. `TRUE` emits `Tag::TRUE`.
+- `adv.evaluate_deferred_payload` is the payload-only compatibility event. It pushes only the
+  canonical payload to the advice stack.
+  - Data payloads are arranged per 8-felt chunk as `HIGH` then `LOW` in advice-pop order, so
+    `adv_pushw adv_pushw` leaves `LOW` above `HIGH` on the operand stack. Chunks preserve canonical
+    chunk order.
+  - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
+    after two `adv_pushw`s.
+  - Unary payloads use the same convention, leaving `child_digest` above `params` after two
+    `adv_pushw`s.
+  - `TRUE` emits no advice.
+- Deferred-evaluation advice values are host-provided hints, so proof-relevant code must bind them
+  to circuit-visible data before relying on them.
 
 _Insert into Advice Map:_
 
@@ -327,7 +380,7 @@ Instructions for communicating with the host through events.
 | ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Note that event IDs in the range `0..256` are reserved for system events.     |
-| `log_precompile`   | `[_, STMNT, _, ...]` | `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds a precomputed precompile statement into the rolling transcript. Reads the per-call statement word `STMNT` from `stack[4..8]` (the HPERM rate1 slots), applies the Poseidon2 permutation `Permute(STATE_PREV, STMNT, ZERO)` (with `STATE_PREV` supplied non-deterministically via helper registers), and writes the permutation output back via the identity lane→slot mapping (matching HPERM): `STATE_NEW` (= output `rate0`) at `stack[0..4]`, then `rate1` and `capacity` halves at `stack[4..8]` and `stack[8..12]`. Callers normally drop all three words immediately. See "Precompile flow" for initialization details. |
+| `log_deferred`   | `[_, STMNT, _, ...]` | `[ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds `STMNT` from `stack[4..8]` into the VM's rolling deferred root via `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`, using the internally maintained previous root and the `Tag::AND` capacity word `[1, 0, 0, 0]`. `STMNT` must be a registered deferred statement that evaluates to `TRUE`. Writes three output words, normally dropped by wrappers. Prefer `miden::precompiles::log_deferred` or the concrete `miden::precompiles` wrappers unless implementing a deferred precompile wrapper. |
 
 ## Debugging Operations
 
