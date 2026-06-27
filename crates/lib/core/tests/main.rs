@@ -102,7 +102,7 @@ fn core_library_does_not_export_fri_preprocess_test_helper() {
 }
 
 #[test]
-fn core_library_exports_restored_crypto_compat_wrappers() {
+fn core_library_exports_crypto_wrappers() {
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
@@ -113,6 +113,8 @@ fn core_library_exports_restored_crypto_compat_wrappers() {
         "::miden::core::crypto::hashes::keccak256::hash",
         "::miden::core::crypto::hashes::keccak256::merge",
         "::miden::core::crypto::hashes::sha512::hash_bytes",
+        "::miden::core::crypto::hashes::sha512::hash",
+        "::miden::core::crypto::hashes::sha512::merge",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
         "::miden::core::crypto::dsa::eddsa_ed25519::verify",
