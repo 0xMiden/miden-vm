@@ -1,0 +1,220 @@
+use miden::precompiles::crypto::hashes::sha512
+use miden::precompiles::math::ed25519
+use miden::precompiles::math::ed25519_scalar
+
+# EDDSA ED25519 TRAPPING VERIFIER
+# ================================================================================================
+#
+# Public API:
+# - assert_verify(a_ptr, sig_ptr, msg_ptr)
+#
+# This verifier accepts native affine Ed25519 points in memory. It recompresses A and R only to build
+# the fixed-size Ed25519 challenge preimage SHA512(R_compressed || A_compressed || message), then
+# verifies:
+#
+#     [S]B == R + [h]A
+#
+# Input memory uses little-endian u32 limb encoding:
+# - a_ptr[0..8]     = A.x, a_ptr[8..16]      = A.y
+# - sig_ptr[0..8]   = R.x, sig_ptr[8..16]    = R.y
+# - sig_ptr[16..24] = S modulo l; non-canonical S traps through ed25519_scalar::load_mem
+# - msg_ptr[0..8]   = fixed 32-byte message, packed as eight little-endian u32 felts
+#
+# Pointer assumptions:
+# - a_ptr, sig_ptr, and msg_ptr are double-word aligned where used with word/mem_stream loads;
+# - all memory limbs consumed by direct u32 instructions are u32-range felts;
+# - the signature is contiguous in memory as native affine R followed by scalar S.
+#
+# Local scratch layout in prepare_verify_inputs:
+# - loc[0..8]    = R_compressed
+# - loc[8..16]   = A_compressed
+# - loc[16..24]  = fixed message copy
+# - loc[24..40]  = SHA-512 digest felts
+
+# PUBLIC PROCEDURES
+# ================================================================================================
+
+#! Verifies an Ed25519 / SHA-512 EdDSA signature using native affine point inputs.
+#!
+#! Input:  [a_ptr, sig_ptr, msg_ptr, ...]
+#! Output: [...]
+#!
+#! The procedure traps on malformed limbs, non-canonical S, invalid/off-curve points, low-order A/R,
+#! or a failed signature equation. It returns no boolean.
+@locals(0)
+pub proc assert_verify
+    exec.prepare_verify_inputs
+    # => [S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    # Reject low-order A and R via [8]P != identity while keeping their original digests for the
+    # signature equation.
+    dupw.2
+    # => [A_DIGEST, S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.assert_not_low_order
+    # => [S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    dupw.3
+    # => [R_DIGEST, S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.assert_not_low_order
+    # => [S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    # Rewrite [S]B == R + [H]A as [S]B + [-H]A == R so the two scalar
+    # multiplications can be registered as one MSM.
+    swapw
+    # => [H_DIGEST, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.ed25519_scalar::push_zero_digest
+    # => [ZERO_DIGEST, H_DIGEST, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.ed25519_scalar::sub
+    # => [NEG_H_DIGEST, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    swapw
+    # => [S_DIGEST, NEG_H_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    exec.ed25519::msm2_generator
+    # => [MSM_DIGEST, R_DIGEST, ...]
+
+    exec.ed25519::assert_eq
+    # => [...]
+end
+
+# INTERNAL PROCEDURES — VERIFY INPUT PREPARATION
+# ================================================================================================
+
+#! Loads/verifies inputs and computes the reduced Ed25519 challenge scalar.
+#!
+#! Input:  [a_ptr, sig_ptr, msg_ptr, ...]
+#! Output: [S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+#!
+#! The fixed challenge buffer is built in local memory as:
+#!   R_compressed || A_compressed || message[32]
+@locals(40)
+proc prepare_verify_inputs
+    locaddr.0
+    # => [scratch_ptr, a_ptr, sig_ptr, msg_ptr, ...]
+
+    # scratch[0..8] = compressed R. Thread the advanced signature pointer out of compression;
+    # it is exactly sig_ptr + 16, the start of S.
+    movup.2
+    # => [sig_ptr, scratch_ptr, a_ptr, msg_ptr, ...]
+    exec.compress_point_to_mem_stream
+    # => [R_DIGEST, s_ptr=sig_ptr+16, a_ptr, msg_ptr, ...]
+
+    # scratch[16..24] = fixed 32-byte message. Copy it before compressing A, while msg_ptr is
+    # still shallower under only R_DIGEST, s_ptr, and a_ptr.
+    movup.6
+    # => [msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+    locaddr.16
+    # => [dst_ptr=scratch+16, msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+
+    padw dup.5 mem_loadw_le
+    # => [MSG_LO_U32[4], dst_ptr, msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+    dup.4 mem_storew_le
+    # => [MSG_LO_U32[4], dst_ptr, msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+
+    dup.5 add.4 mem_loadw_le
+    # => [MSG_HI_U32[4], dst_ptr, msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+    dup.4 add.4 mem_storew_le dropw
+    # => [dst_ptr, msg_ptr, R_DIGEST, s_ptr, a_ptr, ...]
+
+    drop drop
+    # => [R_DIGEST, s_ptr, a_ptr, ...]
+
+    # scratch[8..16] = compressed A, while returning A_DIGEST. The advanced A pointer is not needed.
+    locaddr.8
+    # => [scratch_ptr + 8, R_DIGEST, s_ptr, a_ptr, ...]
+    movup.6
+    # => [a_ptr, scratch_ptr + 8, R_DIGEST, s_ptr, ...]
+    exec.compress_point_to_mem_stream
+    # => [A_DIGEST, a_ptr+16, R_DIGEST, s_ptr, ...]
+    movup.4 drop
+    # => [A_DIGEST, R_DIGEST, s_ptr, ...]
+
+    # S_DIGEST = canonical scalar S from contiguous signature memory. R compression threaded s_ptr
+    # to us, so this load does not need to recompute sig_ptr + 16.
+    movup.8
+    # => [s_ptr, A_DIGEST, R_DIGEST, ...]
+    exec.ed25519_scalar::load_mem
+    # => [S_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    # SHA512(R_compressed || A_compressed || message[32]) -> scratch[24..40].
+    locaddr.24 push.96 locaddr.0
+    # => [preimage_ptr, len_bytes=96, digest_ptr, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.sha512::hash_3_chunks_mem
+    # => [S_DIGEST, A_DIGEST, R_DIGEST, ...]
+
+    # H_DIGEST = SHA512 digest reduced modulo l. Use the generated memory-loading scalar helper;
+    # it consumes the digest in natural little-endian chunk order from scratch[24..40].
+    locaddr.24
+    # => [digest_ptr, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    exec.ed25519_scalar::load_reduced_512_mem
+    # => [H_DIGEST, S_DIGEST, A_DIGEST, R_DIGEST, ...]
+    swapw
+    # => [S_DIGEST, H_DIGEST, A_DIGEST, R_DIGEST, ...]
+end
+
+# INTERNAL PROCEDURES — MEMORY / ENCODING
+# ================================================================================================
+
+#! Loads a native affine point, writes its Ed25519 compressed encoding, and returns the point digest
+#! plus the advanced point pointer.
+#!
+#! Input:  [point_ptr, out_ptr, ...]
+#! Output: [POINT_DIGEST, point_ptr+16, ...]
+#!
+#! Memory layout: point_ptr[0..8] = x limbs, point_ptr[8..16] = y limbs.
+#! Compressed output is y[0..8] with bit 255 set to x[0] & 1.
+@locals(0)
+proc compress_point_to_mem_stream
+    # Copy y[0..4] to out_ptr[0..4] before registering the point, while both pointers are shallow.
+    padw dup.4 add.8 mem_loadw_le
+    # => [Y_LO_U32[4], point_ptr, out_ptr, ...]
+    dup.5 mem_storew_le
+    # => [Y_LO_U32[4], point_ptr, out_ptr, ...]
+
+    # Reuse the now-dead low word as the destination for loading y[4..8].
+    dup.4 add.12 mem_loadw_le
+    # => [Y_HI_U32[4], point_ptr, out_ptr, ...]
+
+    # sign_bit = (x[0] & 1) * 0x80000000.
+    dup.4 mem_load
+    # => [x0, Y_HI_U32[4], point_ptr, out_ptr, ...]
+    u32assert.err="invalid Ed25519 x limb"
+    u32and.1
+    mul.2147483648
+    # => [sign_bit, Y_HI_U32[4], point_ptr, out_ptr, ...]
+
+    # Inject the sign bit into y[7] while the high word is still on the stack, and store the
+    # modified high word once.
+    movup.4
+    # => [y7, sign_bit, y4, y5, y6, point_ptr, out_ptr, ...]
+    # For a valid canonical Ed25519 y-coordinate, bit 255 is clear, so adding the sign bit is
+    # equivalent to OR-ing it in. Non-canonical/off-curve points are rejected by deferred curve
+    # validation, and the hash precompile rejects non-u32 preimage limbs when evaluated.
+    add
+    # => [compressed_y7, y4, y5, y6, point_ptr, out_ptr, ...]
+    movdn.3
+    # => [Y_HI_COMPRESSED_U32[4], point_ptr, out_ptr, ...]
+    dup.5 add.4 mem_storew_le dropw
+    # => [point_ptr, out_ptr, ...]
+
+    # Register the native affine point after compression. This only registers/binds the memory-backed
+    # deferred point digest; curve validity is checked when later deferred assertions evaluate it.
+    exec.ed25519::load_mem_stream
+    # => [POINT_DIGEST, point_ptr+16, out_ptr, ...]
+    movup.5 drop
+    # => [POINT_DIGEST, point_ptr+16, ...]
+end
+
+# INTERNAL PROCEDURES — POINT POLICY
+# ================================================================================================
+
+#! Rejects low-order/torsion points by checking [8]P is not the identity.
+#!
+#! Input:  [POINT_DIGEST, ...]
+#! Output: [...]
+@locals(0)
+proc assert_not_low_order
+    exec.ed25519::double
+    exec.ed25519::double
+    exec.ed25519::double
+    exec.ed25519::assert_not_identity
+end
