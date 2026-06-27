@@ -1,6 +1,195 @@
 #! Top-level module of the `miden::precompiles` namespace.
 #!
-#! Concrete deferred precompile wrappers are added in later commits.
+#! Concrete deferred precompiles are exported from here and its submodules. The helper procedures in
+#! this module are shared by generated and hand-written precompile wrappers.
 
 pub mod crypto
 pub mod math
+
+# Framework data tag used for generic CHUNKS nodes: Tag::CHUNKS = [2, 0, 0, 0].
+const CHUNKS_TAG = [2, 0, 0, 0]
+
+# ===== DEFERRED-DAG HELPERS =======================================================================
+#
+# NOTE: `register_value`, `register_mem`, and `log_deferred` are adapted from `miden::core::sys`
+# (crates/lib/core/asm/sys/mod.masm) so the `miden-precompiles` package is self-contained while the
+# crate is being stood up on this tracking branch. They should be deduplicated against a single
+# shared source once the precompile proof-model migration settles.
+#
+# `register_value` / `register_mem` are safe by default: they derive the node digest in-circuit,
+# so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
+# proc here — deferred evaluation returns an *unbound* host hint (`adv.evaluate_deferred_payload`
+# for payload-only callers, or `adv.evaluate_deferred` when the canonical tag is also needed), and
+# using it soundly requires re-hashing in-circuit and logging a predicate the verifier re-checks.
+# That discipline is precompile-specific, so each precompile wraps the raw event itself rather than
+# calling a deceptively "safe" shared helper.
+
+#! Registers the expression node currently laid out in Poseidon2 sponge order and returns its
+#! content-addressed digest.
+#!
+#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
+#! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
+#! by advice. The helper expects the stack in Poseidon2 sponge layout — `[R0=PAYLOAD_LO,
+#! R1=PAYLOAD_HI, C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0
+#! word (`state[0..4]`), matching `Node::digest`.
+#!
+#! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc digest_expr
+    adv.register_deferred
+    hperm
+    swapw.2 dropw dropw
+end
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
+#! its content-addressed digest on top of the operand stack.
+#!
+#! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_expr
+    movdnw.2
+    # => [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    exec.digest_expr
+end
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
+#! its content-addressed digest on top of the operand stack.
+#!
+#! This is the root-module compatibility helper for value-node callers. It is equivalent to
+#! `register_expr`.
+#!
+#! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_value
+    exec.register_expr
+end
+
+#! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
+#!
+#! `adv.register_deferred_data` interns the node host-side (reading `8n` felts from memory at
+#! `ptr`, where `n` is the stack-supplied `n_chunks`); it produces no stack or advice output. The
+#! digest is then derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity
+#! = `TAG`, one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather
+#! than supplied by advice, and the rate0 word matches `Node::digest`. Empty data bodies are
+#! forbidden, so `n ≥ 1` and the linear-hash loop always runs at least one permutation.
+#!
+#! Input:  [TAG, ptr, n_chunks, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_mem
+    adv.register_deferred_data
+    # => [TAG, ptr, n_chunks, ...]
+
+    # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
+    movup.5 mul.8 dup.5 add movdn.5
+    # => [TAG, ptr, end_addr, ...]
+
+    # Build the sponge state: rate = 0, capacity = TAG, with [start_addr, end_addr] beneath it.
+    padw padw
+    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+
+    # Linear hash: absorb one 8-felt block per iteration until start_addr reaches end_addr.
+    # Data bodies are non-empty, so use a do-while shape and avoid a redundant pre-loop compare.
+    push.1
+    while.true
+        mem_stream hperm
+        dup.13 dup.13 neq
+    end
+    # => [R0', R1', C', end_addr, end_addr, ...]
+
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, end_addr, end_addr, ...]  (digest = rate0)
+    movup.4 drop movup.4 drop
+    # => [NODE_DIGEST, ...]
+end
+
+#! Registers memory as framework CHUNKS data and returns its content-addressed digest.
+#!
+#! Input:  [ptr, n_chunks, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem
+    push.CHUNKS_TAG
+    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks, ...]
+    exec.register_mem
+end
+
+#! Registers exactly one 8-felt memory chunk as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_1
+    push.1 swap push.CHUNKS_TAG
+    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=1, ...]
+    adv.register_deferred_data
+
+    padw padw
+    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=1, ...]
+    mem_stream hperm
+    # => [R0', R1', C', ptr+8, n_chunks=1, ...]
+
+    swapw.2 dropw dropw
+    # => [CHUNKS_DIGEST, ptr+8, n_chunks=1, ...]
+    movup.4 drop movup.4 drop
+    # => [CHUNKS_DIGEST, ...]
+end
+
+#! Registers exactly two contiguous 8-felt memory chunks as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_2
+    push.2 swap push.CHUNKS_TAG
+    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=2, ...]
+    adv.register_deferred_data
+
+    padw padw
+    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=2, ...]
+    repeat.2
+        mem_stream hperm
+    end
+    # => [R0'', R1'', C'', ptr+16, n_chunks=2, ...]
+
+    swapw.2 dropw dropw
+    # => [CHUNKS_DIGEST, ptr+16, n_chunks=2, ...]
+    movup.4 drop movup.4 drop
+    # => [CHUNKS_DIGEST, ...]
+end
+
+#! Registers exactly three contiguous 8-felt memory chunks as framework CHUNKS data.
+#!
+#! Input:  [ptr, ...]
+#! Output: [CHUNKS_DIGEST, ...]
+pub proc register_chunks_mem_3
+    push.3 swap push.CHUNKS_TAG
+    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=3, ...]
+    adv.register_deferred_data
+
+    padw padw
+    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=3, ...]
+    repeat.3
+        mem_stream hperm
+    end
+    # => [R0''', R1''', C''', ptr+24, n_chunks=3, ...]
+
+    swapw.2 dropw dropw
+    # => [CHUNKS_DIGEST, ptr+24, n_chunks=3, ...]
+    movup.4 drop movup.4 drop
+    # => [CHUNKS_DIGEST, ...]
+end
+
+#! Folds a deferred node digest into the rolling deferred root using `log_deferred`.
+#! The digest must reference a node that will reduce to TRUE under the installed precompiles.
+#!
+#! Pads the operand stack so `log_deferred`'s implicit `[_, STMNT, _, ...]` shape sees
+#! NODE_DIGEST at stack[4..8] (the HPERM rate1 lanes). The opcode folds with framework AND
+#! capacity `[1, 0, 0, 0]`, then this helper drops the three words it writes to stack[0..12].
+#!
+#! Input:  [NODE_DIGEST, ...]
+#! Output: `[...]` (the deferred commitment root advances; node is folded in)
+pub proc log_deferred
+    padw padw movdnw.2
+    # => [_, NODE_DIGEST, _, ...]
+    log_deferred
+    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
+    dropw dropw dropw
+end
