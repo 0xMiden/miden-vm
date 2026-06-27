@@ -19,13 +19,14 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-core/std", "thiserror/std"]
+std = ["miden-air/std", "miden-core/std", "miden-precompiles/std", "thiserror/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+miden-precompiles.workspace = true
 
 # External dependencies
 serde.workspace = true

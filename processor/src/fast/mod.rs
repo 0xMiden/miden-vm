@@ -6,7 +6,6 @@ use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
     deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
-    precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
@@ -146,10 +145,6 @@ pub struct FastProcessor {
 
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
-
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
-    pc_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -161,7 +156,6 @@ impl FastProcessor {
             advice: self.advice,
             memory: self.memory,
             deferred_state: self.deferred_state,
-            final_precompile_transcript: self.pc_transcript,
         }
     }
 
@@ -290,7 +284,6 @@ impl FastProcessor {
             )
             .expect("empty deferred registry initialization cannot fail"),
             options,
-            pc_transcript: PrecompileTranscript::new(),
         })
     }
 
@@ -469,10 +462,9 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript.
-    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
-        (self.advice, self.memory, self.pc_transcript)
+    /// Consumes the processor and returns the advice provider and memory.
+    pub fn into_parts(self) -> (AdviceProvider, Memory) {
+        (self.advice, self.memory)
     }
 
     /// Returns a reference to the execution options.
@@ -658,14 +650,13 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider, memory,
-/// final deferred state, and final precompile transcript at the end of execution.
+/// and final deferred state at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
     pub deferred_state: DeferredState,
-    pub final_precompile_transcript: PrecompileTranscript,
 }
 
 // SYSTEM CALL STATE
