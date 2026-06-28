@@ -1576,12 +1576,17 @@ dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
  "miden-stateful-hasher",
+ "p3-blake3",
+ "p3-blake3-air",
  "p3-challenger",
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
+ "p3-keccak",
+ "p3-keccak-air",
  "p3-matrix",
  "p3-maybe-rayon",
+ "p3-poseidon2-air",
  "p3-symmetric",
  "p3-util",
  "rand 0.10.1",
@@ -1686,6 +1691,27 @@ dependencies = [
  "miden-package-registry",
  "miden-processor",
  "miden-utils-sync",
+]
+
+[[package]]
+name = "miden-precompiles-prover"
+version = "0.25.0"
+dependencies = [
+ "itertools 0.14.0",
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
+ "miden-stateful-hasher",
+ "p3-air",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-symmetric",
 ]
 
 [[package]]
@@ -2100,6 +2126,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-blake3-air"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b433e9d3d80f99a1d7e2582f1e36b10d28b6fb3840f02bce1f0a95cbf60a1ab5"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "rand 0.10.1",
+ "tracing",
+]
+
+[[package]]
 name = "p3-challenger"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2173,6 +2214,21 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "tiny-keccak",
+]
+
+[[package]]
+name = "p3-keccak-air"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edbefd4c9ece4d2e17c877fae16970490423351bcfd0e7ba350a4dc60000ded5"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand 0.10.1",
+ "tracing",
 ]
 
 [[package]]
@@ -2259,6 +2315,21 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand 0.10.1",
+]
+
+[[package]]
+name = "p3-poseidon2-air"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb8761b9be7ce2130077c13967f9d14f7b7c6c0b37bf29d2c358f47b752cabcc"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-poseidon2",
+ "rand 0.10.1",
+ "tracing",
 ]
 
 [[package]]

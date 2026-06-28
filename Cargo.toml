@@ -23,6 +23,7 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "precompiles",
+    "precompiles-prover",
     "processor",
     "prover",
     "verifier",
