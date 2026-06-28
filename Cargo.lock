@@ -1691,6 +1691,7 @@ dependencies = [
  "miden-package-registry",
  "miden-processor",
  "miden-utils-sync",
+ "rand_chacha 0.10.0",
 ]
 
 [[package]]
