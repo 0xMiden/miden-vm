@@ -1,0 +1,60 @@
+#! Top-level module of the `miden::precompiles` namespace.
+#!
+#! Shared deferred-DAG helpers are exported from here. Concrete deferred precompile families are
+#! added by later stack segments.
+
+# ===== DEFERRED-DAG HELPERS =======================================================================
+#
+# NOTE: `register_value` is adapted from `miden::core::sys` (crates/lib/core/asm/sys/mod.masm) so
+# the `miden-precompiles` package is self-contained while the crate is being stood up on this
+# tracking branch. It should be deduplicated against a single shared source once the precompile
+# proof-model migration settles.
+#
+# `register_value` is safe by default: it derives the node digest in-circuit, so the worst a misuse
+# can do is make the verifier reject. There is intentionally no memory-registration helper here
+# because memory-backed node shapes are tag-specific and must come from an installed precompile.
+# There is also intentionally no `evaluate` proc here — deferred evaluation returns an *unbound*
+# host hint (`adv.evaluate_deferred_payload` for payload-only callers, or `adv.evaluate_deferred`
+# when the canonical tag is also needed), and using it soundly requires re-hashing in-circuit and
+# registering a predicate the verifier re-checks. That discipline is precompile-specific, so each
+# precompile wraps the raw event itself rather than calling a deceptively "safe" shared helper.
+
+#! Registers the expression node currently laid out in Poseidon2 sponge order and returns its
+#! content-addressed digest.
+#!
+#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
+#! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
+#! by advice. The helper expects the stack in Poseidon2 sponge layout — `[R0=PAYLOAD_LO,
+#! R1=PAYLOAD_HI, C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0
+#! word (`state[0..4]`), matching `Node::digest`.
+#!
+#! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc digest_expr
+    adv.register_deferred
+    hperm
+    swapw.2 dropw dropw
+end
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
+#! its content-addressed digest on top of the operand stack.
+#!
+#! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_expr
+    movdnw.2
+    # => [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    exec.digest_expr
+end
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
+#! its content-addressed digest on top of the operand stack.
+#!
+#! This is the root-module compatibility helper for value-node callers. It is equivalent to
+#! `register_expr`.
+#!
+#! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_value
+    exec.register_expr
+end
