@@ -50,6 +50,7 @@
 
 pub mod add;
 pub mod groups;
+pub mod msm;
 pub mod require;
 pub mod trace;
 

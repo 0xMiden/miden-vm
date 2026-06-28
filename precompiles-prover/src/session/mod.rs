@@ -7,6 +7,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::{
     ec::{
         add::trace::{EcAddRequires, generate_trace as ec_add_trace},
+        msm::trace::{EcMsmRequires, generate_trace as msm_trace},
         trace::{EcStoreRequires, generate_traces as ec_store_traces},
     },
     hash::{
@@ -45,7 +46,7 @@ use crate::{
 mod prove;
 pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
 
-pub const NUM_CHIPLETS: usize = 14;
+pub const NUM_CHIPLETS: usize = 15;
 
 #[derive(Debug)]
 pub struct Session {
@@ -60,6 +61,7 @@ pub struct Session {
     uint: UintStores,
     ec: EcStoreRequires,
     ec_add: EcAddRequires,
+    msm: EcMsmRequires,
 }
 
 impl Session {
@@ -76,6 +78,7 @@ impl Session {
             uint: UintStores::new(),
             ec: EcStoreRequires::new(),
             ec_add: EcAddRequires::new(),
+            msm: EcMsmRequires::new(),
         }
     }
 
@@ -163,6 +166,7 @@ impl Session {
         let uint_add = uint_add_trace(self.uint.add, &mut self.uint.store);
         let uint_mul = uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl);
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut self.bpl);
+        let msm = msm_trace(self.msm, &mut self.uint.store, &mut self.bpl);
         self.ec.route_uintval_demands(&mut self.uint.store);
         let uint_store = uint_trace(self.uint.store, &mut self.bpl);
         let (ec_groups, ec_points) = ec_store_traces(self.ec);
@@ -190,6 +194,7 @@ impl Session {
             ec_groups,
             ec_points,
             ec_add,
+            msm,
             public_root,
             bw64_active_rows,
         }
@@ -218,6 +223,7 @@ pub struct SessionTraces {
     ec_groups: RowMajorMatrix<Felt>,
     ec_points: RowMajorMatrix<Felt>,
     ec_add: RowMajorMatrix<Felt>,
+    msm: RowMajorMatrix<Felt>,
     public_root: P2Digest,
     bw64_active_rows: usize,
 }
@@ -239,6 +245,7 @@ impl SessionTraces {
             &self.ec_groups,
             &self.ec_points,
             &self.ec_add,
+            &self.msm,
         ]
     }
 
@@ -260,6 +267,11 @@ impl SessionTraces {
         &self,
     ) -> (&RowMajorMatrix<Felt>, &RowMajorMatrix<Felt>, &RowMajorMatrix<Felt>) {
         (&self.ec_groups, &self.ec_points, &self.ec_add)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn msm_main(&self) -> &RowMajorMatrix<Felt> {
+        &self.msm
     }
 
     pub fn bw64_active_rows(&self) -> usize {

@@ -33,7 +33,10 @@
 //! | 15    | `EcGroup`       | `ec::groups::EcGroupsAir`       | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — short-Weierstrass group context |
 //! | 16    | `EcPoint`       | `ec::EcPointStoreAir`           | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` — stored on-curve point or group infinity |
 //! | 17    | `EcGroupAdd`    | `ec::add::EcGroupAddAir`        | `(group_ptr, p_ptr, q_ptr, r_ptr)` — asserts `R = P + Q` in the group |
-//! | 18    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`        | `(group_ptr, r_ptr)` — closure certificate for a freshly minted group-law result |
+//! | 18    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`, `ec::msm::EcMsmAir` | `(group_ptr, r_ptr)` — closure certificate for a freshly minted group-law result |
+//! | 19    | `MsmTerm`       | `ec::msm::EcMsmAir`             | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of an MSM expression |
+//! | 20    | `MsmExpr`       | `ec::msm::EcMsmAir`             | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head |
+//! | 21    | `MsmClaimTerm`  | `ec::msm::EcMsmAir`             | `(expr_ptr, base_ptr, scalar_ptr)` — resolve-seam term without `idx` |
 //!
 //! ## Adding a new relation
 //!
@@ -69,12 +72,15 @@ pub enum BusId {
     EcPoint = 16,
     EcGroupAdd = 17,
     EcOnCurveCert = 18,
+    MsmTerm = 19,
+    MsmExpr = 20,
+    MsmClaimTerm = 21,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
 /// exactly one prefix per [`BusId`] variant.
-pub const NUM_BUS_IDS: usize = 19;
+pub const NUM_BUS_IDS: usize = 22;
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held

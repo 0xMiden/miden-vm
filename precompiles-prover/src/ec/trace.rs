@@ -307,6 +307,13 @@ impl EcStoreRequires {
         g.scalar_bound.map_or(g.bound, |(ptr, _)| ptr)
     }
 
+    /// Return the explicitly constrained scalar bound for `group`, if
+    /// one has been named. Unlike [`group_sbound`](Self::group_sbound),
+    /// this does not fall back to the base-field modulus.
+    pub fn constrained_group_sbound(&self, group: EcGroupPtr) -> Option<UintPtr> {
+        self.groups[group.0 as usize - 1].scalar_bound.map(|(ptr, _)| ptr)
+    }
+
     /// The point's group plus its coordinate handles — `None` for the
     /// point at infinity.
     pub fn point_params(&self, point: EcPointPtr) -> (EcGroupPtr, Option<(UintPtr, UintPtr)>) {
