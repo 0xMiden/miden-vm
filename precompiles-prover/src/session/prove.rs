@@ -10,6 +10,7 @@ use miden_lifted_stark::{
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir},
     hash::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
@@ -38,6 +39,9 @@ pub enum ChipletAir {
     UintStore,
     UintAdd,
     UintMul,
+    EcGroups,
+    EcPointStore,
+    EcGroupAdd,
 }
 
 macro_rules! delegate {
@@ -54,6 +58,9 @@ macro_rules! delegate {
             ChipletAir::UintStore => UintStoreAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
             ChipletAir::UintMul => UintMulAir.$method($($arg),*),
+            ChipletAir::EcGroups => EcGroupsAir.$method($($arg),*),
+            ChipletAir::EcPointStore => EcPointStoreAir.$method($($arg),*),
+            ChipletAir::EcGroupAdd => EcGroupAddAir.$method($($arg),*),
         }
     };
 }

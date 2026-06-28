@@ -51,6 +51,11 @@ impl<'a> UintRequire<'a> {
         self.store.intern(value, bound)
     }
 
+    /// Record one external consumer of a stored uint's 4x32-bit value view.
+    pub fn require_uintval(&mut self, ptr: UintPtr) {
+        self.store.require_uintval(ptr);
+    }
+
     /// The stored value behind a handle.
     pub fn value(&self, ptr: UintPtr) -> U256 {
         self.store.uint(ptr).value

@@ -1,3 +1,4 @@
+pub mod ec;
 pub mod hash;
 pub mod logup;
 pub mod math;

@@ -28,4 +28,5 @@ p3-symmetric = "0.6.1"
 ruint = { version = "1.18", default-features = false }
 
 [dev-dependencies]
+k256 = "0.13"
 rand = "0.9"

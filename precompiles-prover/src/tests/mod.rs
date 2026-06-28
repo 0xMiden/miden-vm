@@ -4,6 +4,8 @@
 //! chiplet source files to keep the production code easier to scan.
 
 mod deferred_state;
+mod ec;
+mod ec_add;
 mod uint;
 mod uint_add;
 mod uint_dag;

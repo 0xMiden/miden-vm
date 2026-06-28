@@ -30,6 +30,10 @@
 //! | 12    | `UintMul`       | `uint::mul::UintMulAir`         | `(kappa_a, kappa_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` — asserts `κₐ·a·b + κ_c·c ≡ r (mod p)` |
 //! | 13    | `UintLimbs`     | `uint::UintStoreAir`            | `(ptr, bound_ptr, offset, l0..l7)` — 256-bit uint half as raw 8×16-bit limbs |
 //! | 14    | `Field`         | transcript eval chips           | `(field_id, field_tag0..field_tag3, bound_ptr)` — semantic field domain backed by a uint bound |
+//! | 15    | `EcGroup`       | `ec::groups::EcGroupsAir`       | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — short-Weierstrass group context |
+//! | 16    | `EcPoint`       | `ec::EcPointStoreAir`           | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` — stored on-curve point or group infinity |
+//! | 17    | `EcGroupAdd`    | `ec::add::EcGroupAddAir`        | `(group_ptr, p_ptr, q_ptr, r_ptr)` — asserts `R = P + Q` in the group |
+//! | 18    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`        | `(group_ptr, r_ptr)` — closure certificate for a freshly minted group-law result |
 //!
 //! ## Adding a new relation
 //!
@@ -61,12 +65,16 @@ pub enum BusId {
     UintMul = 12,
     UintLimbs = 13,
     Field = 14,
+    EcGroup = 15,
+    EcPoint = 16,
+    EcGroupAdd = 17,
+    EcOnCurveCert = 18,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
 /// exactly one prefix per [`BusId`] variant.
-pub const NUM_BUS_IDS: usize = 15;
+pub const NUM_BUS_IDS: usize = 19;
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
