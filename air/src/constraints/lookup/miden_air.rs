@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use crate::{PV_PROGRAM_HASH, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
@@ -33,12 +33,7 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         pv[PV_PROGRAM_HASH + 2],
         pv[PV_PROGRAM_HASH + 3],
     ];
-    let final_state: [B::F; 4] = [
-        pv[PV_TRANSCRIPT_STATE],
-        pv[PV_TRANSCRIPT_STATE + 1],
-        pv[PV_TRANSCRIPT_STATE + 2],
-        pv[PV_TRANSCRIPT_STATE + 3],
-    ];
+    let empty_log_precompile_state = [B::F::ZERO; 4];
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     //
@@ -65,8 +60,13 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     );
 
     // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-    boundary.add("log_precompile_initial", LogPrecompileMsg { state: [B::F::ZERO; 4] });
-    boundary.remove("log_precompile_final", LogPrecompileMsg { state: final_state });
+    //
+    // Segment 3 cuts proofs over to `DeferredState.root()`, but the old `log_precompile`
+    // opcode still updates a separate rolling transcript. Until the library helpers migrate to
+    // deferred-state events, only the empty transcript is proof-bound; any executed
+    // `log_precompile` leaves the bus unbalanced and cannot verify.
+    boundary.add("log_precompile_initial", LogPrecompileMsg { state: empty_log_precompile_state });
+    boundary.remove("log_precompile_final", LogPrecompileMsg { state: empty_log_precompile_state });
 }
 
 /// Emits the Chiplets-trace boundary corrections.

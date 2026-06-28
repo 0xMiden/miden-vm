@@ -130,8 +130,11 @@ fn prove_execution_trace(
     );
 
     let stack_outputs = *trace.stack_outputs();
-    let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
+    let deferred_wire = trace
+        .deferred_state()
+        .to_wire()
+        .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
@@ -165,7 +168,7 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
 
     Ok((stack_outputs, proof))
 }

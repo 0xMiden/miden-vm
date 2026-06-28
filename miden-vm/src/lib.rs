@@ -21,7 +21,7 @@ pub use miden_processor::{
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::{prove_from_trace_sync, prove_sync};
-pub use miden_verifier::VerificationError;
+pub use miden_verifier::{PrecompileRegistry, VerificationError};
 
 // (private) exports
 // ================================================================================================
@@ -38,13 +38,24 @@ pub fn verify(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let registry = miden_core_lib::CoreLibrary::default().verifier_registry();
-    let (security_level, _) = miden_verifier::verify_with_precompiles(
+    miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
+}
+
+/// Verifies a Miden proof using `precompiles` to validate the proof's deferred-state wire.
+///
+/// See [miden_verifier::verify_with_precompiles] for more details.
+pub fn verify_with_precompiles(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    precompiles: PrecompileRegistry,
+) -> Result<u32, VerificationError> {
+    miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
-        &registry,
-    )?;
-    Ok(security_level)
+        precompiles,
+    )
 }

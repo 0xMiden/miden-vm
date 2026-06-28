@@ -8,6 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
+    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
     events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
@@ -266,10 +267,59 @@ fn generate_fuzz_seeds() {
         write_seed("precompile_request_deserialize", "precompile_request.bin", &request.to_bytes());
     }
 
+    // Deferred-state wire seeds. ExecutionProof carries this compact wire witness for verifier
+    // rehydration under the supplied precompile registry.
+    {
+        let empty = DeferredStateWire::default();
+        write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
+
+        let tag = Tag::from_word([
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+        ]);
+        let wire = DeferredStateWire {
+            entries: vec![
+                WireEntry::Data {
+                    tag,
+                    chunks: vec![[Felt::new_unchecked(1); 8]],
+                },
+                WireEntry::Data {
+                    tag,
+                    chunks: vec![[Felt::new_unchecked(2); 8], [Felt::new_unchecked(3); 8]],
+                },
+                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
+            ],
+        };
+        write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
+
+        let mut oversized_entry_count = Vec::new();
+        oversized_entry_count.write_usize(usize::MAX);
+        write_seed(
+            "deferred_state_wire_deserialize",
+            "oversized_entry_count.bin",
+            &oversized_entry_count,
+        );
+
+        #[cfg(feature = "serde")]
+        {
+            let empty_json =
+                serde_json::to_vec(&empty).expect("failed to serialize empty wire seed");
+            write_seed("deferred_state_wire_serde_deserialize", "empty_wire.json", &empty_json);
+            let wire_json = serde_json::to_vec(&wire).expect("failed to serialize wire seed");
+            write_seed(
+                "deferred_state_wire_serde_deserialize",
+                "all_entries_wire.json",
+                &wire_json,
+            );
+        }
+    }
+
     // Execution proof seed (minimal)
     {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
+        let proof =
+            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
 
@@ -279,27 +329,14 @@ fn generate_fuzz_seeds() {
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
 
-        let mut oversized_pc_requests_len = Vec::new();
-        oversized_pc_requests_len.write_usize(0);
-        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
-        oversized_pc_requests_len.write_usize(usize::MAX);
+        let mut oversized_deferred_wire_len = Vec::new();
+        oversized_deferred_wire_len.write_usize(0);
+        oversized_deferred_wire_len.write_u8(HashFunction::Blake3_256 as u8);
+        oversized_deferred_wire_len.write_usize(usize::MAX);
         write_seed(
             "execution_proof_deserialize",
-            "oversized_pc_requests_len.bin",
-            &oversized_pc_requests_len,
-        );
-    }
-
-    // Execution proof seed with many small precompile requests.
-    {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
-        write_seed(
-            "execution_proof_deserialize",
-            "many_minimal_precompile_requests.bin",
-            &proof.to_bytes(),
+            "oversized_deferred_wire_len.bin",
+            &oversized_deferred_wire_len,
         );
     }
 

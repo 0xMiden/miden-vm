@@ -31,7 +31,7 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{MidenAir, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
+use crate::{MidenAir, PV_PROGRAM_HASH};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -461,12 +461,7 @@ pub fn multi_air_logup_boundary_config(
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
     ];
-    let final_lp_msg = vec![
-        PublicInput(PV_TRANSCRIPT_STATE),
-        PublicInput(PV_TRANSCRIPT_STATE + 1),
-        PublicInput(PV_TRANSCRIPT_STATE + 2),
-        PublicInput(PV_TRANSCRIPT_STATE + 3),
-    ];
+    let final_lp_msg = default_lp_msg.clone();
 
     // Sum every per-AIR boundary slot. With `num_aux_values()` returning 1 for both
     // CoreAir and ChipletsAir, this is just `[0, 1]` — Core's LogUp final at slot 0

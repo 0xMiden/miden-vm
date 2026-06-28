@@ -23,6 +23,9 @@ pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
 
+/// Root commitment of the deferred DAG bound into execution proofs.
+pub type DeferredRoot = Digest;
+
 // ERROR
 // ================================================================================================
 
