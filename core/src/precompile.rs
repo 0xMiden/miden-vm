@@ -40,8 +40,9 @@
 //!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A linear hash tree over Poseidon2 that produces a rolling digest of
-//!   all recorded precompile statements; the state is itself a complete digest at every step.
+//! - [`PrecompileTranscript`]: A domain-separated Poseidon2 transcript that produces a rolling
+//!   digest of all recorded precompile statements; the state is itself a complete digest at every
+//!   step.
 //!
 //! # Example Implementation
 //!
@@ -58,7 +59,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
-use miden_crypto::{Felt, Word, hash::poseidon2::Poseidon2};
+use miden_crypto::{Felt, ONE, Word, ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -130,10 +131,30 @@ impl Deserializable for PrecompileRequest {
 
 /// The current state of a [`PrecompileTranscript`].
 ///
-/// The transcript is a linear hash tree: this state is the rolling digest of all per-call
-/// statements absorbed so far. After every `record` call the state is itself a complete digest —
-/// no separate finalization step is required.
+/// The transcript is a domain-separated Poseidon2 fold: this state is the rolling digest of all
+/// per-call statements absorbed so far. After every `record` call the state is itself a complete
+/// digest — no separate finalization step is required.
 pub type PrecompileTranscriptState = Word;
+
+/// Domain separator placed in the Poseidon2 capacity lanes for the legacy precompile transcript
+/// fold used by `log_precompile`.
+pub const PRECOMPILE_TRANSCRIPT_DOMAIN: Word = Word::new([ONE, ZERO, ZERO, ZERO]);
+
+/// Folds a precompile statement into the rolling precompile transcript state.
+///
+/// This mirrors the processor's `log_precompile` operation and the AIR chiplet bus constraint:
+/// `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, PRECOMPILE_TRANSCRIPT_DOMAIN]))`.
+pub fn fold_precompile_transcript_state(
+    state: PrecompileTranscriptState,
+    statement: Word,
+) -> PrecompileTranscriptState {
+    let mut permutation = [ZERO; 12];
+    permutation[..4].copy_from_slice(state.as_slice());
+    permutation[4..8].copy_from_slice(statement.as_slice());
+    permutation[8..].copy_from_slice(PRECOMPILE_TRANSCRIPT_DOMAIN.as_slice());
+    Poseidon2::apply_permutation(&mut permutation);
+    permutation[..4].try_into().expect("rate0 slice has length 4")
+}
 
 // PRECOMPILE COMMITMENT
 // ================================================================================================
@@ -322,7 +343,7 @@ pub trait PrecompileVerifier: Send + Sync {
 // PRECOMPILE TRANSCRIPT
 // ================================================================================================
 
-/// Precompile transcript implemented as a linear hash tree over Poseidon2.
+/// Precompile transcript implemented as a domain-separated Poseidon2 fold.
 ///
 /// # Structure
 /// The transcript holds a single 4-element [`Word`] — the rolling state. After each `record` call,
@@ -331,9 +352,9 @@ pub trait PrecompileVerifier: Send + Sync {
 /// # Operation
 /// For each commitment, the transcript first computes the per-call statement
 /// `STMNT = Poseidon2::merge(COMM, TAG)` (see [`PrecompileCommitment::statement`]), then folds the
-/// statement into the rolling state via the 2-to-1 hash
-/// `state' = Poseidon2::merge(state, STMNT)`. The state is exposed directly as the transcript
-/// digest — no finalization step is required.
+/// statement into the rolling state via
+/// `state' = rate0(Poseidon2([state, STMNT, PRECOMPILE_TRANSCRIPT_DOMAIN]))`. The state is exposed
+/// directly as the transcript digest — no finalization step is required.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
     /// The rolling transcript digest.
@@ -359,10 +380,48 @@ impl PrecompileTranscript {
     /// Records a precompile commitment into the transcript, updating the state.
     ///
     /// Folds the per-call statement `STMNT = Poseidon2::merge(COMM, TAG)` into the rolling state
-    /// via `state' = Poseidon2::merge(state, STMNT)`.
+    /// via `state' = rate0(Poseidon2([state, STMNT, PRECOMPILE_TRANSCRIPT_DOMAIN]))`.
     pub fn record(&mut self, commitment: PrecompileCommitment) {
         let stmnt = commitment.statement();
-        self.state = Poseidon2::merge(&[self.state, stmnt]);
+        self.state = fold_precompile_transcript_state(self.state, stmnt);
+    }
+}
+
+#[cfg(test)]
+mod transcript_tests {
+    use super::*;
+
+    #[test]
+    fn record_uses_domain_separated_fold() {
+        let commitment = PrecompileCommitment::new(
+            Word::new([
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4),
+            ]),
+            Word::new([
+                Felt::new_unchecked(5),
+                Felt::new_unchecked(6),
+                Felt::new_unchecked(7),
+                Felt::new_unchecked(8),
+            ]),
+        );
+        let initial_state = Word::new([
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ]);
+
+        let mut transcript = PrecompileTranscript::from_state(initial_state);
+        transcript.record(commitment);
+
+        assert_eq!(
+            transcript.state(),
+            fold_precompile_transcript_state(initial_state, commitment.statement())
+        );
+        assert_ne!(transcript.state(), Poseidon2::merge(&[initial_state, commitment.statement()]));
     }
 }
 

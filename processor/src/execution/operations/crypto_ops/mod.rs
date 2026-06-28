@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::chiplets::hasher::{Hasher, STATE_WIDTH};
+use miden_core::precompile::PRECOMPILE_TRANSCRIPT_DOMAIN;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
@@ -448,8 +449,8 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 /// Stack transition:
 /// `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
 ///
-/// - Hasher computes `merge(STATE_PREV, STMNT) = rate0(Poseidon2([STATE_PREV, STMNT, ZERO]))`;
-///   `STATE_NEW` is the rate0 half of the output.
+/// - Hasher computes `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT,
+///   PRECOMPILE_TRANSCRIPT_DOMAIN]))`.
 /// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
 ///   helper registers.
 /// - `STMNT` lives at stack[4..8] (HPERM rate1 lanes) so the chiplet bus's β⁶..β⁹ products share
@@ -463,10 +464,11 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let stmnt: Word = processor.stack().get_word(4);
     let state_prev = processor.system().precompile_transcript_state();
 
-    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
+    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = DOMAIN].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
     hasher_state[Hasher::RATE0_RANGE].copy_from_slice(state_prev.as_slice());
     hasher_state[Hasher::RATE1_RANGE].copy_from_slice(stmnt.as_slice());
+    hasher_state[Hasher::CAPACITY_RANGE].copy_from_slice(PRECOMPILE_TRANSCRIPT_DOMAIN.as_slice());
 
     let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
