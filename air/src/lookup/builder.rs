@@ -80,8 +80,7 @@ pub trait LookupBuilder: Sized {
 
     // --- auxiliary trace access types ---
 
-    /// Periodic column value at the current row (copied from
-    /// `PeriodicAirBuilder::PeriodicVar`).
+    /// Periodic column value at the current row.
     type PeriodicVar: Into<Self::Expr> + Copy;
 
     /// Two-row window over the main trace, returned as-is from the

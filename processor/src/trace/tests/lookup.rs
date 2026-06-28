@@ -225,8 +225,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let blakeg_periodic =
-        LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
     let blakeg_fractions = build_lookup_fractions(
         &MidenAir::BLAKEG_COMPRESSION,
         &blakeg_matrix,
@@ -338,8 +337,7 @@ fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let blakeg_periodic =
-        LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
     let blakeg_fractions = build_lookup_fractions(
         &MidenAir::BLAKEG_COMPRESSION,
         &blakeg_matrix,
@@ -627,9 +625,8 @@ fn global_lookup_residuals(
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-    let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
-    let blakeg_periodic =
-        LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
 
     let reports = [
         (
@@ -760,9 +757,8 @@ fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &Exe
         trace.main_trace().to_air_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns.
-    let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
-    let blakeg_periodic =
-        LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
     let and8_preprocessed = MidenAir::AND8_LOOKUP
         .preprocessed_trace()
         .expect("byte-pair lookup AIR declares a preprocessed table");

@@ -12,7 +12,7 @@ use alloc::{
 
 use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
+    ExportedTypeUse, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -41,7 +41,10 @@ use crate::{
     ast::Path,
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
+    linker::{
+        Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
+        SymbolResolver,
+    },
     mast_forest_builder::{
         MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
         StaticLibrary,
@@ -801,7 +804,225 @@ impl Assembler {
             TargetType::Kernel => self.linker.link_kernel(root, support)?,
             _ => self.linker.link([root], support)?,
         };
+        self.verify_exported_signature_type_visibility(&module_indices)?;
         self.assemble_library_product(name, &module_indices, kind)
+    }
+
+    fn verify_exported_signature_type_visibility(
+        &self,
+        module_indices: &[ModuleIndex],
+    ) -> Result<(), Report> {
+        let resolver = SymbolResolver::new(&self.linker);
+        for module_index in module_indices.iter().copied() {
+            let module = &self.linker[module_index];
+            for symbol in module.symbols() {
+                if !symbol.visibility().is_public() {
+                    continue;
+                }
+
+                self.verify_exported_item(&resolver, module_index, symbol, None)?;
+            }
+
+            for import in module.imports() {
+                if !import.visibility().is_public()
+                    || !matches!(import.kind(), ast::ImportKind::Item)
+                {
+                    continue;
+                }
+
+                let Some(gid) = import.resolved() else {
+                    continue;
+                };
+
+                self.verify_exported_item(
+                    &resolver,
+                    gid.module,
+                    &self.linker[gid],
+                    Some(import.span()),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_item(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        module_index: ModuleIndex,
+        symbol: &crate::linker::Symbol,
+        export_span: Option<SourceSpan>,
+    ) -> Result<(), Report> {
+        match symbol.item() {
+            SymbolItem::Procedure(proc) => {
+                let proc = proc.borrow();
+                self.verify_exported_signature(resolver, module_index, proc.signature())
+            },
+            SymbolItem::Type(type_decl) => {
+                if !symbol.visibility().is_public() {
+                    return Err(Report::new(SemanticAnalysisError::PrivateTypeInExportedType {
+                        span: export_span.unwrap_or_else(|| type_decl.name().span()),
+                        defined: type_decl.name().span(),
+                    }));
+                }
+
+                let mut visiting_types = BTreeSet::default();
+                self.verify_exported_type_decl(
+                    resolver,
+                    module_index,
+                    type_decl,
+                    &mut visiting_types,
+                    ExportedTypeUse::TypeDeclaration,
+                )
+            },
+            SymbolItem::Constant(_)
+            | SymbolItem::Compiled(
+                ItemInfo::Procedure(_) | ItemInfo::Constant(_) | ItemInfo::Type(_),
+            ) => Ok(()),
+        }
+    }
+
+    fn verify_exported_signature(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        signature: Option<&ast::FunctionType>,
+    ) -> Result<(), Report> {
+        let Some(signature) = signature else {
+            return Ok(());
+        };
+
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            let mut visiting_types = BTreeSet::default();
+            self.verify_exported_type_expr(
+                resolver,
+                current_module,
+                ty,
+                &mut visiting_types,
+                ExportedTypeUse::ProcedureSignature,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_type_decl(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        type_decl: &ast::TypeDecl,
+        visiting_types: &mut BTreeSet<GlobalItemIndex>,
+        usage: ExportedTypeUse,
+    ) -> Result<(), Report> {
+        match type_decl {
+            ast::TypeDecl::Alias(alias) => {
+                self.verify_exported_type_expr(
+                    resolver,
+                    current_module,
+                    &alias.ty,
+                    visiting_types,
+                    usage,
+                )?;
+            },
+            ast::TypeDecl::Enum(ty) => {
+                for variant in ty.variants() {
+                    if let Some(payload_ty) = variant.value_ty.as_ref() {
+                        self.verify_exported_type_expr(
+                            resolver,
+                            current_module,
+                            payload_ty,
+                            visiting_types,
+                            usage,
+                        )?;
+                    }
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_type_expr(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        ty: &ast::TypeExpr,
+        visiting_types: &mut BTreeSet<GlobalItemIndex>,
+        usage: ExportedTypeUse,
+    ) -> Result<(), Report> {
+        match ty {
+            ast::TypeExpr::Primitive(_) => Ok(()),
+            ast::TypeExpr::Ptr(ty) => self.verify_exported_type_expr(
+                resolver,
+                current_module,
+                &ty.pointee,
+                visiting_types,
+                usage,
+            ),
+            ast::TypeExpr::Array(ty) => self.verify_exported_type_expr(
+                resolver,
+                current_module,
+                &ty.elem,
+                visiting_types,
+                usage,
+            ),
+            ast::TypeExpr::Struct(ty) => {
+                for field in ty.fields.iter() {
+                    self.verify_exported_type_expr(
+                        resolver,
+                        current_module,
+                        &field.ty,
+                        visiting_types,
+                        usage,
+                    )?;
+                }
+
+                Ok(())
+            },
+            ast::TypeExpr::Ref(path) => {
+                let context = SymbolResolutionContext {
+                    span: path.span(),
+                    module: current_module,
+                    kind: None,
+                };
+                let resolution =
+                    resolver.resolve_path(&context, path.as_deref()).map_err(Report::from)?;
+
+                let gid = match resolution {
+                    SymbolResolution::Exact { gid, .. } => gid,
+                    SymbolResolution::Local(item) => current_module + item.into_inner(),
+                    SymbolResolution::External(_)
+                    | SymbolResolution::MastRoot(_)
+                    | SymbolResolution::Module { .. } => return Ok(()),
+                };
+
+                let symbol = &self.linker[gid];
+                let SymbolItem::Type(type_decl) = symbol.item() else {
+                    return Ok(());
+                };
+
+                if !symbol.visibility().is_public() {
+                    return Err(Report::new(
+                        usage.private_type_error(path.span(), type_decl.name().span()),
+                    ));
+                }
+
+                if !visiting_types.insert(gid) {
+                    return Ok(());
+                }
+
+                self.verify_exported_type_decl(
+                    resolver,
+                    gid.module,
+                    type_decl,
+                    visiting_types,
+                    usage,
+                )?;
+
+                visiting_types.remove(&gid);
+                Ok(())
+            },
+        }
     }
 
     pub(crate) fn assemble_executable_modules(

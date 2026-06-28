@@ -20,7 +20,7 @@ serde_json      = { workspace = true, features = ["std"] }
 thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-criterion = { package = "codspeed-criterion-compat", version = "4.6.0" }
+codspeed-criterion-compat = { workspace = true }
 miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
 miden-prover = { workspace = true, features = ["std"] }

@@ -5,7 +5,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::stark::{
-    air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow},
+    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
     matrix::RowMajorMatrix,
 };
 
@@ -42,6 +42,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     type PreprocessedWindow = RowWindow<'static, Felt>;
     type MainWindow = RowMajorMatrix<Felt>;
     type PublicVar = Felt;
+    type PeriodicVar = Felt;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -75,10 +76,6 @@ impl AirBuilder for ConstraintEvalBuilder {
     fn public_values(&self) -> &[Self::PublicVar] {
         &[]
     }
-}
-
-impl PeriodicAirBuilder for ConstraintEvalBuilder {
-    type PeriodicVar = Felt;
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         &self.periodic_values

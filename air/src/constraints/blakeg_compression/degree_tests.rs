@@ -2,8 +2,7 @@ use std::vec::Vec;
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_crypto::stark::air::{
-    AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
-    WindowAccess,
+    AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow, WindowAccess,
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression},
 };
 use miden_crypto::stark::matrix::RowMajorMatrix;
@@ -50,6 +49,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     type PreprocessedWindow = RowWindow<'static, Felt>;
     type MainWindow = RowMajorMatrix<Felt>;
     type PublicVar = Felt;
+    type PeriodicVar = Felt;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -67,9 +67,13 @@ impl AirBuilder for ConstraintEvalBuilder {
         Felt::ZERO
     }
 
+    fn is_transition(&self) -> Self::Expr {
+        Felt::ONE
+    }
+
     fn is_transition_window(&self, size: usize) -> Self::Expr {
         assert_eq!(size, 2, "BlakeG tests use two-row transition windows");
-        Felt::ONE
+        self.is_transition()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -78,6 +82,10 @@ impl AirBuilder for ConstraintEvalBuilder {
 
     fn public_values(&self) -> &[Self::PublicVar] {
         &[]
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
     }
 }
 
@@ -109,14 +117,6 @@ impl PermutationAirBuilder for ConstraintEvalBuilder {
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         &self.permutation_values
-    }
-}
-
-impl PeriodicAirBuilder for ConstraintEvalBuilder {
-    type PeriodicVar = Felt;
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
     }
 }
 

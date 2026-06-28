@@ -389,9 +389,9 @@ where
     let main_width = <MidenAir as BaseAir<Felt>>::width(&air);
     let aux_width = <MidenAir as LiftedAir<Felt, EF>>::aux_width(&air);
     let aux_values = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
-    let periodic_columns = <MidenAir as LiftedAir<Felt, EF>>::periodic_columns(&air);
+    let periodic_columns = <MidenAir as BaseAir<Felt>>::periodic_columns(&air);
     let periodic_max = periodic_columns.iter().map(Vec::len).max().unwrap_or(0);
-    let preprocessed_width = <MidenAir as LiftedAir<Felt, EF>>::preprocessed_width(&air);
+    let preprocessed_width = <MidenAir as BaseAir<Felt>>::preprocessed_width(&air);
 
     let aligned_aux_coord = (aux_width * miden_ace_codegen::EXT_DEGREE).next_multiple_of(alignment);
     assert!(

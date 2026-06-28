@@ -16,7 +16,7 @@ use miden_crypto::{
     Word,
     hash::eidos::Eidos,
     merkle::MerkleTree,
-    stark::{Preprocessed, air::LiftedAir},
+    stark::{Preprocessed, air::BaseAir},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -389,7 +389,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
 fn max_periodic_cycle_len_log() -> u32 {
     let max_len = AIRS
         .iter()
-        .flat_map(|spec| <MidenAir as LiftedAir<Felt, QuadFelt>>::periodic_columns(&spec.air))
+        .flat_map(|spec| <MidenAir as BaseAir<Felt>>::periodic_columns(&spec.air))
         .map(|column| column.len())
         .max()
         .unwrap_or(1);
