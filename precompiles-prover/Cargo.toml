@@ -25,3 +25,7 @@ p3-field = "0.6.1"
 p3-goldilocks = "0.6.1"
 p3-matrix = "0.6.1"
 p3-symmetric = "0.6.1"
+ruint = { version = "1.18", default-features = false }
+
+[dev-dependencies]
+rand = "0.9"
