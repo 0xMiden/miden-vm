@@ -3,6 +3,7 @@
 
 use alloc::vec::Vec;
 
+use miden_core::deferred::PrecompileError;
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
@@ -44,6 +45,14 @@ pub enum AdviceError {
         "precompile request calldata byte budget exceeded: adding {added} bytes to the current {current} would exceed the maximum of {max}"
     )]
     PrecompileRequestCalldataBudgetExceeded { current: usize, added: usize, max: usize },
+    #[error(
+        "deferred state initialization failed for the configured element budget of {max_elements}"
+    )]
+    DeferredStateInitializationFailed {
+        max_elements: usize,
+        #[source]
+        source: PrecompileError,
+    },
     #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]

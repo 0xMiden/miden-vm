@@ -16,6 +16,7 @@ use miden_core::{
     operations::Operation,
     program::StackInputs,
     serde::{Deserializable, Serializable},
+    testing::precompile::Hash,
 };
 use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
@@ -81,6 +82,18 @@ fn stack_get_word_out_of_bounds_read() {
 
     // Should not panic
     processor.execute_sync(&program, &mut host).unwrap();
+}
+
+#[test]
+fn with_options_preserves_installed_deferred_precompiles() {
+    let options = ExecutionOptions::default().with_max_deferred_elements(128);
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_deferred_precompiles(PrecompileRegistry::default().with_precompile(Hash))
+        .expect("hash precompile should install")
+        .with_options(options)
+        .expect("options should preserve deferred precompile registry");
+
+    assert!(processor.deferred_state().decode(Hash::digest_tag()).is_ok());
 }
 
 #[test]

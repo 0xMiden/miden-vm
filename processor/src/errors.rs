@@ -3,7 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 use miden_utils_diagnostics::{Diagnostic, miette};
@@ -55,6 +55,16 @@ pub enum ExecutionError {
         event_name: Option<EventName>,
         #[source]
         error: EventError,
+    },
+    /// Deferred system event failed while validating or evaluating a committed node.
+    #[error("{err}")]
+    #[diagnostic()]
+    DeferredError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        err: PrecompileError,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
@@ -114,6 +124,15 @@ impl ExecutionError {
     /// Wraps an advice error without source-location context.
     pub fn advice_error_no_context(err: AdviceError) -> Self {
         Self::AdviceError {
+            label: SourceSpan::UNKNOWN,
+            source_file: None,
+            err,
+        }
+    }
+
+    /// Wraps a deferred error without source-location context.
+    pub fn deferred_error_no_context(err: PrecompileError) -> Self {
+        Self::DeferredError {
             label: SourceSpan::UNKNOWN,
             source_file: None,
             err,
@@ -797,6 +816,9 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
                     },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
+                    },
                 })
             },
         }
@@ -819,6 +841,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
+                    },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
                     },
                 })
             },
@@ -849,6 +874,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
                     },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
+                    },
                 })
             },
             (Err(err), None) => {
@@ -862,6 +890,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
+                    },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
                     },
                 })
             },

@@ -676,6 +676,32 @@ fn test_ast_parsing_adv_injection() -> Result<(), Report> {
 }
 
 #[test]
+fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
+    use super::SystemEventNode::*;
+
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        "begin
+            adv.register_deferred
+            adv.register_deferred_data
+            adv.evaluate_deferred
+            adv.evaluate_deferred_tag
+            adv.evaluate_deferred_payload
+        end"
+    );
+    let forms = module!(begin!(
+        inst!(SysEvent(DeferredRegister)),
+        inst!(SysEvent(DeferredRegisterData)),
+        inst!(SysEvent(DeferredEvaluate)),
+        inst!(SysEvent(DeferredEvaluateTag)),
+        inst!(SysEvent(DeferredEvaluatePayload))
+    ));
+    assert_eq!(context.parse_forms(source)?, forms);
+    Ok(())
+}
+
+#[test]
 fn test_ast_parsing_bitwise_counters() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin u32clz u32ctz u32clo u32cto end");

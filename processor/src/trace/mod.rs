@@ -62,6 +62,7 @@ impl TraceBuildOutput {
             mut advice,
             memory: _,
             final_precompile_transcript,
+            deferred_state: _,
         } = execution_output;
 
         Self {

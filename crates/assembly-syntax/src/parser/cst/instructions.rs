@@ -154,6 +154,18 @@ struct PrimitiveSpec {
 
 static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
+        spelling: "adv.evaluate_deferred",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluate),
+    },
+    PrimitiveSpec {
+        spelling: "adv.evaluate_deferred_payload",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
+    },
+    PrimitiveSpec {
+        spelling: "adv.evaluate_deferred_tag",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateTag),
+    },
+    PrimitiveSpec {
         spelling: "adv.insert_hdword",
         build: || Instruction::SysEvent(SystemEventNode::InsertHdword),
     },
@@ -192,6 +204,14 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         spelling: "adv.push_mtnode",
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
+    },
+    PrimitiveSpec {
+        spelling: "adv.register_deferred",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredRegister),
+    },
+    PrimitiveSpec {
+        spelling: "adv.register_deferred_data",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredRegisterData),
     },
     PrimitiveSpec {
         spelling: "add",

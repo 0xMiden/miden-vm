@@ -4,6 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -146,6 +147,9 @@ pub struct FastProcessor {
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
+
+    /// Deferred witness accumulated during execution and returned for verifier rehydration.
+    deferred_state: DeferredState,
 }
 
 impl FastProcessor {
@@ -157,6 +161,7 @@ impl FastProcessor {
             advice: self.advice,
             memory: self.memory,
             final_precompile_transcript: self.pc_transcript,
+            deferred_state: self.deferred_state,
         }
     }
 
@@ -237,6 +242,12 @@ impl FastProcessor {
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        let registry = Arc::new(self.deferred_state.registry().clone());
+        self.deferred_state = DeferredState::new(registry, options.max_deferred_elements())
+            .map_err(|source| AdviceError::DeferredStateInitializationFailed {
+                max_elements: options.max_deferred_elements(),
+                source,
+            })?;
         self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
@@ -276,8 +287,13 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
-            options,
             pc_transcript: PrecompileTranscript::new(),
+            deferred_state: DeferredState::new(
+                Arc::new(PrecompileRegistry::new()),
+                options.max_deferred_elements(),
+            )
+            .expect("empty deferred registry initialization cannot fail"),
+            options,
         })
     }
 
@@ -300,6 +316,32 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Installs deferred precompiles for tests and experimental end-to-end coverage.
+    ///
+    /// This is intentionally gated behind `testing`. Production registry installation is not part
+    /// of this branch; the default processor uses an empty deferred registry.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_deferred_precompiles(
+        mut self,
+        precompiles: PrecompileRegistry,
+    ) -> Result<Self, ExecutionError> {
+        self.deferred_state
+            .extend_precompiles(precompiles)
+            .map_err(ExecutionError::deferred_error_no_context)?;
+        Ok(self)
+    }
+
+    /// Returns the deferred witness accumulated during execution.
+    #[inline(always)]
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
+    }
+
+    #[inline(always)]
+    pub(super) fn deferred_state_mut(&mut self) -> &mut DeferredState {
+        &mut self.deferred_state
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -627,6 +669,7 @@ pub struct ExecutionOutput {
     pub advice: AdviceProvider,
     pub memory: Memory,
     pub final_precompile_transcript: PrecompileTranscript,
+    pub deferred_state: DeferredState,
 }
 
 // SYSTEM CALL STATE
