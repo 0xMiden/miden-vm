@@ -19,6 +19,7 @@ use miden_assembly::{
 const ASM_DIR_PATH: &str = "asm";
 const ASL_DIR_PATH: &str = "assets";
 const DOC_DIR_PATH: &str = "docs";
+const AGGREGATE_ASM_DIR: &str = "aggregate-masm";
 
 // MARKDOWN RENDERER
 // ================================================================================================
@@ -197,14 +198,84 @@ fn reexport_target_docs(
 // PRE-PROCESSING
 // ================================================================================================
 
-/// Read and parse the contents from `./asm` into a `LibraryContents` struct, serializing it into
-/// `assets` folder under `core` namespace.
+fn prepare_aggregate_project(
+    build_dir: &Path,
+    core_asm_dir: &Path,
+    precompiles_asm_dir: &Path,
+) -> Result<PathBuf, Report> {
+    let aggregate_dir = build_dir.join(AGGREGATE_ASM_DIR);
+    match fs::remove_dir_all(&aggregate_dir) {
+        Ok(()) => {},
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {},
+        Err(err) => {
+            return Err(Report::msg(format!(
+                "failed to clear aggregate MASM directory `{}`: {err}",
+                aggregate_dir.display()
+            )));
+        },
+    }
+
+    fs::create_dir_all(&aggregate_dir).into_diagnostic()?;
+    fs::write(
+        aggregate_dir.join("miden-project.toml"),
+        format!(
+            r#"[package]
+name = "miden-core"
+version = "{}"
+
+[lib]
+namespace = "miden"
+path = "mod.masm"
+
+[profile.release]
+# Always produce debug information, as it can be stripped later by the VM
+debug = true
+# Use workspace-relative file paths in debug info for portability
+trim_paths = true
+"#,
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .into_diagnostic()?;
+    fs::write(aggregate_dir.join("mod.masm"), "pub mod core\npub mod precompiles\n")
+        .into_diagnostic()?;
+
+    copy_masm_tree(core_asm_dir, &aggregate_dir.join("core"))?;
+    copy_masm_tree(precompiles_asm_dir, &aggregate_dir.join("precompiles"))?;
+
+    Ok(aggregate_dir)
+}
+
+fn copy_masm_tree(source_dir: &Path, target_dir: &Path) -> Result<(), Report> {
+    fs::create_dir_all(target_dir).into_diagnostic()?;
+
+    for entry in fs::read_dir(source_dir).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let source_path = entry.path();
+        let target_path = target_dir.join(entry.file_name());
+        let file_type = entry.file_type().into_diagnostic()?;
+
+        if file_type.is_dir() {
+            copy_masm_tree(&source_path, &target_path)?;
+        } else if file_type.is_file()
+            && source_path.extension().and_then(|extension| extension.to_str()) == Some("masm")
+        {
+            fs::copy(&source_path, &target_path).into_diagnostic()?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Read and parse the aggregate core/precompiles sources into a package, serializing it into the
+/// `assets` folder as the `miden-core` package.
 fn main() -> Result<(), Report> {
     use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
 
     // re-build the `[OUT_DIR]/assets/core.masp` file iff something in the `./asm` directory
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
+    println!("cargo:rerun-if-changed={}", miden_precompiles::asm_source_dir().display());
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
     // ../../ to reach crates/assembly/src.
@@ -219,19 +290,20 @@ fn main() -> Result<(), Report> {
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();
 
-    // Build core library
+    // Build the aggregate core library package.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
+    let precompiles_asm_dir = miden_precompiles::asm_source_dir();
+    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let aggregate_dir = prepare_aggregate_project(&build_dir, &asm_dir, &precompiles_asm_dir)?;
 
     let assembler = Assembler::default();
     let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
     let mut project_assembler =
-        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
+        assembler.for_project_at_path(aggregate_dir.join("miden-project.toml"), &mut registry)?;
 
     let package =
         project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
-
-    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // write the masp output
     package.write_masp_file(build_dir.join(ASL_DIR_PATH)).into_diagnostic()?;

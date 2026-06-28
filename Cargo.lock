@@ -1426,6 +1426,7 @@ dependencies = [
  "miden-crypto",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-utils",
@@ -1680,6 +1681,7 @@ version = "0.25.0"
 dependencies = [
  "miden-assembly",
  "miden-core",
+ "miden-crypto",
  "miden-mast-package",
  "miden-package-registry",
  "miden-processor",

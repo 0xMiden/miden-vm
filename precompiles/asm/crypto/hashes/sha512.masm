@@ -1,0 +1,152 @@
+use miden::precompiles
+
+# CONSTANTS - Sha512Precompile tag fields and digest advice event
+# ================================================================================================
+
+const PRECOMPILE_ID = 17153122752013038770
+const ASSERT_TAG_ID = 0
+const PREIMAGE_TAG_ID = 1
+const DIGEST_TAG_ID = 2
+const SHA512_DIGEST_EVENT = event("miden::precompiles::crypto::hashes::sha512::digest")
+
+# PROCEDURES
+# ================================================================================================
+
+#! Computes the SHA-512 hash of data in memory, writing the digest to a caller-provided pointer.
+#!
+#! Input:  [out_ptr, in_ptr, len_bytes, ...]
+#! Output: [...]
+@locals(11)
+pub proc hash_bytes
+    # Stash pointers/length needed after data registration.
+    loc_store.8
+    # => [in_ptr, len_bytes, ...]
+    dup.0 loc_store.9
+    # => [in_ptr, len_bytes, ...]
+    dup.1 loc_store.10
+    # => [in_ptr, len_bytes, ...]
+
+    # Register preimage memory as a hash-owned data node.
+    dup.1
+    # => [len_bytes, in_ptr, len_bytes, ...]
+    add.31 u32div.32
+    # => [ceil(len_bytes / 32), in_ptr, len_bytes, ...]
+    dup eq.0 add
+    # => [preimage_n_chunks=max(1,ceil(len_bytes/32)), in_ptr, len_bytes, ...]
+    swap
+    # => [in_ptr, preimage_n_chunks, len_bytes, ...]
+    push.0 loc_load.10 push.PREIMAGE_TAG_ID push.PRECOMPILE_ID
+    # => [PREIMAGE_TAG, in_ptr, preimage_n_chunks, len_bytes, ...]
+    exec.register_mem
+    # => [PREIMAGE_DIGEST, len_bytes, ...]
+    loc_storew_le.0 dropw
+    # => [len_bytes, ...]
+
+    # Ask the host for the digest limbs.
+    loc_load.9
+    # => [in_ptr, len_bytes, ...]
+    emit.SHA512_DIGEST_EVENT
+    # => [in_ptr, len_bytes, ...]
+    drop drop
+    # => [...]
+
+    # Write DIGEST_U32[16] from advice to out_ptr.
+    adv_pushw adv_pushw adv_pushw adv_pushw
+    # => [DIGEST_W3_U32[4], DIGEST_W2_U32[4], DIGEST_W1_U32[4], DIGEST_W0_U32[4], ...]
+    loc_load.8 add.12 mem_storew_le dropw
+    loc_load.8 add.8 mem_storew_le dropw
+    loc_load.8 add.4 mem_storew_le dropw
+    loc_load.8 mem_storew_le dropw
+    # => [...]
+
+    # Register expected digest memory as a hash-owned data node.
+    push.2 loc_load.8
+    # => [out_ptr, digest_n_chunks=2, ...]
+    push.0.0 push.DIGEST_TAG_ID push.PRECOMPILE_ID
+    # => [DIGEST_TAG, out_ptr, digest_n_chunks=2, ...]
+    exec.register_mem
+    # => [EXPECTED_DIGEST, ...]
+    loc_storew_le.4 dropw
+    # => [...]
+
+    # Log hash_assert(len_bytes, preimage_digest, expected_digest).
+    padw loc_loadw_le.4
+    # => [EXPECTED_DIGEST, ...]
+    padw loc_loadw_le.0
+    # => [PREIMAGE_DIGEST, EXPECTED_DIGEST, ...]
+    push.0 loc_load.10 push.ASSERT_TAG_ID push.PRECOMPILE_ID
+    # => [ASSERT_TAG, PREIMAGE_DIGEST, EXPECTED_DIGEST, ...]
+    exec.precompiles::register_expr
+    # => [ASSERTION_DIGEST, ...]
+    dropw
+    # => [...]
+end
+
+#! Computes the SHA-512 hash of exactly 96 bytes from memory, writing the digest to `out_ptr`.
+#!
+#! Input:  [out_ptr, in_ptr, ...]
+#! Output: [...]
+pub proc hash_96_bytes
+    push.96 movdn.2
+    exec.hash_bytes
+end
+
+#! Computes the SHA-512 hash of a single 256-bit input, writing the digest to `out_ptr`.
+#!
+#! Input:  [out_ptr, INPUT_U32[8], ...]
+#! Output: [...]
+@locals(9)
+pub proc hash
+    loc_store.8
+    loc_storew_le.0 dropw
+    loc_storew_le.4 dropw
+
+    push.32 locaddr.0 loc_load.8
+    exec.hash_bytes
+end
+
+#! Merges two 256-bit inputs via SHA-512, writing the digest to `out_ptr`.
+#!
+#! Input:  [out_ptr, INPUT_L_U32[8], INPUT_R_U32[8], ...]
+#! Output: [...]
+@locals(17)
+pub proc merge
+    loc_store.16
+    loc_storew_le.0 dropw
+    loc_storew_le.4 dropw
+    loc_storew_le.8 dropw
+    loc_storew_le.12 dropw
+
+    push.64 locaddr.0 loc_load.16
+    exec.hash_bytes
+end
+
+# INTERNAL PROCEDURES
+# ================================================================================================
+
+#! Registers a hash-owned data node in memory and returns its in-circuit digest.
+#!
+#! Input:  [TAG, ptr, n_chunks, ...]
+#! Output: [NODE_DIGEST, ...]
+proc register_mem
+    adv.register_deferred_data
+    # => [TAG, ptr, n_chunks, ...]
+
+    movup.5 mul.8 dup.5 add movdn.5
+    # => [TAG, ptr, end_addr, ...]
+
+    padw padw
+    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+
+    dup.13 dup.13 neq
+    while.true
+        mem_stream hperm
+        dup.13 dup.13 neq
+    end
+    # => [R0', R1', C', end_addr, end_addr, ...]
+
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, end_addr, end_addr, ...]
+    movup.4 drop movup.4 drop
+    # => [NODE_DIGEST, ...]
+end

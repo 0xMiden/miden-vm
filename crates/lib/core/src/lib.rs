@@ -8,6 +8,12 @@ pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
 
+pub mod precompiles {
+    pub use miden_precompiles::*;
+}
+
+use miden_precompiles::event_handlers as precompile_event_handlers;
+
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
@@ -142,8 +148,6 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
-            (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
-            (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
             (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
@@ -156,6 +160,7 @@ impl CoreLibrary {
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ];
         handlers.extend(default_debug_handlers());
+        handlers.extend(precompile_event_handlers::default_event_handlers());
         handlers
     }
 

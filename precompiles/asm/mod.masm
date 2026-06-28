@@ -3,6 +3,8 @@
 #! Shared deferred-DAG helpers are exported from here. Concrete deferred precompile families are
 #! added by later stack segments.
 
+pub mod crypto
+
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
 # NOTE: `register_value` is adapted from `miden::core::sys` (crates/lib/core/asm/sys/mod.masm) so

@@ -14,6 +14,13 @@ use miden_mast_package::Package;
 use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
+mod codec;
+mod hash;
+
+pub use hash::{
+    HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
+};
+
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn asm_source_dir() -> PathBuf {
@@ -70,14 +77,19 @@ impl Default for PrecompilesLibrary {
 // ================================================================================================
 
 pub mod event_handlers {
-    use alloc::{sync::Arc, vec::Vec};
+    use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::events::EventName;
     use miden_processor::event::EventHandler;
 
+    use crate::hash::handlers as hash_handlers;
+
     /// Returns the default host event handlers required by this precompiles package.
     pub fn default_event_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        Vec::new()
+        vec![
+            hash_handlers::keccak256_digest_event_handler(),
+            hash_handlers::sha512_digest_event_handler(),
+        ]
     }
 }
 
@@ -87,4 +99,6 @@ pub mod event_handlers {
 /// Returns a [`PrecompileRegistry`] containing the deferred precompiles provided by this crate.
 pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
+        .with_precompile(Keccak256Precompile::default())
+        .with_precompile(Sha512Precompile::default())
 }

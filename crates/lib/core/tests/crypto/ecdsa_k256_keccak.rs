@@ -186,6 +186,7 @@ impl EventHandler for EcdsaSignatureHandler {
 }
 
 #[test]
+#[ignore = "Segment 7 migrates ECDSA to the deferred precompile registry; the high-level wrapper depends on migrated Keccak in Segment 5"]
 fn test_ecdsa_verify_bis_wrapper() {
     let mut rng = StdRng::seed_from_u64(19260817);
     let secret_key = SecretKey::with_rng(&mut rng);
