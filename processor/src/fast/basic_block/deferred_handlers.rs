@@ -94,7 +94,14 @@ pub(super) fn handle_deferred_register(
             let rhs = Digest::new([block[4], block[5], block[6], block[7]]);
             Node::join(tag, lhs, rhs).map_err(PrecompileError::from)?
         },
-        NodeType::Data(_) | NodeType::True => return Err(PrecompileError::InvalidNode.into()),
+        NodeType::PairList(n) if n.get() == 1 => {
+            let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
+            let rhs = Digest::new([block[4], block[5], block[6], block[7]]);
+            Node::try_pair_list(tag, vec![(lhs, rhs)]).map_err(PrecompileError::from)?
+        },
+        NodeType::Data(_) | NodeType::PairList(_) | NodeType::True => {
+            return Err(PrecompileError::InvalidNode.into());
+        },
     };
     register_and_log_true_statement(processor, node)?;
     Ok(())
@@ -199,7 +206,7 @@ pub(super) fn handle_deferred_register_data(
     // already been rejected by the registry.
     let node_type = processor.deferred_state().decode(tag)?;
     let n = match node_type {
-        NodeType::Data(n) => n.get(),
+        NodeType::Data(n) | NodeType::PairList(n) => n.get(),
         NodeType::Join => 1,
         NodeType::True => return Err(PrecompileError::InvalidNode.into()),
     };
@@ -248,6 +255,9 @@ pub(super) fn handle_deferred_register_data(
 
     let node = match node_type {
         NodeType::Data(_) => Node::try_data(tag, chunks).map_err(PrecompileError::from)?,
+        NodeType::PairList(_) => {
+            Node::try_pair_list_chunks(tag, chunks).map_err(PrecompileError::from)?
+        },
         NodeType::Join => {
             let block = chunks.into_iter().next().ok_or(PrecompileError::InvalidNode)?;
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);

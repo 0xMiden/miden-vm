@@ -202,6 +202,23 @@ impl<'a> ProcessorState<'a> {
         self.processor.stack_get_word_safe(start_idx)
     }
 
+    /// Evaluates a registered deferred node and returns its canonical digest and node.
+    pub fn require_canonical_deferred_node(
+        &self,
+        digest: Word,
+    ) -> Result<
+        (miden_core::deferred::Digest, &miden_core::deferred::Node),
+        miden_core::deferred::PrecompileError,
+    > {
+        let canonical_digest = self.processor.deferred_state().clone().evaluate_digest(digest)?;
+        let canonical_node = self
+            .processor
+            .deferred_state()
+            .get_node(&canonical_digest)
+            .ok_or(miden_core::deferred::PrecompileError::MissingNode)?;
+        Ok((canonical_digest, canonical_node))
+    }
+
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the
     /// stack + overflow entries.
     #[inline(always)]

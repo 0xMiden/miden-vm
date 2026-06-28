@@ -72,12 +72,12 @@ impl Tag {
     }
 
     /// Returns the precompile/framework id component.
-    pub(crate) const fn id(&self) -> Felt {
+    pub const fn id(&self) -> Felt {
         self.id
     }
 
     /// Returns the three local immediate arguments.
-    pub(crate) const fn args(&self) -> [Felt; 3] {
+    pub const fn args(&self) -> [Felt; 3] {
         self.args
     }
 
@@ -136,6 +136,8 @@ enum PayloadRepr {
     Data(Arc<[DataChunk]>),
     /// Two child digests encoded as `lhs || rhs`.
     Join(DataChunk),
+    /// Non-empty structural digest pairs, stored as chunks `lhs || rhs`.
+    PairList(Arc<[DataChunk]>),
 }
 
 impl Payload {
@@ -162,6 +164,35 @@ impl Payload {
         Self(PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]))
     }
 
+    /// Creates a pair-list payload from a non-empty collection of structural digest pairs.
+    fn try_pair_list(pairs: impl Into<Arc<[(Digest, Digest)]>>) -> Result<Self, DeferredError> {
+        let chunks = pairs
+            .into()
+            .iter()
+            .map(|(lhs, rhs)| Self::pair_to_chunk(*lhs, *rhs))
+            .collect::<Vec<_>>();
+        Self::try_pair_list_chunks(chunks)
+    }
+
+    /// Creates a pair-list payload from non-empty chunks encoded as `lhs || rhs`.
+    fn try_pair_list_chunks(chunks: impl Into<Arc<[DataChunk]>>) -> Result<Self, DeferredError> {
+        let chunks = chunks.into();
+        if chunks.is_empty() {
+            return Err(DeferredError::InvalidPayload);
+        }
+        Ok(Self(PayloadRepr::PairList(chunks)))
+    }
+
+    fn pair_to_chunk(lhs: Digest, rhs: Digest) -> DataChunk {
+        let [l0, l1, l2, l3] = lhs.into_elements();
+        let [r0, r1, r2, r3] = rhs.into_elements();
+        [l0, l1, l2, l3, r0, r1, r2, r3]
+    }
+
+    fn chunk_to_pair([l0, l1, l2, l3, r0, r1, r2, r3]: DataChunk) -> (Digest, Digest) {
+        (Digest::new([l0, l1, l2, l3]), Digest::new([r0, r1, r2, r3]))
+    }
+
     /// Returns this payload's canonical 8-felt blocks.
     ///
     /// TRUE has no blocks. Data payloads return their stored chunks. Join payloads return one block
@@ -169,7 +200,7 @@ impl Payload {
     pub fn as_chunks(&self) -> &[DataChunk] {
         match &self.0 {
             PayloadRepr::True => &[],
-            PayloadRepr::Data(chunks) => chunks,
+            PayloadRepr::Data(chunks) | PayloadRepr::PairList(chunks) => chunks,
             PayloadRepr::Join(chunk) => core::slice::from_ref(chunk),
         }
     }
@@ -178,7 +209,9 @@ impl Payload {
     pub fn as_data(&self) -> Result<&[DataChunk], DeferredError> {
         match &self.0 {
             PayloadRepr::Data(chunks) => Ok(chunks),
-            PayloadRepr::True | PayloadRepr::Join(_) => Err(DeferredError::InvalidPayload),
+            PayloadRepr::True | PayloadRepr::Join(_) | PayloadRepr::PairList(_) => {
+                Err(DeferredError::InvalidPayload)
+            },
         }
     }
 
@@ -196,7 +229,21 @@ impl Payload {
             PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]) => {
                 Ok((Digest::new([*l0, *l1, *l2, *l3]), Digest::new([*r0, *r1, *r2, *r3])))
             },
-            PayloadRepr::True | PayloadRepr::Data(_) => Err(DeferredError::InvalidPayload),
+            PayloadRepr::True | PayloadRepr::Data(_) | PayloadRepr::PairList(_) => {
+                Err(DeferredError::InvalidPayload)
+            },
+        }
+    }
+
+    /// Returns the structural digest pairs for pair-list payloads.
+    pub fn as_pair_list(&self) -> Result<Vec<(Digest, Digest)>, DeferredError> {
+        match &self.0 {
+            PayloadRepr::PairList(chunks) => {
+                Ok(chunks.iter().map(|chunk| Self::chunk_to_pair(*chunk)).collect())
+            },
+            PayloadRepr::True | PayloadRepr::Data(_) | PayloadRepr::Join(_) => {
+                Err(DeferredError::InvalidPayload)
+            },
         }
     }
 }
@@ -243,6 +290,30 @@ impl Node {
     pub fn join(tag: Tag, lhs: Digest, rhs: Digest) -> Result<Self, DeferredError> {
         let tag = Self::require_precompile_tag(tag)?;
         Ok(Self { tag, payload: Payload::join(lhs, rhs) })
+    }
+
+    /// Creates a pair-list-shaped node that references one or more structural digest pairs.
+    pub fn try_pair_list(
+        tag: Tag,
+        pairs: impl Into<Arc<[(Digest, Digest)]>>,
+    ) -> Result<Self, DeferredError> {
+        let tag = Self::require_precompile_tag(tag)?;
+        Ok(Self {
+            tag,
+            payload: Payload::try_pair_list(pairs)?,
+        })
+    }
+
+    /// Creates a pair-list-shaped node from chunks encoded as `lhs || rhs`.
+    pub fn try_pair_list_chunks(
+        tag: Tag,
+        chunks: impl Into<Arc<[DataChunk]>>,
+    ) -> Result<Self, DeferredError> {
+        let tag = Self::require_precompile_tag(tag)?;
+        Ok(Self {
+            tag,
+            payload: Payload::try_pair_list_chunks(chunks)?,
+        })
     }
 
     /// Creates a structural deferred-root AND step from the previous root and statement digest.
@@ -349,6 +420,8 @@ pub enum NodeType {
     Data(NonZeroU32),
     /// Two child digests.
     Join,
+    /// Non-empty list of child digest pairs whose pair count is fixed by the tag.
+    PairList(NonZeroU32),
 }
 
 impl NodeType {
@@ -362,6 +435,11 @@ impl NodeType {
         NonZeroU32::new(n).map(Self::Data)
     }
 
+    /// Shape for a pair-list node with a non-zero pair count.
+    pub fn pair_list(n: u32) -> Option<Self> {
+        NonZeroU32::new(n).map(Self::PairList)
+    }
+
     /// Validates that a node's payload matches this declared shape.
     pub(crate) fn validate_node(self, node: &Node) -> Result<(), DeferredError> {
         match self {
@@ -372,15 +450,32 @@ impl NodeType {
                 Ok(())
             },
             Self::Join if node.payload.as_join().is_ok() => Ok(()),
+            Self::PairList(n)
+                if node
+                    .payload
+                    .as_pair_list()
+                    .is_ok_and(|pairs| pairs.len() == n.get() as usize) =>
+            {
+                Ok(())
+            },
             _ => Err(DeferredError::InvalidPayload),
         }
     }
 
-    /// Returns this node's structural children, if the shape declares child references.
-    pub(crate) fn children(self, node: &Node) -> Result<Option<(Digest, Digest)>, DeferredError> {
+    /// Returns this node's structural children in payload order.
+    pub(crate) fn children(self, node: &Node) -> Result<Vec<Digest>, DeferredError> {
         match self {
-            Self::Join => node.payload.as_join().map(Some),
-            Self::True | Self::Data(_) => Ok(None),
+            Self::Join => {
+                let (lhs, rhs) = node.payload.as_join()?;
+                Ok(alloc::vec![lhs, rhs])
+            },
+            Self::PairList(_) => Ok(node
+                .payload
+                .as_pair_list()?
+                .into_iter()
+                .flat_map(|(lhs, rhs)| [lhs, rhs])
+                .collect()),
+            Self::True | Self::Data(_) => Ok(Vec::new()),
         }
     }
 }

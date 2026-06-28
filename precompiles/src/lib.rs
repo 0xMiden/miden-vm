@@ -15,10 +15,27 @@ use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 mod codec;
+#[cfg(feature = "codegen-tools")]
+#[doc(hidden)]
+pub mod codegen;
 mod hash;
+mod math;
 
 pub use hash::{
     HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
+};
+pub use math::{
+    curve::{
+        CurveId, CurvePoint, CurvePrecompile, CurveSpec, ShortWeierstrassSpec, TwistedEdwardsSpec,
+    },
+    ed25519_base::Ed25519Base,
+    ed25519_scalar::Ed25519Scalar,
+    k1_base::K1Base,
+    k1_scalar::K1Scalar,
+    r1_base::R1Base,
+    r1_scalar::R1Scalar,
+    u256::U256,
+    uint::{Limbs, UintDomain, UintPrecompile, UintSpec},
 };
 
 #[cfg(feature = "std")]
@@ -33,9 +50,9 @@ pub fn asm_source_dir() -> PathBuf {
 /// The Miden precompiles library, wrapping the compiled `miden-precompiles` [`Package`].
 ///
 /// The package bundles the MASM procedures exported under the `miden::precompiles` namespace,
-/// starting with shared deferred-DAG helper procedures. When the package is dynamically linked
-/// during assembly, these procedures can be called from any Miden program and are serialized as
-/// 32 bytes.
+/// including hash wrappers, arithmetic wrappers, and deferred-DAG helper procedures. When the
+/// package is dynamically linked during assembly, these procedures can be called from any Miden
+/// program and are serialized as 32 bytes.
 ///
 /// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`].
 ///
@@ -82,13 +99,17 @@ pub mod event_handlers {
     use miden_core::events::EventName;
     use miden_processor::event::EventHandler;
 
-    use crate::hash::handlers as hash_handlers;
+    use crate::{hash::handlers as hash_handlers, math::uint::handlers as uint_handlers};
+
+    /// Event used by generated field uint wrappers to request an inverse witness from the host.
+    pub const UINT_FIELD_INV_EVENT_NAME: EventName = uint_handlers::UINT_FIELD_INV_EVENT_NAME;
 
     /// Returns the default host event handlers required by this precompiles package.
     pub fn default_event_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             hash_handlers::keccak256_digest_event_handler(),
             hash_handlers::sha512_digest_event_handler(),
+            uint_handlers::field_inv_event_handler(),
         ]
     }
 }
@@ -101,4 +122,6 @@ pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())
         .with_precompile(Sha512Precompile::default())
+        .with_precompile(UintPrecompile)
+        .with_precompile(CurvePrecompile)
 }

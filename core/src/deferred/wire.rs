@@ -52,6 +52,8 @@ pub enum WireEntry {
     Data { tag: Tag, chunks: Vec<DataChunk> },
     /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
     Join { tag: Tag, lhs: u32, rhs: u32 },
+    /// Non-empty structural child pairs resolved against `TRUE_INDEX` or earlier wire indices.
+    PairList { tag: Tag, pairs: Vec<(u32, u32)> },
 }
 
 // DEFERRED STATE WIRE
@@ -188,6 +190,7 @@ impl<'a> WireDecoder<'a> {
             let node = match entry {
                 WireEntry::Data { tag, chunks } => self.decode_data_entry(*tag, chunks)?,
                 WireEntry::Join { tag, lhs, rhs } => self.decode_join_entry(*tag, *lhs, *rhs)?,
+                WireEntry::PairList { tag, pairs } => self.decode_pair_list_entry(*tag, pairs)?,
             };
             self.push_entry(node)?;
         }
@@ -231,6 +234,30 @@ impl<'a> WireDecoder<'a> {
         match node_type {
             NodeType::Join => Ok(node),
             NodeType::True | NodeType::Data(_) => Err(IntegrityError::InvalidStructure),
+            NodeType::PairList(_) => Err(IntegrityError::InvalidStructure),
+        }
+    }
+
+    fn decode_pair_list_entry(
+        &self,
+        tag: Tag,
+        pairs: &[(u32, u32)],
+    ) -> Result<Node, IntegrityError> {
+        let pairs = pairs
+            .iter()
+            .map(|(lhs, rhs)| Ok((self.resolve_index(*lhs)?, self.resolve_index(*rhs)?)))
+            .collect::<Result<Vec<_>, IntegrityError>>()?;
+        let node = Node::try_pair_list(tag, pairs).map_err(|_| IntegrityError::InvalidStructure)?;
+        let node_type = self
+            .precompiles
+            .decode_node_type(node.tag())
+            .map_err(|_| IntegrityError::InvalidStructure)?;
+        node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
+        match node_type {
+            NodeType::PairList(_) => Ok(node),
+            NodeType::True | NodeType::Data(_) | NodeType::Join => {
+                Err(IntegrityError::InvalidStructure)
+            },
         }
     }
 
@@ -300,15 +327,14 @@ impl WireEncoder {
                     node_type.validate_node(node).map_err(|_| IntegrityError::InvalidStructure)?;
 
                     stack.push(Frame::Emit(digest));
-                    if let NodeType::Join = node_type {
-                        let (lhs, rhs) = node_type
-                            .children(node)
-                            .map_err(|_| IntegrityError::InvalidStructure)?
-                            .expect("join node type has children");
-                        stack.push(Frame::Enter(rhs));
-                        stack.push(Frame::Enter(lhs));
-                    } else if let NodeType::True = node_type {
+                    let mut children =
+                        node_type.children(node).map_err(|_| IntegrityError::InvalidStructure)?;
+                    if let NodeType::True = node_type {
                         return Err(IntegrityError::InvalidStructure);
+                    }
+                    children.reverse();
+                    for child in children {
+                        stack.push(Frame::Enter(child));
                     }
                 },
                 Frame::Emit(digest) => {
@@ -327,13 +353,25 @@ impl WireEncoder {
                                 .to_vec(),
                         },
                         NodeType::Join => {
-                            let (lhs, rhs) = node_type
+                            let children = node_type
                                 .children(node)
-                                .map_err(|_| IntegrityError::InvalidStructure)?
-                                .expect("join node type has children");
-                            let lhs = self.index_for(lhs)?;
-                            let rhs = self.index_for(rhs)?;
+                                .map_err(|_| IntegrityError::InvalidStructure)?;
+                            let [lhs, rhs] = children.as_slice() else {
+                                return Err(IntegrityError::InvalidStructure);
+                            };
+                            let lhs = self.index_for(*lhs)?;
+                            let rhs = self.index_for(*rhs)?;
                             WireEntry::Join { tag: node.tag(), lhs, rhs }
+                        },
+                        NodeType::PairList(_) => {
+                            let pairs = node
+                                .payload()
+                                .as_pair_list()
+                                .map_err(|_| IntegrityError::InvalidStructure)?
+                                .into_iter()
+                                .map(|(lhs, rhs)| Ok((self.index_for(lhs)?, self.index_for(rhs)?)))
+                                .collect::<Result<Vec<_>, IntegrityError>>()?;
+                            WireEntry::PairList { tag: node.tag(), pairs }
                         },
                         NodeType::True => return Err(IntegrityError::InvalidStructure),
                     };
@@ -384,6 +422,15 @@ impl Serializable for WireEntry {
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
             },
+            Self::PairList { tag, pairs } => {
+                target.write_u8(2);
+                tag.write_into(target);
+                target.write_usize(pairs.len());
+                for (lhs, rhs) in pairs {
+                    target.write_u32(*lhs);
+                    target.write_u32(*rhs);
+                }
+            },
         }
     }
 }
@@ -407,6 +454,15 @@ impl Deserializable for WireEntry {
                 let rhs = source.read_u32()?;
                 Ok(Self::Join { tag, lhs, rhs })
             },
+            2 => {
+                let tag = Tag::read_from(source)?;
+                let pair_count = source.read_usize()?;
+                let pairs = source
+                    .read_many_iter::<WirePair>(pair_count)?
+                    .map(|pair| pair.map(|pair| pair.0))
+                    .collect::<Result<_, _>>()?;
+                Ok(Self::PairList { tag, pairs })
+            },
             other => Err(DeserializationError::InvalidValue(format!(
                 "invalid deferred wire entry discriminant: {other}"
             ))),
@@ -419,6 +475,18 @@ impl Deserializable for WireEntry {
 }
 
 struct WireDataChunk(DataChunk);
+
+struct WirePair((u32, u32));
+
+impl Deserializable for WirePair {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self((source.read_u32()?, source.read_u32()?)))
+    }
+
+    fn min_serialized_size() -> usize {
+        2 * u32::min_serialized_size()
+    }
+}
 
 impl Deserializable for WireDataChunk {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
@@ -496,6 +564,10 @@ mod tests {
                 chunks: alloc::vec![felts(20), felts(30)],
             },
             WireEntry::Join { tag: tag(3), lhs: 1, rhs: TRUE_INDEX },
+            WireEntry::PairList {
+                tag: tag(4),
+                pairs: alloc::vec![(1, 2), (TRUE_INDEX, 3)],
+            },
         ]));
         assert_wire_round_trips(DeferredStateWire::default());
     }
@@ -516,6 +588,17 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(0); // Data entry discriminant
+        tag(1).write_into(&mut bytes);
+        bytes.write_usize(usize::MAX);
+
+        assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn wire_rejects_over_budget_pair_count() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(1);
+        bytes.write_u8(2); // PairList entry discriminant
         tag(1).write_into(&mut bytes);
         bytes.write_usize(usize::MAX);
 

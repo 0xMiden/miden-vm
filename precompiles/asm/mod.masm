@@ -1,25 +1,25 @@
 #! Top-level module of the `miden::precompiles` namespace.
 #!
-#! Shared deferred-DAG helpers are exported from here. Concrete deferred precompile families are
-#! added by later stack segments.
+#! Concrete deferred precompiles are exported from here and its submodules. The helper procedures in
+#! this module are shared by generated and hand-written precompile wrappers.
 
 pub mod crypto
+pub mod math
 
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
-# NOTE: `register_value` is adapted from `miden::core::sys` (crates/lib/core/asm/sys/mod.masm) so
-# the `miden-precompiles` package is self-contained while the crate is being stood up on this
-# tracking branch. It should be deduplicated against a single shared source once the precompile
-# proof-model migration settles.
+# NOTE: `register_value` and `register_mem` are adapted from `miden::core::sys`
+# (crates/lib/core/asm/sys/mod.masm) so the `miden-precompiles` package is self-contained while the
+# crate is being stood up on this tracking branch. They should be deduplicated against a single
+# shared source once the precompile proof-model migration settles.
 #
-# `register_value` is safe by default: it derives the node digest in-circuit, so the worst a misuse
-# can do is make the verifier reject. There is intentionally no memory-registration helper here
-# because memory-backed node shapes are tag-specific and must come from an installed precompile.
-# There is also intentionally no `evaluate` proc here — deferred evaluation returns an *unbound*
-# host hint (`adv.evaluate_deferred_payload` for payload-only callers, or `adv.evaluate_deferred`
-# when the canonical tag is also needed), and using it soundly requires re-hashing in-circuit and
-# registering a predicate the verifier re-checks. That discipline is precompile-specific, so each
-# precompile wraps the raw event itself rather than calling a deceptively "safe" shared helper.
+# `register_value` / `register_mem` are safe by default: they derive the node digest in-circuit,
+# so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
+# proc here — deferred evaluation returns an *unbound* host hint (`adv.evaluate_deferred_payload`
+# for payload-only callers, or `adv.evaluate_deferred` when the canonical tag is also needed), and
+# using it soundly requires re-hashing in-circuit and registering a predicate the verifier re-checks.
+# That discipline is precompile-specific, so each precompile wraps the raw event itself rather than
+# calling a deceptively "safe" shared helper.
 
 #! Registers the expression node currently laid out in Poseidon2 sponge order and returns its
 #! content-addressed digest.
@@ -59,4 +59,54 @@ end
 #! Output: [NODE_DIGEST, ...]
 pub proc register_value
     exec.register_expr
+end
+
+#! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
+#!
+#! `adv.register_deferred_data` interns the node host-side (reading `8n` felts from memory at
+#! `ptr`, where `n` is the stack-supplied `n_chunks`); it produces no stack or advice output. The
+#! digest is then derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity
+#! = `TAG`, one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather
+#! than supplied by advice, and the rate0 word matches `Node::digest`. Empty data bodies are
+#! forbidden, so `n ≥ 1` and the linear-hash loop always runs at least one permutation.
+#!
+#! Input:  [TAG, ptr, n_chunks, ...]
+#! Output: [NODE_DIGEST, ...]
+pub proc register_mem
+    adv.register_deferred_data
+    # => [TAG, ptr, n_chunks, ...]
+
+    # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
+    movup.5 mul.8 dup.5 add movdn.5
+    # => [TAG, ptr, end_addr, ...]
+
+    # Build the sponge state: rate = 0, capacity = TAG, with [start_addr, end_addr] beneath it.
+    padw padw
+    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+
+    # Linear hash: absorb one 8-felt block per iteration until start_addr reaches end_addr.
+    dup.13 dup.13 neq
+    while.true
+        mem_stream hperm
+        dup.13 dup.13 neq
+    end
+    # => [R0', R1', C', end_addr, end_addr, ...]
+
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, end_addr, end_addr, ...]  (digest = rate0)
+    movup.4 drop movup.4 drop
+    # => [NODE_DIGEST, ...]
+end
+
+#! Consumes a deferred node digest after registration.
+#!
+#! Deferred registration events already fold TRUE statements into the host deferred root on this
+#! branch. Generated arithmetic wrappers still call this helper after registering assertion nodes,
+#! so the helper only removes the digest they computed in-circuit.
+#!
+#! Input:  [NODE_DIGEST, ...]
+#! Output: [...]
+pub proc log_deferred
+    dropw
 end

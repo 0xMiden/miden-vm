@@ -215,11 +215,9 @@ impl DeferredState {
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
         let node_type = self.registry.validate_node(node)?;
-        if let Some((lhs, rhs)) = node_type.children(node)? {
-            for child in [lhs, rhs] {
-                if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
-                    return Err(PrecompileError::MissingNode);
-                }
+        for child in node_type.children(node)? {
+            if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
+                return Err(PrecompileError::MissingNode);
             }
         }
         Ok(node_type)
@@ -339,12 +337,14 @@ impl<'a> DeferredContext<'a> {
 #[cfg(test)]
 mod tests {
     use alloc::{sync::Arc, vec, vec::Vec};
+    use core::num::NonZeroU32;
 
     use super::*;
     use crate::{
         Felt, Word, ZERO,
         deferred::{
-            DeferredStateWire, PrecompileRegistry, TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
+            DeferredContext, DeferredStateWire, Payload, Precompile, PrecompileRegistry,
+            TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry, precompile_id,
         },
         testing::precompile::{Hash, Uint},
     };
@@ -380,6 +380,66 @@ mod tests {
         let mut limbs = [0u32; 8];
         limbs[0] = value;
         Uint::value_node(limbs)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct PairListFixture;
+
+    impl PairListFixture {
+        const NAME: &'static str = "pair_list_fixture";
+        const EQ_ALL_TAG_ID: u32 = 0;
+
+        fn id() -> Felt {
+            precompile_id(Self::NAME)
+        }
+
+        fn eq_all_tag(pair_count: NonZeroU32) -> Tag {
+            Tag::precompile(
+                Self::id(),
+                [Felt::from_u32(Self::EQ_ALL_TAG_ID), Felt::from_u32(pair_count.get()), ZERO],
+            )
+            .expect("pair-list fixture id is not framework-reserved")
+        }
+    }
+
+    impl Precompile for PairListFixture {
+        fn name(&self) -> &'static str {
+            Self::NAME
+        }
+
+        fn id(&self) -> Felt {
+            Self::id()
+        }
+
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            if args[0].as_canonical_u64() != Self::EQ_ALL_TAG_ID as u64 {
+                return None;
+            }
+
+            let pair_count = u32::try_from(args[1].as_canonical_u64()).ok()?;
+            let pair_count = NonZeroU32::new(pair_count)?;
+            Some(NodeType::PairList(pair_count))
+        }
+
+        fn evaluate(
+            &self,
+            _args: [Felt; 3],
+            payload: &Payload,
+            context: &mut DeferredContext<'_>,
+        ) -> Result<Node, PrecompileError> {
+            for (lhs, rhs) in payload.as_pair_list()? {
+                context.ensure_equal(lhs, rhs)?;
+            }
+            Ok(Node::TRUE)
+        }
+    }
+
+    fn pair_list_precompiles() -> Arc<PrecompileRegistry> {
+        Arc::new(
+            PrecompileRegistry::default()
+                .with_precompile(Uint)
+                .with_precompile(PairListFixture),
+        )
     }
 
     fn dummy_digest(seed: u64) -> Word {
@@ -697,6 +757,30 @@ mod tests {
         assert_eq!(empty_state.to_wire().unwrap(), empty_wire);
 
         let (registry, state) = logged_hash_state();
+        assert_round_trips(&state, &registry);
+    }
+
+    #[test]
+    fn wire_round_trips_logged_pair_list_state() {
+        let registry = pair_list_precompiles();
+        let mut state = state_with(&registry, usize::MAX);
+        let lhs = state.register(uint_value(3)).expect("lhs must register");
+        let rhs = state.register(uint_value(3)).expect("rhs must register");
+        let pair_list = Node::try_pair_list(
+            PairListFixture::eq_all_tag(NonZeroU32::new(2).unwrap()),
+            vec![(lhs, lhs), (rhs, rhs)],
+        )
+        .expect("pair-list fixture owns tag");
+        let statement = state.register(pair_list).expect("pair list must register");
+        state.log_statement(statement).expect("pair list evaluates to TRUE");
+
+        let wire = state.to_wire().unwrap();
+        assert!(
+            wire.entries.iter().any(
+                |entry| matches!(entry, WireEntry::PairList { pairs, .. } if pairs.len() == 2)
+            ),
+            "canonical wire must include the multi-pair entry",
+        );
         assert_round_trips(&state, &registry);
     }
 

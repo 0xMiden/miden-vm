@@ -18,13 +18,7 @@ fn package_deserializes() {
 #[test]
 fn links_against_program() {
     let library = PrecompilesLibrary::default();
-    let source = "
-        begin
-            push.0.0.0.0.0.0.0.0.1.0.0.0
-            exec.::miden::precompiles::register_value
-            dropw
-        end
-    ";
+    let source = "begin exec.::miden::precompiles::math::u256::push_zero_digest dropw end";
     Assembler::default()
         .with_package(library.package(), Linkage::Dynamic)
         .expect("failed to link miden-precompiles")

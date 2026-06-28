@@ -1,7 +1,7 @@
 [package]
 name = "miden-precompiles"
 version.workspace = true
-description = "Deferred precompile package and registry for the Miden VM"
+description = "Concrete deferred precompile implementations for the Miden VM"
 documentation = "https://docs.rs/miden-precompiles"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
@@ -20,6 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 std = ["miden-core/std", "miden-crypto/std", "miden-processor/std", "miden-utils-sync/std"]
+codegen-tools = ["std"]
 
 [dependencies]
 # Miden dependencies
@@ -36,6 +37,11 @@ miden-processor = { workspace = true, features = ["testing"] }
 [build-dependencies]
 miden-assembly = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
+
+[[bin]]
+name = "regenerate-precompile-masm"
+path = "src/bin/regenerate-precompile-masm.rs"
+required-features = ["codegen-tools"]
 
 [[test]]
 name = "integration"
