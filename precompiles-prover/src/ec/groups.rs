@@ -78,12 +78,14 @@ pub const COL_SBOUND_LIMBS_LO: usize = 17;
 pub const COL_SBOUND_LIMBS_HI: usize = 21;
 pub const NUM_MAIN_COLS: usize = 25;
 
-// Aux: one LogUp running-sum column with the EcGroup provide, the b != 0
-// multiply certificate, the low/high UintVal consumes that pin one, and
-// the low/high UintVal consumes that bind `a` and the resolved scalar bound.
-const NUM_LOGUP_COLS: usize = 1;
-const AUX_WIDTH: usize = 1;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [8];
+// Aux: two LogUp running-sum columns. The first carries the EcGroup provide,
+// the b != 0 multiply certificate, and the low/high UintVal consumes that
+// pin one. The second carries the low/high UintVal consumes that bind `a`
+// and the resolved scalar bound. Keeping each column at four fractions stays
+// within the prover's degree budget.
+const NUM_LOGUP_COLS: usize = 2;
+const AUX_WIDTH: usize = 2;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [4, 4];
 
 // AIR
 // ================================================================================================
@@ -181,7 +183,7 @@ where
 
         let provide_deg = Deg { v: 1, u: 1 };
         let f2 = Deg { v: 2, u: 1 };
-        let col_deg = Deg { v: 8, u: 8 };
+        let col_deg = Deg { v: 4, u: 4 };
         let a_lo: [LB::Expr; 4] = array::from_fn(|i| local[COL_A_LIMBS_LO + i].into());
         let a_hi: [LB::Expr; 4] = array::from_fn(|i| local[COL_A_LIMBS_HI + i].into());
         let sbound_lo: [LB::Expr; 4] = array::from_fn(|i| local[COL_SBOUND_LIMBS_LO + i].into());
@@ -254,6 +256,24 @@ where
                                     },
                                     f2,
                                 );
+                            },
+                            col_deg,
+                        );
+                    },
+                    col_deg,
+                );
+            },
+            col_deg,
+        );
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-groups-param-values",
+                    |g| {
+                        g.batch(
+                            "ec-groups-param-fractions",
+                            LB::Expr::ONE,
+                            |b| {
                                 b.insert(
                                     "consume-a-lo",
                                     act.clone(),

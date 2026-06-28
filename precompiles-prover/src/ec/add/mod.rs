@@ -79,7 +79,7 @@
 //! Columns carry only what gates or names certificates on rows 0–2:
 //! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
 //! flags, `act`, the stored-one ptr for inverse certificates — 23 main
-//! columns, 3 LogUp aux columns, 4 periodic one-hots.
+//! columns, 8 LogUp aux columns, 4 periodic one-hots.
 
 pub mod trace;
 
@@ -243,13 +243,12 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: four LogUp columns — three for the bindings / certificates, plus a
-// fourth carrying the stored-one value pin for inverse certificates, the
-// closure-cert ptr-ordering Range16 checks, and the result-membership cert
-// provide.
-const NUM_LOGUP_COLS: usize = 4;
-const AUX_WIDTH: usize = 4;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [7, 7, 7, 7];
+// Aux: eight LogUp columns. Each logical group is split into a four-fraction
+// column plus a three-fraction column to stay within the prover's degree
+// budget when this AIR participates in the production session stack.
+const NUM_LOGUP_COLS: usize = 8;
+const AUX_WIDTH: usize = 8;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [4, 3, 4, 3, 4, 3, 4, 3];
 
 // AIR
 // ================================================================================================
@@ -463,7 +462,6 @@ where
         let group_next: LB::Expr = next[CELL_GROUP].into();
         // Row-2 window: the result cells (local) + the term cells (next).
         let r_local: LB::Expr = local[CELL_R].into();
-        let sbound: LB::Expr = local[CELL_SBOUND].into();
         let group_local: LB::Expr = local[CELL_GROUP].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - next[TERM_CELL_MULT].into();
         let p_ptr: LB::Expr = next[TERM_CELL_P].into();
@@ -475,9 +473,10 @@ where
         let three: LB::Expr = LB::Expr::from(Felt::from(3u32));
 
         let f2 = Deg { v: 2, u: 1 };
-        let col_deg = Deg { v: 8, u: 7 };
-        // Final column: 2 UintVal consumes for the stored-one inverse target
-        // plus 4 Range16 consumes + 1 cert provide, each under a deg-2 gate.
+        let col_deg = Deg { v: 4, u: 4 };
+        // Final column pair: 2 UintVal consumes for the stored-one inverse
+        // target plus 4 Range16 consumes + 1 cert provide, each under a
+        // deg-2 gate.
         let final_col_deg = col_deg;
 
         // Col 0 (running sum): the provide + the point / group bindings,
@@ -544,14 +543,36 @@ where
                                     },
                                     f2,
                                 );
-                                // …and cancel resolves to the group's PAI
-                                // row.
+                            },
+                            col_deg,
+                        );
+                    },
+                    col_deg,
+                );
+            },
+            col_deg,
+        );
+
+        let r_local_binding: LB::Expr = local[CELL_R].into();
+        let group_local_binding: LB::Expr = local[CELL_GROUP].into();
+        let sbound_binding: LB::Expr = local[CELL_SBOUND].into();
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-add-binding-tail",
+                    |g| {
+                        g.batch(
+                            "binding-tail",
+                            LB::Expr::ONE,
+                            |b| {
+                                // Cancel resolves to the group's PAI row.
                                 b.insert(
                                     "consume-ecpoint-r-pai",
                                     cancel.clone() * at_res.clone(),
                                     EcPointMsg {
-                                        point_ptr: r_local,
-                                        group_ptr: group_local.clone(),
+                                        point_ptr: r_local_binding,
+                                        group_ptr: group_local_binding.clone(),
                                         x_ptr: zero.clone(),
                                         y_ptr: zero.clone(),
                                         is_pai: one.clone(),
@@ -562,11 +583,11 @@ where
                                     "consume-ecgroup",
                                     live * at_res.clone(),
                                     EcGroupMsg {
-                                        group_ptr: group_local,
+                                        group_ptr: group_local_binding,
                                         a_ptr: a_ptr.clone(),
                                         b_ptr: b_ptr.clone(),
                                         bound_ptr: bound.clone(),
-                                        scalar_bound_ptr: sbound,
+                                        scalar_bound_ptr: sbound_binding,
                                     },
                                     f2,
                                 );
@@ -593,7 +614,7 @@ where
             col_deg,
         );
 
-        // Col 1 (fractions): the slope + predicate certificates, all in
+        // Col 2 (fractions): the slope + predicate certificates, all in
         // the slope-row window.
         builder.next_column(
             |col| {
@@ -665,6 +686,25 @@ where
                                     },
                                     f2,
                                 );
+                            },
+                            col_deg,
+                        );
+                    },
+                    col_deg,
+                );
+            },
+            col_deg,
+        );
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-add-slope-tail",
+                    |g| {
+                        g.batch(
+                            "slope-tail",
+                            LB::Expr::ONE,
+                            |b| {
                                 b.insert(
                                     "consume-tangent-2ly",
                                     dbl.clone() * at_slope.clone(),
@@ -718,7 +758,7 @@ where
             col_deg,
         );
 
-        // Col 2 (fractions): the shared tail, emitted from the slope-row
+        // Col 4 (fractions): the shared tail, emitted from the slope-row
         // window (tail cells via next) except y₃'s sub, which fires on
         // the tail row (y₃ via next) — plus double's y-equality.
         builder.next_column(
@@ -782,6 +822,25 @@ where
                                     },
                                     f2,
                                 );
+                            },
+                            col_deg,
+                        );
+                    },
+                    col_deg,
+                );
+            },
+            col_deg,
+        );
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-add-tail-end",
+                    |g| {
+                        g.batch(
+                            "tail-end",
+                            LB::Expr::ONE,
+                            |b| {
                                 // u = λ·e.
                                 b.insert(
                                     "consume-u-mul",
@@ -833,7 +892,7 @@ where
             col_deg,
         );
 
-        // ---- col 3: stored-one pin + mint column. Two UintVal consumes pin
+        // ---- cols 6-7: stored-one pin + mint columns. Two UintVal consumes pin
         //             `one_ptr` to value 1 on live inverse-certificate cases.
         //             Four Range16 consumes prove r_ptr > p_ptr ∧ r_ptr >
         //             q_ptr on a mint op, plus the result-membership cert
@@ -851,6 +910,7 @@ where
         let dbl_pin: LB::Expr = local[COL_DBL].into();
         let gen_pin: LB::Expr = local[COL_GEN].into();
         let one_gate: LB::Expr = sel[PCOL_SLOPE].clone() * (dbl_pin + gen_pin);
+        let mint_gate: LB::Expr = sel[PCOL_RES].clone() * mints;
         builder.next_column(
             |col| {
                 col.group(
@@ -892,37 +952,55 @@ where
                                     },
                                     f2,
                                 );
-                                let gate = sel[PCOL_RES].clone() * mints.clone();
                                 b.insert(
                                     "range16-rp-lo",
-                                    gate.clone(),
+                                    mint_gate.clone(),
                                     Range16Msg { w: rp_lo },
                                     f2,
                                 );
                                 b.insert(
                                     "range16-rp-hi",
-                                    gate.clone(),
+                                    mint_gate.clone(),
                                     Range16Msg { w: rp_hi },
                                     f2,
                                 );
+                            },
+                            final_col_deg,
+                        );
+                    },
+                    final_col_deg,
+                );
+            },
+            final_col_deg,
+        );
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-add-mint-tail",
+                    |g| {
+                        g.batch(
+                            "mint-tail",
+                            LB::Expr::ONE,
+                            |b| {
                                 b.insert(
                                     "range16-rq-lo",
-                                    gate.clone(),
+                                    mint_gate.clone(),
                                     Range16Msg { w: rq_lo },
                                     f2,
                                 );
                                 b.insert(
                                     "range16-rq-hi",
-                                    gate.clone(),
+                                    mint_gate.clone(),
                                     Range16Msg { w: rq_hi },
                                     f2,
                                 );
-                                // The cert provide: −1 per mint op (negative ⇒
-                                // provide), naming the fresh result `r` and
-                                // its group.
+                                // The cert provide: -1 per mint op (negative
+                                // means provide), naming the fresh result `r`
+                                // and its group.
                                 b.insert(
                                     "provide-ecgroupadd-cert",
-                                    LB::Expr::ZERO - gate,
+                                    LB::Expr::ZERO - mint_gate,
                                     EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
                                     f2,
                                 );

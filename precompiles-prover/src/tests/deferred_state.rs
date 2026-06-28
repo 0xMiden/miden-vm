@@ -1,8 +1,10 @@
 use miden_core::deferred::{Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST};
+use p3_matrix::Matrix;
 
 use crate::{
     deferred::synthetic_keccak_state,
-    session::{Session, SessionTraces},
+    ec::{NUM_MAIN_COLS as EC_POINT_COLS, add, groups},
+    session::{NUM_CHIPLETS, Session, SessionTraces},
     transcript::poseidon2::P2Digest,
 };
 
@@ -79,4 +81,20 @@ fn keccak_deferred_state_root_proves_and_verifies() {
     let proof = traces.prove();
     assert_eq!(proof.public_root(), synthetic.root);
     proof.verify().expect("Keccak deferred-state proof should verify");
+}
+
+#[test]
+fn default_session_includes_empty_ec_chiplets() {
+    let traces = keccak_session_traces(b"abc");
+    assert_eq!(traces.mains().len(), NUM_CHIPLETS);
+
+    let (groups, points, ec_add) = traces.ec_mains();
+    assert_eq!(groups.width(), groups::NUM_MAIN_COLS);
+    assert_eq!(groups.height(), 2);
+    assert_eq!(points.width(), EC_POINT_COLS);
+    assert_eq!(points.height(), 2);
+    assert_eq!(ec_add.width(), add::NUM_MAIN_COLS);
+    assert_eq!(ec_add.height(), add::PERIOD);
+
+    traces.check();
 }

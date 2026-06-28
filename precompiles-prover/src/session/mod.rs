@@ -5,6 +5,10 @@ use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    ec::{
+        add::trace::{EcAddRequires, generate_trace as ec_add_trace},
+        trace::{EcStoreRequires, generate_traces as ec_store_traces},
+    },
     hash::{
         chunk::trace::{ChunkRequires, generate_trace as chunk_trace},
         keccak::{
@@ -41,7 +45,7 @@ use crate::{
 mod prove;
 pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
 
-pub const NUM_CHIPLETS: usize = 11;
+pub const NUM_CHIPLETS: usize = 14;
 
 #[derive(Debug)]
 pub struct Session {
@@ -54,6 +58,8 @@ pub struct Session {
     node: KeccakNodeRequires,
     eval: TranscriptEvalRequires,
     uint: UintStores,
+    ec: EcStoreRequires,
+    ec_add: EcAddRequires,
 }
 
 impl Session {
@@ -68,6 +74,8 @@ impl Session {
             node: KeccakNodeRequires::new(),
             eval: TranscriptEvalRequires::new(),
             uint: UintStores::new(),
+            ec: EcStoreRequires::new(),
+            ec_add: EcAddRequires::new(),
         }
     }
 
@@ -154,7 +162,10 @@ impl Session {
         let eval = eval_trace(self.eval, root);
         let uint_add = uint_add_trace(self.uint.add, &mut self.uint.store);
         let uint_mul = uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl);
+        let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut self.bpl);
+        self.ec.route_uintval_demands(&mut self.uint.store);
         let uint_store = uint_trace(self.uint.store, &mut self.bpl);
+        let (ec_groups, ec_points) = ec_store_traces(self.ec);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);
         let sponge = sponge_trace(self.sponge);
@@ -176,6 +187,9 @@ impl Session {
             uint_store,
             uint_add,
             uint_mul,
+            ec_groups,
+            ec_points,
+            ec_add,
             public_root,
             bw64_active_rows,
         }
@@ -201,6 +215,9 @@ pub struct SessionTraces {
     uint_store: RowMajorMatrix<Felt>,
     uint_add: RowMajorMatrix<Felt>,
     uint_mul: RowMajorMatrix<Felt>,
+    ec_groups: RowMajorMatrix<Felt>,
+    ec_points: RowMajorMatrix<Felt>,
+    ec_add: RowMajorMatrix<Felt>,
     public_root: P2Digest,
     bw64_active_rows: usize,
 }
@@ -219,6 +236,9 @@ impl SessionTraces {
             &self.uint_store,
             &self.uint_add,
             &self.uint_mul,
+            &self.ec_groups,
+            &self.ec_points,
+            &self.ec_add,
         ]
     }
 
@@ -233,6 +253,13 @@ impl SessionTraces {
     #[cfg(test)]
     pub(crate) fn eval_main(&self) -> &RowMajorMatrix<Felt> {
         &self.eval
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ec_mains(
+        &self,
+    ) -> (&RowMajorMatrix<Felt>, &RowMajorMatrix<Felt>, &RowMajorMatrix<Felt>) {
+        (&self.ec_groups, &self.ec_points, &self.ec_add)
     }
 
     pub fn bw64_active_rows(&self) -> usize {

@@ -79,6 +79,9 @@ impl ChipletAir {
             ChipletAir::UintStore,
             ChipletAir::UintAdd,
             ChipletAir::UintMul,
+            ChipletAir::EcGroups,
+            ChipletAir::EcPointStore,
+            ChipletAir::EcGroupAdd,
         ]
     }
 }
