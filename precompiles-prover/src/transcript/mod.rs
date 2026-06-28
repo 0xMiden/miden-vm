@@ -9,4 +9,5 @@
 
 pub mod binding;
 pub mod eval;
+pub mod nodes;
 pub mod poseidon2;

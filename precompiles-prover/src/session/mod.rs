@@ -1,6 +1,7 @@
-//! Keccak-only session facade for the precompile prover MVP.
+//! Session facade for the precompile prover MVP.
 
 use miden_core::Felt;
+use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -13,23 +14,34 @@ use crate::{
             sponge::trace::{SpongeRequires, generate_trace as sponge_trace},
         },
     },
+    math::{U256, from_limbs32, to_limbs32},
     primitives::{
         bitwise64::{Bitwise64Requires, generate_trace as bw64_trace},
         byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
     },
     transcript::{
-        eval::trace::{TranscriptEvalRequires, Truthy, generate_trace as eval_trace},
+        eval::trace::{
+            PinnedUint, TranscriptEvalRequires, TranscriptRoot, Truthy, UintNode,
+            generate_trace as eval_trace,
+        },
+        nodes::UintOpId,
         poseidon2::{
             P2Digest,
             trace::{Poseidon2Requires, generate_trace as p2_trace},
         },
+    },
+    uint::{
+        UintStores,
+        add::trace::generate_trace as uint_add_trace,
+        mul::trace::generate_trace as uint_mul_trace,
+        trace::{UintPtr, generate_trace as uint_trace},
     },
 };
 
 mod prove;
 pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
 
-pub const NUM_CHIPLETS: usize = 8;
+pub const NUM_CHIPLETS: usize = 11;
 
 #[derive(Debug)]
 pub struct Session {
@@ -41,6 +53,7 @@ pub struct Session {
     sponge: SpongeRequires,
     node: KeccakNodeRequires,
     eval: TranscriptEvalRequires,
+    uint: UintStores,
 }
 
 impl Session {
@@ -54,6 +67,7 @@ impl Session {
             sponge: SpongeRequires::new(),
             node: KeccakNodeRequires::new(),
             eval: TranscriptEvalRequires::new(),
+            uint: UintStores::new(),
         }
     }
 
@@ -87,9 +101,60 @@ impl Session {
         self.eval.zero()
     }
 
-    pub fn finish(mut self, root: Truthy) -> SessionTraces {
+    pub fn pin_modulus(&mut self, addr: u32, bound: U256) -> UintPtr {
+        self.uint.store.pin_modulus(addr, bound)
+    }
+
+    pub fn pin_domain(&mut self, addr: u32, domain: UintDomain) -> UintPtr {
+        let modulus = domain.encoded_modulus();
+        assert!(
+            modulus != [0; 8],
+            "the current uint store does not support the U256 wrapping-domain sentinel",
+        );
+        self.pin_modulus(addr, from_limbs32(&domain.minus_one()))
+    }
+
+    pub fn pin_uint(&mut self, addr: u32, value: U256, bound_ptr: UintPtr) -> PinnedUint {
+        let ptr = self.uint.store.intern_pinned(addr, value, bound_ptr);
+        self.eval
+            .pin_uint(ptr, bound_ptr, to_limbs32(value), &mut self.uint.store, &mut self.p2)
+    }
+
+    pub fn uint_leaf(&mut self, value: U256, bound_ptr: UintPtr) -> UintNode {
+        let ptr = self.uint.store.intern(value, bound_ptr);
+        self.eval
+            .uint_leaf(ptr, bound_ptr, to_limbs32(value), &mut self.uint.store, &mut self.p2)
+    }
+
+    pub fn uint_add(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
+        self.eval.uint_op(UintOpId::Add, a, Some(b), self.uint.require(), &mut self.p2)
+    }
+
+    pub fn uint_sub(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
+        self.eval.uint_op(UintOpId::Sub, a, Some(b), self.uint.require(), &mut self.p2)
+    }
+
+    pub fn uint_mul(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
+        self.eval.uint_op(UintOpId::Mul, a, Some(b), self.uint.require(), &mut self.p2)
+    }
+
+    pub fn uint_neg(&mut self, a: &UintNode) -> UintNode {
+        let _ = a;
+        panic!("uint neg has no canonical deferred node in this segment")
+    }
+
+    pub fn uint_is(&mut self, a: &UintNode, b: &UintNode) -> Truthy {
+        self.eval.record_is(a, b, &mut self.p2)
+    }
+
+    pub fn finish(mut self, root: impl Into<TranscriptRoot>) -> SessionTraces {
+        let root = root.into();
         let public_root = root.hash();
+        self.eval.assert_no_stray_values();
         let eval = eval_trace(self.eval, root);
+        let uint_add = uint_add_trace(self.uint.add, &mut self.uint.store);
+        let uint_mul = uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl);
+        let uint_store = uint_trace(self.uint.store, &mut self.bpl);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);
         let sponge = sponge_trace(self.sponge);
@@ -108,6 +173,9 @@ impl Session {
             sponge,
             node,
             eval,
+            uint_store,
+            uint_add,
+            uint_mul,
             public_root,
             bw64_active_rows,
         }
@@ -130,6 +198,9 @@ pub struct SessionTraces {
     sponge: RowMajorMatrix<Felt>,
     node: RowMajorMatrix<Felt>,
     eval: RowMajorMatrix<Felt>,
+    uint_store: RowMajorMatrix<Felt>,
+    uint_add: RowMajorMatrix<Felt>,
+    uint_mul: RowMajorMatrix<Felt>,
     public_root: P2Digest,
     bw64_active_rows: usize,
 }
@@ -145,6 +216,9 @@ impl SessionTraces {
             &self.sponge,
             &self.node,
             &self.eval,
+            &self.uint_store,
+            &self.uint_add,
+            &self.uint_mul,
         ]
     }
 
@@ -154,6 +228,11 @@ impl SessionTraces {
 
     pub fn public_root(&self) -> P2Digest {
         self.public_root
+    }
+
+    #[cfg(test)]
+    pub(crate) fn eval_main(&self) -> &RowMajorMatrix<Felt> {
+        &self.eval
     }
 
     pub fn bw64_active_rows(&self) -> usize {

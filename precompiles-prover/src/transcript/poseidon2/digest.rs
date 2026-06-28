@@ -10,7 +10,9 @@ use miden_core::{
     Felt,
     deferred::{Digest, Tag},
 };
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{Keccak256Precompile, UintDomain, UintPrecompile};
+
+use crate::transcript::nodes::UintOpId;
 
 /// Output digest of a Poseidon2 absorption — `state[0..4]` after the
 /// last block's permutation.
@@ -64,6 +66,16 @@ impl P2Cap {
     /// chip's AND-node hash combining two proven-true child hashes.
     pub fn and() -> Self {
         Self(Tag::AND.as_word())
+    }
+
+    /// Canonical uint value tag for a fixed arithmetic domain.
+    pub fn uint_value(domain: UintDomain) -> Self {
+        Self(UintPrecompile::value_tag(domain).as_word())
+    }
+
+    /// Canonical uint operation tag.
+    pub fn uint_op(op: UintOpId) -> Self {
+        Self(UintPrecompile::op_tag(op.canonical_id()).as_word())
     }
 
     /// VM Keccak-256 assertion tag (`[Keccak256Precompile::id(), 0,

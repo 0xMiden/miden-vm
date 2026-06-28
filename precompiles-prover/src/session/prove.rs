@@ -1,4 +1,4 @@
-//! Multi-AIR proving for the Keccak-only chiplet stack.
+//! Multi-AIR proving for the precompile prover chiplet stack.
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{
@@ -22,6 +22,7 @@ use crate::{
         eval::TranscriptEvalAir,
         poseidon2::{P2Digest, Poseidon2Air},
     },
+    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
 
 #[derive(Clone, Debug)]
@@ -34,6 +35,9 @@ pub enum ChipletAir {
     KeccakSponge,
     KeccakNode,
     TranscriptEval,
+    UintStore,
+    UintAdd,
+    UintMul,
 }
 
 macro_rules! delegate {
@@ -47,6 +51,9 @@ macro_rules! delegate {
             ChipletAir::KeccakSponge => KeccakSpongeAir.$method($($arg),*),
             ChipletAir::KeccakNode => KeccakNodeAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
+            ChipletAir::UintStore => UintStoreAir.$method($($arg),*),
+            ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
+            ChipletAir::UintMul => UintMulAir.$method($($arg),*),
         }
     };
 }
@@ -62,6 +69,9 @@ impl ChipletAir {
             ChipletAir::KeccakSponge,
             ChipletAir::KeccakNode,
             ChipletAir::TranscriptEval,
+            ChipletAir::UintStore,
+            ChipletAir::UintAdd,
+            ChipletAir::UintMul,
         ]
     }
 }

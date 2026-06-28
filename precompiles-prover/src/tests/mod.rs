@@ -6,6 +6,7 @@
 mod deferred_state;
 mod uint;
 mod uint_add;
+mod uint_dag;
 mod uint_mul;
 
 use miden_core::{Felt, field::QuadFelt};

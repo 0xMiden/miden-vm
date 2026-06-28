@@ -29,6 +29,7 @@
 //! | 11    | `UintAdd`       | `uint::add::UintAddAir`         | `(bound_ptr, a_ptr, b_ptr, c_ptr)` — asserts `a + b ≡ c (mod p)` |
 //! | 12    | `UintMul`       | `uint::mul::UintMulAir`         | `(kappa_a, kappa_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` — asserts `κₐ·a·b + κ_c·c ≡ r (mod p)` |
 //! | 13    | `UintLimbs`     | `uint::UintStoreAir`            | `(ptr, bound_ptr, offset, l0..l7)` — 256-bit uint half as raw 8×16-bit limbs |
+//! | 14    | `Field`         | transcript eval chips           | `(field_id, field_tag0..field_tag3, bound_ptr)` — semantic field domain backed by a uint bound |
 //!
 //! ## Adding a new relation
 //!
@@ -59,12 +60,13 @@ pub enum BusId {
     UintAdd = 11,
     UintMul = 12,
     UintLimbs = 13,
+    Field = 14,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
 /// exactly one prefix per [`BusId`] variant.
-pub const NUM_BUS_IDS: usize = 14;
+pub const NUM_BUS_IDS: usize = 15;
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
@@ -81,3 +83,30 @@ pub const MAX_MESSAGE_WIDTH: usize = 11;
 /// Range16 ceiling on multiplicities); the alias names the role, so a
 /// demand ledger reads `Ptr → ProvideMult` rather than `u32 → u32`.
 pub type ProvideMult = u32;
+
+use miden_core::field::Algebra;
+
+use crate::logup::{Challenges, LookupMessage};
+
+/// LogUp message for the [`Field`](BusId::Field) relation:
+/// `(field_id, field_tag0, field_tag1, field_tag2, field_tag3, bound_ptr)`.
+#[derive(Debug, Clone)]
+pub struct FieldMsg<E> {
+    pub field_id: E,
+    pub field_tag: [E; 4],
+    pub bound_ptr: E,
+}
+
+impl<E, EF> LookupMessage<E, EF> for FieldMsg<E>
+where
+    E: Algebra<E>,
+    EF: Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let [tag0, tag1, tag2, tag3] = self.field_tag.clone();
+        challenges.encode(
+            BusId::Field as usize,
+            [self.field_id.clone(), tag0, tag1, tag2, tag3, self.bound_ptr.clone()],
+        )
+    }
+}

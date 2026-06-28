@@ -32,6 +32,8 @@ pub enum ValueTag {
     /// An assertion that holds. The transcript is exactly the `True`
     /// slice of the Binding bus.
     True = 0,
+    /// A field element backed by a uint store pointer and semantic field id.
+    FieldElem = 1,
 }
 
 /// LogUp message for the [`Binding`](BusId::Binding) relation: a 7-tuple
@@ -40,7 +42,7 @@ pub enum ValueTag {
 ///
 /// - `h` — the node's hash (`Poseidon2(preimage)[0..4]`), the bus key.
 /// - `kind` — the [`ValueTag`] discriminant.
-/// - `ptr` / `domain_id` — reserved for future value bindings and zero for `True`.
+/// - `ptr` / `domain_id` — value pointer and semantic domain, zero for `True`.
 ///
 /// Encoded as `bus_prefix[Binding] + β⁰·h0 + β¹·h1 + β²·h2 + β³·h3 +
 /// β⁴·kind + β⁵·ptr + β⁶·domain_id`.
@@ -64,6 +66,16 @@ where
             kind: E::from_u8(ValueTag::True as u8),
             ptr: E::ZERO,
             domain_id: E::ZERO,
+        }
+    }
+
+    /// Bind a node hash to a field element.
+    pub fn field_elem(h: [E; 4], ptr: E, field_id: E) -> Self {
+        Self {
+            h,
+            kind: E::from_u8(ValueTag::FieldElem as u8),
+            ptr,
+            domain_id: field_id,
         }
     }
 }
