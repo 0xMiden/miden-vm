@@ -20,13 +20,14 @@ doctest = false
 [features]
 default = ["std"]
 std = ["miden-core/std", "miden-crypto/std", "miden-processor/std", "miden-utils-sync/std"]
-codegen-tools = ["std"]
+codegen-tools = ["std", "miden-precompiles-codegen/std"]
 
 [dependencies]
 # Miden dependencies
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-mast-package.workspace = true
+miden-precompiles-codegen.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 
@@ -38,6 +39,7 @@ rand_chacha.workspace = true
 [build-dependencies]
 miden-assembly = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-precompiles-codegen = { workspace = true, features = ["std"] }
 
 [[bin]]
 name = "regenerate-precompile-masm"

@@ -50,9 +50,10 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag, precompile_id,
+        PrecompileError, TRUE_DIGEST, Tag,
     },
 };
+use miden_precompiles_codegen::{CodegenCurveId, CurvePrecompileDescriptor};
 
 use self::{ed25519::Ed25519, secp256k1::Secp256k1, secp256r1::Secp256r1};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
@@ -233,9 +234,17 @@ impl CurveId {
     /// Returns the stable local curve selector used in curve tags.
     pub fn id(self) -> Felt {
         match self {
-            Self::Secp256k1 => <Secp256k1 as CurveSpec>::ID,
-            Self::Secp256r1 => <Secp256r1 as CurveSpec>::ID,
-            Self::Ed25519 => <Ed25519 as CurveSpec>::ID,
+            Self::Secp256k1 => miden_precompiles_codegen::SECP256K1_ID,
+            Self::Secp256r1 => miden_precompiles_codegen::SECP256R1_ID,
+            Self::Ed25519 => miden_precompiles_codegen::ED25519_ID,
+        }
+    }
+
+    fn codegen_id(self) -> CodegenCurveId {
+        match self {
+            Self::Secp256k1 => CodegenCurveId::Secp256k1,
+            Self::Secp256r1 => CodegenCurveId::Secp256r1,
+            Self::Ed25519 => CodegenCurveId::Ed25519,
         }
     }
 
@@ -425,39 +434,33 @@ pub struct CurvePrecompile;
 
 impl CurvePrecompile {
     /// Stable precompile name used to derive this precompile's tag id.
-    pub const NAME: &'static str = "curve";
+    pub const NAME: &'static str = CurvePrecompileDescriptor::NAME;
 
     /// Operation discriminants owned by this precompile.
-    pub const VALUE_OP_ID: u64 = 0;
-    pub const ADD_OP_ID: u64 = 1;
-    pub const SUB_OP_ID: u64 = 2;
-    pub const EQ_OP_ID: u64 = 3;
-    pub const MSM_OP_ID: u64 = 4;
+    pub const VALUE_OP_ID: u64 = CurvePrecompileDescriptor::VALUE_OP_ID;
+    pub const ADD_OP_ID: u64 = CurvePrecompileDescriptor::ADD_OP_ID;
+    pub const SUB_OP_ID: u64 = CurvePrecompileDescriptor::SUB_OP_ID;
+    pub const EQ_OP_ID: u64 = CurvePrecompileDescriptor::EQ_OP_ID;
+    pub const MSM_OP_ID: u64 = CurvePrecompileDescriptor::MSM_OP_ID;
 
     /// Stable precompile id derived from [`Self::NAME`].
     pub fn id() -> Felt {
-        precompile_id(Self::NAME)
+        CurvePrecompileDescriptor::id()
     }
 
     /// Builds a canonical curve `VALUE` tag for `curve`.
     pub fn value_tag(curve: CurveId) -> Tag {
-        let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, curve.id(), ZERO])
-            .expect("curve precompile id is not framework-reserved")
+        CurvePrecompileDescriptor::value_tag(curve.codegen_id())
     }
 
     /// Builds a canonical curve operation tag for curve-agnostic join operations.
     pub fn op_tag(op_id: u64) -> Tag {
-        let op_id = Felt::new(op_id).expect("curve op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
-            .expect("curve precompile id is not framework-reserved")
+        CurvePrecompileDescriptor::op_tag(op_id)
     }
 
     /// Builds a canonical curve MSM tag for `curve` and non-zero pair count `n`.
     pub fn msm_tag(curve: CurveId, n: NonZeroU32) -> Tag {
-        let op_id = Felt::new(Self::MSM_OP_ID).expect("curve MSM op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, curve.id(), Felt::from_u32(n.get())])
-            .expect("curve precompile id is not framework-reserved")
+        CurvePrecompileDescriptor::msm_tag(curve.codegen_id(), n)
     }
 
     /// Builds a point VALUE node from a point value.
@@ -474,8 +477,7 @@ impl CurvePrecompile {
 
     /// Builds the canonical identity point value node for `curve`.
     pub fn identity_node(curve: CurveId) -> Node {
-        Node::join(Self::value_tag(curve), TRUE_DIGEST, TRUE_DIGEST)
-            .expect("curve value tag is precompile-owned")
+        CurvePrecompileDescriptor::identity_node(curve.codegen_id())
     }
 
     /// Builds the canonical generator value node for `curve`.
