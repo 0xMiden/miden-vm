@@ -1,0 +1,4 @@
+/target
+
+# Per-machine Claude Code settings — local to each worktree, never shared.
+.claude/settings.local.json
