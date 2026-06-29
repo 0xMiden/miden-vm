@@ -33,12 +33,7 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// All adds gate on per-chiplet `chiplet_active.*` flags which are mutually exclusive (at
-/// most one chiplet runs per row). Within the hasher branch, the 7 variants are gated by
-/// mutually exclusive `(s0, s1, s2, is_boundary)` combinations. The kernel-ROM branch
-/// emits two fractions per active row: an INIT-labeled remove (multiplicity 1) plus a
-/// CALL-labeled add with multiplicity equal to the row's `multiplicity` column. Every
-/// other chiplet emits exactly one fraction when active. Per-row max: 2.
+/// Kernel ROM emits the max: one INIT remove and one CALL add on the same active row.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus.
@@ -128,7 +123,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // (`chip_clk`) so they cancel against the matching request.
     let clk_plus_one: LB::Expr = local.chip_clk.into();
 
-    // Local helpers: convert the copied Var arrays into Expr arrays.
+    // Hasher payload builders.
     let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
     let full_rate = || -> [LB::Expr; 8] {
         array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() })
@@ -245,7 +240,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 3, u: 4 },
                     );
 
-                    // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
+                    // Memory response.
                     g.add(
                         "memory",
                         ctx.chiplet_active.memory.clone(),
