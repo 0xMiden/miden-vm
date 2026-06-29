@@ -15,9 +15,6 @@ use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 mod codec;
-#[cfg(feature = "codegen-tools")]
-#[doc(hidden)]
-pub mod codegen;
 mod dsa;
 mod hash;
 mod math;
