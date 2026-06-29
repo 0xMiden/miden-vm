@@ -5,6 +5,7 @@
 #### Changes
 
 - Added a Blake3 pure execution benchmark axis and reduced processor benchmark compile time by relaxing forced inlining in execution helpers ([#3289](https://github.com/0xMiden/miden-vm/pull/3289)).
+- Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 
 ## v0.24.0 (2026-06-24)
 
