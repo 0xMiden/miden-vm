@@ -4,10 +4,10 @@
 //! The next row starts a fresh A-row, but the lane mapping from G_g to the
 //! `(a, b, c, d)` slots changes between half-rounds:
 //!
-//! - **Column -> diagonal** (rows 3 -> 4): `a[g] -> a[g]`, `b[g] -> b[(g+3)%4]`,
-//!   `c[g] -> c[(g+2)%4]`, `d[g] -> d[(g+1)%4]`.
-//! - **Diagonal -> column** (rows 7 -> 0 of the next round): `a[g] -> a[g]`,
-//!   `b[g] -> b[(g+1)%4]`, `c[g] -> c[(g+2)%4]`, `d[g] -> d[(g+3)%4]`.
+//! - **Column -> diagonal** (rows 3 -> 4): `a[g] -> a[g]`, `b[g] -> b[(g+3)%4]`, `c[g] ->
+//!   c[(g+2)%4]`, `d[g] -> d[(g+1)%4]`.
+//! - **Diagonal -> column** (rows 7 -> 0 of the next round): `a[g] -> a[g]`, `b[g] -> b[(g+1)%4]`,
+//!   `c[g] -> c[(g+2)%4]`, `d[g] -> d[(g+3)%4]`.
 //!
 //! The very last D-diagonal row (row 55) has no next-A to forward into. It
 //! instead binds the final working state into F0's `W[0..15]` columns,
@@ -18,9 +18,11 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::layout::NUM_G;
-use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow};
+use super::{
+    layout::NUM_G,
+    selectors::Selectors,
+    views::{ACRow, BDRow, FooterRow},
+};
 
 /// D -> next-A remap for both half-round boundaries.
 pub fn enforce_d_to_next_a<AB>(

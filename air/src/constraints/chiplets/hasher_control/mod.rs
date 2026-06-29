@@ -45,7 +45,7 @@ pub fn enforce_controller_constraints<AB>(
     // Do not multiply this gate by `s_ctrl`: controller selector constraints make it zero
     // off controller rows, and the narrower form keeps continuation-routing degree unchanged.
     let controller_padding =
-        chiplet.is_active.clone() * merkle_or_padding.clone() * controller_s0.clone().not();
+        chiplet.is_active.clone() * merkle_or_padding.clone() * controller_s0.not();
     let controller_merkle = merkle_or_padding.clone() * controller_s0.clone();
 
     // Trace skeleton.
@@ -55,9 +55,7 @@ pub fn enforce_controller_constraints<AB>(
     let first_merkle_row: AB::Expr = Into::<AB::Expr>::into(cols.s1)
         + Into::<AB::Expr>::into(cols.s2)
         - Into::<AB::Expr>::into(cols.s1) * Into::<AB::Expr>::into(cols.s2);
-    builder
-        .when_first_row()
-        .assert_zero(first_merkle_row * merkle_start.clone().not());
+    builder.when_first_row().assert_zero(first_merkle_row * merkle_start.not());
 
     let first_mv_row = Into::<AB::Expr>::into(cols.s1) * Into::<AB::Expr>::into(cols.s2).not();
     builder.when_first_row().assert_eq(local.controller_mrupdate_id(), first_mv_row);
@@ -71,7 +69,7 @@ pub fn enforce_controller_constraints<AB>(
         .when(chiplet.is_active.clone())
         .assert_eq(merkle_or_padding.clone(), rows.is_padding.clone() + rows.is_merkle.clone());
     builder
-        .when(chiplet.is_active.clone().not() * controller_s0)
+        .when(chiplet.is_active.not() * controller_s0)
         .assert_zero(merkle_or_padding);
 
     // Padding rows stay padding until the controller section ends.
@@ -85,7 +83,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // Padding rows carry only the MRUPDATE id.
     {
-        let builder = &mut builder.when(controller_padding.clone());
+        let builder = &mut builder.when(controller_padding);
         builder.assert_zeros(cols.state);
         builder.assert_zeros(cols.row_data);
         builder.assert_zero(local.controller_op_final());
@@ -105,7 +103,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // Operation sequencing.
     {
-        let gate = chiplet.is_active.clone() * rows.is_hash.clone() * op_final.clone().not();
+        let gate = chiplet.is_active.clone() * rows.is_hash.clone() * op_final.not();
         let builder = &mut builder.when(gate);
         builder.assert_one(s_ctrl_next.clone());
         builder.assert_zero(cols_next.s0);
@@ -113,7 +111,7 @@ pub fn enforce_controller_constraints<AB>(
         builder.assert_zero(cols_next.s2);
     }
     {
-        let gate = controller_merkle.clone() * op_final.clone().not();
+        let gate = controller_merkle.clone() * op_final.not();
         let builder = &mut builder.when(gate);
         builder.assert_one(s_ctrl_next.clone());
         builder.assert_one(cols_next.s0);
@@ -148,7 +146,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // Hash continuation: the next hash row's input CV equals this row's output digest.
     {
-        let gate = chiplet.is_active.clone() * rows.is_hash.clone() * op_final.clone().not();
+        let gate = chiplet.is_active.clone() * rows.is_hash * op_final.not();
         let cv_next = cols_next.state_tail();
         let digest = cols.hash_digest();
         let builder = &mut builder.when(gate);
@@ -161,7 +159,7 @@ pub fn enforce_controller_constraints<AB>(
     {
         let builder = &mut builder.when(controller_merkle.clone());
 
-        builder.assert_bool(merkle_start.clone());
+        builder.assert_bool(merkle_start);
         builder.assert_zero(cols.row_data[3]);
 
         let node_index: AB::Expr = cols.merkle_node_index().into();
@@ -173,7 +171,7 @@ pub fn enforce_controller_constraints<AB>(
     // Merkle continuation: carry the shifted index and route the digest into the next row's
     // selected rate half, using the next row's virtual direction bit.
     {
-        let merkle_cont = controller_merkle.clone() * op_final.clone().not();
+        let merkle_cont = controller_merkle.clone() * op_final.not();
         let builder = &mut builder.when(merkle_cont);
         builder.assert_eq(cols_next.merkle_node_index(), cols.merkle_node_index_next());
 

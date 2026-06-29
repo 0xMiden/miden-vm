@@ -5,8 +5,8 @@
 //! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!
 //! Columns (in emission order):
-//! - block-stack table + u32 range-check removes + log-precompile capacity (merged
-//!   — see [`super::buses::block_stack_and_range_logcap`]).
+//! - block-stack table + u32 range-check removes + log-precompile capacity (merged — see
+//!   [`super::buses::block_stack_and_range_logcap`]).
 //! - block-hash queue + op-group table.
 //! - chiplet requests from the decoder.
 //! - stack overflow table.

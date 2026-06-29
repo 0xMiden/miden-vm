@@ -141,9 +141,9 @@ pub fn get_blakeg_periodic_column_values() -> Vec<Vec<Felt>> {
 
     // P_IS_DIAG_HALF: 1 on rows 4-7 of each 8-row round.
     let mut is_diag = vec![Felt::ZERO; BLOCK_PERIOD];
-    for i in 0..COMPUTATION_ROWS {
+    for (i, value) in is_diag.iter_mut().enumerate().take(COMPUTATION_ROWS) {
         if (i % 8) >= 4 {
-            is_diag[i] = Felt::ONE;
+            *value = Felt::ONE;
         }
     }
     columns.push(is_diag);
@@ -195,9 +195,8 @@ pub fn get_blakeg_periodic_column_values() -> Vec<Vec<Felt>> {
 
     for g in 0..4 {
         let mut sigma_msg = vec![Felt::ZERO; BLOCK_PERIOD];
-        for round in 0..7 {
+        for (round, s) in SIGMA.iter().enumerate() {
             let base = round * 8;
-            let s = &SIGMA[round];
             sigma_msg[base] = Felt::new_unchecked(s[2 * g] as u64);
             sigma_msg[base + 2] = Felt::new_unchecked(s[2 * g + 1] as u64);
             sigma_msg[base + 4] = Felt::new_unchecked(s[8 + 2 * g] as u64);

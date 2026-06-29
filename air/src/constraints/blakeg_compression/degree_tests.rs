@@ -1,16 +1,21 @@
 use std::vec::Vec;
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_crypto::stark::air::{
-    AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow, WindowAccess,
-    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression},
+use miden_crypto::stark::{
+    air::{
+        AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow, WindowAccess,
+        symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression},
+    },
+    matrix::RowMajorMatrix,
 };
-use miden_crypto::stark::matrix::RowMajorMatrix;
 
-use super::layout::{FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL};
-use super::local_checks;
-use super::views::{ACRow, BDRow};
-use super::{NUM_BLAKEG_COMPRESSION_COLS, periodic, selectors::Selectors};
+use super::{
+    NUM_BLAKEG_COMPRESSION_COLS,
+    layout::{FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL},
+    local_checks, periodic,
+    selectors::Selectors,
+    views::{ACRow, BDRow},
+};
 use crate::Felt;
 
 type Sym = SymbolicAirBuilder<Felt, QuadFelt>;

@@ -241,12 +241,24 @@ fn benchmark_guard_padded_rows(expected_padded_rows: Option<usize>) -> Option<us
         .or(expected_padded_rows)
 }
 
+fn benchmark_usize_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.parse::<usize>().unwrap_or_else(|_| panic!("{name} must be a usize")))
+        .unwrap_or(default)
+}
+
 fn bench_single_scenario(name: &str, source: &str, expected_padded_rows: Option<usize>) {
-    use miden_processor::{FastProcessor, trace::build_trace};
     use std::time::Instant;
+
+    use miden_processor::{FastProcessor, trace::build_trace};
 
     let max_padded_rows = benchmark_max_padded_rows();
     let guard_padded_rows = benchmark_guard_padded_rows(expected_padded_rows);
+    let warmups = benchmark_usize_env("MIDEN_BENCH_WARMUPS", 0);
+    let repeats = benchmark_usize_env("MIDEN_BENCH_REPEATS", 1);
+    assert!(repeats > 0, "MIDEN_BENCH_REPEATS must be positive");
+
     if let Some(guard) = guard_padded_rows {
         if guard > max_padded_rows {
             eprintln!("=== {name} ===");
@@ -304,34 +316,54 @@ fn bench_single_scenario(name: &str, source: &str, expected_padded_rows: Option<
         padded_rows,
     );
     eprintln!("  blakeg_comp={} proof_hash=Eidos", summary.blakeg_compression_rows() / 64);
+    eprintln!("  warmups={warmups} repeats={repeats}");
 
-    let advice_inputs = AdviceInputs::default();
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    let options = ProvingOptions::new(HashFunction::Eidos);
+    let run_proof = |run_idx: usize, record: bool| {
+        let advice_inputs = AdviceInputs::default();
+        let mut host =
+            DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+        let options = ProvingOptions::new(HashFunction::Eidos);
 
-    let t0 = Instant::now();
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .expect("proving failed");
-    let prove_time = t0.elapsed();
+        let t0 = Instant::now();
+        let (stack_outputs, proof) = prove_sync(
+            &program,
+            stack_inputs,
+            advice_inputs,
+            &mut host,
+            ExecutionOptions::default(),
+            options,
+        )
+        .expect("proving failed");
+        let prove_time = t0.elapsed();
+        let proof_size = proof.to_bytes().len();
 
-    eprintln!("  prove_time:  {prove_time:.2?}");
-    eprintln!("  proof_size:  {} bytes", proof.to_bytes().len());
+        let t1 = Instant::now();
+        let security = verify(program.to_info(), stack_inputs, stack_outputs, proof)
+            .expect("verification failed");
+        let verify_time = t1.elapsed();
 
-    let t1 = Instant::now();
-    let security =
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("verification failed");
-    let verify_time = t1.elapsed();
+        let label = if record { "run" } else { "warmup" };
+        eprintln!(
+            "  {label} {run_idx}: prove_time={prove_time:.2?} verify_time={verify_time:.2?} \
+             proof_size={proof_size} bytes security={security}",
+        );
 
-    eprintln!("  verify_time: {verify_time:.2?}");
-    eprintln!("  security:    {security}");
+        if record {
+            println!(
+                "BENCH_SYNTH_PROOF run={run_idx} prove_ms={:.3} verify_ms={:.3} \
+                 proof_bytes={proof_size} security={security}",
+                prove_time.as_secs_f64() * 1_000.0,
+                verify_time.as_secs_f64() * 1_000.0,
+            );
+        }
+    };
+
+    for warmup_idx in 1..=warmups {
+        run_proof(warmup_idx, false);
+    }
+    for run_idx in 1..=repeats {
+        run_proof(run_idx, true);
+    }
 }
 
 #[test]

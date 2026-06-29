@@ -186,7 +186,7 @@ fn generate_row_ac(
 
         // add3: a + b + msg
         let sum = a as u64 + b as u64 + msg as u64;
-        let a_new = (sum & 0xFFFF_FFFF) as u32;
+        let a_new = (sum & 0xffff_ffff) as u32;
         let k3 = (sum >> 32) as u32;
 
         let d_bytes = u32_to_bytes(d);
@@ -239,7 +239,7 @@ fn generate_row_bd(
 
         // add2: c + d_new
         let sum = c as u64 + d_new as u64;
-        let c_new = (sum & 0xFFFF_FFFF) as u32;
+        let c_new = (sum & 0xffff_ffff) as u32;
         let k2 = (sum >> 32) as u32;
 
         let b_bytes = u32_to_bytes(v[bi]);
@@ -485,7 +485,7 @@ fn generate_message_rows(
     let mut canon_z = [Felt::ZERO; 8];
     for k in 0..8 {
         let felt_val = input_state[k].as_canonical_u64();
-        let lo = (felt_val & 0xFFFF_FFFF) as u32;
+        let lo = (felt_val & 0xffff_ffff) as u32;
         let hi = (felt_val >> 32) as u32;
         words[k] = (lo, hi);
 
@@ -524,9 +524,9 @@ fn generate_message_rows(
                     msg_m0_range_col(idx)
                 }
             };
-            rows[row][range_col(4 * k as usize)] = Felt::new_unchecked((lo & 0xFFFF) as u64);
+            rows[row][range_col(4 * k as usize)] = Felt::new_unchecked((lo & 0xffff) as u64);
             rows[row][range_col(4 * k as usize + 1)] = Felt::new_unchecked((lo >> 16) as u64);
-            rows[row][range_col(4 * k as usize + 2)] = Felt::new_unchecked((hi & 0xFFFF) as u64);
+            rows[row][range_col(4 * k as usize + 2)] = Felt::new_unchecked((hi & 0xffff) as u64);
             rows[row][range_col(4 * k as usize + 3)] = Felt::new_unchecked((hi >> 16) as u64);
 
             // Canonicality witnesses for the felt pair (lo, hi):

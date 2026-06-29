@@ -3,14 +3,13 @@
 //! The chiplet trace is laid out as a 64-row x 80-column block. See
 //! `docs/src/design/chiplets/blakeg_compression.md` for the layout and constraint overview:
 //!
-//! - Rows 0..55: 7 rounds of BlakeG x 8 G-rows per round, four row types
-//!   `A` / `B` / `C` / `D` cycling through the column and diagonal halves.
-//! - Rows 56..59: `F0..F3`, the four-row footer that computes the compression-output
-//!   accumulators.
+//! - Rows 0..55: 7 rounds of BlakeG x 8 G-rows per round, four row types `A` / `B` / `C` / `D`
+//!   cycling through the column and diagonal halves.
+//! - Rows 56..59: `F0..F3`, the four-row footer that computes the compression-output accumulators.
 //! - Row 60: `M0`, the first message row (`m[0..7]`).
 //! - Row 61: `M1`, the second message row (`m[8..15]`).
-//! - Row 62: `I`, the interface row. It exposes the packed input state,
-//!   packed digest, compression mode, and multiplicity to the lookup relations.
+//! - Row 62: `I`, the interface row. It exposes the packed input state, packed digest, compression
+//!   mode, and multiplicity to the lookup relations.
 //! - Row 63: `O`, an idle row with no constrained payload.
 //!
 //! This module is split by *section of the trace*, with one submodule per
@@ -18,16 +17,16 @@
 //!
 //! - [`selectors`]: periodic-column wrappers and row gates.
 //! - `layout.rs`: physical column positions and row-family slot helpers.
-//! - [`views`]: typed row views with named slot accessors and computed
-//!   expressions for byte packing, additions, and rotations.
-//! - [`local_checks`]: per-row local constraints (carries, Boolean checks,
-//!   footer tail checks, footer accumulator zero-init).
+//! - [`views`]: typed row views with named slot accessors and computed expressions for byte
+//!   packing, additions, and rotations.
+//! - [`local_checks`]: per-row local constraints (carries, Boolean checks, footer tail checks,
+//!   footer accumulator zero-init).
 //! - [`transitions`]: A->B, B->C, C->D within-round transitions.
 //! - [`boundary`]: D -> next-A remap, plus last-row -> F0 binding.
-//! - [`footer`]: F0..F3 W continuity, accumulator continuity, byte
-//!   decomposition, accumulator definitions, F3 -> M0 forwarding.
-//! - [`interface`]: M0/M1 limb reconstruction and rate binding, M -> I forwarding,
-//!   I.C/I.H consistency, and compression-mode selection.
+//! - [`footer`]: F0..F3 W continuity, accumulator continuity, byte decomposition, accumulator
+//!   definitions, F3 -> M0 forwarding.
+//! - [`interface`]: M0/M1 limb reconstruction and rate binding, M -> I forwarding, I.C/I.H
+//!   consistency, and compression-mode selection.
 //!
 //! [`enforce_blakeg_constraints`] is the public entry point. It builds the
 //! row views once and dispatches to each submodule. The order is intentionally
@@ -52,11 +51,6 @@ pub mod views;
 
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::Felt;
-use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
-
-use self::selectors::Selectors;
-use self::views::{ACRow, BDRow, FooterRow};
 pub(crate) use layout::{AC_A_BASE_COL, AC_B_BASE_COL, BYTE_SLOT_WIDTH, BYTES_PER_WORD};
 pub use layout::{
     AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL,
@@ -70,6 +64,13 @@ pub use layout::{
     MSG_M1_ROUTED_RANGE_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS, ROUTED_M0_RANGE_COUNT,
     ROUTED_M1_RANGE_COUNT, footer_future_w_col, iface_h_word_col, iface_m0_route_col,
     iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
+};
+use miden_core::Felt;
+use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
+
+use self::{
+    selectors::Selectors,
+    views::{ACRow, BDRow, FooterRow},
 };
 
 #[repr(C)]
@@ -141,9 +142,8 @@ pub fn enforce_blakeg_constraints<AB>(
     boundary::enforce_d_to_next_a(builder, &bd_local, &ac_next, &sel);
     boundary::enforce_last_d_to_f0(builder, &bd_local, next, &sel);
 
-    // 4. Footer body: W continuity, accumulator continuity, zero-init,
-    //    Vlo/Vhi binding, output byte-XOR identity, C/D definitions,
-    //    input-CV canonicality, and output-top-bit Booleanity.
+    // 4. Footer body: W continuity, accumulator continuity, zero-init, Vlo/Vhi binding, output
+    //    byte-XOR identity, C/D definitions, input-CV canonicality, and output-top-bit Booleanity.
     footer::enforce_footer_w_continuity(builder, local, next, &sel);
     footer::enforce_footer_accumulator_continuity(builder, local, next, &sel);
     footer::enforce_footer_aead_label_continuity(builder, local, next, &sel);
@@ -157,9 +157,8 @@ pub fn enforce_blakeg_constraints<AB>(
     // 5. F3 -> M0 forwarding (C, D accumulators).
     footer::enforce_f3_to_m0(builder, local, next, &sel);
 
-    // 6. Message rows M0 / M1: limb reconstruction, rate binding,
-    //    canonicality gadget, M0 -> M1 forwarding (routed limbs, R[0..3], C, D),
-    //    M1 -> I forwarding (routed limbs, R, C, D).
+    // 6. Message rows M0 / M1: limb reconstruction, rate binding, canonicality gadget, M0 -> M1
+    //    forwarding (routed limbs, R[0..3], C, D), M1 -> I forwarding (routed limbs, R, C, D).
     interface::enforce_msg_row_limb_reconstruction(builder, local, &sel);
     interface::enforce_msg_rate_binding(builder, local, next, &sel);
     interface::enforce_msg_canonicality(builder, local, &sel);

@@ -44,8 +44,7 @@ use miden_core::{
 use super::{
     ExecutionTrace, Felt, build_trace_from_ops, build_trace_from_ops_with_inputs, rand_array,
 };
-use crate::operation::Operation;
-use crate::{AdviceInputs, StackInputs};
+use crate::{AdviceInputs, StackInputs, operation::Operation};
 
 const BLAKEG_ANNEX_COLUMNS: usize = 2;
 const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;

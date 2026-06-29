@@ -252,7 +252,7 @@ where
         is_msg_row1: E,
         is_iface_in: E,
     ) -> Self {
-        let is_ac = is_first.clone() + is_ac_nonfirst.clone();
+        let is_ac = is_first.clone() + is_ac_nonfirst;
         let is_msg = is_msg_row0.clone() + is_msg_row1.clone();
         let byte_lookup_rows = is_ac.clone() + is_footer.clone();
         let msg_or_iface_rows = is_msg.clone() + is_iface_in.clone();
@@ -528,20 +528,20 @@ pub(crate) fn emit_blakeg_compression_lookup_columns<LB>(
     let is_iface_in: LB::Expr = p[P_IS_IFACE_IN].into();
     let is_msg_row0: LB::Expr = p[P_IS_MSG_ROW0].into();
     let is_msg_row1: LB::Expr = p[P_IS_MSG_ROW1].into();
-    let gate_add3 = is_a.clone() + is_c.clone();
-    let gate_add3_nonfirst = gate_add3.clone() - is_first.clone();
+    let gate_add3 = is_a + is_c;
+    let gate_add3_nonfirst = gate_add3 - is_first.clone();
     let footer_gates = [is_f0, is_f1, is_f2, is_f3];
     let is_footer = footer_gates.iter().cloned().fold(LB::Expr::ZERO, |acc, gate| acc + gate);
     let selectors = SlotSelectors::new(
-        is_first.clone(),
-        is_first_b.clone(),
-        gate_add3_nonfirst.clone(),
-        is_b.clone(),
-        is_d.clone(),
+        is_first,
+        is_first_b,
+        gate_add3_nonfirst,
+        is_b,
+        is_d,
         is_footer,
-        is_msg_row0.clone(),
-        is_msg_row1.clone(),
-        is_iface_in.clone(),
+        is_msg_row0,
+        is_msg_row1,
+        is_iface_in,
     );
 
     for aux_col in 0..BLAKEG_COMPRESSION_COLUMN_SHAPE.len() {

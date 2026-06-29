@@ -445,7 +445,8 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 ///   `STATE_NEW` is the digest word of the output.
 /// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
 ///   helper registers.
-/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with BCOMPRESS.
+/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with
+///   BCOMPRESS.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -511,7 +512,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {

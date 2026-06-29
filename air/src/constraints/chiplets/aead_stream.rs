@@ -72,7 +72,7 @@ fn enforce_phase_alignment<AB>(
         .when(selectors.bitwise.next_is_first.clone() * stream_next.clone())
         .assert_one(r7.clone());
 
-    builder.when(stream.clone().not() * stream_next.clone()).assert_one(r7.clone());
+    builder.when(stream.not() * stream_next.clone()).assert_one(r7.clone());
 
     builder.when(stream * r7.not()).assert_one(stream_next);
 }

@@ -6,8 +6,7 @@
 //! in the target dynamic AIR padded brackets.
 //!
 //! The snapshot schema has two tiers:
-//! - `trace`: hard dynamic AIR totals (`core_rows`, `chiplets_rows`,
-//!   `blakeg_compression_rows`)
+//! - `trace`: hard dynamic AIR totals (`core_rows`, `chiplets_rows`, `blakeg_compression_rows`)
 //! - `trace.chiplets_shape`: advisory per-chiplet breakdown used by the solver
 //!
 //! For compatibility with older producer snapshots, the loader uses

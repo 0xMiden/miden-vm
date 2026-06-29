@@ -32,7 +32,7 @@ pub(in crate::constraints::lookup) fn emit_hasher_returns<LB>(
     let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
     let ctrl_s0: LB::Expr = ctrl.s0.into();
     let op_final: LB::Expr = local.controller_op_final().into();
-    let hash_return = controller_flag * merkle_or_padding.clone().not() * op_final.clone();
+    let hash_return = controller_flag * merkle_or_padding.not() * op_final.clone();
     // The controller skeleton makes `merkle_or_padding * s0` zero off controller rows. Keeping
     // this gate narrow avoids a higher-degree controller-selector factor.
     let merkle_return = merkle_or_padding * ctrl_s0 * op_final;

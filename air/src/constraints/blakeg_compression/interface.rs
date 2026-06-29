@@ -2,13 +2,12 @@
 //!
 //! The interface block sits at rows 60..63:
 //!
-//! - Row 60: M0 (message row, m[0..7]). Carries message words and limb
-//!   ranges in the fixed slot bank, plus canonicality witnesses, C/D
-//!   accumulators, and AEAD-XOF labels.
-//! - Row 61: M1 (message row, m[8..15]). Same slot-bank shape, carries
-//!   routed M0 limbs and R[0..3] computed on M0.
-//! - Row 62: I (interface). Carries HIN-pair slots, routed M-row
-//!   ranges, R[0..7], C[0..3], D[0..3], multiplicity, and AEAD-XOF labels.
+//! - Row 60: M0 (message row, m[0..7]). Carries message words and limb ranges in the fixed slot
+//!   bank, plus canonicality witnesses, C/D accumulators, and AEAD-XOF labels.
+//! - Row 61: M1 (message row, m[8..15]). Same slot-bank shape, carries routed M0 limbs and R[0..3]
+//!   computed on M0.
+//! - Row 62: I (interface). Carries HIN-pair slots, routed M-row ranges, R[0..7], C[0..3], D[0..3],
+//!   multiplicity, and AEAD-XOF labels.
 //! - Row 63: O (idle row). No bus interactions and no constrained payload.
 //!
 //! This module enforces:
@@ -16,20 +15,19 @@
 //! - M0 -> M1 forwarding of routed limbs, C/D, and AEAD-XOF labels.
 //! - M1 -> I forwarding of routed limbs, R[0..3], C/D, and AEAD-XOF labels.
 //! - 16-bit limb reconstruction of `m[k]` on M0 and M1.
-//! - Canonicality of the Goldilocks-u64 (lo, hi) decomposition via an
-//!   inverse-or-zero witness and zero flag.
+//! - Canonicality of the Goldilocks-u64 (lo, hi) decomposition via an inverse-or-zero witness and
+//!   zero flag.
 //! - The rate-binding identity `R[j] = m[2j] + 2^32 * m[2j+1]`.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::selectors::Selectors;
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, IFACE_C_BASE_COL, IFACE_D_BASE_COL, IFACE_R_BASE_COL,
     MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL, MSG_M0_ROUTE_CARRY_BASE_COL,
     MSG_M1_R_CARRY_BASE_COL, ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT, iface_h_word_col,
     iface_m0_route_col, iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col,
-    msg_word_col,
+    msg_word_col, selectors::Selectors,
 };
 
 /// `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]` for `t = 0..3`.
@@ -47,9 +45,9 @@ pub fn enforce_iface_in_c_h_consistency<AB>(
     let is_iface_in = sel.is_iface_in();
     let two_pow_32 = AB::Expr::from(Felt::new_unchecked(1u64 << 32));
     for t in 0..4 {
-        let c_t: AB::Expr = local[IFACE_C_BASE_COL + t].clone().into();
-        let h_even: AB::Expr = local[iface_h_word_col(2 * t)].clone().into();
-        let h_odd: AB::Expr = local[iface_h_word_col(2 * t + 1)].clone().into();
+        let c_t: AB::Expr = local[IFACE_C_BASE_COL + t].into();
+        let h_even: AB::Expr = local[iface_h_word_col(2 * t)].into();
+        let h_odd: AB::Expr = local[iface_h_word_col(2 * t + 1)].into();
         builder
             .when(is_iface_in.clone())
             .assert_zero(c_t - h_even - h_odd * two_pow_32.clone());
@@ -72,23 +70,23 @@ pub fn enforce_m0_to_m1<AB>(
     let builder = &mut builder.when(is_msg_row0);
     // C[0..3] and D[0..3] same-col copy.
     for t in 0..4 {
-        let m0_c: AB::Expr = local[MSG_C_BASE_COL + t].clone().into();
-        let m1_c: AB::Expr = next[MSG_C_BASE_COL + t].clone().into();
+        let m0_c: AB::Expr = local[MSG_C_BASE_COL + t].into();
+        let m1_c: AB::Expr = next[MSG_C_BASE_COL + t].into();
         builder.assert_zero(m0_c - m1_c);
 
-        let m0_d: AB::Expr = local[MSG_D_BASE_COL + t].clone().into();
-        let m1_d: AB::Expr = next[MSG_D_BASE_COL + t].clone().into();
+        let m0_d: AB::Expr = local[MSG_D_BASE_COL + t].into();
+        let m1_d: AB::Expr = next[MSG_D_BASE_COL + t].into();
         builder.assert_zero(m0_d - m1_d);
     }
     for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
-        let m0_value: AB::Expr = local[col].clone().into();
-        let m1_value: AB::Expr = next[col].clone().into();
+        let m0_value: AB::Expr = local[col].into();
+        let m1_value: AB::Expr = next[col].into();
         builder.assert_zero(m0_value - m1_value);
     }
     for i in 0..ROUTED_M0_RANGE_COUNT {
         // M1 carries selected M0 limbs; row I emits their range checks.
-        let routed: AB::Expr = local[msg_m0_range_col(12 + i)].clone().into();
-        let carry: AB::Expr = next[MSG_M0_ROUTE_CARRY_BASE_COL + i].clone().into();
+        let routed: AB::Expr = local[msg_m0_range_col(12 + i)].into();
+        let carry: AB::Expr = next[MSG_M0_ROUTE_CARRY_BASE_COL + i].into();
         builder.assert_zero(routed - carry);
     }
 }
@@ -108,37 +106,37 @@ pub fn enforce_m1_to_iface_in<AB>(
     let builder = &mut builder.when(is_msg_row1);
     // R[0..3]: M1 carry columns -> I R prefix.
     for k in 0..4 {
-        let m1_r: AB::Expr = local[MSG_M1_R_CARRY_BASE_COL + k].clone().into();
-        let i_r: AB::Expr = next[IFACE_R_BASE_COL + k].clone().into();
+        let m1_r: AB::Expr = local[MSG_M1_R_CARRY_BASE_COL + k].into();
+        let i_r: AB::Expr = next[IFACE_R_BASE_COL + k].into();
         builder.assert_zero(m1_r - i_r);
     }
     // C[0..3]: M1 accumulator slots -> I C slots.
     for t in 0..4 {
-        let m1_c: AB::Expr = local[MSG_C_BASE_COL + t].clone().into();
-        let i_c: AB::Expr = next[IFACE_C_BASE_COL + t].clone().into();
+        let m1_c: AB::Expr = local[MSG_C_BASE_COL + t].into();
+        let i_c: AB::Expr = next[IFACE_C_BASE_COL + t].into();
         builder.assert_zero(m1_c - i_c);
     }
     // D[0..3]: M1 accumulator slots -> I D slots.
     for t in 0..4 {
-        let m1_d: AB::Expr = local[MSG_D_BASE_COL + t].clone().into();
-        let i_d: AB::Expr = next[IFACE_D_BASE_COL + t].clone().into();
+        let m1_d: AB::Expr = local[MSG_D_BASE_COL + t].into();
+        let i_d: AB::Expr = next[IFACE_D_BASE_COL + t].into();
         builder.assert_zero(m1_d - i_d);
     }
     for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
-        let m1_value: AB::Expr = local[col].clone().into();
-        let i_value: AB::Expr = next[col].clone().into();
+        let m1_value: AB::Expr = local[col].into();
+        let i_value: AB::Expr = next[col].into();
         builder.assert_zero(m1_value - i_value);
     }
     for i in 0..ROUTED_M0_RANGE_COUNT {
         // Forward the M0 limbs carried by M1 into row I.
-        let m0_routed: AB::Expr = local[MSG_M0_ROUTE_CARRY_BASE_COL + i].clone().into();
-        let i_m0_routed: AB::Expr = next[iface_m0_route_col(i)].clone().into();
+        let m0_routed: AB::Expr = local[MSG_M0_ROUTE_CARRY_BASE_COL + i].into();
+        let i_m0_routed: AB::Expr = next[iface_m0_route_col(i)].into();
         builder.assert_zero(m0_routed - i_m0_routed);
     }
 
     for i in 0..ROUTED_M1_RANGE_COUNT {
-        let m1_routed: AB::Expr = local[msg_m1_range_col(8 + i)].clone().into();
-        let i_m1_routed: AB::Expr = next[iface_m1_route_col(i)].clone().into();
+        let m1_routed: AB::Expr = local[msg_m1_range_col(8 + i)].into();
+        let i_m1_routed: AB::Expr = next[iface_m1_route_col(i)].into();
         builder.assert_zero(m1_routed - i_m1_routed);
     }
 }
@@ -153,10 +151,10 @@ pub fn enforce_aead_mode_and_label_constraints<AB>(
 {
     let is_iface_in = sel.is_iface_in();
     let builder = &mut builder.when(is_iface_in);
-    let mode: AB::Expr = local[AEAD_XOF_MODE_COL].clone().into();
+    let mode: AB::Expr = local[AEAD_XOF_MODE_COL].into();
     let inactive = AB::Expr::ONE - mode.clone();
     builder.assert_zero(mode.clone() * inactive.clone());
-    builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL].clone()));
+    builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL]));
 }
 
 /// 16-bit limb reconstruction on the message rows.
@@ -176,11 +174,11 @@ pub fn enforce_msg_row_limb_reconstruction<AB>(
     let two_pow_16 = AB::Expr::from(Felt::new_unchecked(1u64 << 16));
 
     for k in 0..8 {
-        let w_k: AB::Expr = local[msg_word_col(k)].clone().into();
-        let m0_lo: AB::Expr = local[msg_m0_range_col(2 * k)].clone().into();
-        let m0_hi: AB::Expr = local[msg_m0_range_col(2 * k + 1)].clone().into();
-        let m1_lo: AB::Expr = local[msg_m1_range_col(2 * k)].clone().into();
-        let m1_hi: AB::Expr = local[msg_m1_range_col(2 * k + 1)].clone().into();
+        let w_k: AB::Expr = local[msg_word_col(k)].into();
+        let m0_lo: AB::Expr = local[msg_m0_range_col(2 * k)].into();
+        let m0_hi: AB::Expr = local[msg_m0_range_col(2 * k + 1)].into();
+        let m1_lo: AB::Expr = local[msg_m1_range_col(2 * k)].into();
+        let m1_hi: AB::Expr = local[msg_m1_range_col(2 * k + 1)].into();
         builder
             .when(is_msg_row0.clone())
             .assert_zero(w_k.clone() - m0_lo - m0_hi * two_pow_16.clone());
@@ -209,18 +207,18 @@ pub fn enforce_msg_rate_binding<AB>(
 
     // M0 computes R[0..3] into M1's carry columns.
     for j in 0..4 {
-        let r_j: AB::Expr = next[MSG_M1_R_CARRY_BASE_COL + j].clone().into();
-        let w_lo: AB::Expr = local[msg_word_col(2 * j)].clone().into();
-        let w_hi: AB::Expr = local[msg_word_col(2 * j + 1)].clone().into();
+        let r_j: AB::Expr = next[MSG_M1_R_CARRY_BASE_COL + j].into();
+        let w_lo: AB::Expr = local[msg_word_col(2 * j)].into();
+        let w_hi: AB::Expr = local[msg_word_col(2 * j + 1)].into();
         builder
             .when(is_msg_row0.clone())
             .assert_zero(r_j - w_lo - w_hi * two_pow_32.clone());
     }
     // M1 computes R[4..7] directly into I.
     for j in 0..4 {
-        let r_j: AB::Expr = next[IFACE_R_BASE_COL + 4 + j].clone().into();
-        let w_lo: AB::Expr = local[msg_word_col(2 * j)].clone().into();
-        let w_hi: AB::Expr = local[msg_word_col(2 * j + 1)].clone().into();
+        let r_j: AB::Expr = next[IFACE_R_BASE_COL + 4 + j].into();
+        let w_lo: AB::Expr = local[msg_word_col(2 * j)].into();
+        let w_hi: AB::Expr = local[msg_word_col(2 * j + 1)].into();
         builder
             .when(is_msg_row1.clone())
             .assert_zero(r_j - w_lo - w_hi * two_pow_32.clone());
@@ -255,10 +253,10 @@ where
     let max_u32 = AB::Expr::from(Felt::new_unchecked((1u64 << 32) - 1));
 
     for k in 0..4 {
-        let lo: AB::Expr = local[msg_word_col(2 * k)].clone().into();
-        let hi: AB::Expr = local[msg_word_col(2 * k + 1)].clone().into();
-        let inv: AB::Expr = local[msg_canon_inv_col(k)].clone().into();
-        let z: AB::Expr = local[MSG_CANON_Z_BASE_COL + k].clone().into();
+        let lo: AB::Expr = local[msg_word_col(2 * k)].into();
+        let hi: AB::Expr = local[msg_word_col(2 * k + 1)].into();
+        let inv: AB::Expr = local[msg_canon_inv_col(k)].into();
+        let z: AB::Expr = local[MSG_CANON_Z_BASE_COL + k].into();
         let h = hi - max_u32.clone();
 
         let builder = &mut builder.when(is_msg_row.clone());

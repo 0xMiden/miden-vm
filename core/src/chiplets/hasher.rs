@@ -1,6 +1,7 @@
 //! Low-level VM hasher helpers.
 
 use core::ops::Range;
+
 use miden_crypto::Word as Digest;
 
 use super::{Felt, blakeg};

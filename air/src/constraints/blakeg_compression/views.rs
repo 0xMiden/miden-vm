@@ -7,8 +7,7 @@
 //!
 //! Views are zero-cost wrappers; they hold a slice reference and a
 //! `PhantomData<AB>` and exist only at compile time. Method calls return
-//! `AB::Expr` constructed from a single `.clone().into()` of the underlying
-//! variable.
+//! `AB::Expr` constructed from the underlying variable.
 //!
 //! Physical column positions live in `layout.rs`. Computed expressions, such
 //! as `xor1[j] = d[j] + a_new[j] - 2*and1[j]`, are exposed as methods so they
@@ -78,7 +77,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
 
     #[inline]
     fn col(&self, idx: usize) -> AB::Expr {
-        Into::<AB::Expr>::into(self.cols[idx].clone())
+        Into::<AB::Expr>::into(self.cols[idx])
     }
 
     /// `a` input of G_g.
@@ -223,7 +222,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
 
     #[inline]
     fn col(&self, idx: usize) -> AB::Expr {
-        Into::<AB::Expr>::into(self.cols[idx].clone())
+        Into::<AB::Expr>::into(self.cols[idx])
     }
 
     /// `a` input of G_g (carried unchanged across the B/D step).
@@ -338,7 +337,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
 
     #[inline]
     fn col(&self, idx: usize) -> AB::Expr {
-        Into::<AB::Expr>::into(self.cols[idx].clone())
+        Into::<AB::Expr>::into(self.cols[idx])
     }
 
     /// Input-chaining-value accumulator slot `C[t]` for `t = 0..3`.
@@ -573,8 +572,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::FOOTER_TOP_BIT_MASK;
-    use super::*;
+    use super::{super::FOOTER_TOP_BIT_MASK, *};
 
     #[test]
     fn precomputed_footer_mask_inverse_is_correct() {

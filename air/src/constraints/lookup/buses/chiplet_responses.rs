@@ -84,7 +84,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let not_hs1 = hs1.not();
     let not_hs2 = hs2.not();
     let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
-    let hash_gate = ctx.chiplet_active.controller.clone() * merkle_or_padding.clone().not();
+    let hash_gate = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
     // The controller skeleton makes `merkle_or_padding * s0` zero off controller rows. Keeping
     // this gate narrow avoids a higher-degree controller-selector factor.
     let merkle_gate = merkle_or_padding * hs0.clone();
@@ -95,10 +95,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
 
     // --- Hasher response flags ---
-    let f_sponge_start: LB::Expr = hash_gate.clone() * hs0.clone();
+    let f_sponge_start: LB::Expr = hash_gate.clone() * hs0;
     let f_sponge_respan: LB::Expr = hash_gate * not_hs0;
-    let f_mp: LB::Expr = merkle_gate.clone() * not_hs1.clone() * hs2.clone() * merkle_start.clone();
-    let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * not_hs2.clone() * merkle_start.clone();
+    let f_mp: LB::Expr = merkle_gate.clone() * not_hs1 * hs2.clone() * merkle_start.clone();
+    let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * not_hs2 * merkle_start.clone();
     let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
 
     // --- Non-hasher flags ---
@@ -193,7 +193,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let a = pack_u32_bytes_le::<_, LB::Expr>(bw.a_bytes);
                             let b = pack_u32_bytes_le::<_, LB::Expr>(bw.b_bytes);
                             let and = pack_u32_bytes_le::<_, LB::Expr>(bw.and_bytes);
-                            let xor = a.clone() + b.clone() - and.clone().double();
+                            let xor = a.clone() + b.clone() - and.double();
                             let result = and.clone() + bw_op.clone() * (xor - and);
                             BitwiseMsg { op: bw_op, a, b, result }
                         },

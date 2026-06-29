@@ -203,8 +203,8 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 ///   Advice map: {KEY: [RATE1, RATE2]} (8 elements from rate portion)
 /// ```
 ///
-/// Where `KEY` is computed by applying `bcompress` to the 12-element state and extracting the digest.
-/// The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
+/// Where `KEY` is computed by applying `bcompress` to the 12-element state and extracting the
+/// digest. The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
 fn insert_bcompress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.

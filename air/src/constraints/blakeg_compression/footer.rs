@@ -3,8 +3,8 @@
 //!
 //! The footer block has four rows F0..F3. Each row carries:
 //!
-//! - byte slots for the current `(h_2t, h_2t+1, v_2t, v_2t+1,
-//!   v_{8+2t}, v_{8+2t+1})` pair and its AND witnesses;
+//! - byte slots for the current `(h_2t, h_2t+1, v_2t, v_2t+1, v_{8+2t}, v_{8+2t+1})` pair and its
+//!   AND witnesses;
 //! - future W words needed by later footer rows;
 //! - progressive C/D accumulators;
 //! - HIN-pair fields and AEAD-XOF labels.
@@ -21,13 +21,10 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::layout::BYTES_PER_WORD;
-use super::selectors::Selectors;
-use super::views::FooterRow;
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
     FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL,
-    MSG_D_BASE_COL,
+    MSG_D_BASE_COL, layout::BYTES_PER_WORD, selectors::Selectors, views::FooterRow,
 };
 
 /// Future-W queue continuity across F0 -> F1 -> F2 -> F3.
@@ -84,17 +81,17 @@ pub fn enforce_footer_accumulator_continuity<AB>(
     let is_f0 = sel.is_f(0);
     let is_f1 = sel.is_f(1);
     let is_f2 = sel.is_f(2);
-    let gates = [is_f0.clone() + is_f1.clone() + is_f2.clone(), is_f1 + is_f2.clone(), is_f2];
+    let gates = [is_f0 + is_f1.clone() + is_f2.clone(), is_f1 + is_f2.clone(), is_f2];
 
     for (t, gate) in gates.iter().enumerate() {
         let builder = &mut builder.when(gate.clone());
         builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t].clone())
-                - Into::<AB::Expr>::into(next[FOOTER_C_BASE_COL + t].clone()),
+            Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t])
+                - Into::<AB::Expr>::into(next[FOOTER_C_BASE_COL + t]),
         );
         builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t].clone())
-                - Into::<AB::Expr>::into(next[FOOTER_D_BASE_COL + t].clone()),
+            Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t])
+                - Into::<AB::Expr>::into(next[FOOTER_D_BASE_COL + t]),
         );
     }
 }
@@ -114,8 +111,8 @@ pub fn enforce_footer_aead_label_continuity<AB>(
     let gate = is_f0 + is_f1 + is_f2;
 
     for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
-        let local_value: AB::Expr = local[col].clone().into();
-        let next_value: AB::Expr = next[col].clone().into();
+        let local_value: AB::Expr = local[col].into();
+        let next_value: AB::Expr = next[col].into();
         builder.when(gate.clone()).assert_zero(local_value - next_value);
     }
 }
@@ -134,7 +131,7 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
     let top_bit_mask = AB::Expr::from(Felt::new_unchecked(FOOTER_TOP_BIT_MASK as u64));
 
     {
-        let builder = &mut builder.when(is_footer.clone());
+        let builder = &mut builder.when(is_footer);
 
         for j in 0..BYTES_PER_WORD {
             builder
@@ -143,17 +140,15 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
         }
 
         builder.assert_zero(footer_local.out_odd_top_byte() - footer_local.out_odd_byte(3));
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL].clone()) - top_bit_mask,
-        );
-        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL].clone()));
+        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL]) - top_bit_mask);
+        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL]));
         builder.assert_zero(footer_local.stored_h_even_word() - footer_local.packed_h_even_bytes());
         builder.assert_zero(footer_local.stored_h_odd_word() - footer_local.packed_h_odd_bytes());
     }
 
-    for t in 0..4 {
+    for (t, gate) in gates_ft.iter().enumerate() {
         builder
-            .when(gates_ft[t].clone())
+            .when(gate.clone())
             .assert_zero(footer_local.row_index() - AB::Expr::from(Felt::new_unchecked(t as u64)));
     }
 }
@@ -239,18 +234,18 @@ pub fn enforce_f3_to_m0<AB>(
         let builder = &mut builder.when(is_f3.clone());
         // F3.C[t] -> M0.C[t].
         builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t].clone())
-                - Into::<AB::Expr>::into(next[MSG_C_BASE_COL + t].clone()),
+            Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t])
+                - Into::<AB::Expr>::into(next[MSG_C_BASE_COL + t]),
         );
         // F3.D[t] -> M0.D[t].
         builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t].clone())
-                - Into::<AB::Expr>::into(next[MSG_D_BASE_COL + t].clone()),
+            Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t])
+                - Into::<AB::Expr>::into(next[MSG_D_BASE_COL + t]),
         );
     }
     for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
-        builder.when(is_f3.clone()).assert_zero(
-            Into::<AB::Expr>::into(local[col].clone()) - Into::<AB::Expr>::into(next[col].clone()),
-        );
+        builder
+            .when(is_f3.clone())
+            .assert_zero(Into::<AB::Expr>::into(local[col]) - Into::<AB::Expr>::into(next[col]));
     }
 }

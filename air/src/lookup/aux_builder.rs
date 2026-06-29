@@ -28,7 +28,8 @@
 //!
 //! - `fractions` holds every `(multiplicity, encoded_denominator)` pair every row pushes, in the
 //!   exact order the builder produces them. Across one row, column 0's fractions come first, then
-//!   column 1's, ..., then column `num_cols - 1`'s. Across rows, row 0's block comes before row 1's.
+//!   column 1's, ..., then column `num_cols - 1`'s. Across rows, row 0's block comes before row
+//!   1's.
 //! - `counts` has exactly `num_rows * num_cols` entries, laid out row-major: `counts[r * num_cols +
 //!   c]` is the number of fractions row `r` pushed into column `c`. Equivalently,
 //!   `counts.chunks(num_cols).nth(r)` is row `r`'s per-column tally.

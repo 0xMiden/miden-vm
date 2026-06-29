@@ -7,11 +7,11 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::layout::NUM_G;
-use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow};
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL,
+    layout::NUM_G,
+    selectors::Selectors,
+    views::{ACRow, BDRow, FooterRow},
 };
 
 /// BlakeG IV (the 8 fractional-bit constants of `sqrt(p)` for the first eight
@@ -175,12 +175,12 @@ where
 {
     let is_footer = sel.is_footer();
     let builder = &mut builder.when(is_footer);
-    let mode: AB::Expr = local[AEAD_XOF_MODE_COL].clone().into();
+    let mode: AB::Expr = local[AEAD_XOF_MODE_COL].into();
     let inactive = AB::Expr::ONE - mode.clone();
 
     builder.assert_zero(mode.clone() * inactive.clone());
-    builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL].clone()));
-    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE_COL].clone()));
+    builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL]));
+    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE_COL]));
 }
 
 /// Footer accumulator zero-initialization on F0, F1, F2.
@@ -208,7 +208,7 @@ pub fn enforce_footer_accumulator_zero_init<AB>(
     for (idx, gate) in gates.iter().enumerate() {
         let t = idx + 1;
         let builder = &mut builder.when(gate.clone());
-        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t].clone()));
-        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t].clone()));
+        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t]));
+        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t]));
     }
 }

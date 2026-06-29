@@ -80,4 +80,8 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = [
+    # Temporary BlakeG integration branches. Remove when these dependencies land upstream.
+    "https://github.com/0xMiden/crypto.git",
+    "https://github.com/Al-Kindi-0/midenc-hir-type.git",
+]

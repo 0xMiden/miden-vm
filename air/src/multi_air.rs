@@ -3,6 +3,12 @@
 use alloc::{string::String, vec, vec::Vec};
 use core::borrow::Borrow;
 
+use constraints::lookup::{
+    and8_lookup_air::And8LookupBuilder,
+    blakeg_compression_air::BlakeGCompressionLookupBuilder,
+    chiplet_air::ChipletLookupBuilder,
+    main_air::{MainLookupAir, MainLookupBuilder},
+};
 use miden_core::{WORD_SIZE, field::ExtensionField, utils::RowMajorMatrix};
 use miden_crypto::stark::{
     air::{
@@ -16,15 +22,15 @@ use crate::{
     BlakeGCompressionCols, ChipletCols, CoreCols, Felt, MAX_KERNEL_PROC_DIGEST_INPUTS,
     MidenAirBuilder, NUM_BLAKEG_COMPRESSION_COLS, NUM_PUBLIC_VALUES,
     NUM_VAR_LEN_PUBLIC_INPUT_GROUPS,
-    constraints::and8_lookup::{
-        self,
-        columns::{
-            And8LookupCols, LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS,
-            NUM_AND8_LOOKUP_PREPROCESSED_COLS,
-        },
-    },
     constraints::{
         self,
+        and8_lookup::{
+            self,
+            columns::{
+                And8LookupCols, LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS,
+                NUM_AND8_LOOKUP_PREPROCESSED_COLS,
+            },
+        },
         blakeg_compression::{self, periodic::get_blakeg_periodic_column_values},
         lookup::blakeg_compression_air::{
             BLAKEG_COMPRESSION_COLUMN_SHAPE, emit_blakeg_compression_lookup_columns,
@@ -36,13 +42,6 @@ use crate::{
         build_logup_aux_trace,
     },
     trace,
-};
-
-use constraints::lookup::{
-    and8_lookup_air::And8LookupBuilder,
-    blakeg_compression_air::BlakeGCompressionLookupBuilder,
-    chiplet_air::ChipletLookupBuilder,
-    main_air::{MainLookupAir, MainLookupBuilder},
 };
 
 // PER-TRACE AIRS
@@ -304,6 +303,7 @@ impl And8LookupAir {
         NUM_AND8_LOOKUP_COLS
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn preprocessed_trace(self) -> Option<RowMajorMatrix<Felt>> {
         Some(and8_lookup::preprocessed_trace())
     }

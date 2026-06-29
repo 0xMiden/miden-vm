@@ -7,6 +7,7 @@ use crate::{
     BaseHost, BreakReason, ContextId, ExecutionError, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     errors::PackageSourceDebugContext,
+    host::default::NoopHost,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
     operation::OperationError,
     processor::{Processor, SystemInterface},
@@ -50,7 +51,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub current_source_node_id: Option<DebugSourceNodeId>,
 }
 
-impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
+impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     pub fn current_source_node_id(&self) -> Option<DebugSourceNodeId> {
         self.current_source_node_id
     }
@@ -83,10 +84,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
         ))
     }
 
-    pub fn operation_error_with_current_context(&self, err: OperationError) -> ExecutionError
-    where
-        H: BaseHost,
-    {
+    pub fn operation_error_with_current_context(&self, err: OperationError) -> ExecutionError {
         match self.package_source_context() {
             Some(context) => err.with_package_source_context(context, self.host, None),
             None => err.with_context(),
@@ -182,7 +180,7 @@ pub(crate) fn execute_impl<P, S, T, F>(
     continuation_stack: &mut ContinuationStack<F>,
     current_forest: &mut F,
     kernel: &Kernel,
-    host: &mut impl BaseHost,
+    mut host: &mut dyn BaseHost,
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
@@ -193,8 +191,65 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    execute_impl_inner(
+        processor,
+        continuation_stack,
+        current_forest,
+        kernel,
+        &mut host,
+        tracer,
+        stopper,
+        source_debug_info,
+    )
+}
+
+pub(crate) fn execute_impl_noop_host<P, S, T, F>(
+    processor: &mut P,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
+    kernel: &Kernel,
+    host: &mut NoopHost,
+    tracer: &mut T,
+    stopper: &S,
+    source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
+    execute_impl_inner(
+        processor,
+        continuation_stack,
+        current_forest,
+        kernel,
+        host,
+        tracer,
+        stopper,
+        source_debug_info,
+    )
+}
+
+fn execute_impl_inner<P, H, S, T, F>(
+    processor: &mut P,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
+    kernel: &Kernel,
+    host: &mut H,
+    tracer: &mut T,
+    stopper: &S,
+    source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    H: BaseHost,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
     if source_debug_info.is_none() && !continuation_stack.tracks_source_nodes() {
-        return execute_impl_pure(
+        execute_impl_pure(
             processor,
             continuation_stack,
             current_forest,
@@ -202,9 +257,39 @@ where
             host,
             tracer,
             stopper,
-        );
-    };
+        )
+    } else {
+        execute_impl_with_source(
+            processor,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+            source_debug_info,
+        )
+    }
+}
 
+#[inline(never)]
+fn execute_impl_with_source<P, H, S, T, F>(
+    processor: &mut P,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
+    kernel: &Kernel,
+    host: &mut H,
+    tracer: &mut T,
+    stopper: &S,
+    source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    H: BaseHost,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
     let mut state = ExecutionState {
         processor,
         continuation_stack,
@@ -319,18 +404,20 @@ where
     ControlFlow::Continue(())
 }
 
-#[inline(always)]
-fn execute_impl_pure<P, S, T, F>(
+#[cfg_attr(debug_assertions, inline(never))]
+#[cfg_attr(not(debug_assertions), inline(always))]
+fn execute_impl_pure<P, H, S, T, F>(
     processor: &mut P,
     continuation_stack: &mut ContinuationStack<F>,
     current_forest: &mut F,
     kernel: &Kernel,
-    host: &mut impl BaseHost,
+    host: &mut H,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
+    H: BaseHost,
     S: Stopper<Processor = P, Forest = F>,
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
