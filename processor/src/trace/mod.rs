@@ -105,7 +105,6 @@ impl TraceBuildInputs {
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
         &mut self.trace_generation_context
     }
-
 }
 
 // VM EXECUTION TRACE

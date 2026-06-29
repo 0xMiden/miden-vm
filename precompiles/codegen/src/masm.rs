@@ -514,11 +514,12 @@ struct CurveMasmConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{
         env, fs,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    use super::*;
 
     #[test]
     fn write_to_dir_preserves_unrelated_files() {
