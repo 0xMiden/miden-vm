@@ -1,6 +1,5 @@
 //! Fixed-domain 256-bit uint deferred precompile support.
 
-mod arithmetic;
 mod domain;
 pub(crate) mod handlers;
 mod precompile;

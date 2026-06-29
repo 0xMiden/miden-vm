@@ -1684,9 +1684,17 @@ dependencies = [
  "miden-crypto",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-precompiles-codegen",
  "miden-processor",
  "miden-utils-sync",
  "rand_chacha 0.10.0",
+]
+
+[[package]]
+name = "miden-precompiles-codegen"
+version = "0.25.0"
+dependencies = [
+ "miden-core",
 ]
 
 [[package]]
