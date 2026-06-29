@@ -1,7 +1,7 @@
 ## 0.28.0 (TBD)
 - [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
-
 - Added a zeroizing read helper for deserializing sensitive material, fixing secret-key read buffers that were not wiped on error paths (ECDSA) or at all (Falcon, Poseidon2 AEAD) ([#1057](https://github.com/0xMiden/crypto/pull/1057)).
+- Parallelize aux trace building for faster proving ([#1074](https://github.com/0xMiden/crypto/issues/1074)).
 
 ## 0.27.0 (2026-06-19)
 
