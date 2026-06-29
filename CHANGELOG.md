@@ -67,6 +67,18 @@
 - Preserved `LOGPRECOMPILE` tail stack slots in the AIR, preventing forged values in `stack[12..15]` ([#3244](https://github.com/0xMiden/miden-vm/pull/3244)).
 - Bound memory AIR word addresses to their range-checked decomposition limbs ([#3245](https://github.com/0xMiden/miden-vm/pull/3245)).
 - [BREAKING] Removed the test-only `frie2f4::preprocess` helper from corelib exports ([#3248](https://github.com/0xMiden/miden-vm/pull/3248)).
+- Rejected oversized AEAD decrypt outputs before reading ciphertext or running host-side decryption ([#3252](https://github.com/0xMiden/miden-vm/pull/3252)).
+- [BREAKING] Bounded deferred precompile request growth by request count and total calldata bytes in `AdviceProvider` ([#3260](https://github.com/0xMiden/miden-vm/pull/3260)).
+- [BREAKING] Bounded advice Merkle store growth by internal node count during setup and execution ([#3264](https://github.com/0xMiden/miden-vm/pull/3264)).
+- Fixed MASM tooling edge cases around atomic file writes, source URI paths, package loading, local registry state, diagnostics, generated MASM memory addresses, and CST `$...` special identifiers ([#3178](https://github.com/0xMiden/miden-vm/pull/3178)).
+- [BREAKING] Removed the public `eddsa_ed25519::verify_prehash` entrypoint and bound EdDSA precompile verification to the signed message ([#3254](https://github.com/0xMiden/miden-vm/pull/3254)).
+- Rejected SMT multi-leaf preimages with duplicate or unsorted keys before lookup or update logic runs ([#3255](https://github.com/0xMiden/miden-vm/pull/3255)).
+- Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
+- [BREAKING] Made `miden-vm run` and `miden-vm prove` fail when the inferred `.inputs` file is missing ([#3236](https://github.com/0xMiden/miden-vm/pull/3236)).
+- [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
+- Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
+- Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 - Constrained Core AIR stack routes for control and stream operations, preventing unconstrained stack values across `SYSCALL`, `EVALCIRCUIT`, `CALLER`, `MSTREAM`, `PIPE`, `REPEAT`, `SWAPW2`, and `SWAPW3` ([#3249](https://github.com/0xMiden/miden-vm/pull/3249)).
 - Rejected oversized AEAD decrypt outputs before reading ciphertext or running host-side decryption ([#3252](https://github.com/0xMiden/miden-vm/pull/3252)).
 - Preserved semantic type expressions when converting concrete types back to assembly syntax, keeping wide-integer primitives and named struct metadata intact ([#3253](https://github.com/0xMiden/miden-vm/pull/3253)).
