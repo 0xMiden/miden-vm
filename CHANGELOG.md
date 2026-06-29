@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.1 (TBD)
+
+#### Enhancements
+
+- Added a typed encoder/decoder for package debug info metadata, with range-checked felt decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
 ## v0.24.0 (2026-06-24)
 
 #### Enhancements

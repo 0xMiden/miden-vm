@@ -29,9 +29,10 @@ use self::{
     signature::format_type,
 };
 use super::{
-    DebugFunctionInfo, DebugFunctionsSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DebugFunctionInfo, DebugFunctionsSection, DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo,
+    DebugTypesSection,
 };
-use crate::Package;
+use crate::{Package, PackageDebugInfoError};
 
 mod codec;
 mod decode;
@@ -88,25 +89,31 @@ struct TypedParam {
 impl TypedProcInfo {
     /// Resolves the typed signature of `procedure_name` from `package`'s debug sections.
     ///
-    /// `None` if the package has no debug info or no entry for `procedure_name`. The procedure
-    /// name is matched on the bare leaf with `_` and `-` treated as equal, so both `get_count`
-    /// and `get-count` resolve the same entry.
+    /// `Ok(None)` if the package has no debug info or no entry for `procedure_name`; `Err` if the
+    /// package's debug sections are present but untrusted or malformed.
     ///
     /// The returned info has the built-in [`WordCodec`] registered; add further scalar codecs
     /// with [`Self::with_scalar_codec`].
-    pub fn from_package(package: &Package, procedure_name: &str) -> Option<Self> {
-        let (funcs, types) = read_debug_sections(package)?;
-        let func = find_debug_fn(&funcs, procedure_name)?;
+    pub fn from_package(
+        package: &Package,
+        procedure_name: &str,
+    ) -> Result<Option<Self>, PackageDebugInfoError> {
+        let Some((funcs, types)) = read_debug_sections(package)? else {
+            return Ok(None);
+        };
+        let Some(func) = find_debug_fn(&funcs, procedure_name) else {
+            return Ok(None);
+        };
         let name = func_display_name(func, &funcs, procedure_name);
         let (return_type_idx, fallback_param_types) = extract_signature_types(func, &types);
         let params = build_params(&fallback_param_types);
-        Some(Self {
+        Ok(Some(Self {
             types,
             name,
             return_type_idx,
             params,
             codecs: alloc::vec![Box::new(WordCodec)],
-        })
+        }))
     }
 
     /// Registers a [`WitScalarCodec`], letting it override the generic struct handling for the
@@ -127,7 +134,7 @@ impl TypedProcInfo {
     }
 
     /// Type-table indices of the procedure's parameters, in declaration order. Pair with
-    /// [`encode_tokens`] to encode argument tokens parameter by parameter; the orchestration
+    /// [`Self::encode_arg`] to encode argument tokens parameter by parameter; the orchestration
     /// (iterating parameters and validating the total argument count) is left to the caller, since
     /// turning user-supplied strings into arguments is an application concern.
     pub fn param_type_indices(&self) -> Vec<DebugTypeIdx> {
@@ -239,14 +246,20 @@ fn func_display_name(
 }
 
 /// `(return_type, param_types)` from the `Function`-typed debug entry, or `(None, vec![])` if
-/// the entry has no Function type.
+/// the entry has no Function type. A `Void` return type is normalized to `None`
 fn extract_signature_types(
     func: &DebugFunctionInfo,
     types: &DebugTypesSection,
 ) -> (Option<DebugTypeIdx>, Vec<DebugTypeIdx>) {
     match func.type_idx.and_then(|i| types.get_type(i)) {
         Some(DebugTypeInfo::Function { return_type_idx, param_type_indices }) => {
-            (*return_type_idx, param_type_indices.clone())
+            let return_type_idx = return_type_idx.filter(|i| {
+                !matches!(
+                    types.get_type(*i),
+                    Some(DebugTypeInfo::Primitive(DebugPrimitiveType::Void))
+                )
+            });
+            (return_type_idx, param_type_indices.clone())
         },
         _ => (None, Vec::new()),
     }

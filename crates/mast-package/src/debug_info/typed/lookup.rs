@@ -6,20 +6,24 @@ use alloc::{
     string::{String, ToString},
 };
 
-use miden_core::serde::Deserializable;
-
 use super::super::{DebugFunctionInfo, DebugFunctionsSection, DebugTypesSection};
-use crate::{Package, SectionId};
+use crate::{Package, PackageDebugInfoError};
 
-/// Reads both debug sections from `package`. `None` if either is missing or fails to decode.
+/// Reads both debug sections from `package` through the trusted [`Package::debug_info`] path.
+///
+/// `Ok(None)` if the package carries no debug info or has it but is missing either the functions or
+/// the types section. `Err` propagates the package debug-info trust and decode policy (untrusted or
+/// malformed sections); the caller decides whether to surface it or degrade to an untyped display.
 pub(super) fn read_debug_sections(
     package: &Package,
-) -> Option<(DebugFunctionsSection, DebugTypesSection)> {
-    let funcs_section = package.sections.iter().find(|s| s.id == SectionId::DEBUG_FUNCTIONS)?;
-    let types_section = package.sections.iter().find(|s| s.id == SectionId::DEBUG_TYPES)?;
-    let funcs = DebugFunctionsSection::read_from_bytes(&funcs_section.data).ok()?;
-    let types = DebugTypesSection::read_from_bytes(&types_section.data).ok()?;
-    Some((funcs, types))
+) -> Result<Option<(DebugFunctionsSection, DebugTypesSection)>, PackageDebugInfoError> {
+    let Some(info) = package.debug_info()? else {
+        return Ok(None);
+    };
+    match (info.functions, info.types) {
+        (Some(funcs), Some(types)) => Ok(Some((funcs, types))),
+        _ => Ok(None),
+    }
 }
 
 /// Picks the debug entry for `procedure_name`.
