@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
-    errors::{LimitKind, SemanticAnalysisError, SyntaxError},
+    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
     passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
@@ -272,6 +272,8 @@ pub fn analyze(
         analyzer.error(SemanticAnalysisError::MissingEntrypoint);
     }
 
+    verify_exported_signature_type_visibility(&module, &mut analyzer);
+
     analyzer.has_failed()?;
 
     // Run item checks
@@ -292,6 +294,138 @@ fn normalize_namespace_path(path: &Path) -> Result<Arc<Path>, PathError> {
     path.canonicalize()
         .and_then(|path| path.to_absolute().map(Cow::into_owned))
         .map(Arc::<Path>::from)
+}
+
+fn verify_exported_signature_type_visibility(module: &Module, analyzer: &mut AnalysisContext) {
+    for procedure in module.procedures() {
+        if !procedure.visibility().is_public() {
+            continue;
+        }
+
+        let Some(signature) = procedure.signature() else {
+            continue;
+        };
+
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            let mut visiting_types = BTreeSet::default();
+            verify_exported_type_expr(
+                module,
+                analyzer,
+                ty,
+                &mut visiting_types,
+                ExportedTypeUse::ProcedureSignature,
+            );
+        }
+    }
+
+    for item in module.items() {
+        let Item::Type(type_decl) = item else {
+            continue;
+        };
+        if !type_decl.visibility().is_public() {
+            continue;
+        }
+
+        let mut visiting_types = BTreeSet::default();
+        verify_exported_type_decl(
+            module,
+            analyzer,
+            type_decl,
+            &mut visiting_types,
+            ExportedTypeUse::TypeDeclaration,
+        );
+    }
+}
+
+fn verify_exported_type_decl(
+    module: &Module,
+    analyzer: &mut AnalysisContext,
+    type_decl: &TypeDecl,
+    visiting_types: &mut BTreeSet<ItemIndex>,
+    usage: ExportedTypeUse,
+) {
+    match type_decl {
+        TypeDecl::Alias(alias) => {
+            verify_exported_type_expr(module, analyzer, &alias.ty, visiting_types, usage);
+        },
+        TypeDecl::Enum(ty) => {
+            for variant in ty.variants() {
+                if let Some(payload_ty) = variant.value_ty.as_ref() {
+                    verify_exported_type_expr(module, analyzer, payload_ty, visiting_types, usage);
+                }
+            }
+        },
+    }
+}
+
+fn verify_exported_type_expr(
+    module: &Module,
+    analyzer: &mut AnalysisContext,
+    ty: &TypeExpr,
+    visiting_types: &mut BTreeSet<ItemIndex>,
+    usage: ExportedTypeUse,
+) {
+    match ty {
+        TypeExpr::Primitive(_) => (),
+        TypeExpr::Ptr(ty) => {
+            verify_exported_type_expr(module, analyzer, &ty.pointee, visiting_types, usage);
+        },
+        TypeExpr::Array(ty) => {
+            verify_exported_type_expr(module, analyzer, &ty.elem, visiting_types, usage);
+        },
+        TypeExpr::Struct(ty) => {
+            for field in ty.fields.iter() {
+                verify_exported_type_expr(module, analyzer, &field.ty, visiting_types, usage);
+            }
+        },
+        TypeExpr::Ref(path) => {
+            let resolver = match LocalSymbolResolver::new(module, analyzer.source_manager()) {
+                Ok(resolver) => resolver,
+                Err(_) => return,
+            };
+            let resolution = match resolver.resolve_path(path.as_deref()) {
+                Ok(resolution) => resolution,
+                Err(_) => return,
+            };
+            let item = match resolution {
+                SymbolResolution::Local(item) => Some(item.into_inner()),
+                SymbolResolution::External(path)
+                    if path.parent().is_some_and(|parent| parent == module.path()) =>
+                {
+                    let Some(local_name) = path.last() else {
+                        return;
+                    };
+                    module.index_of(|item| item.name().as_str() == local_name)
+                },
+                SymbolResolution::External(_)
+                | SymbolResolution::MastRoot(_)
+                | SymbolResolution::Exact { .. }
+                | SymbolResolution::Module { .. } => None,
+            };
+            let Some(item) = item else {
+                return;
+            };
+            let Some(export) = module.get(item) else {
+                return;
+            };
+            let Item::Type(type_decl) = export else {
+                return;
+            };
+
+            if !type_decl.visibility().is_public() {
+                analyzer.error(usage.private_type_error(path.span(), type_decl.name().span()));
+                return;
+            }
+
+            if !visiting_types.insert(item) {
+                return;
+            }
+
+            verify_exported_type_decl(module, analyzer, type_decl, visiting_types, usage);
+
+            visiting_types.remove(&item);
+        },
+    }
 }
 
 /// Visit all of the items of the current analysis context, and apply various transformation and

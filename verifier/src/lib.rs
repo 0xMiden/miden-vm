@@ -5,6 +5,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(feature = "std")]
+use core::any::{Any, TypeId};
+
 use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
@@ -17,6 +20,15 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+
+type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
+
+#[cfg(feature = "std")]
+type PreprocessedCache = std::collections::HashMap<(TypeId, u8), Box<dyn Any + Send + Sync>>;
+
+#[cfg(feature = "std")]
+static PREPROCESSED_COMMITMENTS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCache>> =
+    std::sync::OnceLock::new();
 
 // RE-EXPORTS
 // ================================================================================================
@@ -85,7 +97,7 @@ pub fn verify(
 /// - `security_level`: The security level (in bits) of the verified proof.
 /// - `transcript_state`: A [`Word`] containing the rolling commitment to all precompile requests,
 ///   computed by recomputing and recording each precompile commitment in a transcript. The state is
-///   itself a complete digest — no separate finalization step is needed.
+///   itself a complete digest; no separate finalization step is needed.
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -212,8 +224,8 @@ fn verify_stark_proof<SC>(
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
-    SC: StarkConfig<Felt, QuadFelt>,
-    <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
+    SC: StarkConfig<Felt, QuadFelt> + 'static,
+    PreprocessedCommitment<SC>: Clone + Send + Sync + DeserializeOwned + 'static,
 {
     if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
         return Err(StarkVerificationError::ProofTooLarge {
@@ -243,16 +255,83 @@ where
     )
     .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 
-    let preprocessed_commitment =
-        Preprocessed::build(&statement, config).map(|preprocessed| preprocessed.commitment());
+    let preprocessed_commitment = cached_preprocessed_commitment(&statement, config);
     VerifierInstance::new(config, &statement, preprocessed_commitment)?
         .verify(&proof, challenger)?;
     Ok(())
 }
 
+#[cfg(feature = "std")]
+fn cached_preprocessed_commitment<SC>(
+    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
+    config: &SC,
+) -> Option<PreprocessedCommitment<SC>>
+where
+    SC: StarkConfig<Felt, QuadFelt> + 'static,
+    PreprocessedCommitment<SC>: Clone + Send + Sync + 'static,
+{
+    const EIDOS_PREPROCESSED_LOG_BLOWUP: u8 = 3;
+
+    // MidenMultiAir preprocessed traces are fixed circuit data; their commitment changes only
+    // with the concrete commitment scheme and LDE blowup used by the verifier config.
+    let key = (TypeId::of::<SC>(), config.pcs().log_blowup());
+    let mut cache = PREPROCESSED_COMMITMENTS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("preprocessed commitment cache poisoned");
+
+    if let Some(value) = cache.get(&key) {
+        return value
+            .downcast_ref::<Option<PreprocessedCommitment<SC>>>()
+            .expect("preprocessed commitment cache type mismatch")
+            .clone();
+    }
+
+    if TypeId::of::<SC>() == TypeId::of::<config::EidosConfig>()
+        && config.pcs().log_blowup() == EIDOS_PREPROCESSED_LOG_BLOWUP
+    {
+        let value = Some(eidos_preprocessed_commitment());
+        let generic = (&value as &dyn Any)
+            .downcast_ref::<Option<PreprocessedCommitment<SC>>>()
+            .expect("Eidos preprocessed commitment type mismatch")
+            .clone();
+        cache.insert(key, Box::new(value));
+        return generic;
+    }
+
+    let value =
+        Preprocessed::build(statement, config).map(|preprocessed| preprocessed.commitment());
+    cache.insert(key, Box::new(value.clone()));
+    value
+}
+
+#[cfg(feature = "std")]
+fn eidos_preprocessed_commitment() -> PreprocessedCommitment<config::EidosConfig> {
+    // Commitment to the fixed preprocessed table for the standard Eidos verifier config.
+    // `eidos_preprocessed_commitment_matches_fixed_table` recomputes it from the AIR.
+    [
+        8101824786889297799,
+        5557459202643843712,
+        8609469204800341145,
+        5780773595731865481,
+    ]
+    .into()
+}
+
+#[cfg(not(feature = "std"))]
+fn cached_preprocessed_commitment<SC>(
+    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
+    config: &SC,
+) -> Option<PreprocessedCommitment<SC>>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+{
+    Preprocessed::build(statement, config).map(|preprocessed| preprocessed.commitment())
+}
+
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::{vec, vec::Vec};
 
     use super::*;
 
@@ -303,5 +382,22 @@ mod tests {
             ),
             "expected explicit proof byte limit to reject oversized proof, got {err:?}"
         );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn eidos_preprocessed_commitment_matches_fixed_table() {
+        let config = config::eidos_config(config::pcs_params());
+        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+            MidenMultiAir::new(),
+            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let commitment =
+            Preprocessed::build(&statement, &config).map(|preprocessed| preprocessed.commitment());
+
+        assert_eq!(commitment, Some(eidos_preprocessed_commitment()));
     }
 }

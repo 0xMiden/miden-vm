@@ -2,9 +2,8 @@ use miden::core::crypto::hashes::eidos
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
-# Initial digest used by the Eidos LMCS leaf hasher. LMCS absorbs fixed-width
-# rows directly, so it uses the zero-length Eidos chaining word rather than
-# length-bound `Eidos::hash_elements` framing.
+# Initial digest used by the Eidos LMCS leaf hasher. LMCS absorbs already-aligned
+# rows and does not use the length-bound `Eidos::hash_elements` framing.
 const FRI_ROW_HASH_INIT_CV = [4280581858871862887, 2688637133034287986, 1947077364412317696, 6620516959492505600]
 const FRI_LAYER_LEAF_DIGEST_MISMATCH = "FRI layer leaf hash mismatch"
 const FRI_REMAINDER_VALUE_MISMATCH = "FRI remainder value mismatch"

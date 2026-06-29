@@ -381,6 +381,84 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 }
 
 #[test]
+fn exported_proc_signature_rejects_private_local_type() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+namespace test
+
+type PrivateType = felt
+
+pub proc check(value: PrivateType)
+    nop
+end
+",
+        )
+        .expect_err("expected exported procedure signature to reject private local type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported procedure signature"));
+}
+
+#[test]
+fn exported_type_alias_rejects_private_type() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+namespace test
+
+type PrivateType = felt
+pub type PublicAlias = PrivateType
+",
+        )
+        .expect_err("expected exported type alias to reject private type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported type declaration"));
+}
+
+#[test]
+fn exported_proc_signature_rejects_private_local_type_via_absolute_path() {
+    let context = SyntaxTestContext::default();
+    let mut parser = Module::parser(None);
+    let error = parser
+        .parse_str(
+            Some(Path::new("wallet::memory")),
+            "
+type PrivateType = felt
+
+pub proc check(value: ::wallet::memory::PrivateType)
+    nop
+end
+",
+            context.source_manager(),
+        )
+        .expect_err(
+            "expected exported procedure signature to reject private local type via absolute path",
+        );
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported procedure signature"));
+}
+
+#[test]
+fn private_proc_signature_allows_private_local_type() {
+    let context = SyntaxTestContext::default();
+    context
+        .parse_module(
+            "
+namespace test
+
+type PrivateType = felt
+
+proc check(value: PrivateType)
+    nop
+end
+",
+        )
+        .expect("expected private procedure signature to allow private local type");
+}
+
+#[test]
 fn sema_import_define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
     let kinds = [
         DefinitionKind::ModuleImport,

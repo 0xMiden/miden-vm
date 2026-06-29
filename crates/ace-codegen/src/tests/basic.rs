@@ -30,13 +30,13 @@ impl BaseAir<F> for MockAir {
     fn num_public_values(&self) -> usize {
         1
     }
-}
 
-impl LiftedAir<F, EF> for MockAir {
     fn periodic_columns(&self) -> Vec<Vec<F>> {
         vec![vec![Felt::ONE]]
     }
+}
 
+impl LiftedAir<F, EF> for MockAir {
     fn num_randomness(&self) -> usize {
         2
     }
@@ -88,13 +88,13 @@ impl BaseAir<F> for PreprocessedAir {
     fn num_public_values(&self) -> usize {
         0
     }
-}
 
-impl LiftedAir<F, EF> for PreprocessedAir {
     fn preprocessed_width(&self) -> usize {
         1
     }
+}
 
+impl LiftedAir<F, EF> for PreprocessedAir {
     fn num_randomness(&self) -> usize {
         2
     }

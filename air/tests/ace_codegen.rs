@@ -29,10 +29,8 @@ fn core_air_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(
-        &LiftedAir::<Felt, QuadFelt>::periodic_columns(&air),
-        z_k,
-    );
+    let periodic_values =
+        eval_periodic_values::<Felt, QuadFelt>(&BaseAir::<Felt>::periodic_columns(&air), z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,

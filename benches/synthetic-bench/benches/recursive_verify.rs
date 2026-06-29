@@ -7,12 +7,17 @@
 use std::{
     collections::HashSet,
     hint::black_box,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
+use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
-use miden_core::{Felt, precompile::PrecompileTranscriptState};
+use miden_core::{
+    Felt,
+    precompile::PrecompileTranscriptState,
+    serde::{Deserializable, Serializable},
+};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs};
 use miden_prover::{PublicInputs, prove_sync};
@@ -129,6 +134,22 @@ fn masm_path() -> PathBuf {
         .expect("RECURSION_BENCH_MASM must point to the synthetic transaction MASM fixture")
 }
 
+fn proof_cache_load_dir() -> Option<PathBuf> {
+    non_empty_env_path("RECURSION_TX_PROOF_LOAD_DIR")
+}
+
+fn proof_cache_save_dir() -> Option<PathBuf> {
+    non_empty_env_path("RECURSION_TX_PROOF_SAVE_DIR")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    let raw = std::env::var_os(name)?;
+    if raw.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(raw))
+}
+
 fn hex_prefix(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let prefix_len = bytes.len().min(16);
@@ -140,6 +161,103 @@ fn hex_prefix(bytes: &[u8]) -> String {
     out
 }
 
+struct ProofCachePaths {
+    program_info: PathBuf,
+    stack_inputs: PathBuf,
+    proof: PathBuf,
+    stack_outputs: PathBuf,
+}
+
+impl ProofCachePaths {
+    fn new(dir: &Path, proof_index: usize) -> Self {
+        Self {
+            program_info: dir.join("program-info.bin"),
+            stack_inputs: dir.join(format!("stack-inputs-{proof_index}.bin")),
+            proof: dir.join(format!("proof-{proof_index}.bin")),
+            stack_outputs: dir.join(format!("stack-outputs-{proof_index}.bin")),
+        }
+    }
+}
+
+fn load_cached_tx_fixture(
+    dir: &Path,
+    program_info: ProgramInfo,
+    hash_fn: HashFunction,
+    proof_index: usize,
+    expected_stack_inputs: StackInputs,
+) -> TxProofFixture {
+    let paths = ProofCachePaths::new(dir, proof_index);
+    let program_info_bytes = std::fs::read(&paths.program_info).unwrap_or_else(|err| {
+        panic!("read cached program info {}: {err}", paths.program_info.display())
+    });
+    let stack_inputs_bytes = std::fs::read(&paths.stack_inputs).unwrap_or_else(|err| {
+        panic!("read cached stack inputs {}: {err}", paths.stack_inputs.display())
+    });
+    let proof_bytes = std::fs::read(&paths.proof)
+        .unwrap_or_else(|err| panic!("read cached proof {}: {err}", paths.proof.display()));
+    let stack_outputs_bytes = std::fs::read(&paths.stack_outputs).unwrap_or_else(|err| {
+        panic!("read cached stack outputs {}: {err}", paths.stack_outputs.display())
+    });
+    let cached_program_info =
+        ProgramInfo::read_from_bytes(&program_info_bytes).unwrap_or_else(|err| {
+            panic!("decode cached program info {}: {err}", paths.program_info.display())
+        });
+    let stack_inputs = StackInputs::read_from_bytes(&stack_inputs_bytes).unwrap_or_else(|err| {
+        panic!("decode cached stack inputs {}: {err}", paths.stack_inputs.display())
+    });
+    let proof = ExecutionProof::from_bytes(&proof_bytes)
+        .unwrap_or_else(|err| panic!("decode cached proof {}: {err}", paths.proof.display()));
+    let stack_outputs = StackOutputs::read_from_bytes(&stack_outputs_bytes).unwrap_or_else(|err| {
+        panic!("decode cached stack outputs {}: {err}", paths.stack_outputs.display())
+    });
+
+    assert_eq!(
+        proof.hash_fn(),
+        hash_fn,
+        "cached transaction proof hash does not match requested recursive benchmark hash"
+    );
+    assert_eq!(
+        cached_program_info, program_info,
+        "cached transaction proof program does not match this benchmark invocation"
+    );
+    assert_eq!(
+        stack_inputs, expected_stack_inputs,
+        "cached transaction proof stack inputs do not match this benchmark invocation"
+    );
+
+    TxProofFixture {
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+    }
+}
+
+fn save_cached_tx_fixture(dir: &Path, proof_index: usize, fixture: &TxProofFixture) {
+    std::fs::create_dir_all(dir)
+        .unwrap_or_else(|err| panic!("create proof cache dir {}: {err}", dir.display()));
+    let paths = ProofCachePaths::new(dir, proof_index);
+
+    let mut program_info_bytes = Vec::new();
+    let mut stack_inputs_bytes = Vec::new();
+    let mut stack_outputs_bytes = Vec::new();
+    fixture.program_info.write_into(&mut program_info_bytes);
+    fixture.stack_inputs.write_into(&mut stack_inputs_bytes);
+    fixture.stack_outputs.write_into(&mut stack_outputs_bytes);
+
+    std::fs::write(&paths.program_info, program_info_bytes).unwrap_or_else(|err| {
+        panic!("write cached program info {}: {err}", paths.program_info.display())
+    });
+    std::fs::write(&paths.stack_inputs, stack_inputs_bytes).unwrap_or_else(|err| {
+        panic!("write cached stack inputs {}: {err}", paths.stack_inputs.display())
+    });
+    std::fs::write(&paths.proof, fixture.proof.to_bytes())
+        .unwrap_or_else(|err| panic!("write cached proof {}: {err}", paths.proof.display()));
+    std::fs::write(&paths.stack_outputs, stack_outputs_bytes).unwrap_or_else(|err| {
+        panic!("write cached stack outputs {}: {err}", paths.stack_outputs.display())
+    });
+}
+
 fn load_tx_fixtures(hash_fn: HashFunction, proof_count: usize) -> Vec<TxProofFixture> {
     let path = masm_path();
     let source = std::fs::read_to_string(&path)
@@ -149,24 +267,54 @@ fn load_tx_fixtures(hash_fn: HashFunction, proof_count: usize) -> Vec<TxProofFix
         .expect("assemble transaction fixture")
         .unwrap_program();
     let program_info = ProgramInfo::from(program.clone());
+    let load_dir = proof_cache_load_dir();
+    let save_dir = proof_cache_save_dir();
 
     println!("\n=== transaction proof fixtures\n    masm={} hash={hash_fn:?}", path.display());
+    if let Some(dir) = &load_dir {
+        println!("    proof_cache_load={}", dir.display());
+    }
+    if let Some(dir) = &save_dir {
+        println!("    proof_cache_save={}", dir.display());
+    }
 
     let mut seen_proofs = HashSet::with_capacity(proof_count);
     (0..proof_count)
         .map(|proof_index| {
             let stack_values = stack_values_for_proof(proof_index);
             let stack_inputs = stack_inputs(&stack_values);
-            let mut host = DefaultHost::default();
-            let (stack_outputs, proof) = prove_sync(
-                &program,
-                stack_inputs,
-                AdviceInputs::default(),
-                &mut host,
-                ExecutionOptions::default(),
-                ProvingOptions::new(hash_fn),
-            )
-            .expect("prove transaction fixture");
+            let fixture = if let Some(dir) = &load_dir {
+                load_cached_tx_fixture(
+                    dir,
+                    program_info.clone(),
+                    hash_fn,
+                    proof_index,
+                    stack_inputs,
+                )
+            } else {
+                let mut host = DefaultHost::default();
+                let (stack_outputs, proof) = prove_sync(
+                    &program,
+                    stack_inputs,
+                    AdviceInputs::default(),
+                    &mut host,
+                    ExecutionOptions::default(),
+                    ProvingOptions::new(hash_fn),
+                )
+                .expect("prove transaction fixture");
+
+                TxProofFixture {
+                    program_info: program_info.clone(),
+                    stack_inputs,
+                    stack_outputs,
+                    proof,
+                }
+            };
+            if let Some(dir) = &save_dir {
+                save_cached_tx_fixture(dir, proof_index, &fixture);
+            }
+
+            let proof = &fixture.proof;
             let proof_bytes = proof.to_bytes();
             assert!(
                 seen_proofs.insert(proof_bytes.clone()),
@@ -188,12 +336,7 @@ fn load_tx_fixtures(hash_fn: HashFunction, proof_count: usize) -> Vec<TxProofFix
                 hex_prefix(&proof_bytes),
             );
 
-            TxProofFixture {
-                program_info: program_info.clone(),
-                stack_inputs,
-                stack_outputs,
-                proof,
-            }
+            fixture
         })
         .collect()
 }
@@ -301,31 +444,33 @@ fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) {
 }
 
 fn prove_recursive_case((case, mut host, hash_fn): (RecursionCase, DefaultHost, HashFunction)) {
-    let proof = prove_sync(
-        &case.program,
+    let proof = prove_recursive(&case.program, case.advice_inputs, hash_fn, &mut host);
+    black_box(proof);
+}
+
+fn prove_recursive(
+    program: &Program,
+    advice_inputs: AdviceInputs,
+    hash_fn: HashFunction,
+    host: &mut DefaultHost,
+) -> ExecutionProof {
+    let (_, proof) = prove_sync(
+        program,
         StackInputs::default(),
-        case.advice_inputs,
-        &mut host,
+        advice_inputs,
+        host,
         ExecutionOptions::default(),
         ProvingOptions::new(hash_fn),
     )
     .expect("prove recursive verifier");
-    black_box(proof);
+    proof
 }
 
 fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, usize) {
     let advice_inputs = case.advice_inputs.clone();
     let start = Instant::now();
     let mut host = recursive_host();
-    let (_, proof) = prove_sync(
-        &case.program,
-        StackInputs::default(),
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        ProvingOptions::new(hash_fn),
-    )
-    .expect("prove recursive verifier");
+    let proof = prove_recursive(&case.program, advice_inputs, hash_fn, &mut host);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
     let proof_bytes = proof.to_bytes().len();
     black_box(proof);

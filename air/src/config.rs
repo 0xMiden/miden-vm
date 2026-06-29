@@ -367,25 +367,23 @@ type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
 /// Concrete STARK configuration type for Poseidon2.
 pub type Poseidon2Config =
     MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
+/// Concrete STARK configuration type for RPO.
+pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>>;
+/// Concrete STARK configuration type for RPX.
+pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
 
 /// Creates an RPO-based STARK configuration.
-pub fn rpo_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>> {
+pub fn rpo_config(params: PcsParams) -> RpoConfig {
     alg_config(params, RpoPermutation256)
 }
 
 /// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>> {
+pub fn poseidon2_config(params: PcsParams) -> Poseidon2Config {
     alg_config(params, Poseidon2Permutation256)
 }
 
 /// Creates an RPX-based STARK configuration.
-pub fn rpx_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>> {
+pub fn rpx_config(params: PcsParams) -> RpxConfig {
     alg_config(params, RpxPermutation256)
 }
 
@@ -430,8 +428,11 @@ type BlakeLmcs = LmcsConfig<
 type BlakeChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Blake3Hasher, BLAKE_DIGEST_SIZE>>;
 
+/// Concrete STARK configuration type for Blake3_256.
+pub type Blake3_256Config = MidenStarkConfig<BlakeLmcs, BlakeChallenger>;
+
 /// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, BlakeChallenger> {
+pub fn blake3_256_config(params: PcsParams) -> Blake3_256Config {
     let lmcs = LmcsConfig::new(
         ChainingHasher::new(Blake3Hasher),
         CompressionFunctionFromHasher::new(Blake3Hasher),
@@ -447,8 +448,11 @@ pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, Blake
 /// Miden VM STARK transcript domain for the Eidos challenger.
 const EIDOS_VM_STARK_TRANSCRIPT_V1: u32 = (2 << 8) | 1;
 
+/// Concrete STARK configuration type for Eidos.
+pub type EidosConfig = MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
+
 /// Creates an Eidos-based STARK configuration.
-pub fn eidos_config(params: PcsParams) -> MidenStarkConfig<EidosLmcs, MidenEidosChallenger> {
+pub fn eidos_config(params: PcsParams) -> EidosConfig {
     let lmcs = lmcs_config();
     let transcript_init_cv = Eidos::transcript_init_cv(EIDOS_VM_STARK_TRANSCRIPT_V1);
     let challenger = MidenEidosChallenger::new(transcript_init_cv, RELATION_DIGEST.into());
@@ -484,11 +488,14 @@ type KeccakLmcs = LmcsConfig<
 type KeccakChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, KECCAK_CHALLENGER_DIGEST_SIZE>>;
 
+/// Concrete STARK configuration type for Keccak.
+pub type KeccakConfig = MidenStarkConfig<KeccakLmcs, KeccakChallenger>;
+
 /// Creates a Keccak-based STARK configuration.
 ///
 /// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
 /// for SIMD parallelization.
-pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakChallenger> {
+pub fn keccak_config(params: PcsParams) -> KeccakConfig {
     let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
     let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
     let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));

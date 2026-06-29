@@ -10,14 +10,14 @@
 //! column-blind by construction — two messages routed onto different aux columns still compare
 //! equal if they share both multiplicity and encoded denominator.
 //!
-//! No scalar sums, no per-column deltas, no terminals: those views invite missing + spurious
-//! interactions to cancel silently. Subset semantics over raw `(mult, denom)` tuples keeps every
-//! expected interaction independently observable.
+//! The harness does not reduce rows to scalar sums or per-column deltas. Those views can let
+//! missing and spurious interactions cancel. Subset semantics over raw `(mult, denom)` tuples keeps
+//! every expected interaction independently observable.
 
 use alloc::vec::Vec;
 
 use miden_air::{
-    BaseAir, LiftedAir, MidenAir,
+    BaseAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
@@ -49,12 +49,11 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
-        let (core_matrix, chip_matrix, p2_matrix, and8_matrix) =
+        let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
             trace.main_trace().to_air_matrices();
         // Core has no periodic columns.
-        let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
-        let p2_periodic =
-            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+        let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+        let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
         let and8_preprocessed = MidenAir::AND8_LOOKUP
             .preprocessed_trace()
             .expect("AND8 lookup AIR declares a preprocessed table");
@@ -75,11 +74,11 @@ impl InteractionLog {
             &chip_periodic,
             &challenges,
         );
-        let p2_fractions = build_lookup_fractions(
+        let blakeg_fractions = build_lookup_fractions(
             &MidenAir::BLAKEG_COMPRESSION,
-            &p2_matrix,
+            &blakeg_matrix,
             None,
-            &p2_periodic,
+            &blakeg_periodic,
             &challenges,
         );
         let and8_fractions = build_lookup_fractions(
@@ -92,7 +91,7 @@ impl InteractionLog {
         let rows = merge_rows(
             merge_rows(
                 merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions)),
-                split_rows(&p2_fractions),
+                split_rows(&blakeg_fractions),
             ),
             split_rows(&and8_fractions),
         );
@@ -104,9 +103,8 @@ impl InteractionLog {
     /// prover pushes.
     ///
     /// For every `(row, mult, denom)` in `expected`, there must be at least as many matching
-    /// pushes at that row. Unclaimed actual pushes are ignored — this is the whole point of
-    /// subset semantics, so partial tests can focus on one bus or one instruction without
-    /// enumerating every other interaction that happens to fire.
+    /// pushes at that row. Unclaimed actual pushes are ignored, so partial tests can focus on one
+    /// bus or one instruction without enumerating every other interaction that happens to fire.
     pub fn assert_contains(&self, expected: &Expectations) {
         for &entry in &expected.entries {
             let (row, mult, denom) = entry;

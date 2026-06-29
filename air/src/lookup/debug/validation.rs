@@ -5,15 +5,15 @@
 //! `air.validate(layout)`. One short-circuit [`Result<(), ValidationError>`] covers:
 //!
 //! - `num_columns` declared vs observed (the walker counts `next_column` calls).
-//! - Per-group and per-column `Deg { n, d }` declared vs observed (via
+//! - Per-group and per-column `Deg { v, u }` declared vs observed (via
 //!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c*V_e - U_e*V_c` at a random row.
 //! - Simple-group scope: no illegal `insert_encoded` outside the `encoded` closure.
 //!
 //! The global max-degree budget is **not** checked here - the STARK prover's
-//! quotient validation already enforces it and duplicating that check muddies
-//! this module's purpose.
+//! quotient validation already enforces it, and duplicating that check would
+//! blur this module's purpose.
 
 use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
@@ -22,7 +22,7 @@ use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_crypto::{
     rand::random_felt,
     stark::air::{
-        AirBuilder, PeriodicAirBuilder, PermutationAirBuilder,
+        AirBuilder, PermutationAirBuilder,
         symbolic::{
             BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
             SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,

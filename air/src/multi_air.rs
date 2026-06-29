@@ -648,12 +648,13 @@ impl BaseAir<Felt> for MidenAir {
         }
     }
 
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
+    fn preprocessed_width(&self) -> usize {
+        match self {
+            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => 0,
+            Self::And8Lookup(a) => a.preprocessed_width(),
+        }
     }
-}
 
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         match self {
             Self::Core(a) => a.periodic_columns(),
@@ -663,13 +664,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         }
     }
 
-    fn preprocessed_width(&self) -> usize {
-        match self {
-            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => 0,
-            Self::And8Lookup(a) => a.preprocessed_width(),
-        }
+    fn num_public_values(&self) -> usize {
+        NUM_PUBLIC_VALUES
     }
+}
 
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn num_randomness(&self) -> usize {
         trace::AUX_TRACE_RAND_CHALLENGES
     }

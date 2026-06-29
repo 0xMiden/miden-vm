@@ -15,6 +15,8 @@ WARMUP=1
 THREADS=16
 BUILD_JOBS="${CARGO_BUILD_JOBS:-}"
 MONITOR_SYSTEM=0
+TX_PROOF_CACHE_LOAD_DIR="${RECURSION_TX_PROOF_LOAD_DIR:-}"
+TX_PROOF_CACHE_SAVE_DIR="${RECURSION_TX_PROOF_SAVE_DIR:-}"
 RESULT_ROOT="$ROOT/bench-results/blakeg-recursive"
 ORIGINAL_ARGS="$*"
 
@@ -36,6 +38,10 @@ Options:
   --warmup N           Warmup repetitions. Default: 1
   --threads N          RAYON_NUM_THREADS. Default: 16
   --build-jobs N       CARGO_BUILD_JOBS. Default: detected logical CPUs.
+  --tx-proof-cache-load-dir PATH
+                       Load pre-generated transaction proofs from PATH/<fixture>.
+  --tx-proof-cache-save-dir PATH
+                       Save generated transaction proofs under PATH/<fixture>.
   --monitor-system     Capture system snapshots around each fixture invocation.
   --out-root PATH      Output root. Default: bench-results/blakeg-recursive
   -h, --help           Show this help.
@@ -80,6 +86,14 @@ while [[ $# -gt 0 ]]; do
       BUILD_JOBS="${2:-}"
       shift 2
       ;;
+    --tx-proof-cache-load-dir)
+      TX_PROOF_CACHE_LOAD_DIR="${2:-}"
+      shift 2
+      ;;
+    --tx-proof-cache-save-dir)
+      TX_PROOF_CACHE_SAVE_DIR="${2:-}"
+      shift 2
+      ;;
     --monitor-system)
       MONITOR_SYSTEM=1
       shift
@@ -113,6 +127,13 @@ require_positive_uint "--build-jobs" "$BUILD_JOBS"
 [[ -f "$ROOT/benches/synthetic-bench/benches/recursive_verify.rs" ]] \
   || die "missing recursive benchmark harness"
 [[ -d "$FIXTURE_ROOT" ]] || die "missing fixture root: $FIXTURE_ROOT"
+if [[ -n "$TX_PROOF_CACHE_LOAD_DIR" ]]; then
+  [[ -d "$TX_PROOF_CACHE_LOAD_DIR" ]] || die "missing transaction proof cache: $TX_PROOF_CACHE_LOAD_DIR"
+  TX_PROOF_CACHE_LOAD_DIR="$(cd "$TX_PROOF_CACHE_LOAD_DIR" && pwd)"
+fi
+if [[ -n "$TX_PROOF_CACHE_SAVE_DIR" ]]; then
+  TX_PROOF_CACHE_SAVE_DIR="$(abs_dir "$TX_PROOF_CACHE_SAVE_DIR")"
+fi
 RESULT_ROOT="$(abs_dir "$RESULT_ROOT")"
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
@@ -227,6 +248,17 @@ capture_system_snapshot() {
   } > "$output_file"
 }
 
+safe_path_component() {
+  printf '%s' "$1" | tr -c '[:alnum:]_.-' '_'
+}
+
+proof_cache_dir_for_fixture() {
+  local root="$1"
+  local fixture="$2"
+
+  printf '%s/%s\n' "$root" "$(safe_path_component "$fixture")"
+}
+
 tx_bytes_for_count() {
   local log_file="$1"
   local proof_count="$2"
@@ -301,7 +333,18 @@ run_once() {
   local record="$5"
   local label="$6"
   local monitor_base
+  local fixture_cache_load_dir=""
+  local fixture_cache_save_dir=""
   monitor_base="${fixture}_${label//[^[:alnum:]_.-]/_}"
+
+  if [[ -n "$TX_PROOF_CACHE_LOAD_DIR" ]]; then
+    fixture_cache_load_dir="$(proof_cache_dir_for_fixture "$TX_PROOF_CACHE_LOAD_DIR" "$fixture")"
+    [[ -d "$fixture_cache_load_dir" ]] \
+      || die "missing transaction proof cache for fixture $fixture: $fixture_cache_load_dir"
+  fi
+  if [[ -n "$TX_PROOF_CACHE_SAVE_DIR" ]]; then
+    fixture_cache_save_dir="$(proof_cache_dir_for_fixture "$TX_PROOF_CACHE_SAVE_DIR" "$fixture")"
+  fi
 
   echo "[blakeg-recursive] $fixture $label"
   if (( MONITOR_SYSTEM != 0 )); then
@@ -310,19 +353,27 @@ run_once() {
 
   (
     cd "$ROOT"
-    env \
-      RAYON_NUM_THREADS="$THREADS" \
-      CARGO_BUILD_JOBS="$BUILD_JOBS" \
-      RUSTFLAGS="-C target-cpu=native" \
-      RECURSION_BENCH_MASM="$masm_path" \
-      RECURSION_PROOF_COUNTS="$PROOF_COUNTS_CSV" \
-      RECURSION_BENCH_HASH=eidos \
-      RECURSION_BENCH_DISTINCT_STACKS=1 \
-      RECURSION_PROFILE_PROVE=1 \
-      RECURSION_PROFILE_PROVE_REPEATS="$REPEAT" \
-      RECURSION_PROFILE_PROVE_WARMUPS="$WARMUP" \
-      MIDEN_BENCH_NUM_FRI_QUERIES="$FRI_QUERIES" \
-      cargo bench --profile optimized -p miden-vm-synthetic-bench --bench recursive_verify -- --noplot
+    local -a bench_env=(
+      env
+      RAYON_NUM_THREADS="$THREADS"
+      CARGO_BUILD_JOBS="$BUILD_JOBS"
+      RUSTFLAGS="-C target-cpu=native"
+      RECURSION_BENCH_MASM="$masm_path"
+      RECURSION_PROOF_COUNTS="$PROOF_COUNTS_CSV"
+      RECURSION_BENCH_HASH=eidos
+      RECURSION_BENCH_DISTINCT_STACKS=1
+      RECURSION_PROFILE_PROVE=1
+      RECURSION_PROFILE_PROVE_REPEATS="$REPEAT"
+      RECURSION_PROFILE_PROVE_WARMUPS="$WARMUP"
+      MIDEN_BENCH_NUM_FRI_QUERIES="$FRI_QUERIES"
+    )
+    if [[ -n "$fixture_cache_load_dir" ]]; then
+      bench_env+=(RECURSION_TX_PROOF_LOAD_DIR="$fixture_cache_load_dir")
+    fi
+    if [[ -n "$fixture_cache_save_dir" ]]; then
+      bench_env+=(RECURSION_TX_PROOF_SAVE_DIR="$fixture_cache_save_dir")
+    fi
+    "${bench_env[@]}" cargo bench --profile optimized -p miden-vm-synthetic-bench --bench recursive_verify -- --noplot
   ) 2>&1 | tee "$log_file"
 
   if (( MONITOR_SYSTEM != 0 )); then
@@ -360,6 +411,8 @@ write_air_metadata
   echo "RAYON_NUM_THREADS=$THREADS"
   echo "CARGO_BUILD_JOBS=$BUILD_JOBS"
   echo "RUSTFLAGS=-C target-cpu=native"
+  echo "tx_proof_cache_load_dir=$TX_PROOF_CACHE_LOAD_DIR"
+  echo "tx_proof_cache_save_dir=$TX_PROOF_CACHE_SAVE_DIR"
   echo "monitor_system=$MONITOR_SYSTEM"
   echo
   git_meta "$ROOT" blakeg
