@@ -437,12 +437,12 @@ fn test_trace_generation_at_fragment_boundaries(
         ("Chiplets", &chip_from_fragments, &chip_from_single),
     ] {
         let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CORE, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CORE, air_single, &challenges);
+            let (a, c) = build_logup_aux_trace(&MidenAir::Core, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::Core, air_single, &challenges);
             (a, c, b, d)
         } else {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_single, &challenges);
+            let (a, c) = build_logup_aux_trace(&MidenAir::Chiplets, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::Chiplets, air_single, &challenges);
             (a, c, b, d)
         };
         assert_eq!(

@@ -1,15 +1,10 @@
-//! ACE READ section extraction and cross-validation.
+//! Cross-checks the ACE READ section produced by the MASM recursive verifier.
 //!
-//! After the recursive verifier executes in MASM, this module:
-//! 1. Extracts the ACE READ section from MASM memory into a flat `Vec<QuadFelt>`.
-//! 2. Runs structural sanity checks on critical values (non-zero challenges, etc.).
-//! 3. Evaluates the ACE circuit in Rust and asserts the result is zero.
-//!
-//! This catches bugs in the MASM verifier's input preparation (wrong values, wrong
-//! memory slots, missing absorptions) that would silently break soundness.
+//! The check extracts the flat ACE input vector from memory, verifies basic invariants, and
+//! evaluates the same ACE circuit in Rust.
 
 use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::ace::build_multi_air_ace_circuit;
+use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
@@ -20,10 +15,8 @@ use miden_processor::{ContextId, ExecutionOutput};
 // MASM CONSTANTS (must match crates/lib/core/asm/stark/constants.masm)
 // ================================================================================================
 
-// Must match the constants in `crates/lib/core/asm/stark/constants.masm`. Updated
-// for the multi-AIR layout (see `CHIPLETS_TRACE_LENGTH_LOG_PTR` insertion shifting
-// the post-heights pointers forward).
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
+const ORDER_TAG_PTR: u32 = 3223322764;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
 
 // EXTRACTION
@@ -55,6 +48,17 @@ fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<Qua
             QuadFelt::new([c0, c1])
         })
         .collect()
+}
+
+fn extract_order(output: &ExecutionOutput) -> ProofOrder {
+    let ctx = ContextId::root();
+    let tag = output
+        .memory
+        .read_element(ctx, Felt::from_u32(ORDER_TAG_PTR))
+        .expect("ORDER_TAG_PTR not found in memory")
+        .as_canonical_u64();
+    ProofOrder::from_tag(tag as u32)
+        .unwrap_or_else(|| panic!("invalid order tag in recursive verifier memory: {tag}"))
 }
 
 // SANITY CHECKS
@@ -96,17 +100,17 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 // CROSS-EVALUATION
 // ================================================================================================
 
-/// Build the ACE circuit, extract inputs from MASM memory, run sanity checks,
-/// and verify the Rust evaluation matches (result is zero).
-pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
+/// Evaluate the Rust ACE circuit against the READ section left in MASM memory.
+pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
     };
 
-    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ace circuit");
+    let order = extract_order(output);
+    let circuit = build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order)
+        .expect("multi-AIR ace circuit");
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(output, layout);
@@ -120,4 +124,6 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
         "ACE cross-evaluation is non-zero: {result:?}\n\
          MASM verifier populated the READ section incorrectly."
     );
+
+    order
 }

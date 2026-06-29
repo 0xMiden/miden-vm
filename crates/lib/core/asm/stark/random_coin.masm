@@ -11,8 +11,8 @@
 #! Two absorption paths are provided:
 #!   - `observe_felt`/`flush_buffer`: a faithful buffered duplex matching p3's `DuplexChallenger`
 #!     (append to `rate[input_len]`, permute only once the rate fills, flush a partial buffer
-#!     lazily). Used for the public inputs, instance shape, and main-trace commitment, whose
-#!     element stream is not rate-aligned.
+#!     lazily). Used by callers for non-rate-aligned transcript streams, such as public inputs,
+#!     instance shape, and the main-trace commitment.
 #!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that write directly to
 #!     rate memory and permute immediately. Valid only when the input buffer is empty (the stream
 #!     is known to start and end on a rate boundary).
@@ -238,40 +238,28 @@ end
 #!
 #! Implements the transcript initialization:
 #!
-#!   Use the caller-supplied RELATION_DIGEST as initial sponge capacity,
+#!   Use the memory-resident RELATION_DIGEST as initial sponge capacity,
 #!   absorb PCS parameters into the rate, and permute.
 #!   Rate layout: R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
 #!                R2 = [log_blowup, log_final_degree, fold_arity, 0]
 #!
-#! RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT) is a compile-time constant
-#! computed once per AIR and pushed by the caller (the specific verifier).
+#! The relation wrapper stores RELATION_DIGEST before calling the generic verifier.
 #!
 #! Currently assumes a blowup factor equal to 8.
 #!
-#! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
-#! already be stored in memory before calling this procedure.
+#! Precondition: security parameters, relation digest, and trace-height metadata must already be
+#! stored in memory before calling this procedure.
 #!
-#! Input: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
+#! Input: [...]
 #! Output: [...]
 pub proc init_seed
-
-    # Save per-AIR log heights, then derive and store the max (used everywhere
-    # downstream for lifted-domain math, LDE size, and trace generator).
-    dup exec.constants::set_core_trace_length_log
-    dup.1 exec.constants::set_chiplets_trace_length_log
-    dup dup.2
-    # => [log_chip, log_core, log_core, log_chip, rd0, ..., ...]
-    u32max
-    exec.constants::set_trace_length_log
-    # => [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
-
     # Initialize the zero word and buffers to zero.
     padw
     exec.constants::zero_word_ptr mem_storew_le
     dropw
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
+    #=> [...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
 
@@ -279,10 +267,7 @@ pub proc init_seed
     #   R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
     #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
     #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
-    #
-    # Drop both per-AIR log heights from the stack (saved in memory above).
-
-    drop drop
+    padw exec.constants::relation_digest_ptr mem_loadw_le
     #=> [rd0, rd1, rd2, rd3, ...]
 
     # Build R1 from security parameters stored in memory.
@@ -399,32 +384,15 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the multi-AIR instance shape into the Fiat-Shamir transcript via the buffered duplex.
-#!
-#! Mirrors the framework's `observe_shape`, which observes the instance count followed by the
-#! per-AIR log trace heights in instance order (Core, then Chiplets):
-#!   [ 2, log(core trace height), log(chiplets trace height) ].
-#!
-#! These continue the same buffered duplex begun by `process_public_inputs`, so no permutation is
-#! forced here; `reseed_main_after_shape` appends the main-trace commitment and flushes.
-#!
-#! Input: [...]
-#! Output: [...]
-pub proc observe_instance_shape
-    push.2 exec.observe_felt
-    exec.constants::get_core_trace_length_log exec.observe_felt
-    exec.constants::get_chiplets_trace_length_log exec.observe_felt
-end
-
 #! Observe the main-trace commitment and flush the buffered duplex.
 #!
-#! Appends the commitment word `[c0, c1, c2, c3]` to the buffered transcript stream (continuing
-#! from the instance shape) and then flushes any partial buffer, matching the DuplexChallenger's
-#! duplex at the first post-commitment sample (auxiliary randomness). On exit: output_len=8.
+#! Appends the commitment word `[c0, c1, c2, c3]` to the buffered transcript stream and flushes any
+#! partial buffer, matching the DuplexChallenger's duplex at the first post-commitment sample
+#! (auxiliary randomness). On exit: output_len=8.
 #!
 #! Input: [c0, c1, c2, c3, ...]
 #! Output: [...]
-pub proc reseed_main_after_shape
+pub proc observe_main_trace_commitment
     exec.observe_felt
     exec.observe_felt
     exec.observe_felt
@@ -618,33 +586,14 @@ pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     mem_storew_le dropw
 
-    # Sample β (multi-AIR accumulation challenge), then write Word 5 = β-coefficient
-    # word into the stark-vars region as [mab_core_0, mab_core_1, mab_chip_0, mab_chip_1]:
-    #   - if `core_height ≤ chiplets_height` (proof_order [Core, Chiplets]):
-    #         mab_core = β, mab_chip = 1   →  yields β·core_acc + 1·chip_acc
-    #   - else (proof_order [Chiplets, Core]):
-    #         mab_core = 1, mab_chip = β   →  yields 1·core_acc + β·chip_acc
-    # Both forms match upstream's Horner accumulation `acc[j] = acc[j-1]·β + folded[j]`.
+    # Sample beta for proof-order Horner folding, then write Word 5:
+    # [multi_air_beta_0, multi_air_beta_1, reserved, reserved].
     exec.sample_ext
     # => [β_0, β_1, ...]
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    # => [log_chip, log_core, β_0, β_1, ...]
-    # u32lte returns 1 iff log_chip >= log_core, equivalent to log_core <= log_chip,
-    # which means Core is at proof_order position 0 (with the caller_idx=0 tiebreak).
-    u32lte
-    # => [core_first?, β_0, β_1, ...]
-    if.true
-        # core_first: word [mab_core=β, mab_chip=1] = [β_0, β_1, 1, 0]
-        push.0.1
-        # => [1, 0, β_0, β_1, ...]
-        movup.3 movup.3
-        # => [β_0, β_1, 1, 0, ...]
-    else
-        # chip_first: word [mab_core=1, mab_chip=β] = [1, 0, β_0, β_1]
-        push.0.1
-        # => [1, 0, β_0, β_1, ...]
-    end
+    push.0.0
+    # => [0, 0, β_0, β_1, ...]
+    movup.3 movup.3
+    # => [β_0, β_1, 0, 0, ...]
     exec.constants::auxiliary_ace_inputs_ptr add.20
     mem_storew_le dropw
 end
@@ -792,7 +741,7 @@ pub proc generate_list_indices
         sub.1
         #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
         # R1 and R2 are contiguous in memory (R1_PTR, R1_PTR+4 = R2_PTR), so
-        # rate[idx] is simply at R1_PTR + idx.
+        # rate[idx] is at R1_PTR + idx.
         dup exec.constants::r1_ptr add mem_load
         #=> [felt, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 

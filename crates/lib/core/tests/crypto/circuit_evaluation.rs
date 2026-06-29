@@ -95,9 +95,12 @@ fn multi_air_eval_circuit_masm() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
     };
-    let circuit = miden_air::ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
+    let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(
+        config,
+        &miden_air::ProofOrder::instance_order(),
+    )
+    .unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);

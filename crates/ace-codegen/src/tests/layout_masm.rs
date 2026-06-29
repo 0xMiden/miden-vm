@@ -8,7 +8,7 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         num_aux_boundary: 2,
         num_public: 5,
         num_vlpi: 0,
-        num_randomness: 16,
+        num_randomness: 2,
         num_periodic: 1,
         num_quotient_chunks: 2,
     };

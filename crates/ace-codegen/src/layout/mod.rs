@@ -32,20 +32,24 @@
 //!
 //! Layout order (both Native and Masm):
 //! 1) public_values
-//! 2) aux randomness (alpha/beta)
-//! 3) main_curr
-//! 4) aux_curr
-//! 5) quotient_curr
-//! 6) main_next
-//! 7) aux_next
-//! 8) quotient_next
-//! 9) aux_bus_boundary
-//! 10) stark_vars
+//! 2) vlpi_reductions
+//! 3) aux randomness (alpha/beta)
+//! 4) main_curr
+//! 5) aux_curr
+//! 6) quotient_curr
+//! 7) main_next
+//! 8) aux_next
+//! 9) quotient_next
+//! 10) aux_bus_boundary
+//! 11) stark_vars
 //!
 //! Notes:
 //! - `quotient_next` is included in the READ layout and is mapped via
 //!   `InputKey::QuotientChunkCoord` with `offset = 1`.
-//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs.
+//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs. Multi-AIR layouts append
+//!   one beta slot plus three selector slots per AIR instance.
+
+pub(crate) const SELECTORS_PER_AIR: usize = 3;
 
 mod keys;
 mod plan;
@@ -54,4 +58,4 @@ mod policy;
 pub use keys::InputKey;
 pub(crate) use keys::InputKeyMapper;
 pub use plan::{InputCounts, InputLayout};
-pub(crate) use plan::{InputRegion, LayoutRegions, StarkVarIndices};
+pub(crate) use plan::{InputRegion, LayoutRegions, MultiAirIndices, StarkVarIndices};

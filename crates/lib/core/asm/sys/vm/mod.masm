@@ -1,5 +1,6 @@
 pub mod aux_trace
 pub mod constraints_eval
+pub mod constraints_eval_inputs
 pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
@@ -15,18 +16,17 @@ const ACCEPTABLE_QUERY_POW_BITS = 16
 const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
-# RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT).
-# This is a compile-time constant computed once per AIR that binds the Fiat-Shamir
-# transcript to the relation (AIR structure + fix protocol parameter choices).
-#
-# PROTOCOL_ID (defined in circuit_evaluation.rs) implicitly covers every hardcoded
-# protocol choice: hash function, field, blowup factor, FRI folding factor, coset
-# offset, max remainder degree, etc. It must be bumped when any of these change.
-# CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 17246763836728246237
-const RELATION_DIGEST_1 = 9838047215024765106
-const RELATION_DIGEST_2 = 15366705014579132635
-const RELATION_DIGEST_3 = 14157638374955997968
+# RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
+const RELATION_DIGEST_0 = 8648431326613090990
+const RELATION_DIGEST_1 = 12512952497323442019
+const RELATION_DIGEST_2 = 17953111755289758491
+const RELATION_DIGEST_3 = 17459021812452109049
+
+# Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
+const ACE_REGISTRY_ROOT_0 = 13752840065275073014
+const ACE_REGISTRY_ROOT_1 = 8602162562810350728
+const ACE_REGISTRY_ROOT_2 = 8683224132465215448
+const ACE_REGISTRY_ROOT_3 = 6829039342477154261
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -63,44 +63,89 @@ proc assert_acceptable_options
     push.ACCEPTABLE_FOLDING_POW_BITS assert_eq.err="folding_pow_bits does not match acceptable security policy"
 end
 
+#! Loads the VM-specific AIR context used by the generic STARK verifier.
+#!
+#! Advice supplies log heights in fixed instance order:
+#!   [log_core, log_chiplets]
+#!
+#! Writes per-AIR log heights, the maximum log height, ORDER_TAG, RELATION_DIGEST, and
+#! ACE_REGISTRY_ROOT to memory.
+pub proc load_air_context
+    adv_push
+    exec.assert_shape_log
+    exec.constants::set_core_trace_length_log
+
+    adv_push
+    exec.assert_shape_log
+    exec.constants::set_chiplets_trace_length_log
+
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    u32max
+    exec.constants::set_trace_length_log
+
+    exec.derive_order_tag
+    exec.constants::set_order_tag
+
+    exec.store_relation_digest
+    exec.store_ace_registry_root
+end
+
+proc assert_shape_log
+    dup u32assert.err="AIR log height must be u32"
+    dup u32gt.5 assert.err="AIR log height below minimum"
+    dup u32lt.30 assert.err="AIR log height above maximum"
+    drop
+end
+
+#! Derives the Lehmer proof-order tag for the current Core/Chiplets AIR set.
+proc derive_order_tag
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    u32lte
+    if.true
+        push.0
+    else
+        push.1
+    end
+end
+
+proc store_relation_digest
+    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
+    exec.constants::relation_digest_ptr mem_storew_le
+    # Relation metadata is memory-only; leave the caller stack unchanged.
+    dropw dropw
+end
+
+proc store_ace_registry_root
+    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
+    exec.constants::ace_registry_root_ptr mem_storew_le
+    # Relation metadata is memory-only; leave the caller stack unchanged.
+    dropw dropw
+end
+
 #! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and
 #! stored in memory for use by the generic verifier.
 #!
-#! - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
-#!   well as the program and the kernel procedures digests.
-#! - There are two trace segments, main and auxiliary. It is assumed that the main trace segment
-#!   is 73 columns wide while the auxiliary trace segment is 8 columns wide. Note that we pad the main
-#!   trace to the next multiple of 8.
-#! - The OOD evaluation frame is composed of two concatenated rows, current and next, each composed
-#!   of 73 elements representing the main trace portion and 8 elements for the auxiliary trace one.
-#!   Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
-#!   is 80 for the main trace.
+#! - Public inputs contain fixed-size input/output stacks, the program digest, and kernel procedure
+#!   digests.
+#! - The wrapper records the AIR context before calling the generic STARK verifier.
+#! - The constraints evaluator authenticates the ACE program selected by the derived proof order.
 #!
-#! Inputs:  [log(core_trace_length), log(chiplets_trace_length)]
+#! Inputs:  []
 #! Outputs: []
 pub proc verify_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
-    # => [log(core_tl), log(chiplets_tl)]
+    # => [...]
 
-    # --- Get constants -------------------------------------------------------
-
-    # Push RELATION_DIGEST below the two log heights.
-    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    # => [rd0, rd1, rd2, rd3, log_core, log_chiplets]
-
-    # Bring log_core to top, then log_chiplets underneath, restoring the verifier signature.
-    movup.4
-    # => [log_core, rd0, rd1, rd2, rd3, log_chiplets]
-    movup.5
-    # => [log_chiplets, log_core, rd0, rd1, rd2, rd3]
-    swap
-    # => [log_core, log_chiplets, rd0, rd1, rd2, rd3]
+    exec.load_air_context
+    # => [...]
 
     # --- Load the digests of all dynamically invoked procedures --------------
 
@@ -109,7 +154,7 @@ pub proc verify_proof
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4, log_core, log_chiplets, rd0, rd1, rd2, rd3]
+    # => [D0, D1, D2, D3, D4]
 
     # --- Call the core verification procedure from `core-lib` ------------------
 

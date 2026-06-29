@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::{
@@ -316,7 +316,7 @@ impl CoreAir {
         constraints::enforce_core(builder, local, next, &op_flags);
         constraints::public_inputs::enforce_main(builder, local);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CORE);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);
     }
 
@@ -418,7 +418,7 @@ impl ChipletsAir {
 
         constraints::enforce_chiplets(builder, local, next, &selectors);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CHIPLETS);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
         self.lookup_eval(&mut lb);
     }
 
@@ -451,29 +451,209 @@ impl ChipletsAir {
     }
 }
 
-// MIDEN AIR (multi-AIR enum wrapper)
+// MIDEN AIR
 // ================================================================================================
 
-/// Homogeneous wrapper that lets [`CoreAir`] and [`ChipletsAir`] share a single AIR type.
+/// AIR instance identifier for the Miden multi-AIR statement.
+///
 /// [`MultiAir::Air`](miden_crypto::stark::air::MultiAir) is a single associated type, so every
-/// instance in the multi-AIR proof must be the same type; this enum dispatches per-trace work
-/// to the inner [`CoreAir`] / [`ChipletsAir`].
-#[derive(Copy, Clone, Debug)]
+/// instance in the multi-AIR proof must have the same type. This enum identifies which concrete
+/// AIR logic to dispatch to.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {
-    Core(CoreAir),
-    Chiplets(ChipletsAir),
+    Core,
+    Chiplets,
 }
 
 impl MidenAir {
-    pub const CORE: Self = Self::Core(CoreAir);
-    pub const CHIPLETS: Self = Self::Chiplets(ChipletsAir);
+    pub const fn instance_index(self) -> usize {
+        match self {
+            Self::Core => 0,
+            Self::Chiplets => 1,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Core => "Core",
+            Self::Chiplets => "Chiplets",
+        }
+    }
+
+    pub const fn file_token(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Chiplets => "chiplets",
+        }
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        challenges: &Challenges<EF>,
+        public_values: &[Felt],
+        aux_inputs: &[Felt],
+    ) -> Result<EF, ReductionError> {
+        match self {
+            Self::Core => CoreAir.boundary_correction(challenges, public_values, &[]),
+            Self::Chiplets => {
+                ChipletsAir.boundary_correction(challenges, public_values, &[aux_inputs])
+            },
+        }
+    }
+}
+
+/// Supported AIRs in instance order.
+///
+/// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
+pub const AIRS: [MidenAir; 2] = [MidenAir::Core, MidenAir::Chiplets];
+
+pub const MIDEN_AIR_COUNT: usize = AIRS.len();
+
+/// Number of possible proof-order permutations.
+pub const PROOF_ORDER_COUNT: usize = factorial(MIDEN_AIR_COUNT);
+const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags must fit in u32");
+
+/// Smallest Merkle tree depth covering every proof-order tag.
+pub const PROOF_ORDER_REGISTRY_DEPTH: usize = ceil_log2(PROOF_ORDER_COUNT);
+
+const fn factorial(n: usize) -> usize {
+    let mut result = 1;
+    let mut factor = 2;
+    while factor <= n {
+        result *= factor;
+        factor += 1;
+    }
+    result
+}
+
+const fn ceil_log2(value: usize) -> usize {
+    assert!(value > 0, "ceil_log2 is undefined for zero");
+
+    let mut value = value - 1;
+    let mut result = 0;
+    while value > 0 {
+        value >>= 1;
+        result += 1;
+    }
+    result
+}
+
+/// Proof-order AIR permutation.
+///
+/// Proof order is sorted by `(log_trace_height, instance_index)`. The tag is the Lehmer rank of
+/// that permutation relative to [`AIRS`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOrder {
+    airs: [MidenAir; MIDEN_AIR_COUNT],
+    tag: u32,
+}
+
+impl ProofOrder {
+    pub fn new(airs: [MidenAir; MIDEN_AIR_COUNT]) -> Self {
+        assert_is_air_permutation(&airs);
+        let tag = lehmer_rank(&airs);
+        Self { airs, tag }
+    }
+
+    pub fn from_airs(airs: &[MidenAir]) -> Self {
+        let Ok(airs) = airs.try_into() else {
+            panic!("proof order must include every AIR exactly once");
+        };
+        Self::new(airs)
+    }
+
+    pub fn instance_order() -> Self {
+        Self::new(AIRS)
+    }
+
+    pub fn variants() -> Vec<Self> {
+        (0..PROOF_ORDER_COUNT).map(Self::from_rank).collect()
+    }
+
+    pub fn from_tag(tag: u32) -> Option<Self> {
+        let rank = tag as usize;
+        (rank < PROOF_ORDER_COUNT).then(|| Self::from_rank(rank))
+    }
+
+    pub fn from_instance_log_heights(log_heights: &[u8]) -> Self {
+        assert_eq!(log_heights.len(), AIRS.len(), "one log height is required per AIR");
+
+        let mut ordered: Vec<(MidenAir, u8)> =
+            AIRS.iter().copied().zip(log_heights.iter().copied()).collect();
+        ordered.sort_by_key(|(air, height)| (*height, air.instance_index()));
+
+        let mut airs = [AIRS[0]; MIDEN_AIR_COUNT];
+        for (dst, (air, _)) in airs.iter_mut().zip(ordered) {
+            *dst = air;
+        }
+        Self::new(airs)
+    }
+
+    pub fn airs(&self) -> &[MidenAir] {
+        &self.airs
+    }
+
+    pub fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    pub fn file_stem(&self) -> String {
+        let mut stem = String::from("constraints_eval_");
+        for (i, air) in self.airs.iter().copied().enumerate() {
+            if i > 0 {
+                stem.push_str("_then_");
+            }
+            stem.push_str(air.file_token());
+        }
+        stem
+    }
+
+    fn from_rank(rank: usize) -> Self {
+        debug_assert!(rank < PROOF_ORDER_COUNT);
+        debug_assert!(rank <= u32::MAX as usize);
+
+        let tag = rank as u32;
+        let mut rank = rank;
+        let mut remaining = AIRS.to_vec();
+        let mut airs = [AIRS[0]; MIDEN_AIR_COUNT];
+
+        for (i, slot) in airs.iter_mut().enumerate() {
+            let factor = factorial(MIDEN_AIR_COUNT - 1 - i);
+            let index = rank / factor;
+            rank %= factor;
+            *slot = remaining.remove(index);
+        }
+
+        Self { airs, tag }
+    }
+}
+
+fn assert_is_air_permutation(airs: &[MidenAir; MIDEN_AIR_COUNT]) {
+    let mut seen = [false; MIDEN_AIR_COUNT];
+    for air in airs {
+        let index = air.instance_index();
+        assert!(!seen[index], "proof order contains duplicate AIR: {air:?}");
+        seen[index] = true;
+    }
+}
+
+fn lehmer_rank(airs: &[MidenAir; MIDEN_AIR_COUNT]) -> u32 {
+    let mut rank = 0;
+    for i in 0..airs.len() {
+        let smaller_after = airs[i + 1..]
+            .iter()
+            .filter(|air| air.instance_index() < airs[i].instance_index())
+            .count();
+        rank += smaller_after as u32 * factorial(airs.len() - 1 - i) as u32;
+    }
+    rank
 }
 
 impl BaseAir<Felt> for MidenAir {
     fn width(&self) -> usize {
         match self {
-            Self::Core(a) => a.width(),
-            Self::Chiplets(a) => a.width(),
+            Self::Core => CoreAir.width(),
+            Self::Chiplets => ChipletsAir.width(),
         }
     }
 
@@ -483,8 +663,8 @@ impl BaseAir<Felt> for MidenAir {
 
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         match self {
-            Self::Core(a) => a.periodic_columns(),
-            Self::Chiplets(a) => a.periodic_columns(),
+            Self::Core => CoreAir.periodic_columns(),
+            Self::Chiplets => ChipletsAir.periodic_columns(),
         }
     }
 }
@@ -497,8 +677,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
 
     fn aux_width(&self) -> usize {
         match self {
-            Self::Core(a) => a.aux_width(),
-            Self::Chiplets(a) => a.aux_width(),
+            Self::Core => CoreAir.aux_width(),
+            Self::Chiplets => ChipletsAir.aux_width(),
         }
     }
 
@@ -530,8 +710,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
-            Self::Core(a) => a.eval(builder),
-            Self::Chiplets(a) => a.eval(builder),
+            Self::Core => CoreAir.eval(builder),
+            Self::Chiplets => ChipletsAir.eval(builder),
         }
     }
 }
@@ -542,36 +722,36 @@ where
 {
     fn num_columns(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_num_columns(),
-            Self::Chiplets(a) => a.lookup_num_columns(),
+            Self::Core => CoreAir.lookup_num_columns(),
+            Self::Chiplets => ChipletsAir.lookup_num_columns(),
         }
     }
 
     fn column_shape(&self) -> &[usize] {
         match self {
-            Self::Core(a) => a.lookup_column_shape(),
-            Self::Chiplets(a) => a.lookup_column_shape(),
+            Self::Core => CoreAir.lookup_column_shape(),
+            Self::Chiplets => ChipletsAir.lookup_column_shape(),
         }
     }
 
     fn max_message_width(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_max_message_width(),
-            Self::Chiplets(a) => a.lookup_max_message_width(),
+            Self::Core => CoreAir.lookup_max_message_width(),
+            Self::Chiplets => ChipletsAir.lookup_max_message_width(),
         }
     }
 
     fn num_bus_ids(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_num_bus_ids(),
-            Self::Chiplets(a) => a.lookup_num_bus_ids(),
+            Self::Core => CoreAir.lookup_num_bus_ids(),
+            Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
         }
     }
 
     fn eval(&self, builder: &mut LB) {
         match self {
-            Self::Core(a) => a.lookup_eval(builder),
-            Self::Chiplets(a) => a.lookup_eval(builder),
+            Self::Core => CoreAir.lookup_eval(builder),
+            Self::Chiplets => ChipletsAir.lookup_eval(builder),
         }
     }
 
@@ -580,8 +760,8 @@ where
         B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
     {
         match self {
-            Self::Core(a) => a.lookup_eval_boundary(boundary),
-            Self::Chiplets(a) => a.lookup_eval_boundary(boundary),
+            Self::Core => CoreAir.lookup_eval_boundary(boundary),
+            Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
         }
     }
 }
@@ -589,23 +769,20 @@ where
 // MIDEN MULTI-AIR
 // ================================================================================================
 
-/// The cross-AIR statement for the `(Core, Chiplets)` proof: owns the AIR
-/// collection in instance order and carries the LogUp reduction over the
-/// committed aux finals.
+/// The cross-AIR statement for the `(Core, Chiplets)` proof.
+///
+/// AIR instances come from [`AIRS`], and the external reduction sums the committed LogUp finals
+/// with the open-bus boundary corrections.
 ///
 /// Instance order is `[Core, Chiplets]`; every per-AIR slice follows that
 /// ordering.
 #[derive(Copy, Clone, Debug)]
-pub struct MidenMultiAir {
-    airs: [MidenAir; 2],
-}
+pub struct MidenMultiAir;
 
 impl MidenMultiAir {
-    /// Instance-order AIR collection: `[Core, Chiplets]`.
+    /// Construct the Miden multi-AIR statement marker.
     pub const fn new() -> Self {
-        Self {
-            airs: [MidenAir::CORE, MidenAir::CHIPLETS],
-        }
+        Self
     }
 }
 
@@ -619,7 +796,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     type Air = MidenAir;
 
     fn airs(&self) -> &[MidenAir] {
-        &self.airs
+        &AIRS
     }
 
     fn num_air_inputs(&self) -> usize {
@@ -641,8 +818,25 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         air_inputs: &[Felt],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
+        if aux_values.len() != AIRS.len() {
+            return Err(format!(
+                "expected aux values for {} AIRs, got {}",
+                AIRS.len(),
+                aux_values.len()
+            )
+            .into());
+        }
+        if log_trace_heights.len() != AIRS.len() {
+            return Err(format!(
+                "expected log heights for {} AIRs, got {}",
+                AIRS.len(),
+                log_trace_heights.len()
+            )
+            .into());
+        }
+
         let challenges = Challenges::<EF>::new(
             challenges[0],
             challenges[1],
@@ -650,12 +844,23 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             BusId::COUNT,
         );
 
-        let core_correction = CoreAir.boundary_correction(&challenges, air_inputs, &[])?;
-        let chiplets_correction =
-            ChipletsAir.boundary_correction(&challenges, air_inputs, &[aux_inputs])?;
+        let mut aux_sum = EF::ZERO;
+        let mut boundary_correction = EF::ZERO;
+        for (air, values) in AIRS.iter().copied().zip(aux_values.iter()) {
+            boundary_correction += air.boundary_correction(&challenges, air_inputs, aux_inputs)?;
+            let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
+            if values.len() != expected {
+                return Err(format!(
+                    "{} expects {expected} aux boundary values, got {}",
+                    air.name(),
+                    values.len()
+                )
+                .into());
+            }
+            aux_sum += values.iter().copied().sum::<EF>();
+        }
 
-        let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
-        Ok(vec![aux_sum + core_correction + chiplets_correction])
+        Ok(vec![aux_sum + boundary_correction])
     }
 }
 
@@ -666,9 +871,8 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 /// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
 /// running `EF` accumulator.
 ///
-/// Lets the boundary correction reuse the structured boundary emissions from
-/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
-/// instead of open-coding the three corrections a second time.
+/// Lets the boundary correction reuse the structured boundary emissions used by
+/// the debug walker instead of open-coding those interactions a second time.
 ///
 /// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
 /// are non-zero with overwhelming probability. A malformed/adversarial proof can still
@@ -732,10 +936,70 @@ mod tests {
     /// degree away from the declared value, the override must be updated.
     #[test]
     fn constraint_degree_override_matches_symbolic() {
-        for air in [MidenAir::CORE, MidenAir::CHIPLETS] {
+        for air in [MidenAir::Core, MidenAir::Chiplets] {
             let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn air_registry_order_matches_instance_indices() {
+        for (index, air) in AIRS.iter().copied().enumerate() {
+            assert_eq!(air.instance_index(), index);
+        }
+    }
+
+    #[test]
+    fn proof_order_constants_derive_from_air_count() {
+        assert_eq!(PROOF_ORDER_COUNT, ProofOrder::variants().len());
+        assert_eq!(PROOF_ORDER_REGISTRY_DEPTH, ceil_log2(PROOF_ORDER_COUNT));
+    }
+
+    #[test]
+    fn proof_order_count_is_factorial() {
+        assert_eq!(factorial(0), 1);
+        assert_eq!(factorial(1), 1);
+        assert_eq!(factorial(2), 2);
+        assert_eq!(factorial(3), 6);
+        assert_eq!(factorial(4), 24);
+    }
+
+    #[test]
+    fn registry_depth_is_ceil_log2() {
+        assert_eq!(ceil_log2(1), 0);
+        assert_eq!(ceil_log2(2), 1);
+        assert_eq!(ceil_log2(3), 2);
+        assert_eq!(ceil_log2(6), 3);
+        assert_eq!(ceil_log2(24), 5);
+    }
+
+    #[test]
+    fn proof_order_tags_use_lehmer_rank() {
+        let variants = ProofOrder::variants();
+
+        assert_eq!(variants.len(), PROOF_ORDER_COUNT);
+        assert_eq!(variants[0], ProofOrder::instance_order());
+        for (tag, order) in variants.into_iter().enumerate() {
+            assert_eq!(order.tag(), tag as u32);
+            assert_eq!(ProofOrder::from_tag(tag as u32), Some(order));
+        }
+        assert_eq!(ProofOrder::from_tag(PROOF_ORDER_COUNT as u32), None);
+    }
+
+    #[test]
+    fn proof_order_sorts_by_height_then_instance_index() {
+        assert_eq!(
+            ProofOrder::from_instance_log_heights(&[8, 9]),
+            ProofOrder::from_airs(&[MidenAir::Core, MidenAir::Chiplets])
+        );
+        assert_eq!(
+            ProofOrder::from_instance_log_heights(&[9, 8]),
+            ProofOrder::from_airs(&[MidenAir::Chiplets, MidenAir::Core])
+        );
+        assert_eq!(
+            ProofOrder::from_instance_log_heights(&[8, 8]),
+            ProofOrder::from_airs(&[MidenAir::Core, MidenAir::Chiplets])
+        );
     }
 }

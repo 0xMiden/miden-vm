@@ -3,13 +3,22 @@ use std::{array, sync::Arc};
 use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
-    Felt, WORD_SIZE,
+    Felt, WORD_SIZE, Word,
+    events::{EventId, EventName},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    precompile::PrecompileTranscriptState,
+    precompile::{
+        PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscriptState,
+        PrecompileVerifier, PrecompileVerifierRegistry,
+    },
     proof::HashFunction,
 };
+use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, ProcessorState, Program, ProgramInfo,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, prove_sync,
     recursive_verifier::{VerifierData, generate_advice_inputs},
@@ -73,6 +82,12 @@ fn stark_verifier_e2f4_with_kernel_single() {
     run_recursive_verifier(&data);
 }
 
+#[test]
+fn stark_verifier_e2f4_with_log_precompile_transcript() {
+    let data = generate_recursive_verifier_data_with_log_precompile();
+    run_recursive_verifier(&data);
+}
+
 // Helper function for recursive verification
 pub fn generate_recursive_verifier_data(
     source: &str,
@@ -133,6 +148,108 @@ pub fn generate_recursive_verifier_data(
     );
     let (_, proof_bytes, _precompile_requests) = proof.into_parts();
     generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
+}
+
+fn generate_recursive_verifier_data_with_log_precompile() -> VerifierData {
+    const EVENT_NAME: EventName = EventName::new("test::stark::log_precompile");
+
+    let event_id = EventId::from_name(EVENT_NAME);
+    let calldata = vec![1u8, 2, 3, 4];
+    let tag = Word::from([
+        event_id.as_felt(),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(7),
+    ]);
+    let comm = Word::from([
+        Felt::new_unchecked(43),
+        Felt::new_unchecked(62),
+        Felt::new_unchecked(24),
+        Felt::new_unchecked(1),
+    ]);
+    let commitment = PrecompileCommitment::new(tag, comm);
+    let source = format!(
+        "
+            use miden::core::sys
+
+            begin
+                emit.event(\"{EVENT_NAME}\")
+
+                push.{tag} push.{comm}
+                exec.sys::log_precompile_request
+
+                repeat.320
+                    swap dup.1 add
+                end
+                u32split drop
+            end
+        ",
+    );
+
+    let core_lib = CoreLibrary::default();
+    let program: Program = Assembler::default()
+        .with_package(core_lib.package(), miden_assembly::Linkage::Dynamic)
+        .unwrap()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let stack_inputs = stack_inputs_from_ints(fib_stack_inputs());
+    let advice_inputs = AdviceInputs::default();
+    let mut host = DefaultHost::default();
+    host.load_library(&core_lib).unwrap();
+    host.register_handler(EVENT_NAME, Arc::new(DummyLogPrecompileHandler { event_id, calldata }))
+        .unwrap();
+
+    let options = ProvingOptions::new(HashFunction::Poseidon2);
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .unwrap();
+    assert_eq!(proof.precompile_requests().len(), 1);
+
+    let verifier_registry = PrecompileVerifierRegistry::new()
+        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
+    let transcript = verifier_registry.requests_transcript(proof.precompile_requests()).unwrap();
+    assert_ne!(transcript.state(), PrecompileTranscriptState::default());
+
+    let pub_inputs = PublicInputs::new(
+        ProgramInfo::from(program),
+        stack_inputs,
+        stack_outputs,
+        transcript.state(),
+    );
+    generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
+}
+
+#[derive(Clone)]
+struct DummyLogPrecompileHandler {
+    event_id: EventId,
+    calldata: Vec<u8>,
+}
+
+impl EventHandler for DummyLogPrecompileHandler {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(vec![AdviceMutation::extend_precompile_requests([PrecompileRequest::new(
+            self.event_id,
+            self.calldata.clone(),
+        )])])
+    }
+}
+
+#[derive(Clone)]
+struct DummyLogPrecompileVerifier {
+    commitment: PrecompileCommitment,
+}
+
+impl PrecompileVerifier for DummyLogPrecompileVerifier {
+    fn verify(&self, _calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
+        Ok(self.commitment)
+    }
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.
@@ -203,14 +320,7 @@ fn fib_stack_inputs() -> Vec<u64> {
 // 255 = MAX_AUX_INPUTS / WORD_SIZE is the maximum the Rust `Statement` accepts.
 #[case(255)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // init_seed expects [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3,
-    // ...]
-    let log_core_trace_length = 10_u64;
-    let log_chiplets_trace_length = 10_u64;
-    // Relation digest values are arbitrary here; the test only validates VLPI reduction.
-    let rd = [1_u64, 2, 3, 4];
-    let initial_stack =
-        vec![log_core_trace_length, log_chiplets_trace_length, rd[0], rd[1], rd[2], rd[3]];
+    let initial_stack = vec![];
 
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -258,6 +368,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         use miden::core::sys::vm::public_inputs
 
         begin
+            push.10 exec.constants::set_core_trace_length_log
+            push.10 exec.constants::set_chiplets_trace_length_log
+            push.10 exec.constants::set_trace_length_log
+            push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end

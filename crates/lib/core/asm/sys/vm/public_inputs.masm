@@ -13,7 +13,7 @@ use miden::core::crypto::hashes::poseidon2
 # Memory layout populated by this module (growing backward from AUX_RAND_ELEM_PTR):
 #
 #   pi_ptr -->  [ FLPI: 40 base felts as 40 EF slots  ]   load_public_inputs
-#               [ VLPI: reduced kernel value (1 word) ]   reduce_variable_length_public_inputs
+#               [ VLPI: reduced kernel value (1 word) ]   finalize_kernel_reduction
 #   anchor -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   (loaded ND here, verified in random_coin)
 #
 # The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
@@ -23,9 +23,9 @@ use miden::core::crypto::hashes::poseidon2
 #
 # Advice stack consumption order:
 #   1. fixed-length PI (40 base felts)         -- load_public_inputs
-#   2. num_kernel_proc_digests (1 felt)        -- reduce_variable_length_public_inputs
-#   3. kernel digests (8 * N base felts)       -- reduce_variable_length_public_inputs
-#   4. aux randomness (4 base felts)           -- reduce_variable_length_public_inputs
+#   2. num_kernel_proc_digests (1 felt)        -- load_kernel_digests
+#   3. kernel digests (8 * N base felts)       -- load_kernel_digests
+#   4. aux randomness (4 base felts)           -- finalize_kernel_reduction
 #
 # CONSTANTS
 # =================================================================================================
@@ -40,10 +40,20 @@ const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 # The reduced kernel value occupies 1 word (4 base felts) in the ACE READ section.
 const NUM_VAR_LEN_PI_GROUPS = 1
 
+# Number of AIR instances in the Miden VM statement.
+#
+# This MASM verifier is currently specialized to the Core + Chiplets pair. Adding another AIR must
+# update the AIR-shape absorption, proof-order tag derivation, OOD widths, aux-final layout, and ACE
+# selector offsets together.
+const NUM_MIDEN_AIRS = 2
+
 # Upper bound on the kernel-digest statement inputs (`MultiAir::max_aux_inputs`), in field
 # elements: `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. Absorbed into the transcript by
 # `MultiAir::observe`, so the MASM must observe the same value.
 const MAX_AUX_INPUTS = 1020
+
+# Upper exclusive bound for the number of kernel procedure digests.
+const MAX_KERNEL_PROC_DIGESTS_PLUS_ONE = 256
 
 
 # CONSTANTS GETTERS
@@ -69,7 +79,8 @@ end
 #!        [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ]
 #!    is absorbed in 8-element blocks, with the trailing partial block buffered via
 #!    `random_coin::observe_felt`.
-#! 4. Loading the auxiliary randomness from the advice stack and reducing the kernel digests; the
+#! 4. Observing the Miden AIR shape in the transcript.
+#! 5. Loading the auxiliary randomness from the advice stack and reducing the kernel digests; the
 #!    reduced result overwrites the start of the kernel-digest region (in the ACE READ section).
 #!
 #! Note that the fixed length public inputs are stored as extension field elements, while the
@@ -77,9 +88,9 @@ end
 #! reduction). Absorption reads back the natural-order elements from memory so it is decoupled
 #! from those storage layouts.
 #!
-#! POSTCONDITION: the transcript input buffer holds the unflushed tail of the absorbed stream;
-#! the generic verifier observes the instance shape and main-trace commitment next (continuing the
-#! same buffered duplex) and flushes before the first sample.
+#! POSTCONDITION: the transcript input buffer holds the unflushed tail of the statement and shape
+#! observations. The generic verifier appends the main-trace commitment next, then flushes before
+#! the first sample.
 #!
 #! Input:
 #!      - Operand stack: [...]
@@ -107,7 +118,11 @@ pub proc process_public_inputs
     exec.absorb_public_inputs
     # => [...]
 
-    # 5) Load auxiliary randomness and reduce the kernel digests.
+    # 5) Observe the Miden AIR shape.
+    exec.observe_miden_air_shape
+    # => [...]
+
+    # 6) Load auxiliary randomness and reduce the kernel digests.
     exec.finalize_kernel_reduction
     # => [...]
 end
@@ -167,7 +182,7 @@ proc load_kernel_digests
     # MAX_AUX_INPUTS / WORD_SIZE = 255 kernel digests. (u32assert also bounds the load loop below.)
     exec.constants::tmp3 mem_load
     u32assert.err="number of kernel procedure digests must fit in a u32"
-    u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
+    u32lt.MAX_KERNEL_PROC_DIGESTS_PLUS_ONE assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
 
     # Set up dummy state words with the destination pointer at position 12 for adv_pipe,
     # and the absorb-scratch cursor below it.
@@ -214,8 +229,8 @@ end
 #!
 #! Completes the scratch copy of the stream (lengths and FLPI; the kernel-felt section was written
 #! by `load_kernel_digests`), then absorbs it in 8-element blocks via `mem_stream` with the sponge
-#! state on the stack, leaving the trailing partial block (< 8) buffered via `observe_felt` so the
-#! verifier continues the same stream with the instance shape and main-trace commitment.
+#! state on the stack. The trailing partial block (< 8) stays buffered; `process_public_inputs`
+#! appends the AIR shape, and the generic verifier appends the main-trace commitment.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -287,6 +302,19 @@ proc absorb_public_inputs
     drop drop
 end
 
+#! Observe the Miden AIR shape into the Fiat-Shamir transcript.
+#!
+#! This matches the framework's shape observation: instance count followed by per-AIR log heights in
+#! instance order.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc observe_miden_air_shape
+    push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
+    exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
+end
+
 #! Loads the auxiliary randomness from the advice stack and reduces the kernel digests.
 #!
 #! Loads `[beta0, beta1, alpha0, alpha1]` (word-aligned for `horner_eval_ext`), precomputes
@@ -331,8 +359,8 @@ end
 #! `kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)` is stored as
 #! [kernel_corr0, kernel_corr1, 0, 0] at the original `digests_ptr`.
 proc reduce_kernel_digests
-    # Assert that the number of kernel procedures is at most 1023
-    dup u32lt.1024 assert.err="number of kernel procedures must be less than 1024"
+    # The statement admits at most 255 kernel procedure digests.
+    dup u32lt.MAX_KERNEL_PROC_DIGESTS_PLUS_ONE assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
 
     # Save the original digests_ptr in TMP2 so we can store the result there later.
     # (mem_stream will advance digests_ptr during the Horner loop.)
@@ -476,9 +504,8 @@ proc reduce_kernel_digests
     drop
     # => [kernel_corr0, kernel_corr1, ...]
 
-    # Store the result at `digests_ptr` as `[kernel_corr0, kernel_corr1, 0, 0]`
-    # Note that `digests_ptr` points to the group that we just reduced above and hence it is safe
-    # to overwrite it with the result.
+    # Store the result at `digests_ptr` as `[kernel_corr0, kernel_corr1, 0, 0]`.
+    # `digests_ptr` points to the group reduced above, so overwriting it is safe.
     push.0.0
     movup.3
     movup.3

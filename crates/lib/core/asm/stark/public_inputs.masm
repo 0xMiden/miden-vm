@@ -5,7 +5,8 @@ use miden::core::stark::constants
 #! This is a generic dispatch procedure that calls the instance-specific implementation
 #! via `dynexec`. The instance-specific implementation loads fixed-length and variable-length
 #! public inputs from the advice stack, reduces the variable-length inputs using auxiliary
-#! randomness, and stores everything into the ACE READ section.
+#! randomness, stores everything into the ACE READ section, and appends any relation-specific
+#! transcript items that precede the main-trace commitment.
 #!
 #! This involves:
 #!

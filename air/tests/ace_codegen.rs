@@ -15,12 +15,11 @@ use miden_crypto::{
 
 #[test]
 fn core_air_dag_matches_manual_eval() {
-    let air = MidenAir::CORE;
+    let air = MidenAir::Core;
     let config = AceConfig {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -58,18 +57,16 @@ fn core_air_dag_matches_manual_eval() {
 
 #[test]
 fn core_air_dag_rejects_mismatched_layout() {
-    let air = MidenAir::CORE;
+    let air = MidenAir::Core;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
 
     let dag = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, dag_config).unwrap().dag;
@@ -86,12 +83,11 @@ fn core_air_dag_rejects_mismatched_layout() {
 
 #[test]
 fn chiplets_air_ace_rows() {
-    let air = MidenAir::CHIPLETS;
+    let air = MidenAir::Chiplets;
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
     };
 
     let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
@@ -101,7 +97,7 @@ fn chiplets_air_ace_rows() {
     let total_rows = read_rows + eval_rows;
 
     eprintln!(
-        "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
+        "ACE chiplet rows (MidenAir::Chiplets): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,
         total_rows,
@@ -117,11 +113,10 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
     };
 
     let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::Core, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -148,11 +143,10 @@ fn quotient_next_inputs_do_not_affect_eval() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
     };
 
     let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::Core, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -188,16 +182,17 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
 #[test]
 fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
-    use miden_air::ace::build_multi_air_ace_circuit;
+    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
     };
 
-    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let circuit =
+        build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &ProofOrder::instance_order())
+            .expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
     // Combined main width is each per-AIR width aligned to LMCS rate (8 for Poseidon2)
@@ -213,50 +208,52 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     );
     assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
 
-    for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {
-        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
-        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
-    }
+    let beta = layout
+        .index(InputKey::MultiAirBeta)
+        .expect("multi-air layout exposes folding beta");
+    assert!(beta < layout.total_inputs, "beta slot must be within layout bounds");
 }
 
 #[test]
 fn multi_air_ace_circuit_emits_consistently() {
-    use miden_air::ace::build_multi_air_ace_circuit;
+    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
     };
 
-    // Just check the ACE encoding is well-formed (size_in_felt is rate-aligned).
-    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
-    let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
-    assert!(
-        encoded.size_in_felt().is_multiple_of(8),
-        "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
-    );
+    for order in ProofOrder::variants() {
+        // Check that the ACE encoding is well-formed and rate-aligned.
+        let circuit =
+            build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order).expect("ACE circuit");
+        let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
+        assert!(
+            encoded.size_in_felt().is_multiple_of(8),
+            "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
+        );
+    }
 }
 
 #[test]
 fn multi_air_ace_circuit_evaluates_without_panic() {
-    use miden_air::ace::build_multi_air_ace_circuit;
+    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
     };
 
-    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let circuit =
+        build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &ProofOrder::instance_order())
+            .expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
     // Fill all input slots with deterministic non-zero values. We don't expect the
-    // circuit to evaluate to zero for arbitrary inputs — only that every slot
-    // referenced by the DAG is in-range (i.e., no `wiring bus` panic), which is the
-    // failure mode that surfaces if the chiplets-side index rewrite was wrong.
+    // circuit to evaluate to zero for arbitrary inputs; this only checks that every
+    // DAG input reference is in range.
     let inputs: Vec<QuadFelt> = fill_inputs(layout);
     let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
 }

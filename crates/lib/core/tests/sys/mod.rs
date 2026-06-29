@@ -33,8 +33,9 @@ fn truncate_stack() {
 #[test]
 fn reduce_kernel_digests_upper_bound() {
     // init_seed contract:
-    //   Stack: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
-    //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
+    //   Stack: unchanged
+    //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, trace height,
+    //           relation digest
     //
     // process_public_inputs advice stack (consumed in order):
     //   1. load_public_inputs: 40 fixed-length PI felts (5 iterations of 8)
@@ -42,7 +43,7 @@ fn reduce_kernel_digests_upper_bound() {
     //        - 1 felt (num_kernel_proc_digests)
     //        - num_kernel_proc_digests * 8 felts (digests via adv_pipe)
     //        - 4 felts (aux randomness via adv_loadw)
-    //   3. reduce_kernel_digests asserts num_kernel_proc_digests < 1024
+    //   3. kernel digest count must fit `MultiAir::max_aux_inputs`
     let source = "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
@@ -52,20 +53,21 @@ fn reduce_kernel_digests_upper_bound() {
             push.0  exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10 push.10
+            push.10 exec.constants::set_trace_length_log
+            push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end
     ";
 
-    let num_kernel_proc_digests = 1024_usize;
+    let num_kernel_proc_digests = 256_usize;
     let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
     let fixed_length_public_inputs = vec![0_u64; 40];
     let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
     let auxiliary_rand_values = [0_u64; 4];
 
     // Advice layout (consumed top-to-bottom):
-    //   40 fixed-len PI, 1 num_kernel_proc_digests, 8192 digest felts, 4 aux rand
+    //   40 fixed-len PI, 1 num_kernel_proc_digests, digest felts, 4 aux rand
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&fixed_length_public_inputs);
     advice_stack.push(num_kernel_proc_digests as u64);

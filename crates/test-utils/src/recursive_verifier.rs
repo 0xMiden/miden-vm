@@ -1,14 +1,12 @@
-//! Advice provision for the recursive STARK verifier.
+//! Advice provision for the MASM recursive STARK verifier.
 //!
-//! This module mirrors the Fiat-Shamir protocol implemented in MASM
-//! (`crates/lib/core/asm/stark/`) on the Rust side. It deserializes a STARK proof,
-//! replays the verifier transcript to extract commitments, challenges, and openings,
-//! then packs them into the advice inputs (initial stack, advice stack, Merkle store,
-//! and advice map) that the MASM recursive verifier consumes.
+//! The Rust side parses the proof transcript, then provides the stack, Merkle store,
+//! and advice-map entries consumed by `crates/lib/core/asm/stark`.
 //!
 //! The advice stack ordering must match the MASM consumption order exactly:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
+//!   Miden AIR heights ->
 //!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
 //!   aux randomness -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
@@ -22,7 +20,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::{
+    MIDEN_AIR_COUNT, MidenMultiAir, ProofOrder, PublicInputs, Statement,
+    ace::build_recursive_verifier_ace_circuit, config,
+};
 use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
@@ -69,6 +70,11 @@ type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
 /// Partial trees + advice map entries returned by single batch proof conversion.
 type BatchMerkleResult = (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>);
 
+struct MidenTraceHeights {
+    instance_order: [usize; MIDEN_AIR_COUNT],
+    proof_order: ProofOrder,
+}
+
 // PUBLIC API
 // ================================================================================================
 
@@ -80,7 +86,6 @@ pub fn generate_advice_inputs(
     let params = config::pcs_params();
     let config = config::poseidon2_config(params);
 
-    // 1. Deserialize STARK proof bytes.
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof: StarkProofData<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
@@ -90,14 +95,10 @@ pub fn generate_advice_inputs(
     )
     .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
-    // 2. Build domain-separated challenger. Statement-owned inputs (fixed public values and kernel
-    //    digests) plus the per-AIR trace heights are absorbed by the lifted verifier internally
-    //    when the transcript is parsed.
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    // 3. Build the statement and verifier instance.
     let statement = Statement::<Felt, QuadFelt, _>::new(
         MidenMultiAir::new(),
         public_values,
@@ -107,29 +108,31 @@ pub fn generate_advice_inputs(
     let verifier_instance = VerifierInstance::new(&config, &statement, None)
         .expect("Miden AIRs declare no preprocessed columns");
 
-    // 4. Parse STARK transcript (mirrors Fiat-Shamir protocol).
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
 
-    // Per-AIR log trace heights are in instance order: [Core, Chiplets].
-    let log_heights = stark.log_trace_heights();
-    let log_core_trace_height = log_heights[0] as usize;
-    let log_chiplets_trace_height = log_heights[1] as usize;
+    let heights = miden_trace_heights(&stark)?;
 
-    // 5. Reconstruct kernel digests as Words for advice building.
     let kernel_digests: Vec<Word> = kernel_felts
         .chunks_exact(4)
         .map(|c| Word::new([c[0], c[1], c[2], c[3]]))
         .collect();
 
-    // 6. Build advice from parsed transcript.
-    build_advice(
-        &config,
-        &stark,
-        log_core_trace_height,
-        log_chiplets_trace_height,
-        pub_inputs,
-        &kernel_digests,
-    )
+    build_advice(&config, &stark, heights, pub_inputs, &kernel_digests)
+}
+
+fn miden_trace_heights(
+    stark: &StarkProof<Challenge, P2Lmcs>,
+) -> Result<MidenTraceHeights, VerifierError> {
+    let log_heights = stark.log_trace_heights();
+    let Ok(log_heights): Result<[u8; MIDEN_AIR_COUNT], _> = log_heights.try_into() else {
+        return Err(VerifierError::InvalidProofShape("unexpected number of AIR log heights"));
+    };
+    let instance_order = log_heights.map(usize::from);
+
+    Ok(MidenTraceHeights {
+        instance_order,
+        proof_order: ProofOrder::from_instance_log_heights(&log_heights),
+    })
 }
 
 // ADVICE CONSTRUCTION
@@ -137,31 +140,24 @@ pub fn generate_advice_inputs(
 
 /// Packs the parsed STARK transcript into the advice inputs consumed by the MASM verifier.
 ///
-/// The initial operand stack receives `[log_core_trace_height]` and `[log_chiplets_trace_height]`.
-/// The advice stack receives security parameters first, then all remaining data
-/// in the order listed in the module doc.
+/// The initial operand stack is empty. The advice stack receives security parameters first, then
+/// the per-AIR heights and all remaining data in the order listed in the module doc.
 fn build_advice(
     config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
-    log_core_trace_height: usize,
-    log_chiplets_trace_height: usize,
+    heights: MidenTraceHeights,
     pub_inputs: PublicInputs,
     kernel_digests: &[Word],
 ) -> Result<VerifierData, VerifierError> {
     let pcs = &stark.pcs_proof;
+    if stark.all_aux_values.len() != MIDEN_AIR_COUNT {
+        return Err(VerifierError::InvalidProofShape("unexpected number of aux-final groups"));
+    }
 
-    // --- initial stack ---
-    // `[log_core, log_chip]` with log_core on top. Security parameters are on the advice stack.
-    // `StackInputs::try_from_ints` puts `vec[0]` on top.
-    let initial_stack = vec![log_core_trace_height as u64, log_chiplets_trace_height as u64];
-
-    // --- advice stack ---
+    let initial_stack = vec![];
     let mut advice_stack = Vec::new();
 
-    // 0. Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
-    //    Consumed first by load_security_params in the specific verifier. num_queries is the
-    //    configured protocol parameter, not the potentially deduplicated count (e.g.
-    //    tree_indices.len())
+    // Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
     let params = config::pcs_params();
     let num_queries = params.num_queries();
     advice_stack.push(num_queries as u64);
@@ -171,24 +167,23 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Fixed-length public inputs.
+    for height in heights.instance_order {
+        advice_stack.push(height as u64);
+    }
+
     let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
     advice_stack.extend_from_slice(&fixed_len_inputs);
 
-    // 2. Number of kernel procedure digests.
-    let num_kernel_proc_digests = kernel_digests.len();
-    advice_stack.push(num_kernel_proc_digests as u64);
+    advice_stack.push(kernel_digests.len() as u64);
 
-    // 3. Kernel procedure digest elements (each digest padded to 8 elements, reversed).
     let kernel_advice = build_kernel_digest_advice(kernel_digests);
     advice_stack.extend_from_slice(&kernel_advice);
 
-    // 4. Auxiliary randomness [beta0, beta1, alpha0, alpha1].
-    assert!(
-        stark.randomness.len() >= 2,
-        "expected at least 2 randomness challenges (alpha, beta), got {}",
-        stark.randomness.len()
-    );
+    if stark.randomness.len() < 2 {
+        return Err(VerifierError::InvalidProofShape(
+            "expected at least two randomness challenges",
+        ));
+    }
     let alpha = stark.randomness[0];
     let beta = stark.randomness[1];
     let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
@@ -200,51 +195,37 @@ fn build_advice(
         alpha_coeffs[1].as_canonical_u64(),
     ]);
 
-    // 5. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
-
-    // 6. Aux trace commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-    // 7. Aux finals (bus boundary values), one slot per AIR in proof_order; MASM swaps to
-    //    caller_order if needed.
     for aux_values in &stark.all_aux_values {
         advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
     }
 
-    // 8. Quotient commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.quotient_commit));
 
-    // 9. Deep alpha (2 felts) -- the DEEP column-batching challenge.
     let deep_alpha = pcs.deep_proof.challenge_columns;
     let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
     advice_stack
         .extend_from_slice(&[deep_coeffs[1].as_canonical_u64(), deep_coeffs[0].as_canonical_u64()]);
 
-    // 10. OOD evaluations.
     append_ood_evaluations(&mut advice_stack, pcs);
 
-    // 11. DEEP PoW witness.
     advice_stack.push(pcs.deep_proof.pow_witness.as_canonical_u64());
 
-    // 12. FRI layer commitments + per-round PoW witnesses.
     for round in &pcs.fri_proof.rounds {
         advice_stack.extend_from_slice(&commitment_to_u64s(round.commitment));
         advice_stack.push(round.pow_witness.as_canonical_u64());
     }
 
-    // 13. FRI remainder polynomial (already in descending degree order from the prover, matching
-    //     the order observed into the Fiat-Shamir transcript).
     let final_poly = &pcs.fri_proof.final_poly;
     let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
     let remainder_u64s: Vec<u64> = remainder_base.iter().map(Felt::as_canonical_u64).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
 
-    // 14. Query PoW witness.
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
-    // --- Merkle data ---
-    let (store, advice_map) = build_merkle_data(config, stark)?;
+    let (store, advice_map) = build_merkle_data(config, stark, &heights.proof_order)?;
 
     Ok(VerifierData {
         initial_stack,
@@ -300,6 +281,7 @@ where
 fn build_merkle_data(
     config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
+    proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &stark.pcs_proof;
     let lmcs = config.lmcs();
@@ -325,8 +307,25 @@ fn build_merkle_data(
     for tree in &partial_trees {
         store.extend(tree.inner_nodes());
     }
+    extend_ace_registry_store(&mut store);
+    extend_ace_circuit_advice(&mut advice_map, proof_order)?;
 
     Ok((store, advice_map))
+}
+
+fn extend_ace_registry_store(store: &mut MerkleStore) {
+    let registry_tree = config::ace_circuit_registry_tree();
+    store.extend(registry_tree.inner_nodes());
+}
+
+fn extend_ace_circuit_advice(
+    advice_map: &mut Vec<(Word, Vec<Felt>)>,
+    proof_order: &ProofOrder,
+) -> Result<(), VerifierError> {
+    let circuit = build_recursive_verifier_ace_circuit(proof_order)
+        .map_err(|_| VerifierError::InvalidProofShape("failed to build recursive ACE circuit"))?;
+    advice_map.push((circuit.commitment, circuit.instructions));
+    Ok(())
 }
 
 /// Convert a `BatchProof` into `PartialMerkleTree` entries and advice map entries.

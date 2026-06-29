@@ -38,8 +38,8 @@ const LDE_DOMAIN_GEN_PTR = 3223322626
 ### Address to store the number of FRI queries
 const NUM_QUERIES_PTR = 3223322628
 
-### Address to store the size of the FRI remainder polynomial, which is basically the number of its
-### coefficients or equivalently its degree plus one.
+### Address to store the size of the FRI remainder polynomial: the number of coefficients,
+### equivalently its degree plus one.
 const REMAINDER_POLY_SIZE_PTR = 3223322629
 
 ### Address to store the number of FRI folded oracles
@@ -59,8 +59,7 @@ const FRI_QUERIES_ADDRESS_PTR = 3223322633
 ### Used for the lifted-domain math (LDE size, max-AIR selectors, vanishing).
 const TRACE_LENGTH_LOG_PTR = 3223322634
 
-### Per-AIR log heights — stored separately (not as min/max) so MASM can derive the
-### proof_order permutation locally for the β-fold and per-AIR selectors.
+### Per-AIR log heights, kept so MASM can derive proof order and lifted selectors.
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
 
@@ -145,9 +144,13 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 
-### Scratch buffer (64 felts) used by `swap_air_regions_if_chip_first` to hold the
-### smaller AIR's main block during the swap.
-const SWAP_SCRATCH_PTR = 3223322764
+### Proof-order tags are Lehmer ranks over [Core, Chiplets].
+const ORDER_TAG_COUNT = 2
+const ORDER_TAG_PTR = 3223322764
+
+### Relation metadata for this verifier instance.
+const RELATION_DIGEST_PTR = 3223322768
+const ACE_REGISTRY_ROOT_PTR = 3223322772
 
 ### Scratch buffer for gathering the Fiat-Shamir public-input stream before block absorption.
 ### Sized for the max stream length (43 + MAX_AUX_INPUTS = 1063 felts); only live during
@@ -195,14 +198,14 @@ const AUX_RAND_ELEM_PTR = 3225419776
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
+### One LogUp final per AIR, stored in proof order.
 const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
 
-### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
+### Auxiliary inputs for ACE (stark vars), 17 EF slots plus one padding EF slot = 36 base felts:
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
-###   slots 10-11: multi_air_beta_{core,chip}
-###   slots 12-14: is_{first,last,transition}_core
-###   slots 15-17: is_{first,last,transition}_chip
+###   slot 10:     multi_air_beta
+###   slots 11-13: is_{first,last,transition}_core
+###   slots 14-16: is_{first,last,transition}_chip
 const AUXILIARY_ACE_INPUTS_PTR = 3225420232   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
@@ -503,8 +506,25 @@ pub proc tmp4
     push.TMP4
 end
 
-pub proc swap_scratch_ptr
-    push.SWAP_SCRATCH_PTR
+pub proc set_order_tag
+    push.ORDER_TAG_PTR mem_store
+end
+
+pub proc get_order_tag
+    push.ORDER_TAG_PTR mem_load
+end
+
+pub proc assert_valid_order_tag
+    push.ORDER_TAG_PTR mem_load
+    u32lt.ORDER_TAG_COUNT assert.err="invalid order tag"
+end
+
+pub proc relation_digest_ptr
+    push.RELATION_DIGEST_PTR
+end
+
+pub proc ace_registry_root_ptr
+    push.ACE_REGISTRY_ROOT_PTR
 end
 
 pub proc absorb_scratch_ptr

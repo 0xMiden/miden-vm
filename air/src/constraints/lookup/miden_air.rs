@@ -6,14 +6,13 @@ use alloc::vec::Vec;
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use crate::{MIDEN_AIR_COUNT, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Number of committed final aux values in the multi-AIR proof shape: Core final at slot 0
-/// and Chiplets final at slot 1.
-pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
+/// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 
 // BOUNDARY EMITTERS
 // ================================================================================================
@@ -176,7 +175,7 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::CORE, layout)
+        ValidateLookupAir::validate(&MidenAir::Core, layout)
             .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
     }
 
@@ -194,7 +193,7 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::CHIPLETS, layout)
+        ValidateLookupAir::validate(&MidenAir::Chiplets, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
     }
 
@@ -218,7 +217,7 @@ mod tests {
         );
 
         let _ = check_trace_balance(
-            &MidenAir::CORE,
+            &MidenAir::Core,
             &main_trace,
             &periodic,
             &publics,

@@ -1,5 +1,6 @@
-use super::InputKey;
+use super::{InputKey, SELECTORS_PER_AIR};
 use crate::EXT_DEGREE;
+use core::num::NonZeroUsize;
 
 /// A contiguous region of inputs within the ACE READ layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +27,10 @@ pub struct InputCounts {
     pub num_aux_boundary: usize,
     /// Number of public inputs.
     pub num_public: usize,
-    /// Number of variable-length public input (VLPI) reduction slots (in EF elements).
-    /// This is derived from `AceConfig::num_vlpi_groups` by the layout policy:
-    /// MASM expands each group to 2 EF slots (word-aligned); Native uses 1 per group.
+    /// Width of the VLPI reduction region, in EF slots.
+    ///
+    /// This is derived from `AceConfig::num_vlpi_groups`: MASM uses 2 EF slots per
+    /// group for word alignment, while Native uses 1 EF slot per group.
     pub num_vlpi: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
@@ -76,7 +78,7 @@ pub(crate) struct LayoutRegions {
 /// variable enters the verifier expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StarkVarIndices {
-    // -- Extension-field values (slots 0-5) --
+    // -- Extension-field values (slots 0-6) --
     /// Composition challenge `alpha` for folding constraints.
     pub alpha: usize,
     /// `zeta^N` where N is the trace length.
@@ -100,19 +102,21 @@ pub(crate) struct StarkVarIndices {
     /// `s0 = offset^N` (first chunk shift).
     pub s0: usize,
 
-    // -- Multi-AIR additions (only present when `AceConfig::is_multi_air`) --
-    /// β coefficient for Core in `combined = mab_core · core_acc + mab_chip · chip_acc`.
-    /// The verifier sets `(mab_core, mab_chip) = (β, 1)` or `(1, β)` per proof_order.
-    pub multi_air_beta_core: Option<usize>,
-    pub multi_air_beta_chip: Option<usize>,
-    /// Per-AIR lifted selectors for Core (at `z^{r_core}`).
-    pub is_first_core: Option<usize>,
-    pub is_last_core: Option<usize>,
-    pub is_transition_core: Option<usize>,
-    /// Per-AIR lifted selectors for Chiplets (at `z^{r_chip}`).
-    pub is_first_chip: Option<usize>,
-    pub is_last_chip: Option<usize>,
-    pub is_transition_chip: Option<usize>,
+    // -- Multi-AIR additions --
+    /// Extra slots present only for a multi-AIR layout.
+    pub multi_air: Option<MultiAirIndices>,
+}
+
+/// Stark-var slots added by a multi-AIR layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MultiAirIndices {
+    /// Number of AIR instances represented in the multi-AIR layout.
+    pub air_count: NonZeroUsize,
+    /// Multi-AIR beta challenge slot.
+    pub beta: usize,
+    /// First per-AIR selector slot. `SELECTORS_PER_AIR` slots are allocated per AIR instance:
+    /// first-row, last-row, transition.
+    pub selector_start: usize,
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -203,29 +207,11 @@ impl InputLayout {
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);
         check("s0", self.stark.s0);
-        if let Some(idx) = self.stark.multi_air_beta_core {
-            check("multi_air_beta_core", idx);
-        }
-        if let Some(idx) = self.stark.multi_air_beta_chip {
-            check("multi_air_beta_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_first_core {
-            check("is_first_core", idx);
-        }
-        if let Some(idx) = self.stark.is_last_core {
-            check("is_last_core", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_core {
-            check("is_transition_core", idx);
-        }
-        if let Some(idx) = self.stark.is_first_chip {
-            check("is_first_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_last_chip {
-            check("is_last_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_chip {
-            check("is_transition_chip", idx);
+        if let Some(multi_air) = self.stark.multi_air {
+            check("multi_air_beta", multi_air.beta);
+            for i in 0..(multi_air.air_count.get() * SELECTORS_PER_AIR) {
+                check("air_selector", multi_air.selector_start + i);
+            }
         }
 
         let rand_start = self.regions.randomness.offset;
@@ -238,5 +224,21 @@ impl InputLayout {
             self.aux_rand_beta >= rand_start && self.aux_rand_beta < rand_end,
             "aux_rand_beta out of randomness region"
         );
+    }
+}
+
+impl StarkVarIndices {
+    pub(crate) fn multi_air_beta_index(&self) -> Option<usize> {
+        self.multi_air.map(|multi_air| multi_air.beta)
+    }
+
+    pub(crate) fn air_selector_index(
+        &self,
+        air_index: usize,
+        selector_offset: usize,
+    ) -> Option<usize> {
+        let multi_air = self.multi_air?;
+        (air_index < multi_air.air_count.get() && selector_offset < SELECTORS_PER_AIR)
+            .then_some(multi_air.selector_start + air_index * SELECTORS_PER_AIR + selector_offset)
     }
 }

@@ -45,11 +45,6 @@ pub struct AceConfig {
     pub num_vlpi_groups: usize,
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
-    /// Whether this circuit is a multi-AIR combined circuit. When `true`, the
-    /// stark-vars region reserves additional EF slots for the multi-AIR β
-    /// coefficients (one per AIR) and per-AIR lifted selector triples (one per
-    /// AIR). Default: `false` (single-AIR layout).
-    pub is_multi_air: bool,
 }
 
 /// Output of the ACE codegen pipeline (layout + DAG).
@@ -93,11 +88,9 @@ where
 {
     let periodic_columns = air.periodic_columns();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
-    let layout = match (config.layout, config.is_multi_air) {
-        (LayoutKind::Native, false) => InputLayout::new(counts),
-        (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
-        (LayoutKind::Native, true) => InputLayout::new_multi_air(counts),
-        (LayoutKind::Masm, true) => InputLayout::new_masm_multi_air(counts),
+    let layout = match config.layout {
+        LayoutKind::Native => InputLayout::new(counts),
+        LayoutKind::Masm => InputLayout::new_masm(counts),
     };
     layout.validate();
 

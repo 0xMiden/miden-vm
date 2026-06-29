@@ -124,7 +124,6 @@ fn test_verifier_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -167,7 +166,6 @@ fn test_emitted_circuit_matches_dag_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -186,7 +184,6 @@ fn test_encoded_circuit_structure() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
