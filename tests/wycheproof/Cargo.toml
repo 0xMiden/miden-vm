@@ -7,6 +7,9 @@ repository.workspace   = true
 rust-version.workspace = true
 version.workspace      = true
 
+[lib]
+doctest = false
+
 [dev-dependencies]
 ed25519-dalek       = { workspace = true }
 hex                 = { features = ["alloc"], workspace = true }

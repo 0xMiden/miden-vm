@@ -1081,6 +1081,45 @@ fn test_smt_leaf_try_from_elements_invalid_length() {
     assert_matches!(result, Err(SmtLeafError::DecodingError(_)));
 }
 
+/// Tests that `try_from_elements()` rejects a single-entry leaf whose key maps to a different
+/// index than the supplied leaf index.
+#[test]
+fn test_smt_leaf_try_from_elements_rejects_single_entry_index_mismatch() {
+    let leaf = SmtLeaf::new_single(
+        Word::from([10_u32, 11_u32, 12_u32, 13_u32]),
+        Word::from([1_u32, 2_u32, 3_u32, 4_u32]),
+    );
+    let elements: Vec<Felt> = leaf.to_elements().collect();
+    let wrong_leaf_index = LeafIndex::new_max_depth(14);
+
+    let result = SmtLeaf::try_from_elements(&elements, wrong_leaf_index);
+
+    assert_matches!(result, Err(SmtLeafError::InconsistentSingleLeafIndices { .. }));
+}
+
+/// Tests that `try_from_elements()` rejects a multiple-entry leaf whose keys map to a different
+/// index than the supplied leaf index.
+#[test]
+fn test_smt_leaf_try_from_elements_rejects_multiple_entry_index_mismatch() {
+    let leaf = SmtLeaf::new_multiple(vec![
+        (
+            Word::from([10_u32, 11_u32, 12_u32, 13_u32]),
+            Word::from([1_u32, 2_u32, 3_u32, 4_u32]),
+        ),
+        (
+            Word::from([100_u32, 101_u32, 102_u32, 13_u32]),
+            Word::from([11_u32, 12_u32, 13_u32, 14_u32]),
+        ),
+    ])
+    .unwrap();
+    let elements: Vec<Felt> = leaf.to_elements().collect();
+    let wrong_leaf_index = LeafIndex::new_max_depth(14);
+
+    let result = SmtLeaf::try_from_elements(&elements, wrong_leaf_index);
+
+    assert_matches!(result, Err(SmtLeafError::InconsistentMultipleLeafIndices { .. }));
+}
+
 // DUPLICATE KEY DETECTION
 // --------------------------------------------------------------------------------------------
 

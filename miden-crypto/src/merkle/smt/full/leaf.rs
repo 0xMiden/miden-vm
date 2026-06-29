@@ -249,36 +249,14 @@ impl SmtLeaf {
             ));
         }
 
-        let num_entries = elements.len() / DOUBLE_WORD_LEN;
-
-        if num_entries == 1 {
-            // Single entry.
-            let key = Word::new([elements[0], elements[1], elements[2], elements[3]]);
-            let value = Word::new([elements[4], elements[5], elements[6], elements[7]]);
-            Ok(SmtLeaf::new_single(key, value))
-        } else {
-            // Multiple entries.
-            let mut entries = Vec::with_capacity(num_entries);
-            // Read k/v pairs from each entry.
-            for i in 0..num_entries {
-                let base_idx = i * DOUBLE_WORD_LEN;
-                let key = Word::new([
-                    elements[base_idx],
-                    elements[base_idx + 1],
-                    elements[base_idx + 2],
-                    elements[base_idx + 3],
-                ]);
-                let value = Word::new([
-                    elements[base_idx + 4],
-                    elements[base_idx + 5],
-                    elements[base_idx + 6],
-                    elements[base_idx + 7],
-                ]);
-                entries.push((key, value));
-            }
-            let leaf = SmtLeaf::new_multiple(entries)?;
-            Ok(leaf)
+        let mut entries = Vec::with_capacity(elements.len() / DOUBLE_WORD_LEN);
+        for entry in elements.chunks_exact(DOUBLE_WORD_LEN) {
+            let key = Word::new([entry[0], entry[1], entry[2], entry[3]]);
+            let value = Word::new([entry[4], entry[5], entry[6], entry[7]]);
+            entries.push((key, value));
         }
+
+        SmtLeaf::new(entries, leaf_index)
     }
 
     // HELPERS
