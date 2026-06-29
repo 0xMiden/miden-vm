@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: typos
       - run: make typos-check
@@ -28,7 +28,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
       - name: Rustup
@@ -45,7 +45,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -69,10 +69,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: taplo-cli
       - run: make toml-check
@@ -81,10 +81,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: cargo-workspace-lints
       - run: |
@@ -94,7 +94,7 @@ jobs:
     name: doc
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -116,10 +116,10 @@ jobs:
     name: cargo-shear
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: cargo-shear
       - name: Check Cargo manifests for unused dependencies
@@ -129,10 +129,10 @@ jobs:
     name: check dependencies with cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: cargo-deny
       - run: make cargo-deny
@@ -141,7 +141,7 @@ jobs:
     name: zeroize-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
       - name: Rustup
@@ -154,7 +154,7 @@ jobs:
     name: check all feature combinations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -166,7 +166,7 @@ jobs:
           version: "17"
       - name: Rustup
         run: rustup update --no-self-update
-      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # pin@v2.82.2
         with:
           tool: cargo-hack
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
