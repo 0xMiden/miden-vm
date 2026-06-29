@@ -1,10 +1,9 @@
-//! Chiplet requests bus ([`BusId::Chiplets`]).
+//! Decoder requests to the chiplets bus ([`BusId::Chiplets`]).
 //!
-//! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
+//! These interactions remove the decoder-side request for work handled by the hasher, bitwise,
+//! memory, ACE init, and kernel ROM chiplets.
 //!
-//! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
-//! The cached-encoding optimization can be reintroduced later if symbolic expression growth
-//! becomes a bottleneck.
+//! All interactions share one [`super::super::LookupColumn::group`] named `decoder_requests`.
 
 use core::array;
 
@@ -24,12 +23,11 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Every branch here is gated by one mutually exclusive decoder-opcode flag. The heaviest
-/// branch is MRUPDATE, whose batch emits 4 removes (merkle_old_init + return_hash +
-/// merkle_new_init + return_hash). No other single branch exceeds 4.
+/// The heaviest branch is MRUPDATE, which removes four hasher requests:
+/// `merkle_old_init`, old `return_hash`, `merkle_new_init`, and new `return_hash`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the chiplet requests bus.
+/// Emit decoder requests to the chiplets bus.
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -57,10 +55,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
-    // Strides are measured in controller-trace rows (2 per permutation), not physical
-    // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
-    // controller output row.
+    // Hasher return addresses are expressed in controller rows, matching the controller
+    // output rows that provide the matching responses.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
@@ -75,9 +71,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             col.group(
                 "decoder_requests",
                 |g| {
-                    // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN; CALL / SYSCALL
-                    // share the payload but live in batches below). SPAN encodes opcode 0
-                    // at the β¹² slot.
+                    // --- Hasher control-block requests. CALL/SYSCALL live in batches below
+                    // because they also issue chiplet requests. SPAN uses domain 0 in the
+                    // control-block capacity slot.
                     let mut control_remove = |name, flag, opcode: u8| {
                         g.remove(
                             name,
