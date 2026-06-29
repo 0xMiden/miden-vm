@@ -10,7 +10,7 @@ use miden_assembly::{Assembler, ProjectTargetSelector, Report, diagnostics::Into
 
 const ASM_DIR_PATH: &str = "asm";
 const ASSETS_DIR_PATH: &str = "assets";
-const GENERATED_ASM_DIR_PATH: &str = "generated-asm";
+const GENERATED_ASM_DIR_PATH: &str = "asm";
 const GENERATED_MATH_FILES: &[&str] = &[
     "math/ed25519.masm",
     "math/ed25519_base.masm",
@@ -52,12 +52,14 @@ fn main() -> Result<(), Report> {
     prepare_generated_asm_dir(&source_asm_dir, &generated_asm_dir)?;
     miden_precompiles_codegen::masm::write_math_masm(&generated_asm_dir).map_err(Report::msg)?;
 
-    let assembler = Assembler::default();
-    let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
-    let mut project_assembler = assembler
-        .for_project_at_path(generated_asm_dir.join("miden-project.toml"), &mut registry)?;
-
-    let package = project_assembler.assemble(ProjectTargetSelector::Library, "release")?;
+    let package = {
+        let _current_dir = CurrentDirGuard::push(&build_dir)?;
+        let assembler = Assembler::default();
+        let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
+        let mut project_assembler = assembler
+            .for_project_at_path(generated_asm_dir.join("miden-project.toml"), &mut registry)?;
+        project_assembler.assemble(ProjectTargetSelector::Library, "release")?
+    };
 
     package.write_masp_file(build_dir.join(ASSETS_DIR_PATH)).into_diagnostic()?;
 
@@ -103,4 +105,22 @@ fn is_generated_math_file(path: &Path, source_asm_dir: &Path) -> bool {
         .ok()
         .and_then(Path::to_str)
         .is_some_and(|relative_path| GENERATED_MATH_FILES.contains(&relative_path))
+}
+
+struct CurrentDirGuard {
+    previous: PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn push(path: &Path) -> Result<Self, Report> {
+        let previous = env::current_dir().into_diagnostic()?;
+        env::set_current_dir(path).into_diagnostic()?;
+        Ok(Self { previous })
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        let _ = env::set_current_dir(&self.previous);
+    }
 }
