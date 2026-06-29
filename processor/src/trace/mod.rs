@@ -93,13 +93,6 @@ impl TraceBuildInputs {
         &self.program_info
     }
 
-    // Kept for mismatch and edge-case tests that mutate replay inputs directly.
-    #[cfg(any(test, feature = "testing"))]
-    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
-        (self.trace_output, self.trace_generation_context, self.program_info)
-    }
-
     #[cfg(any(test, feature = "testing"))]
     /// Returns the trace replay context captured during execution.
     pub fn trace_generation_context(&self) -> &TraceGenerationContext {
@@ -113,18 +106,6 @@ impl TraceBuildInputs {
         &mut self.trace_generation_context
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_parts(
-        trace_output: TraceBuildOutput,
-        trace_generation_context: TraceGenerationContext,
-        program_info: ProgramInfo,
-    ) -> Self {
-        Self {
-            trace_output,
-            trace_generation_context,
-            program_info,
-        }
-    }
 }
 
 // VM EXECUTION TRACE
