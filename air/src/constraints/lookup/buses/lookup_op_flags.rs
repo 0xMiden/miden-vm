@@ -1,9 +1,10 @@
 //! Bus-scoped operation flags for the LogUp lookup argument.
 //!
 //! [`LookupOpFlags`] is a narrower cousin of [`crate::constraints::op_flags::OpFlags`] that
-//! carries only the ~32 flags the bus emitters in [`super`] actually read — enough to gate
-//! every interaction without materialising the ~150-field surface `OpFlags` exposes to the
-//! stack / decoder / chiplet constraint code.
+//! carries only the ~32 flags read by emitters in the
+//! [`lookup::buses`](crate::constraints::lookup::buses) module — enough to gate every interaction
+//! without materialising the ~150-field surface `OpFlags` exposes to the stack / decoder / chiplet
+//! constraint code.
 //!
 //! The two construction paths live side by side:
 //!
