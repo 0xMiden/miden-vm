@@ -73,6 +73,7 @@ miden-assembly = { workspace = true, features = ["std"] }
 miden-assembly-syntax = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-precompiles = { workspace = true, features = ["std"] }
+miden-precompiles-codegen = { workspace = true, features = ["std"] }
 
 [[bin]]
 name = "regenerate-constraints"

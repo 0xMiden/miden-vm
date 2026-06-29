@@ -363,6 +363,11 @@ pub fn write_math_masm(asm_dir: impl AsRef<Path>) -> Result<(), String> {
     Ok(())
 }
 
+/// Renders the generated U256 MASM module source.
+pub fn render_u256_masm() -> Result<String, String> {
+    render_uint(&U256_CONFIG)
+}
+
 /// Writes generated MASM files into a developer preview directory.
 pub fn write_to_dir(out_dir: impl AsRef<Path>) -> Result<(), String> {
     let out_dir = out_dir.as_ref();

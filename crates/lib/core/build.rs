@@ -241,6 +241,8 @@ trim_paths = true
 
     copy_masm_tree(core_asm_dir, &aggregate_dir.join("core"))?;
     copy_masm_tree(precompiles_asm_dir, &aggregate_dir.join("precompiles"))?;
+    miden_precompiles_codegen::masm::write_math_masm(aggregate_dir.join("precompiles"))
+        .map_err(Report::msg)?;
 
     Ok(aggregate_dir)
 }

@@ -33,6 +33,7 @@ miden-utils-sync.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true
+miden-precompiles-codegen = { workspace = true, features = ["std"] }
 miden-processor = { workspace = true, features = ["testing"] }
 rand_chacha.workspace = true
 
