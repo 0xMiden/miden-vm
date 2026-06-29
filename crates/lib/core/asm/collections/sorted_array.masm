@@ -173,6 +173,8 @@ end
 #! Output: [start_ptr, end_ptr, ...]
 #!
 #! Panics if:
+#! - start_ptr, end_ptr are not word-aligned
+#! - `start_ptr > end_ptr`
 #! - any adjacent word pair is out of order.
 @locals(3)
 pub proc assert_sorted_words
@@ -183,6 +185,11 @@ pub proc assert_sorted_words
     dup loc_store.0
     dup.1 loc_store.1
     dup add.4 loc_store.2
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    loc_load.1 u32mod.4 assertz.err="sorted_array invariant: end_ptr must be word-aligned"
+    loc_load.0 loc_load.1 u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
     # => [start_ptr, end_ptr, ...]
 
     loc_load.2 loc_load.1 u32lt
@@ -479,6 +486,9 @@ end
 #! Output: [start_ptr, end_ptr, ...]
 #!
 #! Panics if:
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with start_ptr
+#! - `start_ptr > end_ptr`
 #! - any adjacent key pair is out of order.
 @locals(4)
 pub proc assert_sorted_keys
@@ -491,6 +501,11 @@ pub proc assert_sorted_keys
     dup.1 loc_store.1
     dup add.8 loc_store.2
     push.1 loc_store.3
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    loc_load.0 loc_load.1 u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    loc_load.1 loc_load.0 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
     # => [start_ptr, end_ptr, ...]
 
     loc_load.2 loc_load.1 u32lt
@@ -527,6 +542,9 @@ end
 #! Output: [start_ptr, end_ptr, ...]
 #!
 #! Panics if:
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with start_ptr
+#! - `start_ptr > end_ptr`
 #! - any adjacent half-key pair is out of order.
 @locals(4)
 pub proc assert_sorted_half_keys
@@ -539,6 +557,11 @@ pub proc assert_sorted_half_keys
     dup.1 loc_store.1
     dup add.8 loc_store.2
     push.0 loc_store.3
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    loc_load.0 loc_load.1 u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    loc_load.1 loc_load.0 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
     # => [start_ptr, end_ptr, ...]
 
     loc_load.2 loc_load.1 u32lt

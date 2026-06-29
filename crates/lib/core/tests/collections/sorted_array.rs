@@ -143,6 +143,48 @@ fn test_assert_sorted_words_rejects_unsorted_array() {
 }
 
 #[test]
+fn test_assert_sorted_words_rejects_invalid_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.100 push.108
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("start_ptr must be <= end_ptr");
+}
+
+#[test]
+fn test_assert_sorted_words_rejects_misaligned_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.108 push.101
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("start_ptr must be word-aligned");
+}
+
+#[test]
 fn test_sorted_key_value_array_find_key() {
     // (word, was_value_found, value_ptr)
     let tests = [
@@ -344,6 +386,27 @@ fn test_assert_sorted_keys_rejects_unsorted_key_value_array() {
 }
 
 #[test]
+fn test_assert_sorted_keys_rejects_invalid_tuple_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.120 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("key-value range must be double-word aligned");
+}
+
+#[test]
 fn test_assert_sorted_half_keys_accepts_sorted_key_value_array() {
     let source: String = format!(
         "
@@ -399,6 +462,27 @@ fn test_assert_sorted_half_keys_rejects_unsorted_key_value_array() {
 
     let program = build_test!(source, &[]);
     program.execute().expect_err("half-keys must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_invalid_tuple_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.120 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("key-value range must be double-word aligned");
 }
 
 #[test]
