@@ -27,6 +27,7 @@ use crate::handlers::{
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
+    readonly::readonly_noop_handlers,
     sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
@@ -156,6 +157,7 @@ impl CoreLibrary {
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ];
         handlers.extend(default_debug_handlers());
+        handlers.extend(readonly_noop_handlers());
         handlers
     }
 
