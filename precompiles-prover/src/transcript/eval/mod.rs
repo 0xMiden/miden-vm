@@ -10,11 +10,12 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_precompiles::{UintDomain, UintPrecompile};
+use miden_precompiles::{CurvePrecompile, UintDomain, UintPrecompile};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    ec::{EcGroupMsg, EcPointMsg, add::EcGroupAddMsg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
@@ -22,7 +23,7 @@ use crate::{
     relations::{FieldMsg, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        nodes::UintOpId,
+        nodes::{EcOpId, UintOpId},
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
@@ -40,7 +41,10 @@ pub const COL_OUT_MULT: usize = COL_IS_ZERO + 1;
 pub const COL_IS_AND: usize = COL_OUT_MULT + 1;
 pub const COL_IS_UINT_LEAF: usize = COL_IS_AND + 1;
 pub const COL_IS_UINT_OP: usize = COL_IS_UINT_LEAF + 1;
-pub const COL_IS_ADD: usize = COL_IS_UINT_OP + 1;
+pub const COL_IS_EC_CREATE: usize = COL_IS_UINT_OP + 1;
+pub const COL_IS_EC_PAI: usize = COL_IS_EC_CREATE + 1;
+pub const COL_IS_EC_OP: usize = COL_IS_EC_PAI + 1;
+pub const COL_IS_ADD: usize = COL_IS_EC_OP + 1;
 pub const COL_IS_SUB: usize = COL_IS_ADD + 1;
 pub const COL_IS_MUL: usize = COL_IS_SUB + 1;
 pub const COL_IS_NEG: usize = COL_IS_MUL + 1;
@@ -52,7 +56,10 @@ pub const COL_PIN_PTR: usize = COL_BOUND_PTR + 1;
 pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
 pub const COL_PARAM_A: usize = COL_B_PTR + 1;
-pub const COL_ABSORB_CAP_BEGIN: usize = COL_PARAM_A + 1;
+pub const COL_GROUP_PTR: usize = COL_PARAM_A + 1;
+pub const COL_CURVE_B: usize = COL_GROUP_PTR + 1;
+pub const COL_SBOUND_PTR: usize = COL_CURVE_B + 1;
+pub const COL_ABSORB_CAP_BEGIN: usize = COL_SBOUND_PTR + 1;
 pub const COL_ABSORB_CAP_END: usize = COL_ABSORB_CAP_BEGIN + NUM_HASH;
 pub const COL_IS_FIELD_TAG: usize = COL_ABSORB_CAP_END;
 pub const NUM_MAIN_COLS: usize = COL_IS_FIELD_TAG + 1;
@@ -61,8 +68,8 @@ pub const PUBLIC_ROOT_BEGIN: usize = 0;
 pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + NUM_HASH;
 pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 
-pub const NUM_AUX_COLS: usize = 6;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 5, 3, 2, 2, 4];
+pub const NUM_AUX_COLS: usize = 9;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 5, 3, 2, 2, 4, 3, 3, 1];
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TranscriptEvalAir;
@@ -144,6 +151,9 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             COL_IS_AND,
             COL_IS_UINT_LEAF,
             COL_IS_UINT_OP,
+            COL_IS_EC_CREATE,
+            COL_IS_EC_PAI,
+            COL_IS_EC_OP,
             COL_IS_ADD,
             COL_IS_SUB,
             COL_IS_MUL,
@@ -158,6 +168,9 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let is_and: AB::Expr = local[COL_IS_AND].into();
         let is_uint_leaf: AB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_uint_op: AB::Expr = local[COL_IS_UINT_OP].into();
+        let is_ec_create: AB::Expr = local[COL_IS_EC_CREATE].into();
+        let is_ec_pai: AB::Expr = local[COL_IS_EC_PAI].into();
+        let is_ec_op: AB::Expr = local[COL_IS_EC_OP].into();
         let is_field_tag: AB::Expr = local[COL_IS_FIELD_TAG].into();
         let is_add: AB::Expr = local[COL_IS_ADD].into();
         let is_sub: AB::Expr = local[COL_IS_SUB].into();
@@ -166,13 +179,19 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let is_is: AB::Expr = local[COL_IS_IS].into();
         let is_op =
             is_add.clone() + is_sub.clone() + is_mul.clone() + is_neg.clone() + is_is.clone();
-        builder.assert_zero(is_op - is_uint_op.clone());
+        builder.assert_zero(is_op.clone() - is_uint_op.clone() - is_ec_op.clone());
+        builder.assert_zero(is_uint_op.clone() * is_neg.clone());
+        builder.assert_zero(is_ec_op.clone() * is_mul.clone());
+        let is_create = is_ec_create.clone() + is_ec_pai.clone();
         builder.assert_zero(
             is_and.clone()
                 + is_zero.clone()
                 + is_field_tag.clone()
                 + is_uint_leaf.clone()
                 + is_uint_op.clone()
+                + is_ec_create.clone()
+                + is_ec_pai.clone()
+                + is_ec_op.clone()
                 - act,
         );
 
@@ -187,27 +206,49 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let a_ptr: AB::Expr = local[COL_A_PTR].into();
         let b_ptr: AB::Expr = local[COL_B_PTR].into();
         let param_a: AB::Expr = local[COL_PARAM_A].into();
-        let is_result_op = is_uint_op.clone() * (AB::Expr::ONE - is_is.clone());
+        let group_ptr: AB::Expr = local[COL_GROUP_PTR].into();
+        let curve_b: AB::Expr = local[COL_CURVE_B].into();
+        let sbound_ptr: AB::Expr = local[COL_SBOUND_PTR].into();
+        let is_result_op = is_op.clone() - is_is.clone();
         let field_domain_id = h[2].clone();
 
-        builder.assert_zero(is_neg.clone());
         builder.assert_zero((AB::Expr::ONE - is_uint_leaf.clone()) * is_pinned.clone());
         builder.when_transition().assert_zero(next[COL_IS_PINNED]);
         builder.assert_zero(is_pinned.clone() * out_mult);
         builder.assert_zero((AB::Expr::ONE - is_pinned.clone()) * pin_ptr.clone());
         builder.assert_zero(is_pinned * (pin_ptr - ptr.clone()));
-        builder.assert_zero((AB::Expr::ONE - is_uint_leaf.clone() - is_result_op) * ptr);
         builder.assert_zero(
-            (AB::Expr::ONE - is_uint_leaf.clone() - is_uint_op.clone() - is_field_tag.clone())
+            (AB::Expr::ONE - is_uint_leaf.clone() - is_result_op - is_create.clone()) * ptr,
+        );
+        builder.assert_zero(
+            (AB::Expr::ONE
+                - is_uint_leaf.clone()
+                - is_uint_op.clone()
+                - is_create.clone()
+                - is_field_tag.clone())
                 * bound_ptr,
         );
-        builder.assert_zero((AB::Expr::ONE - is_uint_op.clone()) * a_ptr.clone());
-        builder.assert_zero((AB::Expr::ONE - is_uint_op.clone() + is_neg.clone()) * b_ptr.clone());
+        builder.assert_zero((AB::Expr::ONE - is_op.clone() - is_ec_create.clone()) * a_ptr.clone());
+        builder.assert_zero(
+            (AB::Expr::ONE - is_op + is_neg.clone() * is_uint_op.clone() - is_ec_create)
+                * b_ptr.clone(),
+        );
         builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
         for i in 0..NUM_HASH {
+            let lhs_i: AB::Expr = local[COL_LHS_BEGIN + i].into();
             let rhs_i: AB::Expr = local[COL_RHS_BEGIN + i].into();
-            builder.assert_zero(is_neg.clone() * rhs_i);
+            builder.assert_zero(is_neg.clone() * rhs_i.clone());
+            builder.assert_zero(is_ec_pai.clone() * lhs_i);
+            builder.assert_zero(is_ec_pai.clone() * rhs_i);
         }
+        builder.assert_zero(
+            (AB::Expr::ONE
+                - is_create.clone()
+                - is_ec_op.clone() * (AB::Expr::ONE - is_is.clone()))
+                * group_ptr,
+        );
+        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * curve_b);
+        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * sbound_ptr);
         builder.assert_zero(
             is_field_tag.clone() * (h[0].clone() - AB::Expr::from(UintPrecompile::id())),
         );
@@ -239,14 +280,19 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             builder.assert_zero(is_field_tag.clone() * (actual - expected));
         }
 
-        let uint_op_id: AB::Expr = is_add
-            + is_sub * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
+        let uint_op_id: AB::Expr = is_add.clone()
+            + is_sub.clone() * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
             + is_mul * AB::Expr::from(Felt::from(UintOpId::Mul as u8))
-            + is_neg * AB::Expr::from(Felt::from(UintOpId::Neg as u8))
-            + is_is * AB::Expr::from(Felt::from(UintOpId::Is as u8));
-        builder.assert_zero(param_a - is_uint_op.clone() * uint_op_id);
+            + is_neg.clone() * AB::Expr::from(Felt::from(UintOpId::Neg as u8))
+            + is_is.clone() * AB::Expr::from(Felt::from(UintOpId::Is as u8));
+        let ec_op_id: AB::Expr = is_add
+            + is_sub * AB::Expr::from(Felt::from(EcOpId::Sub as u8))
+            + is_neg * AB::Expr::from(Felt::from(EcOpId::Neg as u8))
+            + is_is * AB::Expr::from(Felt::from(EcOpId::Is as u8));
+        let op_param = is_uint_op.clone() * uint_op_id + is_ec_op * ec_op_id;
+        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * (param_a - op_param));
 
-        let field_consumer = is_uint_leaf + is_uint_op;
+        let field_consumer = is_uint_leaf + is_uint_op + is_create;
         for i in 0..NUM_HASH {
             let cap_i: AB::Expr = local[COL_ABSORB_CAP_BEGIN + i].into();
             builder.assert_zero((AB::Expr::ONE - field_consumer.clone()) * cap_i);
@@ -285,6 +331,10 @@ where
         let is_zero: LB::Expr = local[COL_IS_ZERO].into();
         let is_uint_leaf: LB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_uint_op: LB::Expr = local[COL_IS_UINT_OP].into();
+        let is_ec_create: LB::Expr = local[COL_IS_EC_CREATE].into();
+        let is_ec_pai: LB::Expr = local[COL_IS_EC_PAI].into();
+        let is_ec_op: LB::Expr = local[COL_IS_EC_OP].into();
+        let is_create = is_ec_create.clone() + is_ec_pai;
         let is_field_tag: LB::Expr = local[COL_IS_FIELD_TAG].into();
         let is_pinned: LB::Expr = local[COL_IS_PINNED].into();
         let is_add: LB::Expr = local[COL_IS_ADD].into();
@@ -300,6 +350,8 @@ where
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
         let param_a: LB::Expr = local[COL_PARAM_A].into();
+        let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
+        let curve_b: LB::Expr = local[COL_CURVE_B].into();
         let lhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
         let rhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
         let h: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
@@ -307,20 +359,28 @@ where
             array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
 
         let is_value_op = is_uint_op.clone() * (LB::Expr::ONE - is_is.clone());
-        let node = is_and.clone() + is_uint_leaf.clone() + is_uint_op.clone();
-        let static_node = is_and.clone() + is_uint_op.clone();
+        let node = is_and.clone()
+            + is_uint_leaf.clone()
+            + is_uint_op.clone()
+            + is_create.clone()
+            + is_ec_op.clone();
+        let static_node =
+            is_and.clone() + is_uint_op.clone() + is_create.clone() + is_ec_op.clone();
         let op_rhs_gate = is_uint_op.clone() * (LB::Expr::ONE - is_neg.clone());
         let neg_out_mult = LB::Expr::ZERO - out_mult;
-        let true_provide = neg_out_mult.clone() * (is_and.clone() + is_zero + is_is);
+        let true_provide = neg_out_mult.clone() * (is_and.clone() + is_zero + is_is.clone());
         let value_provide = neg_out_mult.clone() * (is_uint_leaf.clone() + is_value_op);
         let transient = LB::Expr::ONE - is_pinned;
         let and_cap = Tag::AND.as_word();
         let cap_static = [
             is_and.clone() * LB::Expr::from(and_cap[0])
-                + is_uint_op.clone() * LB::Expr::from(UintPrecompile::id()),
-            is_and.clone() * LB::Expr::from(and_cap[1]) + param_a,
-            is_and.clone() * LB::Expr::from(and_cap[2]),
-            is_and.clone() * LB::Expr::from(and_cap[3]),
+                + is_uint_op.clone() * LB::Expr::from(UintPrecompile::id())
+                + is_create.clone() * LB::Expr::from(CurvePrecompile::id())
+                + is_ec_op.clone() * LB::Expr::from(CurvePrecompile::id()),
+            is_and.clone() * LB::Expr::from(and_cap[1])
+                + (is_uint_op.clone() + is_ec_op.clone()) * param_a.clone(),
+            is_and.clone() * LB::Expr::from(and_cap[2]) + is_create.clone() * param_a,
+            is_and.clone() * LB::Expr::from(and_cap[3]) + is_create.clone() * curve_b,
         ];
 
         let one_deg = Deg { v: 1, u: 1 };
@@ -332,6 +392,9 @@ where
         let col3_deg = Deg { v: 2, u: 2 };
         let col4_deg = Deg { v: 3, u: 3 };
         let col5_deg = Deg { v: 5, u: 4 };
+        let col6_deg = Deg { v: 5, u: 4 };
+        let col7_deg = Deg { v: 4, u: 4 };
+        let col8_deg = Deg { v: 1, u: 1 };
 
         builder.next_column(
             |col| {
@@ -483,7 +546,7 @@ where
                             |b| {
                                 b.insert(
                                     "consume-lhs",
-                                    is_uint_op.clone(),
+                                    is_uint_op.clone() + is_ec_create.clone(),
                                     BindingMsg::field_elem(
                                         lhs.clone(),
                                         a_ptr.clone(),
@@ -493,7 +556,7 @@ where
                                 );
                                 b.insert(
                                     "consume-rhs",
-                                    op_rhs_gate,
+                                    op_rhs_gate + is_ec_create.clone(),
                                     BindingMsg::field_elem(rhs.clone(), b_ptr.clone(), field_id),
                                     one_deg,
                                 );
@@ -562,7 +625,7 @@ where
         let f_h: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
         let f_tag: [LB::Expr; NUM_HASH] =
             array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
-        let field_consume_gate = is_uint_leaf + is_uint_op;
+        let field_consume_gate = is_uint_leaf + is_uint_op + is_create.clone();
         let field_provide = neg_out_mult * is_field_tag.clone();
         builder.next_column(
             |col| {
@@ -623,6 +686,150 @@ where
                 );
             },
             col5_deg,
+        );
+
+        let g_lhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
+        let g_rhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
+        let g_h: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
+        let g_ptr: LB::Expr = local[COL_PTR].into();
+        let g_a: LB::Expr = local[COL_A_PTR].into();
+        let g_b: LB::Expr = local[COL_B_PTR].into();
+        let g_bound: LB::Expr = local[COL_BOUND_PTR].into();
+        let g_param_a: LB::Expr = local[COL_PARAM_A].into();
+        let g_curve_b: LB::Expr = local[COL_CURVE_B].into();
+        let g_group: LB::Expr = local[COL_GROUP_PTR].into();
+        let g_sbound: LB::Expr = local[COL_SBOUND_PTR].into();
+        let g_pai: LB::Expr = local[COL_IS_EC_PAI].into();
+        let g_out_mult: LB::Expr = local[COL_OUT_MULT].into();
+        let g_neg_out_mult = LB::Expr::ZERO - g_out_mult;
+        let ec_binary = is_ec_op.clone() * (LB::Expr::ONE - is_neg.clone());
+        let ec_result = is_ec_op.clone() * (LB::Expr::ONE - is_is);
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "binding-curve-point",
+                    |g| {
+                        g.batch(
+                            "fractions",
+                            LB::Expr::ONE,
+                            |b| {
+                                b.insert(
+                                    "consume-p",
+                                    is_ec_op.clone(),
+                                    BindingMsg::curve_point(g_lhs.clone(), g_a.clone()),
+                                    one_deg,
+                                );
+                                b.insert(
+                                    "consume-q",
+                                    ec_binary,
+                                    BindingMsg::curve_point(g_rhs.clone(), g_b.clone()),
+                                    one_deg,
+                                );
+                                b.insert(
+                                    "provide-result",
+                                    g_neg_out_mult * (is_create.clone() + ec_result.clone()),
+                                    BindingMsg::curve_point(g_h, g_ptr.clone()),
+                                    two_deg,
+                                );
+                            },
+                            col6_deg,
+                        );
+                    },
+                    col6_deg,
+                );
+            },
+            col6_deg,
+        );
+
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-relations",
+                    |g| {
+                        g.batch(
+                            "fractions",
+                            LB::Expr::ONE,
+                            |b| {
+                                b.insert(
+                                    "consume-ecgroup",
+                                    is_create.clone(),
+                                    EcGroupMsg {
+                                        group_ptr: g_group.clone(),
+                                        a_ptr: g_param_a.clone(),
+                                        b_ptr: g_curve_b.clone(),
+                                        bound_ptr: g_bound.clone(),
+                                        scalar_bound_ptr: g_sbound,
+                                    },
+                                    one_deg,
+                                );
+                                b.insert(
+                                    "consume-ecpoint",
+                                    is_create.clone(),
+                                    EcPointMsg {
+                                        point_ptr: g_ptr.clone(),
+                                        group_ptr: g_group.clone(),
+                                        x_ptr: g_a.clone(),
+                                        y_ptr: g_b.clone(),
+                                        is_pai: g_pai,
+                                    },
+                                    one_deg,
+                                );
+                                b.insert(
+                                    "consume-ecgroupadd",
+                                    ec_result.clone(),
+                                    EcGroupAddMsg {
+                                        group_ptr: g_group.clone(),
+                                        p_ptr: (is_add.clone() + is_neg.clone()) * g_a.clone()
+                                            + is_sub.clone() * g_ptr.clone(),
+                                        q_ptr: (is_add.clone() + is_sub.clone()) * g_b.clone()
+                                            + is_neg.clone() * g_ptr.clone(),
+                                        r_ptr: is_add.clone() * g_ptr.clone()
+                                            + is_neg.clone() * g_b.clone()
+                                            + is_sub.clone() * g_a.clone(),
+                                    },
+                                    mixed_deg,
+                                );
+                            },
+                            col7_deg,
+                        );
+                    },
+                    col7_deg,
+                );
+            },
+            col7_deg,
+        );
+
+        let is_ec_neg = is_ec_op * is_neg;
+        builder.next_column(
+            |col| {
+                col.group(
+                    "ec-neg-infinity",
+                    |g| {
+                        g.batch(
+                            "fractions",
+                            LB::Expr::ONE,
+                            |b| {
+                                b.insert(
+                                    "consume-ecpoint-pai",
+                                    is_ec_neg,
+                                    EcPointMsg {
+                                        point_ptr: g_b,
+                                        group_ptr,
+                                        x_ptr: LB::Expr::ZERO,
+                                        y_ptr: LB::Expr::ZERO,
+                                        is_pai: LB::Expr::ONE,
+                                    },
+                                    one_deg,
+                                );
+                            },
+                            col8_deg,
+                        );
+                    },
+                    col8_deg,
+                );
+            },
+            col8_deg,
         );
     }
 }

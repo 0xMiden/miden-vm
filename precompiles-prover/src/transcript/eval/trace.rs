@@ -7,18 +7,23 @@ use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    ec::{
+        EcRequire,
+        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
+    },
     logup::build_logup_aux_trace,
     math::to_limbs32,
     relations::ProvideMult,
     transcript::{
         eval::{
-            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_H_BEGIN,
-            COL_IS_ADD, COL_IS_AND, COL_IS_FIELD_TAG, COL_IS_IS, COL_IS_MUL, COL_IS_NEG,
-            COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO,
-            COL_LHS_BEGIN, COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID, COL_PIN_PTR, COL_PTR,
-            COL_RHS_BEGIN, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CURVE_B,
+            COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_OP,
+            COL_IS_EC_PAI, COL_IS_FIELD_TAG, COL_IS_IS, COL_IS_MUL, COL_IS_NEG, COL_IS_PINNED,
+            COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_OUT_MULT,
+            COL_PARAM_A, COL_PERM_SEQ_ID, COL_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_SBOUND_PTR,
+            NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
         },
-        nodes::UintOpId,
+        nodes::{EcOpId, UintOpId},
         poseidon2::{
             P2Cap, P2Digest,
             trace::{PermSeqId, Poseidon2Requires},
@@ -102,6 +107,19 @@ impl UintNode {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EcNode {
+    id: u32,
+    hash: P2Digest,
+    point: EcPointPtr,
+}
+
+impl EcNode {
+    pub fn hash(&self) -> P2Digest {
+        self.hash
+    }
+}
+
 #[derive(Debug)]
 struct EvalNode {
     id: u32,
@@ -146,12 +164,40 @@ enum NodeKind {
         bound_ptr: u32,
         field_tag: P2Digest,
     },
+    EcCreate {
+        x_hash: P2Digest,
+        y_hash: P2Digest,
+        a_ptr: u32,
+        b_ptr: u32,
+        x_ptr: u32,
+        y_ptr: u32,
+        group_ptr: u32,
+        point_ptr: u32,
+        bound_ptr: u32,
+        field_tag: P2Digest,
+        is_pai: bool,
+    },
+    EcBinOp {
+        op: EcOpId,
+        lhs: P2Digest,
+        rhs: P2Digest,
+        p_ptr: u32,
+        q_ptr: u32,
+        r_ptr: u32,
+        group_ptr: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum UintKey {
     Leaf(UintPtr),
     Op(UintOpId, UintPtr, P2Digest, P2Digest),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum EcKey {
+    Create(u32, u32, P2Digest, P2Digest),
+    Op(EcOpId, P2Digest, P2Digest),
 }
 
 #[derive(Debug, Default)]
@@ -161,6 +207,7 @@ pub struct TranscriptEvalRequires {
     node_consumers: BTreeMap<u32, ProvideMult>,
     nodes: Vec<EvalNode>,
     uint_dedup: HashMap<UintKey, UintNode>,
+    ec_dedup: HashMap<EcKey, EcNode>,
     fields: HashMap<UintPtr, FieldDomain>,
     field_consumers: BTreeMap<u32, ProvideMult>,
 }
@@ -341,6 +388,233 @@ impl TranscriptEvalRequires {
         out
     }
 
+    pub fn ensure_field_domain(
+        &mut self,
+        bound_ptr: UintPtr,
+        store: &mut UintStoreRequires,
+        p2: &mut Poseidon2Requires,
+    ) {
+        let _ = self.ensure_field(bound_ptr, store, p2);
+    }
+
+    pub fn ec_create(
+        &mut self,
+        a_ptr: u32,
+        b_ptr: u32,
+        x: &UintNode,
+        y: &UintNode,
+        mut ec: EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        assert_eq!(x.bound_ptr, y.bound_ptr, "coordinates must share a modulus");
+        let key = EcKey::Create(a_ptr, b_ptr, x.hash, y.hash);
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return node;
+        }
+        let field = self
+            .fields
+            .get(&x.bound_ptr)
+            .copied()
+            .expect("coordinate field was not registered");
+        self.consume_field(x.bound_ptr);
+        let (group, point) = ec.point_on_curve(
+            UintPtr::from_addr(a_ptr),
+            UintPtr::from_addr(b_ptr),
+            x.bound_ptr,
+            x.ptr,
+            y.ptr,
+        );
+        self.consume_uint(x);
+        self.consume_uint(y);
+        let absorption = p2.require_one_shot(
+            P2Cap::ec_create(a_ptr, b_ptr),
+            x.hash.as_array(),
+            y.hash.as_array(),
+        );
+        let _ = p2.require_digest(absorption.digest);
+        let hash = absorption.digest;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.nodes.push(EvalNode {
+            id,
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
+            kind: NodeKind::EcCreate {
+                x_hash: x.hash,
+                y_hash: y.hash,
+                a_ptr,
+                b_ptr,
+                x_ptr: x.ptr.addr(),
+                y_ptr: y.ptr.addr(),
+                group_ptr: group.addr(),
+                point_ptr: point.addr(),
+                bound_ptr: x.bound_ptr.addr(),
+                field_tag: P2Digest(field.tag.as_array()),
+                is_pai: false,
+            },
+        });
+        self.node_consumers.insert(id, 0);
+        let node = EcNode { id, hash, point };
+        self.ec_dedup.insert(key, node);
+        node
+    }
+
+    pub fn ec_pai(
+        &mut self,
+        a_ptr: u32,
+        b_ptr: u32,
+        bound_ptr: u32,
+        mut ec: EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        let key = EcKey::Create(a_ptr, b_ptr, P2Digest::default(), P2Digest::default());
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return node;
+        }
+        let bound = UintPtr::from_addr(bound_ptr);
+        let field = self.fields.get(&bound).copied().expect("PAI field was not registered");
+        self.consume_field(bound);
+        let (group, pai) =
+            ec.pai_on_curve(UintPtr::from_addr(a_ptr), UintPtr::from_addr(b_ptr), bound);
+        let absorption = p2.require_one_shot(
+            P2Cap::ec_create(a_ptr, b_ptr),
+            P2Digest::default().as_array(),
+            P2Digest::default().as_array(),
+        );
+        let _ = p2.require_digest(absorption.digest);
+        let hash = absorption.digest;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.nodes.push(EvalNode {
+            id,
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
+            kind: NodeKind::EcCreate {
+                x_hash: P2Digest::default(),
+                y_hash: P2Digest::default(),
+                a_ptr,
+                b_ptr,
+                x_ptr: 0,
+                y_ptr: 0,
+                group_ptr: group.addr(),
+                point_ptr: pai.addr(),
+                bound_ptr,
+                field_tag: P2Digest(field.tag.as_array()),
+                is_pai: true,
+            },
+        });
+        self.node_consumers.insert(id, 0);
+        let node = EcNode { id, hash, point: pai };
+        self.ec_dedup.insert(key, node);
+        node
+    }
+
+    pub fn ec_add(
+        &mut self,
+        p: &EcNode,
+        q: &EcNode,
+        mut ec: EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        self.ec_op(EcOpId::Add, p, Some(q), &mut ec, p2)
+    }
+
+    pub fn ec_sub(
+        &mut self,
+        p: &EcNode,
+        q: &EcNode,
+        mut ec: EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        self.ec_op(EcOpId::Sub, p, Some(q), &mut ec, p2)
+    }
+
+    pub fn ec_neg(
+        &mut self,
+        p: &EcNode,
+        mut ec: EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        self.ec_op(EcOpId::Neg, p, None, &mut ec, p2)
+    }
+
+    pub fn ec_is(&mut self, p: &EcNode, q: &EcNode, p2: &mut Poseidon2Requires) -> Truthy {
+        assert_eq!(p.point, q.point, "Is operands are unequal points - unprovable");
+        self.consume_ec(p);
+        self.consume_ec(q);
+        let absorption =
+            p2.require_one_shot(P2Cap::ec_op(EcOpId::Is), p.hash.as_array(), q.hash.as_array());
+        let _ = p2.require_digest(absorption.digest);
+        let hash = absorption.digest;
+        let out = self.fresh(hash);
+        self.nodes.push(EvalNode {
+            id: out.id,
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
+            kind: NodeKind::EcBinOp {
+                op: EcOpId::Is,
+                lhs: p.hash,
+                rhs: q.hash,
+                p_ptr: p.point.addr(),
+                q_ptr: q.point.addr(),
+                r_ptr: 0,
+                group_ptr: 0,
+            },
+        });
+        out
+    }
+
+    fn ec_op(
+        &mut self,
+        op: EcOpId,
+        p: &EcNode,
+        q: Option<&EcNode>,
+        ec: &mut EcRequire<'_>,
+        p2: &mut Poseidon2Requires,
+    ) -> EcNode {
+        assert!(q.is_none() == matches!(op, EcOpId::Neg), "Neg is unary; Add/Sub are binary");
+        assert!(!matches!(op, EcOpId::Is), "Is goes through ec_is");
+        let rhs = q.map(|q| q.hash).unwrap_or_default();
+        let key = EcKey::Op(op, p.hash, rhs);
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return node;
+        }
+
+        let group = ec.group_of(p.point);
+        let (r, q_ptr) = match op {
+            EcOpId::Add => (ec.add(p.point, q.expect("binary").point, 1), q.unwrap().point),
+            EcOpId::Sub => (ec.sub(p.point, q.expect("binary").point, 1), q.unwrap().point),
+            EcOpId::Neg => {
+                let (_, r, pai) = ec.neg(p.point, 1);
+                (r, pai)
+            },
+            EcOpId::Is => unreachable!("Is goes through ec_is"),
+        };
+        self.consume_ec(p);
+        if let Some(q) = q {
+            self.consume_ec(q);
+        }
+        let absorption = p2.require_one_shot(P2Cap::ec_op(op), p.hash.as_array(), rhs.as_array());
+        let _ = p2.require_digest(absorption.digest);
+        let hash = absorption.digest;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.nodes.push(EvalNode {
+            id,
+            absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
+            kind: NodeKind::EcBinOp {
+                op,
+                lhs: p.hash,
+                rhs,
+                p_ptr: p.point.addr(),
+                q_ptr: q_ptr.addr(),
+                r_ptr: r.addr(),
+                group_ptr: group.addr(),
+            },
+        });
+        self.node_consumers.insert(id, 0);
+        let node = EcNode { id, hash, point: r };
+        self.ec_dedup.insert(key, node);
+        node
+    }
+
     pub fn assert_no_stray_values(&self) {
         if let Some((id, _)) = self.node_consumers.iter().find(|&(_, &count)| count == 0) {
             panic!("stray field-element value node (id {id})");
@@ -421,6 +695,13 @@ impl TranscriptEvalRequires {
             .expect("UintNode consumed under a foreign requires") += 1;
     }
 
+    fn consume_ec(&mut self, node: &EcNode) {
+        *self
+            .node_consumers
+            .get_mut(&node.id)
+            .expect("EcNode consumed under a foreign requires") += 1;
+    }
+
     fn fresh(&mut self, hash: P2Digest) -> Truthy {
         let id = self.next_id;
         self.next_id += 1;
@@ -436,6 +717,7 @@ impl TranscriptEvalRequires {
 pub fn generate_trace(
     requires: TranscriptEvalRequires,
     root: impl Into<TranscriptRoot>,
+    ec_store: &EcStoreRequires,
 ) -> RowMajorMatrix<Felt> {
     let root = root.into();
     let root_id = root.id();
@@ -487,10 +769,12 @@ pub fn generate_trace(
                 },
                 NodeKind::And { .. }
                 | NodeKind::UintLeaf { is_pinned: true, .. }
-                | NodeKind::UintOp { op: UintOpId::Is, .. } => 1,
-                NodeKind::UintLeaf { .. } | NodeKind::UintOp { .. } => {
-                    requires.node_consumers[&n.id]
-                },
+                | NodeKind::UintOp { op: UintOpId::Is, .. }
+                | NodeKind::EcBinOp { op: EcOpId::Is, .. } => 1,
+                NodeKind::UintLeaf { .. }
+                | NodeKind::UintOp { .. }
+                | NodeKind::EcCreate { .. }
+                | NodeKind::EcBinOp { .. } => requires.node_consumers[&n.id],
             };
             Some((n, out_mult))
         })
@@ -500,9 +784,9 @@ pub fn generate_trace(
     let height = n_rows.next_power_of_two().max(2);
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
-    push_node_row(&mut trace, root_node, 0);
+    push_node_row(&mut trace, root_node, 0, ec_store);
     for (node, out_mult) in rows {
-        push_node_row(&mut trace, node, out_mult);
+        push_node_row(&mut trace, node, out_mult, ec_store);
     }
     if zero_mult > 0 {
         push_node_row(
@@ -513,6 +797,7 @@ pub fn generate_trace(
                 kind: NodeKind::Zero,
             },
             zero_mult,
+            ec_store,
         );
     }
 
@@ -531,12 +816,26 @@ fn uint_op_col(op: UintOpId) -> usize {
     }
 }
 
+fn ec_op_col(op: EcOpId) -> usize {
+    match op {
+        EcOpId::Add => COL_IS_ADD,
+        EcOpId::Sub => COL_IS_SUB,
+        EcOpId::Neg => COL_IS_NEG,
+        EcOpId::Is => COL_IS_IS,
+    }
+}
+
 fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &P2Digest, rhs: &P2Digest) {
     row[COL_LHS_BEGIN..COL_LHS_BEGIN + NUM_HASH].copy_from_slice(&lhs.as_array());
     row[COL_RHS_BEGIN..COL_RHS_BEGIN + NUM_HASH].copy_from_slice(&rhs.as_array());
 }
 
-fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) {
+fn push_node_row(
+    trace: &mut Vec<Felt>,
+    node: &EvalNode,
+    out_mult: ProvideMult,
+    ec_store: &EcStoreRequires,
+) {
     let mut row = [Felt::ZERO; NUM_MAIN_COLS];
     row[COL_ACT] = Felt::ONE;
     row[COL_OUT_MULT] = Felt::from(out_mult);
@@ -605,6 +904,57 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PARAM_A] = Felt::from(*op as u8);
             row[COL_ABSORB_CAP_BEGIN..COL_ABSORB_CAP_BEGIN + NUM_HASH]
                 .copy_from_slice(&field_tag.as_array());
+        },
+        NodeKind::EcCreate {
+            x_hash,
+            y_hash,
+            a_ptr,
+            b_ptr,
+            x_ptr,
+            y_ptr,
+            group_ptr,
+            point_ptr,
+            bound_ptr,
+            field_tag,
+            is_pai,
+        } => {
+            let absorbed = node.absorbed.expect("EC create nodes drive Poseidon2");
+            row[COL_PERM_SEQ_ID] = Felt::from(absorbed.perm_seq_id.seq());
+            row[COL_H_BEGIN..COL_H_BEGIN + NUM_HASH].copy_from_slice(&absorbed.hash.as_array());
+            write_children(&mut row, x_hash, y_hash);
+            row[if *is_pai { COL_IS_EC_PAI } else { COL_IS_EC_CREATE }] = Felt::ONE;
+            row[COL_PTR] = Felt::from(*point_ptr);
+            row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
+            row[COL_A_PTR] = Felt::from(*x_ptr);
+            row[COL_B_PTR] = Felt::from(*y_ptr);
+            row[COL_PARAM_A] = Felt::from(*a_ptr);
+            row[COL_GROUP_PTR] = Felt::from(*group_ptr);
+            row[COL_CURVE_B] = Felt::from(*b_ptr);
+            row[COL_SBOUND_PTR] =
+                Felt::from(ec_store.group_sbound(EcGroupPtr::from_addr(*group_ptr)).addr());
+            row[COL_ABSORB_CAP_BEGIN..COL_ABSORB_CAP_BEGIN + NUM_HASH]
+                .copy_from_slice(&field_tag.as_array());
+        },
+        NodeKind::EcBinOp {
+            op,
+            lhs,
+            rhs,
+            p_ptr,
+            q_ptr,
+            r_ptr,
+            group_ptr,
+        } => {
+            let absorbed = node.absorbed.expect("EC op nodes drive Poseidon2");
+            row[COL_PERM_SEQ_ID] = Felt::from(absorbed.perm_seq_id.seq());
+            row[COL_H_BEGIN..COL_H_BEGIN + NUM_HASH].copy_from_slice(&absorbed.hash.as_array());
+            write_children(&mut row, lhs, rhs);
+            row[COL_IS_EC_OP] = Felt::ONE;
+            row[ec_op_col(*op)] = Felt::ONE;
+            row[COL_PTR] = Felt::from(*r_ptr);
+            row[COL_A_PTR] = Felt::from(*p_ptr);
+            row[COL_B_PTR] = Felt::from(*q_ptr);
+            row[COL_PARAM_A] = Felt::from(*op as u8);
+            row[COL_GROUP_PTR] = Felt::from(*group_ptr);
         },
     }
 

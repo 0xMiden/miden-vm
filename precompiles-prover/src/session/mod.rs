@@ -6,6 +6,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::{
+        EcRequire,
         add::trace::{EcAddRequires, generate_trace as ec_add_trace},
         msm::trace::{EcMsmRequires, generate_trace as msm_trace},
         trace::{EcStoreRequires, generate_traces as ec_store_traces},
@@ -26,7 +27,7 @@ use crate::{
     },
     transcript::{
         eval::trace::{
-            PinnedUint, TranscriptEvalRequires, TranscriptRoot, Truthy, UintNode,
+            EcNode, PinnedUint, TranscriptEvalRequires, TranscriptRoot, Truthy, UintNode,
             generate_trace as eval_trace,
         },
         nodes::UintOpId,
@@ -131,6 +132,10 @@ impl Session {
             .pin_uint(ptr, bound_ptr, to_limbs32(value), &mut self.uint.store, &mut self.p2)
     }
 
+    pub fn pin_uint_value(&mut self, addr: u32, value: U256, bound_ptr: UintPtr) -> UintPtr {
+        self.uint.store.intern_pinned(addr, value, bound_ptr)
+    }
+
     pub fn uint_leaf(&mut self, value: U256, bound_ptr: UintPtr) -> UintNode {
         let ptr = self.uint.store.intern(value, bound_ptr);
         self.eval
@@ -158,11 +163,69 @@ impl Session {
         self.eval.record_is(a, b, &mut self.p2)
     }
 
+    pub fn ec_create(
+        &mut self,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        x: &UintNode,
+        y: &UintNode,
+    ) -> EcNode {
+        self.eval.ec_create(
+            a_ptr.addr(),
+            b_ptr.addr(),
+            x,
+            y,
+            EcRequire::new(&mut self.ec, &mut self.ec_add, self.uint.require()),
+            &mut self.p2,
+        )
+    }
+
+    pub fn ec_pai(&mut self, a_ptr: UintPtr, b_ptr: UintPtr, bound_ptr: UintPtr) -> EcNode {
+        self.eval.ensure_field_domain(bound_ptr, &mut self.uint.store, &mut self.p2);
+        self.eval.ec_pai(
+            a_ptr.addr(),
+            b_ptr.addr(),
+            bound_ptr.addr(),
+            EcRequire::new(&mut self.ec, &mut self.ec_add, self.uint.require()),
+            &mut self.p2,
+        )
+    }
+
+    pub fn ec_add(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
+        self.eval.ec_add(
+            p,
+            q,
+            EcRequire::new(&mut self.ec, &mut self.ec_add, self.uint.require()),
+            &mut self.p2,
+        )
+    }
+
+    pub fn ec_sub(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
+        self.eval.ec_sub(
+            p,
+            q,
+            EcRequire::new(&mut self.ec, &mut self.ec_add, self.uint.require()),
+            &mut self.p2,
+        )
+    }
+
+    pub fn ec_neg(&mut self, p: &EcNode) -> EcNode {
+        self.eval.ec_neg(
+            p,
+            EcRequire::new(&mut self.ec, &mut self.ec_add, self.uint.require()),
+            &mut self.p2,
+        )
+    }
+
+    pub fn ec_is(&mut self, p: &EcNode, q: &EcNode) -> Truthy {
+        self.eval.ec_is(p, q, &mut self.p2)
+    }
+
     pub fn finish(mut self, root: impl Into<TranscriptRoot>) -> SessionTraces {
         let root = root.into();
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
-        let eval = eval_trace(self.eval, root);
+        let eval = eval_trace(self.eval, root, &self.ec);
         let uint_add = uint_add_trace(self.uint.add, &mut self.uint.store);
         let uint_mul = uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl);
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut self.bpl);

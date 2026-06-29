@@ -6,6 +6,7 @@
 mod deferred_state;
 mod ec;
 mod ec_add;
+mod ec_dag;
 mod ec_msm;
 mod uint;
 mod uint_add;

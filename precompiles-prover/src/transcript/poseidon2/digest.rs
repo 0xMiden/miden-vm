@@ -10,9 +10,9 @@ use miden_core::{
     Felt,
     deferred::{Digest, Tag},
 };
-use miden_precompiles::{Keccak256Precompile, UintDomain, UintPrecompile};
+use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 
-use crate::transcript::nodes::UintOpId;
+use crate::transcript::nodes::{EcOpId, UintOpId};
 
 /// Output digest of a Poseidon2 absorption — `state[0..4]` after the
 /// last block's permutation.
@@ -76,6 +76,29 @@ impl P2Cap {
     /// Canonical uint operation tag.
     pub fn uint_op(op: UintOpId) -> Self {
         Self(UintPrecompile::op_tag(op.canonical_id()).as_word())
+    }
+
+    /// Generic short-Weierstrass point creation tag for the prover EC DAG.
+    ///
+    /// The product curve precompile commits concrete `CurveId`s; this prover
+    /// layer is still generic over pinned curve-parameter handles, so creation
+    /// keeps those handles in the cap.
+    pub fn ec_create(a_ptr: u32, b_ptr: u32) -> Self {
+        Self([
+            CurvePrecompile::id(),
+            Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
+            Felt::from_u32(a_ptr),
+            Felt::from_u32(b_ptr),
+        ])
+    }
+
+    /// Curve operation tag used by prover EC DAG joins.
+    pub fn ec_op(op: EcOpId) -> Self {
+        let id = match op {
+            EcOpId::Add | EcOpId::Sub | EcOpId::Is => op.canonical_id(),
+            EcOpId::Neg => 255,
+        };
+        Self(CurvePrecompile::op_tag(id).as_word())
     }
 
     /// VM Keccak-256 assertion tag (`[Keccak256Precompile::id(), 0,

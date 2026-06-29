@@ -34,6 +34,8 @@ pub enum ValueTag {
     True = 0,
     /// A field element backed by a uint store pointer and semantic field id.
     FieldElem = 1,
+    /// A curve point backed by an EC point-store pointer.
+    CurvePoint = 2,
 }
 
 /// LogUp message for the [`Binding`](BusId::Binding) relation: a 7-tuple
@@ -76,6 +78,16 @@ where
             kind: E::from_u8(ValueTag::FieldElem as u8),
             ptr,
             domain_id: field_id,
+        }
+    }
+
+    /// Bind a node hash to a curve point.
+    pub fn curve_point(h: [E; 4], point_ptr: E) -> Self {
+        Self {
+            h,
+            kind: E::from_u8(ValueTag::CurvePoint as u8),
+            ptr: point_ptr,
+            domain_id: E::ZERO,
         }
     }
 }
