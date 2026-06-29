@@ -5,11 +5,7 @@ use alloc::{
     vec::Vec,
 };
 use core::num::NonZeroU32;
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-    println,
-};
+use std::{fs, path::Path};
 
 use miden_core::Word;
 
@@ -18,12 +14,6 @@ use crate::{
     UintPrecompileDescriptor, ZERO_LIMBS,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Mode {
-    Check,
-    Write,
-}
-
 const UINT_TEMPLATE_PATH: &str = "precompiles/codegen/src/templates/uint.masm.tpl";
 const UINT_TEMPLATE: &str = include_str!("templates/uint.masm.tpl");
 const U256_CONSTANTS_TEMPLATE: &str = include_str!("templates/u256_constants.masm.tpl");
@@ -31,7 +21,8 @@ const FIELD_CONSTANTS_TEMPLATE: &str = include_str!("templates/field_constants.m
 const FIELD_EXTRA_OPS_TEMPLATE: &str = include_str!("templates/field_extra_ops.masm.tpl");
 const CURVE_TEMPLATE_PATH: &str = "precompiles/codegen/src/templates/curve.masm.tpl";
 const CURVE_TEMPLATE: &str = include_str!("templates/curve.masm.tpl");
-const REGENERATE_COMMAND: &str = "make regenerate-precompile-masm";
+const REGENERATE_COMMAND: &str =
+    "cargo run -p miden-precompiles-codegen -- --out target/miden-precompiles-generated-asm";
 const ASM_PATH_PREFIX: &str = "asm/";
 
 const U256_CONFIG: UintMasmConfig = UintMasmConfig {
@@ -108,60 +99,6 @@ const CURVE_CONFIGS: &[CurveMasmConfig] = &[
         curve: CodegenCurveId::Ed25519,
     },
 ];
-
-/// Runs write (`--write`) or staleness-check (`--check`) mode for generated precompile MASM.
-pub fn run(mode: Mode) -> Result<(), String> {
-    match mode {
-        Mode::Check => check(),
-        Mode::Write => write(),
-    }
-}
-
-/// Checks checked-in generated MASM files against the fixed codegen descriptors.
-pub fn check() -> Result<(), String> {
-    let generated = generated_files()?;
-
-    for file in &generated {
-        let actual = read_file(file.path)
-            .map_err(|error| format!("failed to read {}: {error}", manifest_path(file.path)))?;
-
-        if actual != file.contents {
-            return Err(first_diff_message(file.path, &actual, &file.contents));
-        }
-    }
-
-    println!("checked {} generated precompile MASM files", generated.len());
-    Ok(())
-}
-
-/// Regenerates checked-in MASM files, writing only files whose contents differ.
-pub fn write() -> Result<(), String> {
-    let generated = generated_files()?;
-    let mut changed = 0usize;
-    let mut unchanged = 0usize;
-
-    for file in &generated {
-        let path = manifest_path(file.path);
-        let needs_write = match fs::read_to_string(&path) {
-            Ok(actual) => actual != file.contents,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-            Err(error) => return Err(format!("failed to read {path}: {error}")),
-        };
-
-        if needs_write {
-            fs::write(&path, file.contents.as_bytes())
-                .map_err(|error| format!("failed to write {path}: {error}"))?;
-            changed += 1;
-            println!("changed {}", file.path);
-        } else {
-            unchanged += 1;
-            println!("unchanged {}", file.path);
-        }
-    }
-
-    println!("summary: {changed} changed, {unchanged} unchanged");
-    Ok(())
-}
 
 fn generated_files() -> Result<Vec<GeneratedFile>, String> {
     let mut generated = Vec::with_capacity(1 + FIELD_CONFIGS.len() + CURVE_CONFIGS.len());
@@ -427,31 +364,6 @@ fn limbs_literal(limbs: [u32; 8]) -> String {
     format!("[{}]", limbs.join(", "))
 }
 
-fn first_diff_message(path: &str, actual: &str, expected: &str) -> String {
-    let actual_lines: Vec<&str> = actual.split('\n').collect();
-    let expected_lines: Vec<&str> = expected.split('\n').collect();
-    let line_count = actual_lines.len().max(expected_lines.len());
-
-    for i in 0..line_count {
-        let actual_line = actual_lines.get(i).copied();
-        let expected_line = expected_lines.get(i).copied();
-        if actual_line != expected_line {
-            return format!(
-                "{path} is out of date at line {}\n  actual:   {}\n  expected: {}",
-                i + 1,
-                actual_line.unwrap_or("<EOF>"),
-                expected_line.unwrap_or("<EOF>"),
-            );
-        }
-    }
-
-    format!("{path} is out of date")
-}
-
-fn read_file(rel_path: &str) -> io::Result<String> {
-    fs::read_to_string(manifest_path(rel_path))
-}
-
 fn write_file_if_changed(path: &Path, contents: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -462,17 +374,6 @@ fn write_file_if_changed(path: &Path, contents: &str) -> Result<(), String> {
         Ok(_) | Err(_) => fs::write(path, contents.as_bytes())
             .map_err(|error| format!("failed to write {}: {error}", path.display())),
     }
-}
-
-fn manifest_path(rel_path: &str) -> String {
-    precompiles_dir().join(rel_path).display().to_string()
-}
-
-fn precompiles_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .to_path_buf()
 }
 
 struct ConstantMasm {
@@ -521,6 +422,7 @@ struct CurveMasmConfig {
 mod tests {
     use std::{
         env, fs,
+        path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
