@@ -21,8 +21,6 @@ help:
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make check-precompile-masm       # Check precompile MASM artifacts\n"
-	@printf "  make regenerate-precompile-masm  # Regenerate precompile MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -241,14 +239,6 @@ regenerate-constraints: ## Regenerate core-lib constraint artifacts
 .PHONY: check-constraints
 check-constraints: ## Check core-lib constraint artifacts for drift
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
-
-.PHONY: regenerate-precompile-masm
-regenerate-precompile-masm: ## Regenerate precompile MASM artifacts
-	cargo run --package miden-precompiles --features codegen-tools --bin regenerate-precompile-masm -- --write
-
-.PHONY: check-precompile-masm
-check-precompile-masm: ## Check precompile MASM artifacts for drift
-	cargo run --package miden-precompiles --features codegen-tools --bin regenerate-precompile-masm -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
