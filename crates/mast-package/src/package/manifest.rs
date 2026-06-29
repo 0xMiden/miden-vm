@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt;
 
 use miden_assembly_syntax::ast::{
@@ -14,15 +19,19 @@ use proptest::prelude::{Strategy, any};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Dependency, PackageId};
+use crate::{Dependency, PackageId, debug_info::DebugSourceNodeId};
 
 // PACKAGE MANIFEST
 // ================================================================================================
 
 /// The manifest of a package, containing the set of package dependencies (libraries or packages)
-/// and exported items (procedures, constants, types), if known.
+/// exported items (procedures, constants, types), and module surface information, if known.
 ///
 /// Exports declared in the package manifest are keyed by their fully-qualified path.
+///
+/// Module surface entries describe the module tree independently from item exports. This lets
+/// downstream linkers validate `use module` and submodule traversal without treating modules as
+/// exported items.
 ///
 /// Dependencies must each specify a unique package identifier, i.e. it is not allowed to have
 /// multiple dependencies on the same package identifier, even if they are different versions.
@@ -41,17 +50,62 @@ pub struct PackageManifest {
         )
     )]
     pub(super) exports: BTreeMap<Arc<Path>, PackageExport>,
+    /// The module surface declared by this package.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Default::default()"))]
+    pub(super) modules: BTreeMap<Arc<Path>, PackageModule>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
     pub(super) dependencies: Vec<Dependency>,
+    /// The (optional) entrypoint function for this package, if it is executable
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
+    pub(super) entrypoint: Option<Arc<Path>>,
 }
 
 #[derive(Debug, Error)]
 pub enum ManifestValidationError {
     #[error("duplicate export path '{0}' in package manifest")]
     DuplicateExport(Arc<Path>),
+    #[error("duplicate module path '{0}' in package manifest")]
+    DuplicateModule(Arc<Path>),
+    #[error("duplicate submodule '{name}' in module '{module}' in package manifest")]
+    DuplicateSubmodule { module: Arc<Path>, name: String },
+    #[error(
+        "package manifest declares export '{export}' in module '{module}', but no module surface was provided for that module"
+    )]
+    MissingExportModuleSurface { export: Arc<Path>, module: Arc<Path> },
+    #[error(
+        "package manifest declares submodule '{module}' from module '{parent}', but no module surface was provided for it"
+    )]
+    MissingDeclaredSubmoduleSurface {
+        parent: Arc<Path>,
+        name: String,
+        module: Arc<Path>,
+    },
+    #[error(
+        "package manifest contains module surface '{module}', but parent module '{parent}' does not declare submodule '{name}'"
+    )]
+    UndeclaredModuleSurface {
+        module: Arc<Path>,
+        parent: Arc<Path>,
+        name: String,
+    },
     #[error("duplicate dependency '{0}' in package manifest")]
     DuplicateDependency(PackageId),
+    #[error("multiple entrypoint procedures found: '{duplicate}' conflicts with '{original}'")]
+    DuplicateEntrypoint {
+        original: Arc<Path>,
+        duplicate: Arc<Path>,
+    },
+    #[error("invalid {expected} path '{path}': found export of type {actual}")]
+    UnexpectedExportType {
+        path: Arc<Path>,
+        expected: &'static str,
+        actual: &'static str,
+    },
+    #[error("found an executable entrypoint in a package declared with non-executable type")]
+    NonExecutableEntrypoint,
+    #[error("invalid entrypoint path '{path}': no export with that path was found in the manifest")]
+    MissingEntrypoint { path: Arc<Path> },
     #[error(
         "package manifest declares export for procedure '{path}', but no procedure root with its digest was found in the MAST"
     )]
@@ -62,6 +116,8 @@ pub enum ManifestValidationError {
     InvalidProcedureExport { path: Arc<Path> },
     #[error("invalid export path '{path}': {error}")]
     InvalidExportPath { path: Arc<Path>, error: ast::PathError },
+    #[error("invalid module path '{path}': {error}")]
+    InvalidModulePath { path: Arc<Path>, error: ast::PathError },
     #[error("package must contain at least one exported procedure")]
     NoProcedures,
 }
@@ -74,14 +130,27 @@ impl PackageManifest {
     ) -> Result<Self, ManifestValidationError> {
         let mut manifest = Self {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
         let mut has_procedures = false;
         for mut export in exports {
-            if export.is_procedure() {
-                has_procedures = true;
-            }
             normalize_export(&mut export)?;
+            if let Some(proc) = export.as_procedure() {
+                has_procedures = true;
+                // The presence of `begin` in any exported module is automatically made the
+                // entrypoint for that package.
+                if proc.path.last().is_some_and(|name| name == ast::ProcedureName::MAIN_PROC_NAME) {
+                    if let Some(original) = manifest.entrypoint.clone() {
+                        return Err(ManifestValidationError::DuplicateEntrypoint {
+                            original,
+                            duplicate: proc.path.clone(),
+                        });
+                    }
+                    manifest.entrypoint = Some(proc.path.clone());
+                }
+            }
             manifest.add_export(export)?;
         }
 
@@ -90,6 +159,60 @@ impl PackageManifest {
         }
 
         Ok(manifest)
+    }
+
+    /// Specify the entrypoint procedure for this package.
+    ///
+    /// This will return an error if an entrypoint already exists, or if `entrypoint` is not
+    /// found in the set of exported procedures declared in this manifest.
+    pub fn with_entrypoint(
+        mut self,
+        entrypoint: Arc<Path>,
+    ) -> Result<Self, ManifestValidationError> {
+        self.set_entrypoint(entrypoint)?;
+
+        Ok(self)
+    }
+
+    /// Override the entrypoint procedure for this package.
+    ///
+    /// This will return an error if an entrypoint already exists, or if `entrypoint` is not
+    /// found in the set of exported procedures declared in this manifest.
+    pub(super) fn set_entrypoint(
+        &mut self,
+        entrypoint: Arc<Path>,
+    ) -> Result<(), ManifestValidationError> {
+        if let Some(original) = self.entrypoint.clone() {
+            if original == entrypoint {
+                Ok(())
+            } else {
+                Err(ManifestValidationError::DuplicateEntrypoint {
+                    original,
+                    duplicate: entrypoint,
+                })
+            }
+        } else if let Some(export) = self.get_export(&entrypoint) {
+            match export {
+                PackageExport::Procedure(proc) => {
+                    self.entrypoint = Some(proc.path.clone());
+                    Ok(())
+                },
+                other @ (PackageExport::Constant(_) | PackageExport::Type(_)) => {
+                    let actual = match other {
+                        PackageExport::Constant(_) => "constant",
+                        PackageExport::Type(_) => "type",
+                        _ => unreachable!(),
+                    };
+                    Err(ManifestValidationError::UnexpectedExportType {
+                        path: entrypoint,
+                        expected: "procedure",
+                        actual,
+                    })
+                },
+            }
+        } else {
+            Err(ManifestValidationError::MissingEntrypoint { path: entrypoint })
+        }
     }
 
     /// Extend this manifest with the provided dependencies
@@ -102,6 +225,29 @@ impl PackageManifest {
         }
 
         Ok(self)
+    }
+
+    /// Extend this manifest with module surface information.
+    pub fn with_modules(
+        mut self,
+        modules: impl IntoIterator<Item = PackageModule>,
+    ) -> Result<Self, ManifestValidationError> {
+        for module in modules {
+            self.add_module(module)?;
+        }
+
+        Ok(self)
+    }
+
+    /// Add module surface information to the manifest.
+    pub fn add_module(&mut self, mut module: PackageModule) -> Result<(), ManifestValidationError> {
+        normalize_module(&mut module)?;
+        let path = module.path.clone();
+        if self.modules.insert(path.clone(), module).is_some() {
+            return Err(ManifestValidationError::DuplicateModule(path));
+        }
+
+        Ok(())
     }
 
     /// Add a dependency to the manifest
@@ -142,6 +288,21 @@ impl PackageManifest {
         self.exports.get(name.as_ref())
     }
 
+    /// Get the number of module surface entries in this manifest.
+    pub fn num_modules(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Get an iterator over the module surfaces in this manifest.
+    pub fn modules(&self) -> impl Iterator<Item = &PackageModule> {
+        self.modules.values()
+    }
+
+    /// Get information about a module surface by its qualified path.
+    pub fn get_module(&self, name: impl AsRef<Path>) -> Option<&PackageModule> {
+        self.modules.get(name.as_ref())
+    }
+
     /// Get information about all exported procedures of this package with the given MAST root
     /// digest
     pub fn get_procedures_by_digest(
@@ -156,6 +317,11 @@ impl PackageManifest {
         })
     }
 
+    /// Get the entrypoint specified in the package manifest, if one is specified
+    pub fn entrypoint(&self) -> Option<Arc<Path>> {
+        self.entrypoint.clone()
+    }
+
     fn add_export(&mut self, export: PackageExport) -> Result<(), ManifestValidationError> {
         let path = export.path();
         if self.exports.insert(path.clone(), export).is_some() {
@@ -163,6 +329,52 @@ impl PackageManifest {
         }
 
         Ok(())
+    }
+}
+
+/// Represents a module surface declared by a package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PackageModule {
+    /// The fully-qualified path of this module.
+    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
+    pub path: Arc<Path>,
+    /// The public submodules declared by this module.
+    pub submodules: Vec<PackageSubmodule>,
+}
+
+impl PackageModule {
+    pub fn new(path: Arc<Path>, submodules: impl IntoIterator<Item = PackageSubmodule>) -> Self {
+        Self {
+            path,
+            submodules: submodules.into_iter().collect(),
+        }
+    }
+
+    /// Get the module path.
+    #[inline]
+    pub fn path(&self) -> &Arc<Path> {
+        &self.path
+    }
+
+    /// Get the submodule declarations for this module.
+    #[inline]
+    pub fn submodules(&self) -> &[PackageSubmodule] {
+        &self.submodules
+    }
+}
+
+/// Represents a submodule declaration in a package module surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PackageSubmodule {
+    /// The name of the submodule.
+    pub name: ast::Ident,
+}
+
+impl PackageSubmodule {
+    pub fn new(name: ast::Ident) -> Self {
+        Self { name }
     }
 }
 
@@ -326,6 +538,14 @@ pub struct ProcedureExport {
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub node: Option<MastNodeId>,
+    /// Source/debug occurrence corresponding to this exported procedure, when package debug info
+    /// is present.
+    ///
+    /// This disambiguates exports that collapse to the same executable [`MastNodeId`] but retain
+    /// distinct source/debug metadata in the package-owned source occurrence graph.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub source_node: Option<DebugSourceNodeId>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Word::default()"))]
     pub digest: Word,
@@ -349,10 +569,16 @@ impl ProcedureExport {
         Self {
             path,
             node,
+            source_node: None,
             digest,
             signature,
             attributes: Default::default(),
         }
+    }
+
+    pub fn with_source_node(mut self, source_node: Option<DebugSourceNodeId>) -> Self {
+        self.source_node = source_node;
+        self
     }
 }
 
@@ -361,6 +587,7 @@ impl fmt::Debug for ProcedureExport {
         let Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -368,6 +595,7 @@ impl fmt::Debug for ProcedureExport {
         f.debug_struct("PackageExport")
             .field("path", &format_args!("{path}"))
             .field("node", node)
+            .field("source_node", source_node)
             .field("digest", &format_args!("{}", DisplayHex::new(&digest.as_bytes())))
             .field("signature", signature)
             .field("attributes", attributes)
@@ -470,6 +698,35 @@ fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidation
     }
 
     Ok(())
+}
+
+fn normalize_module(module: &mut PackageModule) -> Result<(), ManifestValidationError> {
+    use alloc::collections::BTreeSet;
+    let canonical_path = canonicalize_module_path(module.path.as_ref())?;
+    let mut declared = BTreeSet::new();
+
+    for submodule in module.submodules.iter() {
+        let name = submodule.name.as_str();
+        if !declared.insert(name.to_string()) {
+            return Err(ManifestValidationError::DuplicateSubmodule {
+                module: canonical_path,
+                name: name.to_string(),
+            });
+        }
+    }
+
+    module.path = canonical_path;
+    Ok(())
+}
+
+fn canonicalize_module_path(path: &Path) -> Result<Arc<Path>, ManifestValidationError> {
+    let canonical =
+        path.canonicalize()
+            .map_err(|error| ManifestValidationError::InvalidModulePath {
+                error,
+                path: path.to_path_buf().into(),
+            })?;
+    Ok(Arc::<Path>::from(canonical.into_boxed_path()))
 }
 
 fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, ManifestValidationError> {

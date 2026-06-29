@@ -31,8 +31,8 @@ pub use self::{
     parser::{ModuleParser, ParsingError},
 };
 pub use self::{
-    parse::{Parse, ParseOptions},
-    sema::SemanticAnalysisError,
+    parse::Parse,
+    sema::{ExportedTypeUse, SemanticAnalysisError},
 };
 
 /// Maximum allowed iteration count for `repeat.<count>` blocks.

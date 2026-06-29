@@ -3,20 +3,18 @@ use miden_assembly_syntax::{
     ast::{InvocationTarget, InvokeKind},
     diagnostics::Report,
 };
-use miden_core::{
-    mast::{CallNodeBuilder, DynNodeBuilder, MastNodeExt, MastNodeId},
-    operations::{AssemblyOp, Operation},
-};
+use miden_core::operations::{AssemblyOp, Operation};
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, GlobalItemIndex, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastForestBuilder,
+    Assembler, GlobalItemIndex,
+    basic_block_builder::BasicBlockBuilder,
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
 };
 
 /// Procedure Invocation
 impl Assembler {
-    /// Returns the [`MastNodeId`] of the invoked procedure specified by `callee`.
+    /// Returns the [`MastNodeRef`] of the invoked procedure specified by `callee`.
     ///
     /// For example, given `exec.f`, this method would return the procedure body id of `f`. If the
     /// only representation of `f` that we have is its MAST root, then this method will also insert
@@ -28,20 +26,15 @@ impl Assembler {
         caller: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
-    ) -> Result<MastNodeId, Report> {
-        let resolved = self
-            .resolve_target(kind, callee, caller, mast_forest_builder)?
-            .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
+    ) -> Result<MastNodeRef, Report> {
+        let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_node_with_asm_op(
-                CallNodeBuilder::new(resolved.node),
-                asm_op.expect("call invocations must provide an AssemblyOp"),
-            ),
-            InvokeKind::SysCall => mast_forest_builder.ensure_node_with_asm_op(
-                CallNodeBuilder::new_syscall(resolved.node),
-                asm_op.expect("syscall invocations must provide an AssemblyOp"),
+            InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_ref(
+                resolved.node,
+                matches!(kind, InvokeKind::SysCall),
+                asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
             ),
         }
     }
@@ -51,11 +44,10 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_node_id =
-            mast_forest_builder.ensure_node_with_asm_op(DynNodeBuilder::new_dyn(), asm_op)?;
+    ) -> Result<Option<MastNodeRef>, Report> {
+        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_ref(false, asm_op)?;
 
-        Ok(Some(dyn_node_id))
+        Ok(Some(dyn_node_ref))
     }
 
     /// Creates a new DYNCALL block for the dynamic function call and return.
@@ -63,11 +55,10 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_call_node_id =
-            mast_forest_builder.ensure_node_with_asm_op(DynNodeBuilder::new_dyncall(), asm_op)?;
+    ) -> Result<Option<MastNodeRef>, Report> {
+        let dyn_call_node_ref = mast_forest_builder.ensure_dyn_node_ref(true, asm_op)?;
 
-        Ok(Some(dyn_call_node_id))
+        Ok(Some(dyn_call_node_ref))
     }
 
     pub(super) fn procref(
@@ -77,23 +68,15 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
-            let resolved = self
-                .resolve_target(
-                    InvokeKind::ProcRef,
-                    callee,
-                    caller,
-                    block_builder.mast_forest_builder_mut(),
-                )?
-                .ok_or_else(|| {
-                    self.invalid_invoke_target_report(InvokeKind::ProcRef, callee, caller)
-                })?;
+            let resolved = self.resolve_target(
+                InvokeKind::ProcRef,
+                callee,
+                caller.module,
+                block_builder.mast_forest_builder_mut(),
+            )?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
-            block_builder
-                .mast_forest_builder()
-                .get_mast_node(resolved.node)
-                .unwrap()
-                .digest()
+            block_builder.mast_forest_builder().mast_root_for_ref(resolved.node).unwrap()
         };
 
         self.procref_mast_root(mast_root, block_builder);

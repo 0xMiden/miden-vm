@@ -11,9 +11,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_assembly::Linkage;
-use miden_core::precompile::PrecompileTranscriptState;
+use miden_core::{Felt, precompile::PrecompileTranscriptState};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs};
 use miden_prover::{PublicInputs, prove_sync};
@@ -117,7 +118,8 @@ fn stack_inputs(values: &[u64]) -> StackInputs {
         return StackInputs::default();
     }
 
-    StackInputs::try_from_ints(values.iter().copied()).expect("invalid RECURSION_BENCH_STACK")
+    let values: Vec<_> = values.iter().copied().map(Felt::new_unchecked).collect();
+    StackInputs::new(&values).expect("invalid RECURSION_BENCH_STACK")
 }
 
 fn masm_path() -> PathBuf {

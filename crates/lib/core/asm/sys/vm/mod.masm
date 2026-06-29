@@ -1,8 +1,8 @@
-use miden::core::sys::vm::aux_trace
-use miden::core::sys::vm::deep_queries
-use miden::core::sys::vm::constraints_eval
-use miden::core::sys::vm::ood_frames
-use miden::core::sys::vm::public_inputs
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod ood_frames
+pub mod public_inputs
 
 use miden::core::stark::verifier
 use miden::core::stark::constants
@@ -23,10 +23,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
 # CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 18363916774600657317
-const RELATION_DIGEST_1 = 13829962896193052251
-const RELATION_DIGEST_2 = 11712920789916264607
-const RELATION_DIGEST_3 = 2316307575747477038
+const RELATION_DIGEST_0 = 17246763836728246237
+const RELATION_DIGEST_1 = 9838047215024765106
+const RELATION_DIGEST_2 = 15366705014579132635
+const RELATION_DIGEST_3 = 14157638374955997968
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!

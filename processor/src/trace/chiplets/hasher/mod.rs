@@ -15,7 +15,6 @@ mod trace;
 use trace::HasherTrace;
 
 #[cfg(test)]
-#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR

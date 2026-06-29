@@ -32,14 +32,14 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::Program,
 };
-use miden_utils_testing::stack;
+use miden_utils_testing::{stack, stack_inputs_from_ints};
 use rstest::rstest;
 
 use super::super::{
     build_trace_from_ops_with_inputs, build_trace_from_program,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{AdviceInputs, RowIndex, StackInputs, trace::utils::build_span_with_respan_ops};
+use crate::{AdviceInputs, RowIndex, trace::utils::build_span_with_respan_ops};
 
 // RESPONSE-SIDE DISPATCH
 // ================================================================================================
@@ -402,7 +402,7 @@ fn mpverify_hasher_bus() {
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
-    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(runtime_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -484,7 +484,7 @@ fn mrupdate_hasher_bus() {
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
     runtime_stack.extend_from_slice(&word_to_ints(new_leaf_value));
-    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(runtime_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -639,7 +639,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     init_stack.extend_from_slice(&[3, index]);
     init_stack.extend_from_slice(&word_to_ints(tree.root()));
     init_stack.extend_from_slice(&word_to_ints(new_node));
-    let stack_inputs = StackInputs::try_from_ints(init_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(init_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -649,7 +649,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let main = trace.main_trace();
 
     // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_ctrl column) AND the hasher internal
+    // `chiplet_active.controller = 1` (s_01 column) AND the hasher internal
     // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
     // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();

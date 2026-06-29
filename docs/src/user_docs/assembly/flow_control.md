@@ -9,7 +9,7 @@ As mentioned above, Miden assembly provides high-level constructs to facilitate 
 
 - _if-else_ expressions for conditional execution.
 - _repeat_ expressions for bounded counter-controlled loops.
-- _while_ expressions for unbounded condition-controlled loops.
+- _while_ expressions for unbounded condition-controlled loops (head-controlled and tail-controlled).
 
 ### Conditional execution
 
@@ -109,6 +109,42 @@ push.1
 while.true
     # push the boolean false to the stack, finishing the loop for the next iteration
     push.0
+end
+```
+
+#### `do .. while .. end`
+
+A _do-while loop_ is a tail-controlled variant of the while loop: the body is always executed at least once, and the loop condition is evaluated at the *end* of each iteration rather than the beginning. These expressions look like so:
+
+```
+do
+    <body>
+while
+    <condition>
+end
+```
+
+where both `body` and `condition` can be a sequence of any instructions, including nested control structures. The above does the following:
+
+1. The `body` instructions are executed unconditionally.
+2. The `condition` instructions are executed; they must leave a single boolean on top of the stack.
+3. The top item is popped:
+   1. If the popped value is $1$, the loop iterates again, starting from `body`.
+   2. If the popped value is $0$, the loop is exited.
+   3. If the popped value is not binary, the execution fails.
+
+Unlike `while.true`, a `do .. while .. end` loop does not perform an entry check, so it never skips the body. This maps directly onto the VM's native loop primitive and therefore avoids the extra entry-check overhead that a head-controlled loop incurs when it must always execute at least once.
+
+Example:
+
+```
+# count down from the value on top of the stack to 0
+do
+    # decrement the counter
+    push.1 sub
+while
+    # continue while the counter is not yet 0
+    dup.0 neq.0
 end
 ```
 

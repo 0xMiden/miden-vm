@@ -36,7 +36,6 @@ fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
     acc
 }
 
-#[allow(clippy::iter_skip_zero)]
 fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt; 8]) {
     let mut deg7 = [ZERO; 64];
     let mut deg6 = [ZERO; 8];
@@ -46,7 +45,6 @@ fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt;
     for (opcode, slot) in deg7
         .iter_mut()
         .enumerate()
-        .skip(DEGREE_7_OPCODE_STARTS)
         .take(DEGREE_7_OPCODE_ENDS - DEGREE_7_OPCODE_STARTS + 1)
     {
         *slot = naive_flag(&bits, opcode as u8);
@@ -349,8 +347,15 @@ fn degree_4_op_flags() {
 #[test]
 fn composite_no_shift_flags() {
     // Operations where all 16 positions remain unchanged
-    let no_shift_opcodes: [u8; 4] =
-        [opcodes::MPVERIFY, opcodes::SPAN, opcodes::HALT, opcodes::EMIT];
+    let no_shift_opcodes: [u8; 7] = [
+        opcodes::MPVERIFY,
+        opcodes::SPAN,
+        opcodes::HALT,
+        opcodes::EMIT,
+        opcodes::CALL,
+        opcodes::SYSCALL,
+        opcodes::EVALCIRCUIT,
+    ];
 
     for opcode in no_shift_opcodes {
         let op_flags = op_flags_for_opcode(opcode.into());
@@ -400,7 +405,7 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite flags for HPERM (no shift from position 12 onwards).
+/// Tests HPERM flags (top three words are overwritten, the tail is preserved).
 #[test]
 fn composite_hperm_flags() {
     let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
@@ -410,6 +415,44 @@ fn composite_hperm_flags() {
     }
     for i in 12..16 {
         assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for HPERM");
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
+/// Tests composite flags for LOGPRECOMPILE (hasher output rewrites positions 0..12, no shift from
+/// position 12 onwards).
+#[test]
+fn composite_log_precompile_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::LOGPRECOMPILE.into());
+
+    for i in 0..12 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ZERO,
+            "no_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+    }
+    for i in 12..16 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ONE,
+            "no_shift_at({i}) should be ONE for LOGPRECOMPILE"
+        );
+    }
+
+    for i in 0..16 {
+        assert_eq!(
+            op_flags.left_shift_at(i),
+            ZERO,
+            "left_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+        assert_eq!(
+            op_flags.right_shift_at(i),
+            ZERO,
+            "right_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);

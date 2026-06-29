@@ -8,7 +8,7 @@
 //!
 //! - **AIR constraints** (symbolic expressions): `Challenges<AB::ExprEF>`
 //! - **Processor aux trace builders** (concrete field elements): `Challenges<E>`
-//! - **Verifier** (`reduced_aux_values`): `Challenges<EF>`
+//! - **Verifier** (`eval_external`): `Challenges<EF>`
 //!
 //! See [`super::message`] for the standard coefficient index layout.
 

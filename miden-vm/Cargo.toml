@@ -49,7 +49,7 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "dep:proptest"]
+arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
@@ -64,6 +64,7 @@ std = [
     "serde?/std",
     "serde_json?/std",
 ]
+testing = ["arbitrary"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde", "std"]
 
@@ -84,20 +85,17 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
+tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-lifted-stark.workspace = true
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
-proptest.workspace = true
-serde-wincode.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
-wincode.workspace = true

@@ -1,14 +1,50 @@
+use alloc::vec::Vec;
+
 use miden_utils_core_derive::MastForestContributor;
 
 use super::{
     BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-    LoopNodeBuilder, SplitNodeBuilder,
+    LoopNodeBuilder, MastNodeExt, SplitNodeBuilder,
 };
 use crate::{
-    Word,
+    Felt, Word,
+    chiplets::hasher,
     mast::{MastForest, MastForestError, MastNode, MastNodeId},
-    utils::LookupByIdx,
+    utils::{Idx, LookupByIdx},
 };
+
+const CHILD_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
+
+pub(crate) fn fingerprint_with_child_fingerprints(
+    node_digest: Word,
+    child_ids: &[MastNodeId],
+    forest: &MastForest,
+    fingerprint_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+) -> Result<Word, MastForestError> {
+    let mut has_non_digest_child = false;
+    let mut elements = Vec::with_capacity(1 + 4 + child_ids.len() * 4);
+    elements.push(CHILD_FINGERPRINT_DOMAIN);
+    elements.extend_from_slice(node_digest.as_elements());
+
+    for &child_id in child_ids {
+        if child_id.to_usize() >= forest.nodes().len() {
+            return Err(MastForestError::NodeIdOverflow(child_id, forest.nodes().len()));
+        }
+
+        let child_digest = forest[child_id].digest();
+        let child_fingerprint = *fingerprint_by_node_id
+            .get(child_id)
+            .ok_or(MastForestError::NodeIdOverflow(child_id, forest.nodes().len()))?;
+        has_non_digest_child |= child_fingerprint != child_digest;
+        elements.extend_from_slice(child_fingerprint.as_elements());
+    }
+
+    if has_non_digest_child {
+        Ok(hasher::hash_elements(&elements))
+    } else {
+        Ok(node_digest)
+    }
+}
 
 pub trait MastForestContributor {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
@@ -18,7 +54,11 @@ pub trait MastForestContributor {
     /// This method computes the fingerprint for a node directly from the builder data
     /// without first constructing a MastNode, providing the same result as the
     /// traditional fingerprint computation approach.
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError>;
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
@@ -59,6 +99,23 @@ impl MastNodeBuilder {
             MastNodeBuilder::Join(builder) => Ok(builder.build(mast_forest)?.into()),
             MastNodeBuilder::Loop(builder) => Ok(builder.build(mast_forest)?.into()),
             MastNodeBuilder::Split(builder) => Ok(builder.build(mast_forest)?.into()),
+        }
+    }
+
+    /// Build a node whose child IDs have already been remapped into final forest positions.
+    ///
+    /// This path is used by finalizers that materialize nodes in topological order before a
+    /// complete [`MastForest`] exists. Control-node builders must carry their already-computed
+    /// digest on this path.
+    pub fn build_linked(self) -> Result<MastNode, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
+            MastNodeBuilder::Call(builder) => Ok(builder.build_linked()?.into()),
+            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::Join(builder) => Ok(builder.build_linked()?.into()),
+            MastNodeBuilder::Loop(builder) => Ok(builder.build_linked()?.into()),
+            MastNodeBuilder::Split(builder) => Ok(builder.build_linked()?.into()),
         }
     }
 
@@ -113,20 +170,29 @@ mod fingerprint_invariant_tests {
     };
 
     #[test]
-    fn basic_block_fingerprint_ignores_assert_error_codes() {
+    fn basic_block_fingerprint_preserves_error_code_bearing_operations() {
         let forest = MastForest::new();
-        let builder_assert_1 =
-            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(1))]);
-        let builder_assert_2 =
-            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(2))]);
+        let empty_map = alloc::collections::BTreeMap::new();
 
-        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest).unwrap();
-        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest).unwrap();
+        for make_op in [
+            Operation::Assert as fn(Felt) -> Operation,
+            Operation::U32assert2 as fn(Felt) -> Operation,
+            Operation::MpVerify as fn(Felt) -> Operation,
+        ] {
+            let builder_1 = BasicBlockNodeBuilder::new(vec![make_op(Felt::new_unchecked(1))]);
+            let builder_1_dup = BasicBlockNodeBuilder::new(vec![make_op(Felt::new_unchecked(1))]);
+            let builder_2 = BasicBlockNodeBuilder::new(vec![make_op(Felt::new_unchecked(2))]);
 
-        assert_eq!(
-            fp_assert_1, fp_assert_2,
-            "assert error codes are debug metadata and should not affect MAST node identity"
-        );
+            let fp_1 = builder_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp_1_dup = builder_1_dup.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp_2 = builder_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+            assert_eq!(fp_1, fp_1_dup);
+            assert_ne!(
+                fp_1, fp_2,
+                "runtime error codes must affect dedup fingerprints without changing MAST digest"
+            );
+        }
     }
 }
 

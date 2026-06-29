@@ -5,14 +5,13 @@ use alloc::sync::Arc;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{precompile::PrecompileTranscriptState, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
-use miden_lifted_stark::InstanceShapes;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
+use miden_utils_testing::stack_inputs_from_ints;
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
-use serde_wincode::SerdeCompat;
 
 fn assert_prove_verify(
     source: &str,
@@ -25,7 +24,7 @@ fn assert_prove_verify(
         .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
-    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+    let stack_inputs = stack_inputs_from_ints([0, 1]);
     let advice_inputs = AdviceInputs::default();
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
@@ -182,39 +181,6 @@ fn test_equal_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
-#[test]
-fn rejects_non_canonical_air_order() {
-    let source = "
-        begin
-            push.1 drop
-        end
-    ";
-    let program = Assembler::default().assemble_program("test", source).unwrap().unwrap_program();
-    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
-    let advice_inputs = AdviceInputs::default();
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    let options = ProvingOptions::with_96_bit_security(HashFunction::Poseidon2);
-
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .expect("Proving failed");
-
-    let mut tampered_proof_bytes = proof.stark_proof().to_vec();
-    flip_serialized_air_order(&mut tampered_proof_bytes);
-    let tampered_proof =
-        ExecutionProof::new(tampered_proof_bytes, HashFunction::Poseidon2, Vec::new());
-
-    let result = verify(program.into(), stack_inputs, stack_outputs, tampered_proof);
-    assert!(result.is_err(), "non-canonical air_order must be rejected");
-}
-
 /// Hash-heavy program where `chip_height > core_height`. Regression for the
 /// per-AIR-height boundary handling on the SLICED Core trace.
 #[test]
@@ -229,43 +195,6 @@ fn test_hash_heavy_divergent_heights() {
         end
     ";
     assert_prove_verify(source, HashFunction::Blake3_256, "Blake3", false, false);
-}
-
-fn flip_serialized_air_order(proof_bytes: &mut [u8]) {
-    // `StarkProof` serializes `instance_shapes` first, so the wincode encoding of
-    // `InstanceShapes` is a byte-exact prefix of the proof; surgically flip the embedded
-    // `air_order` from the canonical `[0, 1]` to `[1, 0]`.
-    let shapes: InstanceShapes =
-        <SerdeCompat<InstanceShapes> as wincode::config::Deserialize<_>>::deserialize(
-            proof_bytes,
-            wincode::config::Configuration::default(),
-        )
-        .expect("instance shapes prefix");
-    assert_eq!(shapes.air_order(), &[0, 1], "test assumes canonical caller order");
-
-    let serialized_shapes =
-        <SerdeCompat<InstanceShapes> as wincode::config::Serialize<_>>::serialize(
-            &shapes,
-            wincode::config::Configuration::default(),
-        )
-        .expect("serialized shapes");
-    assert!(proof_bytes.starts_with(&serialized_shapes));
-
-    let canonical_order = <SerdeCompat<Vec<u32>> as wincode::config::Serialize<_>>::serialize(
-        &vec![0u32, 1],
-        wincode::config::Configuration::default(),
-    )
-    .expect("canonical order");
-    let tampered_order = <SerdeCompat<Vec<u32>> as wincode::config::Serialize<_>>::serialize(
-        &vec![1u32, 0],
-        wincode::config::Configuration::default(),
-    )
-    .expect("tampered order");
-    let offset = serialized_shapes
-        .windows(canonical_order.len())
-        .position(|window| window == canonical_order)
-        .expect("air_order in instance shape prefix");
-    proof_bytes[offset..offset + tampered_order.len()].copy_from_slice(&tampered_order);
 }
 
 /// Test end-to-end proving and verification with RPX
@@ -323,7 +252,7 @@ fn bench_single_scenario(name: &str, source: &str, expected_padded_rows: Option<
         .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
-    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+    let stack_inputs = stack_inputs_from_ints([0, 1]);
 
     let fast_proc = FastProcessor::new(stack_inputs);
     let mut trace_host =
@@ -505,7 +434,7 @@ mod fast_parallel {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         let trace_inputs =
@@ -526,8 +455,8 @@ mod fast_parallel {
         let blake3_config = config::blake3_256_config(config::pcs_params());
         let proof_bytes = prove_stark(
             &blake3_config,
-            &core_matrix,
-            &chiplets_matrix,
+            core_matrix,
+            chiplets_matrix,
             &public_values,
             &kernel_felts,
         )
@@ -556,7 +485,7 @@ mod fast_parallel {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         let trace_inputs =

@@ -207,7 +207,6 @@ mod serialization {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn deserialize_dependency_map<'de, D>(
         deserializer: D,
     ) -> Result<Map<Span<Arc<str>>, Span<DependencySpec>>, D::Error>

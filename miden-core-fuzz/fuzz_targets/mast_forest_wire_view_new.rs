@@ -16,7 +16,6 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    let _ = view.is_stripped();
     let root_count = view.procedure_root_count();
     let node_count = view.node_count();
 

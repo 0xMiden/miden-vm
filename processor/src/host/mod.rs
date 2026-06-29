@@ -6,7 +6,6 @@ use miden_core::{
     advice::AdviceMap,
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
-    mast::MastForest,
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -23,7 +22,7 @@ pub mod handlers;
 use handlers::EventError;
 
 mod mast_forest_store;
-pub use mast_forest_store::{MastForestStore, MemMastForestStore};
+pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
 // ADVICE MAP MUTATIONS
 // ================================================================================================
@@ -88,7 +87,7 @@ pub trait BaseHost {
 pub trait SyncHost: BaseHost {
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -116,7 +115,8 @@ pub trait Host: BaseHost {
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+    fn get_mast_forest(&self, node_digest: &Word)
+    -> impl FutureMaybeSend<Option<LoadedMastForest>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -140,7 +140,10 @@ impl<T> Host for T
 where
     T: SyncHost,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
         let result = SyncHost::get_mast_forest(self, node_digest);
         async move { result }
     }

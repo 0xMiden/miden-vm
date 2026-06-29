@@ -7,7 +7,6 @@ use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
-    mast::ExecutableMastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -93,15 +92,11 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mpverify<P: Processor, T: Tracer, F>(
+pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
-    program: &F,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError>
-where
-    F: ExecutableMastForest + ?Sized,
-{
+) -> Result<OperationHelperRegisters, CryptoError> {
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -117,14 +112,13 @@ where
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
-        let err_msg = program.resolve_error_message(err_code);
         OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: node,
                 index,
                 root,
                 err_code,
-                err_msg,
+                err_msg: None,
             }),
         }
     })?;
@@ -467,7 +461,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let stmnt: Word = processor.stack().get_word(4);
-    let state_prev = processor.precompile_transcript_state();
+    let state_prev = processor.system().precompile_transcript_state();
 
     // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
@@ -480,7 +474,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
     let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
-    processor.set_precompile_transcript_state(state_new);
+    processor.system_mut().set_precompile_transcript_state(state_new);
 
     processor.stack_mut().set_word(0, &state_new);
     processor.stack_mut().set_word(4, &out_rate1);

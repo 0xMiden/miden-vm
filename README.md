@@ -4,7 +4,7 @@
 [![LICENSE](https://img.shields.io/badge/license-APACHE-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-APACHE)
 [![Test](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml)
 [![Build](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml)
-[![RUST_VERSION](https://img.shields.io/badge/rustc-1.90+-lightgray.svg)](https://www.rust-lang.org/tools/install)
+[![RUST_VERSION](https://img.shields.io/badge/rustc-1.96+-lightgray.svg)](https://www.rust-lang.org/tools/install)
 [![Crates.io](https://img.shields.io/crates/v/miden-vm)](https://crates.io/crates/miden-vm)
 
 A STARK-based virtual machine.
@@ -91,6 +91,23 @@ A few general notes on performance:
 - Proof verification time is really fast. In most cases it is under 1 ms, but sometimes gets as high as 2 ms or 3 ms.
 - Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
 - Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
+
+To refresh the Blake3 results below, run the same Criterion benchmark used by CI:
+
+```bash
+RAYON_NUM_THREADS=16 cargo run --profile optimized -p miden-vm-blake3-bench --bin blake3-nonregression -- run \
+  --repo-root . \
+  --output-dir target/blake3-nonregression \
+  --rayon-num-threads 16 \
+  --sample-size 10 \
+  --light-sample-size 100 \
+  --measurement-time-secs 1 \
+  --warm-up-time-secs 1 \
+  --bench-axes all \
+  --git-ref "$(git rev-parse HEAD)"
+```
+
+The result is written to `target/blake3-nonregression/result.json`; the harness does not parse the `miden-vm run` or `miden-vm prove` text output. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `e2e_prove`. The `e2e_prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
 
 ### Single-core prover performance
 

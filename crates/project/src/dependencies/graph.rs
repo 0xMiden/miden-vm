@@ -853,9 +853,14 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             },
         };
 
-        Ok(target.path.as_ref().map(|path| {
-            manifest_path.parent().expect("manifest path has a parent").join(path.path())
-        }))
+        let project_root = manifest_path.parent().expect("manifest path has a parent");
+        let Some(target_path) = target.path.to_path() else {
+            return Err(Report::msg(format!(
+                "invalid target path: '{}' is not a valid file path",
+                target.path
+            )));
+        };
+        Ok(Some(project_root.join(target_path)))
     }
 
     fn ensure_dependency_name(
@@ -1092,13 +1097,14 @@ fn package_requirements(
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, string::ToString};
+    use core::assert_matches;
     use std::{collections::BTreeMap, fs, sync::Arc};
 
     use miden_assembly_syntax::{
         ast::Path as AstPath,
         debuginfo::{DefaultSourceManager, Span},
     };
-    use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
+    use miden_core::{serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
     use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
@@ -1156,14 +1162,14 @@ mod tests {
     fn builds_path_dependency_graph() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&dependency_dir, "dep", "1.0.0", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1188,14 +1194,14 @@ mod tests {
     fn path_dependency_without_version_uses_referenced_source_version() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "9.9.9", Some("export.foo\nend\n"), []);
+        write_package(&dependency_dir, "dep", "9.9.9", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1219,14 +1225,14 @@ mod tests {
     fn path_dependency_version_requirement_must_match_source_version() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&dependency_dir, "dep", "1.0.0", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1251,14 +1257,14 @@ mod tests {
     fn path_source_dependency_rejects_digest_requirement() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&dependency_dir, "dep", "1.0.0", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1283,14 +1289,14 @@ mod tests {
     fn path_source_dependency_rejects_exact_published_requirement() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&dependency_dir, "dep", "1.0.0", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1320,14 +1326,14 @@ mod tests {
             &workspace_root.join("miden-project.toml"),
             "[workspace]\nmembers = [\"dep\"]\n",
         );
-        write_package(&workspace_root.join("dep"), "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&workspace_root.join("dep"), "dep", "1.0.0", "export.foo\nend\n", []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1354,7 +1360,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
@@ -1384,7 +1390,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Digest(Span::unknown(
@@ -1413,7 +1419,7 @@ mod tests {
             &depa_dir,
             "depa",
             "1.0.0",
-            Some("export.call_shared\nend\n"),
+            "export.call_shared\nend\n",
             [Dependency::new(
                 Span::unknown("shared".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
@@ -1426,7 +1432,7 @@ mod tests {
             &depb_dir,
             "depb",
             "1.0.0",
-            Some("export.call_shared\nend\n"),
+            "export.call_shared\nend\n",
             [Dependency::new(
                 Span::unknown("shared".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
@@ -1441,7 +1447,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.entry\nend\n"),
+            "export.entry\nend\n",
             [
                 Dependency::new(
                     Span::unknown("depa".into()),
@@ -1488,7 +1494,7 @@ mod tests {
             &depa_dir,
             "depa",
             "1.0.0",
-            Some("export.call_shared\nend\n"),
+            "export.call_shared\nend\n",
             [Dependency::new(
                 Span::unknown("shared".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
@@ -1501,7 +1507,7 @@ mod tests {
             &depb_dir,
             "depb",
             "1.0.0",
-            Some("export.call_shared\nend\n"),
+            "export.call_shared\nend\n",
             [Dependency::new(
                 Span::unknown("shared".into()),
                 DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
@@ -1516,7 +1522,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.entry\nend\n"),
+            "export.entry\nend\n",
             [
                 Dependency::new(
                     Span::unknown("depa".into()),
@@ -1552,41 +1558,6 @@ mod tests {
     }
 
     #[test]
-    fn records_missing_library_source_path() {
-        let tempdir = TempDir::new().unwrap();
-        let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", None, []);
-
-        let root_dir = tempdir.path().join("root");
-        let root_manifest = write_package(
-            &root_dir,
-            "root",
-            "1.0.0",
-            Some("export.foo\nend\n"),
-            [Dependency::new(
-                Span::unknown("dep".into()),
-                DependencyVersionScheme::Path {
-                    path: Span::unknown(Uri::new("../dep")),
-                    version: None,
-                },
-                Linkage::Dynamic,
-            )],
-        );
-
-        let registry = TestRegistry::default();
-        let graph = builder(&registry, &tempdir.path().join("git"))
-            .build_from_path(&root_manifest)
-            .unwrap();
-        let dep = graph.get(&PackageId::from("dep")).unwrap();
-        match &dep.provenance {
-            ProjectDependencyNodeProvenance::Source(source) => {
-                assert_matches!(source, ProjectSource::Real { library_path, .. } if library_path.is_none());
-            },
-            _ => panic!("expected source provenance"),
-        }
-    }
-
-    #[test]
     fn path_to_masp_is_leaf() {
         let tempdir = TempDir::new().unwrap();
         let package = build_registry_test_package("dep", "1.0.0");
@@ -1598,7 +1569,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1631,7 +1602,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1688,7 +1659,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1786,7 +1757,7 @@ mod tests {
             &ok_root_dir,
             "root-ok",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1809,7 +1780,7 @@ mod tests {
             &bad_root_dir,
             "root-bad",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Path {
@@ -1834,7 +1805,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&repo_dir, "dep", "1.0.0", "export.foo\nend\n", []);
         run_git(&repo_dir, &["init", "-b", "main"]);
         run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
         run_git(&repo_dir, &["config", "user.name", "Test"]);
@@ -1847,7 +1818,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Git {
@@ -1878,7 +1849,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&repo_dir, "dep", "1.0.0", "export.foo\nend\n", []);
         run_git(&repo_dir, &["init", "-b", "main"]);
         run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
         run_git(&repo_dir, &["config", "user.name", "Test"]);
@@ -1887,7 +1858,7 @@ mod tests {
         run_git(&repo_dir, &["commit", "-m", "init"]);
         let initial_revision = run_git_capture(&repo_dir, &["rev-parse", "HEAD"]);
 
-        write_package(&repo_dir, "dep", "2.0.0", Some("export.foo\nend\n"), []);
+        write_package(&repo_dir, "dep", "2.0.0", "export.foo\nend\n", []);
         run_git(&repo_dir, &["add", "."]);
         run_git(&repo_dir, &["commit", "-m", "change"]);
 
@@ -1896,7 +1867,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Git {
@@ -1934,7 +1905,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        write_package(&repo_dir, "dep", "9.9.9", Some("export.foo\nend\n"), []);
+        write_package(&repo_dir, "dep", "9.9.9", "export.foo\nend\n", []);
         run_git(&repo_dir, &["init", "-b", "main"]);
         run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
         run_git(&repo_dir, &["config", "user.name", "Test"]);
@@ -1947,7 +1918,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Git {
@@ -1973,7 +1944,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        write_package(&repo_dir, "dep", "1.0.0", "export.foo\nend\n", []);
         run_git(&repo_dir, &["init", "-b", "main"]);
         run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
         run_git(&repo_dir, &["config", "user.name", "Test"]);
@@ -1986,7 +1957,7 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            Some("export.foo\nend\n"),
+            "export.foo\nend\n",
             [Dependency::new(
                 Span::unknown("dep".into()),
                 DependencyVersionScheme::Git {
@@ -2084,7 +2055,7 @@ mod tests {
             &root_dir.join("miden-project.toml"),
             "[workspace]\nmembers = [\"app\"]\n\n[workspace.dependencies]\ndep = { path = \"vendor/dep\" }\n",
         );
-        write_package(&dep_dir, "dep", "0.3.0", Some("export.foo\nend\n"), []);
+        write_package(&dep_dir, "dep", "0.3.0", "export.foo\nend\n", []);
         let app_manifest = app_dir.join("miden-project.toml");
         write_file(
             &app_manifest,
@@ -2154,14 +2125,10 @@ mod tests {
         dir: &Path,
         name: &str,
         version: &str,
-        module_body: Option<&str>,
+        module_body: &str,
         dependencies: impl IntoIterator<Item = Dependency>,
     ) -> PathBuf {
-        let target = if module_body.is_some() {
-            Target::library(AstPath::new(name)).with_path("lib/mod.masm")
-        } else {
-            Target::library(AstPath::new(name))
-        };
+        let target = Target::library(AstPath::new(name), "lib/mod.masm".into());
         let manifest = Package::new(name, target)
             .with_version(version.parse().unwrap())
             .with_dependencies(dependencies);
@@ -2169,9 +2136,7 @@ mod tests {
         let manifest = manifest.to_toml().unwrap();
         let manifest_path = dir.join("miden-project.toml");
         write_file(&manifest_path, &manifest);
-        if let Some(module_body) = module_body {
-            write_file(&dir.join("lib/mod.masm"), module_body);
-        }
+        write_file(&dir.join("lib/mod.masm"), module_body);
         manifest_path
     }
 

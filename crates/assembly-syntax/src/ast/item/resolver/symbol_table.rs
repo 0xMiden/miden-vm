@@ -3,16 +3,7 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
 
 use super::{SymbolResolution, SymbolResolutionError};
-use crate::{
-    Path,
-    ast::{AliasTarget, Ident, ItemIndex},
-};
-
-/// Maximum number of alias expansion steps permitted during symbol resolution.
-///
-/// This limit is intended to prevent stack overflows from maliciously deep or cyclic
-/// alias graphs while remaining far above normal usage patterns.
-const MAX_ALIAS_EXPANSION_DEPTH: usize = 128;
+use crate::ast::{Ident, Import, ItemIndex};
 
 /// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::ast::Module].
 ///
@@ -75,10 +66,8 @@ impl SymbolTable for &crate::module::ModuleInfo {
 impl SymbolTable for &crate::ast::Module {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
-    fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
-        use crate::ast::{AliasTarget, Export};
-
-        let mut items = Vec::with_capacity(self.items.len());
+    fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
+        let mut items = Vec::with_capacity(self.items.len() + self.imports.len());
 
         for (i, item) in self.items.iter().enumerate() {
             let id = ItemIndex::new(i);
@@ -86,33 +75,24 @@ impl SymbolTable for &crate::ast::Module {
             let span = name.span();
             let name = name.into_inner();
 
-            if let Export::Alias(alias) = item {
-                match alias.target() {
-                    AliasTarget::MastRoot(root) => {
-                        items.push(LocalSymbol::Import {
-                            name: Span::new(span, name),
-                            resolution: Ok(SymbolResolution::MastRoot(*root)),
-                        });
-                    },
-                    AliasTarget::Path(path) => {
-                        let expanded = LocalSymbolTable::expand(
-                            |name| self.get_import(name).map(|alias| alias.target().clone()),
-                            path.as_deref(),
-                            &source_manager,
-                        );
-                        items.push(LocalSymbol::Import {
-                            name: Span::new(span, name),
-                            resolution: expanded,
-                        });
-                    },
-                }
-            } else {
-                items.push(LocalSymbol::Item {
-                    name: Ident::from_raw_parts(Span::new(span, name)),
-                    resolved: SymbolResolution::Local(Span::new(span, id)),
-                });
-            }
+            items.push(LocalSymbol::Item {
+                name: Ident::from_raw_parts(Span::new(span, name)),
+                resolved: SymbolResolution::Local(Span::new(span, id)),
+            });
         }
+
+        items.extend(self.imports.iter().filter_map(|import| {
+            let Import::Item(item) = import else {
+                return None;
+            };
+            let local_name = import.local_name().clone();
+            let span = local_name.span();
+            let name = Span::new(span, local_name.into_inner());
+            Some(LocalSymbol::Import {
+                name,
+                resolution: Ok(SymbolResolution::External(item.target_path())),
+            })
+        }));
 
         items.into_iter()
     }
@@ -121,7 +101,7 @@ impl SymbolTable for &crate::ast::Module {
         &self,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Self::SymbolIter, SymbolResolutionError> {
-        if self.items.len() > ItemIndex::MAX_ITEMS {
+        if self.items.len() + self.imports.len() > ItemIndex::MAX_ITEMS {
             Err(SymbolResolutionError::too_many_items_in_module(self.span(), &*source_manager))
         } else {
             Ok(self.symbols(source_manager))
@@ -258,356 +238,16 @@ impl LocalSymbolTable {
             },
         }
     }
-
-    /// Expand `path` in the context of `module`.
-    ///
-    /// Our aim here is to replace any leading import-relative path component with the corresponding
-    /// target path, recursively.
-    ///
-    /// Doing so ensures that code like the following works as expected:
-    ///
-    /// ```masm,ignore
-    /// use mylib::foo
-    /// use foo::bar->baz
-    ///
-    /// begin
-    ///     exec.baz::p
-    /// end
-    /// ```
-    ///
-    /// In the scenario above, calling `expand` on `baz::p` would proceed as follows:
-    ///
-    /// 1. `path` is `baz::p` a. We split `path` into `baz` and `p` (i.e. `module_name` and `rest`)
-    ///    b. We look for an import of the symbol `baz`, and find `use foo::bar->baz` c. The target
-    ///    of the import is `foo::bar`, which we recursively call `expand` on
-    /// 2. `path` is now `foo::bar` a. We split `path` into `foo` and `bar` b. We look for an import
-    ///    of `foo`, and find `use mylib::foo` c. The target of the import is `mylib::foo`, which we
-    ///    recursively call `expand` on
-    /// 3. `path` is now `mylib::foo` a. We split `path` into `mylib` and `foo` b. We look for an
-    ///    import of `mylib`, and do not find one. c. Since there is no import, we consider
-    ///    `mylib::foo` to be fully expanded and return it
-    /// 4. We've now expanded `foo` into `mylib::foo`, and so expansion of `foo::bar` is completed
-    ///    by joining `bar` to `mylib::foo`, and returning `mylib::foo::bar`.
-    /// 5. We've now expanded `baz` into `mylib::foo::bar`, and so the expansion of `baz::p` is
-    ///    completed by joining `p` to `mylib::foo::bar` and returning `mylib::foo::bar::p`.
-    /// 6. We're done, having successfully resolved `baz::p` to its full expansion
-    ///    `mylib::foo::bar::p`
-    pub fn expand<F>(
-        get_import: F,
-        path: Span<&Path>,
-        source_manager: &dyn SourceManager,
-    ) -> Result<SymbolResolution, SymbolResolutionError>
-    where
-        F: Fn(&str) -> Option<AliasTarget>,
-    {
-        let mut expansion_stack = Vec::new();
-        Self::expand_with_guard(get_import, path, source_manager, &mut expansion_stack)
-    }
-
-    fn expand_with_guard<F>(
-        get_import: F,
-        path: Span<&Path>,
-        source_manager: &dyn SourceManager,
-        expansion_stack: &mut Vec<Arc<Path>>,
-    ) -> Result<SymbolResolution, SymbolResolutionError>
-    where
-        F: Fn(&str) -> Option<AliasTarget>,
-    {
-        if expansion_stack.len() > MAX_ALIAS_EXPANSION_DEPTH {
-            return Err(SymbolResolutionError::alias_expansion_depth_exceeded(
-                path.span(),
-                MAX_ALIAS_EXPANSION_DEPTH,
-                source_manager,
-            ));
-        }
-
-        let path_ref: &Path = *path;
-        if expansion_stack.iter().any(|entry| entry.as_ref() == path_ref) {
-            return Err(SymbolResolutionError::alias_expansion_cycle(path.span(), source_manager));
-        }
-
-        expansion_stack.push(Arc::from(path_ref));
-
-        let result = {
-            let Some((module_name, rest)) = path.split_first() else {
-                expansion_stack.pop();
-                return Err(SymbolResolutionError::undefined(path.span(), source_manager));
-            };
-            let requested_span = path.span();
-            if let Some(target) = get_import(module_name) {
-                match target {
-                    AliasTarget::MastRoot(digest) if rest.is_empty() => {
-                        Ok(SymbolResolution::MastRoot(digest))
-                    },
-                    AliasTarget::MastRoot(digest) => {
-                        Err(SymbolResolutionError::invalid_alias_target(
-                            digest.span(),
-                            path.span(),
-                            source_manager,
-                        ))
-                    },
-                    // If we have an import like `use lib::lib`, we cannot refer to the base `lib`
-                    // any longer, as it has been shadowed; any attempt to
-                    // further expand the path will recurse infinitely.
-                    //
-                    // For now, we handle this by simply stopping further expansion. In the future,
-                    // we may want to refine module.get_import to allow passing
-                    // an exclusion list, so that we can avoid recursing on the
-                    // same import in an infinite loop.
-                    AliasTarget::Path(shadowed) if shadowed.as_deref() == path => {
-                        Ok(SymbolResolution::External(shadowed))
-                    },
-                    AliasTarget::Path(path) => {
-                        let resolved = Self::expand_with_guard(
-                            get_import,
-                            path.as_deref(),
-                            source_manager,
-                            expansion_stack,
-                        )?;
-                        match resolved {
-                            SymbolResolution::Module { id, path } => {
-                                // We can consider this path fully-resolved, and mark it absolute,
-                                // if it is not already
-                                if rest.is_empty() {
-                                    Ok(SymbolResolution::Module { id, path })
-                                } else {
-                                    Ok(SymbolResolution::External(
-                                        path.map(|p| p.join(rest).into()),
-                                    ))
-                                }
-                            },
-                            SymbolResolution::External(resolved) => {
-                                // We can consider this path fully-resolved, and mark it absolute,
-                                // if it is not already
-                                match resolved.to_absolute() {
-                                    Ok(abs) => {
-                                        for component in rest.components() {
-                                            component.map_err(|_| {
-                                                SymbolResolutionError::undefined(
-                                                    requested_span,
-                                                    source_manager,
-                                                )
-                                            })?;
-                                        }
-                                        Ok(SymbolResolution::External(Span::new(
-                                            resolved.span(),
-                                            abs.join(rest).into(),
-                                        )))
-                                    },
-                                    Err(_) => Err(SymbolResolutionError::undefined(
-                                        resolved.span(),
-                                        source_manager,
-                                    )),
-                                }
-                            },
-                            res @ (SymbolResolution::MastRoot(_)
-                            | SymbolResolution::Local(_)
-                            | SymbolResolution::Exact { .. })
-                                if rest.is_empty() =>
-                            {
-                                Ok(res)
-                            },
-                            SymbolResolution::MastRoot(digest) => {
-                                Err(SymbolResolutionError::invalid_alias_target(
-                                    digest.span(),
-                                    path.span(),
-                                    source_manager,
-                                ))
-                            },
-                            SymbolResolution::Exact { path: item_path, .. } => {
-                                Err(SymbolResolutionError::invalid_alias_target(
-                                    item_path.span(),
-                                    path.span(),
-                                    source_manager,
-                                ))
-                            },
-                            SymbolResolution::Local(item) => {
-                                Err(SymbolResolutionError::invalid_alias_target(
-                                    item.span(),
-                                    path.span(),
-                                    source_manager,
-                                ))
-                            },
-                        }
-                    },
-                }
-            } else {
-                // We can consider this path fully-resolved, and mark it absolute, if it is not
-                // already
-                match path.to_absolute() {
-                    Ok(abs) => Ok(SymbolResolution::External(Span::new(
-                        path.span(),
-                        abs.into_owned().into(),
-                    ))),
-                    Err(_) => Err(SymbolResolutionError::undefined(path.span(), source_manager)),
-                }
-            }
-        };
-
-        expansion_stack.pop();
-        result
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeMap,
-        string::{String, ToString},
-        sync::Arc,
-    };
-    use core::str::FromStr;
+    use alloc::sync::Arc;
 
     use miden_debug_types::DefaultSourceManager;
 
     use super::*;
-    use crate::PathBuf;
-
-    fn path_arc(path: &str) -> Arc<Path> {
-        let path = PathBuf::from_str(path).expect("valid path");
-        Arc::from(path.as_path())
-    }
-
-    #[test]
-    fn alias_expansion_detects_cycle() {
-        let source_manager = DefaultSourceManager::default();
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        imports.insert("a".to_string(), AliasTarget::Path(Span::unknown(path_arc("b"))));
-        imports.insert("b".to_string(), AliasTarget::Path(Span::unknown(path_arc("a"))));
-
-        let path = PathBuf::from_str("a").expect("valid path");
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(path.as_path()),
-            &source_manager,
-        );
-
-        assert!(matches!(result, Err(SymbolResolutionError::AliasExpansionCycle { .. })));
-    }
-
-    #[test]
-    fn alias_expansion_depth_boundary() {
-        let source_manager = DefaultSourceManager::default();
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        let max_depth = MAX_ALIAS_EXPANSION_DEPTH;
-        for i in 0..max_depth {
-            let current = format!("a{i}");
-            let next = format!("a{}", i + 1);
-            imports.insert(current, AliasTarget::Path(Span::unknown(path_arc(&next))));
-        }
-
-        let path = PathBuf::from_str("a0").expect("valid path");
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(path.as_path()),
-            &source_manager,
-        )
-        .expect("expected depth boundary to resolve");
-
-        match result {
-            SymbolResolution::External(resolved) => {
-                let expected = format!("a{max_depth}");
-                let expected = PathBuf::from_str(&expected).expect("valid path");
-                let expected = expected.as_path().to_absolute().unwrap().into_owned();
-                assert_eq!(resolved.as_deref(), expected.as_path());
-            },
-            other => panic!("expected external resolution, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn alias_expansion_depth_exceeded() {
-        let source_manager = DefaultSourceManager::default();
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        for i in 0..=MAX_ALIAS_EXPANSION_DEPTH {
-            let current = format!("a{i}");
-            let next = format!("a{}", i + 1);
-            imports.insert(current, AliasTarget::Path(Span::unknown(path_arc(&next))));
-        }
-
-        let path = PathBuf::from_str("a0").expect("valid path");
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(path.as_path()),
-            &source_manager,
-        );
-
-        assert!(matches!(
-            result,
-            Err(SymbolResolutionError::AliasExpansionDepthExceeded { max_depth, .. })
-                if max_depth == MAX_ALIAS_EXPANSION_DEPTH
-        ));
-    }
-
-    #[test]
-    fn alias_expansion_handles_shadowed_import() {
-        let source_manager = DefaultSourceManager::default();
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(path_arc("lib"))));
-
-        let path = PathBuf::from_str("lib").expect("valid path");
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(path.as_path()),
-            &source_manager,
-        )
-        .expect("shadowed import should resolve");
-
-        match result {
-            SymbolResolution::External(resolved) => {
-                assert_eq!(resolved.as_deref(), path.as_path());
-            },
-            other => panic!("expected external resolution, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn alias_expansion_rejects_invalid_expanded_path_with_rest() {
-        let source_manager = DefaultSourceManager::default();
-        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
-        let invalid_path: Arc<Path> =
-            Arc::from(Path::new(&invalid_component).to_path_buf().into_boxed_path());
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(invalid_path)));
-
-        let path = PathBuf::from_str("lib::entry").expect("valid path");
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(path.as_path()),
-            &source_manager,
-        );
-
-        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
-    }
-
-    #[test]
-    fn alias_expansion_rejects_invalid_rest_after_valid_import() {
-        let source_manager = DefaultSourceManager::default();
-        let mut imports = BTreeMap::<String, AliasTarget>::new();
-        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(path_arc("pkg"))));
-        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
-        let path = alloc::format!("lib::{invalid_component}");
-
-        let result = LocalSymbolTable::expand(
-            |name| imports.get(name).cloned(),
-            Span::unknown(Path::new(&path)),
-            &source_manager,
-        );
-
-        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
-    }
-
-    #[test]
-    fn alias_expansion_rejects_invalid_no_import_path() {
-        let source_manager = DefaultSourceManager::default();
-        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
-        let path = alloc::format!("lib::{invalid_component}");
-
-        let result =
-            LocalSymbolTable::expand(|_| None, Span::unknown(Path::new(&path)), &source_manager);
-
-        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
-    }
+    use crate::Path;
 
     #[test]
     fn checked_symbols_rejects_oversized_module() {
@@ -616,7 +256,7 @@ mod tests {
             crate::ast::Module::new(crate::ast::ModuleKind::Library, Path::new("::m::huge"));
 
         for i in 0..=ItemIndex::MAX_ITEMS {
-            module.items.push(crate::ast::Export::Constant(crate::ast::Constant::new(
+            module.items.push(crate::ast::Item::Constant(crate::ast::Constant::new(
                 SourceSpan::UNKNOWN,
                 crate::ast::Visibility::Private,
                 Ident::new(format!("A{i}")).expect("valid identifier"),

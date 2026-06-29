@@ -29,6 +29,7 @@ use std::{
     cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
 };
 
+use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,

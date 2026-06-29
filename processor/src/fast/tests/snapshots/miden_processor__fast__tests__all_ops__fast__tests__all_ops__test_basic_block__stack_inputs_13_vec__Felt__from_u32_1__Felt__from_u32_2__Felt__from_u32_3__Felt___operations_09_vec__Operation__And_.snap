@@ -17,6 +17,7 @@ Err(
         },
         source_file: None,
         err: NotBinaryValue {
+            context: Operation,
             value: 2,
         },
     },

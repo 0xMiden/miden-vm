@@ -27,7 +27,9 @@ path = "tests/main.rs"
 
 [features]
 default = ["std"]
+arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 std = ["miden-assembly/std", "miden-processor/std", "miden-utils-sync/std"]
+testing = ["arbitrary"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]
@@ -47,13 +49,14 @@ thiserror.workspace = true
 criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
-miden-assembly.workspace = true
+miden-assembly = { workspace = true, features = ["testing"] }
+miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }
-rand = { version = "0.9", default-features = false }
+rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
 
@@ -61,6 +64,7 @@ rstest = { workspace = true }
 env_logger.workspace = true
 fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
+miden-assembly-syntax = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 
 [[bin]]

@@ -14,7 +14,7 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -33,7 +33,7 @@ use miden_core::{
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
 };
-use miden_mast_package::Package;
+use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
@@ -49,7 +49,7 @@ pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
 
@@ -71,8 +71,20 @@ pub mod recursive_verifier;
 
 mod test_builders;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
+
+pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
+    let source = source.to_string();
+    if source.trim_start().starts_with("namespace ") {
+        source
+    } else {
+        let path = path.as_ref().to_string();
+        let namespace = path.strip_prefix("::").unwrap_or(&path);
+        format!("namespace {namespace}\n\n{source}")
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -117,8 +129,10 @@ struct SourceCacheKey {
     source: String,
 }
 
+pub type CompiledTest = (Program, Option<Arc<Package>>, Option<PackageDebugInfo>);
+
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
-type CompileCacheValue = (Program, Option<Arc<Package>>);
+type CompileCacheValue = CompiledTest;
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 type CompileCache = std::collections::HashMap<CompileCacheKey, CompileCacheValue>;
@@ -137,7 +151,7 @@ macro_rules! expect_assembly_error {
         let error = $test.compile().expect_err("expected assembly to fail");
         match error.downcast::<::miden_assembly::AssemblyError>() {
             Ok(error) => {
-                ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
+                ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
             }
             Err(report) => {
                 panic!(r#"
@@ -156,7 +170,7 @@ macro_rules! expect_exec_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err(error) => ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
         }
     };
 }
@@ -164,17 +178,28 @@ macro_rules! expect_exec_error_matches {
 /// Like [miden_assembly::testing::assert_diagnostic], but matches each non-empty line of the
 /// rendered output to a corresponding pattern.
 ///
-/// So if the output has 3 lines, the second of which is empty, and you provide 2 patterns, the
-/// assertion passes if the first line matches the first pattern, and the third line matches the
-/// second pattern - the second line is ignored because it is empty.
+/// Empty lines are ignored, but the remaining line count must match the number of patterns.
 #[cfg(not(target_family = "wasm"))]
 #[macro_export]
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected:expr),+) => {{
-        use miden_assembly::testing::Pattern;
+        use $crate::DiagnosticPattern as Pattern;
         let actual = format!("{}", miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
-        let lines = actual.lines().filter(|l| !l.trim().is_empty()).zip([$(Pattern::from($expected)),*].into_iter());
-        for (actual_line, expected) in lines {
+        let expected = [$(Pattern::from($expected)),*];
+        let actual_line_count = actual.lines().filter(|line| !line.trim().is_empty()).count();
+        ::core::assert_eq!(
+            actual_line_count,
+            expected.len(),
+            "diagnostic line count mismatch: expected {} non-empty lines, got {}\nactual diagnostic:\n{}",
+            expected.len(),
+            actual_line_count,
+            actual,
+        );
+        for (actual_line, expected) in actual
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .zip(expected.into_iter())
+        {
             expected.assert_match_with_context(actual_line, &actual);
         }
     }};
@@ -270,7 +295,7 @@ impl Test {
     /// Sets the stack inputs for this test using stack-ordered values.
     #[track_caller]
     pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
-        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self.stack_inputs = stack_inputs_from_ints(stack_inputs.as_ref().iter().copied());
         self
     }
 
@@ -303,7 +328,9 @@ impl Test {
 
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
-        self.add_modules.push((path.as_ref().into(), source.to_string()));
+        let path = path.as_ref();
+        let source = module_source(path, source);
+        self.add_modules.push((path.into(), source));
     }
 
     /// Add a handler for a specific event when running the `Host`.
@@ -334,7 +361,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack(&self, final_stack: &[u64]) {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -351,7 +378,7 @@ impl Test {
         expected_mem: &[u64],
     ) {
         // compile the program
-        let (program, host) = self.get_program_and_host();
+        let (program, host, _debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
@@ -379,19 +406,21 @@ impl Test {
             );
         }
 
-        // validate the stack states
-        self.expect_stack(final_stack);
+        // validate the stack state from the same execution as the memory assertions
+        let result = stack_outputs_as_int_vec(&execution_output.stack);
+        let expected = resize_to_min_stack_depth(final_stack);
+        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
 
     /// Asserts that executing the test inside a proptest results in the expected final stack state.
     /// The proptest will return a test failure instead of panicking if the assertion condition
     /// fails.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
     pub fn prop_expect_stack(
         &self,
         final_stack: &[u64],
     ) -> Result<(), proptest::prelude::TestCaseError> {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         proptest::prop_assert_eq!(resize_to_min_stack_depth(final_stack), result);
 
         Ok(())
@@ -412,7 +441,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        let result = trace.last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -425,8 +454,11 @@ impl Test {
     ///
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
-    pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
-        use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
+    pub fn compile(&self) -> Result<CompiledTest, Report> {
+        use miden_assembly::{
+            Assembler,
+            ast::{Module, ModuleKind},
+        };
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         let cache_key = self.compile_cache_key();
@@ -436,7 +468,7 @@ impl Test {
             let mut cache_guard = COMPILE_CACHE.lock().unwrap();
             let cache = cache_guard.get_or_insert_with(Default::default);
             if let Some(cached) = cache.get(&cache_key) {
-                return Ok((cached.0.clone(), cached.1.clone()));
+                return Ok((cached.0.clone(), cached.1.clone(), cached.2.clone()));
             }
         }
 
@@ -446,11 +478,12 @@ impl Test {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+        let (mut assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+            let mut parser = Module::parser(Some(ModuleKind::Kernel));
+            let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
             let kernel_lib = Assembler::new(self.source_manager.clone())
-                .assemble_kernel("kernel", kernel)
-                .map(Arc::<Package>::from)
-                .unwrap();
+                .assemble_kernel("kernel", kernel, None)
+                .map(Arc::<Package>::from)?;
 
             (
                 Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
@@ -460,32 +493,30 @@ impl Test {
             (Assembler::new(self.source_manager.clone()), None)
         };
 
-        let mut assembler =
-            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
-                let module = source
-                    .parse_with_options(
-                        self.source_manager.clone(),
-                        ParseOptions::new(ModuleKind::Library, path.clone()),
-                    )
-                    .expect("invalid masm source code");
-                assembler.compile_and_statically_link(module).expect("failed to link module");
-                assembler
-            });
+        for (path, source) in &self.add_modules {
+            let module = Module::parser(None).parse_str(
+                Some(path.as_ref()),
+                source,
+                self.source_manager.clone(),
+            )?;
+            assembler.compile_and_statically_link(module)?;
+        }
         // Debug mode is now always enabled
         for package in &self.libraries {
-            assembler.link_package(package.clone(), Linkage::Dynamic).unwrap();
+            assembler.link_package(package.clone(), Linkage::Dynamic)?;
         }
 
-        let result = (
-            assembler.assemble_program("program", self.source.clone())?.unwrap_program(),
-            kernel_lib,
-        );
+        let package = assembler.assemble_program("program", self.source.clone())?;
+        let debug_info = package
+            .debug_info()
+            .map_err(|err| Report::msg(format!("failed to decode test debug info: {err}")))?;
+        let result = (package.unwrap_program(), kernel_lib, debug_info);
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
             let mut cache_guard = COMPILE_CACHE.lock().unwrap();
             let cache = cache_guard.get_or_insert_with(Default::default);
-            cache.insert(cache_key, (result.0.clone(), result.1.clone()));
+            cache.insert(cache_key, (result.0.clone(), result.1.clone(), result.2.clone()));
         }
 
         Ok(result)
@@ -512,7 +543,7 @@ impl Test {
         &self,
         stack_inputs: &[u64],
     ) -> Result<ExecutionTrace, ExecutionError> {
-        let stack_inputs = StackInputs::try_from_ints(stack_inputs.to_vec()).unwrap();
+        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
 
@@ -527,8 +558,9 @@ impl Test {
         // generation logic - though not too big so as to over-allocate memory.
         const FRAGMENT_SIZE: usize = 1 << 16;
 
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let fast_stack_result = {
             let fast_processor = FastProcessor::new_with_options(
@@ -539,7 +571,13 @@ impl Test {
                     .unwrap(),
             )
             .map_err(ExecutionError::advice_error_no_context)?;
-            fast_processor.execute_trace_inputs_sync(&program, &mut host)
+            if let Some(debug_info) = debug_info.as_ref() {
+                fast_processor.execute_trace_inputs_with_package_debug_info_sync(
+                    &program, debug_info, &mut host,
+                )
+            } else {
+                fast_processor.execute_trace_inputs_sync(&program, &mut host)
+            }
         };
 
         // Compare traced full execution and step/resume execution stack outputs.
@@ -558,14 +596,21 @@ impl Test {
     /// Returns the [`ExecutionOutput`] once execution is finished.
     #[cfg(not(target_family = "wasm"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?;
 
-        processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        if let Some(debug_info) = debug_info.as_ref() {
+            processor
+                .execute_with_package_debug_info_sync(&program, debug_info, &mut host)
+                .map(|output| (output, host))
+        } else {
+            processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        }
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -577,9 +622,9 @@ impl Test {
     /// verifier logic, or precompile request handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
-        let (program, mut host) = self.get_program_and_host();
-        let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = prove_sync(
+        let (program, mut host, _debug_info) = self.get_program_and_host();
+        let stack_inputs = stack_inputs_from_ints(pub_inputs);
+        let (stack_outputs, proof) = prove_sync(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
@@ -591,7 +636,11 @@ impl Test {
 
         let program_info = ProgramInfo::from(program);
         if test_fail {
-            stack_outputs.as_mut()[0] += ONE;
+            let mut elements = [ZERO; MIN_STACK_DEPTH];
+            elements.copy_from_slice(&*stack_outputs);
+            elements[0] += ONE;
+            let stack_outputs =
+                StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
         } else {
             let result = verify(program_info, stack_inputs, stack_outputs, proof);
@@ -646,8 +695,8 @@ impl Test {
     /// The host is initialized with the advice inputs provided in the test, as well as the kernel
     /// and library MAST forests.
     #[cfg(not(target_family = "wasm"))]
-    fn get_program_and_host(&self) -> (Program, DefaultHost) {
-        let (program, kernel) = self.compile().expect("Failed to compile test source.");
+    fn get_program_and_host(&self) -> (Program, DefaultHost, Option<PackageDebugInfo>) {
+        let (program, kernel, debug_info) = self.compile().expect("Failed to compile test source.");
         let mut host = DefaultHost::default();
         if let Some(kernel) = kernel {
             host.load_library(kernel.mast_forest()).unwrap();
@@ -659,7 +708,7 @@ impl Test {
             host.register_handler(event.clone(), handler.clone()).unwrap();
         }
 
-        (program, host)
+        (program, host, debug_info)
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -673,6 +722,7 @@ impl Test {
             right_result: &Result<StackOutputs, ExecutionError>,
             left_name: &str,
             right_name: &str,
+            compare_error_diagnostics: bool,
         ) {
             match (left_result, right_result) {
                 (Ok(left_stack_outputs), Ok(right_stack_outputs)) => {
@@ -682,6 +732,10 @@ impl Test {
                     );
                 },
                 (Err(left_err), Err(right_err)) => {
+                    if !compare_error_diagnostics {
+                        return;
+                    }
+
                     // assert that diagnostics match
                     let right_diagnostic =
                         format!("{}", PrintDiagnostic::new_without_color(right_err));
@@ -709,14 +763,21 @@ impl Test {
             }
         }
 
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
+        let compare_error_diagnostics = debug_info.is_none();
 
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
                 .expect("test advice inputs should fit default advice map limits");
-            fast_process.execute_by_step_sync(&program, &mut host)
+            if let Some(debug_info) = debug_info.as_ref() {
+                fast_process
+                    .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)
+            } else {
+                fast_process.execute_by_step_sync(&program, &mut host)
+            }
         };
 
         compare_results(
@@ -724,6 +785,7 @@ impl Test {
             &fast_result_by_step,
             "traced execution",
             "step/resume execution",
+            compare_error_diagnostics,
         );
     }
 
@@ -740,6 +802,90 @@ impl Test {
                 .collect(),
             library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
         }
+    }
+}
+
+#[cfg(all(test, feature = "std", not(target_family = "wasm")))]
+mod tests {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use miden_processor::{advice::AdviceMutation, event::EventError};
+
+    use super::*;
+
+    #[test]
+    fn compile_returns_error_for_invalid_kernel_without_panicking() {
+        let test = Test::new("main", "begin push.1 end", false)
+            .with_kernel_source("kernel", "export.invalid begin push.1");
+
+        let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
+
+        assert!(result.is_ok(), "invalid kernel source caused Test::compile() to panic");
+        assert!(result.unwrap().is_err(), "invalid kernel source should return an error");
+    }
+
+    #[test]
+    fn compile_returns_error_for_invalid_extra_module_without_panicking() {
+        let test = Test::new("main", "use.foo::bar\nbegin\n    exec.foo::bar\nend", false)
+            .with_module("foo", "export.bar begin push.1");
+
+        let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
+
+        assert!(result.is_ok(), "invalid extra module source caused Test::compile() to panic");
+        assert!(result.unwrap().is_err(), "invalid extra module source should return an error");
+    }
+
+    #[test]
+    #[should_panic(expected = "diagnostic line count mismatch")]
+    fn assert_diagnostic_lines_rejects_missing_actual_lines() {
+        crate::assert_diagnostic_lines!(
+            miden_assembly::report!("the error string"),
+            "the error string",
+            "other",
+            "lines"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "diagnostic line count mismatch")]
+    fn assert_diagnostic_lines_rejects_extra_actual_lines() {
+        crate::assert_diagnostic_lines!(
+            miden_assembly::report!("the first line\nthe second line"),
+            "the first line"
+        );
+    }
+
+    #[test]
+    fn expect_stack_and_memory_executes_once() {
+        const EVENT_NAME: EventName = EventName::new("test::expect_stack_and_memory::once");
+
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let handler_invocations = invocations.clone();
+        let handler = move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
+            handler_invocations.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        };
+
+        let source = alloc::format!(
+            r#"
+            begin
+                emit.event("{EVENT_NAME}")
+                push.42.1000 mem_store
+            end
+            "#
+        );
+
+        Test::new("main", &source, false)
+            .with_event_handler(EVENT_NAME, handler)
+            .expect_stack_and_memory(&[], 1000, &[42]);
+
+        core::assert_eq!(1, invocations.load(Ordering::SeqCst));
     }
 }
 
@@ -761,9 +907,26 @@ pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
     target.extend(word.iter().map(Felt::as_canonical_u64));
 }
 
+#[doc(hidden)]
+pub use miden_assembly_syntax::testing::Pattern as DiagnosticPattern;
+
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
     values.iter().map(|e| (*e).as_canonical_u64()).collect()
+}
+
+#[doc(hidden)]
+#[track_caller]
+pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInputs {
+    let values = values
+        .into_iter()
+        .map(|value| Felt::new(value).expect("stack input should be a valid field element"))
+        .collect::<Vec<_>>();
+    StackInputs::new(&values).expect("stack inputs should fit the VM stack")
+}
+
+fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
+    outputs.iter().map(Felt::as_canonical_u64).collect()
 }
 
 pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
@@ -773,7 +936,7 @@ pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
 }
 
 /// A proptest strategy for generating a random word with 4 values of type T.
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     use proptest::prelude::{any, prop};
     prop::collection::vec(any::<T>(), 4)
@@ -885,7 +1048,7 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
 pub fn get_column_name(col_idx: usize) -> String {
     let core_names = CORE_COL_NAMES.as_slice();
     if let Some(name) = core_names.get(col_idx) {
-        return name.to_string();
+        return (*name).to_string();
     }
     format!("unknown_col[{col_idx}]")
 }

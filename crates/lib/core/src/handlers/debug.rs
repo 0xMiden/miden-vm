@@ -4,8 +4,10 @@
 //! single [`DebugPrinter`] handler for all of those events; when one fires, the handler reads the
 //! requested piece of VM state (operand stack, memory, advice stack, or advice map) and prints it
 //! using the VM's tree-style debug formatting via [`miden_processor::write_stack`] /
-//! [`miden_processor::write_interval`]. Range-based procedures may share events with their
-//! full-state variants when the full-state behavior can be represented as an unbounded range.
+//! [`miden_processor::write_interval`]. A range-based procedure may share an event with its
+//! full-state variant when the full-state behavior can be represented as an unbounded range (e.g.
+//! the advice stack); memory uses a dedicated full-state event because `print_mem` enumerates its
+//! (capped) range while `print_mem_all` lists only initialized cells.
 //!
 //! These are ordinary `emit` events: they carry no MAST/decorator cost and print whenever the
 //! procedure is executed.
@@ -21,7 +23,7 @@ use core::fmt;
 
 use miden_core::{Felt, Word};
 use miden_processor::{
-    ProcessorState, StdoutWriter,
+    MemoryError, ProcessorState, StdoutWriter,
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventId, EventName},
     write_interval, write_stack,
@@ -41,13 +43,16 @@ pub const PRINT_MEM_ALL_EVENT_NAME: EventName = EventName::new("miden::core::deb
 pub const PRINT_ADV_STACK_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_stack");
 /// Prints the full advice map.
-pub const PRINT_ADV_MAP_ALL_EVENT_NAME: EventName =
-    EventName::new("miden::core::debug::print_adv_map_all");
+pub const PRINT_ADV_MAP_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_adv_map");
 /// Looks up a WORD key in the advice map and prints the associated values.
 pub const PRINT_ADV_MAP_ITEM_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_map_item");
 
-const MAX_PRINT_MEM_RANGE: u32 = 1024;
+/// Maximum number of addresses an explicit `print_mem` / `print_mem_addr` range may span.
+///
+/// Guards against a caller accidentally passing an enormous range. Use `print_mem_all` (which has
+/// its own event) to print the entire memory of the current context.
+const MAX_PRINT_MEM_RANGE: u64 = 1024;
 
 /// Returns the default `(EventName, handler)` pairs for print-style debugging.
 ///
@@ -73,7 +78,7 @@ pub fn noop_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (PRINT_MEM_EVENT_NAME, handler.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, handler.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, handler.clone()),
-        (PRINT_ADV_MAP_ALL_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_MAP_EVENT_NAME, handler.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, handler),
     ]
 }
@@ -88,7 +93,7 @@ pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (PRINT_MEM_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
 }
@@ -104,7 +109,7 @@ pub fn advice_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::default());
     vec![
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
 }
@@ -149,15 +154,18 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
             let operand_stack = stack.get(1..).unwrap_or(&[]);
             write_stack(w, operand_stack, None, "Stack", process.clock())?;
         } else if id == PRINT_MEM_EVENT_NAME.to_event_id() {
-            let range = process.get_mem_addr_range(1, 2)?;
-            let len = range.end - range.start;
-            if len > MAX_PRINT_MEM_RANGE {
-                return Err(format!(
-                    "print_mem range length {len} exceeds maximum of {MAX_PRINT_MEM_RANGE}"
-                )
-                .into());
+            let bounds = read_mem_print_range(process, 1, 2)?;
+            // Guard against an accidentally huge explicit range.
+            if let Some((first, last)) = bounds {
+                let len = u64::from(last - first) + 1;
+                if len > MAX_PRINT_MEM_RANGE {
+                    return Err(format!(
+                        "print_mem range length {len} exceeds maximum of {MAX_PRINT_MEM_RANGE}"
+                    )
+                    .into());
+                }
             }
-            write_mem_range(w, process, range)?;
+            write_mem_range(w, process, bounds)?;
         } else if id == PRINT_MEM_ALL_EVENT_NAME.to_event_id() {
             write_mem_all(w, process)?;
         } else if id == PRINT_ADV_STACK_EVENT_NAME.to_event_id() {
@@ -166,7 +174,7 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
             let adv_stack = process.advice_provider().stack();
             let slice = slice_range(&adv_stack, start, end);
             write_stack(w, slice, None, "Advice stack", process.clock())?;
-        } else if id == PRINT_ADV_MAP_ALL_EVENT_NAME.to_event_id() {
+        } else if id == PRINT_ADV_MAP_EVENT_NAME.to_event_id() {
             write_adv_map(w, process)?;
         } else if id == PRINT_ADV_MAP_ITEM_EVENT_NAME.to_event_id() {
             write_adv_map_entry(w, process)?;
@@ -201,26 +209,59 @@ fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
     &slice[start..end]
 }
 
-/// Prints memory in the range `[start, end)` of the current context.
+/// Reads a half-open `[start, end)` memory range off the operand stack and returns it as inclusive
+/// `(first, last)` `u32` address bounds, or `None` if the range is empty (`start == end`).
+///
+/// Memory addresses are `u32`, so both bounds are valid `u32` values. The half-open end may be
+/// `2^32` (one past the last address) so the cell at `u32::MAX` stays reachable; it folds into an
+/// inclusive end of `u32::MAX`.
+fn read_mem_print_range(
+    process: &ProcessorState,
+    start_idx: usize,
+    end_idx: usize,
+) -> Result<Option<(u32, u32)>, MemoryError> {
+    let start_addr = process.get_stack_item(start_idx).as_canonical_u64();
+    let end_addr = process.get_stack_item(end_idx).as_canonical_u64();
+
+    if start_addr > u32::MAX as u64 {
+        return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
+    }
+    // The exclusive end may be one past the last valid address (`2^32`).
+    if end_addr > u32::MAX as u64 + 1 {
+        return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
+    }
+    if start_addr > end_addr {
+        return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
+    }
+
+    if start_addr == end_addr {
+        Ok(None)
+    } else {
+        // Subtract in `u64` before the cast, since `end_addr` may be `2^32`; the result is in
+        // `[0, u32::MAX]`.
+        Ok(Some((start_addr as u32, (end_addr - 1) as u32)))
+    }
+}
+
+/// Prints every memory cell in the inclusive `[first, last]` bounds for the current context,
+/// showing uninitialized cells as `EMPTY`. `None` denotes an empty range.
+///
+/// The bounds are inclusive so the cell at `u32::MAX` can be printed without the end overflowing
+/// `u32`. The caller is responsible for capping the range length (see [`MAX_PRINT_MEM_RANGE`]).
 fn write_mem_range<W: fmt::Write>(
     w: &mut W,
     process: &ProcessorState,
-    range: core::ops::Range<u32>,
+    bounds: Option<(u32, u32)>,
 ) -> fmt::Result {
     let (ctx, clk) = (process.ctx(), process.clock());
-    if range.is_empty() {
-        return writeln!(
-            w,
-            "Memory state before step {clk} for context {ctx}: range [{}, {}) is empty.",
-            range.start, range.end
-        );
-    }
+    let Some((start, end)) = bounds else {
+        return writeln!(w, "Memory state before step {clk} for context {ctx}: range is empty.");
+    };
     writeln!(
         w,
-        "Memory state before step {clk} for context {ctx} in the range [{}, {}):",
-        range.start, range.end
+        "Memory state before step {clk} for context {ctx} in the range [{start}, {end}]:",
     )?;
-    let items: Vec<_> = range
+    let items: Vec<_> = (start..=end)
         .map(|addr| {
             let value = process.get_mem_value(ctx, addr).map(|v| v.to_string());
             (format!("{addr:#010x}"), value)
@@ -229,7 +270,7 @@ fn write_mem_range<W: fmt::Write>(
     write_interval(w, items, None)
 }
 
-/// Prints the full memory of the current context.
+/// Prints all initialized memory cells of the current context.
 fn write_mem_all<W: fmt::Write>(w: &mut W, process: &ProcessorState) -> fmt::Result {
     let (ctx, clk) = (process.ctx(), process.clock());
     writeln!(w, "Memory state before step {clk} for context {ctx}:")?;

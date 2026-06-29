@@ -1,6 +1,8 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
@@ -51,24 +53,16 @@ where
     let clk = state.processor.system().clock();
     let mem_addr = state.processor.stack().get(0);
 
-    let callee_hash = match state
-        .processor
-        .memory_mut()
-        .read_word(read_ctx, mem_addr, clk)
-        .map_exec_err(current_forest, current_node_id, state.host)
-    {
-        Ok(w) => w,
-        Err(err) => {
-            return ControlFlow::Break(BreakReason::Err(err).into());
-        },
-    };
+    let callee_hash =
+        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
+            Ok(w) => w,
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(err).into());
+            },
+        };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-        current_forest,
-        current_node_id,
-        state.host,
-    ) {
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
         return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
     }
 
@@ -79,7 +73,8 @@ where
         let new_ctx: ContextId = get_next_ctx_id(state.processor);
 
         // Save the current state, and update the system registers.
-        state.processor.save_context_and_truncate_stack();
+        state.processor.stack_mut().start_context();
+        state.processor.system_mut().save_call_state();
 
         state.processor.system_mut().set_ctx(new_ctx);
         state.processor.system_mut().set_caller_hash(callee_hash);
@@ -89,7 +84,128 @@ where
             .processor
             .memory_mut()
             .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err(current_forest, current_node_id, state.host)
+            .map_exec_err()
+        {
+            return ControlFlow::Break(BreakReason::Err(err).into());
+        }
+        state
+            .tracer
+            .record_dyncall_memory(callee_hash, mem_addr, read_ctx, new_ctx, clk);
+    } else {
+        state.tracer.record_memory_read_word(callee_hash, mem_addr, read_ctx, clk);
+    };
+
+    // Update continuation stack
+    // -----------------------------
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::FinishDyn(current_node_id),
+        state.current_source_node_id(),
+    );
+
+    // if the callee is not in the program's MAST forest, then we need to break to allow the
+    // implementing processor to fetch it (possibly asynchronously in an external library in the
+    // host).
+    match current_forest.find_procedure_root(callee_hash) {
+        Some(callee_id) => {
+            let source_node_id = match &state.source_debug_info {
+                Some(source_debug_info) => source_debug_info
+                    .unique_source_root_for_exec_node(callee_id)
+                    .unwrap_or_default(),
+                None => None,
+            };
+            state
+                .continuation_stack
+                .push_with_source_node_id(Continuation::StartNode(callee_id), source_node_id);
+        },
+        None => {
+            // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
+            // processors need this to be done asynchronously. Thus, we break here and make the
+            // implementing processor handle the loading in the outer execution loop. When done, the
+            // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
+            // to proceed properly.
+            return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
+                callee_hash,
+                source_node_id: state.current_source_node_id(),
+            });
+        },
+    }
+
+    // Finalize the clock cycle corresponding to the DYN or DYNCALL operation.
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
+    .map_break(InternalBreakReason::from)
+}
+
+/// Executes a Dyn node from the start without source debug metadata.
+#[inline(always)]
+pub(super) fn start_dyn_node_pure<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
+    current_node_id: MastNodeId,
+    current_forest: &mut F,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    H: BaseHost,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::StartNode(current_node_id),
+        state.continuation_stack,
+        current_forest,
+    );
+
+    let dyn_node = option_map_break_reason(
+        current_forest.get_node_by_id(current_node_id),
+        "dyn node not found in current forest",
+    )
+    .map_break(InternalBreakReason::from)?
+    .unwrap_dyn();
+
+    // Retrieve callee hash from memory, using stack top as the memory address.
+    let read_ctx = state.processor.system().ctx();
+    let clk = state.processor.system().clock();
+    let mem_addr = state.processor.stack().get(0);
+
+    let callee_hash =
+        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
+            Ok(w) => w,
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(err).into());
+            },
+        };
+
+    // Drop the memory address from the stack. This needs to be done before saving the context.
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    }
+
+    // For dyncall,
+    // - save the context and reset it,
+    // - initialize the frame pointer in memory for the new context.
+    if dyn_node.is_dyncall() {
+        let new_ctx: ContextId = get_next_ctx_id(state.processor);
+
+        // Save the current state, and update the system registers.
+        state.processor.stack_mut().start_context();
+        state.processor.system_mut().save_call_state();
+
+        state.processor.system_mut().set_ctx(new_ctx);
+        state.processor.system_mut().set_caller_hash(callee_hash);
+
+        // Initialize the frame pointer in memory for the new context.
+        if let Err(err) = state
+            .processor
+            .memory_mut()
+            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+            .map_exec_err()
         {
             return ControlFlow::Break(BreakReason::Err(err).into());
         }
@@ -118,8 +234,8 @@ where
             // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
             // to proceed properly.
             return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
-                dyn_node_id: current_node_id,
                 callee_hash,
+                source_node_id: None,
             });
         },
     }
@@ -140,8 +256,11 @@ where
 pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
     root_id: MastNodeId,
     new_forest: F,
+    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
+    new_source_node_id: Option<DebugSourceNodeId>,
     processor: &mut P,
     current_forest: &mut F,
+    current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
     stopper: &S,
@@ -154,15 +273,19 @@ where
 {
     // Save the old forest: the continuation from start_clock_cycle references nodes in it.
     let old_forest = current_forest.clone();
+    let old_package_debug_info = current_package_debug_info.clone();
 
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(current_forest.clone());
+    continuation_stack
+        .push_enter_forest_with_package_debug_info(current_forest.clone(), old_package_debug_info);
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    continuation_stack.push_start_node(root_id);
+    continuation_stack
+        .push_with_source_node_id(Continuation::StartNode(root_id), new_source_node_id);
 
     // Set the new MAST forest as current
     *current_forest = new_forest;
+    *current_package_debug_info = new_package_debug_info;
 
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
     // forest because the continuation was set during start_clock_cycle, which referenced the old
@@ -201,14 +324,17 @@ where
     )?
     .unwrap_dyn();
     // For dyncall, restore the context.
-    if dyn_node.is_dyncall()
-        && let Err(e) = state.processor.restore_context()
-    {
-        return ControlFlow::Break(BreakReason::Err(e.with_context(
-            current_forest,
-            node_id,
-            state.host,
-        )));
+    if dyn_node.is_dyncall() {
+        if let Err(e) = state.processor.stack_mut().restore_context() {
+            return ControlFlow::Break(BreakReason::Err(
+                state.operation_error_with_current_context(e),
+            ));
+        }
+        if let Err(e) = state.processor.system_mut().restore_call_state() {
+            return ControlFlow::Break(BreakReason::Err(
+                state.operation_error_with_current_context(e),
+            ));
+        }
     }
 
     // Finalize the clock cycle corresponding to the END operation.

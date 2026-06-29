@@ -1,7 +1,7 @@
 use crate::{
     Felt, ONE, ZERO,
     field::Field,
-    operation::OperationError,
+    operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::OperationHelperRegisters,
 };
@@ -122,7 +122,10 @@ pub(super) fn op_not<P: Processor>(
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(OperationError::NotBinaryValue { value: *top });
+        return Err(OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::Operation,
+            value: *top,
+        });
     }
     Ok(OperationHelperRegisters::Empty)
 }
@@ -288,7 +291,10 @@ where
 #[inline(always)]
 fn assert_binary(value: Felt) -> Result<(), OperationError> {
     if value != ZERO && value != ONE {
-        Err(OperationError::NotBinaryValue { value })
+        Err(OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::Operation,
+            value,
+        })
     } else {
         Ok(())
     }

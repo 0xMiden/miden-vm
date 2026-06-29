@@ -30,6 +30,12 @@ parse_version() {
     eval "${prefix}_patch=\$patch"
 }
 
+cargo_incompatible_release_line_changed() {
+    (( baseline_major != current_major )) ||
+        (( baseline_major == 0 && baseline_minor != current_minor )) ||
+        (( baseline_major == 0 && baseline_minor == 0 && baseline_patch != current_patch ))
+}
+
 latest_release_tag_on_head() {
     git -C "$repo_root" tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' \
         | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
@@ -51,8 +57,8 @@ fi
 baseline_version="${baseline_tag#v}"
 parse_version "$baseline_version" baseline
 
-if (( baseline_major != current_major )); then
-    echo "workspace version changed major version from ${baseline_version} to ${workspace_version}; skipping MASM root stability check"
+if cargo_incompatible_release_line_changed; then
+    echo "workspace version changed Cargo-incompatible release line from ${baseline_version} to ${workspace_version}; skipping MASM root stability check"
     exit 0
 fi
 

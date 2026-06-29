@@ -22,7 +22,7 @@ In this document we use the following terms and notations:
 Throughout this document, we use lower-case letters to refer to individual field elements (e.g., $a$). Sometimes it is convenient to describe operations over groups of elements. For these purposes we define a *word* to be a group of four elements. We use upper-case letters to refer to words (e.g., $A$). To refer to individual elements within a word, we use numerical subscripts. For example, $a_0$ is the first element of word $A$, $b_3$ is the last element of word $B$, etc.
 
 ## Organization and usage
-Procedures in the Miden Core Library are organized into modules, each targeting a narrow set of functionality. Modules are grouped into higher-level namespaces. However, higher-level namespaces do not expose any procedures themselves. For example, `miden::core::math::u64` is a module containing procedures for working with 64-bit unsigned integers. This module is a part of the `miden::core::math` namespace. However, the `miden::core::math` namespace does not expose any procedures.
+Procedures in the Miden Core Library are organized into modules, each targeting a narrow set of functionality. Modules are grouped under higher-level namespaces, e.g. `miden::core::math`. These higher-level namespaces are structured to not contain any items directly - instead, procedures and other items are defined in submodules of these high-level namespaces, e.g. `miden::core::math::u64` which provides useful 64-bit unsigned integer arithmetic procedures and constants.
 
 For an example of how to invoke procedures from imported modules see [this section](../assembly/code_organization.md#importing-modules).
 

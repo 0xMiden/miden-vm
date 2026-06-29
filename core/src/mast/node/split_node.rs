@@ -4,7 +4,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -145,14 +145,7 @@ impl MastNodeExt for SplitNode {
     type Builder = SplitNodeBuilder;
 
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        SplitNodeBuilder::new(self.branches)
-    }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
+        SplitNodeBuilder::new(self.branches).with_digest(self.digest)
     }
 }
 
@@ -221,6 +214,13 @@ impl SplitNodeBuilder {
 
         Ok(SplitNode { branches: self.branches, digest })
     }
+
+    pub(in crate::mast) fn build_linked(self) -> Result<SplitNode, MastForestError> {
+        Ok(SplitNode {
+            branches: self.branches,
+            digest: self.digest.ok_or(MastForestError::DigestRequiredForDeserialization)?,
+        })
+    }
 }
 
 impl MastForestContributor for SplitNodeBuilder {
@@ -253,15 +253,21 @@ impl MastForestContributor for SplitNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
-        Ok(if let Some(forced_digest) = self.digest {
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
             let if_branch_hash = forest[self.branches[0]].digest();
             let else_branch_hash = forest[self.branches[1]].digest();
 
             hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
-        })
+        };
+
+        fingerprint_with_child_fingerprints(node_digest, &self.branches, forest, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -313,12 +319,18 @@ impl SplitNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for SplitNodeBuilder {
-    type Parameters = ();
+    type Parameters = SplitNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
+        let _ = params;
         any::<[MastNodeId; 2]>().prop_map(Self::new).boxed()
     }
 }
+
+/// Parameters for generating SplitNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug, Default)]
+pub struct SplitNodeBuilderParams {}

@@ -16,8 +16,7 @@
 //! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_options`] with
 //! [`UntrustedMastForestReadOptions`] to tune the wire byte budget. This limits allocations driven
 //! directly by wire counts while reading the payload. A separate validation helper budget is
-//! derived from it for later allocations needed to materialize and check stripped or hashless
-//! payloads.
+//! derived from it for later allocations needed to materialize and check hashless payloads.
 //!
 //! ```ignore
 //! use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
@@ -41,18 +40,11 @@
 //!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    fmt,
-    ops::{Index, IndexMut},
-};
+#[cfg(test)]
+use alloc::collections::BTreeSet;
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use core::{fmt, ops::Index};
 
-use miden_utils_sync::OnceLockCompat;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
@@ -70,18 +62,12 @@ pub use node::{
 };
 
 #[cfg(feature = "serde")]
-use crate::serde::SliceReader;
+use crate::serde::{Deserializable, Serializable, SliceReader};
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    operations::{AssemblyOp, DebugVarInfo},
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteWriter, DeserializationError},
     utils::{Idx, IndexVec, hash_string_to_word},
-};
-
-mod debuginfo;
-pub use debuginfo::{
-    AsmOpIndexError, DebugInfo, DebugInfoIndexError, DebugVarId, OpToAsmOpId, OpToDebugVarIds,
 };
 
 mod serialization;
@@ -131,13 +117,15 @@ pub struct MastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Debug information including source metadata and error codes.
-    /// Always present (as per issue #1821), but can be empty for stripped builds.
-    debug_info: DebugInfo,
+    /// Commitment to this MAST forest (commitment to all roots).
+    commitment: Word,
+}
 
-    /// Cached commitment to this MAST forest (commitment to all roots).
-    /// This is computed lazily on first access and invalidated on any mutation.
-    commitment_cache: OnceLockCompat<Word>,
+/// Complete parts needed to construct a finalized [`MastForest`].
+pub(crate) struct MastForestParts {
+    pub nodes: IndexVec<MastNodeId, MastNode>,
+    pub roots: Vec<MastNodeId>,
+    pub advice_map: AdviceMap,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -149,9 +137,64 @@ impl MastForest {
             nodes: IndexVec::new(),
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
-            debug_info: DebugInfo::new(),
-            commitment_cache: OnceLockCompat::new(),
+            commitment: empty_mast_forest_commitment(),
         }
+    }
+
+    /// Builds a [`MastForest`] from raw parts and validates local structure.
+    #[doc(hidden)]
+    pub fn from_raw_parts(
+        nodes: IndexVec<MastNodeId, MastNode>,
+        roots: Vec<MastNodeId>,
+        advice_map: AdviceMap,
+    ) -> Result<Self, MastForestError> {
+        Self::from_parts(MastForestParts { nodes, roots, advice_map })
+    }
+
+    /// Builds a [`MastForest`] from completed parts.
+    pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
+        if parts.nodes.len() > Self::MAX_NODES {
+            return Err(MastForestError::TooManyNodes);
+        }
+
+        let node_count = parts.nodes.len();
+        for &root_id in &parts.roots {
+            if root_id.to_usize() >= node_count {
+                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+            }
+        }
+
+        let forest = Self {
+            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            nodes: parts.nodes,
+            roots: parts.roots,
+            advice_map: parts.advice_map,
+        };
+
+        forest.validate()?;
+        forest.validate_node_hashes()?;
+        Ok(forest)
+    }
+
+    pub(in crate::mast) fn from_trusted_deserialization_parts(
+        parts: MastForestParts,
+    ) -> Result<Self, MastForestError> {
+        if parts.nodes.len() > Self::MAX_NODES {
+            return Err(MastForestError::TooManyNodes);
+        }
+
+        let node_count = parts.nodes.len();
+        for &root_id in &parts.roots {
+            if root_id.to_usize() >= node_count {
+                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+            }
+        }
+        Ok(Self {
+            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            nodes: parts.nodes,
+            roots: parts.roots,
+            advice_map: parts.advice_map,
+        })
     }
 }
 
@@ -159,11 +202,9 @@ impl MastForest {
 /// Equality implementations
 impl PartialEq for MastForest {
     fn eq(&self, other: &Self) -> bool {
-        // Compare all fields except commitment_cache, which is derived data
         self.nodes == other.nodes
             && self.roots == other.roots
             && self.advice_map == other.advice_map
-            && self.debug_info == other.debug_info
     }
 }
 
@@ -175,6 +216,17 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
+    // Kept private so callers cannot mutate roots arbitrarily, but shared with the merger so it
+    // can rebuild the root set while remapping nodes into the merged forest.
+    fn mark_root(&mut self, new_root_id: MastNodeId) {
+        assert!(new_root_id.to_usize() < self.nodes.len());
+
+        if !self.roots.contains(&new_root_id) {
+            self.roots.push(new_root_id);
+            self.commitment = self.compute_nodes_commitment(&self.roots);
+        }
+    }
+
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -182,14 +234,9 @@ impl MastForest {
     /// # Panics
     /// - if `new_root_id`'s internal index is larger than the number of nodes in this forest (i.e.
     ///   clearly doesn't belong to this MAST forest).
+    #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
-        assert!(new_root_id.to_usize() < self.nodes.len());
-
-        if !self.roots.contains(&new_root_id) {
-            self.roots.push(new_root_id);
-            // Invalidate the cached commitment since we modified the roots
-            self.commitment_cache.take();
-        }
+        self.mark_root(new_root_id);
     }
 
     /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
@@ -199,6 +246,7 @@ impl MastForest {
     ///
     /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
     /// reference to the old [`MastForest`] should be remapped using this map.
+    #[cfg(test)]
     pub fn remove_nodes(
         &mut self,
         nodes_to_remove: &BTreeSet<MastNodeId>,
@@ -207,6 +255,8 @@ impl MastForest {
             return BTreeMap::new();
         }
 
+        self.assert_nodes_to_remove_are_orphaned(nodes_to_remove);
+
         let old_nodes = core::mem::replace(&mut self.nodes, IndexVec::new());
         let old_root_ids = core::mem::take(&mut self.roots);
         let (retained_nodes, id_remappings) = remove_nodes(old_nodes.into_inner(), nodes_to_remove);
@@ -214,32 +264,14 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        // Remap the asm_op_storage to use the new node IDs
-        self.debug_info.remap_asm_op_storage(&id_remappings);
-
-        // Invalidate the cached commitment since we modified the forest structure
-        self.commitment_cache.take();
+        self.commitment = self.compute_nodes_commitment(&self.roots);
 
         id_remappings
-    }
-
-    /// Clears all [`DebugInfo`] from this forest: source metadata, error codes, and procedure
-    /// names.
-    ///
-    /// ```
-    /// # use miden_core::mast::MastForest;
-    /// let mut forest = MastForest::new();
-    /// forest.clear_debug_info();
-    /// assert!(forest.debug_info().is_empty());
-    /// ```
-    pub fn clear_debug_info(&mut self) {
-        self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.
-    /// The method assumes that debug info has already been cleared if that is desired.
     /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
@@ -252,13 +284,10 @@ impl MastForest {
     /// ```rust
     /// use miden_core::mast::MastForest;
     ///
-    /// let mut forest = MastForest::new();
+    /// let forest = MastForest::new();
     /// // Add nodes to the forest
     ///
-    /// // First clear debug info if needed
-    /// forest.clear_debug_info();
-    ///
-    /// // Then compact the forest (consumes the original)
+    /// // Compact the forest (consumes the original)
     /// let (compacted_forest, root_map) = forest.compact();
     ///
     /// // compacted_forest is now compacted with duplicate nodes merged
@@ -266,8 +295,8 @@ impl MastForest {
     pub fn compact(self) -> (MastForest, MastForestRootMap) {
         // Merge with itself to deduplicate nodes
         // Note: This cannot fail for a self-merge under normal conditions.
-        // The only possible failures (TooManyNodes, TooManyDebugInfoEntries) would require the
-        // original forest to be at capacity limits, at which point compaction wouldn't help.
+        // The only possible failure (TooManyNodes) would require the original forest to be at a
+        // capacity limit, at which point compaction wouldn't help.
         MastForest::merge([&self])
             .expect("Failed to compact MastForest: this should never happen during self-merge")
     }
@@ -328,11 +357,29 @@ impl MastForest {
 // ------------------------------------------------------------------------------------------------
 /// Helpers
 impl MastForest {
+    #[cfg(test)]
+    fn assert_nodes_to_remove_are_orphaned(&self, nodes_to_remove: &BTreeSet<MastNodeId>) {
+        for (node_idx, node) in self.nodes.iter().enumerate() {
+            let node_id = MastNodeId::new_unchecked(node_idx.try_into().expect("too many nodes"));
+            if nodes_to_remove.contains(&node_id) {
+                continue;
+            }
+
+            node.for_each_child(|child_id| {
+                assert!(
+                    !nodes_to_remove.contains(&child_id),
+                    "cannot remove node {child_id:?}; retained node {node_id:?} references it"
+                );
+            });
+        }
+    }
+
     /// Adds all provided nodes to the internal set of nodes, remapping all [`MastNodeId`]
     /// references in those nodes.
     ///
     /// # Panics
     /// - Panics if the internal set of nodes is not empty.
+    #[cfg(test)]
     fn remap_and_add_nodes(
         &mut self,
         nodes_to_add: Vec<MastNode>,
@@ -353,6 +400,7 @@ impl MastForest {
     ///
     /// # Panics
     /// - Panics if the internal set of roots is not empty.
+    #[cfg(test)]
     fn remap_and_add_roots(
         &mut self,
         old_root_ids: Vec<MastNodeId>,
@@ -361,14 +409,16 @@ impl MastForest {
         assert!(self.roots.is_empty());
 
         for old_root_id in old_root_ids {
-            let new_root_id = id_remappings.get(&old_root_id).copied().unwrap_or(old_root_id);
-            self.make_root(new_root_id);
+            if let Some(new_root_id) = id_remappings.get(&old_root_id).copied() {
+                self.mark_root(new_root_id);
+            }
         }
     }
 }
 
 /// Returns the set of nodes that are live, as well as the mapping from "old ID" to "new ID" for all
 /// live nodes.
+#[cfg(test)]
 fn remove_nodes(
     mast_nodes: Vec<MastNode>,
     nodes_to_remove: &BTreeSet<MastNodeId>,
@@ -391,6 +441,19 @@ fn remove_nodes(
     }
 
     (retained_nodes, id_remappings)
+}
+
+fn empty_mast_forest_commitment() -> Word {
+    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[])
+}
+
+fn compute_nodes_commitment(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+    node_ids: &[MastNodeId],
+) -> Word {
+    let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
+    digests.sort_unstable();
+    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -461,22 +524,19 @@ impl MastForest {
         &self,
         node_ids: impl IntoIterator<Item = &'a MastNodeId>,
     ) -> Word {
-        let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
-        digests.sort_unstable();
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+        let node_ids = node_ids.into_iter().copied().collect::<Vec<_>>();
+        compute_nodes_commitment(&self.nodes, &node_ids)
     }
 
     /// Returns the commitment to this MAST forest.
     ///
     /// The commitment is computed as the sequential hash of all procedure roots in the forest.
-    /// This value is cached after the first computation and reused for subsequent calls,
-    /// unless the forest is mutated (in which case the cache is invalidated).
     ///
     /// The commitment uniquely identifies the forest's structure, as each root's digest
     /// transitively includes all of its descendants. Therefore, a commitment to all roots
     /// is a commitment to the entire forest.
     pub fn commitment(&self) -> Word {
-        *self.commitment_cache.get_or_init(|| self.compute_nodes_commitment(&self.roots))
+        self.commitment
     }
 
     /// Returns the number of nodes in this MAST forest.
@@ -493,100 +553,32 @@ impl MastForest {
         &self.advice_map
     }
 
-    pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
+    /// Returns this forest with `advice_map` entries added.
+    pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
+        self.advice_map.extend(advice_map);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advice_map_mut(&mut self) -> &mut AdviceMap {
         &mut self.advice_map
     }
 
     // SERIALIZATION
     // --------------------------------------------------------------------------------------------
 
-    /// Serializes this MastForest without debug information.
-    ///
-    /// This produces a smaller output by omitting source metadata, error codes, and procedure
-    /// names.
-    /// The resulting bytes can be deserialized with the standard [`Deserializable`] impl,
-    /// which auto-detects the format and creates an empty [`DebugInfo`].
-    ///
-    /// Use this for production builds where debug info is not needed.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use miden_core::{mast::MastForest, serde::Serializable};
-    ///
-    /// let forest = MastForest::new();
-    ///
-    /// // Full serialization (with debug info)
-    /// let full_bytes = forest.to_bytes();
-    ///
-    /// // Stripped serialization (without debug info)
-    /// let mut stripped_bytes = Vec::new();
-    /// forest.write_stripped(&mut stripped_bytes);
-    ///
-    /// // Both can be deserialized the same way
-    /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
-    /// ```
-    pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
-        serialization::write_stripped_into(self, target);
-    }
-
     /// Serializes this MastForest with the HASHLESS flag set.
     ///
-    /// Hashless implies stripped: debug info is omitted, and digests must be recomputed during
-    /// validation. Trusted deserialization rejects this flag.
+    /// Hashless forest bytes omit rebuildable internal node hashes. External node digests stay on
+    /// the wire because they cannot be rebuilt from local structure. Trusted deserialization
+    /// rejects this flag.
     ///
     /// Use this when producing data for untrusted validation.
     pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
         serialization::write_hashless_into(self, target);
     }
-
-    /// Returns the exact size of stripped serialization in bytes.
-    pub fn stripped_size_hint(&self) -> usize {
-        serialization::stripped_size_hint(self)
-    }
 }
 
-// ------------------------------------------------------------------------------------------------
-impl MastForest {
-    /// Adds a debug variable to the forest, and returns the associated [`DebugVarId`].
-    pub fn add_debug_var(
-        &mut self,
-        debug_var: DebugVarInfo,
-    ) -> Result<DebugVarId, MastForestError> {
-        self.debug_info.add_debug_var(debug_var)
-    }
-
-    /// Returns debug variable IDs for a specific operation within a node.
-    pub fn debug_vars_for_operation(
-        &self,
-        node_id: MastNodeId,
-        local_op_idx: usize,
-    ) -> &[DebugVarId] {
-        self.debug_info.debug_vars_for_operation(node_id, local_op_idx)
-    }
-
-    /// Returns the debug variable with the given ID, if it exists.
-    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&DebugVarInfo> {
-        self.debug_info.debug_var(debug_var_id)
-    }
-
-    /// Returns the [`AssemblyOp`] associated with a node.
-    ///
-    /// For basic block nodes with a `target_op_idx`, returns the AssemblyOp for that operation.
-    /// For other nodes or when no `target_op_idx` is provided, returns the first AssemblyOp.
-    pub fn get_assembly_op(
-        &self,
-        node_id: MastNodeId,
-        target_op_idx: Option<usize>,
-    ) -> Option<&AssemblyOp> {
-        match target_op_idx {
-            Some(op_idx) => self.debug_info.asm_op_for_operation(node_id, op_idx),
-            None => self.debug_info.first_asm_op_for_node(node_id),
-        }
-    }
-}
-
-// ------------------------------------------------------------------------------------------------
 /// Validation methods
 impl MastForest {
     fn validate_basic_block_invariants(&self) -> Result<(), MastForestError> {
@@ -603,16 +595,6 @@ impl MastForest {
         Ok(())
     }
 
-    fn validate_procedure_name_digests(&self) -> Result<(), MastForestError> {
-        for (digest, _) in self.debug_info.procedure_names() {
-            if self.find_procedure_root(digest).is_none() {
-                return Err(MastForestError::InvalidProcedureNameDigest(digest));
-            }
-        }
-
-        Ok(())
-    }
-
     /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
     /// 1. Power-of-two number of groups in each batch
     /// 2. No operation group ends with an operation requiring an immediate value
@@ -620,15 +602,12 @@ impl MastForest {
     /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
     ///    indptr integrity, bounds checking)
     ///
-    /// This also validates that each stored procedure-name digest resolves to a procedure root in
-    /// the forest.
-    ///
     /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
     /// at assembly time rather than dynamically during execution, and adds comprehensive
     /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
         self.validate_basic_block_invariants()?;
-        self.validate_procedure_name_digests()
+        Ok(())
     }
 
     /// Validates that stored node digests match the hashes implied by local structure.
@@ -745,61 +724,6 @@ impl MastForest {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
-/// Error message methods
-impl MastForest {
-    /// Given an error code as a Felt, resolves it to its corresponding error message.
-    pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        let key = code.as_canonical_u64();
-        self.debug_info.error_message(key)
-    }
-
-    /// Registers an error message in the MAST Forest and returns the corresponding error code as a
-    /// Felt.
-    pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
-        let code: Felt = error_code_from_msg(&msg);
-        // we use u64 as keys for the map
-        self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
-        code
-    }
-}
-
-// ------------------------------------------------------------------------------------------------
-/// Procedure name methods
-impl MastForest {
-    /// Returns the procedure name for the given MAST root digest, if present.
-    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.debug_info.procedure_name(digest)
-    }
-
-    /// Returns an iterator over all (digest, name) pairs of procedure names.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
-        self.debug_info.procedure_names()
-    }
-
-    /// Inserts a procedure name for the given MAST root digest.
-    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
-        assert!(
-            self.find_procedure_root(digest).is_some(),
-            "attempted to insert procedure name for digest that is not a procedure root"
-        );
-        self.debug_info.insert_procedure_name(digest, name);
-    }
-
-    /// Returns a reference to the debug info for this forest.
-    pub fn debug_info(&self) -> &DebugInfo {
-        &self.debug_info
-    }
-
-    /// Returns a mutable reference to the debug info.
-    ///
-    /// This is intended for use by the assembler to register AssemblyOps and other debug
-    /// information during compilation.
-    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
-        &mut self.debug_info
-    }
-}
-
 // MAST FOREST INDEXING
 // ------------------------------------------------------------------------------------------------
 
@@ -809,13 +733,6 @@ impl Index<MastNodeId> for MastForest {
     #[inline(always)]
     fn index(&self, node_id: MastNodeId) -> &Self::Output {
         &self.nodes[node_id]
-    }
-}
-
-impl IndexMut<MastNodeId> for MastForest {
-    #[inline(always)]
-    fn index_mut(&mut self, node_id: MastNodeId) -> &mut Self::Output {
-        &mut self.nodes[node_id]
     }
 }
 
@@ -848,19 +765,6 @@ pub trait ExecutableMastForest {
 
     /// Returns the advice map associated with this forest.
     fn advice_map(&self) -> &AdviceMap;
-
-    /// Returns the [`AssemblyOp`] associated with a node (and optionally an operation index inside
-    /// a basic block), if any.
-    ///
-    /// This is used by the error-reporting machinery to produce source locations.
-    fn get_assembly_op(
-        &self,
-        node_id: MastNodeId,
-        target_op_idx: Option<usize>,
-    ) -> Option<&AssemblyOp>;
-
-    /// Resolves an error code to its corresponding error message, if any.
-    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>>;
 }
 
 impl ExecutableMastForest for MastForest {
@@ -882,20 +786,6 @@ impl ExecutableMastForest for MastForest {
     #[inline(always)]
     fn advice_map(&self) -> &AdviceMap {
         MastForest::advice_map(self)
-    }
-
-    #[inline(always)]
-    fn get_assembly_op(
-        &self,
-        node_id: MastNodeId,
-        target_op_idx: Option<usize>,
-    ) -> Option<&AssemblyOp> {
-        MastForest::get_assembly_op(self, node_id, target_op_idx)
-    }
-
-    #[inline(always)]
-    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        MastForest::resolve_error_message(self, code)
     }
 }
 
@@ -933,20 +823,6 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
     #[inline(always)]
     fn advice_map(&self) -> &AdviceMap {
         T::advice_map(self)
-    }
-
-    #[inline(always)]
-    fn get_assembly_op(
-        &self,
-        node_id: MastNodeId,
-        target_op_idx: Option<usize>,
-    ) -> Option<&AssemblyOp> {
-        T::get_assembly_op(self, node_id, target_op_idx)
-    }
-
-    #[inline(always)]
-    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        T::resolve_error_message(self, code)
     }
 }
 
@@ -1081,71 +957,6 @@ impl Iterator for SubtreeIterator<'_> {
     }
 }
 
-// ASM OP ID
-// ================================================================================================
-
-/// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
-///
-/// AssemblyOps are metadata used only for error context and debugging tools.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
-)]
-pub struct AsmOpId(u32);
-
-impl AsmOpId {
-    /// Creates a new [`AsmOpId`] with the provided inner value.
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<u32> for AsmOpId {
-    fn from(value: u32) -> Self {
-        AsmOpId::new(value)
-    }
-}
-
-impl Idx for AsmOpId {}
-
-impl From<AsmOpId> for u32 {
-    fn from(id: AsmOpId) -> Self {
-        id.0
-    }
-}
-
-impl fmt::Display for AsmOpId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "AsmOpId({})", self.0)
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for AsmOpId {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<u32>().prop_map(Self::from).boxed()
-    }
-}
-
-impl Serializable for AsmOpId {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target)
-    }
-}
-
-impl Deserializable for AsmOpId {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let value = u32::read_from(source)?;
-        Ok(Self(value))
-    }
-}
-
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
@@ -1159,8 +970,6 @@ pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
 /// Represents the types of errors that can occur when dealing with MAST forest.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MastForestError {
-    #[error("MAST forest debug metadata count exceeds the maximum of {} entries", u32::MAX)]
-    TooManyDebugInfoEntries,
     #[error("MAST forest node count exceeds the maximum of {} nodes", MastForest::MAX_NODES)]
     TooManyNodes,
     #[error("node id {0} is greater than or equal to forest length {1}")]
@@ -1169,14 +978,10 @@ pub enum MastForestError {
     EmptyBasicBlock,
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
-    #[error("assembly op storage error: {0}")]
-    AssemblyOpError(AsmOpIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
-    #[error("procedure name references digest that is not a procedure root: {0:?}")]
-    InvalidProcedureNameDigest(Word),
     #[error(
         "node {0:?} references child {1:?} which comes after it in the forest (forward reference)"
     )]

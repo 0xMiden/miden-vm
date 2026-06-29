@@ -10,6 +10,7 @@ use miden_core::{
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
 };
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use super::super::trace_state::{
     AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
@@ -147,22 +148,27 @@ impl ReplayProcessor {
     {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
+        let mut package_debug_info = None;
 
-        while let ControlFlow::Break(internal_break_reason) =
-            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
-        {
+        while let ControlFlow::Break(internal_break_reason) = execute_impl(
+            self,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+            &mut package_debug_info,
+        ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit {
-                    basic_block_node_id: _,
-                    op_idx: _,
-                    continuation,
-                } => {
+                InternalBreakReason::Emit { op_idx: _, continuation, source_node_id } => {
                     // do nothing - in replay processor we don't need to emit anything
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
                     finish_emit_op_execution(
                         continuation,
+                        source_node_id,
                         self,
                         continuation_stack,
                         current_forest,
@@ -190,8 +196,11 @@ impl ReplayProcessor {
                     finish_load_mast_forest_from_dyn_start(
                         root_id,
                         new_forest,
+                        None,
+                        None,
                         self,
                         current_forest,
+                        &mut package_debug_info,
                         continuation_stack,
                         tracer,
                         stopper,
@@ -200,6 +209,7 @@ impl ReplayProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash: _,
+                    source_node_id: _,
                 } => {
                     // load mast forest from replay
                     let (root_id, new_forest_id) =
@@ -220,10 +230,12 @@ impl ReplayProcessor {
                     finish_load_mast_forest_from_external(
                         root_id,
                         new_forest,
+                        None,
+                        None,
                         external_node_id,
                         current_forest,
+                        &mut package_debug_info,
                         continuation_stack,
-                        host,
                         tracer,
                     )?;
                 },
@@ -248,6 +260,10 @@ impl SystemInterface for ReplayProcessor {
         self.system.ctx
     }
 
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.system.pc_transcript_state
+    }
+
     fn set_caller_hash(&mut self, caller_hash: Word) {
         self.system.fn_hash = caller_hash;
     }
@@ -258,6 +274,22 @@ impl SystemInterface for ReplayProcessor {
 
     fn increment_clock(&mut self) {
         self.system.clk += 1_u32;
+    }
+
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.system.pc_transcript_state = state;
+    }
+
+    fn save_call_state(&mut self) {
+        // no-op for the replay processor: the system call state was already recorded by the
+        // tracer into `execution_context_replay` during the original execution.
+    }
+
+    fn restore_call_state(&mut self) -> Result<(), OperationError> {
+        let ctx_info = self.execution_context_replay.replay_execution_context()?;
+        self.system.ctx = ctx_info.parent_ctx;
+        self.system.fn_hash = ctx_info.parent_fn_hash;
+        Ok(())
     }
 }
 
@@ -407,6 +439,14 @@ impl StackInterface for ReplayProcessor {
 
         Ok(())
     }
+
+    fn start_context(&mut self) {
+        self.stack.start_context();
+    }
+
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        self.stack.restore_context(&mut self.stack_overflow_replay)
+    }
 }
 
 impl Processor for ReplayProcessor {
@@ -447,31 +487,6 @@ impl Processor for ReplayProcessor {
     fn hasher(&mut self) -> &mut Self::Hasher {
         &mut self.hasher_response_replay
     }
-
-    fn save_context_and_truncate_stack(&mut self) {
-        self.stack.start_context();
-    }
-
-    fn restore_context(&mut self) -> Result<(), OperationError> {
-        let ctx_info = self.execution_context_replay.replay_execution_context()?;
-
-        // Restore system state
-        self.system_mut().set_ctx(ctx_info.parent_ctx);
-        self.system_mut().set_caller_hash(ctx_info.parent_fn_hash);
-
-        // Restore stack state
-        self.stack.restore_context(&mut self.stack_overflow_replay)?;
-
-        Ok(())
-    }
-
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.system.pc_transcript_state
-    }
-
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.system.pc_transcript_state = state;
-    }
 }
 
 // REPLAY STOPPER
@@ -490,7 +505,10 @@ impl Stopper for ReplayStopper {
         &self,
         processor: &ReplayProcessor,
         _continuation_stack: &ContinuationStack<Arc<SparseMastForest>>,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<SparseMastForest>>>,
+        continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Arc<SparseMastForest>>,
+            Option<DebugSourceNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>> {
         if processor.system().clock() >= processor.maximum_clock {
             ControlFlow::Break(BreakReason::Stopped(continuation_after_stop()))

@@ -1,3 +1,5 @@
+use alloc::vec;
+
 use super::*;
 
 impl Package {
@@ -46,8 +48,6 @@ impl proptest::arbitrary::Arbitrary for Package {
     type Parameters = ArbitraryPackageParams;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        use alloc::vec;
-
         use miden_core::{
             mast::{BasicBlockNodeBuilder, MastForestContributor, MastNodeExt},
             operations::Operation,
@@ -85,6 +85,24 @@ impl proptest::arbitrary::Arbitrary for Package {
                         export.node = Some(node_id);
                         export.digest = mast_forest[node_id].digest();
                     }
+                }
+
+                // Generate an entrypoint export if needed
+                if kind.is_executable() {
+                    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
+                        .add_to_forest(&mut mast_forest)
+                        .unwrap();
+                    // Add the node to the forest roots if it's not already there
+                    mast_forest.make_root(node_id);
+                    nodes.push(node_id);
+                    let path: Arc<Path> =
+                        Path::EXEC.join(ast::ProcedureName::MAIN_PROC_NAME).into();
+                    exports.push(PackageExport::Procedure(ProcedureExport::new(
+                        path,
+                        Some(node_id),
+                        mast_forest[node_id].digest(),
+                        None,
+                    )));
                 }
 
                 let mast_forest = Arc::from(mast_forest);

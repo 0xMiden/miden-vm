@@ -1,7 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan};
@@ -247,7 +247,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error(
-        "re-exporting a procedure identified by digest requires giving it a name, e.g. `pub use DIGEST->foo`"
+        "source-level digest re-exports are not supported; re-export a named item with `pub use {{item}} from module`"
     )]
     UnnamedReexportOfMastRoot {
         #[label]
@@ -308,7 +308,9 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help("expected one of: '@packed', '@transparent', '@bigendian', or '@align(N)'"))]
+    #[diagnostic(help(
+        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
+    ))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,
@@ -341,6 +343,56 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
         padding: u8,
+    },
+    #[error(
+        "invalid submodule declaration '{name}': could not find module sources at '{directory}/{basename}.masm' or '{directory}/{basename}/mod.masm'"
+    )]
+    UndefinedSubmodule {
+        name: crate::ast::Ident,
+        basename: alloc::boxed::Box<str>,
+        directory: miden_debug_types::Uri,
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "invalid submodule declaration '{name}': submodules must not have the same name as their parent"
+    )]
+    #[diagnostic(help("occurred while parsing {parent_module_uri}"))]
+    SelfReferentialSubmodule {
+        name: crate::ast::Ident,
+        parent_module_uri: miden_debug_types::Uri,
+        #[label(
+            "module source resolution rules require this declaration to resolve to the current source file"
+        )]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "conflicting submodule paths detected: '{name}' can be parsed from either '{first}' and '{second}', but not both"
+    )]
+    AmbiguousSubmoduleLocation {
+        name: crate::ast::Ident,
+        first: miden_debug_types::Uri,
+        second: miden_debug_types::Uri,
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "invalid submodule declaration '{name}': module source '{module_uri}' is already reachable through another submodule declaration"
+    )]
+    #[diagnostic(help("each module source file can only be owned by one module in a module tree"))]
+    DuplicateSubmoduleSource {
+        name: crate::ast::Ident,
+        module_uri: miden_debug_types::Uri,
+        #[label("this declaration resolves to an already visited module source")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
 }
 

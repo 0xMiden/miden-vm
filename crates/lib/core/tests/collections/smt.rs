@@ -110,6 +110,105 @@ fn test_smt_get_multi() {
     expect_value_from_get(k2, v_empty, &smt);
 }
 
+#[test]
+fn test_smt_get_rejects_authenticated_duplicate_keys() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::get
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let key = word(401, 402, 403, 0x4242);
+    let first_value = word(1, 2, 3, 4);
+    let second_value = word(9, 10, 11, 12);
+    let duplicate_entries = [(key, first_value), (key, second_value)];
+
+    assert!(
+        Smt::with_entries(duplicate_entries).is_err(),
+        "canonical SMT constructors must reject duplicate keys"
+    );
+
+    let (root, store, advice_map) = build_custom_smt_root(&duplicate_entries);
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &key);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
+}
+
+#[test]
+fn test_smt_get_rejects_authenticated_unsorted_unique_keys() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::get
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let low_key = word(601, 602, 603, 0x4343);
+    let high_key = word(701, 702, 703, 0x4343);
+    let low_value = word(31, 32, 33, 34);
+    let high_value = word(41, 42, 43, 44);
+    let unsorted_entries = [(high_key, high_value), (low_key, low_value)];
+
+    let (root, store, advice_map) = build_custom_smt_root(&unsorted_entries);
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &low_key);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
+}
+
+#[test]
+fn test_smt_set_rejects_authenticated_duplicate_keys() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::set
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let key = word(501, 502, 503, 0x5252);
+    let first_value = word(11, 12, 13, 14);
+    let second_value = word(21, 22, 23, 24);
+    let duplicate_entries = [(key, first_value), (key, second_value)];
+
+    assert!(
+        Smt::with_entries(duplicate_entries).is_err(),
+        "canonical SMT constructors must reject duplicate keys"
+    );
+
+    let (root, store, advice_map) = build_custom_smt_root(&duplicate_entries);
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &key);
+    push_word(&mut initial_stack, &EMPTY_WORD);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
+}
+
 /// Tests inserting and removing key-value pairs to an SMT. We do the insert/removal twice to ensure
 /// that the removal properly updates the advice map/stack.
 #[test]
@@ -416,7 +515,10 @@ fn test_smt_set_single_to_multi_rejects_forged_preimage() {
     push_word(&mut initial_stack, &v_new);
 
     let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
-    crate::expect_assert_error_message!(test, contains "invalid single-leaf preimage");
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid single-leaf preimage: hash does not match node value"
+    );
 }
 
 /// Regression test for the multi-leaf no-op deletion bypass.
@@ -713,6 +815,43 @@ fn test_smt_set_remove_in_multi() {
     expect_remove(&smt, K2);
 }
 
+#[test]
+fn test_smt_set_remove_first_from_three_pair_multi_leaf() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::set
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let entries = entries_for_leaf(3, 0x5151);
+    let smt = build_smt_from_pairs(&entries);
+    let key = smt
+        .leaves()
+        .map(|(_, leaf)| leaf.entries())
+        .find(|entries| entries.len() == 3)
+        .map(|entries| entries[0].0)
+        .unwrap();
+
+    let root = smt.root();
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &key);
+    push_word(&mut initial_stack, &EMPTY_WORD);
+
+    let expected_value = smt_get_value(&smt, key);
+    let mut expected_smt = smt.clone();
+    smt_insert(&mut expected_smt, key, EMPTY_WORD);
+    let expected_output = build_expected_stack(expected_value, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+        .expect_stack(&expected_output);
+}
+
 /// Tests `peek` on every key present in the SMT, as well as an empty leaf
 #[test]
 fn test_smt_peek() {
@@ -843,7 +982,6 @@ fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[expect(clippy::type_complexity)]
 fn prepare_insert_or_set(
     key: Word,
     value: Word,
@@ -881,11 +1019,44 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
     (store, advice_map)
 }
 
+fn build_custom_smt_root(entries: &[(Word, Word)]) -> (Word, MerkleStore, Vec<(Word, Vec<Felt>)>) {
+    use miden_utils_testing::crypto::{NodeIndex, Poseidon2};
+
+    const SMT_DEPTH: u8 = 64;
+
+    assert!(!entries.is_empty(), "custom SMT root requires at least one entry");
+
+    let leaf_elements = build_leaf_advice_value(entries);
+    let leaf_hash = Poseidon2::hash_elements_in_domain(&leaf_elements, LEAF_DOMAIN);
+
+    let leaf_index = entries[0].0[3].as_canonical_u64();
+    let empty_root = Smt::new().root();
+    let mut store = MerkleStore::new();
+    let root = store
+        .set_node(empty_root, NodeIndex::new(SMT_DEPTH, leaf_index).unwrap(), leaf_hash)
+        .unwrap()
+        .root;
+
+    (root, store, vec![(leaf_hash, leaf_elements)])
+}
+
 fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     let mut result = Vec::with_capacity(8);
     append_word_to_vec(&mut result, word0);
     append_word_to_vec(&mut result, word1);
     result
+}
+
+fn entries_for_leaf(pair_count: usize, leaf_index: u64) -> Vec<(Word, Word)> {
+    (0..pair_count)
+        .map(|idx| {
+            let base = 101 + idx as u64 * 100;
+            (
+                word(base, base + 1, base + 2, leaf_index),
+                word(base + 3, base + 4, base + 5, base + 6),
+            )
+        })
+        .collect()
 }
 
 // RANDOMIZED ROUND-TRIP TEST
