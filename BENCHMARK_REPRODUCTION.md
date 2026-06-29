@@ -1,14 +1,15 @@
 # BlakeG vs Poseidon2 Benchmark Reproduction
 
 This note records the commands used to reproduce the synthetic transaction and
-recursive verifier benchmark tables for the BlakeG/Eidos branch and the
-Poseidon2 `next` baseline.
+recursive verifier benchmark tables for the 32-row BlakeG/Eidos branch and
+the Poseidon2 `next` baseline.
 
 ## Branches
 
 Use two independent VM checkouts:
 
-- BlakeG/Eidos: `0xMiden/miden-vm`, branch `al-blakeg-final`
+- BlakeG/Eidos 32-row AIR: `0xMiden/miden-vm`, branch
+  `al-blakeg-air-32row-research`
 - Poseidon2 baseline: `0xMiden/miden-vm`, branch `al-next-bench`
 
 The BlakeG branch uses these git dependencies:
@@ -83,9 +84,9 @@ The standalone BlakeG suite defaults to the ECDSA P2ID fixtures. Use the auth
 comparison script above when you need Falcon and ECDSA tables side by side.
 
 ```sh
-git clone git@github.com:0xMiden/miden-vm.git miden-vm-blakeg-final
-cd miden-vm-blakeg-final
-git checkout al-blakeg-final
+git clone git@github.com:0xMiden/miden-vm.git miden-vm-blakeg-air-32row
+cd miden-vm-blakeg-air-32row
+git checkout al-blakeg-air-32row-research
 
 scripts/bench_blakeg_suite.sh \
   --fri-queries 27 \
