@@ -43,6 +43,10 @@ pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
+///
+/// Its binary form is trusted replay data. Sparse MAST hashes inside the trace generation context
+/// are not validated against untrusted senders; see
+/// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
     trace_output: TraceBuildOutput,

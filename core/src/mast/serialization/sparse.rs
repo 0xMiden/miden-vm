@@ -30,6 +30,8 @@ fn sparse_mast_forest_min_serialized_size() -> usize {
 ///
 /// This format carries the digest for each full node and accepts those digests on read. It is
 /// suitable for trusted remote proving inputs, not as an untrusted hashless validation path.
+///
+/// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
 pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
     let mut basic_block_data_builder = BasicBlockDataBuilder::new();
     let mut full_ids = Vec::with_capacity(forest.nodes().len());
@@ -100,6 +102,10 @@ impl Serializable for SparseMastForest {
 }
 
 impl Deserializable for SparseMastForest {
+    /// Reads a trusted sparse replay payload.
+    ///
+    /// Full-node digests are accepted from the payload. This is not the untrusted hash-validation
+    /// path from <https://github.com/0xMiden/miden-vm/issues/3303>.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         read_sparse_from(source)
     }
@@ -108,11 +114,16 @@ impl Deserializable for SparseMastForest {
         sparse_mast_forest_min_serialized_size()
     }
 
+    /// Reads trusted sparse replay bytes and rejects trailing bytes.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         SparseMastForest::read_from_bytes(bytes)
     }
 }
 
+/// Reads a trusted sparse replay payload.
+///
+/// The payload carries full-node digests and digest-only entries as replay data. It does not
+/// rebuild those hashes from node structure.
 pub(super) fn read_sparse_from<R: ByteReader>(
     source: &mut R,
 ) -> Result<SparseMastForest, DeserializationError> {
@@ -335,12 +346,16 @@ fn materialize_sparse_nodes(
 }
 
 impl SparseMastForest {
-    /// Deserializes sparse MAST bytes using default untrusted budgets.
+    /// Deserializes trusted sparse MAST replay bytes using default parse budgets.
+    ///
+    /// This reader bounds parsing, but accepts sparse MAST hashes from the payload.
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from_bytes_with_options(bytes, SparseMastForestReadOptions::default())
     }
 
-    /// Deserializes sparse MAST bytes using explicit read options.
+    /// Deserializes trusted sparse MAST replay bytes using explicit read options.
+    ///
+    /// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
     pub fn read_from_bytes_with_options(
         bytes: &[u8],
         options: SparseMastForestReadOptions,

@@ -63,6 +63,9 @@ pub struct TraceGenerationContext {
     /// original [`MastNodeId`]s of the source forest. References from `CoreTraceFragmentContext`,
     /// `MastForestResolutionReplay`, and `HasherOp::HashBasicBlock` are encoded as
     /// [`MastForestId`]s into this vector.
+    ///
+    /// Serialized entries are trusted sparse replay data. Their sparse MAST hashes are not
+    /// recomputed on read; see <https://github.com/0xMiden/miden-vm/issues/3303>.
     pub mast_forest_store: Vec<Arc<SparseMastForest>>,
 
     // Replays that contain additional data needed to generate the range checker and chiplets

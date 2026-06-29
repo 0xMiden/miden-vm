@@ -45,10 +45,11 @@ pub use proving_options::ProvingOptions;
 
 /// Inputs required to prove from pre-executed trace data.
 ///
-/// Its binary form is a VM-owned remote proving input containing trace replay data and
-/// proof-generation options. Deserialization checks malformed structure and bounded allocation;
-/// semantic replay inconsistencies may still surface later while building the trace. Correct
-/// execution is established by the proof generated from these inputs.
+/// Its binary form is a VM-owned trusted remote proving input containing trace replay data and
+/// proof-generation options. Deserialization checks malformed structure and bounded allocation, but
+/// sparse MAST hashes are accepted as replay data.
+///
+/// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
 #[derive(Debug)]
 pub struct TraceProvingInputs {
     trace_inputs: TraceBuildInputs,
@@ -66,7 +67,10 @@ impl TraceProvingInputs {
         (self.trace_inputs, self.options)
     }
 
-    /// Deserializes remote proving inputs using the supplied untrusted byte budget.
+    /// Deserializes trusted remote proving inputs using the supplied byte budget.
+    ///
+    /// The budget bounds parsing. It does not validate sparse MAST hashes from untrusted senders.
+    /// See <https://github.com/0xMiden/miden-vm/issues/3303>.
     pub fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,
