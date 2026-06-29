@@ -23,16 +23,6 @@ pub fn masm_store_felts(felts: &[Felt], base_addr: u32) -> String {
         .join(" ")
 }
 
-/// Generates MASM code to push field elements onto the stack while preserving their original order.
-pub fn masm_push_felts(felts: &[Felt]) -> String {
-    felts
-        .iter()
-        .rev()
-        .map(|felt| format!("push.{}", felt.as_canonical_u64()))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

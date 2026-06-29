@@ -1,8 +1,3 @@
-#! Keccak256 and SHA512 procedures call the corresponding
-#! `::miden::precompiles::crypto::hashes` implementations.
-
 pub mod blake3
-pub mod keccak256
 pub mod poseidon2
 pub mod sha256
-pub mod sha512

@@ -102,26 +102,26 @@ fn core_library_does_not_export_fri_preprocess_test_helper() {
 }
 
 #[test]
-fn core_library_exports_crypto_wrappers() {
+fn core_library_exports_official_precompile_wrappers() {
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
     let package = core_lib.package();
 
     for path in [
-        "::miden::core::crypto::hashes::keccak256::hash_bytes",
-        "::miden::core::crypto::hashes::keccak256::hash",
-        "::miden::core::crypto::hashes::keccak256::merge",
-        "::miden::core::crypto::hashes::sha512::hash_bytes",
-        "::miden::core::crypto::hashes::sha512::hash",
-        "::miden::core::crypto::hashes::sha512::merge",
-        "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify",
-        "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
-        "::miden::core::crypto::dsa::eddsa_ed25519::verify",
+        "::miden::precompiles::crypto::hashes::keccak256::hash_bytes_mem",
+        "::miden::precompiles::crypto::hashes::keccak256::hash_1_chunk_mem",
+        "::miden::precompiles::crypto::hashes::keccak256::hash_2_chunks_mem",
+        "::miden::precompiles::crypto::hashes::sha512::hash_bytes_mem",
+        "::miden::precompiles::crypto::hashes::sha512::hash_1_chunk_mem",
+        "::miden::precompiles::crypto::hashes::sha512::hash_2_chunks_mem",
+        "::miden::precompiles::crypto::hashes::sha512::hash_3_chunks_mem",
+        "::miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash",
+        "::miden::precompiles::crypto::dsa::eddsa_ed25519::assert_verify",
     ] {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
-            "{path} must be exported by corelib",
+            "{path} must be exported by aggregate corelib",
         );
     }
 }

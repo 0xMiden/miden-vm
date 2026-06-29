@@ -5,6 +5,7 @@
 #### Changes
 
 - Added a Blake3 pure execution benchmark axis and reduced processor benchmark compile time by relaxing forced inlining in execution helpers ([#3289](https://github.com/0xMiden/miden-vm/pull/3289)).
+- [BREAKING] Removed the legacy `miden::core::crypto::{hashes,dsa}` Keccak256, SHA512, ECDSA secp256k1, and Ed25519 compatibility modules. Use the matching `miden::precompiles::crypto::*` modules instead.
 
 ## v0.24.0 (2026-06-24)
 
