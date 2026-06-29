@@ -133,6 +133,19 @@ pub fn execute_trace_inputs(fixture: &Blake3Fixture) -> TraceBuildInputs {
     }
 }
 
+pub fn execute_program(fixture: &Blake3Fixture) {
+    let mut host = host_for_fixture(fixture);
+    let processor = FastProcessor::new_with_options(
+        fixture.stack_inputs,
+        fixture.advice_inputs.clone(),
+        execution_options(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    processor
+        .execute_sync(&fixture.program, &mut host)
+        .expect("failed to execute Blake3 benchmark");
+}
+
 pub fn prove_program(fixture: &Blake3Fixture) {
     let _span = tracing::info_span!("prove_program_sync").entered();
     prove_trace(execute_trace_inputs(fixture));

@@ -14,7 +14,7 @@ use crate::{
 // ================================================================================================
 
 /// Executes a Split node from the start.
-#[inline(always)]
+#[inline]
 pub(super) fn start_split_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     split_node: &SplitNode,

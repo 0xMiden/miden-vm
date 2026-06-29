@@ -38,16 +38,17 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new_unchecked(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub(crate) fn execute_op<P, T>(
+pub(crate) fn execute_op<P, H, T>(
     processor: &mut P,
     op: &Operation,
     op_idx: usize,
-    host: &mut impl BaseHost,
+    host: &mut H,
     tracer: &mut T,
     package_source_context: Option<PackageSourceDebugContext<'_>>,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
+    H: BaseHost,
     T: Tracer<Processor = P>,
 {
     let user_op_helpers =

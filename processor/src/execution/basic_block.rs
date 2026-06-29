@@ -20,7 +20,7 @@ use crate::{
 // ================================================================================================
 
 /// Execute the given basic block node.
-#[inline(always)]
+#[inline]
 pub(super) fn execute_basic_block_node_from_start<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
@@ -75,7 +75,7 @@ where
 
 /// Executes the give basic block node starting from the specified operation index within the
 /// specified batch.
-#[inline(always)]
+#[inline]
 pub(super) fn execute_basic_block_node_from_op_idx<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
@@ -120,7 +120,7 @@ where
 }
 
 /// Executes the give basic block node starting from the RESPAN preceding the specified batch.
-#[inline(always)]
+#[inline]
 pub(super) fn execute_basic_block_node_from_batch<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
@@ -195,7 +195,7 @@ where
 }
 
 /// Execute the finish phase of a basic block node.
-#[inline(always)]
+#[inline]
 pub(super) fn finish_basic_block<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     node_id: MastNodeId,
