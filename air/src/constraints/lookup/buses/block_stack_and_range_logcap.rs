@@ -20,9 +20,8 @@
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
 //!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
 //! - **Sibling group** (always on):
-//!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
-//!     it fires on every row. Lives in its own group because it overlaps (row-wise) with every
-//!     opcode-gated interaction above and would break the simple-group mutual-exclusion invariant.
+//!   - Range-table response: a single insert with runtime multiplicity `range_m`. It lives in its
+//!     own group because it overlaps with every opcode-gated interaction above.
 //!
 //! # Mutual exclusivity
 //!
@@ -126,8 +125,6 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let sys_ctx = local.system.ctx;
     let sys_ctx_next = next.system.ctx;
 
-    // `fn_hash` is used twice (DYNCALL, CALL/SYSCALL) and `fn_hash_next` once
-    // (END-after-CALL/SYSCALL).
     let fn_hash = local.system.fn_hash;
     let fn_hash_next = next.system.fn_hash;
 
@@ -353,10 +350,9 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                 Deg { v: 6, u: 7 },
             );
 
-            // Always-active insertion with multiplicity `range_m`. Lives in its own group
-            // because its gate (`ONE`) makes it fire on every row, overlapping with every
-            // opcode-gated interaction in the main group — which would break the simple-group
-            // mutual-exclusion invariant if they shared a group.
+            // The range-table response is always active, so it must remain separate from the
+            // opcode-gated main group. On the padding row this still contributes zero because
+            // `range_m` is zero, preserving the no-interactions-on-last-row invariant.
             col.group(
                 "range_table",
                 |g| {
