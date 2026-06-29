@@ -21,7 +21,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
-        InternalBreakReason, execute_impl, finish_emit_op_execution,
+        InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     host::default::NoopHost,
@@ -150,7 +150,7 @@ impl ReplayProcessor {
         let stopper = &ReplayStopper;
         let mut package_debug_info = None;
 
-        while let ControlFlow::Break(internal_break_reason) = execute_impl(
+        while let ControlFlow::Break(internal_break_reason) = execute_impl_noop_host(
             self,
             continuation_stack,
             current_forest,

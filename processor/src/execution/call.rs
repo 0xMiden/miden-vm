@@ -20,7 +20,7 @@ use crate::{
 // ================================================================================================
 
 /// Executes a Call node from the start.
-#[inline(always)]
+#[inline]
 pub(super) fn start_call_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     call_node: &CallNode,

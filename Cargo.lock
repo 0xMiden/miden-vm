@@ -1309,7 +1309,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1318,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "env_logger",
  "insta",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "env_logger",
  "log",
@@ -1377,7 +1377,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1412,7 +1412,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "criterion",
  "env_logger",
@@ -1491,7 +1491,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "miden-format"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -1642,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1658,7 +1658,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry-local"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax",
@@ -1675,7 +1675,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "insta",
  "itertools 0.14.0",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-air",
  "miden-assembly",
@@ -1811,7 +1811,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1829,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-crypto",
  "miden-test-serde-macros",
@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "lock_api",
  "loom",
@@ -1851,7 +1851,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -1865,7 +1865,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1893,8 +1893,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-vm-blake3-bench"
+version = "0.25.0"
+dependencies = [
+ "clap",
+ "codspeed-criterion-compat",
+ "insta",
+ "miden-core-lib",
+ "miden-vm",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "miden-vm-synthetic-bench"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-processor",
