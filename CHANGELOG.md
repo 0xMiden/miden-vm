@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.1 (TBD)
+
+#### Enhancements
+
+- Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
+
 ## v0.24.0 (2026-06-24)
 
 #### Enhancements
