@@ -25,6 +25,15 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 /// If no value was previously associated with the specified key, [ZERO; 4] is pushed onto
 /// the advice stack.
 ///
+/// This is a fast, untrusted lookup. The handler reads a node and leaf preimage from the advice
+/// provider, but it does not verify a Merkle path from `ROOT` to that node. It also does not prove
+/// that the decoded value is committed under `ROOT`.
+///
+/// Caller code must verify the returned value before relying on it. The expected pattern is to call
+/// `smt::peek`, then later call `smt::set`, and compare the old value returned by `smt::set` with
+/// the value returned by `smt::peek`. That lets a program avoid doing the same Merkle path
+/// verification twice.
+///
 /// Inputs:
 ///   Operand stack: [event_id, KEY, ROOT, ...]
 ///   Advice stack: [...]
