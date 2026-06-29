@@ -366,10 +366,6 @@ pub fn write_math_masm(asm_dir: impl AsRef<Path>) -> Result<(), String> {
 /// Writes generated MASM files into a developer preview directory.
 pub fn write_to_dir(out_dir: impl AsRef<Path>) -> Result<(), String> {
     let out_dir = out_dir.as_ref();
-    if out_dir.exists() {
-        fs::remove_dir_all(out_dir)
-            .map_err(|error| format!("failed to remove {}: {error}", out_dir.display()))?;
-    }
     for file in generated_files()? {
         write_file_if_changed(&out_dir.join(file.path), &file.contents)?;
     }
@@ -514,4 +510,33 @@ struct CurveMasmConfig {
     base_field_module: &'static str,
     base_field_description: &'static str,
     curve: CodegenCurveId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn write_to_dir_preserves_unrelated_files() {
+        let out_dir = unique_temp_dir("miden-precompiles-codegen-write-to-dir");
+        let unrelated_file = out_dir.join("notes.txt");
+        fs::create_dir_all(&out_dir).unwrap();
+        fs::write(&unrelated_file, "keep me").unwrap();
+
+        write_to_dir(&out_dir).unwrap();
+
+        assert_eq!(fs::read_to_string(&unrelated_file).unwrap(), "keep me");
+        assert!(out_dir.join("asm/math/u256.masm").exists());
+
+        fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+    }
 }
