@@ -8,6 +8,7 @@
 - Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
 - Tightened LogUp lookup AIR docs and comments, removed unused operation-flag accessors, and added block-hash/op-group selector coverage ([#3309](https://github.com/0xMiden/miden-vm/pull/3309)).
+- Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering.
 
 ## v0.24.0 (2026-06-24)
 
