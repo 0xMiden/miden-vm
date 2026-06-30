@@ -560,6 +560,13 @@ fn read_words_at(bytes: &[u8], offset: usize, count: usize) -> Vec<Word> {
         .collect()
 }
 
+fn forest_commitment_from_inputs(root_digests: &[Word], dependency_digests: &[Word]) -> Word {
+    miden_crypto::hash::poseidon2::Poseidon2::merge(&[
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(root_digests),
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(dependency_digests),
+    ])
+}
+
 #[test]
 fn test_mast_forest_wire_view_rejects_hashless() {
     let mut forest = MastForest::new();
@@ -692,10 +699,7 @@ fn test_mast_forest_wire_payload_includes_sorted_commitment_inputs() {
         sorted
     );
     assert_eq!(read_words_at(&bytes, view.dependency_commitment_digest_offset(), 3), sorted);
-    assert_eq!(
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
-        forest.commitment()
-    );
+    assert_eq!(forest_commitment_from_inputs(&sorted, &sorted), forest.commitment());
 }
 
 #[test]
@@ -914,11 +918,8 @@ fn sparse_mast_round_trip_preserves_sorted_commitment_inputs() {
     let sorted = vec![low, middle, high];
 
     assert_eq!(restored.commitment_root_digests(), sorted.as_slice());
-    assert_eq!(restored.dependency_digests(), &[high]);
-    assert_eq!(
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
-        restored.commitment()
-    );
+    assert_eq!(restored.dependency_digests(), sorted.as_slice());
+    assert_eq!(forest_commitment_from_inputs(&sorted, &sorted), restored.commitment());
     assert!(restored.get_node_by_id(low_id).is_none());
     assert!(restored.get_node_by_id(middle_id).is_none());
     assert_eq!(restored.get_digest_by_id(low_id), Some(low));
@@ -1040,7 +1041,7 @@ fn sparse_reader_allows_large_source_node_count_with_small_payload() {
         &[MastNodeEntry::Block { ops_offset: block_offset }],
         &[block.digest()],
         &basic_block_data,
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[block.digest()]),
+        forest_commitment_from_inputs(&[block.digest()], &[]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -1079,7 +1080,7 @@ fn sparse_reader_reconstructs_forward_full_child_digests() {
         ],
         &[expected_root_digest, left_block.digest(), right_block.digest()],
         &basic_block_data,
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[expected_root_digest]),
+        forest_commitment_from_inputs(&[expected_root_digest], &[]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -1119,15 +1120,12 @@ fn sparse_reader_preserves_forced_full_node_digest() {
         ],
         &[forced_root_digest, child_block.digest()],
         &basic_block_data,
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[forced_root_digest]),
+        forest_commitment_from_inputs(&[forced_root_digest], &[]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
     assert_eq!(restored.get_digest_by_id(root), Some(forced_root_digest));
-    assert_eq!(
-        restored.commitment(),
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[forced_root_digest])
-    );
+    assert_eq!(restored.commitment(), forest_commitment_from_inputs(&[forced_root_digest], &[]));
 }
 
 #[test]
@@ -1164,7 +1162,7 @@ fn sparse_reader_reconstructs_deep_forward_full_child_chain() {
         &entries,
         &full_digests,
         &basic_block_data,
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[expected_root_digest]),
+        forest_commitment_from_inputs(&[expected_root_digest], &[]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -1186,7 +1184,7 @@ fn sparse_reader_rejects_trailing_bytes_with_exact_prefix_budget() {
         &[MastNodeEntry::Block { ops_offset: block_offset }],
         &[block.digest()],
         &basic_block_data,
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[block.digest()]),
+        forest_commitment_from_inputs(&[block.digest()], &[]),
     );
 
     bytes_with_trailing.push(0);
@@ -1348,7 +1346,7 @@ fn sparse_serialized_parts_reject_root_commitment_digest_not_bound_to_root_id() 
         sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
     let forged_root_digests = vec![sparse.get_digest_by_id(false_branch).unwrap()];
     let forged_commitment =
-        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&forged_root_digests);
+        forest_commitment_from_inputs(&forged_root_digests, sparse.dependency_digests());
 
     let result = SparseMastForest::from_serialized_parts(
         nodes,
@@ -1394,6 +1392,9 @@ fn sparse_serialized_parts_reject_dependency_digest_not_bound_to_full_external_n
     let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
     let digests: Vec<_> =
         sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let forged_dependency_digests = vec![high];
+    let forged_commitment =
+        forest_commitment_from_inputs(sparse.commitment_root_digests(), &forged_dependency_digests);
 
     let result = SparseMastForest::from_serialized_parts(
         nodes,
@@ -1401,14 +1402,14 @@ fn sparse_serialized_parts_reject_dependency_digest_not_bound_to_full_external_n
         sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
-        sparse.commitment(),
+        forged_commitment,
         sparse.commitment_root_digests().to_vec(),
-        vec![low, high],
+        forged_dependency_digests,
     );
 
     assert_matches!(
         result,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("does not match full external nodes")
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("is missing a full external node")
     );
 }
 
@@ -2040,7 +2041,8 @@ fn test_materialized_deserialization_rejects_duplicate_root_commitment_inputs() 
         .add_to_forest(&mut forest)
         .unwrap();
     forest.roots = vec![root_id, root_id];
-    forest.commitment = forest.compute_nodes_commitment(&forest.roots);
+    forest.commitment =
+        forest_commitment_from_inputs(&[forest[root_id].digest(), forest[root_id].digest()], &[]);
 
     let bytes = forest.to_bytes();
 

@@ -118,7 +118,7 @@ pub struct MastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Commitment to this MAST forest (commitment to all roots).
+    /// Commitment to this MAST forest's roots and external dependencies.
     commitment: Word,
 }
 
@@ -166,7 +166,7 @@ impl MastForest {
         }
 
         let forest = Self {
-            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(&parts.nodes, &parts.roots),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
@@ -191,7 +191,7 @@ impl MastForest {
             }
         }
         Ok(Self {
-            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(&parts.nodes, &parts.roots),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
@@ -224,7 +224,7 @@ impl MastForest {
 
         if !self.roots.contains(&new_root_id) {
             self.roots.push(new_root_id);
-            self.commitment = self.compute_nodes_commitment(&self.roots);
+            self.commitment = self.compute_mast_forest_commitment();
         }
     }
 
@@ -238,6 +238,16 @@ impl MastForest {
     #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
         self.mark_root(new_root_id);
+    }
+
+    pub(in crate::mast) fn add_external_node(
+        &mut self,
+        node: MastNode,
+    ) -> Result<MastNodeId, MastForestError> {
+        debug_assert!(node.is_external());
+        let node_id = self.nodes.push(node).map_err(|_| MastForestError::TooManyNodes)?;
+        self.commitment = self.compute_mast_forest_commitment();
+        Ok(node_id)
     }
 
     /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
@@ -265,7 +275,7 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        self.commitment = self.compute_nodes_commitment(&self.roots);
+        self.commitment = self.compute_mast_forest_commitment();
 
         id_remappings
     }
@@ -445,7 +455,9 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> Word {
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[])
+    let interface_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
+    let dependency_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
+    miden_crypto::hash::poseidon2::Poseidon2::merge(&[interface_commitment, dependency_commitment])
 }
 
 fn compute_nodes_commitment(
@@ -455,6 +467,25 @@ fn compute_nodes_commitment(
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
     miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+}
+
+fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
+    let mut digests: Vec<Word> = nodes
+        .iter()
+        .filter(|node| node.is_external())
+        .map(MastNodeExt::digest)
+        .collect();
+    digests.sort_unstable();
+    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+}
+
+fn compute_mast_forest_commitment(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+    roots: &[MastNodeId],
+) -> Word {
+    let interface_commitment = compute_nodes_commitment(nodes, roots);
+    let dependency_commitment = compute_dependency_commitment(nodes);
+    miden_crypto::hash::poseidon2::Poseidon2::merge(&[interface_commitment, dependency_commitment])
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -529,13 +560,29 @@ impl MastForest {
         compute_nodes_commitment(&self.nodes, &node_ids)
     }
 
+    /// Returns the commitment to this MAST forest's public procedure roots.
+    ///
+    /// The commitment is computed as the sequential hash of all procedure root digests after
+    /// sorting them by digest.
+    pub fn interface_commitment(&self) -> Word {
+        self.compute_nodes_commitment(&self.roots)
+    }
+
+    /// Returns the commitment to this MAST forest's external dependencies.
+    ///
+    /// The commitment is computed as the sequential hash of all external node digests after
+    /// sorting them by digest.
+    pub fn dependency_commitment(&self) -> Word {
+        compute_dependency_commitment(&self.nodes)
+    }
+
+    fn compute_mast_forest_commitment(&self) -> Word {
+        compute_mast_forest_commitment(&self.nodes, &self.roots)
+    }
+
     /// Returns the commitment to this MAST forest.
     ///
-    /// The commitment is computed as the sequential hash of all procedure roots in the forest.
-    ///
-    /// The commitment uniquely identifies the forest's structure, as each root's digest
-    /// transitively includes all of its descendants. Therefore, a commitment to all roots
-    /// is a commitment to the entire forest.
+    /// The commitment is computed as `hash(interface_commitment || dependency_commitment)`.
     pub fn commitment(&self) -> Word {
         self.commitment
     }

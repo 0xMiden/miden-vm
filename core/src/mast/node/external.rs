@@ -155,14 +155,7 @@ impl ExternalNodeBuilder {
 
 impl MastForestContributor for ExternalNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(ExternalNode { digest: self.digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        forest.add_external_node(ExternalNode { digest: self.digest }.into())
     }
 
     fn fingerprint_for_node(
@@ -198,14 +191,7 @@ impl ExternalNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(ExternalNode { digest: self.digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        forest.add_external_node(ExternalNode { digest: self.digest }.into())
     }
 }
 

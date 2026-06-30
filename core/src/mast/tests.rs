@@ -7,8 +7,8 @@ use crate::{
     Felt, WORD_SIZE, Word,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, MastForest,
-        MastForestContributor, MastNodeExt,
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
+        MastForest, MastForestContributor, MastNodeExt,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},
@@ -146,6 +146,41 @@ fn test_commitment_caching() {
     let commitment7 = forest.commitment();
     // Since we didn't actually remove anything, commitment should still be the same
     assert_eq!(commitment3, commitment7);
+}
+
+#[test]
+fn mast_forest_commitment_separates_interface_and_dependencies() {
+    let mut first = MastForest::new();
+    let first_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut first)
+        .unwrap();
+    first.make_root(first_root);
+    ExternalNodeBuilder::new(Word::new([
+        Felt::new_unchecked(1),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ]))
+    .add_to_forest(&mut first)
+    .unwrap();
+
+    let mut second = MastForest::new();
+    let second_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut second)
+        .unwrap();
+    second.make_root(second_root);
+    ExternalNodeBuilder::new(Word::new([
+        Felt::new_unchecked(2),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ]))
+    .add_to_forest(&mut second)
+    .unwrap();
+
+    assert_eq!(first.interface_commitment(), second.interface_commitment());
+    assert_ne!(first.dependency_commitment(), second.dependency_commitment());
+    assert_ne!(first.commitment(), second.commitment());
 }
 
 #[test]

@@ -172,9 +172,9 @@ impl Linker {
                 reason: err.to_string(),
             })?;
 
-        match self.libraries.entry(library.mast().commitment()) {
+        match self.libraries.entry(library.interface_digest()) {
             Entry::Vacant(entry) => {
-                entry.insert(library.clone());
+                entry.insert(library);
                 self.link_assembled_modules(module_infos)
             },
             Entry::Occupied(mut entry) => {
