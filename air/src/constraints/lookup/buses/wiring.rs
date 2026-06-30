@@ -55,7 +55,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::columns::PeriodicCols,
+        chiplets::{columns::PeriodicCols, hasher_control::flags::ControllerFlags},
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{AceWireMsg, HasherPermLinkMsg},
@@ -136,10 +136,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     // Controller-side row-kind flags. `is_input = s0` (deg 1); `is_output = (1-s0)*(1-s1)`
     // (deg 2). Padding rows (`s0=0, s1=1`) are excluded automatically by both expressions.
     let ctrl = local.controller();
-    let s0c: LB::Expr = ctrl.s0.into();
-    let s1c: LB::Expr = ctrl.s1.into();
-    let is_input = s0c.clone();
-    let is_output = (LB::Expr::ONE - s0c) * (LB::Expr::ONE - s1c);
+    let (is_input, is_output) = ControllerFlags::<LB::Expr>::input_output(ctrl);
 
     let controller_flag = ctx.chiplet_active.controller.clone();
     let permutation_flag = ctx.chiplet_active.permutation.clone();
