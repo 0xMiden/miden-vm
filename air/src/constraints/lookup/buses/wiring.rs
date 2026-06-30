@@ -1,8 +1,8 @@
 //! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
 //! HasherPermLinkOutput}`).
 //!
-//! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
-//! tri-state (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
+//! The single [`super::super::LookupColumn::group`] is intentional. The chiplet tri-state
+//! (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
 //! and hasher permutation rows pairwise mutually exclusive, so the simple-group
 //! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
 //! interactions fires per row, and the column's running `(V, U)` takes MAX over per-
@@ -153,12 +153,12 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     builder.next_column(
         |col| {
-            // Single group hosts both buses. ACE rows (`chiplet_active.ace`), controller rows
-            // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
-            // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group
-            // composition is sound. Merging into one group takes MAX over per-interaction
-            // degrees instead of multiplying sibling `(V_g, U_g)` pairs — critical for keeping
-            // this column's transition inside the degree-9 budget.
+            // Keep ACE wiring and perm-link in one group. ACE rows (`chiplet_active.ace`),
+            // controller rows (`chiplet_active.controller`), and permutation rows
+            // (`chiplet_active.permutation`) are pairwise mutually exclusive via the chiplet
+            // tri-state, so the simple-group composition is sound. The merged group takes MAX
+            // over per-interaction degrees instead of multiplying sibling `(V_g, U_g)` pairs,
+            // keeping this column's transition inside the degree-9 budget.
             col.group(
                 "ace_perm_link",
                 |g| {
