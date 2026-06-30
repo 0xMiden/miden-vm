@@ -8,3 +8,11 @@ marker = "u32popcnt"
 program = "clk push.7 u32popcnt drop clk swap sub"
 baseline_program = "clk push.7 drop clk swap sub"
 expected = "38 cycles"
+
+[[case]]
+id = "u32popcnt-instruction-reference"
+doc = "docs/src/user_docs/assembly/instruction_reference.md"
+marker = "u32popcnt"
+program = "clk push.7 u32popcnt drop clk swap sub"
+baseline_program = "clk push.7 drop clk swap sub"
+expected = "38"

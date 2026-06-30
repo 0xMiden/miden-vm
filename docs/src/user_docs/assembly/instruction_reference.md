@@ -114,7 +114,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `u32shr` <br /> `u32shr.b`   | `[b, a, ...]` | `[c, ...]`   | 20 <br /> 5 | $c = \lfloor a / 2^b \rfloor$. Undefined if $a \geq 2^{32}$ or $b > 31$.    |
 | `u32rotl` <br /> `u32rotl.b` | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | Rotate left. Undefined if $a \geq 2^{32}$ or $b > 31$.                      |
 | `u32rotr` <br /> `u32rotr.b` | `[b, a, ...]` | `[c, ...]`   | 22 <br /> 3 | Rotate right. Undefined if $a \geq 2^{32}$ or $b > 31$.                     |
-| `u32popcnt`                  | `[a, ...]`    | `[b, ...]`   | 38          | Population count (Hamming weight). Undefined if $a \geq 2^{32}$.            |
+| `u32popcnt` <!-- cycle-check: u32popcnt --> | `[a, ...]`    | `[b, ...]`   | 38          | Population count (Hamming weight). Undefined if $a \geq 2^{32}$.            |
 | `u32clz`                     | `[a, ...]`    | `[b, ...]`   | 48          | Count leading zeros. Undefined if $a \geq 2^{32}$.                          |
 | `u32ctz`                     | `[a, ...]`    | `[b, ...]`   | 34          | Count trailing zeros. Undefined if $a \geq 2^{32}$.                         |
 | `u32clo`                     | `[a, ...]`    | `[b, ...]`   | 40          | Count leading ones. Undefined if $a \geq 2^{32}$.                           |
