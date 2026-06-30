@@ -591,6 +591,106 @@ mod tests {
         }
     }
 
+    /// Covers the row-disjointness assumption used by the block-hash/op-group merged column.
+    #[test]
+    fn block_hash_and_op_group_selectors_are_disjoint() {
+        let block_hash_ops = [
+            opcodes::JOIN,
+            opcodes::SPLIT,
+            opcodes::LOOP,
+            opcodes::REPEAT,
+            opcodes::DYN,
+            opcodes::DYNCALL,
+            opcodes::CALL,
+            opcodes::SYSCALL,
+            opcodes::END,
+        ];
+
+        for opcode in block_hash_ops {
+            let row = generate_test_row(opcode.into());
+            let row_next = generate_test_row(0);
+            let flags = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+
+            assert_eq!(block_hash_selector(&flags), ONE, "block-hash selector for {opcode}");
+            assert_eq!(
+                op_group_selector(
+                    &flags,
+                    row.decoder.in_span,
+                    row.decoder.group_count,
+                    row_next.decoder.group_count,
+                    row.decoder.batch_flags,
+                ),
+                ZERO,
+                "op-group selector for block-hash opcode {opcode}",
+            );
+        }
+
+        for opcode in [opcodes::SPAN, opcodes::RESPAN] {
+            let mut row = generate_test_row(opcode.into());
+            row.decoder.batch_flags = [ONE, ZERO, ZERO];
+            let row_next = generate_test_row(0);
+            let flags = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+
+            assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector for {opcode}");
+            assert_eq!(
+                op_group_selector(
+                    &flags,
+                    row.decoder.in_span,
+                    row.decoder.group_count,
+                    row_next.decoder.group_count,
+                    row.decoder.batch_flags,
+                ),
+                ONE,
+                "op-group batch selector for {opcode}",
+            );
+        }
+
+        let mut row = generate_test_row(opcodes::ADD.into());
+        row.decoder.in_span = ONE;
+        row.decoder.group_count = Felt::new_unchecked(2);
+        let mut row_next = generate_test_row(0);
+        row_next.decoder.group_count = ONE;
+        let flags = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+
+        assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector inside a span");
+        assert_eq!(
+            op_group_selector(
+                &flags,
+                row.decoder.in_span,
+                row.decoder.group_count,
+                row_next.decoder.group_count,
+                row.decoder.batch_flags,
+            ),
+            ONE,
+            "op-group removal selector inside a span",
+        );
+    }
+
+    fn block_hash_selector(flags: &LookupOpFlags<Felt>) -> Felt {
+        flags.join()
+            + flags.split()
+            + flags.loop_op()
+            + flags.repeat()
+            + flags.dyn_op()
+            + flags.dyncall()
+            + flags.call()
+            + flags.syscall()
+            + flags.end()
+    }
+
+    fn op_group_selector(
+        flags: &LookupOpFlags<Felt>,
+        in_span: Felt,
+        group_count: Felt,
+        group_count_next: Felt,
+        [c0, c1, c2]: [Felt; 3],
+    ) -> Felt {
+        let batch_selector = (flags.span() + flags.respan())
+            * (c0 + (ONE - c0) * c1 * (ONE - c2) + (ONE - c0) * (ONE - c1) * c2);
+        let removal_selector = in_span * (group_count - group_count_next);
+        batch_selector + removal_selector
+    }
+
     fn flags_for_opcode(opcode: usize) -> LookupOpFlags<Felt> {
         let row = generate_test_row(opcode);
         let row_next = generate_test_row(0);
