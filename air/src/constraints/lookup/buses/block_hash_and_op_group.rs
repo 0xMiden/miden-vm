@@ -1,17 +1,15 @@
-//! Block-hash table and op-group table interactions sharing one lookup column.
+//! Block-hash table and op-group table interactions in one lookup column.
 //!
 //! - Block-hash table rows come from control-flow opcodes: JOIN, SPLIT, LOOP/REPEAT,
 //!   DYN/DYNCALL/CALL/SYSCALL, and END.
 //! - Op-group table rows come from SPAN/RESPAN batch setup rows and in-span decode rows.
 //!
-//! These row sets are disjoint: control-flow opcodes are never in-span, and SPAN/RESPAN
-//! are not block-hash table variants. The column degree is therefore the elementwise max
-//! of the two tables. Block-hash contributes `(V_g, U_g) = (6, 8)` and op-group
-//! contributes `(7, 8)`, so the shared column contributes `(7, 8)`.
+//! These row sets are disjoint. Control-flow opcodes are never in-span, and SPAN/RESPAN
+//! are not block-hash table variants. Block-hash contributes `(V_g, U_g) = (6, 8)`.
+//! Op-group contributes `(7, 8)`. The shared column uses the max, `(7, 8)`.
 //!
-//! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
-//! merged group's degree is unchanged under either mode. The cached-encoding optimization
-//! can be reintroduced later if symbolic expression growth becomes a bottleneck.
+//! The emitter uses plain `col.group` for both buses. Cached encoding does not change the
+//! merged group degree.
 
 use core::array;
 
@@ -88,7 +86,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                 |g| {
                     // =================== BLOCK HASH TABLE ===================
 
-                    // JOIN: two children — `h_0` first, `h_1` second.
+                    // JOIN: two children. `h_0` is first, `h_1` is second.
                     g.batch(
                         "join",
                         f_join,

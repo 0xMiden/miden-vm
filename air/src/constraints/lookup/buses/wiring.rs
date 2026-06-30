@@ -1,11 +1,9 @@
 //! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
 //! HasherPermLinkOutput}`).
 //!
-//! The single [`super::super::LookupColumn::group`] is intentional; see the
-//! [`crate::constraints::lookup::buses`] overview for the shared merge rules. Here, the
-//! chiplet tri-state (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller
-//! rows, and hasher permutation rows pairwise mutually exclusive, so at most one of the
-//! five interactions fires per row.
+//! The single [`super::super::LookupColumn::group`] is intentional. The chiplet tri-state
+//! (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows, and hasher
+//! permutation rows mutually exclusive. At most one of the five interactions is active per row.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
 //!
@@ -18,7 +16,7 @@
 //! `(deg(U_g), deg(V_g)) = (7, 8)`.
 //!
 //! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
-//! slot — under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
+//! slot. Under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
@@ -30,20 +28,19 @@
 //! (or skip the cycle entirely). Four mutually exclusive interactions split across two
 //! domain-separated buses:
 //!
-//! - **Controller input** (`s_01 · is_input`, multiplicity `+1`) — controller side of a (state_in,
+//! - Controller input (`s_01 · is_input`, multiplicity `+1`): controller side of a (state_in,
 //!   state_out) pair. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`s_01 · is_output`, multiplicity `+1`). Routed to
+//! - Controller output (`s_01 · is_output`, multiplicity `+1`). Routed to
 //!   `BusId::HasherPermLinkOutput`.
-//! - **Permutation row 0** (`s_00 · is_init_ext`, multiplicity `−m`) — input boundary of a
+//! - Permutation row 0 (`s_00 · is_init_ext`, multiplicity `-m`): input boundary of a
 //!   Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the
 //!   cycle by [`crate::constraints::chiplets::permutation`]. Routed to
 //!   `BusId::HasherPermLinkInput`.
-//! - **Permutation row 15** (`s_00 · (1 − periodic_sum)`, multiplicity `−m`) — output boundary of
+//! - Permutation row 15 (`s_00 · (1 - periodic_sum)`, multiplicity `-m`): output boundary of
 //!   the same cycle. Routed to `BusId::HasherPermLinkOutput`.
 //!
-//! The widest perm-link contribution is `f_ctrl_output` with gate degree 3 — strictly below
-//! the ACE batch's `(7, 8)` — so merging into the same group leaves the column's transition
-//! at `max(1 + 7, 8) = 8`.
+//! The widest perm-link contribution is `f_ctrl_output` with gate degree 3. It is below
+//! the ACE batch's `(7, 8)`, so the merged group has transition degree `max(1 + 7, 8) = 8`.
 
 use core::{array, borrow::Borrow};
 
@@ -65,14 +62,14 @@ use crate::{
 ///
 /// Single group hosts both buses. The chiplet tri-state makes ACE, hasher-controller, and
 /// hasher-permutation rows pairwise mutually exclusive, so on any given row only one of:
-/// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
-///   when the outer `ace_flag` fires).
-/// - **Perm-link** on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
+/// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
+///   when the outer `ace_flag` is active).
+/// - Perm-link on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
 ///   `s0`).
-/// - **Perm-link** on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the
+/// - Perm-link on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the
 ///   periodic cycle schedule).
 ///
-/// Per-row max is therefore `max(3, 1, 1) = 3`.
+/// Per-row max is `max(3, 1, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the `v_wiring` shared column: ACE wiring + hasher perm-link.

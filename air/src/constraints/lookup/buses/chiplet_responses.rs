@@ -9,8 +9,8 @@
 //! by the matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
-//! rather than splitting into 4 per-label variants — this keeps the response-column
-//! transition degree at 8 (a per-variant split would bump it to 9).
+//! rather than splitting into 4 per-label variants. This keeps the response-column
+//! transition degree at 8. A per-variant split would raise it to 9.
 
 use core::{array, borrow::Borrow};
 
@@ -120,7 +120,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                     );
 
                     // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
-                    // Each fires on its own controller flag; all three encode
+                    // Each path has its own controller flag. All three encode
                     // `leaf = (1-bit)·rate_0 + bit·rate_1` with `bit = node_index -
                     // 2·node_index_next` (the current Merkle direction bit).
                     for (name, flag, kind) in [

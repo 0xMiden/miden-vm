@@ -1,47 +1,36 @@
-//! Packs four buses onto one main-trace lookup column:
+//! Packs four buses into one main-trace lookup column:
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 range-check removes: gated by u32 opcodes.
 //! - Log-precompile transcript-state: gated by the log precompile opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
-//! This file uses the shared merge rules from [`super`]: opcode-gated interactions share the
-//! `main_interactions` group, while the always-active range-table response stays in the sibling
-//! `range_table` group.
+//! Opcode-gated interactions share the `main_interactions` group. The range-table response
+//! stays in the sibling `range_table` group because it can overlap with them.
 //!
-//! # Structure
-//!
-//! One [`super::super::LookupBuilder::column`] call with two sibling
-//! [`super::super::LookupColumn::group`] calls:
-//!
-//! - **Main group** (opcode-gated, mutually exclusive by opcode):
+//! Main group:
 //!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
-//!     batch (7 branches, mutually exclusive via decoder opcode flags).
+//!     batch.
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
 //!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
-//! - **Sibling group** (always on):
+//! Sibling group:
 //!   - Range-table response: a single insert with runtime multiplicity `range_m`. It lives in its
 //!     own group because it overlaps with every opcode-gated interaction above.
 //!
-//! # Mutual exclusivity
-//!
-//! The `main_interactions` group is safe because its three bus families live in disjoint opcode
-//! sets:
+//! The `main_interactions` group is mutually exclusive by opcode:
 //!
 //! - Block-stack: {JOIN, SPLIT, SPAN, DYN, LOOP, DYNCALL, CALL, SYSCALL, END, RESPAN}
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
-//!   U32MADD, …} — prefix_100 in the opcode encoding.
-//! - LOGPRECOMPILE: {LOGPRECOMPILE} — a single opcode.
+//!   U32MADD, ...}. These are `prefix_100` in the opcode encoding.
+//! - LOGPRECOMPILE: {LOGPRECOMPILE}.
 //!
 //! No row can fire two of these simultaneously. The END-simple / END-call/syscall split
 //! inside block-stack is mutually exclusive via the `is_call + is_syscall ≤ 1` end-flag
 //! invariant.
 //!
-//! # Degree budget
+//! Degree budget:
 //!
-//! Main group contribution table:
-//!
-//! | Interaction | Gate deg | Payload | U contrib | V contrib |
+//! | Interaction | Gate deg | Payload | U | V |
 //! |---|---|---|---|---|
 //! | JOIN/SPLIT/SPAN/DYN simple add | 5 | Simple, denom 1 | 6 | 5 |
 //! | LOOP simple add | 5 | Simple, denom 1 | 6 | 5 |
@@ -49,20 +38,20 @@
 //! | CALL/SYSCALL simple add (Full msg) | 4 | Full, denom 1 | 5 | 4 |
 //! | END simple remove | 5 | Simple, denom 1 | 6 | 5 |
 //! | END call/syscall remove (Full msg) | 5 | Full, denom 1 | 6 | 5 |
-//! | RESPAN batch (k=2, f=respan deg 4) | — | Simple | 6 | 5 |
-//! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | logpre batch (k=2, f=log_precompile deg 5) | — | LogPrecompile, denom 1 | **7** | **6** |
+//! | RESPAN batch (k=2, f=respan deg 4) | n/a | Simple | 6 | 5 |
+//! | u32rc batch (k=4, f=u32_rc_op deg 3) | n/a | Range, denom 1 | 7 | 6 |
+//! | logpre batch (k=2, f=log_precompile deg 5) | n/a | LogPrecompile, denom 1 | 7 | 6 |
 //!
 //! Main group max: `U_g = 7, V_g = 6`.
 //!
-//! Sibling range-table group: `g.insert(ONE, range_m, RangeMsg)` — gate deg 0, mult deg 1,
+//! Sibling range-table group: `g.insert(ONE, range_m, RangeMsg)`. Gate deg 0, mult deg 1,
 //! denom deg 1. `U_g = 1, V_g = 1`.
 //!
 //! Column fold (cross-mul rule `U_col = ∏ U_gi`, `V_col = Σᵢ V_gi · ∏_{j≠i} U_gj`):
 //!
 //! - `deg(U_col) = 7 + 1 = 8`
 //! - `deg(V_col) = max(6 + 1, 1 + 7) = 8`
-//! - **Transition = `max(1 + 8, 8) = 9`**, 0 headroom.
+//! - Transition = `max(1 + 8, 8) = 9`, 0 headroom.
 
 use core::array;
 
@@ -80,7 +69,7 @@ use crate::{
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
 /// Main group per-row max is `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (logpre)) = 4`
-/// — the u32rc 4-remove batch is the dominant branch.
+/// The u32rc 4-remove batch is the largest branch.
 /// Sibling range-table group always contributes 1 fraction.
 /// Both groups run unconditionally (the main group fires at most one branch per row but
 /// the per-column accumulator allocates the worst-case slot budget), so the per-row max is

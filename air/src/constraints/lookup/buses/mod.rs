@@ -1,8 +1,8 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! The Miden VM's LogUp buses are emitted across 7 columns — most host a single bus, but
-//! several host two or more linearly-independent buses sharing one running accumulator via
-//! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
+//! The Miden VM's LogUp buses use 7 columns. Most columns host one bus. Some host two or
+//! more linearly independent buses that share one running accumulator through distinct
+//! `bus_prefix[bus]` bases.
 //! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
 //! opens a single [`super::LookupBuilder::column`] closure and describes the bus's
 //! interactions via [`super::LookupColumn::group`] or
@@ -16,10 +16,8 @@
 //! not mutually exclusive, they must be emitted as sibling groups; sibling groups compose
 //! product-wise and increase the column degree accordingly.
 //!
-//! Some columns intentionally merge multiple bus families into one group. That is sound only
-//! when their row selectors are mutually exclusive. The different bus identifiers still remain
-//! domain-separated because each message denominator starts from its own `bus_prefix[bus]`
-//! additive base.
+//! Some columns merge multiple bus families into one group. This is valid only when their
+//! row selectors are mutually exclusive. Each bus still has its own `bus_prefix[bus]`.
 //!
 //! The emitters are routed per-AIR:
 //! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
@@ -30,18 +28,16 @@
 //! ## Shared precompute contexts
 //!
 //! The main-trace and chiplet-trace contexts live next to their respective LookupAirs:
-//! - [`super::main_air::MainBusContext`] — two-row window plus the shared [`LookupOpFlags`]
+//! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`]
 //!   instance consumed by the 4 main-trace emitters.
-//! - [`super::chiplet_air::ChipletBusContext`] — two-row window plus the shared
+//! - [`super::chiplet_air::ChipletBusContext`]: two-row window plus the shared
 //!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
 //! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
-//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]), so a future
-//! prover-side override can replace the polynomial construction with a cheaper boolean fast
-//! path without touching any emitter code. [`ChipletActiveFlags`] itself lives in this
-//! module because it's the pure-compute helper both the default chiplet hook and any
-//! future override want to reach for; it does not depend on the chiplet bus context type.
+//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover adapters can
+//! override those hooks without changing emitter code. [`ChipletActiveFlags`] lives here
+//! because both the default chiplet hook and prover overrides can use it.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -64,9 +60,9 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// Per-chiplet `is_active` expressions, mirroring the active-flag block of
 /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors).
 ///
-/// These are the only chiplet-flag flavors the LogUp buses consume —
-/// `is_transition` / `is_last` / `next_is_first` are used only by the constraint-path
-/// chiplet code, not by the LogUp argument — so this type carries no other variants.
+/// These are the only chiplet flags the LogUp buses consume.
+/// `is_transition`, `is_last`, and `next_is_first` are used only by the chiplet
+/// constraints, so this type does not carry them.
 ///
 /// The constructor is a pure compute function: it builds the same algebra as
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is

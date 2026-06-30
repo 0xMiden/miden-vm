@@ -1,18 +1,17 @@
 //! Chiplet-trace LogUp lookup AIR.
 //!
-//! Owns the chiplet-trace side of the Miden VM's LogUp argument: three columns, one per
-//! `emit_*` function in [`super::buses`]. This module wires them together via a single
-//! [`ChipletBusContext`] that carries the two-row window plus a shared [`ChipletActiveFlags`]
-//! snapshot.
+//! Chiplet-trace side of the Miden VM's LogUp argument: three columns, one per
+//! `emit_*` function in [`super::buses`]. A single [`ChipletBusContext`] carries the
+//! two-row window plus a shared [`ChipletActiveFlags`] snapshot.
 //!
 //! Columns (in emission order):
 //! - chiplet responses (memory / bitwise / hasher replies).
 //! - hash-kernel virtual table.
 //! - shared wiring column: ACE wiring + hasher perm-link.
 //!
-//! [`ChipletLookupBuilder`] supplies the shared active-flag construction hook for this side of
-//! the lookup AIR. The default hook builds [`ChipletActiveFlags`] from the chiplet selector
-//! columns; adapters can override it when they have a cheaper concrete-row path.
+//! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. The default path
+//! reads the chiplet selector columns. Adapters can override it when they have a cheaper
+//! concrete-row path.
 
 use super::buses::{
     ChipletActiveFlags,

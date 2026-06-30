@@ -2,21 +2,21 @@
 //!
 //! [`LookupOpFlags`] is a narrower cousin of [`crate::constraints::op_flags::OpFlags`] that
 //! carries only the ~32 flags read by emitters in the
-//! [`lookup::buses`](crate::constraints::lookup::buses) module — enough to gate every interaction
-//! without materialising the ~150-field surface `OpFlags` exposes to the stack / decoder / chiplet
-//! constraint code.
+//! [`lookup::buses`](crate::constraints::lookup::buses) module. That is enough to gate every
+//! interaction without building the ~150-field surface `OpFlags` exposes to the stack,
+//! decoder, and chiplet constraint code.
 //!
-//! The two construction paths live side by side:
+//! There are two construction paths:
 //!
-//! - [`from_main_cols`](LookupOpFlags::from_main_cols) — polynomial, shared by the constraint-path
+//! - [`from_main_cols`](LookupOpFlags::from_main_cols): polynomial, shared by the constraint-path
 //!   adapter and the debug builders. Mirrors the relevant parts of
 //!   [`OpFlags::new`](crate::constraints::op_flags::OpFlags::new) but skips every prefix product
 //!   that would feed only unused flags.
-//! - [`from_boolean_row`](LookupOpFlags::from_boolean_row) — prover-path override that decodes the
-//!   7-bit opcode as a `u8` and flips exactly one flag per row. Saves a further factor by
-//!   sidestepping Felt arithmetic altogether on the discrete flags.
+//! - [`from_boolean_row`](LookupOpFlags::from_boolean_row): prover-path override that decodes the
+//!   7-bit opcode as a `u8` and flips exactly one flag per row. This avoids Felt arithmetic for
+//!   discrete flags.
 //!
-//! The method-accessor shape intentionally mirrors `OpFlags` so the bus emitters read
+//! The method-accessor shape mirrors `OpFlags` so the bus emitters read
 //! `op_flags.join()` / `op_flags.overflow()` etc. without caring which constructor ran.
 
 use core::array;
@@ -262,12 +262,12 @@ where
 // ================================================================================================
 
 impl LookupOpFlags<Felt> {
-    /// Concrete-row constructor used by the prover-path adapter.
+    /// Constructor used by the prover-path adapter.
     ///
     /// Decodes the 7-bit opcode from `decoder.op_bits` as a `u8` and flips exactly one
-    /// (or no) flag instead of materialising the polynomial products that
+    /// (or no) flag instead of building the polynomial products that
     /// [`from_main_cols`](LookupOpFlags::from_main_cols) builds. Semantics match
-    /// `from_main_cols` on any valid trace — op_bits are 0/1 by the decoder's boolean
+    /// `from_main_cols` on any valid trace. op_bits are 0/1 by the decoder's boolean
     /// constraint, and the `is_loop` hasher slot that gates `left_shift`'s `end` term is
     /// also 0/1 on valid traces.
     ///
@@ -283,8 +283,7 @@ impl LookupOpFlags<Felt> {
 
         let mut f = Self::all_zero();
 
-        // One match statement per row — branch-free in the hot case (inactive deg-7 rows
-        // fall through the default arm).
+        // One match statement per row. Inactive degree-7 rows fall through the default arm.
         match opcode {
             opcodes::JOIN => f.join = Felt::ONE,
             opcodes::SPLIT => f.split = Felt::ONE,
@@ -332,7 +331,7 @@ impl LookupOpFlags<Felt> {
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
         // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/REPEAT/DYN
-        // + END*is_loop. DYNCALL and LOOP intentionally excluded — see OpFlags::left_shift.
+        // + END*is_loop. DYNCALL and LOOP are excluded; see OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)
@@ -352,8 +351,8 @@ impl LookupOpFlags<Felt> {
 
         // -- Debug parity check -----------------------------------------------------------
         // Cross-check against the polynomial path. `from_main_cols` always produces
-        // identical output on valid traces — mismatches here indicate either (a) a bug in
-        // this fast path or (b) a non-boolean op_bits row, which the decoder constraint
+        // identical output on valid traces. Mismatches here indicate either (a) a bug in
+        // this path or (b) a non-boolean op_bits row, which the decoder constraint
         // would also reject.
         #[cfg(debug_assertions)]
         f.assert_matches_polynomial(decoder, stack, decoder_next);

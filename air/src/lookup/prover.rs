@@ -1,4 +1,4 @@
-//! Concrete-row [`LookupBuilder`] adapter used while collecting prover lookup fractions.
+//! [`LookupBuilder`] adapter for concrete prover rows.
 //!
 //! The prover path evaluates an AIR against base-field row values and appends one
 //! `(multiplicity, encoded_denominator)` entry for each active lookup interaction to
@@ -21,7 +21,7 @@ use super::{
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
-/// Concrete-row [`LookupBuilder`] over one current/next-row window.
+/// [`LookupBuilder`] over one concrete current/next-row window.
 ///
 /// All expression-like associated types collapse to concrete field values on this path.
 pub struct ProverLookupBuilder<'a, F, EF>
@@ -88,7 +88,7 @@ where
 /// [`LookupFractions`] buffer the collection phase produces.
 ///
 /// Generic over the base field `F` and extension field `EF`. The caller supplies the
-/// main trace and periodic columns — this function does row slicing, periodic-column
+/// main trace and periodic columns. This function does row slicing, periodic-column
 /// indexing, and fraction collection. Concrete AIRs wrap this with their own
 /// periodic-column layout.
 ///
@@ -103,7 +103,7 @@ where
 /// # Panics
 ///
 /// Panics in debug builds if any row pushes more fractions into a column than that
-/// column's declared [`LookupAir::column_shape`] bound — this indicates the emitter's
+/// column's declared [`LookupAir::column_shape`] bound. This indicates the emitter's
 /// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
 pub fn build_lookup_fractions<A, F, EF>(
     air: &A,

@@ -1,8 +1,8 @@
 //! Generic traits and adapters for LogUp lookup arguments.
 //!
-//! This module contains the field-polymorphic lookup contract ([`LookupAir`]), the
-//! closure-based builder API, message encoding, challenge precomputation, constraint/prover
-//! adapters, and aux-trace accumulation helpers.
+//! This module contains the generic lookup contract ([`LookupAir`]), the builder API,
+//! message encoding, challenge precomputation, constraint and prover adapters, and
+//! aux-trace accumulation helpers.
 
 pub mod aux_builder;
 pub mod builder;
@@ -56,12 +56,11 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Per-column upper bound on the number of fractions a single row can push.
     ///
     /// Length must equal [`num_columns()`](Self::num_columns). Each entry is the
-    /// **mutual-exclusion-aware** max — i.e. the largest active branch count taken across
-    /// all mutually exclusive groups inside the column, not the sum of every structural
+    /// Mutual-exclusion-aware max: the largest active branch count taken across all mutually
+    /// exclusive groups inside the column, not the sum of every structural
     /// `add` / `remove` / `insert` / `batch` push site.
     ///
-    /// The prover-path adapter uses this to size the dense per-column fraction buffer
-    /// (`Vec::with_capacity`) so the hot row loop never re-allocates.
+    /// The prover-path adapter uses this to size the dense per-column fraction buffer.
     fn column_shape(&self) -> &[usize];
 
     /// Upper bound on the **payload** width of any message emitted by
