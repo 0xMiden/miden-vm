@@ -5,7 +5,11 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
 use alloc::{string::ToString, vec, vec::Vec};
+#[cfg(feature = "std")]
+use core::any::{Any, TypeId};
 
 use ::serde::Serialize;
 use miden_air::{MidenMultiAir, ProverStatement, Statement};
@@ -23,6 +27,16 @@ use serde_wincode::SerdeCompat;
 use tracing::instrument;
 
 mod proving_options;
+
+#[cfg(feature = "std")]
+type PreprocessedSetup<SC> = Preprocessed<Felt, <SC as StarkConfig<Felt, QuadFelt>>::Lmcs>;
+
+#[cfg(feature = "std")]
+type PreprocessedCache = std::collections::HashMap<(TypeId, u8), Box<dyn Any + Send + Sync>>;
+
+#[cfg(feature = "std")]
+static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCache>> =
+    std::sync::OnceLock::new();
 
 // EXPORTS
 // ================================================================================================
@@ -152,7 +166,7 @@ fn prove_execution_trace(
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -164,7 +178,7 @@ fn prove_execution_trace(
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -176,7 +190,7 @@ fn prove_execution_trace(
         },
         HashFunction::Eidos => {
             let config = config::eidos_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -188,7 +202,7 @@ fn prove_execution_trace(
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -200,7 +214,7 @@ fn prove_execution_trace(
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -212,7 +226,7 @@ fn prove_execution_trace(
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(
+            prove_stark_for_execution(
                 &config,
                 core_matrix,
                 chiplets_matrix,
@@ -249,24 +263,106 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
-    let mut challenger = config.challenger();
-    config::observe_protocol_params(&mut challenger);
+    let prover_statement = build_prover_statement(
+        core_trace,
+        chiplets_trace,
+        blakeg_compression_trace,
+        and8_lookup_trace,
+        public_values,
+        kernel_felts,
+    )?;
+    let preprocessed = Preprocessed::build(prover_statement.statement(), config);
 
-    // `air_inputs` are the fixed public values; `aux_inputs` are the kernel-procedure
-    // digests (the only variable-length public input today). The lifted prover absorbs
-    // both into Fiat-Shamir internally, along with the per-AIR trace heights.
+    prove_stark_from_statement(config, prover_statement, preprocessed.as_ref())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[cfg(feature = "std")]
+fn prove_stark_for_execution<SC>(
+    config: &SC,
+    core_trace: RowMajorMatrix<Felt>,
+    chiplets_trace: RowMajorMatrix<Felt>,
+    blakeg_compression_trace: RowMajorMatrix<Felt>,
+    and8_lookup_trace: RowMajorMatrix<Felt>,
+    public_values: &[Felt],
+    kernel_felts: &[Felt],
+) -> Result<Vec<u8>, ExecutionError>
+where
+    SC: StarkConfig<Felt, QuadFelt> + 'static,
+    PreprocessedSetup<SC>: Send + Sync + 'static,
+    <SC::Lmcs as Lmcs>::Commitment: Serialize,
+{
+    let prover_statement = build_prover_statement(
+        core_trace,
+        chiplets_trace,
+        blakeg_compression_trace,
+        and8_lookup_trace,
+        public_values,
+        kernel_felts,
+    )?;
+    let preprocessed = cached_preprocessed_setup(prover_statement.statement(), config);
+
+    prove_stark_from_statement(config, prover_statement, preprocessed.as_deref())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[cfg(not(feature = "std"))]
+fn prove_stark_for_execution<SC>(
+    config: &SC,
+    core_trace: RowMajorMatrix<Felt>,
+    chiplets_trace: RowMajorMatrix<Felt>,
+    blakeg_compression_trace: RowMajorMatrix<Felt>,
+    and8_lookup_trace: RowMajorMatrix<Felt>,
+    public_values: &[Felt],
+    kernel_felts: &[Felt],
+) -> Result<Vec<u8>, ExecutionError>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+    <SC::Lmcs as Lmcs>::Commitment: Serialize,
+{
+    prove_stark(
+        config,
+        core_trace,
+        chiplets_trace,
+        blakeg_compression_trace,
+        and8_lookup_trace,
+        public_values,
+        kernel_felts,
+    )
+}
+
+fn build_prover_statement(
+    core_trace: RowMajorMatrix<Felt>,
+    chiplets_trace: RowMajorMatrix<Felt>,
+    blakeg_compression_trace: RowMajorMatrix<Felt>,
+    and8_lookup_trace: RowMajorMatrix<Felt>,
+    public_values: &[Felt],
+    kernel_felts: &[Felt],
+) -> Result<ProverStatement<Felt, QuadFelt, MidenMultiAir>, ExecutionError> {
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), kernel_felts.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let prover_statement = ProverStatement::new(
+    ProverStatement::new(
         statement,
         vec![core_trace, chiplets_trace, blakeg_compression_trace, and8_lookup_trace],
     )
-    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let preprocessed = Preprocessed::build(prover_statement.statement(), config);
+    .map_err(|e| ExecutionError::ProvingError(e.to_string()))
+}
+
+fn prove_stark_from_statement<SC>(
+    config: &SC,
+    prover_statement: ProverStatement<Felt, QuadFelt, MidenMultiAir>,
+    preprocessed: Option<&Preprocessed<Felt, SC::Lmcs>>,
+) -> Result<Vec<u8>, ExecutionError>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+    <SC::Lmcs as Lmcs>::Commitment: Serialize,
+{
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger);
 
     let output: StarkOutput<Felt, QuadFelt, SC> =
-        ProverInstance::new(config, &prover_statement, preprocessed.as_ref())
+        ProverInstance::new(config, &prover_statement, preprocessed)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
@@ -279,4 +375,33 @@ where
         )
         .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     Ok(proof_bytes)
+}
+
+#[cfg(feature = "std")]
+fn cached_preprocessed_setup<SC>(
+    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
+    config: &SC,
+) -> Option<std::sync::Arc<PreprocessedSetup<SC>>>
+where
+    SC: StarkConfig<Felt, QuadFelt> + 'static,
+    PreprocessedSetup<SC>: Send + Sync + 'static,
+{
+    // The verifier only needs the fixed setup commitment. The prover needs the
+    // full setup tree so it can open preprocessed rows during PCS queries.
+    let key = (TypeId::of::<SC>(), config.pcs().log_blowup());
+    let mut cache = PREPROCESSED_SETUPS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("preprocessed setup cache poisoned");
+
+    if let Some(value) = cache.get(&key) {
+        return value
+            .downcast_ref::<Option<std::sync::Arc<PreprocessedSetup<SC>>>>()
+            .expect("preprocessed setup cache type mismatch")
+            .clone();
+    }
+
+    let value = Preprocessed::build(statement, config).map(std::sync::Arc::new);
+    cache.insert(key, Box::new(value.clone()));
+    value
 }

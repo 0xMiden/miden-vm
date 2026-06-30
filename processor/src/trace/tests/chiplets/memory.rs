@@ -1,8 +1,8 @@
 //! Memory-chiplet bus tests.
 //!
 //! Exercises stack-issued memory opcodes (`MStoreW`, `MLoadW`, `MLoad`, `MStore`, `MStream`)
-//! plus the `AeadStream` plaintext read / ciphertext write rows, and verifies the chiplet-requests /
-//! chiplet-responses bus pair.
+//! plus the `AeadStream` plaintext read / ciphertext write rows, and verifies the chiplet-requests
+//! / chiplet-responses bus pair.
 //!
 //! For each stack-level memory op the test registers an expected `-1` push of a
 //! [`MemoryMsg`] (the "request" side). For each memory chiplet row the test registers an

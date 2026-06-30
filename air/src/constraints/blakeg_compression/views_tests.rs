@@ -1,5 +1,7 @@
-use super::layout::*;
-use super::views::{FooterOverlayRow, FusedGRow, LookupSlot};
+use super::{
+    layout::*,
+    views::{FooterOverlayRow, FusedGRow, LookupSlot},
+};
 
 fn row() -> [usize; NUM_COLS] {
     core::array::from_fn(|idx| idx)

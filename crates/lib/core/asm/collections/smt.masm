@@ -239,6 +239,14 @@ end
 #! If no value was previously associated with the specified key, [ZERO; 4] is pushed onto the advice
 #! stack.
 #!
+#! This is a fast, untrusted lookup. It reads from the advice provider and does not verify a Merkle
+#! path from the supplied root to the returned leaf node. It also does not prove that the returned
+#! value is the value committed under the supplied root.
+#!
+#! Caller code must verify the value before relying on it. The usual pattern is to call `peek`, then
+#! later call `set`, and compare the old value returned by `set` with the value returned by `peek`.
+#! That pattern lets a program avoid doing the same Merkle path verification twice.
+#!
 #! Inputs:
 #!   Operand stack: [KEY, ROOT]
 #!   Advice stack:  []

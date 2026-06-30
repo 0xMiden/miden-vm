@@ -1,8 +1,8 @@
-use miden_core::{Felt, WORD_SIZE};
-use miden_processor::ProcessorState;
-
 use alloc::vec::Vec;
 use core::mem::size_of;
+
+use miden_core::{Felt, WORD_SIZE};
+use miden_processor::ProcessorState;
 
 /// Number of bytes packed into each u32 field element.
 ///

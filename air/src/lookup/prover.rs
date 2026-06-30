@@ -437,7 +437,7 @@ where
     }
 
     fn bus_prefix(&self, bus_id: usize) -> EF {
-        self.challenges.bus_prefix[bus_id].clone()
+        self.challenges.bus_prefix[bus_id]
     }
 }
 

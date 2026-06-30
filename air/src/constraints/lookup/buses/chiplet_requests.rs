@@ -469,7 +469,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         "aead_stream",
                         op_flags.aead_stream(),
                         move |b| {
-                            let state = core::array::from_fn(|i| {
+                            let state = array::from_fn(|i| {
                                 if i == 0 {
                                     stk.get(4).into()
                                 } else if i < 8 {

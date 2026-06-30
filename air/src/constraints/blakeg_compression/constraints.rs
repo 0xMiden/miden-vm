@@ -3,14 +3,18 @@
 //! These checks mirror the symbolic AIR constraints: row-local add/carry equations,
 //! lookup-backed byte XOR/rotation payloads, and row-to-row state continuity.
 
-use super::layout::*;
-use super::model::initial_working_state;
-use super::periodic::{NUM_PERIODIC_COLUMNS, get_periodic_column_values};
-use super::schedule::fused_step_at;
-use super::selectors::BlakeGSelectors;
-use super::trace::{BlakeGRow, rot_contribution};
 use core::array;
+
 use miden_core::{Felt, field::PrimeField64};
+
+use super::{
+    layout::*,
+    model::initial_working_state,
+    periodic::{NUM_PERIODIC_COLUMNS, get_periodic_column_values},
+    schedule::fused_step_at,
+    selectors::BlakeGSelectors,
+    trace::{BlakeGRow, rot_contribution},
+};
 
 const U32_BASE: u64 = 1u64 << 32;
 const CANONICALITY_HIGH_WORD_MAX: u64 = u32::MAX as u64;

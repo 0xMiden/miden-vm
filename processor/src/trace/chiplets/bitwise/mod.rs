@@ -301,7 +301,7 @@ fn fill_aead_stream_chunk(
         0,
         0,
         [limbs[0], limbs[1]],
-        [witnesses[0], witnesses[1], witnesses[2], witnesses[3]],
+        &[witnesses[0], witnesses[1], witnesses[2], witnesses[3]],
     );
 
     fill_stream_word_pair(
@@ -312,7 +312,7 @@ fn fill_aead_stream_chunk(
         2,
         4,
         [limbs[2], limbs[3]],
-        [witnesses[4], witnesses[5], witnesses[6], witnesses[7]],
+        &[witnesses[4], witnesses[5], witnesses[6], witnesses[7]],
     );
 }
 
@@ -324,7 +324,7 @@ fn fill_stream_word_pair(
     plaintext_offset: usize,
     lane_offset: usize,
     limbs: [(u32, u32); 2],
-    witnesses: [LimbXorWitness; 4],
+    witnesses: &[LimbXorWitness; 4],
 ) {
     let lane_base = op.lane_base + Felt::new_unchecked(lane_offset as u64);
     let dst_ptr = op.dst_ptr + Felt::new_unchecked(lane_offset as u64);

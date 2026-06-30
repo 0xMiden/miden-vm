@@ -282,8 +282,8 @@ where
     //   byte order exactly. Padding slots inside each AIR subregion are unreferenced by that AIR's
     //   constraints.
     // - `num_aux_boundary` sums each AIR's boundary slot count.
-    // - `num_periodic` is metadata for the combined layout. Periodic columns were already
-    //   lowered inside each sub-DAG as polynomials in that AIR's `z_k`.
+    // - `num_periodic` is metadata for the combined layout. Periodic columns were already lowered
+    //   inside each sub-DAG as polynomials in that AIR's `z_k`.
     let combined_counts = InputCounts {
         preprocessed_width: combined_preprocessed_w,
         width: combined_main_w,
@@ -299,10 +299,8 @@ where
     // Build combined layout via the multi-air constructors so the stark-vars region
     // includes the multi-AIR beta coefficients and per-AIR selector slots.
     let combined_layout = match config.layout {
-        miden_ace_codegen::LayoutKind::Native => {
-            InputLayout::new_multi_air_for_airs(combined_counts, MIDEN_AIR_COUNT)
-        },
-        miden_ace_codegen::LayoutKind::Masm => {
+        LayoutKind::Native => InputLayout::new_multi_air_for_airs(combined_counts, MIDEN_AIR_COUNT),
+        LayoutKind::Masm => {
             InputLayout::new_masm_multi_air_for_airs(combined_counts, MIDEN_AIR_COUNT)
         },
     };

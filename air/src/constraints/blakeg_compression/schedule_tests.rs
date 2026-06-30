@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 
-use super::layout::{FUSED_G_ROWS, RowKind};
-use super::schedule::*;
+use super::{
+    layout::{FUSED_G_ROWS, RowKind},
+    schedule::*,
+};
 
 #[test]
 fn fused_rows_follow_column_then_diagonal_schedule() {

@@ -2,18 +2,20 @@ use alloc::vec::Vec;
 
 use miden_core::Felt;
 
-use super::constraints::{
-    read_input_state, read_output_state, validate_block, validate_block_with_selectors,
-    validate_footer_block, validate_footer_row, validate_footer_transition, validate_fused_g_block,
-    validate_fused_g_row, validate_fused_g_transition, validate_initial_state,
-    validate_row_selectors,
+use super::{
+    constraints::{
+        read_input_state, read_output_state, validate_block, validate_block_with_selectors,
+        validate_footer_block, validate_footer_row, validate_footer_transition,
+        validate_fused_g_block, validate_fused_g_row, validate_fused_g_transition,
+        validate_initial_state, validate_row_selectors,
+    },
+    layout::*,
+    model::initial_working_state,
+    periodic::{P_IS_AB, get_periodic_column_values},
+    schedule::fused_step_at,
+    selectors::BlakeGSelectors,
+    trace::{TraceMode, generate_trace_block},
 };
-use super::layout::*;
-use super::model::initial_working_state;
-use super::periodic::{P_IS_AB, get_periodic_column_values};
-use super::schedule::fused_step_at;
-use super::selectors::BlakeGSelectors;
-use super::trace::{TraceMode, generate_trace_block};
 
 fn test_block() -> [u32; 16] {
     [

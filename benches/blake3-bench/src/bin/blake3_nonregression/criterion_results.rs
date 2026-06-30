@@ -57,10 +57,16 @@ pub(crate) fn collect_result(
 fn select_primary_metric(
     metrics: &BTreeMap<String, Metric>,
 ) -> Result<&str, Box<dyn std::error::Error>> {
-    [PRIMARY_METRIC, "prove_trace_sync", "build_trace", "execute_trace_inputs_sync"]
-        .into_iter()
-        .find(|metric| metrics.contains_key(*metric))
-        .ok_or_else(|| "no supported primary metric found in benchmark result".into())
+    [
+        PRIMARY_METRIC,
+        "prove_trace_sync",
+        "build_trace",
+        "execute_trace_inputs_sync",
+        "execute_sync",
+    ]
+    .into_iter()
+    .find(|metric| metrics.contains_key(*metric))
+    .ok_or_else(|| "no supported primary metric found in benchmark result".into())
 }
 
 fn collect_criterion_metrics(

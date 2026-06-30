@@ -383,7 +383,7 @@ impl OperationError {
     pub fn with_package_source_context(
         self,
         context: PackageSourceDebugContext<'_>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: Option<usize>,
     ) -> ExecutionError {
         let (label, source_file) =
@@ -487,7 +487,7 @@ impl<'a> PackageSourceDebugContext<'a> {
 
 fn label_and_source_file_from_location(
     location: Option<&Location>,
-    host: &impl BaseHost,
+    host: &(dyn BaseHost + '_),
 ) -> (SourceSpan, Option<Arc<SourceFile>>) {
     location.map_or_else(
         || (SourceSpan::UNKNOWN, None),
@@ -517,7 +517,7 @@ pub fn advice_error_with_context(err: AdviceError) -> ExecutionError {
 pub fn advice_error_with_package_source_context(
     err: AdviceError,
     context: PackageSourceDebugContext<'_>,
-    host: &impl BaseHost,
+    host: &(dyn BaseHost + '_),
     op_idx: Option<usize>,
 ) -> ExecutionError {
     let (label, source_file) =
@@ -548,7 +548,7 @@ pub fn event_error_with_context(
 pub fn event_error_with_package_source_context(
     error: EventError,
     context: PackageSourceDebugContext<'_>,
-    host: &impl BaseHost,
+    host: &(dyn BaseHost + '_),
     op_idx: Option<usize>,
     event_id: EventId,
     event_name: Option<EventName>,
@@ -574,7 +574,7 @@ pub fn procedure_not_found_with_context(root_digest: Word) -> ExecutionError {
 pub fn procedure_not_found_with_package_source_context(
     root_digest: Word,
     context: PackageSourceDebugContext<'_>,
-    host: &impl BaseHost,
+    host: &(dyn BaseHost + '_),
 ) -> ExecutionError {
     let (label, source_file) =
         label_and_source_file_from_location(context.assembly_location(None), host);
@@ -585,7 +585,7 @@ pub fn procedure_not_found_with_package_source_context(
 pub fn malformed_mast_forest_with_context(
     root_digest: Word,
     context: Option<PackageSourceDebugContext<'_>>,
-    host: &impl BaseHost,
+    host: &(dyn BaseHost + '_),
 ) -> ExecutionError {
     let err = OperationError::MalformedMastForestInHost { root_digest };
     match context {
@@ -620,7 +620,7 @@ pub trait MapExecErrWithOpIdx<T> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        _host: &impl BaseHost,
+        _host: &(dyn BaseHost + '_),
         _op_idx: usize,
     ) -> Result<T, ExecutionError>
     where
@@ -674,7 +674,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {
@@ -759,7 +759,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {
@@ -829,7 +829,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {
@@ -894,7 +894,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {
@@ -953,7 +953,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {
@@ -1013,7 +1013,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
     fn map_exec_err_with_package_source_op_idx(
         self,
         context: Option<PackageSourceDebugContext<'_>>,
-        host: &impl BaseHost,
+        host: &(dyn BaseHost + '_),
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match (self, context) {

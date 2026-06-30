@@ -33,8 +33,9 @@
 //! ## Hasher compression link (`BusId::HasherCompressionLink`)
 //!
 //! Binds hasher controller rows to the standalone BlakeG compression AIR. Without this bus a
-//! malicious prover could pair any controller `(state_in, state_out)` with any compression execution
-//! (or skip the cycle entirely). The controller side emits one interaction per compression row:
+//! malicious prover could pair any controller `(state_in, state_out)` with any compression
+//! execution (or skip the cycle entirely). The controller side emits one interaction per
+//! compression row:
 //!
 //! - **Hash compression** (`s_ctrl * !controller_merkle_or_padding`, multiplicity `+1`):
 //!   `[block(8), cv_in(4), cv_out(4)]`.
@@ -139,7 +140,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let controller_flag = ctx.chiplet_active.controller.clone();
     let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
     let ctrl_s0: LB::Expr = ctrl.s0.into();
-    let f_hash_compression = controller_flag.clone() * merkle_or_padding.clone().not();
+    let f_hash_compression = controller_flag.clone() * merkle_or_padding.not();
     let f_merkle_compression = controller_flag * merkle_or_padding * ctrl_s0;
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);

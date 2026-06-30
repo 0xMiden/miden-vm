@@ -1,6 +1,5 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_crypto::hash::eidos::Eidos;
-use miden_crypto::merkle::smt::LEAF_DOMAIN;
+use miden_crypto::{hash::eidos::Eidos, merkle::smt::LEAF_DOMAIN};
 
 use super::*;
 

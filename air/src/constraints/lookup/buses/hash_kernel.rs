@@ -2,24 +2,24 @@
 //!
 //! Combines five row-disjoint interaction families on a single LogUp column:
 //!
-//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller
-//!    rows with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
-//!    (old path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects
-//!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
-//!    (two add, two remove).
-//! 2. **ACE memory reads** - on ACE chiplet rows, the block selector
-//!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
-//!    Both are removed from the chiplets bus.
+//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller rows
+//!    with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
+//!    adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which half
+//!    of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add, two
+//!    remove).
+//! 2. **ACE memory reads** - on ACE chiplet rows, the block selector distinguishes word reads
+//!    (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are removed from the
+//!    chiplets bus.
 //! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows,
 //!    phases 0 and 4 remove the duplicated plaintext reads, and the two terminal phases remove
 //!    ciphertext writes.
-//! 4. **Normal bitwise AND8 checks** (`BusId::And8Lookup`) - on normal bitwise rows, four
-//!    removes bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
+//! 4. **Normal bitwise AND8 checks** (`BusId::And8Lookup`) - on normal bitwise rows, four removes
+//!    bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
 //! 5. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
 //!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
-//!    `w0`, `w1`, and `4 * w1`. Together these enforce `d0, d1, w0, w1 in [0, 2^16)` plus `w1 in [0,
-//!    2^14)` (via the `4 * w1` check), which bounds `word_addr = 4 * (w0 + 2^16 * w1)` to the 32-bit
-//!    memory address space.
+//!    `w0`, `w1`, and `4 * w1`. Together these enforce `d0, d1, w0, w1 in [0, 2^16)` plus `w1 in
+//!    [0, 2^14)` (via the `4 * w1` check), which bounds `word_addr = 4 * (w0 + 2^16 * w1)` to the
+//!    32-bit memory address space.
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
@@ -57,13 +57,13 @@ use crate::{
 ///   one of the four fires per row -> 1 fraction.
 /// - **ACE memory reads** on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are
 ///   mutually exclusive via `block_sel` -> 1 fraction.
-/// - **AEAD stream memory I/O** on stream rows: one memory interaction on
-///   each of phases 0, 3, 4, and 7, so this contributes at most 1 fraction per row.
-/// - **Normal bitwise AND8 checks** on normal bitwise rows: a 4-remove batch fires once per
-///   one-row bitwise operation -> 4 fractions.
-/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch
-///   (`d0`, `d1`, `w0`, `w1`, `4 * w1`) fires unconditionally when the outer batch flag is active
-///   -> 5 fractions.
+/// - **AEAD stream memory I/O** on stream rows: one memory interaction on each of phases 0, 3, 4,
+///   and 7, so this contributes at most 1 fraction per row.
+/// - **Normal bitwise AND8 checks** on normal bitwise rows: a 4-remove batch fires once per one-row
+///   bitwise operation -> 4 fractions.
+/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
+///   `d1`, `w0`, `w1`, `4 * w1`) fires unconditionally when the outer batch flag is active -> 5
+///   fractions.
 ///
 /// Row-type disjointness means only one set fires per row, so the per-row max is
 /// `max(1, 1, 1, 4, 5) = 5`.
@@ -312,9 +312,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     // Five removes per memory-active row:
                     // - `d0`, `d1` - the two 16-bit delta limbs used by the memory chiplet's
                     //   sorted-access constraints.
-                    // - `w0`, `w1`, `4 * w1` - the word-address decomposition limbs. The
-                    //   `4 * w1` check additionally enforces `w1 in [0, 2^14)`, which bounds
-                    //   `word_addr = 4 * (w0 + 2^16 * w1) < 2^32`.
+                    // - `w0`, `w1`, `4 * w1` - the word-address decomposition limbs. The `4 * w1`
+                    //   check additionally enforces `w1 in [0, 2^14)`, which bounds `word_addr = 4
+                    //   * (w0 + 2^16 * w1) < 2^32`.
                     g.batch(
                         "memory_range_checks",
                         mem_active,

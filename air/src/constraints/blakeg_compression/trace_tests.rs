@@ -1,12 +1,15 @@
-use super::layout::*;
-use super::model::{execute_fused_rounds, initial_working_state, low_output, xof_lanes};
-use super::schedule::fused_step_at;
-use super::trace::{
-    BlakeGFeltRow, TraceMode, generate_felt_trace_block, generate_trace_block, rot_contribution,
-    write_felt_trace_block,
-};
-use super::views::{FooterOverlayRow, FusedGRow, LookupSlot};
 use miden_core::Felt;
+
+use super::{
+    layout::*,
+    model::{execute_fused_rounds, initial_working_state, low_output, xof_lanes},
+    schedule::fused_step_at,
+    trace::{
+        BlakeGFeltRow, TraceMode, generate_felt_trace_block, generate_trace_block,
+        rot_contribution, write_felt_trace_block,
+    },
+    views::{FooterOverlayRow, FusedGRow, LookupSlot},
+};
 
 fn test_block() -> [u32; 16] {
     [

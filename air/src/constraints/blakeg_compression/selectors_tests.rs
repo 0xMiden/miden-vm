@@ -2,9 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::Felt;
 
-use super::layout::*;
-use super::periodic::*;
-use super::selectors::BlakeGSelectors;
+use super::{layout::*, periodic::*, selectors::BlakeGSelectors};
 
 fn row_values(columns: &[Vec<Felt>], row: usize) -> Vec<Felt> {
     columns.iter().map(|column| column[row]).collect()

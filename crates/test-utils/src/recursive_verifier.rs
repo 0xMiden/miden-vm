@@ -195,8 +195,8 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Dynamic Miden AIR heights. The VM wrapper appends the fixed AND8 height before calling
-    //    the generic verifier and caches the per-AIR log heights in memory.
+    // 1. Dynamic Miden AIR heights. The VM wrapper appends the fixed AND8 height before calling the
+    //    generic verifier and caches the per-AIR log heights in memory.
     advice_stack.extend_from_slice(&build_miden_air_shape(
         log_core_trace_height,
         log_chiplets_trace_height,

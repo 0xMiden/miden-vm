@@ -183,8 +183,7 @@ where
 /// Holds only the running `(V, U)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
-/// - the enclosing `next_column` method handles finalization
-/// directly after the closure returns.
+/// - the enclosing `next_column` method handles finalization directly after the closure returns.
 pub struct ConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,

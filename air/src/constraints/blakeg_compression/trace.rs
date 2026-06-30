@@ -1,9 +1,12 @@
 //! Trace writer for the 32-row BlakeG layout.
 
-use super::layout::*;
-use super::model::{initial_working_state, low_output};
-use super::schedule::fused_step_at;
 use miden_core::{Felt, field::batch_inversion_allow_zeros};
+
+use super::{
+    layout::*,
+    model::{initial_working_state, low_output},
+    schedule::fused_step_at,
+};
 
 pub type BlakeGRow = [u64; NUM_COLS];
 pub type BlakeGFeltRow = [Felt; NUM_COLS];

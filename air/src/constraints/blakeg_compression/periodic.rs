@@ -4,8 +4,7 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::Felt;
 
-use super::layout::*;
-use super::schedule::fused_step_at;
+use super::{layout::*, schedule::fused_step_at};
 
 pub const P_IS_AB: usize = 0;
 pub const P_IS_CD: usize = 1;

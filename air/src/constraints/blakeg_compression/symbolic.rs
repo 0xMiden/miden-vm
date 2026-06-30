@@ -3,9 +3,11 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::layout::*;
-use super::schedule::{G_IDX_COL, G_IDX_DIAG, LaneMap};
-use super::selectors::BlakeGSelectors;
+use super::{
+    layout::*,
+    schedule::{G_IDX_COL, G_IDX_DIAG, LaneMap},
+    selectors::BlakeGSelectors,
+};
 
 const IV: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,

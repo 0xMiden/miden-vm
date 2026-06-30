@@ -1,14 +1,14 @@
 //! Lookup columns for the 32-row BlakeG layout.
 
-use super::layout::*;
-use super::selectors::BlakeGSelectors;
 #[cfg(test)]
 use alloc::vec::Vec;
 use core::borrow::Borrow;
+
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 #[cfg(test)]
 use miden_crypto::stark::air::WindowAccess;
 
+use super::{layout::*, selectors::BlakeGSelectors};
 #[cfg(test)]
 use crate::{
     constraints::lookup::MIDEN_MAX_MESSAGE_WIDTH,

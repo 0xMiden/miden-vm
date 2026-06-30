@@ -96,32 +96,6 @@ impl fmt::Display for JoinNodePrettyPrint<'_> {
     }
 }
 
-// SEMANTIC EQUALITY (FOR TESTING)
-// ================================================================================================
-
-#[cfg(test)]
-impl JoinNode {
-    /// Checks if two JoinNodes are semantically equal (i.e., they represent the same join
-    /// operation).
-    ///
-    /// Unlike the derived PartialEq, this method ignores storage identity and compares the
-    /// executable shape directly.
-    #[cfg(test)]
-    pub fn semantic_eq(&self, other: &JoinNode, _forest: &MastForest) -> bool {
-        // Compare children
-        if self.first() != other.first() || self.second() != other.second() {
-            return false;
-        }
-
-        // Compare digests
-        if self.digest() != other.digest() {
-            return false;
-        }
-
-        true
-    }
-}
-
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 

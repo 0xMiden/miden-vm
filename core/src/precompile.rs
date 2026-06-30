@@ -40,9 +40,8 @@
 //!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A linear hash tree over the VM hasher that produces a rolling
-//!   digest of all recorded precompile statements; the state is itself a complete digest at every
-//!   step.
+//! - [`PrecompileTranscript`]: A linear hash tree over the VM hasher that produces a rolling digest
+//!   of all recorded precompile statements; the state is itself a complete digest at every step.
 //!
 //! # Example Implementation
 //!

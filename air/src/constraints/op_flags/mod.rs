@@ -371,7 +371,7 @@ where
             // +CALLER         - overwrites only s0..s3
             op7(opcodes::CALLER),
             // +SWAPW2|SWAPW3  - swap s0..s3 with s8+ (leaves at depth 8)
-            swapw2_or_swapw3.clone(),
+            swapw2_or_swapw3,
             // +EXT2MUL        - ext field multiply on s0..s3
             op7(opcodes::EXT2MUL),
             // +MRUPDATE       - Merkle root update on s0..s3

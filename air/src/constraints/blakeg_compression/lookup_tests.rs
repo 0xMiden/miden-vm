@@ -1,19 +1,23 @@
 use alloc::collections::BTreeMap;
 
-use super::layout::*;
-use super::lookup::{
-    AEAD_HIGH_OUTPUT_COLUMN, AEAD_INPUT_COLUMN, AEAD_LOW_OUTPUT_COLUMN, BLAKEG_LOOKUP_COLUMN_SHAPE,
-    BlakeGCompressionLookupAir, BlakeGCompressionMode, COMPRESSION_LINK_COLUMN, LookupPlan,
-    NARROW_BATCH_COLUMNS, NarrowLookup, NarrowLookupKind, SingletonLookupKind, lookup_plan,
-};
-use super::periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values};
-use super::trace::{BlakeGRow, TraceMode, generate_trace_block};
-use crate::lookup::{Challenges, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
+
+use super::{
+    layout::*,
+    lookup::{
+        AEAD_HIGH_OUTPUT_COLUMN, AEAD_INPUT_COLUMN, AEAD_LOW_OUTPUT_COLUMN,
+        BLAKEG_LOOKUP_COLUMN_SHAPE, BlakeGCompressionLookupAir, BlakeGCompressionMode,
+        COMPRESSION_LINK_COLUMN, LookupPlan, NARROW_BATCH_COLUMNS, NarrowLookup, NarrowLookupKind,
+        SingletonLookupKind, lookup_plan,
+    },
+    periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values},
+    trace::{BlakeGRow, TraceMode, generate_trace_block},
+};
+use crate::lookup::{Challenges, build_lookup_fractions};
 
 fn count_narrow(plan: &[NarrowLookup], kind: NarrowLookupKind, sign: i8) -> usize {
     plan.iter().filter(|lookup| lookup.kind == kind && lookup.sign == sign).count()

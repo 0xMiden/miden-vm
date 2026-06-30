@@ -1,6 +1,4 @@
-use super::layout::*;
-use super::periodic::*;
-use super::schedule::fused_step_at;
+use super::{layout::*, periodic::*, schedule::fused_step_at};
 
 #[test]
 fn periodic_columns_have_32_row_period() {

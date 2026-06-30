@@ -20,12 +20,11 @@ use miden_air::trace::{
 use miden_core::chiplets::{blakeg, hasher::compress_state};
 use rayon::prelude::*;
 
-use crate::{ContextId, RowIndex};
-
 use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
     RangeChecker, Word as Digest, ZERO,
 };
+use crate::{ContextId, RowIndex};
 
 mod trace;
 use trace::HasherTrace;

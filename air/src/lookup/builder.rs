@@ -175,8 +175,8 @@ pub trait LookupColumn {
     ///   fraction collector.
     /// - `encoded` runs on the constraint path. It sees the same [`LookupGroup`] surface, plus the
     ///   encoding primitives `beta_powers()`, `bus_prefix()`, and `insert_encoded()`. Authors use
-    ///   this to precompute shared encoding fragments (e.g. a common `alpha + beta*addr` prefix) and reuse
-    ///   them across mutually-exclusive variants.
+    ///   this to precompute shared encoding fragments (e.g. a common `alpha + beta*addr` prefix)
+    ///   and reuse them across mutually-exclusive variants.
     ///
     /// Both closures must produce mathematically identical `(V, U)`
     /// pairs; the split is purely an optimization for expensive

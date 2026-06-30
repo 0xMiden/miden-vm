@@ -83,6 +83,19 @@ pub trait BaseHost {
     }
 }
 
+impl<T: BaseHost + ?Sized> BaseHost for &mut T {
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (**self).get_label_and_source_file(location)
+    }
+
+    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
+        (**self).resolve_event(event_id)
+    }
+}
+
 /// Defines a synchronous interface by which the VM can interact with the host during execution.
 pub trait SyncHost: BaseHost {
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for

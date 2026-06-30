@@ -39,9 +39,9 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let s0: E = cols.s0.into();
         let s1: E = cols.s1.into();
         let s2: E = cols.s2.into();
-        let not_s0 = s0.clone().not();
-        let not_s1 = s1.clone().not();
-        let not_s2 = s2.clone().not();
+        let not_s0 = s0.not();
+        let not_s1 = s1.not();
+        let not_s2 = s2.not();
 
         let is_hash = not_s1.clone() * not_s2.clone();
         let is_mp = s0.clone() * not_s1 * s2.clone();

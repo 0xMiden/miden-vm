@@ -133,22 +133,19 @@ EOF
   git_meta "$ROOT" blakeg
 } > "$META_FILE"
 
-run_once() {
+run_fixture() {
   local fixture="$1"
   local masm_path="$2"
   local expected="$3"
   local guard="$4"
-  local run_idx="$5"
-  local log_file="$6"
-  local record="$7"
-  local label="$8"
+  local log_file="$5"
   local env_args
 
   if [[ -n "$guard" ]] && (( guard > MAX_PADDED_ROWS )); then
     die "$fixture guard padded rows $guard exceeds max $MAX_PADDED_ROWS"
   fi
 
-  echo "[blakeg-synthetic] $fixture $label"
+  echo "[blakeg-synthetic] $fixture runs=$REPEAT warmups=$WARMUP"
   env_args=(
     RAYON_NUM_THREADS="$THREADS"
     CARGO_BUILD_JOBS="$BUILD_JOBS"
@@ -156,6 +153,8 @@ run_once() {
     MIDEN_BENCH_MASM="$masm_path"
     MIDEN_BENCH_GUARD_PADDED_ROWS="$guard"
     MIDEN_BENCH_MAX_PADDED_ROWS="$MAX_PADDED_ROWS"
+    MIDEN_BENCH_WARMUPS="$WARMUP"
+    MIDEN_BENCH_REPEATS="$REPEAT"
   )
   if [[ -n "$expected" ]]; then
     env_args+=(MIDEN_BENCH_EXPECTED_PADDED_ROWS="$expected")
@@ -168,32 +167,34 @@ run_once() {
         bench_prove_masm_file -- --ignored --nocapture
   ) 2>&1 | tee "$log_file"
 
-  (( record == 0 )) && return
-
-  local rows_line proof_hash_line prove_raw verify_raw proof_size security
+  local rows_line proof_hash_line measured
   rows_line="$(grep 'rows: core=' "$log_file" | tail -n 1 || true)"
   proof_hash_line="$(grep 'blakeg_comp=' "$log_file" | tail -n 1 || true)"
-  prove_raw="$(sed -n 's/^[[:space:]]*prove_time:[[:space:]]*//p' "$log_file" | tail -n 1)"
-  verify_raw="$(sed -n 's/^[[:space:]]*verify_time:[[:space:]]*//p' "$log_file" | tail -n 1)"
-  proof_size="$(sed -n 's/^[[:space:]]*proof_size:[[:space:]]*\([0-9][0-9]*\) bytes$/\1/p' "$log_file" | tail -n 1)"
-  security="$(sed -n 's/^[[:space:]]*security:[[:space:]]*//p' "$log_file" | tail -n 1)"
 
-  [[ -n "$rows_line" && -n "$prove_raw" && -n "$proof_size" ]] \
+  [[ -n "$rows_line" ]] \
     || die "failed to parse benchmark log: $log_file"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$fixture" "$run_idx" "$(duration_to_ms "$prove_raw")" "$(duration_to_ms "$verify_raw")" \
-    "$proof_size" \
-    "$(extract_field core "$rows_line")" \
-    "$(extract_field range "$rows_line")" \
-    "$(extract_field chiplets "$rows_line")" \
-    "$(extract_field hash_ctrl "$rows_line")" \
-    "$(extract_field blakeg_air "$rows_line")" \
-    "$(extract_field and8 "$rows_line")" \
-    "$(extract_field padded "$rows_line")" \
-    "$(extract_field blakeg_comp "$proof_hash_line")" \
-    "$security" "$expected" "$guard" "$log_file" \
-    >> "$RESULTS_TSV"
+  measured=0
+  while IFS= read -r proof_line; do
+    measured=$((measured + 1))
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$fixture" "$(extract_field run "$proof_line")" \
+      "$(extract_field prove_ms "$proof_line")" "$(extract_field verify_ms "$proof_line")" \
+      "$(extract_field proof_bytes "$proof_line")" \
+      "$(extract_field core "$rows_line")" \
+      "$(extract_field range "$rows_line")" \
+      "$(extract_field chiplets "$rows_line")" \
+      "$(extract_field hash_ctrl "$rows_line")" \
+      "$(extract_field blakeg_air "$rows_line")" \
+      "$(extract_field and8 "$rows_line")" \
+      "$(extract_field padded "$rows_line")" \
+      "$(extract_field blakeg_comp "$proof_hash_line")" \
+      "$(extract_field security "$proof_line")" "$expected" "$guard" "$log_file" \
+      >> "$RESULTS_TSV"
+  done < <(grep '^BENCH_SYNTH_PROOF ' "$log_file")
+
+  [[ "$measured" == "$REPEAT" ]] \
+    || die "expected $REPEAT measured rows for $fixture, parsed $measured from $log_file"
 }
 
 FIXTURES=()
@@ -210,17 +211,7 @@ for raw_fixture in "${FIXTURES[@]}"; do
   candidate_path="$(write_blakeg_fixture "$fixture" "$source_path" "$RUN_DIR/candidate-fixtures")"
   printf '%s\t%s\t%s\n' "$fixture" "$source_path" "$candidate_path" >> "$FIXTURE_PATHS_TSV"
 
-  if (( WARMUP > 0 )); then
-    for warmup_idx in $(seq 1 "$WARMUP"); do
-      run_once "$fixture" "$candidate_path" "$expected" "$guard" "$warmup_idx" \
-        "$RUN_DIR/logs/${fixture}_warmup${warmup_idx}.log" 0 "warmup $warmup_idx/$WARMUP"
-    done
-  fi
-
-  for run_idx in $(seq 1 "$REPEAT"); do
-    run_once "$fixture" "$candidate_path" "$expected" "$guard" "$run_idx" \
-      "$RUN_DIR/logs/${fixture}_run${run_idx}.log" 1 "run $run_idx/$REPEAT"
-  done
+  run_fixture "$fixture" "$candidate_path" "$expected" "$guard" "$RUN_DIR/logs/${fixture}.log"
 done
 
 {

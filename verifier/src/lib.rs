@@ -5,10 +5,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use alloc::{boxed::Box, vec::Vec};
 #[cfg(feature = "std")]
 use core::any::{Any, TypeId};
-
-use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{Felt, field::QuadFelt};

@@ -4,8 +4,7 @@ use miden_air::Felt;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
-    crypto::dsa::falcon512_eidos::Nonce,
-    crypto::hash::Eidos,
+    crypto::{dsa::falcon512_eidos::Nonce, hash::Eidos},
     events::EventName,
     field::PrimeField64,
     mast::error_code_from_msg,

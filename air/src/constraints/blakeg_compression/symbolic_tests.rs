@@ -6,11 +6,13 @@ use miden_crypto::stark::{
     matrix::RowMajorMatrix,
 };
 
-use super::layout::*;
-use super::periodic::get_periodic_column_values;
-use super::selectors::BlakeGSelectors;
-use super::symbolic::{enforce_footer_rows, enforce_fused_rows};
-use super::trace::{TraceMode, generate_felt_trace_block};
+use super::{
+    layout::*,
+    periodic::get_periodic_column_values,
+    selectors::BlakeGSelectors,
+    symbolic::{enforce_footer_rows, enforce_fused_rows},
+    trace::{TraceMode, generate_felt_trace_block},
+};
 use crate::Felt;
 
 struct ConstraintEvalBuilder {
