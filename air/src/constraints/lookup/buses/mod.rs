@@ -8,6 +8,19 @@
 //! interactions via [`super::LookupColumn::group`] or
 //! [`super::LookupColumn::group_with_cached_encoding`].
 //!
+//! ## Shared merge rules
+//!
+//! A [`super::LookupColumn::group`] assumes its top-level entries are mutually exclusive,
+//! so the column degree is the max over active branches. Simultaneous fractions belong in
+//! a [`super::LookupGroup::batch`] with an explicit degree. If two interaction families are
+//! not mutually exclusive, they must be emitted as sibling groups; sibling groups compose
+//! product-wise and increase the column degree accordingly.
+//!
+//! Some columns intentionally merge multiple bus families into one group. That is sound only
+//! when their row selectors are mutually exclusive. The different bus identifiers still remain
+//! domain-separated because each message denominator starts from its own `bus_prefix[bus]`
+//! additive base.
+//!
 //! The emitters are routed per-AIR:
 //! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
 //!   `LookupAir` impl.

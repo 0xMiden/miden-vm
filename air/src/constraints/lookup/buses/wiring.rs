@@ -1,15 +1,11 @@
 //! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
 //! HasherPermLinkOutput}`).
 //!
-//! The single [`super::super::LookupColumn::group`] is intentional. The chiplet tri-state
-//! (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
-//! and hasher permutation rows pairwise mutually exclusive, so the simple-group
-//! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
-//! interactions fires per row, and the column's running `(V, U)` takes MAX over per-
-//! interaction degrees rather than summing them (which a sibling-group split would do).
-//! Each bus's denominator uses a distinct `bus_prefix[bus]` additive base, so even
-//! though they share the same accumulator their contributions are linearly independent in
-//! the extension field and cannot cancel across buses.
+//! The single [`super::super::LookupColumn::group`] is intentional; see the
+//! [`crate::constraints::lookup::buses`] overview for the shared merge rules. Here, the
+//! chiplet tri-state (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller
+//! rows, and hasher permutation rows pairwise mutually exclusive, so at most one of the
+//! five interactions fires per row.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
 //!
@@ -153,12 +149,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     builder.next_column(
         |col| {
-            // Keep ACE wiring and perm-link in one group. ACE rows (`chiplet_active.ace`),
-            // controller rows (`chiplet_active.controller`), and permutation rows
-            // (`chiplet_active.permutation`) are pairwise mutually exclusive via the chiplet
-            // tri-state, so the simple-group composition is sound. The merged group takes MAX
-            // over per-interaction degrees instead of multiplying sibling `(V_g, U_g)` pairs,
-            // keeping this column's transition inside the degree-9 budget.
+            // Keep ACE wiring and perm-link in one group: the chiplet tri-state makes their row
+            // selectors mutually exclusive, so this column takes the max per-interaction degree
+            // instead of composing sibling `(V_g, U_g)` pairs and stays inside degree 9.
             col.group(
                 "ace_perm_link",
                 |g| {
