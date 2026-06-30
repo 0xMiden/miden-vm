@@ -34,6 +34,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
+        chiplets::columns::ControllerCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
@@ -77,16 +78,11 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ctrl = local.controller();
     let ctrl_next = next.controller();
 
-    let hs0: LB::Expr = ctrl.s0.into();
-    let hs1: LB::Expr = ctrl.s1.into();
-    let hs2: LB::Expr = ctrl.s2.into();
-
     // MU/MV controller-row flags for sibling-table participation. Both require input rows
     // (`s0 = 1, s1 = 1`); `s2` distinguishes MU (`s2 = 1`) from MV (`s2 = 0`) at each Merkle
     // path step.
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
+    let (f_mv_all, f_mu_all) = merkle_update_sibling_flags(controller_flag, ctrl);
 
     // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)` —
     // sibling messages only use the rate halves.
@@ -253,4 +249,18 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
         },
         Deg { v: 7, u: 8 },
     );
+}
+
+fn merkle_update_sibling_flags<E, V>(controller_flag: E, ctrl: &ControllerCols<V>) -> (E, E)
+where
+    E: PrimeCharacteristicRing + Clone,
+    V: Copy + Into<E>,
+{
+    let hs0: E = ctrl.s0.into();
+    let hs1: E = ctrl.s1.into();
+    let hs2: E = ctrl.s2.into();
+
+    let f_mu_all = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
+    let f_mv_all = controller_flag * hs0 * hs1 * hs2.not();
+    (f_mv_all, f_mu_all)
 }
