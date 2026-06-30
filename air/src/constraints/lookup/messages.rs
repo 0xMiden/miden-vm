@@ -538,9 +538,6 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     }
 }
 
-// ACE MESSAGE
-// ================================================================================================
-
 /// ACE circuit evaluation init message (5 elements): `[clk, ctx, ptr, num_read, num_eval]`.
 #[derive(Clone, Debug)]
 pub struct AceInitMsg<E> {
@@ -570,9 +567,6 @@ pub struct RangeMsg<E> {
 pub struct LogPrecompileMsg<E> {
     pub state: [E; 4],
 }
-
-// SIBLING TABLE MESSAGE
-// ================================================================================================
 
 // ACE WIRING MESSAGE
 // ================================================================================================
