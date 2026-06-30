@@ -17,5 +17,8 @@ Overall delta: `+100.00 ms` (+10.00%)
 | --- | --- | ---: | ---: | ---: | ---: |
 | e2e_prove | criterion | 1000.00 ms | 1100.00 ms | +100.00 ms | +10.00% |
 
+Regressions over threshold:
+- `e2e_prove` moved by +100.00 ms (+10.00%) against a 5.00% threshold.
+
 Top slowdowns:
 - `e2e_prove` moved by +100.00 ms (+10.00%).

@@ -20,6 +20,8 @@ pub(crate) fn collect_result(
     light_sample_size: Option<usize>,
     measurement_time_secs: Option<u64>,
     warm_up_time_secs: Option<u64>,
+    light_measurement_time_secs: Option<u64>,
+    light_warm_up_time_secs: Option<u64>,
     spans: Vec<SpanRecord>,
 ) -> Result<BenchmarkResult, Box<dyn std::error::Error>> {
     let mut metrics = collect_criterion_metrics(repo_root)?;
@@ -48,6 +50,8 @@ pub(crate) fn collect_result(
         light_sample_size,
         measurement_time_secs,
         warm_up_time_secs,
+        light_measurement_time_secs,
+        light_warm_up_time_secs,
         primary_metric: select_primary_metric(&metrics)?.to_string(),
         metrics,
         spans,
