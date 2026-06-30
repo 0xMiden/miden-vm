@@ -32,8 +32,6 @@ use crate::{
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
-///
-/// Kernel ROM emits the max: one INIT remove and one CALL add on the same active row.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus.
