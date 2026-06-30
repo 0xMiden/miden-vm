@@ -455,11 +455,11 @@ fn build_chains(requests: &[Request]) -> Vec<Chain> {
         }
     }
     for (i, r) in requests.iter().enumerate() {
-        if let Request::Logic { a, .. } = *r {
-            if let Some(p) = claim_producer(a, i, &producers, &mut claimed) {
-                next[p] = Some(i);
-                is_continuation[i] = true;
-            }
+        if let Request::Logic { a, .. } = *r
+            && let Some(p) = claim_producer(a, i, &producers, &mut claimed)
+        {
+            next[p] = Some(i);
+            is_continuation[i] = true;
         }
     }
 
@@ -651,7 +651,7 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
 
         // ROL must be preceded by LOGIC (cyclic ungated). Subsumes
         // ROL/ROL forbid AND Carrier/padding → ROL forbid AND wrap.
-        builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic.clone()));
+        builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic));
 
         let a_bytes: [AB::Var; 8] = array::from_fn(|i| local[A_BYTES_RANGE.start + i]);
         let b_limbs: [AB::Var; 8] = array::from_fn(|i| local[B_LIMBS_RANGE.start + i]);
@@ -670,12 +670,9 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
 
         // (lo + 2^32)·k = decomposition (gated by is_rol; deg 1 + 1 + 1 = 3).
         builder.assert_zero(
-            is_rol.clone()
-                * ((a_lo.clone() + two_32.clone()) * op_or_k.clone() - lo_offset_k_decomp),
+            is_rol.clone() * ((a_lo + two_32.clone()) * op_or_k.clone() - lo_offset_k_decomp),
         );
-        builder.assert_zero(
-            is_rol.clone() * ((a_hi.clone() + two_32) * op_or_k.clone() - hi_offset_k_decomp),
-        );
+        builder.assert_zero(is_rol * ((a_hi + two_32) * op_or_k - hi_offset_k_decomp));
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =

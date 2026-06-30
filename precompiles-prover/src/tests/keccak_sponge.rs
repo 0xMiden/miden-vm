@@ -272,7 +272,7 @@ fn constraints_hold_on_overshoot_then_invocation_seam() {
     // its overshoot tail, the relaxed chain must carry `chunk_ptr`
     // contiguously into the second — no seam gap, since the sponge now
     // consumes all 4·num_chunks lanes the chiplet emits.
-    let mut rng = StdRng::seed_from_u64(0xe_1_5e);
+    let mut rng = StdRng::seed_from_u64(0xe15e);
     let a: Vec<u8> = (0..271).map(|_| rng.random()).collect();
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
@@ -434,7 +434,7 @@ fn corruption_seq_id_breaks_row_counter_transition() {
     // row-0 transition (`seq_id_1 − seq_id_0 − 1 = 6 ≠ 0`) and the
     // row-1 transition (`seq_id_2 − seq_id_1 − 1 = −6 ≠ 0`) fail.
     corrupt_and_check(0xc0_5e, Invocation { input: vec![0xab] }, |main| {
-        main.values[1 * NUM_MAIN_COLS + COL_SPONGE_SEQ_ID] = Felt::from(7u8);
+        main.values[NUM_MAIN_COLS + COL_SPONGE_SEQ_ID] = Felt::from(7u8);
     });
 }
 

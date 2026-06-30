@@ -7,20 +7,19 @@ use miden::precompiles
 # {{TITLE}} DEFERRED {{DOMAIN_KIND}} PRECOMPILE WRAPPERS
 # ================================================================================================
 # User-facing values are deferred node digests. Canonical values are one data chunk of eight
-# little-endian u32 limbs. Arithmetic is selected by the fixed domain id (MODULUS_ID).
+# little-endian u32 limbs tagged by the fixed bound pointer (BOUND_PTR).
 # Encoded modulus limbs (little-endian u32{{ENCODED_MODULUS_NOTE}}): {{ENCODED_MODULUS_LIMBS}}
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.
-# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE, MODULUS_ID, 0].
+# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE, BOUND_PTR, 0].
 # - OP_TAG(op_id) = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/MUL/EQ.
 # - VALUE_U32[8]  = two words [v0, v1, v2, v3] [v4, v5, v6, v7], with v0 least significant.
 #
 const PRECOMPILE_ID = {{PRECOMPILE_ID}}
-const MODULUS_ID = {{MODULUS_ID}}
+const BOUND_PTR = {{BOUND_PTR}}
 
-# UintPrecompile op ids are fixed by the Rust precompile: VALUE=0, ADD=1, SUB=2, MUL=3,
-# EQ=4. Only VALUE_TAG carries MODULUS_ID; operation tags deliberately use zero in that slot.
+# UintPrecompile op ids are fixed by the Rust precompile: VALUE=0, ADD=1, SUB=2, MUL=3, EQ=4.
 const VALUE_TAG = {{VALUE_TAG}}
 const ADD_TAG = {{ADD_TAG}}
 const SUB_TAG = {{SUB_TAG}}
@@ -184,7 +183,7 @@ end
 #! Output: [is_zero, ...]
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
-#! digest against the pinned zero digest. Inequality itself does not trap.
+#! digest against the registered zero VALUE digest. Inequality itself does not trap.
 pub proc is_zero
     exec.push_zero_digest
     # => [ZERO_DIGEST, EXPR_DIGEST, ...]
@@ -197,7 +196,7 @@ end
 #! Output: [is_one, ...]
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
-#! digest against the pinned one digest. Inequality itself does not trap.
+#! digest against the registered one VALUE digest. Inequality itself does not trap.
 pub proc is_one
     exec.push_one_digest
     # => [ONE_DIGEST, EXPR_DIGEST, ...]

@@ -192,8 +192,7 @@ impl SessionTraces {
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
         let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
             .expect("chiplet statement inputs are valid");
-        let mains: Vec<RowMajorMatrix<Felt>> =
-            self.mains().into_iter().map(|m| m.clone()).collect();
+        let mains: Vec<RowMajorMatrix<Felt>> = self.mains().into_iter().cloned().collect();
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
@@ -258,7 +257,7 @@ impl SessionProof {
         let verifier_digest = VerifierInstance::new(
             &config,
             &statement,
-            preprocessed.as_ref().map(|p| p.commitment()),
+            preprocessed.as_ref().map(Preprocessed::commitment),
         )
         .expect("preprocessed commitment matches the declared columns")
         .verify(&self.proof, test_challenger())

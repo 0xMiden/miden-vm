@@ -25,8 +25,8 @@ fn chiplet_one_round(state: [u64; 25], rc: u64) -> [u64; 25] {
     // computes them but we only read out round 0's outputs.
     let mut rcs = [0u64; NUM_ROUNDS];
     rcs[0] = rc;
-    let full = extract_output_one_round(&state, &rcs);
-    full
+
+    extract_output_one_round(&state, &rcs)
 }
 
 /// Extract state after exactly one round by running the chiplet
@@ -80,13 +80,13 @@ fn extract_output_one_round(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64;
     }
 
     let mut out = [0u64; 25];
-    for idx in 0..25 {
+    for (idx, value) in out.iter_mut().enumerate() {
         let slot = if idx == 0 {
             SLOT_IOTA
         } else {
             SLOT_CHI_XOR_BEGIN + (idx - 1)
         };
-        out[idx] = memory[(IP_BOUNDARY + slot as u64) as usize];
+        *value = memory[(IP_BOUNDARY + slot as u64) as usize];
     }
     out
 }
@@ -123,10 +123,10 @@ fn chiplet_one_round_matches_reference_zero_input() {
 fn chiplet_two_rounds_match_reference_zero_input() {
     let mut state = [0u64; 25];
     let mut expected = state;
-    for r in 0..2 {
+    for (r, &rc) in KECCAK_RC.iter().enumerate().take(2) {
         let prev = state;
-        keccak_round(&mut expected, KECCAK_RC[r]);
-        let got = chiplet_one_round(prev, KECCAK_RC[r]);
+        keccak_round(&mut expected, rc);
+        let got = chiplet_one_round(prev, rc);
         for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
             assert_eq!(g, e, "round {r}, lane {i} (x={}, y={})", i % 5, i / 5);
         }
@@ -140,8 +140,8 @@ fn chiplet_two_rounds_match_reference_zero_input() {
 fn chiplet_full_permutation_matches_reference_zero_input_internal() {
     let state = [0u64; 25];
     let mut expected = state;
-    for r in 0..NUM_ROUNDS {
-        keccak_round(&mut expected, KECCAK_RC[r]);
+    for &rc in KECCAK_RC.iter().take(NUM_ROUNDS) {
+        keccak_round(&mut expected, rc);
     }
     let got = extract_output(&state, &KECCAK_RC);
     assert_eq!(got, expected);
@@ -159,8 +159,8 @@ fn extract_output_matches_reference_keccak_zero_input() {
 fn extract_output_matches_reference_keccak_canonical_test_vectors() {
     // A handful of arbitrary patterns.
     let mut state = [0u64; 25];
-    for i in 0..25 {
-        state[i] = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    for (i, lane) in state.iter_mut().enumerate() {
+        *lane = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     }
     let expected = keccak_f1600(state);
     let got = extract_output(&state, &KECCAK_RC);
@@ -246,9 +246,9 @@ fn bw64_per_perm_floor_holds() {
 
     let mut round = RoundRequires::new();
     let mut state = init;
-    for r in 0..NUM_ROUNDS {
+    for &rc in KECCAK_RC.iter().take(NUM_ROUNDS) {
         round.require_round(state);
-        keccak_round(&mut state, KECCAK_RC[r]);
+        keccak_round(&mut state, rc);
     }
 
     let mut bw64 = Bitwise64Requires::new();

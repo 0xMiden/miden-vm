@@ -141,7 +141,7 @@ fn render_uint(config: &UintMasmConfig) -> Result<String, String> {
         ("DOMAIN_KIND", domain_kind(domain).to_string()),
         ("VALUE_KIND", value_kind(domain).to_string()),
         ("ENCODED_MODULUS_NOTE", encoded_modulus_note(domain).to_string()),
-        ("MODULUS_ID", domain.id().as_canonical_u64().to_string()),
+        ("BOUND_PTR", domain.bound_ptr().to_string()),
         ("ENCODED_MODULUS_LIMBS", limbs_literal(domain.encoded_modulus())),
         ("PRECOMPILE_ID", UintPrecompileDescriptor::id().as_canonical_u64().to_string()),
         ("VALUE_TAG", word_literal(tag_word(UintPrecompileDescriptor::value_tag(domain)))),

@@ -1,12 +1,11 @@
-//! Transcript node-tag registry & protocol version.
+//! Transcript node-tag registry.
 //!
 //! The transcript analog of [`relations`](crate::relations): a single
-//! source of truth for the transcript DAG's `tag_id` values and the
-//! protocol `version`. Every transcript node commits a 12-felt
-//! preimage whose capacity slot carries
-//! `(tag_id, param_a, param_b, version)`; producers of those nodes
+//! source of truth for the transcript DAG's `tag_id` values. Every
+//! transcript node commits a 12-felt preimage whose capacity slot carries
+//! `(tag_id, param_a, param_b, reserved)`; producers of those nodes
 //! (the chunk chiplet today; uint / group / Keccak-eval chiplets
-//! soon) and the eval chip all read their tags and version from here.
+//! soon) and the eval chip all read their tags from here.
 //!
 //! See `docs/transcript-nodes.md` for the full node-format spec and
 //! `docs/transcript-eval.md` for how the tags are dispatched.
@@ -17,13 +16,18 @@
 //! |--------|--------------------|--------------------------------------------|
 //! | 0      | `Transcript`       | assertion-chain node (AND over children)   |
 //! | 1      | `Chunk`            | generic chunk capacity domain separator    |
-//! | 2      | `UintLeaf`         | uint leaf (u32-LE in the rate)             |
-//! | 3      | unused             | intentionally unassigned                   |
-//! | 4      | `UintOp`           | uint add / sub / mul / is ([`UintOpId`])  |
+//! | 2      | `UintLeaf`         | reserved                                   |
+//! | 3      | `UintPinClaim`     | bootstrap uint pin claim                   |
+//! | 4      | `UintOp`           | reserved                                   |
 //! | 5      | `EcCreate`         | curve-point construction                  |
 //! | 6      | `EcBinOp`          | group add / sub / is                      |
 //! | 7      | `Keccak`           | `keccak(chunks) == digest` relation        |
 //! | 8      | `EcMsm`            | multi-scalar-mul claim (absorb-run sponge) |
+
+/// Capacity tag for bootstrap uint pin claims.
+///
+/// Pin claims commit `store[pin_ptr] = value` as initial-root inputs.
+pub const UINT_PIN_CLAIM_TAG: u8 = 3;
 
 /// Transcript node type, stamped into the `tag_id` capacity slot of a
 /// node's 12-felt hash preimage. `#[repr(u8)]` lets a variant cast
@@ -44,18 +48,16 @@ pub enum NodeTag {
     /// **variable-length** run of absorb rows in the eval chip (every
     /// other node is one row). Capacity-threaded by row adjacency
     /// (`capᵢ = stateᵢ₋₁`); the first absorb's cap is the IV
-    /// `(EcMsm, group_ptr, 0, version)`, which domain-separates MSM
-    /// hashes from every one-shot cap. The node *is* its value point
+    /// `(EcMsm, group_ptr, 0, 0)`, which domain-separates MSM hashes
+    /// from every one-shot cap. The node *is* its value point
     /// (binds `Group`); see `docs/chiplets/ec-msm.md §6.2`.
     EcMsm = 8,
 }
 
-/// Operation discriminant of a [`NodeTag::UintOp`] node, committed as the
-/// cap's `param_a` (`param_b` is pinned 0, reserved for future per-op
-/// parameters). The node's preimage rate is `lhs_hash ‖ rhs_hash`; the
-/// result rides the node's `Binding` as a nondeterministic ptr — **never
-/// the hash**: store addresses are bus-level witness data, observable in
-/// a cap only as a uint leaf's `bound_ptr` / pin seam.
+/// Operation discriminant for VM uint op rows.
+///
+/// The cap is `[UintPrecompile::id(), op_id, 0, 0]`; operand/result pointers and
+/// `bound_ptr` are carried by `Binding` and relation witnesses.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
 /// |---|---|---|
@@ -75,13 +77,12 @@ pub enum UintOpId {
     Is = 4,
 }
 
-/// Operation discriminant of a [`NodeTag::EcBinOp`] node, committed as
-/// the cap's `param_a` (`param_b` pinned 0). The preimage rate is
-/// `lhs_hash ‖ rhs_hash` over two `Group` children; the result point
-/// rides the node's `Binding` as a nondeterministic ptr — **never the
-/// hash**. The curve is *not* in this cap: it threads transitively from
-/// the operands' [`NodeTag::EcCreate`] caps (where `a`/`b` enter the
-/// DAG), exactly as the uint modulus threads through [`UintOpId`] ops.
+/// Operation discriminant of a [`NodeTag::EcBinOp`] node.
+///
+/// The cap is `(EcBinOp, op_id, 0, 0)`. The preimage rate is
+/// `lhs_hash ‖ rhs_hash` over two `Group` children; the result point rides
+/// the node's `Binding` as a nondeterministic ptr. The curve threads from
+/// the operands' [`NodeTag::EcCreate`] caps.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
 /// |---|---|---|
@@ -103,9 +104,3 @@ pub enum EcOpId {
     Sub = 2,
     Is = 3,
 }
-
-/// Transcript protocol version, bound into every node's hash via the
-/// capacity `version` slot. Bumping it invalidates all prior
-/// commitments — the upgrade lever. Placeholder `0` until a
-/// version-1 cut is appropriate.
-pub const CURRENT_VERSION: u8 = 0;

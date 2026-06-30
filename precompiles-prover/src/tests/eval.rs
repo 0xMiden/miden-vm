@@ -19,10 +19,9 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use crate::{
     ec::trace::EcStoreRequires,
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    math::{U256, from_limbs32},
     transcript::{
         eval::{
-            COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_PTR,
+            COL_ACT, COL_CAP_PARAM_B, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT,
             NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES,
             PUBLIC_ROOT_BEGIN, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace, transcript_node_hash},
@@ -92,7 +91,7 @@ fn check_with_k(seed: u64, k: usize) {
 fn check_corrupted(
     seed: u64,
     k: usize,
-    corrupt_trace: impl FnOnce(&mut p3_matrix::dense::RowMajorMatrix<Felt>),
+    corrupt_trace: impl FnOnce(&mut RowMajorMatrix<Felt>),
     corrupt_public_root: impl FnOnce(&mut P2Digest),
 ) {
     let mut rng = StdRng::seed_from_u64(seed);
@@ -395,12 +394,9 @@ fn corruption_act_sticky_down() {
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn corruption_pinned_leaf_pin_ptr_mismatch() {
-    // A pinned uint leaf whose pin_ptr is forged away from the ptr its
-    // UintVal consume dereferences: the `is_pinned·(pin_ptr − ptr)` tie
-    // must reject. This is the cap-side half of the relocation attack —
-    // the bus-side half (an honest trace over a tampered store) is
-    // `tests::integration::relocated_modulus_pin_unbalances`.
+fn corruption_pinned_leaf_cap_slot_mismatch() {
+    // A pinned uint leaf whose cap slot 2 (`pin_ptr`) is forged away from the ptr
+    // its UintVal consume dereferences must be rejected.
     let mut rng = StdRng::seed_from_u64(0xf0_f6_3d);
     let mut p2 = Poseidon2Requires::new();
     let mut req = TranscriptEvalRequires::new();
@@ -416,7 +412,7 @@ fn corruption_pinned_leaf_pin_ptr_mismatch() {
     let pin_row = (0..main.height())
         .find(|&r| main.values[r * NUM_MAIN_COLS + COL_IS_PINNED] == Felt::ONE)
         .expect("trace has a pinned leaf row");
-    main.values[pin_row * NUM_MAIN_COLS + COL_PIN_PTR] += Felt::ONE;
+    main.values[pin_row * NUM_MAIN_COLS + COL_CAP_PARAM_B] += Felt::ONE;
 
     crate::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
 }

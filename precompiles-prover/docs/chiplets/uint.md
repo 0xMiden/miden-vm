@@ -14,7 +14,7 @@ is *witnessed* (a stored uint), not a compile-time constant, so any
 modulus works with no primality story. It is **Binding-agnostic** — it
 never touches the `Binding` bus; the [eval chip](transcript-eval.md) is
 the sole bridge from a stored uint into the transcript (see
-[the eval seam](#the-eval-seam-pin_uint)).
+[the eval seam](#the-eval-seam-uint-values-and-bootstrap-pin-claims)).
 
 ## What it stores
 
@@ -212,25 +212,21 @@ tie (below).
 
 Pointers are **caller-assigned** and partitioned:
 
-- **ptr 0** is never a store address — it is the uint-leaf cap's
-  *transient* marker (`pin_ptr = 0`, see [the eval
-  seam](#the-eval-seam-pin_uint)). Nulls are modulus-typed (a zero
-  operand for mod-`p` work is a pin of `0` under `p`'s `bound_ptr`, e.g.
-  secp256k1's `a`), so no global zero block exists.
-- **`[1, 2¹⁶)`** is the **pin namespace** — well-known constants
-  (secp256k1 `a` / `b` / `Fp`, …), each at a stable address.
-- **`≥ 2¹⁶`** is for **transients** — values and arithmetic
-  intermediates, interned by `UintStoreRequires::intern` at a
-  bump-allocated ptr.
+- **ptr 0** is never a store address — it is the none-sentinel used by
+  relations that intentionally omit an operand. There is no global zero block.
+- **`[1, 2¹⁶)`** is available for protocol-assigned true pins. Fixed pointer
+  assignments are introduced by bootstrap pin claims
+  `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+- **`≥ 2¹⁶`** is for dynamic values and arithmetic intermediates, interned by
+  `UintStoreRequires::intern` at a bump-allocated ptr.
 
-There is **no first-row anchor**: the gap chain below forces injectivity
-on its own (steps of `gap + 1 ∈ [1, 2¹⁶]` cannot lap the field within
-any realizable trace), and every consume names its ptr explicitly, so
-absolute addresses need no structural pinning. A rogue block parked at
-address 0 is inert — a pinned leaf dereferencing it would hash under the
-transient-marked cap (`pin_ptr = 0`), a node shape the verifier-side DAG
-never contains, so its binding finds no consumer and bus balance forces
-`out_mult = 0`.
+The bootstrap manifest installs bounds/moduli as **self-pins**
+(`pin_ptr = bound_ptr`).
+
+There is **no first-row anchor**: the gap chain below forces injectivity on
+its own (steps of `gap + 1 ∈ [1, 2¹⁶]` cannot lap the field within any
+realizable trace), and every consume names its ptr explicitly. Bootstrap pin
+claims anchor fixed protocol addresses.
 
 `UintVal` must have exactly one provider per ptr (`ptr ↦ value` a
 function), so ptrs are **injective**. The store keeps uints sorted by ptr
@@ -294,78 +290,66 @@ Two consequences of the store being modulus-agnostic:
   stored uint is already range-checked to `[0, p)` on interning, so an
   op checks only its reduction identity.
 
-## The eval seam (`pin_uint`)
+## The eval seam: uint values and bootstrap pin claims
 
-A stored uint enters the transcript through the [eval
-chip](transcript-eval.md), which hashes its value into a node. The eval
-chip pulls **both** `UintVal` halves into its Poseidon2 rate — the 4×32
-view *is* the 8×u32 rate, no recombination — and hashes under the cap
-`(UintLeaf, bound_ptr, pin_ptr, V)`: the modulus pointer and the **pin
-address** are committed into the hash. `pin_ptr = is_pinned·ptr`,
-materialized as its own main column (a degree-2 cap component would push
-the perm column past constraint degree 5 ⇒ `lqd = 3`) and tied by
+A stored uint enters the transcript through the [eval chip](transcript-eval.md),
+which hashes its 8×u32 value into either a normal VM uint value node or a
+bootstrap pin claim. In both cases the eval chip pulls **both** `UintVal`
+halves into its Poseidon2 rate — the 4×32 view *is* the 8×u32 rate, no
+recombination.
 
-```
-(1 − is_pinned) · pin_ptr = 0        is_pinned · (pin_ptr − ptr) = 0
-```
+Runtime VM uint values hash under
+`[UINT_PRECOMPILE_ID, VALUE_OP_ID, bound_ptr, 0]` and provide
+`Binding(h_value, Uint, ptr, bound_ptr)`.
 
-so the cap-committed address **is** the address the `UintVal` consume
-dereferences. The resulting `Binding` **forks on `is_pinned`**:
+Normal uint ops hash under `[UINT_PRECOMPILE_ID, op_id, 0, 0]`; their
+`bound_ptr` is carried by the child/output bindings and relation tuples.
 
-- **pinned** uint (the modulus, well-known constants; `pin_ptr = ptr`) →
-  `Binding(h, True)` — a `Truthy` folded into the transcript spine. The
-  hash covers the value, its bound object, *and its address*, so the
-  root anchors `store[pin_ptr] = value` exactly. For the modulus that is
-  `store[fp] = p − 1` as an *equality* — without the pin address, a
-  prover could squat a larger value at `fp` and relocate `p − 1`
-  elsewhere under the same bound, reproducing the honest root with every
-  bus balanced (`tests::integration::relocated_modulus_pin_unbalances`
-  replays exactly that; `corruption_pinned_leaf_pin_ptr_mismatch` covers
-  the forged-column variant).
-- **transient** uint (`pin_ptr = 0`, hence the address-0 reservation) →
-  `Binding(h, Uint, ptr, bound_ptr)` — a value-binding consumed by the
-  eval chip's own `UintOp` arms (the DAG arithmetic + the `is`
-  predicate; see [transcript-eval](transcript-eval.md)); the hash stays
-  content-addressed and the nondeterministic `ptr` rides on the binding
-  instead.
+Bootstrap pin claims hash under
+`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. A bootstrap pin row consumes
+`UintVal(pin_ptr, bound_ptr, 0, lo)` and
+`UintVal(pin_ptr, bound_ptr, 1, hi)`, then provides
+`Binding(h_pin, True)`. Bounds/moduli are self-pins (`pin_ptr = bound_ptr`).
+Bootstrap pin claims fold deterministically to produce the initial root;
+program VM graph claims fold from that root.
 
-The fork is a degree-2 message (`value_tag` / `ptr` / `bound_ptr` scaled
-by `1 − is_pinned`), keeping the eval chip at `log_quotient_degree = 2`.
-The store-side cost is one `UintVal` consume per leaf, fed into the demand
-ledger.
+The eval trace keeps the cap slot row-kind-aware: VM uint value rows place
+`bound_ptr` in cap slot 2, uint op rows keep cap slot 2 zero, and bootstrap
+pin rows place `pin_ptr = ptr` in cap slot 2. The forked `Binding` message
+scales the `Uint` fields by `1 − is_pinned`, keeping the eval chip at
+`log_quotient_degree = 2`. The store-side cost is one `UintVal` consume per
+leaf, fed into the demand ledger.
 
 ## The DAG surface
 
-[`Session`](../../src/session/mod.rs)'s public uint surface is
-DAG-level only:
+[`Session`](../../src/session/mod.rs)'s public uint surface separates bootstrap
+pin claims from normal VM graph values:
 
 ```rust
-Session::pin_uint(ptr, value, bound_ptr) -> Truthy
-Session::uint_leaf(value, bound_ptr) -> UintNode   // transient value leaf
+Session::pin_uint(pin_ptr, value, bound_ptr) -> Truthy // bootstrap pin claim
+Session::uint_leaf(value, bound_ptr) -> UintNode       // runtime VM value leaf
 Session::uint_add(&a, &b) -> UintNode              // a + b mod p
 Session::uint_sub(&a, &b) -> UintNode              // a − b (as b + r = a)
 Session::uint_mul(&a, &b) -> UintNode              // a · b (κₐ = 1, κ_c = 0)
 Session::uint_is(&a, &b) -> Truthy                 // the is predicate
 ```
 
-`pin_uint` interns the uint at the caller's `ptr`, drives its Poseidon2
-perm (cap `(UintLeaf, bound_ptr, ptr, V)`), records the demand, and
-returns the foldable `Truthy` — fold it into the root with `assert_and`
-/ `assert_and_fold`, exactly like a `keccak` claim. The modulus is just
-a self-referential pin (`bound_ptr == ptr`); curve constants pin under
-it (e.g. secp256k1's `Gx` / `Gy` / `a` / `b` under `Fp`'s ptr, giving
-each `store[ptr] = value ∧ value < p` in the root —
-`tests::integration::full_stack_pins_k1_constants`).
+`pin_uint` interns the uint at the assigned `pin_ptr`, hashes the pin claim
+under `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`, records the demand, and
+returns the foldable `Truthy`. Bootstrap code folds these pin claims in a
+canonical order to derive the initial root. The modulus is a self-referential
+pin (`pin_ptr = bound_ptr`).
 
 `uint_leaf` and the value ops return shared-use [`UintNode`] handles
 (each op-use bumps the node's `out_mult`); `uint_is` closes a value
 chain into a foldable `Truthy`. Values intern with **canonical
 `(value, modulus)` dedup** — equal results, including a result that
-coincides with a pinned constant, share one ptr, which is what keeps
-`uint_is` complete across different DAG shapes
+coincides with a bootstrap-installed true pin, share one ptr, which is what
+keeps `uint_is` complete across different DAG shapes
 (`tests::uint_dag::horner_sign_alternation_full_stack` proves one
-polynomial value via two disjoint shapes). Ptrs never surface in the
-API or any cap.
+polynomial value via two disjoint shapes). VM value caps carry `bound_ptr`;
+uint op caps are `[UINT_PRECOMPILE_ID, op_id, 0, 0]`; op bindings and relations
+carry the operand/result ptrs and bound.
 
 Underneath sits the **require layer**:
 [`UintRequire`](../../src/uint/require.rs) (a transient view over the
@@ -388,7 +372,7 @@ bookkeeping, and power-of-two padding are all below the layer;
 
 **Built:** the `UintStore` AIR (storage + the vertical-SZ range check),
 the `UintVal` / `UintLimbs` / `Range16` buses + demand ledgers, the eval
-`pin_uint` seam, the [UintAdd](uint-add.md) and
+uint value / bootstrap pin seam, the [UintAdd](uint-add.md) and
 [UintMul](uint-mul.md) relation chiplets, the DAG-level arithmetic +
 `is` predicate ([transcript-eval](transcript-eval.md)'s `UintOp` arms),
 and the require/Session wiring — validated standalone and through the

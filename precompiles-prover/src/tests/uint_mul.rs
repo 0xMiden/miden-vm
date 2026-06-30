@@ -1,5 +1,5 @@
-//! UintMul tests — the scaled-MAC vertical Schwartz–Zippel (constraints
-//! + the 17-limb quotient), the liquid-layout witness placement, the
+//! UintMul tests — the scaled-MAC vertical Schwartz–Zippel constraints,
+//! the 17-limb quotient, the liquid-layout witness placement, the
 //! `UintLimbs`/`UintVal`/`Range16` buses balanced against the store and
 //! the byte-pair LUT, and the act-gated padding.
 
@@ -145,7 +145,7 @@ fn mul_constraints_hold() {
     // The carries must be exercised: some γ cell pair differs from the
     // zero encoding (lo, hi) = (0, 2¹⁵).
     let vals = op.resolve(&store);
-    let gammas = crate::uint::mul::trace::gamma_halves(&op, &vals, &canonical_q(&op, &vals));
+    let gammas = gamma_halves(&op, &vals, &canonical_q(&op, &vals));
     assert!(
         gammas.iter().any(|&(lo, hi)| (lo, hi) != (0, 1 << 15)),
         "a random MAC must carry",

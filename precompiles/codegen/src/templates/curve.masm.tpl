@@ -36,14 +36,14 @@ const SUB_OP_ID = {{SUB_OP_ID}}
 const EQ_OP_ID = {{EQ_OP_ID}}
 const MSM_OP_ID = {{MSM_OP_ID}}
 
-# VALUE/MSM tags carry CURVE_ID; ADD/SUB/EQ tags deliberately use zero in that slot.
+# VALUE/MSM tags carry CURVE_ID. ADD/SUB/EQ tags are [PRECOMPILE_ID, op_id, 0, 0].
 const VALUE_TAG = {{VALUE_TAG}}
 const ADD_TAG = {{ADD_TAG}}
 const SUB_TAG = {{SUB_TAG}}
 const EQ_TAG = {{EQ_TAG}}
 const MSM_TAG = {{MSM_TAG}}
 
-# Pinned digests for init constants registered by CurvePrecompile.
+# Registered digests for CurvePrecompile init constants.
 const IDENTITY_DIGEST = {{IDENTITY_DIGEST}}
 const GENERATOR_DIGEST = {{GENERATOR_DIGEST}}
 

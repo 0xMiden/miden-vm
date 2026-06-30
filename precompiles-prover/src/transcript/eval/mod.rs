@@ -13,17 +13,14 @@
 //!
 //! Node kinds are dispatched by a uniform one-hot `is_and + is_zero +
 //! is_uint_leaf + Σ op-flags = act`: the **Transcript AND-combinator**
-//! `h = Poseidon2(lhs || rhs || (Transcript=0, 0, 0, V))[0..4]` folding
-//! two child `True` bindings; the **uint leaf**, which hashes a stored
-//! uint's value (pulled from the `UintStore` over `UintVal` — the 4×32
-//! view fed straight as the perm rate) under the cap `(UintLeaf,
-//! bound_ptr, pin_ptr, V)` and binds it (`pin_ptr` commits a pinned
-//! leaf's store address into the hash, `0` = transient — so a pinned leaf
-//! anchors `store[pin_ptr] = value`); and the **uint ops** (`is_add` /
-//! `is_sub` / `is_mul` / `is_is`), which hash two child hashes under
-//! `(UintOp, op_id, 0, V)` and tie the children's `Uint` bindings to a
-//! [`UintAdd`](crate::uint::add) / [`UintMul`](crate::uint::mul) relation
-//! tuple by ptr. Group and full tag dispatch stay deferred. This
+//! `h = Poseidon2(lhs || rhs || Tag::AND)[0..4]` folding two child
+//! `True` bindings; the **uint leaf / pin-claim row**, which hashes a stored uint's
+//! value under either `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`
+//! or `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`; and the **uint ops**
+//! (`is_add` / `is_sub` / `is_mul` / `is_is`), which hash two child hashes under
+//! `[UintPrecompile::id(), op_id, 0, 0]` and tie the children's `Uint` bindings
+//! to a [`UintAdd`](crate::uint::add) / [`UintMul`](crate::uint::mul) relation
+//! tuple by ptr and bound. Group and full tag dispatch stay deferred. This
 //! chip replaced the left-leaning spine (now retired); the spine was its
 //! degenerate chain instance.
 //!
@@ -38,13 +35,13 @@
 //! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 4×32 value → `h` under the uint cap;
 //!   consume both `UintVal` halves; provide `Binding(h, True)` when `is_pinned` (folded into the
 //!   spine) else `Binding(h, Uint, ptr, bound_ptr)` (a transient value-binding).
-//! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the op cap; consume the
-//!   children's `Uint` bindings at the witnessed `a_ptr` / `b_ptr` (`Is` forces `b_ptr = a_ptr` —
-//!   equality asserted by the bus); consume one relation tuple wiring those ptrs to the witnessed
-//!   result `ptr`; provide `Binding(h, Uint, ptr, bound_ptr)` — or `Binding(h, True)` for `Is`, the
-//!   predicate folding uint values into the spine. All value soundness lives at the relation
-//!   chiplets + store; this row is pure ptr wiring. Ptrs never enter the hash — the result is
-//!   nondeterministic, memoized on the binding.
+//! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the VM uint op cap; consume
+//!   the children's `Uint` bindings at the witnessed `a_ptr` / `b_ptr` and row `bound_ptr` (`Is`
+//!   forces `b_ptr = a_ptr` — equality asserted by the bus); consume one relation tuple wiring
+//!   those ptrs to the witnessed result `ptr`; provide `Binding(h, Uint, ptr, bound_ptr)` — or
+//!   `Binding(h, True)` for `Is`, the predicate folding uint values into the spine. All value
+//!   soundness lives at the relation chiplets + store; this row is pure ptr wiring. Ptrs never
+//!   enter the hash — the result is nondeterministic, memoized on the binding.
 //! - **ZERO_HASH leaf** (`is_zero = 1`): no unhash, no consumes; `h = 0` pinned; provides
 //!   `Binding(0, True)` with multiplicity `out_mult`. The `True` base case / AND identity, usable
 //!   as any node's child.
@@ -67,6 +64,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_precompiles::UintPrecompile;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -82,7 +80,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        nodes::{CURRENT_VERSION, EcOpId, NodeTag, UintOpId},
+        nodes::{EcOpId, NodeTag, UintOpId},
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
@@ -98,7 +96,7 @@ use crate::{
 // - Hashes (12): lhs[4], rhs[4], h[4].
 // - Node-family and op flags.
 // - Reused pointer/context cells for uint leaves/ops, EC points, and MSM runs.
-// - EcMsm threaded capacity cells.
+// - Row-kind-aware cap parameter cells and EcMsm threaded capacity cells.
 
 /// Sticky-downward activity flag. Gates the consume / unhash mults; the
 /// `out_mult`-pin keeps padding-row provides at zero.
@@ -189,26 +187,24 @@ pub const COL_IS_IS: usize = COL_IS_MUL + 1;
 // Modifiers + reused data columns. The ptr columns already double
 // across modes (ptr = leaf uint / op result / created-or-result point;
 // a_ptr / b_ptr = operands / coords; bound_ptr = modulus; param_a =
-// cap slot 1; group_ptr / curve_b = EC handles).
+// cap slot 1; cap_param_b = row-kind-aware cap slot 2; group_ptr / curve_b = EC handles).
 // ================================================================
 
-/// Pin flag for a uint leaf: 1 = pinned (anchored at its store address),
-/// 0 = transient. Enters the hash only through `pin_ptr` (= `is_pinned·
-/// ptr`); locally it gates the True / Uint binding fork.
+/// Pin-claim flag for a uint leaf row: 1 = bootstrap pin claim, 0 = runtime
+/// VM value row. Locally gates the True / Uint binding fork.
 pub const COL_IS_PINNED: usize = COL_IS_IS + 1;
 /// The pointer the row's binding carries: the stored uint on uint-leaf
 /// rows, the witnessed *result* on value-op rows, the created / result
 /// point on EC rows (0 on `Is` — binds `True`, names no result).
 pub const COL_PTR: usize = COL_IS_PINNED + 1;
 /// The uint's modulus pointer — carried on every `Uint`-typed bus message
-/// (uint-leaf and uint-op rows; 0 otherwise). Cap-committed only on leaf
-/// rows (via `param_a`): op rows inherit it transitively through the
-/// bindings' shared `bound_ptr` thread.
+/// (uint-leaf and uint-op rows; 0 otherwise). VM uint value caps also commit it in cap slot 2.
 pub const COL_BOUND_PTR: usize = COL_PTR + 1;
-/// The cap-committed pin address: `is_pinned·ptr`, materialized to keep
-/// the cap degree-1. Zero on transient leaves and non-leaf rows; equal to
-/// `ptr` on pinned leaves.
+/// Physical column for the row-kind-aware uint cap slot 2.
 pub const COL_PIN_PTR: usize = COL_BOUND_PTR + 1;
+/// Semantic alias for [`COL_PIN_PTR`]. VM uint value rows put `bound_ptr` here;
+/// bootstrap pin rows put `pin_ptr = ptr` here.
+pub const COL_CAP_PARAM_B: usize = COL_PIN_PTR;
 /// The lhs operand ptr — uint-op / ec-op lhs, or the x-coord on EcCreate
 /// (0 elsewhere). On `Is` rows `b_ptr = a_ptr` *is* the equality.
 pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
@@ -216,8 +212,8 @@ pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
 /// (0 on non-op rows).
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
 /// The cap's `param_a` slot, materialized to keep the cap degree-1:
-/// `bound_ptr` on uint leaves, the op id on op rows, the curve's `a_ptr`
-/// on EcCreate, 0 elsewhere.
+/// `bound_ptr` on bootstrap pin rows, the op id on op rows, the curve's `a_ptr`
+/// on EcCreate, 0 elsewhere. VM uint value rows use `VALUE_OP_ID = 0`.
 pub const COL_PARAM_A: usize = COL_B_PTR + 1;
 /// Witnessed EC-store group handle, fed to the `EcGroup` / `EcPoint` /
 /// `EcGroupAdd` consumes and pinned by their provides. Nonzero only on
@@ -260,7 +256,7 @@ pub const COL_MSM_IDX: usize = COL_IS_MSM_LAST + 1;
 /// value to — see the run-constancy constraints below.
 pub const COL_MSM_EXPR: usize = COL_MSM_IDX + 1;
 /// First felt of the threaded capacity `stateᵢ` fed to this absorb's
-/// perm. The first row's = the IV `(EcMsm, group_ptr, 0, version)`; each
+/// perm. The first row's = the IV `(EcMsm, group_ptr, 0, 0)`; each
 /// later row's = the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
 /// only cross-row hash link. Pinned 0 off absorb rows; the Poseidon2 cap
 /// lookup for EcMsm rows is supplied by the dynamic-cap aux column.
@@ -483,7 +479,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // is_pinned is a leaf-only flag; ptr carries a binding ptr only on
         // uint-leaf / result-op / Ec-create / Ec-pai rows; bound_ptr only
         // where a Uint-typed message reads it (leaf / uint-op / create) —
-        // zero elsewhere, so an AND node's cap stays (Transcript, 0, 0, V).
+        // zero elsewhere, so an AND node's cap stays [1, 0, 0, 0].
         let not_uint_leaf: AB::Expr = AB::Expr::ONE - is_uint_leaf.clone();
         let is_pinned: AB::Expr = local[COL_IS_PINNED].into();
         let ptr: AB::Expr = local[COL_PTR].into();
@@ -503,17 +499,15 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // bound_ptr also carries the scalar bound on every EcMsm absorb row
         // (the sᵢ `Uint` binding consume).
         builder.assert_zero(
-            (not_uint_leaf.clone() - is_uint_op.clone() - is_create.clone() - is_ec_msm.clone())
+            (not_uint_leaf - is_uint_op.clone() - is_create.clone() - is_ec_msm.clone())
                 * bound_ptr.clone(),
         );
-        // pin_ptr = is_pinned·ptr, materialized (a deg-2 cap component would
-        // push the perm column past constraint deg 5 ⇒ lqd 3): zero unless
-        // pinned — covering transient / AND / zero / op / padding rows — and
-        // equal to `ptr` when pinned, so the cap-committed address is the
-        // address the `UintVal` consume dereferences.
-        let pin_ptr: AB::Expr = local[COL_PIN_PTR].into();
-        builder.assert_zero((AB::Expr::ONE - is_pinned.clone()) * pin_ptr.clone());
-        builder.assert_zero(is_pinned * (pin_ptr - ptr));
+        // Materialize cap slot 2 without a deg-2 Poseidon2 cap component:
+        // VM uint value rows use `bound_ptr`; bootstrap pin rows use `ptr`.
+        let cap_param_b: AB::Expr = local[COL_CAP_PARAM_B].into();
+        let expected_cap_param_b =
+            is_uint_leaf * bound_ptr.clone() + is_pinned.clone() * (ptr - bound_ptr.clone());
+        builder.assert_zero(cap_param_b - expected_cap_param_b);
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
         // Ec create. On `Is` (either family) b_ptr = a_ptr *is* the equality.
@@ -530,12 +524,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         );
         builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
 
-        // param_a (the cap's second slot), materialized like pin_ptr:
-        // bound_ptr on uint-leaf rows — keeping the leaf cap byte-identical
-        // to the pre-op format — and the op id on op rows; 0 on AND / zero /
-        // padding rows. Ids diverge per family (uint Is=4, ec Is=3), so each
-        // family's id-weighted op sum is gated by its family bit (degree-2,
-        // absorbed by the materialized column).
+        // Materialize cap slot 1: bootstrap pin rows use `bound_ptr`, VM uint
+        // value rows use `VALUE_OP_ID = 0`, and op rows use their family op id.
         let param_a: AB::Expr = local[COL_PARAM_A].into();
         let uint_op_id: AB::Expr = is_add.clone()
             + is_sub.clone() * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
@@ -544,9 +534,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let ec_op_id: AB::Expr = is_add
             + is_sub * AB::Expr::from(Felt::from(EcOpId::Sub as u8))
             + is_is.clone() * AB::Expr::from(Felt::from(EcOpId::Is as u8));
-        let tag_param = is_uint_leaf.clone() * bound_ptr.clone()
-            + is_uint_op.clone() * uint_op_id
-            + is_ec_op.clone() * ec_op_id;
+        let tag_param =
+            is_pinned * bound_ptr + is_uint_op * uint_op_id + is_ec_op.clone() * ec_op_id;
         builder.assert_zero((AB::Expr::ONE - is_create.clone()) * (param_a - tag_param));
 
         // group_ptr: the witnessed EC-store handle, nonzero only on Ec
@@ -572,7 +561,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // create rows' EcGroup consume, so zero off create rows. Witnessed,
         // not cap-committed — pinned to the group's scalar bound by that
         // consume's provide (like group_ptr), so a wrong value can't balance.
-        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * sbound_ptr);
+        builder.assert_zero((AB::Expr::ONE - is_create) * sbound_ptr);
 
         // ---- EcMsm capacity threading (the chip's first cross-row hash
         //      link). The absorb cap cells hold `stateᵢ`: 0 off absorb
@@ -595,13 +584,13 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let continues = is_ec_msm.clone() * (AB::Expr::ONE - is_msm_last.clone());
         // The next row *starts* a run iff it is an absorb and this row is not
         // a continuation source (non-absorb, or the prior run's last). Then
-        // its cap = the IV `(EcMsm, group_next, 0, version)`.
+        // its cap = the IV `(EcMsm, group_next, 0, 0)`.
         let starts = is_ec_msm_next * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last);
         let iv: [AB::Expr; NUM_HASH] = [
             AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
             group_next,
             AB::Expr::ZERO,
-            AB::Expr::from(Felt::from(CURRENT_VERSION)),
+            AB::Expr::ZERO,
         ];
         for i in 0..NUM_HASH {
             builder
@@ -619,7 +608,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
             group_ptr,
             AB::Expr::ZERO,
-            AB::Expr::from(Felt::from(CURRENT_VERSION)),
+            AB::Expr::ZERO,
         ];
         for i in 0..NUM_HASH {
             builder.when_first_row().assert_zero(
@@ -707,7 +696,7 @@ where
         let out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let ptr: LB::Expr = local[COL_PTR].into();
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        let pin_ptr: LB::Expr = local[COL_PIN_PTR].into();
+        let cap_param_b: LB::Expr = local[COL_CAP_PARAM_B].into();
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
         let param_a: LB::Expr = local[COL_PARAM_A].into();
@@ -746,7 +735,7 @@ where
         // provide (AND ∪ ZERO ∪ Is — either family, col 0) and the Uint
         // provide (uint-leaf ∪ uint value op, col 2); `out_mult = 0` on the
         // root and padding ⇒ provide nothing.
-        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult.clone();
+        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
         let and_provide: LB::Expr =
             neg_out_mult.clone() * (is_and.clone() + is_zero + is_is.clone());
         let uint_gate: LB::Expr = is_uint_leaf.clone();
@@ -756,34 +745,30 @@ where
         // leaf or a value op binds Uint. value_tag / ptr / bound_ptr collapse
         // to the True form (all 0) when is_pinned = 1 — and is_pinned is 0 on
         // op rows, so their fields pass through.
-        let transient: LB::Expr = LB::Expr::ONE - is_pinned;
+        let transient: LB::Expr = LB::Expr::ONE - is_pinned.clone();
 
-        // Node-perm capacity, every slot degree-1. AND rows use the VM-owned
-        // deferred `AND` tag. Uint leaf: (UintLeaf, bound_ptr, pin_ptr, V) —
-        // the modulus pointer and, for a pinned leaf, its store address are
-        // committed (pin_ptr = is_pinned·ptr; 0 marks a transient, whose hash
-        // stays content-addressed). Uint op: (UintOp, op_id, 0, V) — only the
-        // op discriminant: ptrs are bus-level witness data, and the modulus is
-        // threaded by the lookups, not the cap. EcMsm uses its threaded
-        // `absorb_cap`, consumed in aux col 7.
+        // Node-perm capacity, every slot degree-1. Runtime uint values use
+        // `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`; uint ops use
+        // `[UintPrecompile::id(), op_id, 0, 0]`; bootstrap pins use
+        // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
         let and_cap = Tag::AND.as_word();
-        let static_node = is_and.clone()
+        let static_node = is_and
             + is_uint_leaf.clone()
             + is_uint_op.clone()
             + is_create.clone()
             + is_ec_op.clone();
-        let versioned_static_node =
-            is_uint_leaf.clone() + is_uint_op.clone() + is_create.clone() + is_ec_op.clone();
+        let uint_precompile_id = LB::Expr::from(UintPrecompile::id());
+        let pin_claim_tag =
+            LB::Expr::from(Felt::from(crate::transcript::nodes::UINT_PIN_CLAIM_TAG));
         let cap = [
             and_gate.clone() * LB::Expr::from(and_cap[0])
-                + is_uint_leaf.clone() * LB::Expr::from(Felt::from(NodeTag::UintLeaf as u8))
-                + op_lhs_gate.clone() * LB::Expr::from(Felt::from(NodeTag::UintOp as u8))
+                + (is_uint_leaf + op_lhs_gate.clone()) * uint_precompile_id.clone()
+                + is_pinned * (pin_claim_tag - uint_precompile_id)
                 + is_create.clone() * LB::Expr::from(Felt::from(NodeTag::EcCreate as u8))
                 + is_ec_op.clone() * LB::Expr::from(Felt::from(NodeTag::EcBinOp as u8)),
             and_gate.clone() * LB::Expr::from(and_cap[1]) + param_a,
-            and_gate.clone() * LB::Expr::from(and_cap[2]) + pin_ptr + curve_b.clone(),
-            and_gate.clone() * LB::Expr::from(and_cap[3])
-                + versioned_static_node * LB::Expr::from(Felt::from(CURRENT_VERSION)),
+            and_gate.clone() * LB::Expr::from(and_cap[2]) + cap_param_b + curve_b,
+            LB::Expr::ZERO,
         ];
 
         // Per-insert mult degrees: the one-hot gates (perm `node`, AND / op
