@@ -1,4 +1,4 @@
-//! Decoder requests to the chiplets bus ([`BusId::Chiplets`]).
+//! Chiplet bus requests emitted by decoder rows ([`BusId::Chiplets`]).
 //!
 //! These interactions remove the decoder-side request for work handled by the hasher, bitwise,
 //! memory, ACE init, and kernel ROM chiplets.
@@ -21,13 +21,13 @@ use crate::{
     },
 };
 
-/// Upper bound on fractions this emitter pushes into its column per row.
+/// Maximum number of chiplet bus requests emitted by one decoder row.
 ///
-/// The heaviest branch is MRUPDATE, which removes four hasher requests:
-/// `merkle_old_init`, old `return_hash`, `merkle_new_init`, and new `return_hash`.
+/// MRUPDATE emits four hasher requests: `merkle_old_init`, old `return_hash`,
+/// `merkle_new_init`, and new `return_hash`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit decoder requests to the chiplets bus.
+/// Emit the chiplet's bus requests from decoder rows.
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -60,8 +60,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
-    // Shared (ctx, addr, clk) triple for MLOAD / MSTORE / MLOADW / MSTOREW: all read from
-    // `s0` with the current system context and clock.
+    // Address tuple used by MLOAD, MSTORE, MLOADW, and MSTOREW.
     let mem_ctx: LB::Expr = sys_ctx.into();
     let mem_clk: LB::Expr = clk.into();
     let mem_addr: LB::Expr = s0.into();
@@ -71,9 +70,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             col.group(
                 "decoder_requests",
                 |g| {
-                    // --- Hasher control-block requests. CALL/SYSCALL live in batches below
-                    // because they also issue chiplet requests. SPAN uses domain 0 in the
-                    // control-block capacity slot.
+                    // --- Hasher control-block requests.
+                    // Each remove cancels the decoder request for the corresponding control
+                    // block. CALL and SYSCALL are batches because they also request memory or
+                    // kernel-ROM work. SPAN uses domain 0 in the control-block capacity slot.
                     let mut control_remove = |name, flag, opcode: u8| {
                         g.remove(
                             name,
