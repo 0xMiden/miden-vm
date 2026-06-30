@@ -164,6 +164,27 @@ fn test_assert_sorted_words_rejects_invalid_range() {
 }
 
 #[test]
+fn test_assert_sorted_words_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
+}
+
+#[test]
 fn test_assert_sorted_words_rejects_misaligned_range() {
     let source: String = format!(
         "
@@ -407,6 +428,27 @@ fn test_assert_sorted_keys_rejects_invalid_tuple_range() {
 }
 
 #[test]
+fn test_assert_sorted_keys_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
+}
+
+#[test]
 fn test_assert_sorted_half_keys_accepts_sorted_key_value_array() {
     let source: String = format!(
         "
@@ -483,6 +525,27 @@ fn test_assert_sorted_half_keys_rejects_invalid_tuple_range() {
 
     let program = build_test!(source, &[]);
     program.execute().expect_err("key-value range must be double-word aligned");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
 }
 
 #[test]
