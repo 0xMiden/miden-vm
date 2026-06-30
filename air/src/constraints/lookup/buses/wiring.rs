@@ -21,16 +21,6 @@
 //! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the batch's contribution to
 //! `(deg(U_g), deg(V_g)) = (7, 8)`.
 //!
-//! Algebraic equivalence:
-//!
-//! ```text
-//!   is_read · (m_0/wire_0 + m_1/wire_1)
-//! + is_eval · (m_0/wire_0 − 1/wire_1 − 1/wire_2)
-//!   = ace_flag · [ m_0/wire_0
-//!                + ((1 − sblock)·m_1 − sblock)/wire_1
-//!                + (−sblock)/wire_2 ]
-//! ```
-//!
 //! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
 //! slot — under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
