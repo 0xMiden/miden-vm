@@ -9,7 +9,15 @@ use alloc::{string::ToString, vec, vec::Vec};
 
 use ::serde::Serialize;
 use miden_air::{MidenMultiAir, ProverStatement, Statement};
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable,
+        DeserializationError as SerdeDeserializationError, Serializable, SliceReader,
+    },
+    utils::RowMajorMatrix,
+};
 use miden_crypto::stark::{
     ProverInstance, StarkConfig,
     lmcs::Lmcs,
@@ -36,6 +44,12 @@ pub use miden_processor::{
 pub use proving_options::ProvingOptions;
 
 /// Inputs required to prove from pre-executed trace data.
+///
+/// Its binary form is a VM-owned trusted remote proving input containing trace replay data and
+/// proof-generation options. Deserialization checks malformed structure and bounded allocation, but
+/// sparse MAST hashes are accepted as replay data.
+///
+/// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
 #[derive(Debug)]
 pub struct TraceProvingInputs {
     trace_inputs: TraceBuildInputs,
@@ -51,6 +65,57 @@ impl TraceProvingInputs {
     /// Consumes this bundle and returns its trace inputs and proof-generation options.
     pub fn into_parts(self) -> (TraceBuildInputs, ProvingOptions) {
         (self.trace_inputs, self.options)
+    }
+
+    /// Deserializes trusted remote proving inputs using the supplied byte budget.
+    ///
+    /// The budget bounds parsing. It does not validate sparse MAST hashes from untrusted senders.
+    /// See <https://github.com/0xMiden/miden-vm/issues/3303>.
+    pub fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, SerdeDeserializationError> {
+        if budget < bytes.len() {
+            return Err(SerdeDeserializationError::InvalidValue(
+                "TraceProvingInputs byte budget is smaller than payload length".into(),
+            ));
+        }
+        let allocation_budget = budget.min(bytes.len().saturating_mul(4));
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), allocation_budget);
+        let inputs = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(SerdeDeserializationError::InvalidValue(
+                "TraceProvingInputs payload has trailing bytes".into(),
+            ));
+        }
+        Ok(inputs)
+    }
+}
+
+impl Serializable for TraceProvingInputs {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.trace_inputs.write_into(target);
+        self.options.write_into(target);
+    }
+}
+
+impl Deserializable for TraceProvingInputs {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, SerdeDeserializationError> {
+        Ok(Self {
+            trace_inputs: TraceBuildInputs::read_from(source)?,
+            options: ProvingOptions::read_from(source)?,
+        })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, SerdeDeserializationError> {
+        TraceProvingInputs::read_from_bytes_with_budget(bytes, bytes.len().saturating_mul(4))
+    }
+
+    fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, SerdeDeserializationError> {
+        TraceProvingInputs::read_from_bytes_with_budget(bytes, budget)
     }
 }
 

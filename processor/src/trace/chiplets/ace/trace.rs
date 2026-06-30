@@ -8,6 +8,7 @@ use miden_air::{
 use miden_core::{
     Felt, Word,
     field::{BasedVectorSpace, QuadFelt},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 use super::{
@@ -18,7 +19,11 @@ use crate::{ContextId, errors::AceError};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
 /// pointer of the word that was loaded.
-#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReadNode {
     ptr: Felt,
     id_0: Felt,
@@ -30,7 +35,11 @@ struct ReadNode {
 /// One row of the ACE chiplet trace in `EVAL` mode: a single arithmetic gate `(id_0, v_0)` with
 /// two inputs `(id_1, v_1)` (left) and `(id_2, v_2)` (right), the instruction pointer that
 /// produced it, and the gate's `eval_op` selector.
-#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EvalNode {
     ptr: Felt,
     eval_op: Felt,
@@ -46,7 +55,11 @@ struct EvalNode {
 /// The output value is checked to be equal to 0.
 ///
 /// The set of nodes is used to fill the ACE chiplet trace.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
@@ -243,7 +256,11 @@ fn quad_to_expr(v: QuadFelt) -> QuadFeltExpr<Felt> {
 /// gate, to "receive" the values of the input wires from the bus and to "send" the value of
 /// the value of the output wire back with multiplicity equal to the fan-out of the respective gate.
 /// Note that the messages include extra data in order to avoid collisions.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WireBus {
     // Circuit ID as Felt of the next wire to be inserted
     id_next: Felt,
@@ -287,5 +304,397 @@ impl WireBus {
     /// Return true if the expected number of wires have been inserted.
     fn is_finalized(&self) -> bool {
         self.wires.len() == self.num_wires as usize
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
+    u32::from(row).write_into(target);
+}
+
+fn read_row_index<R: ByteReader>(source: &mut R) -> Result<RowIndex, DeserializationError> {
+    Ok(RowIndex::from(u32::read_from(source)?))
+}
+
+fn write_quad_felt<W: ByteWriter>(value: QuadFelt, target: &mut W) {
+    let coefficients: &[Felt] = value.as_basis_coefficients_slice();
+    coefficients[0].write_into(target);
+    coefficients[1].write_into(target);
+}
+
+fn read_quad_felt<R: ByteReader>(source: &mut R) -> Result<QuadFelt, DeserializationError> {
+    let c0 = Felt::read_from(source)?;
+    let c1 = Felt::read_from(source)?;
+    Ok(QuadFelt::from_basis_coefficients_fn(|i| [c0, c1][i]))
+}
+
+fn quad_felt_min_serialized_size() -> usize {
+    Felt::min_serialized_size() * 2
+}
+
+impl Serializable for ReadNode {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ptr.write_into(target);
+        self.id_0.write_into(target);
+        write_quad_felt(self.v_0, target);
+        self.id_1.write_into(target);
+        write_quad_felt(self.v_1, target);
+    }
+}
+
+impl Deserializable for ReadNode {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            ptr: Felt::read_from(source)?,
+            id_0: Felt::read_from(source)?,
+            v_0: read_quad_felt(source)?,
+            id_1: Felt::read_from(source)?,
+            v_1: read_quad_felt(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        Felt::min_serialized_size() * 3 + quad_felt_min_serialized_size() * 2
+    }
+}
+
+impl Serializable for EvalNode {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ptr.write_into(target);
+        self.eval_op.write_into(target);
+        self.id_0.write_into(target);
+        write_quad_felt(self.v_0, target);
+        self.id_1.write_into(target);
+        write_quad_felt(self.v_1, target);
+        self.id_2.write_into(target);
+        write_quad_felt(self.v_2, target);
+    }
+}
+
+impl Deserializable for EvalNode {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            ptr: Felt::read_from(source)?,
+            eval_op: Felt::read_from(source)?,
+            id_0: Felt::read_from(source)?,
+            v_0: read_quad_felt(source)?,
+            id_1: Felt::read_from(source)?,
+            v_1: read_quad_felt(source)?,
+            id_2: Felt::read_from(source)?,
+            v_2: read_quad_felt(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        Felt::min_serialized_size() * 5 + quad_felt_min_serialized_size() * 3
+    }
+}
+
+impl Serializable for WireBus {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.id_next.write_into(target);
+        self.wires.len().write_into(target);
+        for (value, multiplicity) in &self.wires {
+            write_quad_felt(*value, target);
+            multiplicity.write_into(target);
+        }
+        self.num_wires.write_into(target);
+    }
+}
+
+impl Deserializable for WireBus {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let id_next = Felt::read_from(source)?;
+        let wire_count = usize::read_from(source)?;
+        let max_count =
+            source.max_alloc(Felt::min_serialized_size() * 2 + u32::min_serialized_size());
+        if wire_count > max_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ACE wire count {wire_count} exceeds reader allocation bound {max_count}"
+            )));
+        }
+
+        let mut wires = Vec::with_capacity(wire_count);
+        for _ in 0..wire_count {
+            wires.push((read_quad_felt(source)?, u32::read_from(source)?));
+        }
+        let num_wires = u32::read_from(source)?;
+        if num_wires == 0 {
+            return Err(DeserializationError::InvalidValue(
+                "ACE wire bus must contain at least one wire".into(),
+            ));
+        }
+        if num_wires > MAX_NUM_ACE_WIRES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ACE declared wire count {num_wires} exceeds maximum {MAX_NUM_ACE_WIRES}"
+            )));
+        }
+        if wire_count != num_wires as usize {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ACE wire count {wire_count} does not match declared wire count {num_wires}"
+            )));
+        }
+        Ok(Self { id_next, wires, num_wires })
+    }
+
+    fn min_serialized_size() -> usize {
+        Felt::min_serialized_size() + Vec::<u8>::min_serialized_size() + u32::min_serialized_size()
+    }
+}
+
+impl Serializable for CircuitEvaluation {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ctx.write_into(target);
+        write_row_index(self.clk, target);
+        self.wire_bus.write_into(target);
+        self.read_nodes.write_into(target);
+        self.eval_nodes.write_into(target);
+    }
+}
+
+impl Deserializable for CircuitEvaluation {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let evaluation = Self {
+            ctx: ContextId::read_from(source)?,
+            clk: read_row_index(source)?,
+            wire_bus: WireBus::read_from(source)?,
+            read_nodes: Vec::<ReadNode>::read_from(source)?,
+            eval_nodes: Vec::<EvalNode>::read_from(source)?,
+        };
+        evaluation.validate_wire_count()?;
+        Ok(evaluation)
+    }
+
+    fn min_serialized_size() -> usize {
+        ContextId::min_serialized_size()
+            + u32::min_serialized_size()
+            + WireBus::min_serialized_size()
+            + Vec::<ReadNode>::min_serialized_size()
+            + Vec::<EvalNode>::min_serialized_size()
+    }
+}
+
+impl CircuitEvaluation {
+    fn validate_wire_count(&self) -> Result<(), DeserializationError> {
+        if self.eval_nodes.is_empty() {
+            return Err(DeserializationError::InvalidValue(
+                "ACE circuit evaluation must contain at least one eval node".into(),
+            ));
+        }
+        let read_wires = self.read_nodes.len().checked_mul(2).ok_or_else(|| {
+            DeserializationError::InvalidValue("ACE read-node wire count overflow".into())
+        })?;
+        let expected_wires = read_wires.checked_add(self.eval_nodes.len()).ok_or_else(|| {
+            DeserializationError::InvalidValue("ACE total wire count overflow".into())
+        })?;
+
+        if expected_wires == 0 {
+            return Err(DeserializationError::InvalidValue(
+                "ACE circuit evaluation must contain at least one wire".into(),
+            ));
+        }
+        if expected_wires > MAX_NUM_ACE_WIRES as usize {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ACE circuit evaluation wire count {expected_wires} exceeds maximum {MAX_NUM_ACE_WIRES}"
+            )));
+        }
+        if self.wire_bus.num_wires as usize != expected_wires {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ACE wire bus count {} does not match read/eval node wire count {expected_wires}",
+                self.wire_bus.num_wires
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::{collection, prelude::*};
+
+    use super::*;
+
+    const MAX_TEST_NODES: usize = 8;
+
+    fn arb_felt() -> impl Strategy<Value = Felt> {
+        any::<u32>().prop_map(Felt::from_u32)
+    }
+
+    fn arb_quad_felt() -> impl Strategy<Value = QuadFelt> {
+        (arb_felt(), arb_felt()).prop_map(|(c0, c1)| QuadFelt::new([c0, c1]))
+    }
+
+    impl Arbitrary for ReadNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_felt(), arb_felt(), arb_quad_felt(), arb_felt(), arb_quad_felt())
+                .prop_map(|(ptr, id_0, v_0, id_1, v_1)| Self { ptr, id_0, v_0, id_1, v_1 })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for EvalNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_felt(),
+                arb_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+            )
+                .prop_map(|(ptr, eval_op, id_0, v_0, id_1, v_1, id_2, v_2)| Self {
+                    ptr,
+                    eval_op,
+                    id_0,
+                    v_0,
+                    id_1,
+                    v_1,
+                    id_2,
+                    v_2,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for WireBus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (1usize..=MAX_TEST_NODES)
+                .prop_flat_map(|wire_count| {
+                    (
+                        arb_felt(),
+                        collection::vec((arb_quad_felt(), any::<u32>()), wire_count),
+                        Just(wire_count as u32),
+                    )
+                })
+                .prop_map(|(id_next, wires, num_wires)| Self { id_next, wires, num_wires })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CircuitEvaluation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (0usize..=3, 1usize..=MAX_TEST_NODES)
+                .prop_filter(
+                    "ACE test circuit must fit the wire limit",
+                    |(read_count, eval_count)| {
+                        read_count.saturating_mul(2).saturating_add(*eval_count)
+                            <= MAX_NUM_ACE_WIRES as usize
+                    },
+                )
+                .prop_flat_map(|(read_count, eval_count)| {
+                    let wire_count = read_count * 2 + eval_count;
+                    (
+                        any::<ContextId>(),
+                        any::<u32>().prop_map(RowIndex::from),
+                        collection::vec(any::<ReadNode>(), read_count),
+                        collection::vec(any::<EvalNode>(), eval_count),
+                        collection::vec((arb_quad_felt(), any::<u32>()), wire_count),
+                        Just(wire_count as u32),
+                    )
+                })
+                .prop_map(|(ctx, clk, read_nodes, eval_nodes, wires, num_wires)| Self {
+                    ctx,
+                    clk,
+                    wire_bus: WireBus {
+                        id_next: Felt::from_u32(num_wires),
+                        wires,
+                        num_wires,
+                    },
+                    read_nodes,
+                    eval_nodes,
+                })
+                .boxed()
+        }
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use alloc::vec;
+
+    use super::*;
+
+    fn sample_read_node(value: QuadFelt) -> ReadNode {
+        ReadNode {
+            ptr: Felt::ZERO,
+            id_0: Felt::ZERO,
+            v_0: value,
+            id_1: Felt::ONE,
+            v_1: value,
+        }
+    }
+
+    fn sample_eval_node(value: QuadFelt) -> EvalNode {
+        EvalNode {
+            ptr: Felt::ZERO,
+            eval_op: Felt::ZERO,
+            id_0: Felt::ZERO,
+            v_0: value,
+            id_1: Felt::ZERO,
+            v_1: value,
+            id_2: Felt::ONE,
+            v_2: value,
+        }
+    }
+
+    #[test]
+    fn circuit_evaluation_read_rejects_mismatched_wire_bus_count() {
+        let value = QuadFelt::new([Felt::ONE, Felt::ZERO]);
+        let evaluation = CircuitEvaluation {
+            ctx: ContextId::from(0),
+            clk: RowIndex::from(0_u32),
+            wire_bus: WireBus {
+                id_next: Felt::ZERO,
+                wires: vec![(value, 0), (value, 0)],
+                num_wires: 2,
+            },
+            read_nodes: vec![sample_read_node(value)],
+            eval_nodes: vec![sample_eval_node(value)],
+        };
+
+        let err = CircuitEvaluation::read_from_bytes(&evaluation.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid ACE wire count error");
+        };
+        assert!(message.contains("does not match read/eval node wire count"));
+    }
+
+    #[test]
+    fn circuit_evaluation_read_rejects_empty_eval_section() {
+        let value = QuadFelt::new([Felt::ONE, Felt::ZERO]);
+        let evaluation = CircuitEvaluation {
+            ctx: ContextId::from(0),
+            clk: RowIndex::from(0_u32),
+            wire_bus: WireBus {
+                id_next: Felt::ZERO,
+                wires: vec![(value, 0), (value, 0)],
+                num_wires: 2,
+            },
+            read_nodes: vec![sample_read_node(value)],
+            eval_nodes: Vec::new(),
+        };
+
+        let err = CircuitEvaluation::read_from_bytes(&evaluation.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid ACE eval section error");
+        };
+        assert!(message.contains("at least one eval node"));
     }
 }

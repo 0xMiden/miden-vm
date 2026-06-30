@@ -31,6 +31,8 @@ pub mod field {
 }
 
 pub mod serde {
+    use alloc::collections::VecDeque;
+
     pub use miden_crypto::utils::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -72,6 +74,53 @@ pub mod serde {
             ),
             err => err,
         })
+    }
+
+    /// Serializable view over a [`VecDeque`].
+    ///
+    /// This uses the same wire shape as `Vec<T>`: a length prefix followed by items in iteration
+    /// order.
+    pub struct SerializableVecDeque<'a, T>(pub &'a VecDeque<T>);
+
+    impl<T: Serializable> Serializable for SerializableVecDeque<'_, T> {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            target.write_usize(self.0.len());
+            for item in self.0 {
+                item.write_into(target);
+            }
+        }
+    }
+
+    /// Reads a [`VecDeque`] encoded by [`SerializableVecDeque`].
+    pub fn read_vec_deque<T: Deserializable, R: ByteReader>(
+        source: &mut R,
+    ) -> Result<VecDeque<T>, DeserializationError> {
+        let len = read_bounded_len(source, "VecDeque", T::min_serialized_size())?;
+        let mut values = VecDeque::with_capacity(len);
+        for _ in 0..len {
+            values.push_back(T::read_from(source)?);
+        }
+        Ok(values)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use alloc::{collections::VecDeque, vec::Vec};
+
+        use super::{Deserializable, Serializable, SerializableVecDeque, read_vec_deque};
+
+        #[test]
+        fn vec_deque_round_trip_uses_vec_shape() {
+            let values = VecDeque::from([1u32, 2, 3]);
+            let mut bytes = Vec::new();
+            SerializableVecDeque(&values).write_into(&mut bytes);
+
+            let restored = read_vec_deque(&mut super::SliceReader::new(&bytes)).unwrap();
+            assert_eq!(values, restored);
+
+            let vec = Vec::<u32>::read_from_bytes(&bytes).unwrap();
+            assert_eq!(vec, [1, 2, 3]);
+        }
     }
 }
 
