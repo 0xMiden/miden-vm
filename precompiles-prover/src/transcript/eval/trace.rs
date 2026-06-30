@@ -45,8 +45,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use miden_core::Felt;
-use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{

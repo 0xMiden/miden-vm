@@ -221,12 +221,7 @@ impl EcStoreRequires {
     /// The existing finite point at `(group, x, y)`, if any — the gate
     /// the require layer checks before recording membership, so a
     /// deduped point pays no second MAC trio.
-    pub fn point_by_coords(
-        &self,
-        group: EcGroupPtr,
-        x: UintPtr,
-        y: UintPtr,
-    ) -> Option<EcPointPtr> {
+    pub fn point_by_coords(&self, group: EcGroupPtr, x: UintPtr, y: UintPtr) -> Option<EcPointPtr> {
         self.by_coords.get(&(group, x, y)).copied()
     }
 
@@ -297,9 +292,7 @@ impl EcStoreRequires {
 /// bound-ref analogue), the add relation's `EcGroup` / `EcPoint`
 /// consumes in [`super::add::trace::generate_trace`], run first by the
 /// Session sweep.
-pub fn generate_traces(
-    requires: EcStoreRequires,
-) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     (groups_trace(&requires), points_trace(&requires))
 }
 

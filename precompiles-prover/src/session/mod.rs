@@ -35,30 +35,46 @@
 use miden_core::Felt;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::ec::EcStores;
-use crate::ec::add::trace::generate_trace as ec_add_trace;
-use crate::ec::msm::require;
-use crate::ec::msm::trace::EcExprPtr;
-use crate::ec::msm::trace::{EcMsmRequires, generate_trace as msm_trace};
-use crate::ec::trace::generate_traces as ec_store_traces;
-use crate::hash::chunk::trace::{ChunkRequires, generate_trace as chunk_trace};
-use crate::hash::keccak::digest::KeccakDigest;
-use crate::hash::keccak::node::trace::{KeccakNodeRequires, generate_trace as keccak_node_trace};
-use crate::hash::keccak::round::{RoundRequires, generate_trace as round_trace};
-use crate::hash::keccak::sponge::trace::{SpongeRequires, generate_trace as sponge_trace};
-use crate::math::{U256, to_limbs32};
-use crate::primitives::bitwise64::{Bitwise64Requires, generate_trace as bw64_trace};
-use crate::primitives::byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace};
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
-use crate::transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace};
-use crate::transcript::nodes::UintOpId;
-use crate::transcript::poseidon2::P2Digest;
-use crate::transcript::poseidon2::trace::{Poseidon2Requires, generate_trace as p2_trace};
-use crate::uint::UintStores;
-use crate::uint::add::trace::generate_trace as uint_add_trace;
-use crate::uint::mul::trace::generate_trace as uint_mul_trace;
-use crate::uint::trace::UintPtr;
-use crate::uint::trace::generate_trace as uint_trace;
+use crate::{
+    ec::{
+        EcStores,
+        add::trace::generate_trace as ec_add_trace,
+        msm::{
+            require,
+            trace::{EcExprPtr, EcMsmRequires, generate_trace as msm_trace},
+        },
+        trace::generate_traces as ec_store_traces,
+    },
+    hash::{
+        chunk::trace::{ChunkRequires, generate_trace as chunk_trace},
+        keccak::{
+            digest::KeccakDigest,
+            node::trace::{KeccakNodeRequires, generate_trace as keccak_node_trace},
+            round::{RoundRequires, generate_trace as round_trace},
+            sponge::trace::{SpongeRequires, generate_trace as sponge_trace},
+        },
+    },
+    math::{U256, to_limbs32},
+    primitives::{
+        bitwise64::{Bitwise64Requires, generate_trace as bw64_trace},
+        byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
+    },
+    transcript::{
+        eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
+        nodes::UintOpId,
+        poseidon2::{
+            P2Digest,
+            trace::{Poseidon2Requires, generate_trace as p2_trace},
+        },
+    },
+    uint::{
+        UintStores,
+        add::trace::generate_trace as uint_add_trace,
+        mul::trace::generate_trace as uint_mul_trace,
+        trace::{UintPtr, generate_trace as uint_trace},
+    },
+};
 
 mod prove;
 pub mod statements;
