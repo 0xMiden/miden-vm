@@ -13,26 +13,24 @@
 
 use miden_core::{Felt, deferred::Tag, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::ec::trace::EcStoreRequires;
-use crate::logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES};
-use crate::math::{U256, from_limbs32};
-
-use crate::transcript::eval::trace::{
-    TranscriptEvalRequires, Truthy, generate_trace, transcript_node_hash,
+use crate::{
+    ec::trace::EcStoreRequires,
+    logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    math::{U256, from_limbs32},
+    transcript::{
+        eval::{
+            COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_PTR,
+            NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES,
+            PUBLIC_ROOT_BEGIN, TranscriptEvalAir,
+            trace::{TranscriptEvalRequires, Truthy, generate_trace, transcript_node_hash},
+        },
+        poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
+    },
+    uint::trace::{UintPtr, UintStoreRequires},
 };
-use crate::transcript::eval::{
-    COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_PTR, NUM_AUX_COLS,
-    NUM_HASH, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES, PUBLIC_ROOT_BEGIN,
-    TranscriptEvalAir,
-};
-use crate::transcript::poseidon2::trace::Poseidon2Requires;
-use crate::transcript::poseidon2::{P2Cap, P2Digest};
-use crate::uint::trace::{UintPtr, UintStoreRequires};
 
 // HELPERS
 // ================================================================================================
@@ -110,7 +108,7 @@ fn uint_leaf_constraints_hold() {
     // one-hot node type + ptr / bound_ptr handling and its σ recurrence; the
     // pinned→True fork + cross-chiplet UintVal / Binding / Poseidon2 balance
     // are the integration test's job.
-    let mut rng = StdRng::seed_from_u64(0x0157_1EAF);
+    let mut rng = StdRng::seed_from_u64(0x0157_1eaf);
     let mut p2 = Poseidon2Requires::new();
     let mut req = TranscriptEvalRequires::new();
 
@@ -252,7 +250,7 @@ fn each_fold_defers_one_perm_seq_id_to_p2() {
 fn zero_leaves_merge_into_one_row() {
     // Two sub-folds, each from its own zero leaf: AND(AND(0, k1), AND(0, k2)).
     // The two zero leaves share one is_zero row at out_mult 2.
-    let mut rng = StdRng::seed_from_u64(0x2E_07);
+    let mut rng = StdRng::seed_from_u64(0x2e_07);
     let mut p2 = Poseidon2Requires::new();
     let mut req = TranscriptEvalRequires::new();
     let k1 = req.issue(random_hash(&mut rng));
@@ -339,13 +337,13 @@ fn constraints_hold_on_larger_tree() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_act() {
-    check_corrupted(0xC0, 1, |main| main.values[COL_ACT] = Felt::from(2u8), |_| {});
+    check_corrupted(0xc0, 1, |main| main.values[COL_ACT] = Felt::from(2u8), |_| {});
 }
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_zero() {
-    check_corrupted(0xC1, 3, |main| main.values[COL_IS_ZERO] = Felt::from(2u8), |_| {});
+    check_corrupted(0xc1, 3, |main| main.values[COL_IS_ZERO] = Felt::from(2u8), |_| {});
 }
 
 #[test]
@@ -353,7 +351,7 @@ fn corruption_non_binary_is_zero() {
 fn corruption_zero_leaf_h_not_zero() {
     // K = 3: ZERO_HASH leaf at row 3. Bumping its h breaks `is_zero·h = 0`.
     check_corrupted(
-        0xC2,
+        0xc2,
         3,
         |main| main.values[3 * NUM_MAIN_COLS + COL_H_BEGIN] += Felt::ONE,
         |_| {},
@@ -364,7 +362,7 @@ fn corruption_zero_leaf_h_not_zero() {
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_first_row_root_pin() {
     // Bump the public root; row 0's h no longer matches it.
-    check_corrupted(0xC3, 3, |_| {}, |root| root.0[0] += Felt::ONE);
+    check_corrupted(0xc3, 3, |_| {}, |root| root.0[0] += Felt::ONE);
 }
 
 #[test]
@@ -372,7 +370,7 @@ fn corruption_first_row_root_pin() {
 fn corruption_empty_root_not_zero() {
     // K = 0: row 0 is a ZERO_HASH leaf (h = 0), so a non-zero public root
     // fails the first-row pin.
-    check_corrupted(0xC4, 0, |_| {}, |root| root.0[2] = Felt::from(7u8));
+    check_corrupted(0xc4, 0, |_| {}, |root| root.0[2] = Felt::from(7u8));
 }
 
 #[test]
@@ -380,7 +378,7 @@ fn corruption_empty_root_not_zero() {
 fn corruption_out_mult_on_padding() {
     // K = 2: row 3 is padding. Setting its out_mult breaks `(1−act)·out_mult = 0`.
     check_corrupted(
-        0xC5,
+        0xc5,
         2,
         |main| main.values[3 * NUM_MAIN_COLS + COL_OUT_MULT] = Felt::ONE,
         |_| {},
@@ -392,7 +390,7 @@ fn corruption_out_mult_on_padding() {
 fn corruption_act_sticky_down() {
     // K = 2: flip row 0 inactive, leaving row 1 active — the 0→1 transition
     // violates sticky-down.
-    check_corrupted(0xC6, 2, |main| main.values[COL_ACT] = Felt::ZERO, |_| {});
+    check_corrupted(0xc6, 2, |main| main.values[COL_ACT] = Felt::ZERO, |_| {});
 }
 
 #[test]
@@ -403,7 +401,7 @@ fn corruption_pinned_leaf_pin_ptr_mismatch() {
     // must reject. This is the cap-side half of the relocation attack —
     // the bus-side half (an honest trace over a tampered store) is
     // `tests::integration::relocated_modulus_pin_unbalances`.
-    let mut rng = StdRng::seed_from_u64(0xF0_F6_3D);
+    let mut rng = StdRng::seed_from_u64(0xf0_f6_3d);
     let mut p2 = Poseidon2Requires::new();
     let mut req = TranscriptEvalRequires::new();
 
