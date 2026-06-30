@@ -11,8 +11,8 @@
 //! stores the *numerator–denominator pair* `(Nᵢ, Dᵢ)` — the cross-multiplied sum of all
 //! interactions assigned to that column on row `r`. The constraints then check:
 //!
-//! - Fraction columns (i > 0): `Dᵢ · acc[i] - Nᵢ = 0` on transition rows. This binds `acc[i]`
-//!   to `Nᵢ/Dᵢ`, the row's fraction sum for column `i`.
+//! - Fraction columns (i > 0): `Dᵢ · acc[i] - Nᵢ = 0` on transition rows. This binds `acc[i]` to
+//!   `Nᵢ/Dᵢ`, the row's fraction sum for column `i`.
 //!
 //! - **Accumulator** (col 0): the single running sum across the entire trace.
 //!   - `when_first:      acc[0] = 0` — starts at zero.

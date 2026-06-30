@@ -3,19 +3,19 @@
 //!
 //! Combines three tables on a single LogUp column:
 //!
-//! 1. Sibling table (`BusId::SiblingTable`). Merkle update siblings. On hasher controller
-//!    input rows with `s0 = 1, s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
-//!    (old path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects
-//!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
-//!    (two add, two remove).
+//! 1. Sibling table (`BusId::SiblingTable`). Merkle update siblings. On hasher controller input
+//!    rows with `s0 = 1, s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old
+//!    path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which
+//!    half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add,
+//!    two remove).
 //! 2. ACE memory reads (chiplet-responses column). On ACE chiplet rows, the block selector
 //!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
 //!    Both are removed from the chiplets bus.
-//! 3. Memory-side range checks (`BusId::RangeCheck`). On memory chiplet rows, a five-remove
-//!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
-//!    `w0`, `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0,
-//!    2^14)` (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit
-//!    memory address space.
+//! 3. Memory-side range checks (`BusId::RangeCheck`). On memory chiplet rows, a five-remove batch
+//!    consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values `w0`,
+//!    `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0, 2^14)`
+//!    (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit memory
+//!    address space.
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, and
@@ -51,11 +51,10 @@ use crate::{
 /// - Sibling table on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
 ///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
 ///   one of the four is active per row. Max: 1 fraction.
-/// - ACE memory reads on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are
-///   mutually exclusive via `block_sel`. Max: 1 fraction.
+/// - ACE memory reads on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are mutually
+///   exclusive via `block_sel`. Max: 1 fraction.
 /// - Memory-side range checks on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
-///   `d1`, `w0`, `w1`, `4·w1`) is active under the outer batch flag. Max: 5
-///   fractions.
+///   `d1`, `w0`, `w1`, `4·w1`) is active under the outer batch flag. Max: 5 fractions.
 ///
 /// Row-type disjointness means only one set fires per row, so the per-row max is
 /// `max(1, 1, 5) = 5`.

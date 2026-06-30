@@ -28,8 +28,8 @@
 //! ## Shared precompute contexts
 //!
 //! The main-trace and chiplet-trace contexts live next to their respective LookupAirs:
-//! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`]
-//!   instance consumed by the 4 main-trace emitters.
+//! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`] instance
+//!   consumed by the 4 main-trace emitters.
 //! - [`super::chiplet_air::ChipletBusContext`]: two-row window plus the shared
 //!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
 //!

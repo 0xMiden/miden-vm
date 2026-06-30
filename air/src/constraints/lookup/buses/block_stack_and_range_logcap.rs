@@ -13,6 +13,7 @@
 //!     batch.
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
 //!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
+//!
 //! Sibling group:
 //!   - Range-table response: a single insert with runtime multiplicity `range_m`. It lives in its
 //!     own group because it overlaps with every opcode-gated interaction above.

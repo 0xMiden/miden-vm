@@ -32,12 +32,11 @@
 //!   state_out) pair. Routed to `BusId::HasherPermLinkInput`.
 //! - Controller output (`s_01 · is_output`, multiplicity `+1`). Routed to
 //!   `BusId::HasherPermLinkOutput`.
-//! - Permutation row 0 (`s_00 · is_init_ext`, multiplicity `-m`): input boundary of a
-//!   Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the
-//!   cycle by [`crate::constraints::chiplets::permutation`]. Routed to
-//!   `BusId::HasherPermLinkInput`.
-//! - Permutation row 15 (`s_00 · (1 - periodic_sum)`, multiplicity `-m`): output boundary of
-//!   the same cycle. Routed to `BusId::HasherPermLinkOutput`.
+//! - Permutation row 0 (`s_00 · is_init_ext`, multiplicity `-m`): input boundary of a Poseidon2
+//!   cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the cycle by
+//!   [`crate::constraints::chiplets::permutation`]. Routed to `BusId::HasherPermLinkInput`.
+//! - Permutation row 15 (`s_00 · (1 - periodic_sum)`, multiplicity `-m`): output boundary of the
+//!   same cycle. Routed to `BusId::HasherPermLinkOutput`.
 //!
 //! The widest perm-link contribution is `f_ctrl_output` with gate degree 3. It is below
 //! the ACE batch's `(7, 8)`, so the merged group has transition degree `max(1 + 7, 8) = 8`.
@@ -62,12 +61,12 @@ use crate::{
 ///
 /// Single group hosts both buses. The chiplet tri-state makes ACE, hasher-controller, and
 /// hasher-permutation rows pairwise mutually exclusive, so on any given row only one of:
-/// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
-///   when the outer `ace_flag` is active).
+/// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally when
+///   the outer `ace_flag` is active).
 /// - Perm-link on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
 ///   `s0`).
-/// - Perm-link on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the
-///   periodic cycle schedule).
+/// - Perm-link on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the periodic
+///   cycle schedule).
 ///
 /// Per-row max is `max(3, 1, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
