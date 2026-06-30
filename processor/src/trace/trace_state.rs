@@ -1228,6 +1228,20 @@ enum HasherOpSink {
     Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
 }
 
+impl PartialEq for HasherRequestReplay {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.sink, &other.sink) {
+            (HasherOpSink::Buffered(lhs), HasherOpSink::Buffered(rhs)) => lhs == rhs,
+            #[cfg(feature = "std")]
+            (HasherOpSink::Streamed(_), HasherOpSink::Streamed(_)) => true,
+            #[cfg(feature = "std")]
+            _ => false,
+        }
+    }
+}
+
+impl Eq for HasherRequestReplay {}
+
 impl Default for HasherOpSink {
     fn default() -> Self {
         Self::Buffered(VecDeque::new())
@@ -2175,3 +2189,6 @@ mod tests {
         assert!(ops.next().is_none());
     }
 }
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary;

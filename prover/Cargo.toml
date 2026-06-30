@@ -14,6 +14,7 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
+arbitrary = ["dep:proptest"]
 default = ["std"]
 concurrent = [
     "std",
@@ -29,6 +30,7 @@ std = [
     "miden-processor/std",
     "thiserror/std",
 ]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
@@ -39,6 +41,7 @@ miden-processor.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
+proptest = { workspace = true, optional = true }
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
