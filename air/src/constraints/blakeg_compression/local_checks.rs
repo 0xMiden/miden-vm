@@ -178,7 +178,7 @@ where
     let mode: AB::Expr = local[AEAD_XOF_MODE_COL].into();
     let inactive = AB::Expr::ONE - mode.clone();
 
-    builder.assert_zero(mode.clone() * inactive.clone());
+    builder.assert_zero(mode * inactive.clone());
     builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL]));
     builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE_COL]));
 }

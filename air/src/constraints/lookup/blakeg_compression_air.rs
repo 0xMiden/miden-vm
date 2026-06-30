@@ -784,7 +784,7 @@ fn emit_annex1<LB, G>(
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
+    use alloc::vec::Vec;
 
     use super::*;
 

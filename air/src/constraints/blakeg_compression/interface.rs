@@ -153,7 +153,7 @@ pub fn enforce_aead_mode_and_label_constraints<AB>(
     let builder = &mut builder.when(is_iface_in);
     let mode: AB::Expr = local[AEAD_XOF_MODE_COL].into();
     let inactive = AB::Expr::ONE - mode.clone();
-    builder.assert_zero(mode.clone() * inactive.clone());
+    builder.assert_zero(mode * inactive.clone());
     builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL]));
 }
 
