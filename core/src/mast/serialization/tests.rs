@@ -524,10 +524,11 @@ fn test_mast_forest_wire_view_large_counts() {
     let mut forest = MastForest::new();
     let mut roots = Vec::new();
 
-    for _ in 0..300 {
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
-            .unwrap();
+    for value in 0..300 {
+        let block_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(value))])
+                .add_to_forest(&mut forest)
+                .unwrap();
         roots.push(block_id);
     }
 
@@ -694,6 +695,40 @@ fn test_mast_forest_wire_payload_includes_sorted_commitment_inputs() {
     assert_eq!(
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
         forest.commitment()
+    );
+}
+
+#[test]
+fn test_mast_forest_readers_reject_duplicate_dependency_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root_id);
+
+    let duplicate = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let bytes = forest.to_bytes();
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency commitment digest section is not strictly sorted")
+    );
+
+    let result = MastForestWireView::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency commitment digest section is not strictly sorted")
     );
 }
 
@@ -887,6 +922,38 @@ fn sparse_mast_round_trip_preserves_sorted_commitment_inputs() {
     assert!(restored.get_node_by_id(middle_id).is_none());
     assert_eq!(restored.get_digest_by_id(low_id), Some(low));
     assert_eq!(restored.get_digest_by_id(middle_id), Some(middle));
+}
+
+#[test]
+fn sparse_mast_readers_reject_duplicate_dependency_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root_id);
+
+    let duplicate = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let first_external = ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    let second_external = ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(root_id, VisitKind::FullVisit);
+    builder.record_visit(first_external, VisitKind::FullVisit);
+    builder.record_visit(second_external, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    let result = SparseMastForest::read_from_bytes(&sparse.to_bytes());
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency digest section is not strictly sorted")
+    );
 }
 
 fn write_sparse_test_payload(
@@ -1965,7 +2032,7 @@ fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
 }
 
 #[test]
-fn test_materialized_deserialization_preserves_duplicate_roots() {
+fn test_materialized_deserialization_rejects_duplicate_root_commitment_inputs() {
     let mut forest = MastForest::new();
     let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
@@ -1974,10 +2041,13 @@ fn test_materialized_deserialization_preserves_duplicate_roots() {
     forest.commitment = forest.compute_nodes_commitment(&forest.roots);
 
     let bytes = forest.to_bytes();
-    let restored = MastForest::read_from_bytes(&bytes).unwrap();
 
-    assert_eq!(restored.procedure_roots(), &[root_id, root_id]);
-    assert_eq!(restored.commitment(), forest.commitment());
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("root commitment digest section is not strictly sorted")
+    );
 }
 
 fn assert_untrusted_overspec_logging(

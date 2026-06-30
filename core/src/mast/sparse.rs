@@ -198,9 +198,9 @@ fn validate_sorted_digests(
     digests: &[Word],
     label: &str,
 ) -> Result<(), DeserializationError> {
-    if !digests.windows(2).all(|pair| pair[0] <= pair[1]) {
+    if !digests.windows(2).all(|pair| pair[0] < pair[1]) {
         return Err(DeserializationError::InvalidValue(format!(
-            "{label} section is not sorted"
+            "{label} section is not strictly sorted"
         )));
     }
 
