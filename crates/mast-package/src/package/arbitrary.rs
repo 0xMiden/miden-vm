@@ -49,6 +49,7 @@ impl proptest::arbitrary::Arbitrary for Package {
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use miden_core::{
+            Felt,
             mast::{BasicBlockNodeBuilder, MastForestContributor, MastNodeExt},
             operations::Operation,
         };
@@ -75,10 +76,14 @@ impl proptest::arbitrary::Arbitrary for Package {
                 let mut nodes = Vec::with_capacity(exports.len());
                 for export in exports.iter_mut() {
                     if let PackageExport::Procedure(export) = export {
-                        let node_id =
-                            BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-                                .add_to_forest(&mut mast_forest)
-                                .unwrap();
+                        let procedure_index = nodes.len() as u64;
+                        let node_id = BasicBlockNodeBuilder::new(vec![
+                            Operation::Push(Felt::new_unchecked(procedure_index)),
+                            Operation::Add,
+                            Operation::Mul,
+                        ])
+                        .add_to_forest(&mut mast_forest)
+                        .unwrap();
                         // Add the node to the forest roots if it's not already there
                         mast_forest.make_root(node_id);
                         nodes.push(node_id);
@@ -89,9 +94,14 @@ impl proptest::arbitrary::Arbitrary for Package {
 
                 // Generate an entrypoint export if needed
                 if kind.is_executable() {
-                    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-                        .add_to_forest(&mut mast_forest)
-                        .unwrap();
+                    let procedure_index = nodes.len() as u64;
+                    let node_id = BasicBlockNodeBuilder::new(vec![
+                        Operation::Push(Felt::new_unchecked(procedure_index)),
+                        Operation::Add,
+                        Operation::Mul,
+                    ])
+                    .add_to_forest(&mut mast_forest)
+                    .unwrap();
                     // Add the node to the forest roots if it's not already there
                     mast_forest.make_root(node_id);
                     nodes.push(node_id);

@@ -1,4 +1,7 @@
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use core::ops::RangeInclusive;
 
 use proptest::{arbitrary::Arbitrary, prelude::*};
@@ -474,7 +477,12 @@ impl Arbitrary for MastForest {
 
                     // Add external nodes
                     // WARNING: These use random digests that won't match any valid procedures
+                    let mut external_digest_set = BTreeSet::new();
                     for digest in external_digests {
+                        if !external_digest_set.insert(digest) {
+                            continue;
+                        }
+
                         if let Ok(external_id) =
                             ExternalNodeBuilder::new(digest).add_to_forest(&mut forest)
                         {
@@ -495,8 +503,11 @@ impl Arbitrary for MastForest {
 
                     // 4) Make some nodes roots (but not all, to test internal nodes)
                     let num_roots = (all_node_ids.len() / 3).max(1); // Make roughly 1/3 of nodes roots
+                    let mut root_digest_set = BTreeSet::new();
                     for (i, &node_id) in all_node_ids.iter().enumerate() {
-                        if i % (all_node_ids.len() / num_roots.max(1)) == 0 {
+                        if i % (all_node_ids.len() / num_roots.max(1)) == 0
+                            && root_digest_set.insert(forest[node_id].digest())
+                        {
                             forest.make_root(node_id);
                         }
                     }

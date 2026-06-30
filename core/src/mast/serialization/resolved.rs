@@ -254,6 +254,12 @@ fn validate_digest_section(
     expected: &[crate::Word],
     section_name: &str,
 ) -> Result<(), DeserializationError> {
+    if !expected.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{section_name} section is not strictly sorted"
+        )));
+    }
+
     for (index, expected_digest) in expected.iter().copied().enumerate() {
         let actual = read_digest_entry(bytes, digest_section_offset, index)?;
         if actual != expected_digest {
