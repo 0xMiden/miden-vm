@@ -10,6 +10,7 @@
 - Tightened LogUp lookup AIR docs and comments, removed unused operation-flag accessors, and added block-hash/op-group selector coverage ([#3309](https://github.com/0xMiden/miden-vm/pull/3309)).
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering.
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
+- Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 
 ## v0.24.0 (2026-06-24)
 
