@@ -1000,10 +1000,10 @@ fn ec_op_col(op: EcOpId) -> usize {
 
 /// Copy two child digests into the `lhs` / `rhs` hash blocks.
 fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &P2Digest, rhs: &P2Digest) {
-    for i in 0..NUM_HASH {
-        row[COL_LHS_BEGIN + i] = lhs.as_array()[i];
-        row[COL_RHS_BEGIN + i] = rhs.as_array()[i];
-    }
+    let lhs = lhs.as_array();
+    let rhs = rhs.as_array();
+    row[COL_LHS_BEGIN..COL_LHS_BEGIN + NUM_HASH].copy_from_slice(&lhs);
+    row[COL_RHS_BEGIN..COL_RHS_BEGIN + NUM_HASH].copy_from_slice(&rhs);
 }
 
 /// Append one eval row, written by column *constant* so the layout in
@@ -1027,12 +1027,14 @@ fn push_node_row(
             row[COL_IS_EC_MSM] = Felt::ONE;
             row[COL_IS_MSM_LAST] = Felt::from(is_last as u8);
             row[COL_PERM_SEQ_ID] = Felt::from(a.perm_seq_id.seq());
-            for i in 0..NUM_HASH {
-                row[COL_LHS_BEGIN + i] = a.base_hash.as_array()[i];
-                row[COL_RHS_BEGIN + i] = a.scalar_hash.as_array()[i];
-                row[COL_H_BEGIN + i] = a.digest.as_array()[i];
-                row[COL_ABSORB_CAP_BEGIN + i] = a.cap.as_array()[i];
-            }
+            let base_hash = a.base_hash.as_array();
+            let scalar_hash = a.scalar_hash.as_array();
+            let digest = a.digest.as_array();
+            let cap = a.cap.as_array();
+            row[COL_LHS_BEGIN..COL_LHS_BEGIN + NUM_HASH].copy_from_slice(&base_hash);
+            row[COL_RHS_BEGIN..COL_RHS_BEGIN + NUM_HASH].copy_from_slice(&scalar_hash);
+            row[COL_H_BEGIN..COL_H_BEGIN + NUM_HASH].copy_from_slice(&digest);
+            row[COL_ABSORB_CAP_BEGIN..COL_ABSORB_CAP_BEGIN + NUM_HASH].copy_from_slice(&cap);
             row[COL_A_PTR] = Felt::from(a.base_ptr);
             row[COL_B_PTR] = Felt::from(a.scalar_ptr);
             row[COL_MSM_IDX] = Felt::from(idx as u32);
@@ -1063,9 +1065,8 @@ fn push_node_row(
     // Every other node commits an absorption: the perm-cycle handle + the
     // digest in the h[4] block, shared by all arms.
     row[COL_PERM_SEQ_ID] = Felt::from(perm_seq_id.seq());
-    for i in 0..NUM_HASH {
-        row[COL_H_BEGIN + i] = hash.as_array()[i];
-    }
+    let hash = hash.as_array();
+    row[COL_H_BEGIN..COL_H_BEGIN + NUM_HASH].copy_from_slice(&hash);
 
     match &node.kind {
         NodeKind::Zero => unreachable!("Zero carries no absorption"),
@@ -1074,10 +1075,8 @@ fn push_node_row(
             row[COL_IS_AND] = Felt::ONE;
         },
         NodeKind::UintLeaf { ptr, bound_ptr, is_pinned, lo, hi } => {
-            for i in 0..NUM_HASH {
-                row[COL_LHS_BEGIN + i] = lo[i];
-                row[COL_RHS_BEGIN + i] = hi[i];
-            }
+            row[COL_LHS_BEGIN..COL_LHS_BEGIN + NUM_HASH].copy_from_slice(lo);
+            row[COL_RHS_BEGIN..COL_RHS_BEGIN + NUM_HASH].copy_from_slice(hi);
             row[COL_IS_UINT_LEAF] = Felt::ONE;
             row[COL_IS_PINNED] = Felt::from(*is_pinned as u8);
             row[COL_PTR] = Felt::from(*ptr);

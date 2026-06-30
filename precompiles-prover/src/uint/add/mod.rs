@@ -410,13 +410,13 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
 
         // Carry booleanity: γ⁺ / γ⁻ ∈ {0, 1}. cpos_lo / cneg_lo carry 4
         // limbs (γ·₀..₃), cpos_hi / cneg_hi carry 3 (γ·₄..₆).
-        for j in 0..4 {
-            let lj: AB::Expr = local[j].into();
+        for &cell in local.iter().take(4) {
+            let lj: AB::Expr = cell.into();
             let boolean = lj.clone() * (AB::Expr::ONE - lj);
             builder.assert_zero((cpos_lo.clone() + cneg_lo.clone()) * boolean);
         }
-        for m in 0..3 {
-            let lm: AB::Expr = local[m].into();
+        for &cell in local.iter().take(3) {
+            let lm: AB::Expr = cell.into();
             let boolean = lm.clone() * (AB::Expr::ONE - lm);
             builder.assert_zero((cpos_hi.clone() + cneg_hi.clone()) * boolean);
         }

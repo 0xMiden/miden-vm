@@ -850,11 +850,11 @@ where
                             "limbs",
                             LB::Expr::ONE,
                             |b| {
-                                for i in 0..8 {
+                                for &limb in &b_limbs {
                                     b.insert(
                                         "limb_i",
                                         is_rol.clone(),
-                                        Range16Msg { w: b_limbs[i].into() },
+                                        Range16Msg { w: limb.into() },
                                         interaction_deg,
                                     );
                                 }

@@ -319,9 +319,9 @@ fn compute_block_snapshots_driving(
             // reference round function so the chunk-content P2 layer
             // sees identical state_ins to what round.generate_trace
             // will replay.
-            for r in 0..NUM_ROUNDS {
+            for &rc in &KECCAK_RC[..NUM_ROUNDS] {
                 round_req.require_round(state);
-                keccak_round(&mut state, KECCAK_RC[r]);
+                keccak_round(&mut state, rc);
             }
             let perm_out = state;
 

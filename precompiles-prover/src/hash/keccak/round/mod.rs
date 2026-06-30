@@ -625,13 +625,13 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
         let perm_base = (n * PERM_CYCLE) as u64;
         let last_round_base = IP_BOUNDARY + perm_base + (23 * ROUND_PERIOD) as u64;
         let mut out = [0u64; 25];
-        for idx in 0..25 {
+        for (idx, out_limb) in out.iter_mut().enumerate() {
             let slot = if idx == 0 {
                 program::SLOT_IOTA
             } else {
                 program::SLOT_CHI_XOR_BEGIN + (idx - 1)
             };
-            out[idx] = memory[(last_round_base + slot as u64) as usize];
+            *out_limb = memory[(last_round_base + slot as u64) as usize];
         }
         outputs.push(out);
     }

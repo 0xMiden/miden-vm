@@ -289,9 +289,9 @@ fn constraints_hold_with_dead_rows() {
     // (last dead row → row 0, a new invocation) must not demand
     // `is_zero = 1` on the dead row. Any non-power-of-two block count
     // exercises this.
-    let mut rng = StdRng::seed_from_u64(0xdead_12c);
+    let mut rng = StdRng::seed_from_u64(0x0dea_d12c);
     let input: Vec<u8> = (0..300).map(|_| rng.random()).collect();
-    check_invocation(0xdead_12c, Invocation { input });
+    check_invocation(0x0dea_d12c, Invocation { input });
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn constraints_hold_on_empty_then_nonempty_seam() {
     // Empty invocation immediately followed by a normal one — the empty
     // block's chunk_ptr advance (4 lanes) must carry contiguously across
     // the invocation seam into the next.
-    let mut rng = StdRng::seed_from_u64(0xe_1_5ea);
+    let mut rng = StdRng::seed_from_u64(0x000e_15ea);
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
         build_sponge_requires(&[Invocation { input: vec![] }, Invocation { input: b }]);
@@ -358,7 +358,7 @@ fn constraints_hold_on_multiple_invocations() {
     // (33 bytes → 2 chunks) leaves `chunk_ptr` at a non-multiple-of-4
     // offset for the second (40 bytes), confirming the per-invocation
     // base needn't be 4-aligned under the relaxed chain.
-    let mut rng = StdRng::seed_from_u64(0x5ea_3);
+    let mut rng = StdRng::seed_from_u64(0x5ea3);
     let a: Vec<u8> = (0..33).map(|_| rng.random()).collect();
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =

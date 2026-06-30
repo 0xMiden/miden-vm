@@ -86,7 +86,7 @@ fn sample_add(
 
 #[test]
 fn add_constraints_hold() {
-    let mut rng = StdRng::seed_from_u64(0xadd_1);
+    let mut rng = StdRng::seed_from_u64(0xadd1);
     let (add, mut store, k) = sample_add(&mut rng, false);
     let main = generate_trace(add, &mut store);
     assert_eq!(main.height(), PERIOD, "one op = one period-16 block");
@@ -177,7 +177,7 @@ fn duplicate_relations_collapse() {
     // multiplicities accumulating on its term row — the relation-level
     // interning that lets two consumers (e.g. an eval op node and an EC
     // certificate) share a block.
-    let mut rng = StdRng::seed_from_u64(0xded0_add);
+    let mut rng = StdRng::seed_from_u64(0x0ded_0add);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);
