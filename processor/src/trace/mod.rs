@@ -6,7 +6,10 @@ use miden_air::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use miden_core::{
+    crypto::hash::Blake3_256,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -40,6 +43,10 @@ pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
+///
+/// Its binary form is trusted replay data. Sparse MAST hashes inside the trace generation context
+/// are not validated against untrusted senders; see
+/// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
     trace_output: TraceBuildOutput,
@@ -83,6 +90,32 @@ impl TraceBuildOutput {
         let expected_digest: [u8; 32] =
             Blake3_256::hash(&self.precompile_requests.to_bytes()).into();
         self.precompile_requests_digest == expected_digest
+    }
+}
+
+impl Serializable for TraceBuildOutput {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.stack_outputs.write_into(target);
+        self.final_precompile_transcript.write_into(target);
+        self.precompile_requests.write_into(target);
+        self.precompile_requests_digest.write_into(target);
+    }
+}
+
+impl Deserializable for TraceBuildOutput {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let trace_output = Self {
+            stack_outputs: StackOutputs::read_from(source)?,
+            final_precompile_transcript: PrecompileTranscript::read_from(source)?,
+            precompile_requests: Vec::<PrecompileRequest>::read_from(source)?,
+            precompile_requests_digest: <[u8; 32]>::read_from(source)?,
+        };
+        if !trace_output.has_matching_precompile_requests_digest() {
+            return Err(DeserializationError::InvalidValue(
+                "precompile request digest does not match serialized requests".into(),
+            ));
+        }
+        Ok(trace_output)
     }
 }
 
@@ -152,6 +185,24 @@ impl TraceBuildInputs {
             trace_generation_context,
             program_info,
         }
+    }
+}
+
+impl Serializable for TraceBuildInputs {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.trace_output.write_into(target);
+        self.trace_generation_context.write_into(target);
+        self.program_info.write_into(target);
+    }
+}
+
+impl Deserializable for TraceBuildInputs {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            trace_output: TraceBuildOutput::read_from(source)?,
+            trace_generation_context: TraceGenerationContext::read_from(source)?,
+            program_info: ProgramInfo::read_from(source)?,
+        })
     }
 }
 
