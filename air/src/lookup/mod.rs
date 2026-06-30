@@ -1,17 +1,8 @@
-//! Generic `LookupAir` / `LookupBuilder` lookup-argument module.
+//! Generic traits and adapters for LogUp lookup arguments.
 //!
-//! Holds the field-polymorphic core of the closure-based LogUp machinery: the
-//! [`LookupAir`] trait, the [`LookupBuilder`] / [`LookupColumn`] / [`LookupGroup`] /
-//! [`LookupBatch`] surface, the [`Challenges`] struct, the [`LookupMessage`] encode trait,
-//! the two-path adapters ([`ConstraintLookupBuilder`] for symbolic constraint
-//! evaluation, [`ProverLookupBuilder`] for concrete-row fraction collection), the
-//! [`LookupFractions`] accumulator, and the [`build_logup_aux_trace`] /
-//! [`build_lookup_fractions`] drivers.
-//!
-//! This module is deliberately free of Miden-specific types so it can be extracted into
-//! its own crate without further disentangling. The Miden-side wiring (aggregator AIR,
-//! bus message structs, aux-trace builder, bus identifiers) is surfaced separately
-//! through [`crate::logup`].
+//! This module contains the field-polymorphic lookup contract ([`LookupAir`]), the
+//! closure-based builder API, message encoding, challenge precomputation, constraint/prover
+//! adapters, and aux-trace accumulation helpers.
 
 pub mod aux_builder;
 pub mod builder;
@@ -88,23 +79,14 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// the builder's closure API.
     fn eval(&self, builder: &mut LB);
 
-    /// Emit boundary / "outer" interactions — once-per-proof contributions that don't
-    /// come from any main-trace row.
+    /// Emit once-per-proof boundary interactions that don't come from any main-trace row.
     ///
     /// Typical sources are committed-final terminals and public-input-driven seed
     /// emissions (kernel ROM init, block hash seed, log-precompile terminals).
     /// These close out buses whose per-row [`eval`](Self::eval) contributions alone
     /// don't cancel.
     ///
-    /// Consumed today only by the real-trace debug walker in
-    /// [`crate::lookup::debug::trace`], which combines per-row and boundary emissions
-    /// into a single balance check. The constraint and prover paths don't call this
-    /// method yet — boundary terms still flow through `when_first_row` / `when_last_row`
-    /// flag selectors inside [`eval`](Self::eval) until they are refactored to read
-    /// from here too.
-    ///
-    /// Default is a no-op so AIRs with no boundary contributions don't need to
-    /// override it.
+    /// Default is a no-op so AIRs with no boundary contributions don't need to override it.
     fn eval_boundary<B>(&self, _boundary: &mut B)
     where
         B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
