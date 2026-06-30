@@ -13,7 +13,7 @@ use crate::{
 // ================================================================================================
 
 /// Executes a Join node from the start.
-#[inline(always)]
+#[inline]
 pub(super) fn start_join_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     join_node: &JoinNode,

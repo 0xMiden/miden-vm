@@ -3,14 +3,19 @@ use std::{hint::black_box, time::Duration};
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm_blake3_bench::{
-    BENCH_GROUP, Blake3Fixture, build_trace, execute_trace_inputs, prove_and_verify_once,
-    prove_span_duration, prove_trace, repo_root_from_manifest,
+    BENCH_GROUP, Blake3Fixture, build_trace, execute_program, execute_trace_inputs,
+    prove_and_verify_once, prove_span_duration, prove_trace, repo_root_from_manifest,
 };
 
-const ALL_AXES: [&str; 4] =
-    ["execute_trace_inputs_sync", "build_trace", "prove_trace_sync", "e2e_prove"];
+const ALL_AXES: [&str; 5] = [
+    "execute_sync",
+    "execute_trace_inputs_sync",
+    "build_trace",
+    "prove_trace_sync",
+    "e2e_prove",
+];
 const PROOF_AXES: [&str; 2] = ["e2e_prove", "prove_trace_sync"];
-const LIGHT_AXES: [&str; 2] = ["execute_trace_inputs_sync", "build_trace"];
+const LIGHT_AXES: [&str; 3] = ["execute_sync", "execute_trace_inputs_sync", "build_trace"];
 
 fn env_usize(name: &str, default: usize) -> usize {
     match std::env::var(name) {
@@ -49,6 +54,7 @@ fn resolve_axes() -> Vec<&'static str> {
         match axis {
             "all" => requested.extend(ALL_AXES),
             "e2e_prove" | "prove" | "prove_program_sync" => requested.push("e2e_prove"),
+            "execute_sync" => requested.push("execute_sync"),
             "execute_trace_inputs_sync" => requested.push("execute_trace_inputs_sync"),
             "prove_trace_sync" => requested.push("prove_trace_sync"),
             "build_trace" => requested.push("build_trace"),
@@ -117,6 +123,19 @@ fn blake3_bench(c: &mut Criterion) {
     if LIGHT_AXES.iter().any(|axis| has_axis(&axes, axis)) {
         let mut group = c.benchmark_group(BENCH_GROUP);
         configure_group(&mut group, light_sample_size, measurement_time_secs, warm_up_time_secs);
+
+        if has_axis(&axes, "execute_sync") {
+            group.bench_function("execute_sync", |b| {
+                b.iter_batched(
+                    || fixture.clone(),
+                    |fixture| {
+                        execute_program(&fixture);
+                        black_box(())
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+        }
 
         if has_axis(&axes, "execute_trace_inputs_sync") {
             group.bench_function("execute_trace_inputs_sync", |b| {

@@ -182,18 +182,6 @@ impl BasicBlockNode {
     pub fn raw_operations(&self) -> impl Iterator<Item = &Operation> {
         self.op_batches.iter().flat_map(OpBatch::raw_ops)
     }
-
-    /// Performs semantic equality comparison with another BasicBlockNode.
-    ///
-    /// This method compares two blocks for logical equality by comparing:
-    /// - Operations (exact equality)
-    #[cfg(test)]
-    pub fn semantic_eq(&self, other: &BasicBlockNode) -> bool {
-        // Compare operations by collecting and comparing
-        let self_ops: Vec<_> = self.operations().collect();
-        let other_ops: Vec<_> = other.operations().collect();
-        self_ops == other_ops
-    }
 }
 
 // BATCH VALIDATION
