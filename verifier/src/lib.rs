@@ -283,7 +283,7 @@ fn eidos_preprocessed_commitment(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
 
     use super::*;
 

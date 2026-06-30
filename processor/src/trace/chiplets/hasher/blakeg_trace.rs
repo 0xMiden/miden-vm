@@ -136,8 +136,8 @@ fn u32_to_bytes(val: u32) -> [u8; 4] {
 }
 
 #[inline]
-fn bytes_to_u32(bytes: &[u8; 4]) -> u32 {
-    u32::from_le_bytes(*bytes)
+fn bytes_to_u32(bytes: [u8; 4]) -> u32 {
+    u32::from_le_bytes(bytes)
 }
 
 // ---- Row writer ----
@@ -232,8 +232,7 @@ fn generate_row_bd(
     and8_counts: &mut [u64],
 ) {
     let mut w = RowWriter::new(rows, row);
-    for g in 0..4 {
-        let [ai, bi, ci, di] = g_idx[g];
+    for (g, &[ai, bi, ci, di]) in g_idx.iter().enumerate() {
         let c = v[ci];
         let d_new = v[di]; // from previous A/C row
 
@@ -343,7 +342,7 @@ fn generate_footer_rows(
         let mask_bit = (out_odd_bytes[3] >> 7) as u64;
         let masked_out_odd_msb = out_odd_bytes[3] & 0x7f;
 
-        let out_odd_masked = bytes_to_u32(&[
+        let out_odd_masked = bytes_to_u32([
             out_odd_bytes[0],
             out_odd_bytes[1],
             out_odd_bytes[2],
@@ -538,9 +537,8 @@ fn generate_message_rows(
     emit_m_row(rows, row_m0, 0, false); // m[0..7]
     emit_m_row(rows, row_m1, 4, true); // m[8..15]
 
-    for k in 0..4 {
-        rows[row_m1][MSG_M1_R_CARRY_BASE_COL + k] = input_state[k];
-    }
+    rows[row_m1][MSG_M1_R_CARRY_BASE_COL..MSG_M1_R_CARRY_BASE_COL + 4]
+        .copy_from_slice(&input_state[..4]);
 
     for i in 0..ROUTED_M0_RANGE_COUNT {
         let m0_value = rows[row_m0][msg_m0_range_col(12 + i)];
@@ -582,7 +580,7 @@ fn footer_high_word_from_row(row: &[Felt; NUM_BLAKEG_COMPRESSION_COLS], odd: boo
         debug_assert!(and <= u8::MAX as u64);
         (vhi + h - 2 * and) as u8
     });
-    bytes_to_u32(&bytes)
+    bytes_to_u32(bytes)
 }
 
 #[cfg(debug_assertions)]
@@ -643,8 +641,7 @@ pub fn generate_compression_block(
     v[15] = IV[7];
 
     // 7 rounds x 8 rows = 56 computation rows
-    for round in 0..7 {
-        let s = &SIGMA[round];
+    for (round, s) in SIGMA.iter().enumerate() {
         let base = start_row + round * 8;
 
         // Column half-round: A_col, B_col, C_col, D_col
