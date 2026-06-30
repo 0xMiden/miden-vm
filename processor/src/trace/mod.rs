@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{format, sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -7,8 +7,9 @@ use miden_air::{
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    deferred::{Digest, TRUE_DIGEST},
+    deferred::{DeferredState, DeferredStateWire, Digest, TRUE_DIGEST},
     program::ExecutionClaim,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 use crate::{
@@ -51,7 +52,9 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 ///
 /// The processor constructs its VM witness and optional singleton precompile witness from the same
 /// execution output, so they retain the same deferred root. The aggregate may contain private and
-/// potentially large prover data.
+/// potentially large prover data. Its binary form is trusted replay data: sparse MAST node and
+/// digest maps inside the trace replay are not checked against a source `MastForest` commitment;
+/// see <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct ExecutionWitness {
     vm: VmWitness,
@@ -101,10 +104,41 @@ impl ExecutionWitness {
     }
 }
 
+impl Serializable for ExecutionWitness {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.vm.write_into(target);
+        match &self.precompile {
+            Some(precompile) => {
+                target.write_u8(1);
+                write_precompile_witness(precompile, target);
+            },
+            None => target.write_u8(0),
+        }
+    }
+}
+
+impl Deserializable for ExecutionWitness {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let vm = VmWitness::read_from(source)?;
+        let precompile = match source.read_u8()? {
+            0 => None,
+            1 => Some(read_precompile_witness(source)?),
+            tag => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "invalid precompile witness option tag {tag}"
+                )));
+            },
+        };
+        Ok(Self { vm, precompile })
+    }
+}
+
 /// Witness required to materialize and prove a VM execution trace.
 ///
 /// This potentially large value contains private replay data and is consumed by trace-building and
-/// proving operations. The processor does not define a serialized representation for it.
+/// proving operations. Its binary form is trusted replay data: sparse MAST node and digest maps
+/// inside the trace replay are not checked against a source `MastForest` commitment; see
+/// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct VmWitness {
     program_info: ProgramInfo,
@@ -146,6 +180,71 @@ impl VmWitness {
     pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
     }
+}
+
+impl Serializable for VmWitness {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.program_info.write_into(target);
+        self.stack_inputs.write_into(target);
+        self.stack_outputs.write_into(target);
+        self.trace.write_into(target);
+        self.precompile_root.write_into(target);
+    }
+}
+
+impl Deserializable for VmWitness {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            program_info: ProgramInfo::read_from(source)?,
+            stack_inputs: StackInputs::read_from(source)?,
+            stack_outputs: StackOutputs::read_from(source)?,
+            trace: TraceReplay::read_from(source)?,
+            precompile_root: Digest::read_from(source)?,
+        })
+    }
+}
+
+/// Writes a singleton precompile witness as its ordered roots followed by its canonical deferred
+/// wire.
+fn write_precompile_witness<W: ByteWriter>(witness: &PrecompileWitness, target: &mut W) {
+    let roots = witness.roots();
+    debug_assert_eq!(roots.len(), 1, "only singleton precompile witnesses are serializable");
+    target.write_usize(roots.len());
+    for root in roots {
+        root.write_into(target);
+    }
+    let deferred_wire = witness
+        .state()
+        .to_wire()
+        .expect("deferred state must serialize to canonical wire");
+    deferred_wire.write_into(target);
+}
+
+/// Reads a singleton precompile witness written by [`write_precompile_witness`].
+fn read_precompile_witness<R: ByteReader>(
+    source: &mut R,
+) -> Result<PrecompileWitness, DeserializationError> {
+    let roots = Vec::<Digest>::read_from(source)?;
+    if roots.len() != 1 {
+        return Err(DeserializationError::InvalidValue(
+            "expected a singleton precompile witness".into(),
+        ));
+    }
+    let deferred_wire = DeferredStateWire::read_from(source)?;
+    let deferred_state =
+        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &deferred_wire).map_err(
+            |err| DeserializationError::InvalidValue(format!("invalid deferred state: {err}")),
+        )?;
+
+    let witness = PrecompileWitness::new(deferred_state).map_err(|err| {
+        DeserializationError::InvalidValue(format!("invalid precompile witness: {err}"))
+    })?;
+    if witness.roots() != roots.as_slice() {
+        return Err(DeserializationError::InvalidValue(
+            "precompile witness roots do not match its deferred state".into(),
+        ));
+    }
+    Ok(witness)
 }
 
 // VM EXECUTION TRACE

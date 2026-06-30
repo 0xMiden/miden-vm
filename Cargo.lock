@@ -2656,6 +2656,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-test-serde-macros"
+version = "0.30.0"
+dependencies = [
+ "proc-macro2",
+ "proptest",
+ "proptest-derive",
+ "quote",
+ "serde",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "miden-test-serialization-macros"
 version = "0.30.0"
 dependencies = [
