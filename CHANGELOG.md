@@ -9,6 +9,7 @@
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 - [BREAKING] MAST forest payloads now include sorted root and dependency digests, so commitment inputs round trip ([#3294](https://github.com/0xMiden/miden-vm/pull/3294)).
+- [BREAKING] MAST forest and package code digests now commit to both public roots and external dependencies ([#3311](https://github.com/0xMiden/miden-vm/pull/3311)).
 
 ## v0.24.0 (2026-06-24)
 
