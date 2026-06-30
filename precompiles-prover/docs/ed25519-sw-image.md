@@ -78,7 +78,7 @@ backward exceptional point is not rational**, so the only special case
 is `∞ ↦ (0, 1)` and, from the forward conventions,
 `(A/3, 0) ↦ (0, −1)`. The conversion gadgets therefore need exactly
 two case branches in each direction, both detectable by coordinate
-equality against pinned constants — never a hidden third.
+equality against known constants — never a hidden third.
 
 Everything else, including the order-4 and order-8 points, flows
 through the formulas without incident.
@@ -126,8 +126,8 @@ checked by MAC arrangements:
 ```
 x witnessed                 (decompression: the prover supplies it)
 u·(1 − y) ≡ 1 + y           (one MAC arrangement: defines u, no division)
-v·x ≡ c·u                   (one MAC, c = √(−486664) a pinned per-group constant)
-X = u + A/3                 (one add; A/3 pinned)
+v·x ≡ c·u                   (one MAC, c = √(−486664) a known helper constant)
+X = u + A/3                 (one add; A/3 known)
 (X, Y=v) interned; SW membership = the store's MAC trio
 ```
 
@@ -135,12 +135,12 @@ SW membership of the image plus the two conversion ties is equivalent
 to the Edwards equation holding for `(x, y)` — the witnessed `x` is
 correct by construction or nothing proves. The `sign` bit is a parity
 predicate over the canonical `x` (`is`-layer, not a chiplet). The
-constants this adds to `EcCreate`'s pin set for the ed25519 group:
-`c`, `A/3` (and implicitly `a_W`, `b_W` like any group). All are
-**statement, not witness**: computed off-circuit by the runner and
-committed through the `(tag, a, b, version)` cap — a wrong constant is
-a different (publicly visible) statement, not a soundness hole.
+constants this adds to the ed25519 conversion statement: `c`, `A/3`
+(and implicitly `a_W`, `b_W` like any group). All are **statement, not
+witness**: computed off-circuit by the runner and committed by the conversion
+statement — a wrong constant is a different (publicly visible) statement, not
+a soundness hole.
 
 The exceptional branches: wire `y = 1 ⟹` PAI row; wire
-`y = −1 ∧ x = 0 ⟹ (A/3, 0)` directly. Both equality-against-pinned-
-constant predicates.
+`y = −1 ∧ x = 0 ⟹ (A/3, 0)` directly. Both equality-against-known-constant
+predicates.

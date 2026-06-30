@@ -7,6 +7,7 @@
 mod aux_register;
 mod binding;
 mod bitwise64;
+mod bootstrap;
 mod byte_pair_lut;
 mod chunk;
 mod deferred_state;
@@ -25,6 +26,7 @@ mod uint_add;
 mod uint_dag;
 mod uint_mul;
 mod utils;
+mod vm_uint;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};

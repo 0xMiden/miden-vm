@@ -1,11 +1,11 @@
 //! Tests for the chunk chiplet.
 //!
-//! [`ChunkChainMsg`] encoding invariants + main-column-layout invariants
-//! + [`LiftedAir`] structural smoke checks (validate, layout dims,
-//! log-quotient-degree target) + trace-driven constraint checks across
-//! the canonical edge cases (single chunk, multi-chunk, block-aligned
-//! tails, multi-invocation) + negative tests confirming
-//! `check_constraints` catches corruption.
+//! [`ChunkChainMsg`] encoding invariants, main-column-layout invariants,
+//! [`LiftedAir`] structural smoke checks (validate, layout dims,
+//! log-quotient-degree target), trace-driven constraint checks across the
+//! canonical edge cases (single chunk, multi-chunk, block-aligned tails,
+//! multi-invocation), and negative tests confirming `check_constraints`
+//! catches corruption.
 
 use miden_air::BaseAir;
 use miden_core::{
@@ -228,7 +228,7 @@ fn corrupt_and_check(
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_act() {
     corrupt_and_check(0xc0, &[inv(33, 0x21)], |main| {
-        main.values[0 * NUM_MAIN_COLS + COL_ACT] = Felt::from(2u8);
+        main.values[COL_ACT] = Felt::from(2u8);
     });
 }
 
@@ -236,7 +236,7 @@ fn corruption_non_binary_act() {
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_head() {
     corrupt_and_check(0xc1, &[inv(33, 0x21)], |main| {
-        main.values[0 * NUM_MAIN_COLS + COL_IS_HEAD] = Felt::from(2u8);
+        main.values[COL_IS_HEAD] = Felt::from(2u8);
     });
 }
 
@@ -244,7 +244,7 @@ fn corruption_non_binary_is_head() {
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_chunk_seq_id_breaks_chain() {
     corrupt_and_check(0xc3, &[inv(200, 0xc8)], |main| {
-        main.values[1 * NUM_MAIN_COLS + COL_CHUNK_SEQ_ID] = Felt::from(7u8);
+        main.values[NUM_MAIN_COLS + COL_CHUNK_SEQ_ID] = Felt::from(7u8);
     });
 }
 

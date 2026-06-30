@@ -30,16 +30,20 @@ enum UintOp {
 
 impl UintOp {
     fn decode(args: [Felt; 3]) -> Option<Self> {
-        if args[2] != ZERO {
-            return None;
-        }
-
         match args[0].as_canonical_u64() {
-            UintPrecompile::VALUE_OP_ID => Some(Self::Value(UintDomain::from_id(args[1])?)),
-            UintPrecompile::ADD_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Add)),
-            UintPrecompile::SUB_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Sub)),
-            UintPrecompile::MUL_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Mul)),
-            UintPrecompile::EQ_OP_ID if args[1] == ZERO => Some(Self::Eq),
+            UintPrecompile::VALUE_OP_ID if args[2] == ZERO => {
+                Some(Self::Value(domain_from_bound_ptr_arg(args[1])?))
+            },
+            UintPrecompile::ADD_OP_ID if args[1] == ZERO && args[2] == ZERO => {
+                Some(Self::Binary(UintBinaryOp::Add))
+            },
+            UintPrecompile::SUB_OP_ID if args[1] == ZERO && args[2] == ZERO => {
+                Some(Self::Binary(UintBinaryOp::Sub))
+            },
+            UintPrecompile::MUL_OP_ID if args[1] == ZERO && args[2] == ZERO => {
+                Some(Self::Binary(UintBinaryOp::Mul))
+            },
+            UintPrecompile::EQ_OP_ID if args[1] == ZERO && args[2] == ZERO => Some(Self::Eq),
             _ => None,
         }
     }
@@ -50,6 +54,14 @@ impl UintOp {
             Self::Binary(_) | Self::Eq => NodeType::Join,
         }
     }
+}
+
+fn domain_from_bound_ptr_arg(bound_ptr: Felt) -> Option<UintDomain> {
+    let ptr = bound_ptr.as_canonical_u64();
+    if ptr > u32::MAX as u64 {
+        return None;
+    }
+    UintDomain::from_bound_ptr(ptr as u32)
 }
 
 enum UintNode {
@@ -280,25 +292,40 @@ mod tests {
     }
 
     #[test]
-    fn decode_uses_domain_only_for_value_tags() {
+    fn decode_uses_bound_ptr_value_and_op_tags() {
         let precompile = UintPrecompile;
+        let domain = UintDomain::K1Base;
+        let bound_ptr = Felt::from(domain.bound_ptr());
 
         assert_eq!(
-            precompile.decode(UintPrecompile::value_tag(UintDomain::K1Base).args()),
+            UintPrecompile::value_tag(domain).as_word(),
+            [UintPrecompile::id(), Felt::from_u32(0), bound_ptr, ZERO],
+        );
+        assert_eq!(
+            precompile.decode(UintPrecompile::value_tag(domain).args()),
             Some(NodeType::value())
+        );
+
+        assert_eq!(
+            UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID).as_word(),
+            [UintPrecompile::id(), Felt::from_u32(1), ZERO, ZERO],
         );
         assert_eq!(
             precompile.decode(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID).args()),
             Some(NodeType::Join)
         );
 
-        let mut add_with_domain = UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID).args();
-        add_with_domain[1] = UintDomain::K1Base.id();
-        assert_eq!(precompile.decode(add_with_domain), None);
+        let mut add_with_bound = UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID).args();
+        add_with_bound[1] = bound_ptr;
+        assert_eq!(precompile.decode(add_with_bound), None);
 
         assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99), ZERO]), None);
         assert_eq!(
-            precompile.decode([Felt::from_u32(0), UintDomain::U256.id(), Felt::from_u32(1)]),
+            precompile.decode([
+                Felt::from_u32(0),
+                Felt::from(UintDomain::U256.bound_ptr()),
+                Felt::from_u32(1)
+            ]),
             None
         );
     }

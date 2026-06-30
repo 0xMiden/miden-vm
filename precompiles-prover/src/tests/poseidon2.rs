@@ -273,7 +273,7 @@ fn span_bounds(out: &AbsorptionOutput) -> (u32, u32) {
 #[test]
 fn one_shot_digest_matches_reference_on_zero_input() {
     let absorption = Absorption::one_shot([Felt::ZERO; 4], [Felt::ZERO; 4], [Felt::ZERO; 4]);
-    let (p2, outputs) = build_requires(&[absorption.clone()]);
+    let (p2, outputs) = build_requires(std::slice::from_ref(&absorption));
     let main = generate_trace(p2);
 
     let expected_digest = P2Digest(reference_digest(&absorption));
@@ -293,7 +293,7 @@ fn one_shot_digest_matches_reference_on_random_input() {
     let (rate0, rate1) = random_block(&mut rng);
     let absorption = Absorption::one_shot(cap, rate0, rate1);
 
-    let (_, outputs) = build_requires(&[absorption.clone()]);
+    let (_, outputs) = build_requires(std::slice::from_ref(&absorption));
     assert_eq!(outputs[0].digest, P2Digest(reference_digest(&absorption)));
 }
 
@@ -308,7 +308,7 @@ fn three_block_digest_matches_chained_reference_permutation() {
         out_multiplicity: 1,
     };
 
-    let (_, outputs) = build_requires(&[absorption.clone()]);
+    let (_, outputs) = build_requires(std::slice::from_ref(&absorption));
     assert_eq!(outputs[0].digest, P2Digest(reference_digest(&absorption)));
     assert_eq!(span_bounds(&outputs[0]), (0, 2));
 }

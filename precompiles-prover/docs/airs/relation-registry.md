@@ -60,7 +60,7 @@ powers of `β`; encoding stays linear.
 | 5 | [KeccakSponge](#5--keccaksponge) | `(sponge_seq_id, chunk_ptr, len_bytes)` | KeccakNode | KeccakSponge |
 | 6 | [Poseidon2In](#6--poseidon2in) | `(perm_seq_id, tag, c0..c3)` | Poseidon2 | Chunk, KeccakNode, TranscriptEval |
 | 7 | [Poseidon2Out](#7--poseidon2out) | `(perm_seq_id, d0..d3)` | Poseidon2 | KeccakNode, TranscriptEval |
-| 8 | [Binding](#8--binding) | `(h0..h3, value_tag, ptr)` | TranscriptEval, KeccakNode | TranscriptEval |
+| 8 | [Binding](#8--binding) | `(h0..h3, value_tag, ptr, bound_ptr)` | TranscriptEval, KeccakNode | TranscriptEval |
 | 9 | [ChunkChain](#9--chunkchain) | `(chunk_seq_id_head, perm_seq_id_head)` | Chunk | KeccakNode |
 | 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm |
 | 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
@@ -164,15 +164,17 @@ post-permutation state.
 
 ## 8 — Binding
 
-`(h0, h1, h2, h3, value_tag, ptr)` — a node hash bound to a typed value.
-`value_tag` selects the interpretation of `ptr`: `True` (a proven
-predicate, `ptr` unused), `Uint` (a stored uint), `Group` (a stored EC
-point). See [transcript-eval.md](transcript-eval.md) for the per-tag
-context slots.
+`(h0, h1, h2, h3, value_tag, ptr, bound_ptr)` — a node hash bound to a
+typed value. `value_tag` selects the interpretation of the context slots:
+`True` uses `(ptr, bound_ptr) = (0, 0)`, `Uint` uses
+`(ptr, bound_ptr)` as a stored uint and its modulus domain, and `Group` uses
+`ptr` as a stored EC point with `bound_ptr = 0`. See
+[transcript-eval.md](transcript-eval.md) for the per-tag context slots.
 
 - **Providers** — [TranscriptEval](transcript-eval.md) (one provide per
   DAG node at `−out_mult`, across the True / Uint / Group tags),
-  [KeccakNode](keccak-node.md) (`Binding(H_keccak, True)` at `−out_mult`).
+  [KeccakNode](keccak-node.md) (`Binding(H_keccak, True, 0, 0)` at
+  `−out_mult`).
 - **Consumer** — [TranscriptEval](transcript-eval.md): each node consumes
   its children's bindings (AND lhs/rhs, op operands, EC coordinates /
   points / scalars). Self-referential — a child binding is always an
@@ -261,7 +263,7 @@ or the group's ∞ when `is_pai = 1`.
 - **Provider** — [EcGroupAdd](ec-group-add.md): at the op's consumer count.
 - **Consumers** — [EcMsm](ec-msm.md) (a combine's value add, a neg's
   cancel `val + r = ∞`), [TranscriptEval](transcript-eval.md) (EcBinOp
-  add / sub / neg nodes).
+  add / sub nodes).
 
 ## 17 — EcOnCurveCert
 

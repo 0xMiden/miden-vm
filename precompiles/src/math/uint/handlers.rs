@@ -28,7 +28,7 @@ impl EventHandler for UintFieldInvHandler {
         let (_, canonical_node) = process.require_canonical_deferred_node(input_digest)?;
 
         let tag = canonical_node.tag();
-        let [op_id, domain_id, reserved] = tag.args();
+        let [op_id, bound_ptr, reserved] = tag.args();
         if op_id.as_canonical_u64() != UintPrecompile::VALUE_OP_ID || reserved != ZERO {
             return Err(UintFieldInvError::ExpectedUintValue.into());
         }
@@ -36,7 +36,12 @@ impl EventHandler for UintFieldInvHandler {
         if tag.id() != UintPrecompile::id() {
             return Err(UintFieldInvError::ExpectedUintPrecompile.into());
         }
-        let domain = UintDomain::from_id(domain_id).ok_or(UintFieldInvError::UnknownDomain)?;
+        let bound_ptr = bound_ptr.as_canonical_u64();
+        if bound_ptr > u32::MAX as u64 {
+            return Err(UintFieldInvError::UnknownDomain.into());
+        }
+        let domain =
+            UintDomain::from_bound_ptr(bound_ptr as u32).ok_or(UintFieldInvError::UnknownDomain)?;
         if !domain.is_prime_field() {
             return Err(UintFieldInvError::UnsupportedDomain.into());
         }

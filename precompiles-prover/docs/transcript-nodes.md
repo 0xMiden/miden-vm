@@ -2,21 +2,30 @@
 
 Cross-chiplet protocol layer: how values and assertions are committed
 inside the transcript DAG. Defines the 12-felt hash preimage shape and
-the tag / version / parameter discipline that gives each node its
-domain separation across the chunk, Keccak, uint, and EC paths.
+the tag / parameter discipline that gives each node its domain
+separation across the chunk, Keccak, uint, and EC paths.
 
 Adapted from the precompile-VM design doc (trunk's `pvm-design.md`,
 §3 / §4 / §6.3 / §6.7 / §7.1 / §8.4 / §8.5). The cherry-picked
 scope here covers the Keccak node types — **Chunk** and **Keccak** —
-plus the live uint family: **Transcript** / **UintLeaf** / **UintOp**;
+plus the live uint family: VM uint **VALUE** / **Add** / **Sub** /
+**Mul** / **Eq** caps and the external bootstrap **UintPinClaim**;
 the EC family: **EcCreate**, **EcBinOp**, and **EcMsm**.
 
 The Keccak MVP follows VM deferred-state tags for the public root path:
 **AND** is VM `Tag::AND = [1, 0, 0, 0]`, generic chunk commitments use
 VM `Tag::CHUNKS = [2, 0, 0, 0]`, and the terminal Keccak assertion uses
 `Keccak256Precompile::assert_tag(len_bytes).as_word() =
-[Keccak256Precompile::id(), 0, len_bytes, 0]`. Non-Keccak uint/EC
-families still use prover-local `NodeTag` + `CURRENT_VERSION` caps.
+[Keccak256Precompile::id(), 0, len_bytes, 0]`. Uint graph nodes use VM
+`UintPrecompile` caps:
+
+```text
+[UINT_PRECOMPILE_ID, VALUE_OP_ID, bound_ptr, 0]
+[UINT_PRECOMPILE_ID, op_id,       0,         0]
+```
+
+Bootstrap uint pin claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+EC nodes use prover-local caps with a reserved zero final slot.
 
 ## Hash preimage — Miden-native 12-felt state
 
@@ -27,7 +36,7 @@ without any felt reshuffling.
 
 ```
 index:  0 ................ 7        8        9        10       11
-        val[8]                      tag_id   param_a  param_b  version
+        val[8]                      tag_id   param_a  param_b  0
         ────── rate ──────          ─────────── capacity ─────────────
 ```
 
@@ -39,68 +48,58 @@ index:  0 ................ 7        8        9        10       11
 - **`tag_id`** (position 8, capacity): node type discriminator.
 - **`param_a`**, **`param_b`** (positions 9, 10): node-shape
   parameters (semantics per tag — see [§ Tag enumeration](#tag-enumeration)).
-- **`version`** (position 11): fixed felt constant `CURRENT_VERSION`.
-  Every consumer rejects any node where the version doesn't match.
-  Bumping the version invalidates all prior commitments — the
-  upgrade lever.
+- **reserved zero** (position 11): pinned to `0` for local transcript
+  caps. VM-owned caps also use their canonical fourth tag felt.
 
 The node's hash is `Poseidon2(preimage)[0..4]` — the first rate
 word post-permutation, matching the existing Poseidon2 chiplet's
 `DIGEST_RANGE` convention.
 
-## `CURRENT_VERSION`
+## Reserved capacity slot
 
-A felt-valued global constant baked into every chiplet that
-participates in transcript hashing. Initial value: `0` (placeholder
-— lock the exact felt once the chiplet stack stabilizes and a
-"version 1" cut is appropriate). Future spec upgrades increment
-this constant, which forces every previously-committed transcript
-root to fail verification against the new code path.
-
-The version lives in the capacity slot `state[11]` so it's bound
-into every node's hash without consuming a rate slot.
+The fourth capacity felt is reserved. Local transcript caps pin it to
+`0`, matching the VM-owned tag shapes used on the public root path.
+Future format changes should allocate explicit tag or parameter space.
 
 ## Tag enumeration
 
 VM-owned caps come directly from `miden_core::deferred::Tag` and
 `miden_precompiles::Keccak256Precompile`. The remaining local caps are
 registered in [`src/transcript/nodes.rs`](../src/transcript/nodes.rs)
-(`NodeTag` enum + `CURRENT_VERSION`).
+(`NodeTag` enum).
 
 | Capacity word | Name | `val[8]` |
 |---|---|---|
 | `[1, 0, 0, 0]` | VM `AND` | `lhs_hash[4] \|\| rhs_hash[4]` |
 | `[2, 0, 0, 0]` | VM `CHUNKS` | per-chunk content, including one-chunk digest payloads |
 | `[Keccak256Precompile::id(), 0, len_bytes, 0]` | VM Keccak-256 assertion | `H_input_chunks[4] \|\| H_digest_chunks[4]` |
-| `[UintLeaf, bound_ptr, pin_ptr, CURRENT_VERSION]` | local UintLeaf | the uint's 8×u32-LE value |
-| `[UintOp, op_id, 0, CURRENT_VERSION]` | local UintOp | `lhs_hash[4] \|\| rhs_hash[4]` |
-| `[EcCreate, a_ptr, b_ptr, CURRENT_VERSION]` | local EcCreate | `x_hash[4] \|\| y_hash[4]` |
-| `[EcBinOp, op_id, 0, CURRENT_VERSION]` | local EcBinOp | `P_hash[4] \|\| Q_hash[4]` |
-| `[EcMsm, group_ptr, 0, CURRENT_VERSION]` | local EcMsm IV | first MSM absorb; later absorbs use the prior digest as cap |
+| `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` | VM uint VALUE | the uint's 8×u32-LE value |
+| `[UintPrecompile::id(), op_id, 0, 0]` | VM uint op | `lhs_hash[4] \|\| rhs_hash[4]` |
+| `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` | bootstrap uint pin claim | the pinned uint's 8×u32-LE value |
+| `[EcCreate, a_ptr, b_ptr, 0]` | local EcCreate | `x_hash[4] \|\| y_hash[4]` |
+| `[EcBinOp, op_id, 0, 0]` | local EcBinOp | `P_hash[4] \|\| Q_hash[4]` |
+| `[EcMsm, group_ptr, 0, 0]` | local EcMsm IV | first MSM absorb; later absorbs use the prior digest as cap |
 
 ### Parameter constraints
 
 Every node-evaluating chiplet enforces these unused-slot pins as
-local AIR constraints. The pins are part of the version-1 spec —
-violating them is rejected as a malformed node, distinct from a
-version mismatch.
+local AIR constraints. Violating them is rejected as a malformed node.
 
 - **VM `AND`**: the entire cap is fixed to `[1, 0, 0, 0]`.
 - **VM `CHUNKS`**: the entire cap is fixed to `[2, 0, 0, 0]`.
 - **VM Keccak-256 assertion**: cap slot 1 is the assertion discriminant `0`,
   cap slot 2 is `len_bytes`, and cap slot 3 is `0`.
-- **Local UintLeaf**: `param_a = bound_ptr` (never 0 — ptr 0 is not a store
-  address), `param_b = pin_ptr` (`is_pinned·ptr`: the store address of a pinned
-  leaf, 0 for a transient).
-- **Local UintOp**: `param_a = op_id ∈ [1, 4]`, `param_b = 0`. Both param slots
-  belong to the op-discriminant namespace; future per-op parameters land in
-  `param_b`.
+- **VM uint VALUE**: cap slot 1 is `VALUE_OP_ID = 0`, cap slot 2 is
+  `bound_ptr`, and cap slot 3 is `0`.
+- **VM uint op**: cap slot 1 is `op_id ∈ [1, 4]`, cap slots 2 and 3 are `0`.
+  Operand/result pointers and `bound_ptr` are carried by `Binding` and relation tuples.
+- **Bootstrap uint pin claim**: cap slot 1 is `bound_ptr`, cap slot 2 is
+  `pin_ptr`, and cap slot 3 is `0`. This commits `store[pin_ptr] = value` as
+  an initial-root input.
 - **Local EcCreate**: `param_a = a_ptr`, `param_b = b_ptr` — the store addresses
-  of the curve's pinned `a`, `b` (never 0). This is the only node where the
-  curve `(a, b)` enters the DAG.
-- **Local EcBinOp**: `param_a = op_id ∈ [1, 3]`, `param_b = 0` — uniform with
-  UintOp: no curve param in the cap, the curve threads transitively through the
-  operands' hashes.
+  of the curve coefficients `a` and `b` (never 0).
+- **Local EcBinOp**: `param_a = op_id ∈ [1, 3]`, `param_b = 0`; the curve
+  threads through the operands' hashes.
 
 ### VM `CHUNKS` — not an eval-chip node
 
@@ -110,17 +109,27 @@ chunks. KeccakNode also uses the same capacity inline to hash the 8 packed
 digest felts as a one-chunk payload. That digest commitment is not a physical
 extra ChunkAir row.
 
-### Tag 3 (unused)
+### Bootstrap `UINT_PIN_CLAIM_TAG`
 
-Tag id 3 is intentionally unassigned. Current KeccakNode hashing commits
-both input bytes and digest bytes with tag 1 (`Chunk`), then commits the
-terminal assertion with tag 7 (`Keccak`).
+A bootstrap uint pin claim hashes the pinned value limbs under
+`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`:
 
-### Tag 4 (UintOp)
+```text
+rate  = lo[4] || hi[4]
+h_pin = H(rate || [UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0])
+```
 
-A uint arithmetic / equality node over two child hashes,
-discriminated by `param_a = op_id` (registered in code as
-`UintOpId`, `src/transcript/nodes.rs`):
+The eval row consumes both stored halves,
+`UintVal(pin_ptr, bound_ptr, 0, lo)` and
+`UintVal(pin_ptr, bound_ptr, 1, hi)`, and provides
+`Binding(h_pin, True)`. Bounds/moduli are self-pins (`pin_ptr = bound_ptr`).
+Bootstrap pin claims fold deterministically into the initial root; program
+claims fold from that root.
+
+### VM uint ops
+
+A uint arithmetic / equality node over two child hashes is discriminated by the
+VM uint precompile op id in cap slot 1; cap slots 2 and 3 are zero:
 
 | `op_id` | op | children (lhs, rhs) | semantics |
 |---|---|---|---|
@@ -131,10 +140,8 @@ discriminated by `param_a = op_id` (registered in code as
 
 The value ops bind `(h, Uint, r_ptr, bound_ptr)`; `Is` binds
 `(h, True, 0, 0)` — the predicate that folds uint equalities into the
-transcript root. **No result ptr appears in the cap**: the result ptr
-is a nondeterministic witness riding the Binding bus, and the bound is
-threaded through the lookups — the children's bindings, the relation
-tuple, and the node's own binding all carry one shared `bound_ptr`.
+transcript root. The `bound_ptr` is carried by the children's bindings,
+the relation tuple, and the node's own binding; these must agree.
 
 Each value-op row consumes one **pointered relation tuple** from
 the matching relation chiplet — `UintAdd(bound_ptr, ·, ·, ·)` for
@@ -149,7 +156,7 @@ one shared ptr column, so equality is enforced by bus balance alone.
 The EC family's leaf: a composite node that constructs a point of
 the short-Weierstrass curve `y² = x³ + ax + b` from two uint-node
 children `(x, y)`. The curve is named by the cap — `param_a = a_ptr`,
-`param_b = b_ptr`, the store addresses of the pinned `a` and `b` —
+`param_b = b_ptr`, the store addresses of coefficients `a` and `b` —
 and the modulus `p` is inherited from the children's shared
 `bound_ptr`.
 
@@ -261,7 +268,7 @@ buses is the usual bus-prefix mechanism.
 
 - [`chiplets/chunk.md`](chiplets/chunk.md) — chunk chiplet that
   drives input chunk absorption against the Poseidon2 chiplet, with
-  capacity init `(1, 0, 0, CURRENT_VERSION)`.
+  capacity init `Tag::CHUNKS.as_word() = [2, 0, 0, 0]`.
 - [`chiplets/keccak-sponge.md`](chiplets/keccak-sponge.md) —
   Keccak sponge consumes `KeccakSponge(sponge_seq_id, chunk_ptr, len_bytes)`;
   `KeccakNodeAir` ties that sponge run to the chunk-chain digest and the

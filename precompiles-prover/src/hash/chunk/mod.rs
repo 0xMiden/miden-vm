@@ -178,7 +178,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         // wrap unconstrained.
         builder
             .when_transition()
-            .assert_zero(chunk_seq_id_next.clone() - chunk_seq_id.clone() - AB::Expr::ONE);
+            .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
 
         // perm_seq_id chain -------------------------------------
         // Within an absorption chain (successor not a new head) it
@@ -187,19 +187,16 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         // chain's P2 cycle. This lockstep makes P2's absorption order
         // equal the downstream hasher's Memory64 order.
         builder.when_transition().assert_zero(
-            (AB::Expr::ONE - is_head_next.clone())
-                * (perm_seq_id_next.clone() - perm_seq_id.clone() - AB::Expr::ONE),
+            (AB::Expr::ONE - is_head_next) * (perm_seq_id_next - perm_seq_id - AB::Expr::ONE),
         );
 
         // Activity ----------------------------------------------
         builder.assert_bool(local[COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
 
         // Selector ----------------------------------------------
         builder.assert_bool(local[COL_IS_HEAD]);
-        builder.assert_zero(is_head.clone() * (AB::Expr::ONE - act.clone()));
+        builder.assert_zero(is_head * (AB::Expr::ONE - act));
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =
@@ -256,11 +253,11 @@ where
         // Poseidon2In consume multiplicities (sign +, gated by act):
         // rate0/rate1 every row; InCap on chain heads.
         let pos_act: LB::Expr = act.clone();
-        let pos_act_head: LB::Expr = act.clone() * is_head.clone();
+        let pos_act_head: LB::Expr = act * is_head;
 
         let rate0_chunk = [f[0].clone(), f[1].clone(), f[2].clone(), f[3].clone()];
         let rate1_chunk = [f[4].clone(), f[5].clone(), f[6].clone(), f[7].clone()];
-        let cap_chunk = Tag::CHUNKS.as_word().map(|felt| LB::Expr::from(felt));
+        let cap_chunk = Tag::CHUNKS.as_word().map(LB::Expr::from);
 
         let interaction_deg = Deg { v: 1, u: 1 };
         // Col 0 Memory64: one batch, 4 product inserts. d = 4; every

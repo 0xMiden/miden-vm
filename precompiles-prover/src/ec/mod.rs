@@ -326,7 +326,7 @@ where
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].into();
         let member_flag: LB::Expr =
             act.clone() * (LB::Expr::ONE - is_pai.clone()) * (LB::Expr::ONE - is_cert.clone());
-        let cert_flag: LB::Expr = act.clone() * is_cert.clone();
+        let cert_flag: LB::Expr = act.clone() * is_cert;
 
         let one: LB::Expr = LB::Expr::ONE;
         let zero: LB::Expr = LB::Expr::ZERO;

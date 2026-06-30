@@ -5,8 +5,8 @@
 //! claim — issued for a binding a downstream chip provides
 //! ([`issue`](TranscriptEvalRequires::issue), e.g. the keccak chip's
 //! `Binding(H_keccak, True)`), as a `ZERO_HASH` leaf
-//! ([`zero`](TranscriptEvalRequires::zero)), for a pinned uint leaf, or
-//! by the `Is` predicate. A `UintNode` stands for a
+//! ([`zero`](TranscriptEvalRequires::zero)), for a bootstrap uint pin
+//! claim, or by the `Is` predicate. A `UintNode` stands for a
 //! `Binding(hash, Uint, ptr, bound_ptr)` value — a transient uint leaf
 //! or an arithmetic op's result — consumed any number of times by
 //! further ops. [`record_and`](TranscriptEvalRequires::record_and) folds
@@ -57,12 +57,12 @@ use crate::{
     relations::ProvideMult,
     transcript::{
         eval::{
-            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CURVE_B,
-            COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
-            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED,
-            COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_MSM_EXPR,
-            COL_MSM_IDX, COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID, COL_PIN_PTR, COL_PTR,
-            COL_RHS_BEGIN, COL_SBOUND_PTR, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CAP_PARAM_B,
+            COL_CURVE_B, COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL,
+            COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO,
+            COL_LHS_BEGIN, COL_MSM_EXPR, COL_MSM_IDX, COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID,
+            COL_PTR, COL_RHS_BEGIN, COL_SBOUND_PTR, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::{EcOpId, UintOpId},
         poseidon2::{
@@ -181,11 +181,12 @@ enum NodeKind {
     Zero,
     /// AND node folding two children's bindings into the node hash.
     And { lhs: P2Digest, rhs: P2Digest },
-    /// Uint leaf — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`, its two
-    /// 4×32 halves pulled over `UintVal`) under the
-    /// `(UintLeaf, bound_ptr, pin_ptr, V)` cap into `Binding(hash, True)`
-    /// when pinned (`pin_ptr = ptr`) else `Binding(hash, Uint, ptr,
-    /// bound_ptr)` (`pin_ptr = 0`).
+    /// Uint leaf / bootstrap pin claim — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`,
+    /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the VM uint value cap
+    /// `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and bind
+    /// `Binding(hash, Uint, ptr, bound_ptr)`. Bootstrap pin claims use
+    /// `(UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
+    /// `Binding(hash, True)`.
     UintLeaf {
         ptr: u32,
         bound_ptr: u32,
@@ -193,9 +194,9 @@ enum NodeKind {
         lo: [Felt; NUM_HASH],
         hi: [Felt; NUM_HASH],
     },
-    /// Uint op — hashes its two child hashes under the
-    /// `(UintOp, op_id, 0, V)` cap, consumes the children's `Uint`
-    /// bindings (`a_ptr` / `b_ptr`) plus one `UintAdd` / `UintMul`
+    /// Uint op — hashes its two child hashes under the VM uint op cap
+    /// `[UintPrecompile::id(), op_id, 0, 0]`, consumes the children's `Uint`
+    /// bindings (`a_ptr` / `b_ptr` / `bound_ptr`) plus one `UintAdd` / `UintMul`
     /// relation tuple, and binds `(hash, Uint, r_ptr, bound_ptr)` — or
     /// `(hash, True)` for [`UintOpId::Is`]. `Is` carries `b_ptr = a_ptr` and
     /// `r_ptr = 0`.
@@ -209,7 +210,7 @@ enum NodeKind {
         bound_ptr: u32,
     },
     /// EcCreate — hashes two uint-coord child hashes `(x, y)` under the
-    /// `(EcCreate, a_ptr, b_ptr, V)` cap, consumes both coords' `Uint`
+    /// `(EcCreate, a_ptr, b_ptr, 0)` cap, consumes both coords' `Uint`
     /// bindings + the `EcGroup` (cap a/b ↔ group) and `EcPoint`
     /// (membership) tuples, and binds `(hash, Group, point_ptr)`. The
     /// slice lays finite points (`is_pai = 0`).
@@ -229,7 +230,7 @@ enum NodeKind {
         is_pai: bool,
     },
     /// EcBinOp — hashes two point child hashes under the `(EcBinOp,
-    /// op, 0, V)` cap. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
+    /// op, 0, 0)` cap. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
     /// consumes the rearranged `EcGroupAdd(group, r, q, p)`, and both bind
     /// `(hash, Group, r_ptr)`; `Is` consumes no relation (shared
     /// `p_ptr = q_ptr`) and binds `(hash, True)` (`r_ptr = group_ptr = 0`).
@@ -345,11 +346,10 @@ impl TranscriptEvalRequires {
         out
     }
 
-    /// Record a uint-leaf node (shared by [`uint_leaf`](Self::uint_leaf) and
-    /// [`pin_uint`](Self::pin_uint)): drive the Poseidon2 absorption of
-    /// `lo ‖ hi ‖ (UintLeaf, bound_ptr, pin_ptr, V)` — the pin address in
-    /// the cap is `ptr` when pinned, else the 0 transient marker — and
-    /// push the row. Returns the node id + hash.
+    /// Record a uint value row (shared by [`uint_leaf`](Self::uint_leaf) and
+    /// [`pin_uint`](Self::pin_uint)): drive the Poseidon2 absorption of `lo ‖ hi` under either
+    /// the runtime uint-leaf cap or the bootstrap pin-claim cap, then push the row. Returns the
+    /// node id + hash.
     fn push_uint_leaf(
         &mut self,
         ptr: UintPtr,
@@ -360,8 +360,12 @@ impl TranscriptEvalRequires {
     ) -> (u32, P2Digest) {
         let lo: [Felt; NUM_HASH] = core::array::from_fn(|i| Felt::from(value[i]));
         let hi: [Felt; NUM_HASH] = core::array::from_fn(|i| Felt::from(value[NUM_HASH + i]));
-        let pin_addr = if is_pinned { ptr.addr() } else { 0 };
-        let absorption = p2.require_one_shot(P2Cap::uint_leaf(bound_ptr.addr(), pin_addr), lo, hi);
+        let cap = if is_pinned {
+            P2Cap::uint_pin_claim(bound_ptr.addr(), ptr.addr())
+        } else {
+            P2Cap::uint_value(bound_ptr.addr())
+        };
+        let absorption = p2.require_one_shot(cap, lo, hi);
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
@@ -411,7 +415,7 @@ impl TranscriptEvalRequires {
     /// `b`: dedup by `(op, child hashes)` — a re-requested op returns the
     /// existing shared-use handle — else record the relation-chiplet op through
     /// `uints` (interning the result), drive the Poseidon2 absorption of
-    /// `a.hash ‖ b.hash ‖ (UintOp, op, 0, V)`, consume each child once, and
+    /// `a.hash ‖ b.hash` under the VM uint op cap, consume each child once, and
     /// bind the result to `Binding(hash, Uint, r_ptr, bound_ptr)`. Returns
     /// the result's handle.
     pub fn uint_op(
@@ -466,7 +470,7 @@ impl TranscriptEvalRequires {
 
     /// Record an `Is` node asserting `a ≡ b`, consuming each child's
     /// value-binding once, driving the Poseidon2 absorption of
-    /// `a.hash ‖ b.hash ‖ (UintOp, Is, 0, V)`, and binding
+    /// `a.hash ‖ b.hash` under the VM uint `EQ`/`Is` cap, and binding
     /// `(hash, True)` — the predicate that folds uint values into the
     /// transcript spine. Equality is asserted on the bus (the row
     /// carries one shared ptr for both child consumes), so the honest
@@ -506,7 +510,7 @@ impl TranscriptEvalRequires {
     /// `(x, y)` on the pinned curve `(a_ptr, b_ptr)`. Dedups by `(a, b, x
     /// hash, y hash)`; else drives the EC value work (group +
     /// eager-membership point) through `ec`, the Poseidon2 absorption of
-    /// `x.hash ‖ y.hash ‖ (EcCreate, a, b, V)`, consumes both coords,
+    /// `x.hash ‖ y.hash ‖ (EcCreate, a, b, 0)`, consumes both coords,
     /// and binds `(hash, Group, point_ptr)`. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_create(
@@ -567,7 +571,7 @@ impl TranscriptEvalRequires {
     /// the pinned curve `(a_ptr, b_ptr)`. Dedups by `(a, b, 0, 0)` (one ∞
     /// per curve); else drives `ec.pai_on_curve` (the group + its PAI row,
     /// routing the row's `EcGroup` / `EcPoint` demand), the Poseidon2
-    /// absorption of `0 ‖ 0 ‖ (EcCreate, a, b, V)`, and binds
+    /// absorption of `0 ‖ 0 ‖ (EcCreate, a, b, 0)`, and binds
     /// `(hash, Group, pai_ptr)`. No coord children. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_pai(
@@ -621,7 +625,7 @@ impl TranscriptEvalRequires {
     /// Record a EcBinOp/Add node `R = P + Q`. Dedups by `(Add, P hash,
     /// Q hash)`; else drives `ec.add` (the group law at provide mult 1)
     /// for `(group, R)`, the Poseidon2 absorption of `P.hash ‖ Q.hash ‖
-    /// (EcBinOp, Add, 0, V)`, consumes both operands, and binds `(hash,
+    /// (EcBinOp, Add, 0, 0)`, consumes both operands, and binds `(hash,
     /// Group, r_ptr)`. Returns the shared-use [`EcNode`].
     pub fn ec_add(
         &mut self,
@@ -668,7 +672,7 @@ impl TranscriptEvalRequires {
     /// parallel of uint sub. Dedups by `(Sub, P hash, Q hash)`; else drives
     /// `ec.sub` (intern the witness `R`, certify `R + Q = P` at provide
     /// mult 1), consumes both operands, absorbs `P.hash ‖ Q.hash ‖
-    /// (EcBinOp, Sub, 0, V)`, and binds `(hash, Group, r_ptr)` — `R`. The
+    /// (EcBinOp, Sub, 0, 0)`, and binds `(hash, Group, r_ptr)` — `R`. The
     /// row carries `(p_ptr, q_ptr, r_ptr) = (P, Q, R)`; the AIR's Sub arm
     /// permutes the consume to `EcGroupAdd(g, R, Q, P)`. Returns the
     /// shared-use [`EcNode`].
@@ -715,7 +719,7 @@ impl TranscriptEvalRequires {
     /// Record a EcBinOp/Is node asserting `P ≡ Q` — point-ptr equality
     /// (canonical interning means equal points share a ptr), consuming
     /// both operands' Group bindings at one shared ptr, driving the
-    /// Poseidon2 absorption of `P.hash ‖ Q.hash ‖ (EcBinOp, Is, 0, V)`,
+    /// Poseidon2 absorption of `P.hash ‖ Q.hash ‖ (EcBinOp, Is, 0, 0)`,
     /// and binding `(hash, True)`. Returns the foldable [`Truthy`].
     pub fn ec_is(&mut self, p: &EcNode, q: &EcNode, p2: &mut Poseidon2Requires) -> Truthy {
         assert_eq!(
@@ -748,7 +752,7 @@ impl TranscriptEvalRequires {
     /// Record an EcMsm claim node `R = Σ sᵢ·Pᵢ` — the chaining sponge over
     /// `terms = [(Pᵢ, sᵢ)]` (in `idx` order, matching the chiplet's
     /// `expr_ptr` term list). Each term folds into the sponge under
-    /// `cap = stateᵢ` (the IV `(EcMsm, group, 0, V)` first, the prior
+    /// `cap = stateᵢ` (the IV `(EcMsm, group, 0, 0)` first, the prior
     /// digest after); the node's hash is `state_k` and it binds
     /// `(h_claim, Group, val)`. Consumes each term's child `Group`/`Uint`
     /// binding (their `out_mult`); the absorb rows additionally consume
@@ -838,11 +842,11 @@ impl TranscriptEvalRequires {
         }
     }
 
-    /// Record a *pinned* uint leaf binding `value` to `Binding(hash, True)`
-    /// — a Truthy folded into the transcript spine (anchoring e.g. the
-    /// modulus in the public root; the pin address rides the cap) —
-    /// driving its `UintVal` demand and Poseidon2 absorption. Returns the
-    /// foldable handle (consumed exactly once, like any [`Truthy`]).
+    /// Record a bootstrap uint pin claim binding `value` to `Binding(hash, True)`.
+    ///
+    /// The cap is `(UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the row consumes both
+    /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
+    /// exactly like any [`Truthy`].
     pub fn pin_uint(
         &mut self,
         ptr: UintPtr,
@@ -1078,10 +1082,12 @@ fn push_node_row(
             row[COL_IS_PINNED] = Felt::from(*is_pinned as u8);
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
-            // pin_ptr = is_pinned·ptr: the cap-committed store address of a
-            // pinned leaf; 0 keeps a transient's hash content-addressed.
-            row[COL_PIN_PTR] = Felt::from(if *is_pinned { *ptr } else { 0 });
-            row[COL_PARAM_A] = Felt::from(*bound_ptr); // cap slot 1 = bound_ptr
+            // Cap slot 2: VM runtime value rows commit `bound_ptr`; bootstrap pin rows commit
+            // `pin_ptr = ptr`.
+            row[COL_CAP_PARAM_B] = Felt::from(if *is_pinned { *ptr } else { *bound_ptr });
+            // Cap slot 1: bootstrap pin rows commit `bound_ptr`; VM runtime value rows use
+            // VALUE_OP_ID = 0.
+            row[COL_PARAM_A] = Felt::from(if *is_pinned { *bound_ptr } else { 0 });
         },
         NodeKind::UintOp {
             op,
@@ -1100,6 +1106,7 @@ fn push_node_row(
             row[COL_A_PTR] = Felt::from(*a_ptr);
             row[COL_B_PTR] = Felt::from(*b_ptr);
             row[COL_PARAM_A] = Felt::from(*op as u8); // cap slot 1 = op id
+            // cap slot 2 stays 0: the bound rides the Binding / uint-relation buses.
         },
         NodeKind::EcCreate {
             x_hash,

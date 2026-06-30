@@ -348,7 +348,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             bp.push(bp[i - 1].clone() * beta.clone());
         }
         let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-        let x_minus_t: AB::ExprEF = beta.clone() - t16.clone();
+        let x_minus_t: AB::ExprEF = beta - t16.clone();
         let offset: AB::Expr = AB::Expr::from(Felt::from(GAMMA_OFFSET));
 
         let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
@@ -376,7 +376,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // S: build κₐ·a(β) over the a-rows, bound(β) over the p-rows;
         // hold / reset per the periodic keep gate.
         let build: AB::ExprEF = lo_sum.clone() * (sel[ROW_A_LO].clone() * kappa_a.clone())
-            + hi_sum.clone() * (sel[ROW_A_HI].clone() * kappa_a.clone())
+            + hi_sum.clone() * (sel[ROW_A_HI].clone() * kappa_a)
             + lo_sum.clone() * sel[ROW_P_LO].clone()
             + hi_sum.clone() * sel[ROW_P_HI].clone();
         let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
@@ -385,8 +385,8 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // id contributions.
         // The product: S = κₐ·a(β) through the b-rows.
-        let product = s.clone() * lo_sum.clone() * sel[ROW_B_LO].clone()
-            + s.clone() * hi_sum.clone() * sel[ROW_B_HI].clone();
+        let product =
+            s.clone() * lo_sum * sel[ROW_B_LO].clone() + s.clone() * hi_sum * sel[ROW_B_HI].clone();
         // The quotient: S = bound(β) through the q-rows; q(β)·(bound(β)+1)
         // with q₀..q₉ on q_lo (all ten cells) and q₁₀..q₁₆ on q_hi.
         let q_lo_sum: AB::ExprEF = (0..NUM_CELLS)
@@ -394,14 +394,14 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         let q_hi_sum: AB::ExprEF = (0..NUM_Q_LIMBS - NUM_CELLS).fold(AB::ExprEF::ZERO, |acc, i| {
             acc + bp[NUM_CELLS + i].clone() * AB::Expr::from(local[i])
         });
-        let quotient = (s.clone() + AB::ExprEF::ONE)
+        let quotient = (s + AB::ExprEF::ONE)
             * (q_lo_sum * sel[ROW_Q_LO].clone() + q_hi_sum * sel[ROW_Q_HI].clone());
         // The linear operands: 4×32 limbs at even powers, both halves on
         // one row. κ_c is read from the term row (next).
         let val_sum: AB::ExprEF = (0..8)
             .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
-        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next.clone())
-            - val_sum * sel[ROW_R].clone();
+        let linear =
+            val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next) - val_sum * sel[ROW_R].clone();
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
         // the lo halves carry the −2³¹ offset correction, act-gated so
         // all-zero padding blocks contribute nothing.
@@ -410,11 +410,11 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             let k = slot / 2;
             let mut w = x_minus_t.clone() * bp[k].clone();
             if slot % 2 == 1 {
-                w = w * t16.clone();
+                w *= t16.clone();
             }
             let mut gated: AB::Expr = sel[row].clone() * AB::Expr::from(local[cell]);
             if slot % 2 == 0 {
-                gated = gated - sel[row].clone() * act.clone() * offset.clone();
+                gated -= sel[row].clone() * act.clone() * offset.clone();
             }
             carries += w * gated;
         }
@@ -434,7 +434,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // provide a *false* relation onto the bus. Force the mult to 0 when
         // act = 0.
         builder.assert_zero(
-            sel[ROW_TERM].clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
+            sel[ROW_TERM].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into(),
         );
 
         // Cycle-constancy: ptrs / κₐ / act are constant within a block
@@ -564,7 +564,17 @@ where
             (sel[row].clone() * act.clone(), ptr, offset)
         })
         .collect();
-        for group in raw_consumes.chunks(2).map(|c| c.to_vec()).collect::<Vec<_>>() {
+        for group in raw_consumes
+            .chunks(2)
+            .map(
+                <[(
+                    <LB as LookupBuilder>::Expr,
+                    <LB as LookupBuilder>::Expr,
+                    <LB as LookupBuilder>::Expr,
+                )]>::to_vec,
+            )
+            .collect::<Vec<_>>()
+        {
             builder.next_column(
                 |col| {
                     col.group(
@@ -620,7 +630,11 @@ where
         // cols 4..8: Range16 on all ten cell positions, two per column.
         let cell_specs: Vec<(LB::Expr, usize)> =
             (0..NUM_CELLS).map(|cell| (cell_gate(cell) * act.clone(), cell)).collect();
-        for group in cell_specs.chunks(2).map(|c| c.to_vec()).collect::<Vec<_>>() {
+        for group in cell_specs
+            .chunks(2)
+            .map(<[(<LB as LookupBuilder>::Expr, usize)]>::to_vec)
+            .collect::<Vec<_>>()
+        {
             builder.next_column(
                 |col| {
                     col.group(
@@ -681,8 +695,7 @@ where
             pair_deg,
         );
         // cols 10..11: the 4×32 UintVal consumes (r, then c), lo+hi per col.
-        let val_consumes: [(usize, LB::Expr); 2] =
-            [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_next.clone())];
+        let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_next)];
         for (row, ptr) in val_consumes {
             builder.next_column(
                 |col| {

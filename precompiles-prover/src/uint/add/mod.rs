@@ -347,7 +347,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         // p = bound + 1.
         let k_next: AB::Expr = next[K_HUB_CELL_K].into();
         let k_here: AB::Expr = local[K_HUB_CELL_K].into();
-        let p_lo_contrib = (lo_sum.clone() + bp[0].clone()) * k_next.clone();
+        let p_lo_contrib = (lo_sum.clone() + bp[0].clone()) * k_next;
         let p_hi_contrib = hi_sum_next.clone() * k_here.clone();
 
         // When is_c_zero (the C-hub cell between the c halves), c is the
@@ -363,13 +363,13 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_active_next: AB::Expr = AB::Expr::ONE - bzc_next;
         let b_active_here: AB::Expr = AB::Expr::ONE - bzc_here.clone();
 
-        let contrib: AB::ExprEF = lo_sum.clone() * a_lo.clone()
-            + hi_sum.clone() * a_hi.clone()
-            + lo_sum.clone() * (b_lo.clone() * b_active_next)
+        let contrib: AB::ExprEF = lo_sum.clone() * a_lo
+            + hi_sum * a_hi
+            + lo_sum.clone() * (b_lo * b_active_next)
             + hi_sum_next.clone() * (b_hub.clone() * b_active_here)
-            - lo_sum * (c_lo.clone() * c_active_next)
-            - hi_sum_next.clone() * (c_hub.clone() * c_active_here)
-            - p_lo_contrib * p_lo.clone()
+            - lo_sum * (c_lo * c_active_next)
+            - hi_sum_next * (c_hub.clone() * c_active_here)
+            - p_lo_contrib * p_lo
             - p_hi_contrib * k_hub.clone()
             + carry_lo_term.clone() * cpos_lo.clone()
             + carry_hi_term.clone() * cpos_hi.clone()
@@ -392,9 +392,8 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         // act-gated — so an `act = 0` block with zeroed limbs (the SZ closes
         // trivially) and a witnessed term-row `mult` would provide a *false*
         // relation onto the bus. Force the term-row mult to 0 when act = 0.
-        builder.assert_zero(
-            term_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
-        );
+        builder
+            .assert_zero(term_sel.clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into());
 
         // is_c_zero (a C-hub cell) is boolean, and forces c_ptr = 0 — the
         // zero result has no stored address, and the tuple's c_ptr = 0
