@@ -288,7 +288,7 @@ fn one_shot_digest_matches_reference_on_zero_input() {
 
 #[test]
 fn one_shot_digest_matches_reference_on_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xc011_5e_ed);
+    let mut rng = StdRng::seed_from_u64(0xc011_5eed);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     let absorption = Absorption::one_shot(cap, rate0, rate1);
@@ -299,7 +299,7 @@ fn one_shot_digest_matches_reference_on_random_input() {
 
 #[test]
 fn three_block_digest_matches_chained_reference_permutation() {
-    let mut rng = StdRng::seed_from_u64(0xc0a1_ced);
+    let mut rng = StdRng::seed_from_u64(0x0c0a_1ced);
     let cap = random_chunk(&mut rng);
     let absorption = Absorption {
         cap,

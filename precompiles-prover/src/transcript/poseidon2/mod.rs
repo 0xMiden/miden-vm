@@ -323,8 +323,8 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         // w[0] is unused on rows that are neither packed-int nor int+ext.
         builder.assert_zero((AB::Expr::ONE - is_packed_int.clone() - is_int_ext) * w[0].clone());
         // w[1], w[2] are unused on rows that are not packed-int.
-        for k in 1..NUM_WITNESSES {
-            builder.assert_zero((AB::Expr::ONE - is_packed_int.clone()) * w[k].clone());
+        for witness in w.iter().skip(1) {
+            builder.assert_zero((AB::Expr::ONE - is_packed_int.clone()) * witness.clone());
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.

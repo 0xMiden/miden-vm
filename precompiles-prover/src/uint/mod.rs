@@ -378,12 +378,12 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
 
         // Carry booleanity (the no-wrap bound needs binary carries):
         // γ₀..γ₃ on the bound-lo row, γ₄..γ₆ on the bound-hi row.
-        for j in CARRY_CELLS_BEGIN..NUM_LIMBS {
-            let lj: AB::Expr = local[j].into();
+        for &cell in local.iter().take(NUM_LIMBS).skip(CARRY_CELLS_BEGIN) {
+            let lj: AB::Expr = cell.into();
             builder.assert_zero(bound_lo.clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
-        for j in CARRY_CELLS_BEGIN..NUM_LIMBS - 1 {
-            let lj: AB::Expr = local[j].into();
+        for &cell in local.iter().take(NUM_LIMBS - 1).skip(CARRY_CELLS_BEGIN) {
+            let lj: AB::Expr = cell.into();
             builder.assert_zero(bound_hi.clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
 

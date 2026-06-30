@@ -246,7 +246,7 @@ fn mul_rejects_wrong_result() {
     // Tamper the looked-up r limbs: the SZ id is nonzero at the term row
     // and check_constraints rejects (the bus would also mismatch, but the
     // identity fails first).
-    let mut rng = StdRng::seed_from_u64(0xbad_3);
+    let mut rng = StdRng::seed_from_u64(0xbad3);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
     let b = random_uint_below(&mut rng, bound);

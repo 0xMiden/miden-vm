@@ -387,8 +387,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
         builder.assert_bool(local[COL_IS_ZERO]);
-        for i in 0..NUM_HASH {
-            builder.assert_zero(is_zero.clone() * h[i].clone());
+        for h_i in &h {
+            builder.assert_zero(is_zero.clone() * h_i.clone());
         }
 
         // Root pin: the first row is the root; its `h` is the public

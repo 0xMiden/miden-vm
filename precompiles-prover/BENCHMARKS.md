@@ -30,14 +30,14 @@ by carrying the same benches through both configurations.
   - `ec_msm_ecdsa -- N 255 glv` — same workload, **signed GLV**
     decomposition: a real lattice reduction (short basis via half
     extended-Euclid on `(n, λ)` + one Babai step) splits `uᵢ` into two
-    **signed** ~128-bit halves; each half's sign rides on its base via
-    an `ec_neg` node (`|k|·(−P) = (−|k|)·P`), so the MSM consumes four
-    non-negative ~128-bit scalars and the joint ladder is capped near
-    128 doublings. `φ(P)` is certified in-circuit
-    (`x_{φP} = β·x_P mod p` + on-curve check); each split is bound by
-    `uᵢ ≡ uᵢₐ + uᵢᵦ·λ (mod n)` (with `uint_neg` on the half whose base
-    was flipped). The 4-base chain is laid by interleaved wNAF (`w = 4`,
-    `joint_wnaf`) — sparser adds than 4-base Straus.
+    **signed** ~128-bit halves; each half's sign rides on its chosen base
+    (`|k|·(−P) = (−|k|)·P`), so the MSM consumes four non-negative ~128-bit
+    scalars and the joint ladder is capped near 128 doublings. `φ(P)` is
+    certified in-circuit (`x_{φP} = β·x_P mod p` + on-curve check); each
+    split is bound by `uᵢ ≡ uᵢₐ + uᵢᵦ·λ (mod n)`, with the flipped half
+    represented by the corresponding signed scalar relation. The 4-base
+    chain is laid by interleaved wNAF (`w = 4`, `joint_wnaf`) — sparser
+    adds than 4-base Straus.
 - **Phases** are the direct children of the `prove` span (the names below
   match `miden_lifted_stark::prover`):
   - `commit-main` — main trace LDE + Merkle commit (blowup 8).
@@ -117,7 +117,7 @@ Trace heights at N = 32 vs JSF (JSF in brackets):
 uintadd = 2²¹, uintmul = 2²⁰]` — uint/uintadd **halved**),
 `ec_add = ec_msm = 32 768` (`ec_add` **halved**, vs JSF `[65 536]`),
 `ec_points = 8 192` (vs JSF `[16 384]`), `poseidon2 = 16 384` (vs JSF
-`[8 192]` — split + endomorphism + ec_neg certs push transcript-eval
+`[8 192]` — split + endomorphism + sign certificates push transcript-eval
 work into `poseidon2`, doubling it). The padding-boundary crossing on
 the uint family is what makes this real: with the previous unsigned-Straus
 GLV strategy the active uint count was below 2²¹ but still in the

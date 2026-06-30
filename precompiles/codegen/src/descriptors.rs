@@ -855,3 +855,28 @@ fn sub_raw(lhs: Limbs, rhs: Limbs) -> (Limbs, u32) {
     }
     (out, borrow as u32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_bound_pointers_round_trip_domains() {
+        let expected_ptrs = [
+            U256_BOUND_PTR,
+            K1_BASE_BOUND_PTR,
+            K1_SCALAR_BOUND_PTR,
+            R1_BASE_BOUND_PTR,
+            R1_SCALAR_BOUND_PTR,
+            ED25519_BASE_BOUND_PTR,
+            ED25519_SCALAR_BOUND_PTR,
+        ];
+
+        for (domain, expected_ptr) in UintDomain::ALL.into_iter().zip(expected_ptrs) {
+            assert_eq!(domain.bound_ptr(), expected_ptr);
+            assert_eq!(UintDomain::from_bound_ptr(expected_ptr), Some(domain));
+        }
+        assert_eq!(UintDomain::from_bound_ptr(0), None);
+        assert_eq!(UintDomain::from_bound_ptr(8), None);
+    }
+}

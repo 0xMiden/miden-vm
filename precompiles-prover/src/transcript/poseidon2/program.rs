@@ -89,15 +89,13 @@ pub fn poseidon2_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
     for r in [1, 2, 3, 12, 13, 14] {
         cols[PCOL_IS_EXT][r] = Felt::ONE;
     }
-    for r in PACKED_INT_BEGIN..PACKED_INT_END {
-        cols[PCOL_IS_PACKED_INT][r] = Felt::ONE;
-    }
+    cols[PCOL_IS_PACKED_INT][PACKED_INT_BEGIN..PACKED_INT_END].fill(Felt::ONE);
     cols[PCOL_IS_INT_EXT][ROW_INT_EXT] = Felt::ONE;
 
     // Ark columns — initial externals (rows 0–3).
-    for r in 0..=3 {
+    for (r, ark_row) in Hasher::ARK_EXT_INITIAL.iter().enumerate() {
         for lane in 0..STATE_WIDTH {
-            cols[PCOL_ARK_BEGIN + lane][r] = Hasher::ARK_EXT_INITIAL[r][lane];
+            cols[PCOL_ARK_BEGIN + lane][r] = ark_row[lane];
         }
     }
 
@@ -119,9 +117,9 @@ pub fn poseidon2_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
     }
 
     // Ark columns — terminal externals (rows 12–14).
-    for r in 12..=14 {
+    for (r, ark_row) in (12..=14).zip(Hasher::ARK_EXT_TERMINAL.iter().skip(1)) {
         for lane in 0..STATE_WIDTH {
-            cols[PCOL_ARK_BEGIN + lane][r] = Hasher::ARK_EXT_TERMINAL[r - 11][lane];
+            cols[PCOL_ARK_BEGIN + lane][r] = ark_row[lane];
         }
     }
 
