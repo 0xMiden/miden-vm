@@ -1,6 +1,8 @@
 use alloc::{format, string::ToString, vec::Vec};
 
-use super::{FLAG_HASHLESS, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION};
+use super::{
+    FLAG_HASHLESS, FLAG_SPARSE, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
+};
 use crate::{
     mast::MastNodeId,
     serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
@@ -157,6 +159,10 @@ impl WireFlags {
     pub(super) fn is_hashless(self) -> bool {
         self.0 & FLAG_HASHLESS != 0
     }
+
+    pub(super) fn is_sparse(self) -> bool {
+        self.0 & FLAG_SPARSE != 0
+    }
 }
 
 // LAYOUT SCANNING
@@ -171,6 +177,11 @@ pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
     // untrusted deserialization path.
     let (raw_flags, _version) = read_and_validate_header(source)?;
     let flags = WireFlags::new(raw_flags);
+    if flags.is_sparse() {
+        return Err(DeserializationError::InvalidValue(
+            "SPARSE flag is set; use SparseMastForest for sparse replay input".to_string(),
+        ));
+    }
     if flags.is_hashless() && !allow_hashless {
         return Err(DeserializationError::InvalidValue(
             "HASHLESS flag is set; use UntrustedMastForest for untrusted input".to_string(),
@@ -457,7 +468,7 @@ fn validate_budgeted_count<R: ByteReader>(
     Ok(())
 }
 
-fn read_and_validate_header<R: ByteReader>(
+pub(super) fn read_and_validate_header<R: ByteReader>(
     source: &mut R,
 ) -> Result<(u8, [u8; 3]), DeserializationError> {
     let magic: [u8; 4] = source.read_array()?;
