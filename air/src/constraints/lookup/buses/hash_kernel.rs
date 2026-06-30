@@ -4,10 +4,10 @@
 //! Combines three tables on a single LogUp column:
 //!
 //! 1. **Sibling table** (`BusId::SiblingTable`) — Merkle update siblings. On hasher controller
-//!    input rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old
-//!    path, adds siblings). The direction bit `b = node_index − 2·node_index_next` selects which
-//!    half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add,
-//!    two remove).
+//!    input rows with `s0 = 1, s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
+//!    (old path, adds siblings). The direction bit `b = node_index − 2·node_index_next` selects
+//!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
+//!    (two add, two remove).
 //! 2. **ACE memory reads** (chiplet-responses column) — on ACE chiplet rows, the block selector
 //!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
 //!    Both are removed from the chiplets bus.
@@ -81,8 +81,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let hs1: LB::Expr = ctrl.s1.into();
     let hs2: LB::Expr = ctrl.s2.into();
 
-    // MU/MV controller-row flags for sibling-table participation. Both share `s0 * s1 = 1`;
-    // they differ on `s2` (MU: `s2 = 1`, MV: `s2 = 0`) and fire at each Merkle path step.
+    // MU/MV controller-row flags for sibling-table participation. Both require input rows
+    // (`s0 = 1, s1 = 1`); `s2` distinguishes MU (`s2 = 1`) from MV (`s2 = 0`) at each Merkle
+    // path step.
     let controller_flag = ctx.chiplet_active.controller.clone();
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
