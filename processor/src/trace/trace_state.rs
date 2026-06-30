@@ -1880,3 +1880,6 @@ impl Deserializable for ExecutionReplay {
         })
     }
 }
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary;

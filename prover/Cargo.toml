@@ -14,6 +14,7 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
+arbitrary = ["dep:proptest"]
 default = ["std"]
 concurrent = [
     "std",
@@ -28,6 +29,7 @@ std = [
     "miden-precompiles-prover/std",
     "miden-processor/std",
 ]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
@@ -38,6 +40,7 @@ miden-processor.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
+proptest = { workspace = true, optional = true }
 serde.workspace = true
 serde-wincode.workspace = true
 tracing.workspace = true
@@ -46,4 +49,5 @@ wincode.workspace = true
 [dev-dependencies]
 miden-assembly.workspace = true
 miden-debug-types.workspace = true
+miden-test-serde-macros.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
