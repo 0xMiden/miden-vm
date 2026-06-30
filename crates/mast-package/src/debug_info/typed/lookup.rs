@@ -26,12 +26,17 @@ pub(super) fn read_debug_sections(
     }
 }
 
-/// Picks the debug entry for `procedure_name`.
+/// Finds the debug entry for `procedure_name`.
 ///
-/// The compiler emits the same procedure under two names: the `::`-path form (`..."get-count"`)
-/// has the high-level typed signature, the `#`-qualified form (`...@0.1.0#get-count`) the lowered
-/// (felt-flattened) one. Both have a `type_idx`, so prefer the `::`-path form. Otherwise take any
-/// entry with a `type_idx`, then any match at all.
+/// Each entry has a long compiler name. We take only its last part (the bare leaf) with
+/// `proc_display_name`, then compare it to the query in two forms: as typed, and in kebab form.
+/// Rust names become kebab (`get-count`), but hand-written MASM can keep `_` (`get_count`), so a
+/// `get_count` query matches either one.
+///
+/// The compiler writes the same procedure under two names: the `::`-path form (`..."get-count"`)
+/// carries the full typed signature, the `#`-form (`...@0.1.0#get-count`) the lowered (felt) one.
+/// Both have a `type_idx`, so we prefer the `::`-path form, then any entry with a `type_idx`, then
+/// any match.
 pub(super) fn find_debug_fn<'a>(
     funcs: &'a DebugFunctionsSection,
     procedure_name: &str,
@@ -45,8 +50,8 @@ pub(super) fn find_debug_fn<'a>(
             continue;
         };
         let s = s.as_ref();
-        // The leaf can be `#name`, `"name"`, or a bare `::name`, so compare the peeled leaf.
-        if proc_display_name(s) != kebab {
+        let leaf = proc_display_name(s);
+        if leaf != procedure_name && leaf != kebab {
             continue;
         }
         first_any.get_or_insert(f);
@@ -70,8 +75,8 @@ pub(super) fn wit_type_name(name: &str) -> &str {
     name.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or("")
 }
 
-/// The bare procedure name from a mangled debug name: last `::`-segment, quotes stripped, any
-/// `...#` interface prefix dropped. `::"miden:cc/mcc@0.1.0"::"get-count"` becomes `get-count`.
+/// The short procedure name from a long compiler name: take the last `::` part, remove the quotes,
+/// and drop anything before `#`. `::"miden:cc/mcc@0.1.0"::"get-count"` becomes `get-count`.
 pub(super) fn proc_display_name(raw: &str) -> &str {
     let seg = raw.rsplit("::").next().unwrap_or(raw).trim_matches('"');
     seg.rsplit('#').next().unwrap_or(seg)
@@ -156,12 +161,19 @@ mod tests {
     }
 
     #[test]
-    fn find_debug_fn_normalizes_snake_input_to_kebab() {
-        let mut funcs = DebugFunctionsSection::new();
-        let path = funcs.add_string(Arc::from("::\"miden:cc/mcc@0.1.0\"::\"take-account-id\""));
-        funcs.add_function(typed_fn(path, DebugTypeIdx::from(0)));
+    fn find_debug_fn_matches_kebab_and_exact_underscore_leaves() {
+        // A `take_account_id` query must find both a kebab leaf (`take-account-id`, from Rust) and
+        // a leaf that keeps `_` (`take_account_id`, from hand-written MASM).
+        for leaf in [
+            "::\"miden:cc/mcc@0.1.0\"::\"take-account-id\"",
+            "::\"miden:cc/mcc@0.1.0\"::take_account_id",
+        ] {
+            let mut funcs = DebugFunctionsSection::new();
+            let path = funcs.add_string(Arc::from(leaf));
+            funcs.add_function(typed_fn(path, DebugTypeIdx::from(0)));
 
-        let found = find_debug_fn(&funcs, "take_account_id").unwrap();
-        assert_eq!(found.name_idx, path);
+            let found = find_debug_fn(&funcs, "take_account_id").unwrap();
+            assert_eq!(found.name_idx, path);
+        }
     }
 }
