@@ -5,9 +5,9 @@
 //! - Log-precompile transcript-state: gated by the log precompile opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
-//! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
-//! (so their rationals remain linearly independent in the extension field) and on all
-//! opcode-gated interactions being mutually exclusive in the main group.
+//! This file uses the shared merge rules from [`super`]: opcode-gated interactions share the
+//! `main_interactions` group, while the always-active range-table response stays in the sibling
+//! `range_table` group.
 //!
 //! # Structure
 //!
@@ -25,9 +25,8 @@
 //!
 //! # Mutual exclusivity
 //!
-//! The main group is sound under simple-group accumulation because all its gates are
-//! mutually exclusive decoder-opcode flags. The three bus families live in disjoint
-//! opcode sets:
+//! The `main_interactions` group is safe because its three bus families live in disjoint opcode
+//! sets:
 //!
 //! - Block-stack: {JOIN, SPLIT, SPAN, DYN, LOOP, DYNCALL, CALL, SYSCALL, END, RESPAN}
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
