@@ -200,10 +200,13 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let id_1: LB::Expr = ace_id_1.into();
                             let id_2: LB::Expr = ace_id_2.into();
                             let eval_op: LB::Expr = ace_eval_op.into();
-                            let element = id_1
-                                + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
-                                + (eval_op + LB::Expr::ONE)
-                                    * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+
+                            // ACE EVAL rows read the packed instruction
+                            // `id_1 + id_2 * 2^30 + (eval_op + 1) * 2^60`.
+                            let id_2_slot = id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
+                            let eval_op_slot = (eval_op + LB::Expr::ONE)
+                                * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+                            let element = id_1 + id_2_slot + eval_op_slot;
                             MemoryMsg::read_element(ctx, addr, clk, element)
                         },
                         Deg { v: 5, u: 6 },
