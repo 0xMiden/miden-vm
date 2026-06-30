@@ -1654,7 +1654,8 @@ impl DebugPrimitiveType {
             | Self::F32
             | Self::Felt => 1,
             Self::I64 | Self::U64 | Self::F64 => 2,
-            Self::I128 | Self::U128 | Self::Word | Self::U256 => 4,
+            Self::I128 | Self::U128 | Self::Word => 4,
+            Self::U256 => 8,
         }
     }
 
@@ -2188,7 +2189,8 @@ mod tests {
         assert_eq!(DebugPrimitiveType::I64.size_in_felts(), 2);
         assert_eq!(DebugPrimitiveType::F64.size_in_felts(), 2);
         assert_eq!(DebugPrimitiveType::Word.size_in_felts(), 4);
-        assert_eq!(DebugPrimitiveType::U256.size_in_felts(), 4);
+        // A `u256` occupies eight 32-bit limbs on the stack.
+        assert_eq!(DebugPrimitiveType::U256.size_in_felts(), 8);
     }
 
     #[test]

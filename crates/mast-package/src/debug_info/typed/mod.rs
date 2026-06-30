@@ -130,7 +130,12 @@ impl TypedProcInfo {
     /// (e.g. a dynamic array).
     pub fn expected_arg_count(&self) -> Option<usize> {
         let view = self.view();
-        self.params.iter().map(|p| arg_token_count(&view, p.type_idx)).sum()
+        let mut total = 0usize;
+        for p in &self.params {
+            let count = arg_token_count(&view, p.type_idx)?;
+            total = total.checked_add(count)?;
+        }
+        Some(total)
     }
 
     /// Type-table indices of the procedure's parameters, in declaration order. Pair with
@@ -536,6 +541,39 @@ mod tests {
     }
 
     #[test]
+    fn u256_unsupported() {
+        let proc = prim_proc(DebugPrimitiveType::U256, "take-u256");
+
+        assert_eq!(proc.output_felt_count(), Some(8));
+
+        // A real 256-bit value, and its eight 32-bit limbs on the stack (low first).
+        let token = "0x1111111122222222333333334444444455555555666666667777777788888888";
+        let limbs: Vec<Felt> = [
+            0x8888_8888u64,
+            0x7777_7777,
+            0x6666_6666,
+            0x5555_5555,
+            0x4444_4444,
+            0x3333_3333,
+            0x2222_2222,
+            0x1111_1111,
+        ]
+        .into_iter()
+        .map(felt)
+        .collect();
+
+        // Encoding a u256 argument is rejected with a clear unsupported-type error
+        let mut tokens = [token.to_string()].into_iter();
+        assert!(matches!(
+            proc.encode_arg(&mut tokens, proc.param_type_indices()[0]),
+            Err(TypedDebugInfoError::UnsupportedType("u256"))
+        ));
+
+        // Decoding a u256 result isn't supported either: it falls back to raw felts (`None`)
+        assert_eq!(proc.decode_result(&limbs), None);
+    }
+
+    #[test]
     fn i128_signed_roundtrip() {
         let proc = prim_proc(DebugPrimitiveType::I128, "take-i128");
         let encoded = encode_all(&proc, &["-1"]);
@@ -814,5 +852,33 @@ mod tests {
 
         let mut iter = core::iter::empty::<String>();
         assert!(encode_tokens(&mut iter, &view, arr).expect("encode must terminate").is_empty());
+    }
+
+    #[test]
+    fn expected_arg_count_overflow_is_none() {
+        let mut types = DebugTypesSection::new();
+        let u8_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        // `[u8; u32::MAX]` -> u32::MAX tokens.
+        let inner = types.add_type(DebugTypeInfo::Array {
+            element_type_idx: u8_t,
+            count: Some(u32::MAX),
+        });
+        // `[[u8; u32::MAX]; u32::MAX]` -> u32::MAX * u32::MAX, still under usize::MAX on 64-bit.
+        let outer = types.add_type(DebugTypeInfo::Array {
+            element_type_idx: inner,
+            count: Some(u32::MAX),
+        });
+
+        let proc = make_proc(
+            types,
+            "two-big-arrays",
+            None,
+            vec![
+                TypedParam { name: "a".to_string(), type_idx: outer },
+                TypedParam { name: "b".to_string(), type_idx: outer },
+            ],
+        );
+
+        assert_eq!(proc.expected_arg_count(), None);
     }
 }
