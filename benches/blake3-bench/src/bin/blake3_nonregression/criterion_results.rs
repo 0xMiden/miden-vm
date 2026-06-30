@@ -9,23 +9,27 @@ use miden_vm_blake3_bench::{BENCH_GROUP, PRIMARY_METRIC, SpanRecord};
 
 use crate::model::{BenchmarkResult, Metric};
 
+pub(crate) struct CollectionContext<'a> {
+    pub(crate) git_ref: &'a str,
+    pub(crate) bench_wall_ms: Option<f64>,
+    pub(crate) span_collection_wall_ms: Option<f64>,
+    pub(crate) rayon_num_threads: Option<usize>,
+    pub(crate) bench_axes: &'a str,
+    pub(crate) sample_size: Option<usize>,
+    pub(crate) light_sample_size: Option<usize>,
+    pub(crate) measurement_time_secs: Option<u64>,
+    pub(crate) warm_up_time_secs: Option<u64>,
+    pub(crate) light_measurement_time_secs: Option<u64>,
+    pub(crate) light_warm_up_time_secs: Option<u64>,
+}
+
 pub(crate) fn collect_result(
     repo_root: &Path,
-    git_ref: &str,
-    bench_wall_ms: Option<f64>,
-    span_collection_wall_ms: Option<f64>,
-    rayon_num_threads: Option<usize>,
-    bench_axes: &str,
-    sample_size: Option<usize>,
-    light_sample_size: Option<usize>,
-    measurement_time_secs: Option<u64>,
-    warm_up_time_secs: Option<u64>,
-    light_measurement_time_secs: Option<u64>,
-    light_warm_up_time_secs: Option<u64>,
+    context: CollectionContext<'_>,
     spans: Vec<SpanRecord>,
 ) -> Result<BenchmarkResult, Box<dyn std::error::Error>> {
     let mut metrics = collect_criterion_metrics(repo_root)?;
-    if let Some(axes) = selected_criterion_axes(bench_axes) {
+    if let Some(axes) = selected_criterion_axes(context.bench_axes) {
         metrics.retain(|name, _| axes.contains(name.as_str()));
         if metrics.is_empty() {
             return Err(format!(
@@ -40,18 +44,18 @@ pub(crate) fn collect_result(
     }
     Ok(BenchmarkResult {
         repo_root: repo_root.display().to_string(),
-        git_ref: git_ref.to_string(),
+        git_ref: context.git_ref.to_string(),
         git_sha: current_sha(repo_root)?,
-        bench_wall_ms,
-        span_collection_wall_ms,
-        rayon_num_threads,
-        bench_axes: split_csv(bench_axes),
-        sample_size,
-        light_sample_size,
-        measurement_time_secs,
-        warm_up_time_secs,
-        light_measurement_time_secs,
-        light_warm_up_time_secs,
+        bench_wall_ms: context.bench_wall_ms,
+        span_collection_wall_ms: context.span_collection_wall_ms,
+        rayon_num_threads: context.rayon_num_threads,
+        bench_axes: split_csv(context.bench_axes),
+        sample_size: context.sample_size,
+        light_sample_size: context.light_sample_size,
+        measurement_time_secs: context.measurement_time_secs,
+        warm_up_time_secs: context.warm_up_time_secs,
+        light_measurement_time_secs: context.light_measurement_time_secs,
+        light_warm_up_time_secs: context.light_warm_up_time_secs,
         primary_metric: select_primary_metric(&metrics)?.to_string(),
         metrics,
         spans,
