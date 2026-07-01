@@ -9,6 +9,7 @@
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 - Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
+- Added fuzz targets and proptest coverage for trusted trace proving input serialization ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
 
 ## v0.24.0 (2026-06-24)
 
@@ -59,7 +60,6 @@
 - [BREAKING] Removed the stripped `MastForest` serialization mode. Normal forest bytes now describe execution data only ([#3268](https://github.com/0xMiden/miden-vm/pull/3268)).
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
 - [BREAKING] Bump Plonky3 and miden-crypto related dependencies ([#3275](https://github.com/0xMiden/miden-vm/pull/3275)).
-
 #### Fixes
 
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).

@@ -22,6 +22,7 @@ arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std", "serde?/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]
+testing = ["arbitrary"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true

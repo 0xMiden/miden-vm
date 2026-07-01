@@ -1905,3 +1905,6 @@ impl Deserializable for ExecutionReplay {
 
 #[cfg(feature = "arbitrary")]
 mod arbitrary;
+
+#[cfg(test)]
+mod serialization_tests;
