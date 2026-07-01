@@ -28,41 +28,45 @@ pub(super) fn read_debug_sections(
 
 /// Finds the debug entry for `procedure_name`.
 ///
-/// Each entry has a long compiler name. We take only its last part (the bare leaf) with
-/// `proc_display_name`, then compare it to the query in two forms: as typed, and in kebab form.
-/// Rust names become kebab (`get-count`), but hand-written MASM can keep `_` (`get_count`), so a
-/// `get_count` query matches either one.
+/// Each entry has a long compiler name; we compare only its bare leaf (via `proc_display_name`).
+/// The exact query name is tried first, the kebab form second, so a hand-written MASM proc
+/// whose name really contains `_` (`foo_bar`) is never shadowed by a compiler entry that only
+/// matches after the rewrite (`foo-bar`). Rust contract names become kebab (`get-count`), so a
+/// `get_count` query resolves through the kebab pass.
 ///
 /// The compiler writes the same procedure under two names: the `::`-path form (`..."get-count"`)
 /// carries the full typed signature, the `#`-form (`...@0.1.0#get-count`) the lowered (felt) one.
-/// Both have a `type_idx`, so we prefer the `::`-path form, then any entry with a `type_idx`, then
-/// any match.
+/// Within each pass we prefer the `::`-path form, because it retains the high-level WIT
+/// types (e.g. `AccountId`, `Word`) we want to preserve, whereas the `#`-form has already been
+/// lowered to raw felts. We fall back to any entry with a `type_idx`, then to any match at all;
+/// ties keep the first entry in iteration order.
 pub(super) fn find_debug_fn<'a>(
     funcs: &'a DebugFunctionsSection,
     procedure_name: &str,
 ) -> Option<&'a DebugFunctionInfo> {
     let kebab = procedure_name.replace('_', "-");
-    let mut typed_path: Option<&DebugFunctionInfo> = None;
-    let mut typed_any: Option<&DebugFunctionInfo> = None;
-    let mut first_any: Option<&DebugFunctionInfo> = None;
-    for f in &funcs.functions {
-        let Some(s) = funcs.strings.get(f.name_idx as usize) else {
-            continue;
-        };
-        let s = s.as_ref();
-        let leaf = proc_display_name(s);
-        if leaf != procedure_name && leaf != kebab {
-            continue;
-        }
-        first_any.get_or_insert(f);
-        if f.type_idx.is_some() {
-            typed_any.get_or_insert(f);
-            if !s.contains('#') {
-                typed_path.get_or_insert(f);
+    [procedure_name, kebab.as_str()].into_iter().find_map(|target| {
+        let mut typed_path: Option<&DebugFunctionInfo> = None;
+        let mut typed_any: Option<&DebugFunctionInfo> = None;
+        let mut first_any: Option<&DebugFunctionInfo> = None;
+        for f in &funcs.functions {
+            let Some(s) = funcs.strings.get(f.name_idx as usize) else {
+                continue;
+            };
+            let s = s.as_ref();
+            if proc_display_name(s) != target {
+                continue;
+            }
+            first_any.get_or_insert(f);
+            if f.type_idx.is_some() {
+                typed_any.get_or_insert(f);
+                if !s.contains('#') {
+                    typed_path.get_or_insert(f);
+                }
             }
         }
-    }
-    typed_path.or(typed_any).or(first_any)
+        typed_path.or(typed_any).or(first_any)
+    })
 }
 
 /// The bare type name from a full WIT path.
@@ -121,6 +125,38 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::default_trait_access)]
+    fn find_debug_fn_untyped_masm_leaves_exact_underscore_wins() {
+        // Faithful to `mixed_names.masm`: `pub proc "foo-bar"` and `pub proc foo_bar`, neither with
+        // a signature, so both DEBUG_FUNCTIONS entries are untyped (`first_any`, not `typed_path`).
+        // A `foo_bar` query must resolve to the exact `_` leaf, never the kebab `foo-bar` one,
+        // whichever order the assembler wrote them in.
+        for order in [
+            ["::mix::\"foo-bar\"", "::mix::foo_bar"],
+            ["::mix::foo_bar", "::mix::\"foo-bar\""],
+        ] {
+            let mut funcs = DebugFunctionsSection::new();
+            let mut exact_idx = None;
+            for leaf in order {
+                let idx = funcs.add_string(Arc::from(leaf));
+                funcs.add_function(DebugFunctionInfo::new(
+                    idx,
+                    0,
+                    Default::default(),
+                    Default::default(),
+                ));
+                if leaf.ends_with("foo_bar") {
+                    exact_idx = Some(idx);
+                }
+            }
+            let found = find_debug_fn(&funcs, "foo_bar").unwrap();
+            let found_raw = funcs.strings.get(found.name_idx as usize).unwrap().as_ref();
+            assert_eq!(found.name_idx, exact_idx.unwrap());
+            assert_eq!(proc_display_name(found_raw), "foo_bar");
+        }
+    }
+
+    #[test]
     fn proc_display_name_extracts_leaf() {
         // Quoted WIT leaf, `#`-qualified form, and a bare plain name.
         assert_eq!(
@@ -158,6 +194,26 @@ mod tests {
 
         let found = find_debug_fn(&funcs, "mixed").unwrap();
         assert_eq!(found.name_idx, path);
+    }
+
+    #[test]
+    fn find_debug_fn_typed_leaves_exact_underscore_wins() {
+        for order in [
+            ["::\"miden:cc/mcc@0.1.0\"::\"take-account-id\"", "::mcc::take_account_id"],
+            ["::mcc::take_account_id", "::\"miden:cc/mcc@0.1.0\"::\"take-account-id\""],
+        ] {
+            let mut funcs = DebugFunctionsSection::new();
+            let mut exact_idx = None;
+            for leaf in order {
+                let idx = funcs.add_string(Arc::from(leaf));
+                funcs.add_function(typed_fn(idx, DebugTypeIdx::from(0)));
+                if leaf.ends_with("take_account_id") {
+                    exact_idx = Some(idx);
+                }
+            }
+            let found = find_debug_fn(&funcs, "take_account_id").unwrap();
+            assert_eq!(found.name_idx, exact_idx.unwrap());
+        }
     }
 
     #[test]
