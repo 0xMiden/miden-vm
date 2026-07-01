@@ -1,5 +1,4 @@
-//! Per-AIR LogUp boundary emitters ([`emit_core_boundary`], [`emit_chiplets_boundary`])
-//! plus the committed-finals count for the multi-AIR proof shape.
+//! Boundary corrections and committed-final metadata for the Miden VM LogUp argument.
 
 use alloc::vec::Vec;
 
@@ -11,17 +10,16 @@ use crate::lookup::BoundaryBuilder;
 // COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Number of committed final aux values in the multi-AIR proof shape: Core final at slot 0
-/// and Chiplets final at slot 1.
+/// Number of final aux values.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 // BOUNDARY EMITTERS
 // ================================================================================================
 
-/// Emits the Core-trace boundary corrections.
+/// Emit boundary corrections for Core lookup columns.
 ///
-/// Block-hash seed and log-precompile transcript terminals both cancel against bus
-/// accumulators on Core columns:
+/// The block-hash seed and log-precompile transcript terminals cancel against these Core
+/// bus accumulators:
 /// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
 /// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
 ///   merged column).
@@ -64,7 +62,7 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     boundary.remove("log_precompile_final", LogPrecompileMsg { state: final_state });
 }
 
-/// Emits the Chiplets-trace boundary corrections.
+/// Emit boundary corrections for Chiplets lookup columns.
 pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let kernel_digests: Vec<[B::F; 4]> = boundary
         .var_len_public_inputs()

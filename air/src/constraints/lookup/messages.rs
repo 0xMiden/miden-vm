@@ -45,28 +45,39 @@ const _: () = assert!(
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
-    // --- Out-of-circuit (boundary correction / eval_external) ---
     /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
     KernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.
     BlockHashTable = 1,
     /// Log-precompile transcript: initial/final capacity state boundary correction.
     LogPrecompileTranscript = 2,
-
-    // --- In-circuit buses ---
+    /// Kernel ROM call: syscall multiplicities for kernel procedure roots.
     KernelRomCall = 3,
+    /// Hasher request: linear hash initial state.
     HasherLinearHashInit = 4,
+    /// Hasher response: return full sponge state.
     HasherReturnState = 5,
+    /// Hasher request: absorb a rate block.
     HasherAbsorption = 6,
+    /// Hasher response: return digest word.
     HasherReturnHash = 7,
+    /// Hasher request: Merkle path verification leaf.
     HasherMerkleVerifyInit = 8,
+    /// Hasher request: old-root side of Merkle root update.
     HasherMerkleOldInit = 9,
+    /// Hasher request: new-root side of Merkle root update.
     HasherMerkleNewInit = 10,
+    /// Memory bus: read one element.
     MemoryReadElement = 11,
+    /// Memory bus: write one element.
     MemoryWriteElement = 12,
+    /// Memory bus: read one word.
     MemoryReadWord = 13,
+    /// Memory bus: write one word.
     MemoryWriteWord = 14,
+    /// Bitwise chiplet request/response bus.
     Bitwise = 15,
+    /// ACE chiplet init bus.
     AceInit = 16,
     /// Block stack table (decoder p1): tracks control flow block nesting.
     BlockStackTable = 17,
@@ -527,9 +538,6 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     }
 }
 
-// ACE MESSAGE
-// ================================================================================================
-
 /// ACE circuit evaluation init message (5 elements): `[clk, ctx, ptr, num_read, num_eval]`.
 #[derive(Clone, Debug)]
 pub struct AceInitMsg<E> {
@@ -559,9 +567,6 @@ pub struct RangeMsg<E> {
 pub struct LogPrecompileMsg<E> {
     pub state: [E; 4],
 }
-
-// SIBLING TABLE MESSAGE
-// ================================================================================================
 
 // ACE WIRING MESSAGE
 // ================================================================================================
