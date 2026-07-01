@@ -43,6 +43,8 @@ pub use miden_processor::{
 };
 pub use proving_options::ProvingOptions;
 
+const TRACE_PROVING_INPUTS_ALLOCATION_BUDGET_MULTIPLIER: usize = 4;
+
 /// Inputs required to prove from pre-executed trace data.
 ///
 /// Its binary form is a VM-owned trusted remote proving input containing trace replay data and
@@ -70,6 +72,13 @@ impl TraceProvingInputs {
     /// Deserializes trusted remote proving inputs using the supplied byte budget.
     ///
     /// The budget bounds parsing. It does not validate sparse MAST hashes from untrusted senders.
+    /// This function reads one standalone payload and rejects trailing bytes. Readers for a larger
+    /// wrapper object should call [`TraceProvingInputs::read_from`] and let the wrapper own the
+    /// trailing-byte check.
+    ///
+    /// The public budget is a byte budget. Length-prefixed replay collections also need a bounded
+    /// allocation budget, so the reader derives a small preallocation allowance from the actual
+    /// payload length and caps it by the caller's byte budget.
     /// See <https://github.com/0xMiden/miden-vm/issues/3303>.
     pub fn read_from_bytes_with_budget(
         bytes: &[u8],
@@ -80,7 +89,8 @@ impl TraceProvingInputs {
                 "TraceProvingInputs byte budget is smaller than payload length".into(),
             ));
         }
-        let allocation_budget = budget.min(bytes.len().saturating_mul(4));
+        let allocation_budget = budget
+            .min(bytes.len().saturating_mul(TRACE_PROVING_INPUTS_ALLOCATION_BUDGET_MULTIPLIER));
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), allocation_budget);
         let inputs = Self::read_from(&mut reader)?;
         if reader.has_more_bytes() {
@@ -108,7 +118,10 @@ impl Deserializable for TraceProvingInputs {
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, SerdeDeserializationError> {
-        TraceProvingInputs::read_from_bytes_with_budget(bytes, bytes.len().saturating_mul(4))
+        TraceProvingInputs::read_from_bytes_with_budget(
+            bytes,
+            bytes.len().saturating_mul(TRACE_PROVING_INPUTS_ALLOCATION_BUDGET_MULTIPLIER),
+        )
     }
 
     fn read_from_bytes_with_budget(

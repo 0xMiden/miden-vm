@@ -55,7 +55,7 @@ pub struct TraceBuildInputs {
 }
 
 #[derive(Debug)]
-pub(crate) struct TraceBuildOutput {
+struct TraceBuildOutput {
     stack_outputs: StackOutputs,
     final_precompile_transcript: PrecompileTranscript,
     precompile_requests: Vec<PrecompileRequest>,
@@ -157,7 +157,7 @@ impl TraceBuildInputs {
     // Kept for mismatch and edge-case tests that mutate replay inputs directly.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
+    fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
         (self.trace_output, self.trace_generation_context, self.program_info)
     }
 
@@ -175,7 +175,7 @@ impl TraceBuildInputs {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_parts(
+    fn from_parts(
         trace_output: TraceBuildOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
@@ -231,7 +231,7 @@ impl ExecutionTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    pub(crate) fn new_from_parts(
+    fn new_from_parts(
         program_info: ProgramInfo,
         trace_output: TraceBuildOutput,
         main_trace: MainTrace,

@@ -10,6 +10,17 @@ use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 
+const TAG_START_NODE: u8 = 0;
+const TAG_FINISH_JOIN: u8 = 1;
+const TAG_FINISH_SPLIT: u8 = 2;
+const TAG_FINISH_LOOP: u8 = 3;
+const TAG_FINISH_CALL: u8 = 4;
+const TAG_FINISH_DYN: u8 = 5;
+const TAG_RESUME_BASIC_BLOCK: u8 = 6;
+const TAG_RESPAN: u8 = 7;
+const TAG_FINISH_BASIC_BLOCK: u8 = 8;
+const TAG_ENTER_FOREST: u8 = 9;
+
 // CONTINUATION
 // ================================================================================================
 
@@ -377,46 +388,46 @@ impl Serializable for Continuation<MastForestId> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
             Self::StartNode(node_id) => {
-                0u8.write_into(target);
+                TAG_START_NODE.write_into(target);
                 node_id.write_into(target);
             },
             Self::FinishJoin(node_id) => {
-                1u8.write_into(target);
+                TAG_FINISH_JOIN.write_into(target);
                 node_id.write_into(target);
             },
             Self::FinishSplit(node_id) => {
-                2u8.write_into(target);
+                TAG_FINISH_SPLIT.write_into(target);
                 node_id.write_into(target);
             },
             Self::FinishLoop(node_id) => {
-                3u8.write_into(target);
+                TAG_FINISH_LOOP.write_into(target);
                 node_id.write_into(target);
             },
             Self::FinishCall(node_id) => {
-                4u8.write_into(target);
+                TAG_FINISH_CALL.write_into(target);
                 node_id.write_into(target);
             },
             Self::FinishDyn(node_id) => {
-                5u8.write_into(target);
+                TAG_FINISH_DYN.write_into(target);
                 node_id.write_into(target);
             },
             Self::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                6u8.write_into(target);
+                TAG_RESUME_BASIC_BLOCK.write_into(target);
                 node_id.write_into(target);
                 batch_index.write_into(target);
                 op_idx_in_batch.write_into(target);
             },
             Self::Respan { node_id, batch_index } => {
-                7u8.write_into(target);
+                TAG_RESPAN.write_into(target);
                 node_id.write_into(target);
                 batch_index.write_into(target);
             },
             Self::FinishBasicBlock(node_id) => {
-                8u8.write_into(target);
+                TAG_FINISH_BASIC_BLOCK.write_into(target);
                 node_id.write_into(target);
             },
             Self::EnterForest { forest, package_debug_info: _ } => {
-                9u8.write_into(target);
+                TAG_ENTER_FOREST.write_into(target);
                 forest.write_into(target);
             },
         }
@@ -426,23 +437,23 @@ impl Serializable for Continuation<MastForestId> {
 impl Deserializable for Continuation<MastForestId> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         match u8::read_from(source)? {
-            0 => Ok(Self::StartNode(MastNodeId::read_from(source)?)),
-            1 => Ok(Self::FinishJoin(MastNodeId::read_from(source)?)),
-            2 => Ok(Self::FinishSplit(MastNodeId::read_from(source)?)),
-            3 => Ok(Self::FinishLoop(MastNodeId::read_from(source)?)),
-            4 => Ok(Self::FinishCall(MastNodeId::read_from(source)?)),
-            5 => Ok(Self::FinishDyn(MastNodeId::read_from(source)?)),
-            6 => Ok(Self::ResumeBasicBlock {
-                node_id: MastNodeId::read_from(source)?,
+            TAG_START_NODE => Ok(Self::StartNode(read_mast_node_id(source)?)),
+            TAG_FINISH_JOIN => Ok(Self::FinishJoin(read_mast_node_id(source)?)),
+            TAG_FINISH_SPLIT => Ok(Self::FinishSplit(read_mast_node_id(source)?)),
+            TAG_FINISH_LOOP => Ok(Self::FinishLoop(read_mast_node_id(source)?)),
+            TAG_FINISH_CALL => Ok(Self::FinishCall(read_mast_node_id(source)?)),
+            TAG_FINISH_DYN => Ok(Self::FinishDyn(read_mast_node_id(source)?)),
+            TAG_RESUME_BASIC_BLOCK => Ok(Self::ResumeBasicBlock {
+                node_id: read_mast_node_id(source)?,
                 batch_index: usize::read_from(source)?,
                 op_idx_in_batch: usize::read_from(source)?,
             }),
-            7 => Ok(Self::Respan {
-                node_id: MastNodeId::read_from(source)?,
+            TAG_RESPAN => Ok(Self::Respan {
+                node_id: read_mast_node_id(source)?,
                 batch_index: usize::read_from(source)?,
             }),
-            8 => Ok(Self::FinishBasicBlock(MastNodeId::read_from(source)?)),
-            9 => Ok(Self::EnterForest {
+            TAG_FINISH_BASIC_BLOCK => Ok(Self::FinishBasicBlock(read_mast_node_id(source)?)),
+            TAG_ENTER_FOREST => Ok(Self::EnterForest {
                 forest: MastForestId::read_from(source)?,
                 package_debug_info: None,
             }),
@@ -451,6 +462,10 @@ impl Deserializable for Continuation<MastForestId> {
             },
         }
     }
+}
+
+fn read_mast_node_id<R: ByteReader>(source: &mut R) -> Result<MastNodeId, DeserializationError> {
+    Ok(MastNodeId::from(u32::read_from(source)?))
 }
 
 impl Serializable for ContinuationStack<MastForestId> {
