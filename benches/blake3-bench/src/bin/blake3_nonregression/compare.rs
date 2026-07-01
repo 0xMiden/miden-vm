@@ -48,8 +48,13 @@ pub(crate) fn compare_results(
         }
     }
     rows.sort_by(|a, b| b.delta_pct.partial_cmp(&a.delta_pct).unwrap_or(std::cmp::Ordering::Equal));
+    let regression_rows = rows
+        .iter()
+        .filter(|row| row.delta_pct > threshold_pct)
+        .cloned()
+        .collect::<Vec<_>>();
     let top_slowdowns = rows.iter().filter(|row| row.delta_pct > 0.0).take(5).cloned().collect();
-    let regression = rows.iter().any(|row| row.delta_pct > threshold_pct);
+    let regression = !regression_rows.is_empty();
     Ok(Comparison {
         status: if regression { "regression" } else { "ok" }.to_string(),
         regression,
@@ -66,6 +71,7 @@ pub(crate) fn compare_results(
         baseline_bench_wall_ms: baseline.bench_wall_ms,
         current_bench_wall_ms: current.bench_wall_ms,
         rows,
+        regression_rows,
         top_slowdowns,
         missing_in_current,
         missing_in_baseline,
