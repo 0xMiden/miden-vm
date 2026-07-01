@@ -51,10 +51,10 @@ fn state_to_key(state: &HasherState) -> StateKey {
 ///
 /// Equal input states share one permutation cycle with the corresponding multiplicity.
 ///
-/// ## Controller row layout (20 columns)
+/// ## Controller row layout (19 columns)
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
-/// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit
+/// ├────┴───┴───┴────────┴────┴────────────┴─────────────┴───────────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
@@ -88,7 +88,7 @@ impl Hasher {
     /// Returns the layout of the hasher region as `(controller_len, poseidon2_len)`.
     ///
     /// `controller_len` includes padding rows that align the following chiplet section.
-    /// `poseidon2_len` includes a final zero-multiplicity cycle for the LogUp accumulator.
+    /// `poseidon2_len` includes one zero-multiplicity padding cycle.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
         let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);

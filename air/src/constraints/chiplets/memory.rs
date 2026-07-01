@@ -378,8 +378,7 @@ mod tests {
 
     fn memory_row() -> ChipletCols<Felt> {
         ChipletCols {
-            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 2],
-            s_perm: Felt::ZERO,
+            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 1],
             chip_clk: Felt::ONE,
         }
     }

@@ -45,15 +45,11 @@ macro_rules! impl_borrow_for_chiplet_cols {
 
 /// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
-/// Logical overlay for controller rows (`s_ctrl = 1`). `s0` distinguishes input rows
-/// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
-/// the hasher-controller row layout.
+/// Logical overlay for controller rows. The controller-internal `s0` distinguishes input rows
+/// (`s0 = 1`) from output/padding rows (`s0 = 0`).
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `ChipletCols::s_perm`) are consumed by the
-/// chiplet selector system and are NOT part of this overlay. Because the chiplet-level
-/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl`) and is
-/// never a named column or struct field, there is no name collision with the
-/// controller-internal `s0` defined here.
+/// `chiplets[0]` belongs to the top-level chiplet selector system and is not part of this overlay.
+/// The controller-internal `s0` defined here starts at `chiplets[1]`.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
 /// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
@@ -124,8 +120,7 @@ impl<T: Copy> ControllerCols<T> {
 
     /// Merkle-update new-path flag: `s0 * s1 * s2`.
     ///
-    /// Active on controller input rows that insert the new Merkle path into the sibling
-    /// table (request/remove side of the sibling bus).
+    /// Active on controller input rows that remove siblings for the new Merkle path.
     pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
     where
         T: Into<E>,
@@ -135,8 +130,7 @@ impl<T: Copy> ControllerCols<T> {
 
     /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
     ///
-    /// Active on controller input rows that extract the old Merkle path from the sibling
-    /// table (response/add side of the sibling bus).
+    /// Active on controller input rows that insert siblings for the old Merkle path.
     pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
     where
         T: Into<E>,

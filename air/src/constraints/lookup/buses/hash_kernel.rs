@@ -46,7 +46,7 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Three row-type-disjoint interaction sets, mutually exclusive via the chiplet tri-state:
+/// Three row-type-disjoint interaction sets, mutually exclusive via the chiplet selector prefix:
 /// - **Sibling-table** on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
 ///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
 ///   one of the four fires per row → 1 fraction.

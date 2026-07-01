@@ -17,7 +17,7 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (22 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_WIDTH: usize = 6;
@@ -68,10 +68,10 @@ pub mod log_precompile {
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
 
 // Chiplets trace
-// 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
+// 20 chiplet columns + chip_clk = 21.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
 // hasher responder address on the chiplet side.
-pub const CHIPLETS_WIDTH: usize = 22;
+pub const CHIPLETS_WIDTH: usize = 21;
 
 pub mod poseidon2_permutation {
     pub use crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS;

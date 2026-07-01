@@ -586,7 +586,7 @@ fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     if usize::from(row) >= main.chiplets_height() {
         return false;
     }
-    main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
+    main.chiplet_selector_0(row) == ZERO
 }
 
 /// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
@@ -656,7 +656,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
+        if main.chiplet_selector_0(idx) != ZERO {
             continue;
         }
         let hs0 = main.chiplet_selector_1(idx);

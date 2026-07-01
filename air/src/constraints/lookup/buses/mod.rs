@@ -62,7 +62,7 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
 pub(crate) struct ChipletActiveFlags<E> {
-    /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
+    /// `is_active` for the hasher controller sub-chiplet (= `1 - s0`).
     pub controller: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
     pub bitwise: E,
@@ -82,9 +82,9 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s_ctrl = chiplets[0]`
-    /// - virtual `s0 = 1 - s_ctrl`
+    /// - `s0 = chiplets[0]`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
+    /// - `is_controller = 1 - s0`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
@@ -92,14 +92,13 @@ where
         V: Copy,
         E: Algebra<V>,
     {
-        let s_ctrl: E = local.chiplets[0].into();
+        let s0: E = local.chiplets[0].into();
         let s1: E = local.chiplets[1].into();
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();
         let s4: E = local.chiplets[4].into();
 
-        // Virtual non-controller selector and prefix products.
-        let s0 = E::ONE - s_ctrl.clone();
+        let controller = E::ONE - s0.clone();
         let s01 = s0.clone() * s1;
         let s012 = s01.clone() * s2;
         let s0123 = s012.clone() * s3;
@@ -112,7 +111,7 @@ where
         let kernel_rom = s0123 - s01234;
 
         Self {
-            controller: s_ctrl,
+            controller,
             bitwise,
             memory,
             ace,

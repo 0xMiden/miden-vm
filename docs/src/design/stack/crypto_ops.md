@@ -35,7 +35,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/permutation split design these rows are consecutive, so their addresses differ by exactly $1$.
+The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. These controller rows are consecutive, so their addresses differ by exactly $1$.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $12$.
@@ -475,8 +475,8 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
 The above constraint enforces that the specified input and output controller rows must be present
-in the trace of the hash chiplet. In the controller/permutation split design these two controller
-rows are consecutive, so their addresses differ by exactly 1.
+in the trace of the hash chiplet. These two controller rows are consecutive, so their addresses
+differ by exactly 1.
 
 Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
 variables in the trace, it should be possible to combine the bus constraint in a way that avoids

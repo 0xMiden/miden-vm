@@ -1,6 +1,5 @@
 ---
 source: air/src/constraints/columns.rs
-assertion_line: 345
 expression: CHIPLET_COL_MAP
 ---
 ChipletCols {
@@ -26,6 +25,5 @@ ChipletCols {
         18,
         19,
     ],
-    s_perm: 20,
-    chip_clk: 21,
+    chip_clk: 20,
 }

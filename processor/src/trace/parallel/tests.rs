@@ -1217,10 +1217,10 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the chiplets trace
-/// (hasher + memory rows) exceeds `max_trace_len`, even though the core trace rows fit.
+/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the Poseidon2
+/// permutation trace exceeds `max_trace_len`, even though the core trace rows fit.
 #[test]
-fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
+fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_max_len() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     // Use the DYN program because it exercises both hasher and memory chiplets.
@@ -1243,20 +1243,20 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
         * trace_inputs.trace_generation_context().fragment_size;
 
-    // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
-    // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
-    // core_trace_rows / HASH_CYCLE_LEN + 1 permutations to guarantee the chiplets trace exceeds the
-    // limit.
+    // Inject enough unique permutation requests so the Poseidon2 permutation trace exceeds
+    // core_trace_rows. Each unique state adds one HASH_CYCLE_LEN cycle.
     let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
-    for _ in 0..num_permutations {
+    for i in 0..num_permutations {
+        let mut state = [ZERO; 12];
+        state[0] = Felt::from_u32(i as u32);
         trace_inputs
             .trace_generation_context_mut()
             .hasher_for_chiplet
-            .record_permute_input([ZERO; 12]);
+            .record_permute_input(state);
     }
 
     // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
-    // greater), but the inflated chiplets trace will exceed it.
+    // greater), but the Poseidon2 permutation trace will exceed it.
     let max_trace_len = core_trace_rows;
 
     let result = build_trace_with_max_len(trace_inputs, max_trace_len);

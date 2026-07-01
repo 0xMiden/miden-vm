@@ -4,8 +4,7 @@
 //! responds to the chiplets bus. The Poseidon2 permutation AIR enforces the requested
 //! permutations. The perm-link bus binds the controller rows to those permutation cycles.
 //!
-//! The controller is active when `s_ctrl = 1`, which covers all controller rows: input, output, and
-//! padding.
+//! The controller active flag covers all controller rows: input, output, and padding.
 //!
 //! ## Sub-modules
 //!
@@ -53,8 +52,8 @@ use crate::{
 
 /// Enforce all controller sub-chiplet constraints.
 ///
-/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The `s_ctrl`
-/// column is never referenced directly by constraint code.
+/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The top-level chiplet
+/// selector is never referenced directly by constraint code.
 pub fn enforce_controller_constraints<AB>(
     builder: &mut AB,
     local: &ChipletCols<AB::Var>,
@@ -78,8 +77,8 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- First-row boundary ---
     // The first row of the trace must be a controller input row: asserting
-    // `is_active * is_input = 1` forces both `s_ctrl = 1` and `s0 = 1` because
-    // the only solution to a product of booleans equaling 1 is all factors = 1.
+    // `is_active * is_input = 1` forces both the controller active flag and the
+    // controller-internal input selector to 1.
     // NOTE: this assumes the controller is the first chiplet section in the trace.
     // A reordering of chiplet sections would require moving this constraint.
     builder
@@ -118,9 +117,8 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Padding stability ---
     // A padding row may only be followed by another padding row or by the first
-    // row outside the controller section. Gating on `chiplet.is_transition` =
-    // `is_transition * s_ctrl * s_ctrl'` makes the constraint vanish on the last
-    // padding row.
+    // row outside the controller section. Gating on `chiplet.is_transition`
+    // makes the constraint vanish on the last padding row.
     //
     // Asserting `is_padding_next = (1-s0')*s1' = 1` forces `s0' = 0` and `s1' = 1`.
     // Degree: is_transition(3) * is_padding(2) * is_padding_next(2) = 7.
@@ -139,16 +137,13 @@ pub fn enforce_controller_constraints<AB>(
     // =====================================================================
     // 2. OPERATION START
     //
-    // The first row of every operation is a controller input row (s_ctrl = 1,
-    // s0 = 1). These constraints apply to ANY input row regardless of
-    // operation kind.
+    // The first row of every operation is a controller input row. These constraints apply to ANY
+    // input row regardless of operation kind.
     // =====================================================================
 
     // --- No input row at the end of the controller section ---
     // An input row cannot be the last controller row. Without this, the
-    // adjacency rule below (which relies on `s_ctrl'` so that `s0'/s1'` are
-    // binary on the next row) would have a hole at the boundary.
-    // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly there.
+    // adjacency rule below would have a hole at the boundary.
     builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
 
     // --- No non-final output at the end of the controller section ---
@@ -163,11 +158,10 @@ pub fn enforce_controller_constraints<AB>(
         .assert_one(cols.is_boundary);
 
     // --- Input→output adjacency on ctrl→ctrl transitions ---
-    // On a ctrl→ctrl transition from an input row, the next row must be an
-    // output row. `is_transition` carries the `s_ctrl'` factor, so on this
-    // gate `cols_next.s0/s1` are boolean and `(1 - s0')(1 - s1') = 1` really
-    // does force both to 0. Combined with the `is_last` guard above, every
-    // ctrl_input is followed by a ctrl_output.
+    // On a controller-to-controller transition from an input row, the next row must be an output
+    // row. `is_transition` guarantees that the next row is also a controller row, so
+    // `cols_next.s0/s1` are binary and `(1 - s0') * (1 - s1') = 1` forces both to 0. Combined
+    // with the `is_last` guard above, every controller input is followed by a controller output.
     builder
         .when(chiplet.is_transition.clone())
         .when(rows.is_input.clone())

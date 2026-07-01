@@ -75,29 +75,26 @@ impl<T> CoreCols<T> {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the 20 chiplet columns, reserved `s_perm`, and `chip_clk`.
+/// `ChipletCols` covers the chiplet payload/selector columns and `chip_clk`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
-    /// Reserved chiplet selector column. It is constrained to zero in `ChipletsAir`.
-    pub s_perm: T,
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
     /// Chiplet-trace row counter: starts at 1 on the first row and increments by 1.
     pub chip_clk: T,
 }
 
-/// Number of columns in the chiplets trace (22), derived from the struct layout.
+/// Number of columns in the chiplets trace (21), derived from the struct layout.
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
 impl<T> ChipletCols<T> {
-    /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
-    pub fn chiplet_selectors(&self) -> [T; 6]
+    /// Returns the top-level selector slots `[s0, s1, s2, s3, s4]`.
+    pub fn chiplet_selectors(&self) -> [T; 5]
     where
         T: Copy,
     {
         [
             self.chiplets[0],
-            self.s_perm,
             self.chiplets[1],
             self.chiplets[2],
             self.chiplets[3],
@@ -296,8 +293,7 @@ mod tests {
     fn col_map_chiplets() {
         assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
         assert_eq!(CHIPLET_COL_MAP.chiplets[19], 19);
-        assert_eq!(CHIPLET_COL_MAP.s_perm, 20);
-        assert_eq!(CHIPLET_COL_MAP.chip_clk, 21);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, 20);
     }
 
     // --- Per-AIR width invariants -------------------------------------------------------------

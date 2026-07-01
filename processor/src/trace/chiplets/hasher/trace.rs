@@ -12,10 +12,6 @@ use miden_core::chiplets::hasher::Hasher;
 
 use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, StateKey, ZERO};
 
-// The controller overlay is 19 columns wide. The final hasher-controller trace column is the
-// chiplet-level `s_perm` selector, which is fixed to ZERO in this trace.
-const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
-
 // HASHER OPERATION
 // ================================================================================================
 
@@ -58,14 +54,13 @@ impl HasherOp {
 /// materialized into the separate Poseidon2 permutation AIR by
 /// [`fill_poseidon2_permutation_trace`].
 ///
-/// Controller rows use 20 columns:
+/// Controller rows use 19 columns:
 /// - 3 hasher-internal selector columns (`s0`, `s1`, `s2`).
 /// - 12 Poseidon2 state columns (`h0..h11`).
 /// - `node_index`, used by Merkle operations.
 /// - `mrupdate_id`, the domain separator for MRUPDATE sibling-table entries.
 /// - `is_boundary`, set on operation boundaries.
 /// - `direction_bit`, used by Merkle path operations.
-/// - `s_perm`, fixed to ZERO for every controller row.
 #[derive(Debug, Default)]
 pub(super) struct HasherTrace {
     ops: Vec<HasherOp>,
@@ -238,8 +233,7 @@ fn write_controller_row(
     is_boundary: Felt,
     direction_bit: Felt,
 ) {
-    let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
-    let cols: &mut ControllerCols<Felt> = overlay.borrow_mut();
+    let cols: &mut ControllerCols<Felt> = row.as_mut_slice().borrow_mut();
     cols.s0 = selectors[0];
     cols.s1 = selectors[1];
     cols.s2 = selectors[2];
@@ -248,7 +242,6 @@ fn write_controller_row(
     cols.mrupdate_id = mrupdate_id;
     cols.is_boundary = is_boundary;
     cols.direction_bit = direction_bit;
-    tail[0] = ZERO;
 }
 
 // POSEIDON2 PERMUTATION TRACE

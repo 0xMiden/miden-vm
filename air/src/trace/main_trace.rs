@@ -470,11 +470,6 @@ impl MainTrace {
         self.chiplet_cols(i).chiplets[4]
     }
 
-    /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
-    pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[5]
-    }
-
     /// Returns `true` if a row is part of the hash-controller chiplet.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; rows past `chiplets_height()`
@@ -483,7 +478,7 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
     }
 
     /// Returns the (full) state of the hasher chiplet at row i.
@@ -513,16 +508,6 @@ impl MainTrace {
         self.chiplet_cols(i).controller().direction_bit
     }
 
-    /// Returns the reserved `s_perm` column at row i.
-    ///
-    /// # Panics
-    /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
-    /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
-    /// height, so they can be used as bound-aware filters.
-    pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).s_perm
-    }
-
     /// Returns the memory's word address low 16-bit limb at row i.
     pub fn chiplet_memory_word_addr_lo(&self, i: RowIndex) -> Felt {
         self.chiplet_cols(i).memory_word_addr_lo()
@@ -534,7 +519,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=0.
+    /// Active when `s0=1` and `s1=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height so the classifier is safe to
     /// call on any row of the unified trace.
@@ -542,9 +527,7 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
-            && self.chiplet_selector_1(i) == ZERO
+        self.chiplet_selector_0(i) == ONE && self.chiplet_selector_1(i) == ZERO
     }
 
     /// Returns the bitwise column holding the aggregated value of input `a` at row i.
@@ -563,15 +546,14 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=0.
+    /// Active when `s0=1`, `s1=1`, and `s2=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+        self.chiplet_selector_0(i) == ONE
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ZERO
     }
@@ -622,15 +604,14 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=0.
+    /// Active when `s0=1`, `s1=1`, `s2=1`, and `s3=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+        self.chiplet_selector_0(i) == ONE
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ZERO
@@ -741,15 +722,14 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the kernel chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=1, s4=0.
+    /// Active when `s0=1`, `s1=1`, `s2=1`, `s3=1`, and `s4=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+        self.chiplet_selector_0(i) == ONE
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
@@ -805,11 +785,10 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_s_perm(i) == ZERO   // controller region
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
-            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
-            && self.chiplet_selector_3(i) == ZERO // s2=0
+        self.chiplet_selector_0(i) == ZERO        // chiplet s0=0 (controller row)
+            && self.chiplet_selector_1(i) == ONE  // controller s0=1 (input row)
+            && self.chiplet_selector_2(i) == ONE  // controller s1=1 (MR_UPDATE_OLD)
+            && self.chiplet_selector_3(i) == ZERO // controller s2=0
     }
 
     /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) hasher controller input row.
@@ -823,11 +802,10 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_s_perm(i) == ZERO   // controller region
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
-            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
-            && self.chiplet_selector_3(i) == ONE // s2=1
+        self.chiplet_selector_0(i) == ZERO        // chiplet s0=0 (controller row)
+            && self.chiplet_selector_1(i) == ONE  // controller s0=1 (input row)
+            && self.chiplet_selector_2(i) == ONE  // controller s1=1 (MR_UPDATE_NEW)
+            && self.chiplet_selector_3(i) == ONE // controller s2=1
     }
 }
 

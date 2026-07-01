@@ -35,9 +35,9 @@
 //! prover could pair any controller `(state_in, state_out)` with any permutation cycle or skip the
 //! cycle entirely. The chiplets side emits the controller additions:
 //!
-//! - **Controller input** (`s_ctrl * is_input`, multiplicity `+1`): controller side of a
+//! - **Controller input** (`controller_active * is_input`, multiplicity `+1`): controller side of a
 //!   `(state_in, state_out)` pair. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`s_ctrl * is_output`, multiplicity `+1`). Routed to
+//! - **Controller output** (`controller_active * is_output`, multiplicity `+1`). Routed to
 //!   `BusId::HasherPermLinkOutput`.
 //!
 //! The Poseidon2 AIR emits the matching removals on cycle rows 0 and 15.
