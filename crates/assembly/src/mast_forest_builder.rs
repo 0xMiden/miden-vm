@@ -110,11 +110,24 @@ pub struct MastForestBuilder {
 pub(crate) struct StaticLibrary<'a> {
     pub(crate) mast: &'a MastForest,
     pub(crate) debug_info: Option<PackageDebugInfo>,
+    pub(crate) source_library_commitment: Word,
 }
 
 impl<'a> StaticLibrary<'a> {
     pub(crate) fn new(mast: &'a MastForest, debug_info: Option<PackageDebugInfo>) -> Self {
-        Self { mast, debug_info }
+        Self {
+            mast,
+            debug_info,
+            source_library_commitment: mast.interface_commitment(),
+        }
+    }
+
+    pub(crate) fn with_source_library_commitment(
+        mut self,
+        source_library_commitment: Word,
+    ) -> Self {
+        self.source_library_commitment = source_library_commitment;
+        self
     }
 }
 
@@ -146,7 +159,7 @@ impl MastForestBuilder {
             .collect::<Vec<_>>();
         let mut error_messages = BTreeMap::new();
         let statically_linked_package_debug_info = static_libraries
-            .into_iter()
+            .iter()
             .map(|library| {
                 if let Some(debug_info) = library.debug_info.as_ref()
                     && let Some(section) = debug_info.error_messages()
@@ -155,13 +168,13 @@ impl MastForestBuilder {
                         error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
                     }
                 }
-                library.debug_info
+                library.debug_info.clone()
             })
             .collect::<Vec<_>>();
         let mut statically_linked_forest_indices_by_commitment = BTreeMap::new();
-        for (idx, forest) in forests.iter().enumerate() {
+        for (idx, library) in static_libraries.iter().enumerate() {
             statically_linked_forest_indices_by_commitment
-                .entry(forest.commitment())
+                .entry(library.source_library_commitment)
                 .or_insert_with(Vec::new)
                 .push(idx);
         }
@@ -2104,7 +2117,7 @@ mod tests {
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
-                Some(static_forest.commitment()),
+                Some(static_forest.interface_commitment()),
                 Some(final_static_block),
                 Some(DebugSourceNodeId::from(u32::from(static_source_root))),
             )
@@ -2179,7 +2192,7 @@ mod tests {
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
-                Some(static_forest.commitment()),
+                Some(static_forest.interface_commitment()),
                 Some(final_static_block),
                 Some(package_source_root),
             )
@@ -2243,7 +2256,7 @@ mod tests {
         let error = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_split].digest(),
-                Some(static_forest.commitment()),
+                Some(static_forest.interface_commitment()),
                 Some(final_split),
                 Some(package_source_root),
             )
@@ -2452,7 +2465,7 @@ mod tests {
         let source_b_root = source_b_remapping[&source_b_ref];
 
         assert_eq!(source_a_root, source_b_root);
-        assert_eq!(source_a_forest.commitment(), source_b_forest.commitment());
+        assert_eq!(source_a_forest.interface_commitment(), source_b_forest.interface_commitment());
         assert_eq!(
             source_a_forest[source_a_root].digest(),
             source_b_forest[source_b_root].digest()
@@ -2462,7 +2475,7 @@ mod tests {
         let linked_ref = builder
             .ensure_external_link_with_source_ref(
                 source_a_forest[source_a_root].digest(),
-                Some(source_a_forest.commitment()),
+                Some(source_a_forest.interface_commitment()),
                 Some(source_a_root),
                 None,
             )
@@ -2521,7 +2534,7 @@ mod tests {
         let linked_alias_b_ref = provenance_builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_alias_b].digest(),
-                Some(static_forest.commitment()),
+                Some(static_forest.interface_commitment()),
                 Some(final_alias_b),
                 Some(DebugSourceNodeId::from(u32::from(alias_b_source_root))),
             )

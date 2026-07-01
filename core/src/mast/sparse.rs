@@ -64,13 +64,13 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
+    /// Cached commitment to the original MAST forest's roots and external dependencies.
     commitment_cache: Word,
 
     /// Sorted source root digests used as the forest commitment input.
     commitment_root_digests: Vec<Word>,
 
-    /// Sorted full external node digests represented in this sparse forest.
+    /// Sorted source external node digests used as the dependency commitment input.
     dependency_digests: Vec<Word>,
 }
 
@@ -103,11 +103,21 @@ impl SparseMastForest {
         &self.digests
     }
 
-    /// Returns the commitment to this sparse forest, computed from the procedure roots.
+    /// Returns the commitment to this sparse forest's public procedure roots.
+    pub fn interface_commitment(&self) -> Word {
+        Poseidon2::merge_many(&self.commitment_root_digests)
+    }
+
+    /// Returns the commitment to this sparse forest's external dependencies.
+    pub fn dependency_commitment(&self) -> Word {
+        Poseidon2::merge_many(&self.dependency_digests)
+    }
+
+    /// Returns the commitment to this sparse forest.
     ///
-    /// The commitment value is derived from the digests of the procedure roots in the original
-    /// forest; it is therefore equal to the commitment of the source [`MastForest`] from which
-    /// this sparse forest was built.
+    /// The commitment value is derived from the source forest's procedure root digests and external
+    /// dependency digests. It is therefore equal to the commitment of the source [`MastForest`]
+    /// from which this sparse forest was built.
     pub fn commitment(&self) -> Word {
         self.commitment_cache
     }
@@ -140,6 +150,7 @@ impl SparseMastForest {
             roots.len(),
             "sparse root commitment digest",
         )?;
+        validate_sorted_digests(&dependency_digests, "sparse dependency commitment digest")?;
         validate_root_commitment_inputs(
             &roots,
             &nodes,
@@ -147,7 +158,11 @@ impl SparseMastForest {
             num_nodes,
             &commitment_root_digests,
         )?;
-        validate_sparse_commitment(&commitment_root_digests, commitment_cache)?;
+        validate_sparse_commitment(
+            &commitment_root_digests,
+            &dependency_digests,
+            commitment_cache,
+        )?;
         validate_dependency_commitment_inputs(&nodes, &dependency_digests)?;
 
         for &root in &roots {
@@ -208,12 +223,16 @@ fn validate_sorted_digests(
 
 fn validate_sparse_commitment(
     root_digests: &[Word],
+    dependency_digests: &[Word],
     commitment: Word,
 ) -> Result<(), crate::serde::DeserializationError> {
-    let computed = Poseidon2::merge_many(root_digests);
+    let computed = Poseidon2::merge(&[
+        Poseidon2::merge_many(root_digests),
+        Poseidon2::merge_many(dependency_digests),
+    ]);
     if computed != commitment {
         return Err(crate::serde::DeserializationError::InvalidValue(
-            "sparse root commitment digest section does not match commitment".into(),
+            "sparse commitment digest sections do not match commitment".into(),
         ));
     }
 
@@ -267,17 +286,28 @@ fn validate_dependency_commitment_inputs(
     nodes: &BTreeMap<MastNodeId, MastNode>,
     dependency_digests: &[Word],
 ) -> Result<(), crate::serde::DeserializationError> {
-    let mut external_node_digests: Vec<_> = nodes
+    let mut full_external_digests = nodes
         .values()
         .filter(|node| node.is_external())
         .map(MastNodeExt::digest)
-        .collect();
-    external_node_digests.sort_unstable();
+        .collect::<Vec<_>>();
+    full_external_digests.sort_unstable();
 
-    if external_node_digests != dependency_digests {
-        return Err(crate::serde::DeserializationError::InvalidValue(
-            "sparse dependency commitment digest section does not match full external nodes".into(),
-        ));
+    let mut dependency_index = 0;
+    for full_digest in full_external_digests {
+        while dependency_index < dependency_digests.len()
+            && dependency_digests[dependency_index] < full_digest
+        {
+            dependency_index += 1;
+        }
+
+        if dependency_digests.get(dependency_index) != Some(&full_digest) {
+            return Err(crate::serde::DeserializationError::InvalidValue(
+                "sparse dependency commitment digest section is missing a full external node"
+                    .into(),
+            ));
+        }
+        dependency_index += 1;
     }
 
     Ok(())
@@ -543,7 +573,7 @@ impl SparseMastForestBuilder {
             digests.insert(root, node.digest());
         }
 
-        let dependency_digests = sorted_dependency_digests(&nodes);
+        let dependency_digests = sorted_dependency_digests(&source);
 
         SparseMastForest {
             nodes,
@@ -564,9 +594,10 @@ fn sorted_root_digests(source: &MastForest) -> Vec<Word> {
     digests
 }
 
-fn sorted_dependency_digests(nodes: &BTreeMap<MastNodeId, MastNode>) -> Vec<Word> {
-    let mut digests: Vec<Word> = nodes
-        .values()
+fn sorted_dependency_digests(source: &MastForest) -> Vec<Word> {
+    let mut digests: Vec<Word> = source
+        .nodes()
+        .iter()
         .filter(|&node| node.is_external())
         .map(MastNodeExt::digest)
         .collect();

@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::module::ModuleInfo;
+use miden_core::Word;
 use miden_mast_package::{ManifestValidationError, MastForest, Package};
 pub use miden_project::Linkage;
 
@@ -28,6 +29,11 @@ impl LinkLibrary {
     #[inline(always)]
     pub fn mast(&self) -> &Arc<MastForest> {
         self.package.mast_forest()
+    }
+
+    #[inline(always)]
+    pub fn interface_digest(&self) -> Word {
+        self.package.interface_digest()
     }
 
     #[inline]
