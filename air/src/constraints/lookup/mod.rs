@@ -6,5 +6,6 @@ mod extension_impls;
 pub mod main_air;
 pub mod messages;
 pub mod miden_air;
+pub mod poseidon2_permutation_air;
 
 pub use messages::{BusId, MIDEN_MAX_MESSAGE_WIDTH};

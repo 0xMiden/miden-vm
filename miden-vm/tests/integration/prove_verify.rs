@@ -302,8 +302,8 @@ mod fast_parallel {
         // Build public inputs
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
-        // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
-        let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
+        // Per-AIR matrices for prove_multi.
+        let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.to_air_matrices();
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
@@ -311,6 +311,7 @@ mod fast_parallel {
             &blake3_config,
             core_matrix,
             chiplets_matrix,
+            poseidon2_matrix,
             &public_values,
             &kernel_felts,
         )

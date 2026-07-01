@@ -1,6 +1,5 @@
 use miden_ace_codegen::{
-    AceConfig, AceError, EXT_DEGREE, InputKey, LayoutKind, build_ace_circuit_for_air,
-    build_ace_dag_for_air, emit_circuit,
+    AceConfig, AceError, EXT_DEGREE, InputKey, LayoutKind, build_ace_dag_for_air, emit_circuit,
     testing::{
         eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
         zps_for_chunk,
@@ -78,32 +77,6 @@ fn core_air_dag_rejects_mismatched_layout() {
     assert!(
         matches!(err, AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
-    );
-}
-
-#[test]
-fn chiplets_air_ace_rows() {
-    let air = MidenAir::Chiplets;
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
-        layout: LayoutKind::Masm,
-    };
-
-    let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
-    let encoded = circuit.to_ace().unwrap();
-    let read_rows = encoded.num_read_rows();
-    let eval_rows = encoded.num_eval_rows();
-    let total_rows = read_rows + eval_rows;
-
-    eprintln!(
-        "ACE chiplet rows (MidenAir::Chiplets): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
-        read_rows,
-        eval_rows,
-        total_rows,
-        encoded.num_inputs(),
-        encoded.num_constants(),
-        encoded.num_nodes()
     );
 }
 
@@ -195,18 +168,17 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
             .expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined main width is each per-AIR width aligned to LMCS rate (8 for Poseidon2)
-    // and concatenated: aligned(51) + aligned(22) = 56 + 24 = 80. Combined aux is
-    // aligned(4*2) + aligned(3*2) = 8 + 8 = 16 base coords = 8 EFs.
+    // Combined main width is each per-AIR width aligned to the LMCS rate:
+    // aligned(51) + aligned(22) + aligned(16) = 56 + 24 + 16 = 96.
     assert_eq!(
-        layout.counts.width, 80,
+        layout.counts.width, 96,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 8,
-        "combined aux_width = aligned(4) + aligned(3) = 8 EFs"
+        layout.counts.aux_width, 12,
+        "combined aux_width = aligned(4) + aligned(3) + aligned(1) = 12 EFs"
     );
-    assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
+    assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
 
     let beta = layout
         .index(InputKey::MultiAirBeta)

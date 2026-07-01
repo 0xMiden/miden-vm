@@ -13,6 +13,7 @@ use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
     chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
     decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS},
+    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
 use crate::constraints::{
     columns::{ChipletCols, CoreCols, NUM_CHIPLETS_COLS, NUM_CORE_COLS},
@@ -68,6 +69,8 @@ struct TraceStorage {
     core_rm: RowMajorMatrix<Felt>,
     /// Chiplets matrix (`CHIPLETS_WIDTH` cols), at its own per-AIR height.
     chiplets_rm: RowMajorMatrix<Felt>,
+    /// Poseidon2 permutation matrix, at its own per-AIR height.
+    poseidon2_permutation_rm: RowMajorMatrix<Felt>,
 }
 
 #[derive(Debug)]
@@ -84,6 +87,7 @@ impl MainTrace {
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
+        poseidon2_permutation_rm: Vec<Felt>,
         last_program_row: RowIndex,
     ) -> Self {
         assert_eq!(
@@ -96,14 +100,28 @@ impl MainTrace {
             0,
             "chiplets buffer not a multiple of CHIPLETS_WIDTH"
         );
+        assert_eq!(
+            poseidon2_permutation_rm.len() % NUM_POSEIDON2_PERMUTATION_COLS,
+            0,
+            "Poseidon2 buffer not a multiple of NUM_POSEIDON2_PERMUTATION_COLS"
+        );
         let core_rows = core_rm.len() / CORE_STORAGE_WIDTH;
         let chiplets_rows = chiplets_rm.len() / CHIPLETS_WIDTH;
+        let poseidon2_rows = poseidon2_permutation_rm.len() / NUM_POSEIDON2_PERMUTATION_COLS;
         assert!(core_rows.is_power_of_two(), "core height must be a power of two");
         assert!(chiplets_rows.is_power_of_two(), "chiplets height must be a power of two");
+        assert!(
+            poseidon2_rows.is_power_of_two(),
+            "Poseidon2 permutation height must be a power of two"
+        );
         Self {
             storage: TraceStorage {
                 core_rm: RowMajorMatrix::new(core_rm, CORE_STORAGE_WIDTH),
                 chiplets_rm: RowMajorMatrix::new(chiplets_rm, CHIPLETS_WIDTH),
+                poseidon2_permutation_rm: RowMajorMatrix::new(
+                    poseidon2_permutation_rm,
+                    NUM_POSEIDON2_PERMUTATION_COLS,
+                ),
             },
             last_program_row,
         }
@@ -123,7 +141,7 @@ impl MainTrace {
     /// Returns the stored chiplets trace row at index `i`.
     ///
     /// The returned [`ChipletCols`] is the raw column layout shared across all chiplets;
-    /// use one of the per-chiplet overlays (`.controller()`, `.permutation()`, `.bitwise()`,
+    /// use one of the per-chiplet overlays (`.controller()`, `.bitwise()`,
     /// `.memory()`, `.ace()`, `.kernel_rom()`) to name the physical columns according to
     /// the chiplet active on that row.
     ///
@@ -137,21 +155,34 @@ impl MainTrace {
         rows[i.as_usize()].as_slice().borrow()
     }
 
-    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
-    /// proving path.
-    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    /// Splits the trace into the per-AIR matrices used by the multi-AIR proving path.
+    pub fn to_air_matrices(
+        &self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
         // Each buffer is already stored at exactly its per-AIR height.
-        (self.storage.core_rm.clone(), self.storage.chiplets_rm.clone())
+        (
+            self.storage.core_rm.clone(),
+            self.storage.chiplets_rm.clone(),
+            self.storage.poseidon2_permutation_rm.clone(),
+        )
     }
 
-    /// Like [`Self::to_core_chiplets_matrices`], but consumes the trace and moves buffers.
-    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        (self.storage.core_rm, self.storage.chiplets_rm)
+    /// Like [`Self::to_air_matrices`], but consumes the trace and moves buffers.
+    pub fn into_air_matrices(
+        self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        (
+            self.storage.core_rm,
+            self.storage.chiplets_rm,
+            self.storage.poseidon2_permutation_rm,
+        )
     }
 
-    /// Returns the larger of the two per-AIR heights.
+    /// Returns the larger of all per-AIR heights.
     pub fn num_rows(&self) -> usize {
-        self.core_height().max(self.chiplets_height())
+        self.core_height()
+            .max(self.chiplets_height())
+            .max(self.poseidon2_permutation_height())
     }
 
     /// Returns the Core-AIR trace height.
@@ -164,6 +195,12 @@ impl MainTrace {
     #[inline]
     pub fn chiplets_height(&self) -> usize {
         self.storage.chiplets_rm.height()
+    }
+
+    /// Returns the Poseidon2-permutation AIR trace height.
+    #[inline]
+    pub fn poseidon2_permutation_height(&self) -> usize {
+        self.storage.poseidon2_permutation_rm.height()
     }
 
     pub fn last_program_row(&self) -> RowIndex {
@@ -410,43 +447,43 @@ impl MainTrace {
     /// [`Self::is_bitwise_row`] / [`Self::is_memory_row`] / [`Self::is_ace_row`], which
     /// short-circuit past the chiplets height.
     pub fn chiplet_selector_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).s_01
+        self.chiplet_cols(i).chiplets[0]
     }
 
     /// Returns chiplet column number 1 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[0]
+        self.chiplet_cols(i).chiplets[1]
     }
 
     /// Returns chiplet column number 2 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[1]
+        self.chiplet_cols(i).chiplets[2]
     }
 
     /// Returns chiplet column number 3 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[2]
+        self.chiplet_cols(i).chiplets[3]
     }
 
     /// Returns chiplet column number 4 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_4(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[3]
+        self.chiplet_cols(i).chiplets[4]
     }
 
     /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[4]
+        self.chiplet_cols(i).chiplets[5]
     }
 
-    /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
+    /// Returns `true` if a row is part of the hash-controller chiplet.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height — rows past `chiplets_height()`
-    /// are not part of any chiplet by definition in the split-trace model.
+    /// Short-circuits to `false` past the chiplets-AIR height; rows past `chiplets_height()`
+    /// are outside the chiplets trace.
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE || self.chiplet_s_perm(i) == ONE
+        self.chiplet_selector_0(i) == ONE
     }
 
     /// Returns the (full) state of the hasher chiplet at row i.
@@ -471,19 +508,19 @@ impl MainTrace {
     }
 
     /// Returns the hasher's direction_bit column at row i. On Merkle controller rows this holds
-    /// the direction bit extracted from the node index; zero on non-Merkle and perm segment rows.
+    /// the direction bit extracted from the node index; zero on non-Merkle rows.
     pub fn chiplet_direction_bit(&self, i: RowIndex) -> Felt {
         self.chiplet_cols(i).controller().direction_bit
     }
 
-    /// Returns the hasher's s_00 column at row i (0=controller, 1=permutation segment).
+    /// Returns the reserved `s_perm` column at row i.
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
     /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
     /// height, so they can be used as bound-aware filters.
     pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).s_00
+        self.chiplet_cols(i).s_perm
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.
@@ -808,6 +845,7 @@ mod tests {
         // `core_rm` is the full per-AIR Core matrix (range columns in trailing slots).
         let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
+        let mut poseidon2_rm = Vec::with_capacity(num_rows * NUM_POSEIDON2_PERMUTATION_COLS);
 
         for row in 0..num_rows {
             for col in 0..CORE_STORAGE_WIDTH {
@@ -817,21 +855,27 @@ mod tests {
                 chiplets_rm
                     .push(Felt::from_u32((row * TRACE_WIDTH + CORE_STORAGE_WIDTH + c) as u32));
             }
+            for c in 0..NUM_POSEIDON2_PERMUTATION_COLS {
+                poseidon2_rm.push(Felt::from_u32((row * 100 + c) as u32));
+            }
         }
 
-        MainTrace::from_parts(core_rm, chiplets_rm, RowIndex::from(0))
+        MainTrace::from_parts(core_rm, chiplets_rm, poseidon2_rm, RowIndex::from(0))
     }
 
     #[test]
     fn into_split_matches_borrowed_split() {
         const NUM_ROWS: usize = 8;
-        let (ref_core, ref_chip) = deterministic_parts_trace(NUM_ROWS).to_core_chiplets_matrices();
-        let (moved_core, moved_chip) =
-            deterministic_parts_trace(NUM_ROWS).into_core_chiplets_matrices();
+        let (ref_core, ref_chip, ref_poseidon2) =
+            deterministic_parts_trace(NUM_ROWS).to_air_matrices();
+        let (moved_core, moved_chip, moved_poseidon2) =
+            deterministic_parts_trace(NUM_ROWS).into_air_matrices();
 
         assert_eq!(ref_core.width(), moved_core.width());
         assert_eq!(ref_chip.width(), moved_chip.width());
+        assert_eq!(ref_poseidon2.width(), moved_poseidon2.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
+        assert_eq!(ref_poseidon2.values, moved_poseidon2.values);
     }
 }

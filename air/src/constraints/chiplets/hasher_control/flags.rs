@@ -21,9 +21,8 @@
 //! |  0 |  0 |  1 | SOUT output (return full state) | `is_sout` / `is_output` |
 //! |  0 |  1 |  * | Padding (inactive slot) | `is_padding` |
 //!
-//! On permutation rows (`s_00 = 1`), `s0/s1/s2` hold S-box witnesses, so these
-//! flags are don't-care there — constraint code gates them by `ChipletFlags.is_active`
-//! (= `s_01`) at the call site.
+//! These flags are only meaningful on controller rows; constraint code gates them by
+//! `ChipletFlags.is_active` at the call site.
 //!
 //! ## Operation semantics
 //!

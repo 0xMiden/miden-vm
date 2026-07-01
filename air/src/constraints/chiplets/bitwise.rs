@@ -29,7 +29,7 @@ use super::selectors::ChipletFlags;
 use crate::{
     AirBuilder, ChipletCols, MidenAirBuilder,
     constraints::{
-        chiplets::columns::{BitwiseCols, PeriodicCols},
+        chiplets::columns::{BitwiseCols, BitwisePeriodicCols},
         constants::F_16,
         utils::horner_eval_bits,
     },
@@ -52,9 +52,9 @@ pub fn enforce_bitwise_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
-    let k_first = periodic.bitwise.k_first;
-    let k_transition = periodic.bitwise.k_transition;
+    let periodic: &BitwisePeriodicCols<_> = builder.periodic_values().borrow();
+    let k_first = periodic.k_first;
+    let k_transition = periodic.k_transition;
 
     let bitwise_flag = flags.is_active.clone();
 

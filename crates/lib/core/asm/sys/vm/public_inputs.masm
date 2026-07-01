@@ -18,7 +18,7 @@ use miden::core::crypto::hashes::poseidon2
 #
 # The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
 # The VLPI reduction is the LogUp kernel ROM boundary correction
-#     kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)
+#     kernel_corr = sum_i 1 / kernel_proc_message(digest_i)
 # (chiplet-side INIT removes; boundary adds).
 #
 # Advice stack consumption order:
@@ -41,11 +41,7 @@ const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 const NUM_VAR_LEN_PI_GROUPS = 1
 
 # Number of AIR instances in the Miden VM statement.
-#
-# This MASM verifier is currently specialized to the Core + Chiplets pair. Adding another AIR must
-# update the AIR-shape absorption, proof-order tag derivation, OOD widths, aux-final layout, and ACE
-# selector offsets together.
-const NUM_MIDEN_AIRS = 2
+const NUM_MIDEN_AIRS = 3
 
 # Upper bound on the kernel-digest statement inputs (`MultiAir::max_aux_inputs`), in field
 # elements: `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. Absorbed into the transcript by
@@ -165,9 +161,9 @@ end
 #! (absorption happens in `absorb_public_inputs`).
 #!
 #! Reads `num_kernel_proc_digests` from advice into `tmp3`, then loads each digest as 8 base
-#! elements (2 words) via `adv_pipe`. Each digest is padded to 8 elements and reversed
-#! (`[0,0,0,0, d3,d2,d1,d0]`) so the downstream `reduce_kernel_digests` Horner pass — which reads
-#! 8-felt chunks — yields `d0 + d1*β + d2*β^2 + d3*β^3`.
+#! elements (2 words) via `adv_pipe`. Each digest is padded to 8 elements and reversed:
+#! `[0,0,0,0, d3,d2,d1,d0]`. The downstream Horner pass reads one 8-felt chunk and yields
+#! `d0 + d1*beta + d2*beta^2 + d3*beta^3`.
 #!
 #! Input:
 #!      - Advice stack: [num_kernel_proc_digests, kernel_digest_elements..., ...]
@@ -313,6 +309,7 @@ proc observe_miden_air_shape
     push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
     exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
     exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_poseidon2_permutation_trace_length_log exec.random_coin::observe_felt
 end
 
 #! Loads the auxiliary randomness from the advice stack and reduces the kernel digests.
@@ -356,7 +353,7 @@ end
 #! Outputs: [...]
 #!
 #! where `digests_ptr` is a pointer to the kernel procedures digests. The reduced value
-#! `kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)` is stored as
+#! `kernel_corr = sum_i 1 / kernel_proc_message(digest_i)` is stored as
 #! [kernel_corr0, kernel_corr1, 0, 0] at the original `digests_ptr`.
 proc reduce_kernel_digests
     # The statement admits at most 255 kernel procedure digests.
@@ -421,9 +418,9 @@ proc reduce_kernel_digests
 
     while.true
         # Compute `acc = sum {0<=i<4} digest[i] * beta^i` via Horner evaluation.
-        # The stored 8-felt digest is [0,0,0,0, d3,d2,d1,d0]: the 4 leading zeros are
-        # Horner no-ops (contribute 0*β^4..0*β^7), so the result is just d0 + d1*β +
-        # d2*β^2 + d3*β^3 — exactly the β^0..β^3 payload we want. One mem_stream pass.
+        # The stored 8-felt digest is [0,0,0,0, d3,d2,d1,d0]. The leading zeros do not
+        # affect Horner evaluation, so one mem_stream pass yields
+        # d0 + d1*beta + d2*beta^2 + d3*beta^3.
         repeat.1
             mem_stream
             horner_eval_base
@@ -472,7 +469,7 @@ proc reduce_kernel_digests
     exec.constants::tmp1 push.3 add mem_load
     # => [N, termN_0, termN_1, ..., term1_0, term1_1, ...]
 
-    # Accumulate the sum of reciprocals: acc = Σ 1/term_i.
+    # Accumulate the sum of reciprocals: acc = sum_i 1 / term_i.
     # We push the additive identity element, the number of elements to accumulate, and a boolean
     # flag to enter or not the loop.
     push.0
@@ -498,9 +495,9 @@ proc reduce_kernel_digests
         neq
         # => [loop, n - 1, acc0', acc1', term1_0, term1_1, ..., termn_0, termn_1, ...]
     end
-    # => [0, sum0, sum1, ...] where sum = Σ 1/term_i
+    # => [0, sum0, sum1, ...] where sum = sum_i 1 / term_i
 
-    # kernel_corr = Σ 1/term_i (no negation: chiplet removes, boundary adds).
+    # kernel_corr = sum_i 1 / term_i (no negation: chiplet removes, boundary adds).
     drop
     # => [kernel_corr0, kernel_corr1, ...]
 

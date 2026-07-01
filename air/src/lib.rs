@@ -27,8 +27,8 @@ pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
-/// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` for the multi-AIR
-/// instance; it dispatches per-trace work to [`crate::CoreAir`] / [`crate::ChipletsAir`].
+/// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
+/// statement; it dispatches per-trace work to Core, Chiplets, and Poseidon2 permutation AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
 /// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
 /// Miden-specific types so it can be extracted into its own crate.
@@ -41,15 +41,16 @@ pub mod logup {
 use constraints::lookup::{
     chiplet_air::ChipletLookupBuilder,
     main_air::{MainLookupAir, MainLookupBuilder},
+    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
 };
 pub use constraints::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
+    poseidon2_permutation::columns::{Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols},
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
@@ -247,8 +248,8 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
-/// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
+/// LogUp aux trace width: 4 core columns + 3 chiplet columns + 1 Poseidon2 column.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
 
 // Public values layout offsets.
 const PV_PROGRAM_HASH: usize = 0;
@@ -259,8 +260,7 @@ const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
 /// Core-trace AIR.
 ///
-/// Owns the system, decoder, stack, and range-check segments. Paired with [`ChipletsAir`]
-/// for the two-AIR proving path.
+/// Owns the system, decoder, stack, and range-check segments.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 
@@ -270,7 +270,6 @@ impl CoreAir {
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        // Core has no periodic columns; all periodic columns serve the chiplets.
         Vec::new()
     }
 
@@ -348,22 +347,19 @@ impl CoreAir {
 // CHIPLETS AIR
 // ================================================================================================
 
-/// Chiplets-trace AIR for the multi-AIR proving path.
+/// Chiplets trace AIR.
 ///
-/// Owns the chiplet section and its LogUp accumulator columns. Counterpart to [`CoreAir`].
+/// Enforces the chiplet selector hierarchy, chiplet transition constraints, and
+/// chiplet-side LogUp buses.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
-/// Per-trace AIR logic. Like [`CoreAir`], `ChipletsAir` is not an AIR trait impl itself —
-/// [`MidenAir`] dispatches to these inherent (struct) methods for per-trace concerns.
 impl ChipletsAir {
     fn width(self) -> usize {
         constraints::columns::NUM_CHIPLETS_COLS
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        // All periodic columns (hasher round constants, bitwise operation table) belong to
-        // the chiplets trace.
         constraints::chiplets::columns::PeriodicCols::periodic_columns()
     }
 
@@ -451,6 +447,79 @@ impl ChipletsAir {
     }
 }
 
+// POSEIDON2 PERMUTATION AIR
+// ================================================================================================
+
+/// Poseidon2 permutation trace AIR.
+///
+/// Enforces 16-row permutation cycles and the permutation-side LogUp bus.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Poseidon2PermutationAir;
+
+impl Poseidon2PermutationAir {
+    fn width(self) -> usize {
+        constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS
+    }
+
+    fn periodic_columns(self) -> Vec<Vec<Felt>> {
+        Poseidon2PermutationPeriodicCols::periodic_columns()
+    }
+
+    fn aux_width(self) -> usize {
+        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        _challenges: &Challenges<EF>,
+        _public_values: &[Felt],
+        var_len_public_inputs: &[&[Felt]],
+    ) -> Result<EF, ReductionError> {
+        if !var_len_public_inputs.is_empty() {
+            return Err(format!(
+                "Poseidon2PermutationAir expects 0 var-len public input slices, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        Ok(EF::ZERO)
+    }
+
+    fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
+        constraints::enforce_poseidon2_permutation(builder);
+
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Poseidon2Permutation);
+        self.lookup_eval(&mut lb);
+    }
+
+    fn lookup_num_columns(self) -> usize {
+        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+    }
+
+    fn lookup_column_shape(self) -> &'static [usize] {
+        &constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
+    }
+
+    fn lookup_max_message_width(self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn lookup_num_bus_ids(self) -> usize {
+        BusId::COUNT
+    }
+
+    fn lookup_eval<LB: Poseidon2PermutationLookupBuilder>(self, builder: &mut LB) {
+        let main = builder.main();
+        let local: &Poseidon2PermutationCols<_> = main.current_slice().borrow();
+
+        constraints::lookup::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns(
+            builder, local,
+        );
+    }
+
+    fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
+}
+
 // MIDEN AIR
 // ================================================================================================
 
@@ -463,6 +532,7 @@ impl ChipletsAir {
 pub enum MidenAir {
     Core,
     Chiplets,
+    Poseidon2Permutation,
 }
 
 impl MidenAir {
@@ -470,6 +540,7 @@ impl MidenAir {
         match self {
             Self::Core => 0,
             Self::Chiplets => 1,
+            Self::Poseidon2Permutation => 2,
         }
     }
 
@@ -477,6 +548,7 @@ impl MidenAir {
         match self {
             Self::Core => "Core",
             Self::Chiplets => "Chiplets",
+            Self::Poseidon2Permutation => "Poseidon2Permutation",
         }
     }
 
@@ -484,6 +556,7 @@ impl MidenAir {
         match self {
             Self::Core => "core",
             Self::Chiplets => "chiplets",
+            Self::Poseidon2Permutation => "poseidon2_permutation",
         }
     }
 
@@ -498,6 +571,9 @@ impl MidenAir {
             Self::Chiplets => {
                 ChipletsAir.boundary_correction(challenges, public_values, &[aux_inputs])
             },
+            Self::Poseidon2Permutation => {
+                Poseidon2PermutationAir.boundary_correction(challenges, public_values, &[])
+            },
         }
     }
 }
@@ -505,7 +581,8 @@ impl MidenAir {
 /// Supported AIRs in instance order.
 ///
 /// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
-pub const AIRS: [MidenAir; 2] = [MidenAir::Core, MidenAir::Chiplets];
+pub const AIRS: [MidenAir; 3] =
+    [MidenAir::Core, MidenAir::Chiplets, MidenAir::Poseidon2Permutation];
 
 pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 
@@ -654,6 +731,7 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.width(),
             Self::Chiplets => ChipletsAir.width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.width(),
         }
     }
 
@@ -665,6 +743,7 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.periodic_columns(),
             Self::Chiplets => ChipletsAir.periodic_columns(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.periodic_columns(),
         }
     }
 }
@@ -679,6 +758,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core => CoreAir.aux_width(),
             Self::Chiplets => ChipletsAir.aux_width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.aux_width(),
         }
     }
 
@@ -704,26 +784,30 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {
-        // All AIRs peak at degree 9 over base-field and extension-field constraints.
-        ConstraintDegrees { base: 9, ext: 9 }
+        match self {
+            Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
+            Self::Poseidon2Permutation => ConstraintDegrees { base: 8, ext: 3 },
+        }
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Core => CoreAir.eval(builder),
             Self::Chiplets => ChipletsAir.eval(builder),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.eval(builder),
         }
     }
 }
 
 impl<LB> LookupAir<LB> for MidenAir
 where
-    LB: MainLookupBuilder + ChipletLookupBuilder,
+    LB: MainLookupBuilder + ChipletLookupBuilder + Poseidon2PermutationLookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
             Self::Core => CoreAir.lookup_num_columns(),
             Self::Chiplets => ChipletsAir.lookup_num_columns(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_columns(),
         }
     }
 
@@ -731,6 +815,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_column_shape(),
             Self::Chiplets => ChipletsAir.lookup_column_shape(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_column_shape(),
         }
     }
 
@@ -738,6 +823,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_max_message_width(),
             Self::Chiplets => ChipletsAir.lookup_max_message_width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_max_message_width(),
         }
     }
 
@@ -745,6 +831,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_num_bus_ids(),
             Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_bus_ids(),
         }
     }
 
@@ -752,6 +839,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval(builder),
             Self::Chiplets => ChipletsAir.lookup_eval(builder),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval(builder),
         }
     }
 
@@ -762,6 +850,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval_boundary(boundary),
             Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval_boundary(boundary),
         }
     }
 }
@@ -769,12 +858,12 @@ where
 // MIDEN MULTI-AIR
 // ================================================================================================
 
-/// The cross-AIR statement for the `(Core, Chiplets)` proof.
+/// The cross-AIR statement for the Miden VM proof.
 ///
 /// AIR instances come from [`AIRS`], and the external reduction sums the committed LogUp finals
 /// with the open-bus boundary corrections.
 ///
-/// Instance order is `[Core, Chiplets]`; every per-AIR slice follows that
+/// Instance order is `[Core, Chiplets, Poseidon2Permutation]`; every per-AIR slice follows that
 /// ordering.
 #[derive(Copy, Clone, Debug)]
 pub struct MidenMultiAir;
@@ -871,8 +960,8 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 /// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
 /// running `EF` accumulator.
 ///
-/// Lets the boundary correction reuse the structured boundary emissions used by
-/// the debug walker instead of open-coding those interactions a second time.
+/// Boundary correction is computed by replaying the same structured boundary emissions used by
+/// the debug walker.
 ///
 /// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
 /// are non-zero with overwhelming probability. A malformed/adversarial proof can still
@@ -936,7 +1025,7 @@ mod tests {
     /// degree away from the declared value, the override must be updated.
     #[test]
     fn constraint_degree_override_matches_symbolic() {
-        for air in [MidenAir::Core, MidenAir::Chiplets] {
+        for air in AIRS {
             let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
@@ -990,16 +1079,28 @@ mod tests {
     #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 9]),
-            ProofOrder::from_airs(&[MidenAir::Core, MidenAir::Chiplets])
+            ProofOrder::from_instance_log_heights(&[8, 9, 10]),
+            ProofOrder::from_airs(&[
+                MidenAir::Core,
+                MidenAir::Chiplets,
+                MidenAir::Poseidon2Permutation,
+            ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[9, 8]),
-            ProofOrder::from_airs(&[MidenAir::Chiplets, MidenAir::Core])
+            ProofOrder::from_instance_log_heights(&[9, 8, 10]),
+            ProofOrder::from_airs(&[
+                MidenAir::Chiplets,
+                MidenAir::Core,
+                MidenAir::Poseidon2Permutation,
+            ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 8]),
-            ProofOrder::from_airs(&[MidenAir::Core, MidenAir::Chiplets])
+            ProofOrder::from_instance_log_heights(&[8, 8, 8]),
+            ProofOrder::from_airs(&[
+                MidenAir::Core,
+                MidenAir::Chiplets,
+                MidenAir::Poseidon2Permutation,
+            ])
         );
     }
 }

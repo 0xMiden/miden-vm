@@ -17,16 +17,16 @@ const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 8648431326613090990
-const RELATION_DIGEST_1 = 12512952497323442019
-const RELATION_DIGEST_2 = 17953111755289758491
-const RELATION_DIGEST_3 = 17459021812452109049
+const RELATION_DIGEST_0 = 9913531275672247865
+const RELATION_DIGEST_1 = 15794906418915927844
+const RELATION_DIGEST_2 = 3774214157771655323
+const RELATION_DIGEST_3 = 5280062953843895353
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 13752840065275073014
-const ACE_REGISTRY_ROOT_1 = 8602162562810350728
-const ACE_REGISTRY_ROOT_2 = 8683224132465215448
-const ACE_REGISTRY_ROOT_3 = 6829039342477154261
+const ACE_REGISTRY_ROOT_0 = 15641767307456778549
+const ACE_REGISTRY_ROOT_1 = 4365786043986633362
+const ACE_REGISTRY_ROOT_2 = 6358794537601080079
+const ACE_REGISTRY_ROOT_3 = 12933441436087451576
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -66,7 +66,7 @@ end
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
-#!   [log_core, log_chiplets]
+#!   [log_core, log_chiplets, log_poseidon2_permutation]
 #!
 #! Writes per-AIR log heights, the maximum log height, ORDER_TAG, RELATION_DIGEST, and
 #! ACE_REGISTRY_ROOT to memory.
@@ -79,8 +79,14 @@ pub proc load_air_context
     exec.assert_shape_log
     exec.constants::set_chiplets_trace_length_log
 
+    adv_push
+    exec.assert_shape_log
+    exec.constants::set_poseidon2_permutation_trace_length_log
+
     exec.constants::get_core_trace_length_log
     exec.constants::get_chiplets_trace_length_log
+    u32max
+    exec.constants::get_poseidon2_permutation_trace_length_log
     u32max
     exec.constants::set_trace_length_log
 
@@ -98,16 +104,58 @@ proc assert_shape_log
     drop
 end
 
-#! Derives the Lehmer proof-order tag for the current Core/Chiplets AIR set.
+#! Derives the Lehmer proof-order tag for [Core, Chiplets, Poseidon2Permutation].
 proc derive_order_tag
+    exec.core_le_chiplets
+    if.true
+        exec.chiplets_le_poseidon2_permutation
+        if.true
+            # Core, Chiplets, Poseidon2Permutation
+            push.0
+        else
+            exec.core_le_poseidon2_permutation
+            if.true
+                # Core, Poseidon2Permutation, Chiplets
+                push.1
+            else
+                # Poseidon2Permutation, Core, Chiplets
+                push.4
+            end
+        end
+    else
+        exec.core_le_poseidon2_permutation
+        if.true
+            # Chiplets, Core, Poseidon2Permutation
+            push.2
+        else
+            exec.chiplets_le_poseidon2_permutation
+            if.true
+                # Chiplets, Poseidon2Permutation, Core
+                push.3
+            else
+                # Poseidon2Permutation, Chiplets, Core
+                push.5
+            end
+        end
+    end
+end
+
+proc core_le_chiplets
     exec.constants::get_core_trace_length_log
     exec.constants::get_chiplets_trace_length_log
     u32lte
-    if.true
-        push.0
-    else
-        push.1
-    end
+end
+
+proc core_le_poseidon2_permutation
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    u32lte
+end
+
+proc chiplets_le_poseidon2_permutation
+    exec.constants::get_chiplets_trace_length_log
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    u32lte
 end
 
 proc store_relation_digest

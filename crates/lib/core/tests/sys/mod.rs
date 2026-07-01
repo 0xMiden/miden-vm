@@ -53,6 +53,9 @@ fn reduce_kernel_digests_upper_bound() {
             push.0  exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
+            push.10 exec.constants::set_core_trace_length_log
+            push.10 exec.constants::set_chiplets_trace_length_log
+            push.10 exec.constants::set_poseidon2_permutation_trace_length_log
             push.10 exec.constants::set_trace_length_log
             push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
             exec.random_coin::init_seed

@@ -5,10 +5,10 @@ use miden::core::stark::random_coin
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the boundary values (2 extension field elements = 4 base field elements = 1 word).
+#! and absorbs the boundary values (3 extension field elements = 6 base field elements).
 #!
-#! The advice provider must supply exactly 2 words in order:
-#!   [commitment, W0]
+#! The advice provider supplies the commitment, then aux finals in proof order:
+#!   [commitment, aux0, aux1, aux2]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
 #! aux_bus_boundary_ptr.
@@ -30,7 +30,7 @@ pub proc observe_aux_trace
     # Reseeding clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Single permutation: Absorb [COM, W0] ---
+    # Absorb the full rate block [commitment, aux0, aux1].
 
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
@@ -52,6 +52,21 @@ pub proc observe_aux_trace
     exec.random_coin::store_random_coin_state
     # => [...]
 
-    # Mark output buffer as full (8 elements available for sampling).
+    # Absorb aux2 as a two-element partial block.
+    push.0.0 adv_push adv_push swap
+    exec.constants::aux_bus_boundary_ptr add.4 mem_storew_le
+    # => [aux2_0, aux2_1, 0, 0, ...]
+
+    exec.random_coin::get_capacity
+    padw
+    # => [R2=0, C, R1, ...]
+    movupw.2
+    # => [R1, R2, C, ...]
+    # Bind the absorbed length (2) into the capacity.
+    movup.8 add.2 movdn.8
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+
+    # Fresh output available.
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 end

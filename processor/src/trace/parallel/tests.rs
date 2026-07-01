@@ -46,7 +46,7 @@ fn dyn_target_proc_hash() -> &'static [Felt] {
         let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
             .add_to_forest(&mut forest)
             .unwrap();
-        // FastProcessor::new now expects first element to be top of stack
+        // Stack inputs are top-first for FastProcessor::new.
         forest.get_node_by_id(target).unwrap().digest().iter().copied().collect()
     });
     HASH.as_slice()
@@ -67,7 +67,7 @@ fn external_lib_proc_digest() -> Word {
 }
 
 /// Returns the external library procedure digest elements for stack inputs.
-/// FastProcessor::new now expects first element to be top of stack.
+/// Returns the digest in top-first stack-input order.
 fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
     use std::sync::LazyLock;
     static HASH: LazyLock<Vec<Felt>> =
@@ -428,23 +428,22 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let (core_from_fragments, chip_from_fragments) =
-        trace_from_fragments.main_trace().to_core_chiplets_matrices();
-    let (core_from_single, chip_from_single) =
-        trace_from_single_fragment.main_trace().to_core_chiplets_matrices();
-    for (label, air_frag, air_single) in [
-        ("Core", &core_from_fragments, &core_from_single),
-        ("Chiplets", &chip_from_fragments, &chip_from_single),
+    let (core_from_fragments, chip_from_fragments, poseidon2_from_fragments) =
+        trace_from_fragments.main_trace().to_air_matrices();
+    let (core_from_single, chip_from_single, poseidon2_from_single) =
+        trace_from_single_fragment.main_trace().to_air_matrices();
+    for (label, air, air_frag, air_single) in [
+        ("Core", MidenAir::Core, &core_from_fragments, &core_from_single),
+        ("Chiplets", MidenAir::Chiplets, &chip_from_fragments, &chip_from_single),
+        (
+            "Poseidon2Permutation",
+            MidenAir::Poseidon2Permutation,
+            &poseidon2_from_fragments,
+            &poseidon2_from_single,
+        ),
     ] {
-        let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
-            let (a, c) = build_logup_aux_trace(&MidenAir::Core, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::Core, air_single, &challenges);
-            (a, c, b, d)
-        } else {
-            let (a, c) = build_logup_aux_trace(&MidenAir::Chiplets, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::Chiplets, air_single, &challenges);
-            (a, c, b, d)
-        };
+        let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
+        let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
         assert_eq!(
             aux_frag.values, aux_single.values,
             "{label} LogUp aux trace mismatch between fragments and single fragment"

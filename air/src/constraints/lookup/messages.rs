@@ -13,7 +13,7 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::lookup::Challenges;
+use crate::lookup::{Challenges, message::LookupMessage};
 
 // BUS IDENTIFIERS
 // ================================================================================================
@@ -491,9 +491,9 @@ pub struct StackOverflowMsg<E> {
 
 /// Hasher perm-link message (12 elements): `state[0..12]`.
 ///
-/// Binds hasher controller rows to permutation sub-chiplet rows. The `Input` variant pairs a
-/// controller-input row with perm-cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
-/// variant pairs a controller-output row with perm-cycle row 15 on
+/// Binds hasher controller rows to Poseidon2 permutation cycles. The `Input` variant pairs a
+/// controller-input row with cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
+/// variant pairs a controller-output row with cycle row 15 on
 /// `BusId::HasherPermLinkOutput`. `state` carries all 12 sponge lanes (rate_0, rate_1, capacity).
 #[derive(Clone, Debug)]
 pub enum HasherPermLinkMsg<E> {
@@ -601,8 +601,6 @@ pub struct MemoryResponseMsg<E> {
 
 // LOOKUP MESSAGE IMPLEMENTATIONS
 // ================================================================================================
-
-use crate::lookup::message::LookupMessage;
 
 // --- HasherMsg (interaction-specific bus ids) ----------------------------------------------------
 

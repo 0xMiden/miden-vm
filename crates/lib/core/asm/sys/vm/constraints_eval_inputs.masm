@@ -1,9 +1,10 @@
 use miden::core::stark::constants
 
 # Base-field offsets from `auxiliary_ace_inputs_ptr` to each AIR's selector triple.
-# Kept in instance order for the current Core + Chiplets statement.
+# Kept in instance order for [Core, Chiplets, Poseidon2Permutation].
 const CORE_SELECTOR_OFFSET = 22
 const CHIPLETS_SELECTOR_OFFSET = 28
+const POSEIDON2_PERMUTATION_SELECTOR_OFFSET = 34
 
 #! Sets up the Miden VM ACE input layout.
 #!
@@ -19,7 +20,7 @@ const CHIPLETS_SELECTOR_OFFSET = 28
 #!   slot 10: proof-order beta
 #!   slots 11-13: lifted Core selectors
 #!   slots 14-16: lifted Chiplets selectors
-#!   slot 17: padding
+#!   slots 17-19: lifted Poseidon2Permutation selectors
 #!
 #! Input:  [max_cycle_len_log, ...]
 #! Output: [...]
@@ -153,6 +154,10 @@ pub proc set_up_auxiliary_inputs_ace
     exec.constants::get_chiplets_trace_length_log
     push.CHIPLETS_SELECTOR_OFFSET
     exec.compute_per_air_selectors
+
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    push.POSEIDON2_PERMUTATION_SELECTOR_OFFSET
+    exec.compute_per_air_selectors
 end
 
 #! Load the quad field element stored at `[addr, addr + 1]`.
@@ -238,9 +243,8 @@ end
 
 #! Read the ACE batching challenge gamma without consuming the transcript.
 #!
-#! Host compatibility: the Rust verifier does not draw a separate ACE gamma yet, so this reads the
-#! next extension value without advancing output_len. Replace this with `sample_ext` when the host
-#! draws gamma between OOD-frame absorption and DEEP.
+#! The host derives ACE gamma by reading the next extension value without advancing the
+#! transcript. The MASM verifier must leave output_len unchanged for subsequent samples.
 #!
 #! Input:  [...]
 #! Output: [gamma_0, gamma_1, ...]

@@ -18,7 +18,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::columns::PeriodicCols,
+        chiplets::columns::BitwisePeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
@@ -53,8 +53,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // Read the typed periodic column view (used for bitwise k_transition).
     let k_transition: LB::Expr = {
-        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        periodic.bitwise.k_transition.into()
+        let periodic: &BitwisePeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+        periodic.k_transition.into()
     };
 
     // Typed chiplet-data overlays.

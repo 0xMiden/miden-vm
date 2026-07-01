@@ -58,9 +58,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
     // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
-    // Strides are measured in controller-trace rows (2 per permutation), not physical
-    // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
-    // controller output row.
+    // Strides are measured in controller rows (2 per permutation); the address must cancel against
+    // `clk + 1` on the hasher controller output row.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
@@ -145,9 +144,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- RESPAN ---
-                    // Uses `addr_next` directly: in the controller/perm split, the next row's
-                    // decoder `addr` already points at the continuation input
-                    // row, so no offset is needed.
+                    // `addr_next` points at the continuation input row, so RESPAN does not apply
+                    // an address offset here.
                     g.remove(
                         "respan",
                         op_flags.respan(),

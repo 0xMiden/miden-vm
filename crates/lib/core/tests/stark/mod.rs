@@ -370,6 +370,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         begin
             push.10 exec.constants::set_core_trace_length_log
             push.10 exec.constants::set_chiplets_trace_length_log
+            push.10 exec.constants::set_poseidon2_permutation_trace_length_log
             push.10 exec.constants::set_trace_length_log
             push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
             exec.random_coin::init_seed

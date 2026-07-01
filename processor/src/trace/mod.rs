@@ -161,11 +161,11 @@ impl TraceBuildInputs {
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
+/// - Per-AIR trace matrices for Core, Chiplets, and Poseidon2Permutation.
 /// - Information about the program (program hash and the kernel).
 /// - Information about execution outputs (stack state, deferred precompile requests, and the final
 ///   precompile transcript).
-/// - Summary of trace lengths of the main trace components.
+/// - Summary of trace lengths.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     main_trace: MainTrace,
@@ -301,7 +301,7 @@ impl ExecutionTrace {
         self.get_trace_len()
     }
 
-    /// Returns a summary of the lengths of main, range and chiplet traces.
+    /// Returns a summary of the per-component trace lengths.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
     }
@@ -321,15 +321,16 @@ impl ExecutionTrace {
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
         let public_inputs = self.public_inputs();
-        let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
+        let (core_matrix, chiplets_matrix, poseidon2_matrix) = self.main_trace.to_air_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
 
         let statement =
             Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
                 .expect("valid statement inputs");
-        let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
-            .expect("valid trace shapes");
+        let prover_statement =
+            ProverStatement::new(statement, vec![core_matrix, chiplets_matrix, poseidon2_matrix])
+                .expect("valid trace shapes");
 
         // A deterministic challenger seeds the debug constraint check; this is a local
         // constraint debugger, not a full proof transcript, so any fixed challenge set works.
@@ -337,17 +338,18 @@ impl ExecutionTrace {
         debug::check_constraints(&prover_statement, config.challenger());
     }
 
-    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
-    /// multi-AIR proving path. Strips the Poseidon2 rate-alignment padding columns
-    /// before returning.
-    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        self.main_trace.to_core_chiplets_matrices()
+    /// Splits the trace into the per-AIR matrices consumed by the multi-AIR proving path.
+    pub fn to_air_matrices(
+        &self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.to_air_matrices()
     }
 
-    /// Consuming variant for the proving hot path: moves the chiplets row-major buffer
-    /// instead of copying it. See [`MainTrace::into_core_chiplets_matrices`].
-    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        self.main_trace.into_core_chiplets_matrices()
+    /// Consuming variant for the proving hot path.
+    pub fn into_air_matrices(
+        self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.into_air_matrices()
     }
 
     // HELPER METHODS

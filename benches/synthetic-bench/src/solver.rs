@@ -69,7 +69,7 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let component_target = |c: Component| -> f64 {
         match c {
             Component::Core => target.totals.core_rows as f64,
-            Component::Hasher => target.breakdown.hasher_rows as f64,
+            Component::Hasher => target.hasher_work_rows() as f64,
             Component::Bitwise => target.breakdown.bitwise_rows as f64,
             Component::Memory => target.breakdown.memory_target() as f64,
             Component::Range => target.totals.range_rows as f64,
@@ -148,6 +148,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: hasher,
             range_rows,
         };
         TraceShape::new(totals, breakdown)

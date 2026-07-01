@@ -76,8 +76,11 @@ pub const NUM_SELECTORS: usize = 3;
 pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
+/// Row alignment for the hasher controller region inside `ChipletsAir`.
+pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
+
 /// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_00 = 20.
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_perm = 20.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 5;
 
 /// Number of controller rows per permutation request (one input + one output).
@@ -113,4 +116,4 @@ pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
 /// h11) is returned.
 pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
 
-// NOTE: Selectors s0/s1/s2 are unconstrained on perm segment rows.
+// NOTE: Selectors s0/s1/s2 are hasher-controller internal selectors.

@@ -1,15 +1,36 @@
 ---
 source: air/src/config.rs
+assertion_line: 433
 expression: snapshot
 ---
-constraints_eval_core_then_chiplets:
-  num_inputs: 586
-  num_eval_gates: 5572
-  stream_len: 6168
-  commitment: [120625280166720343, 1539815736310834958, 10009030942391677579, 15184649038377618669]
-constraints_eval_chiplets_then_core:
-  num_inputs: 586
-  num_eval_gates: 5572
-  stream_len: 6168
-  commitment: [547403893096940190, 6879455989269247616, 12977127621494737717, 13938180764990543304]
-relation_digest: [8648431326613090990, 12512952497323442019, 17953111755289758491, 17459021812452109049]
+constraints_eval_core_then_chiplets_then_poseidon2_permutation:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [17943454789029943666, 17247979576137624359, 13534404818379970829, 13668956434536314773]
+constraints_eval_core_then_poseidon2_permutation_then_chiplets:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [8426273132096714119, 5972338390219023032, 3174014451105298628, 16182980135659236537]
+constraints_eval_chiplets_then_core_then_poseidon2_permutation:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [9863808389183283070, 17912961681061118225, 3962401185322040846, 824331585860663166]
+constraints_eval_chiplets_then_poseidon2_permutation_then_core:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [5183445973248241898, 15415046734340909200, 17955372942090042014, 5205941111354433483]
+constraints_eval_poseidon2_permutation_then_core_then_chiplets:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [5134759471901630931, 1163658818752990481, 10918583463235226707, 10189520642583829232]
+constraints_eval_poseidon2_permutation_then_chiplets_then_core:
+  num_inputs: 638
+  num_eval_gates: 5564
+  stream_len: 6160
+  commitment: [12439130832360869304, 8476036172046586571, 1535548755166152393, 11159220683710771640]
+relation_digest: [9913531275672247865, 15794906418915927844, 3774214157771655323, 5280062953843895353]

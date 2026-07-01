@@ -9,6 +9,7 @@ use miden_processor::{ContextId, ExecutionOutput};
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
 const CORE_TRACE_LENGTH_LOG_PTR: u32 = 3223322635;
 const CHIPLETS_TRACE_LENGTH_LOG_PTR: u32 = 3223322636;
+const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR: u32 = 3223322637;
 const ORDER_TAG_PTR: u32 = 3223322764;
 
 fn load_air_context_source() -> &'static str {
@@ -26,11 +27,18 @@ fn read_memory(output: &ExecutionOutput, addr: u32) -> u64 {
         .as_canonical_u64()
 }
 
-fn execute_load_air_context(core_log_height: u64, chiplets_log_height: u64) -> ExecutionOutput {
-    let (output, _) =
-        build_test!(load_air_context_source(), &[], &[core_log_height, chiplets_log_height],)
-            .execute_for_output()
-            .expect("load_air_context should execute");
+fn execute_load_air_context(
+    core_log_height: u64,
+    chiplets_log_height: u64,
+    poseidon2_log_height: u64,
+) -> ExecutionOutput {
+    let (output, _) = build_test!(
+        load_air_context_source(),
+        &[],
+        &[core_log_height, chiplets_log_height, poseidon2_log_height],
+    )
+    .execute_for_output()
+    .expect("load_air_context should execute");
     assert_eq!(output.stack.get_num_elements(16), &[Felt::ZERO; 16]);
     output
 }
@@ -56,48 +64,65 @@ fn validate_inputs_source(
 
 #[test]
 fn load_air_context_core_trace_length_upper_bound() {
-    // log(core_trace_length) = 30 must be rejected (must be < 30); chiplets ok.
-    let test = build_test!(load_air_context_source(), &[], &[30, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[30, 10, 10]);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_core_trace_length_lower_bound() {
-    // log(core_trace_length) = 5 must be rejected (must be > 5); chiplets ok.
-    let test = build_test!(load_air_context_source(), &[], &[5, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[5, 10, 10]);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_chiplets_trace_length_upper_bound() {
-    // log(chiplets_trace_length) = 30 must be rejected; core ok.
-    let test = build_test!(load_air_context_source(), &[], &[10, 30]);
+    let test = build_test!(load_air_context_source(), &[], &[10, 30, 10]);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_chiplets_trace_length_lower_bound() {
-    // log(chiplets_trace_length) = 5 must be rejected; core ok.
-    let test = build_test!(load_air_context_source(), &[], &[10, 5]);
+    let test = build_test!(load_air_context_source(), &[], &[10, 5, 10]);
     expect_assert_error_message!(test);
 }
 
 #[test]
-fn load_air_context_stores_core_first_order() {
-    let output = execute_load_air_context(8, 9);
-    assert_eq!(read_memory(&output, CORE_TRACE_LENGTH_LOG_PTR), 8);
-    assert_eq!(read_memory(&output, CHIPLETS_TRACE_LENGTH_LOG_PTR), 9);
-    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 9);
-    assert_eq!(read_memory(&output, ORDER_TAG_PTR), 0);
+fn load_air_context_poseidon2_trace_length_upper_bound() {
+    let test = build_test!(load_air_context_source(), &[], &[10, 10, 30]);
+    expect_assert_error_message!(test);
 }
 
 #[test]
-fn load_air_context_stores_chiplets_first_order() {
-    let output = execute_load_air_context(9, 8);
-    assert_eq!(read_memory(&output, CORE_TRACE_LENGTH_LOG_PTR), 9);
-    assert_eq!(read_memory(&output, CHIPLETS_TRACE_LENGTH_LOG_PTR), 8);
-    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 9);
-    assert_eq!(read_memory(&output, ORDER_TAG_PTR), 1);
+fn load_air_context_poseidon2_trace_length_lower_bound() {
+    let test = build_test!(load_air_context_source(), &[], &[10, 10, 5]);
+    expect_assert_error_message!(test);
+}
+
+#[test]
+fn load_air_context_stores_shape_and_max_height() {
+    let output = execute_load_air_context(8, 10, 9);
+    assert_eq!(read_memory(&output, CORE_TRACE_LENGTH_LOG_PTR), 8);
+    assert_eq!(read_memory(&output, CHIPLETS_TRACE_LENGTH_LOG_PTR), 10);
+    assert_eq!(read_memory(&output, POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR), 9);
+    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 10);
+}
+
+#[test]
+fn load_air_context_derives_proof_order_tags() {
+    let cases = [
+        ((8, 9, 10), 0), // Core, Chiplets, Poseidon2Permutation
+        ((8, 10, 9), 1), // Core, Poseidon2Permutation, Chiplets
+        ((9, 8, 10), 2), // Chiplets, Core, Poseidon2Permutation
+        ((10, 8, 9), 3), // Chiplets, Poseidon2Permutation, Core
+        ((9, 10, 8), 4), // Poseidon2Permutation, Core, Chiplets
+        ((10, 9, 8), 5), // Poseidon2Permutation, Chiplets, Core
+        ((8, 8, 8), 0),  // ties use instance order
+    ];
+
+    for ((core, chiplets, poseidon2), expected_tag) in cases {
+        let output = execute_load_air_context(core, chiplets, poseidon2);
+        assert_eq!(read_memory(&output, ORDER_TAG_PTR), expected_tag);
+    }
 }
 
 #[test]

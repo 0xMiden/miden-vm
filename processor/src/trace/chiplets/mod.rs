@@ -9,17 +9,14 @@ use miden_air::trace::{
         hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
+    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
 use miden_core::{mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    trace::{
-        ChipletTraceFragment, RowIndex,
-        range::RangeChecker,
-        utils::{CHIP_CLK_COL, DATA_COL_START, S_00_COL},
-    },
+    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
 };
 
 mod bitwise;
@@ -47,6 +44,10 @@ pub struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
+pub struct Poseidon2PermutationTrace {
+    pub(crate) trace: Vec<Felt>,
+}
+
 // CHIPLETS MODULE OF HASHER, BITWISE, MEMORY, ACE, AND KERNEL ROM CHIPLETS
 // ================================================================================================
 
@@ -54,89 +55,56 @@ pub struct ChipletsTrace {
 /// and kernel ROM chiplets and is responsible for building a final execution trace from their
 /// stacked execution traces and chiplet selectors.
 ///
-/// The module's trace can be thought of as 6 stacked segments in the following form.
+/// The chiplets trace is five stacked chiplet segments followed by padding.
 ///
-/// The chiplet system uses two physical selector columns (`s_00 = column 0` and
-/// `s_01 = column 1`) plus the virtual `s0 = 1 - (s_00 + s_01)` to partition rows into three
-/// top-level regions. Columns 3-6 (`s1..s4`) subdivide the `s0` region. Column 2 holds
-/// `chip_clk`, the chiplet-trace row counter.
-///
-/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`. Split into
-///   controller (s_00=0, s_01=1) and permutation (s_00=1, s_01=0) sub-regions.
-///   - column 0 (s_00): 0 on controller rows, 1 on permutation rows
-///   - column 1 (s_01): 1 on controller rows, 0 on permutation rows
-///   - columns 3-21: execution trace of hash chiplet
-///
-/// * Bitwise segment: begins at the end of the hasher segment.
-///   - column 1 (s_01): ZERO
-///   - column 3 (s1): ZERO
-///   - columns 4-16: execution trace of bitwise chiplet
-///   - columns 17-21: unused columns padded with ZERO
-///
-/// * Memory segment: begins at the end of the bitwise segment.
-///   - column 1 (s_01): ZERO
-///   - column 3 (s1): ONE
-///   - column 4 (s2): ZERO
-///   - columns 5-21: execution trace of memory chiplet
-///
-/// * ACE segment: begins at the end of the memory segment.
-///   - column 1 (s_01): ZERO
-///   - column 3-4 (s1, s2): ONE
-///   - column 5 (s3): ZERO
-///   - columns 6-21: execution trace of ACE chiplet
-///
-/// * Kernel ROM segment: begins at the end of the ACE segment.
-///   - column 1 (s_01): ZERO
-///   - columns 3-5 (s1, s2, s3): ONE
-///   - column 6 (s4): ZERO
-///   - columns 7-11: execution trace of kernel ROM chiplet
-///   - columns 12-21: unused columns padded with ZERO
-///
-/// * Padding segment: fills the rest of the trace.
-///   - column 1 (s_01): ZERO
-///   - columns 3-6 (s1..s4): ONE
-///   - columns 7-21: unused columns padded with ZERO
-///
-///
-/// The following is a pictorial representation of the chiplet module:
+/// The chiplet system uses five selector columns. Column 0 selects the hasher controller. Columns
+/// 1-4 (`s1..s4`) select the bitwise, memory, ACE, kernel ROM, and padding regions by prefix.
+/// Column 20 is reserved and constrained to zero.
+/// Column 21 holds `chip_clk`, the chiplet-trace row counter.
 ///
 /// ```text
-///        s_00 s_01 clk s1  s2  s3  s4
-///         [0]  [1] [2] [3] [4] [5] [6]
-///         +---+---+-------------------------------------------------------+
-///  ctrl   | 0 | 1 |       Hash chiplet (controller rows)                  |
-///         | . | . |       19 columns                                      |
-///         | 0 | 1 |       constraint degree 9                             |
-///         +---+---+                                                       +
-///  perm   | 1 | 0 |       Hash chiplet (permutation rows)                 |
-///         | . | . |                                                       |
-///         | 1 | 0 |                                                       |
-///         +---+---+---+---------------------------------------------------+
-///         | 0 | 0 | 0 |                                                |---|
-///         | . | . | . |                Bitwise chiplet                 |---|
-///         | . | . | . |                  13 columns                    |---|
-///         | 0 | 0 | 0 |             constraint degree 5                |---|
-///         | . | . +---+---+---------------------------------------------+-+
-///         | . | . | 1 | 0 |                                              |-|
-///         | . | . | . | . |          Memory chiplet                      |-|
-///         | . | . | . | . |            17 columns                        |-|
-///         | . | . | . | 0 |        constraint degree 9                   |-|
-///         | . | . + . +---+---+-------------------------------------------+
-///         | . | . | . | 1 | 0 |                                          |-|
-///         | . | . | . | . | . |        ACE chiplet                       |-|
-///         | . | . | . | . | . |          16 columns                      |-|
-///         | . | . | . | . | 0 |      constraint degree 5                 |-|
-///         | . | . + . | . +---+---+-----------------------+----------------+
-///         | . | . | . | . | 1 | 0 |                       |----------------|
-///         | . | . | . | . | . | . |   Kernel ROM chiplet  |----------------|
-///         | . | . | . | . | . | . |   5 columns           |----------------|
-///         | . | . | . | . | . | 0 |   constraint degree 9 |----------------|
-///         | . | . + . | . | . +---+-----------------------+----------------+
-///         | . | . | . | . | . | 1 |------- Padding --------|               |
-///         | . | . | . | . | . | . |                        |               |
-///         | 0 | 0 | . | 1 | 1 | 1 | 1                      | 0             |
-///         +---+---+---+---+---+---+------------------------+---------------+
+/// column:   0      1   2   3   4     5..19                  20       21
+///          s_ctrl  s1  s2  s3  s4    chiplet payload        s_perm   chip_clk
+///          ------  --  --  --  --    ----------------       ------   --------
+/// hasher     1     <hasher controller payload, columns 1..19> 0       clk
+/// bitwise    0      0  <bitwise payload, columns 2..14>        0       clk
+/// memory     0      1   0  <memory payload, columns 3..19>     0       clk
+/// ACE        0      1   1   0  <ACE payload, columns 4..19>    0       clk
+/// kernel     0      1   1   1   0  <kernel ROM, columns 5..9>  0       clk
+/// padding    0      1   1   1   1  zeros                      0       clk
 /// ```
+///
+/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
+///   - column 0: ONE on controller rows
+///   - columns 1-19: execution trace of the hasher controller
+///   - column 20: reserved selector, set to ZERO
+///
+/// * Bitwise segment: begins at the end of the hasher segment.
+///   - column 1 (s1): ZERO
+///   - columns 2-14: execution trace of bitwise chiplet
+///   - columns 15-20: unused columns padded with ZERO
+///
+/// * Memory segment: begins at the end of the bitwise segment.
+///   - column 1 (s1): ONE
+///   - column 2 (s2): ZERO
+///   - columns 3-19: execution trace of memory chiplet
+///   - column 20: unused column padded with ZERO
+///
+/// * ACE segment: begins at the end of the memory segment.
+///   - columns 1-2 (s1, s2): ONE
+///   - column 3 (s3): ZERO
+///   - columns 4-19: execution trace of ACE chiplet
+///   - column 20: unused column padded with ZERO
+///
+/// * Kernel ROM segment: begins at the end of the ACE segment.
+///   - columns 1-3 (s1, s2, s3): ONE
+///   - column 4 (s4): ZERO
+///   - columns 5-9: execution trace of kernel ROM chiplet
+///   - columns 10-20: unused columns padded with ZERO
+///
+/// * Padding segment: fills the rest of the trace.
+///   - columns 1-4 (s1..s4): ONE
+///   - columns 5-20: unused columns padded with ZERO
 #[derive(Debug)]
 pub struct Chiplets {
     pub hasher: Hasher,
@@ -163,9 +131,8 @@ impl Chiplets {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the length of the trace required to accommodate chiplet components and 1
-    /// mandatory padding row required for ensuring sufficient trace length for auxiliary connector
-    /// columns that rely on the memory chiplet.
+    /// Returns the chiplets trace length, including the mandatory padding row used by auxiliary
+    /// connector columns that read the memory chiplet.
     pub fn trace_len(&self) -> usize {
         self.hasher.trace_len()
             + self.bitwise.trace_len()
@@ -173,6 +140,11 @@ impl Chiplets {
             + self.kernel_rom.trace_len()
             + self.ace.trace_len()
             + 1
+    }
+
+    /// Returns the unpadded trace length of the Poseidon2 permutation AIR.
+    pub fn poseidon2_permutation_trace_len(&self) -> usize {
+        self.hasher.poseidon2_permutation_trace_len()
     }
 
     /// Returns the index of the first row of `Bitwise` execution trace.
@@ -185,7 +157,7 @@ impl Chiplets {
         self.bitwise_start() + self.bitwise.trace_len()
     }
 
-    /// Returns the index of the first row of `KernelRom` execution trace.
+    /// Returns the index of the first row of the `ACE` execution trace.
     pub fn ace_start(&self) -> RowIndex {
         self.memory_start() + self.memory.trace_len()
     }
@@ -209,25 +181,36 @@ impl Chiplets {
         self.memory.append_range_checks(self.memory_start(), range_checker);
     }
 
-    /// Returns an execution trace of the chiplets containing the stacked traces of the
-    /// Hasher, Bitwise, ACE, Memory chiplets, and kernel ROM chiplet.
-    pub fn into_trace(self, trace_len: usize) -> ChipletsTrace {
+    /// Returns execution traces for `ChipletsAir` and `Poseidon2PermutationAir`.
+    pub fn into_traces(
+        self,
+        trace_len: usize,
+        poseidon2_trace_len: usize,
+    ) -> (ChipletsTrace, Poseidon2PermutationTrace) {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
+        assert!(
+            self.poseidon2_permutation_trace_len() <= poseidon2_trace_len,
+            "target Poseidon2 trace length too small"
+        );
 
         let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
-        self.fill_trace(&mut trace, trace_len);
+        let mut poseidon2_trace =
+            vec![Felt::ZERO; NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len];
+        self.fill_trace(&mut trace, trace_len, &mut poseidon2_trace);
 
-        ChipletsTrace { trace }
+        (ChipletsTrace { trace }, Poseidon2PermutationTrace { trace: poseidon2_trace })
     }
 
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Fills the provided trace for the chiplets module with the stacked execution traces of the
-    /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
-    /// to identify each individual chiplet trace in addition to padding to fill the rest of
-    /// the trace.
-    fn fill_trace(self, trace: &mut [Felt], trace_len: usize) {
+    /// Fills the chiplets trace with the stacked hasher-controller, bitwise, memory, ACE, and
+    /// kernel ROM regions.
+    ///
+    /// Selector columns and `chip_clk` are written by each `ChipletTraceFragment`; the padding
+    /// region is filled directly below. Poseidon2 permutation rows are materialized into
+    /// `poseidon2_trace`.
+    fn fill_trace(self, trace: &mut [Felt], trace_len: usize, poseidon2_trace: &mut [Felt]) {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
 
@@ -246,14 +229,10 @@ impl Chiplets {
         let ace_len = ace.trace_len();
         let kernel_rom_len = kernel_rom.trace_len();
 
-        // Chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom and begin at columns
-        // 3, 4, 5, 6, 7; the widest (hasher) fills every data column up to the final column.
-        // Each chiplet's `copy_rows_from` writes its prefix selector ONEs and `chip_clk` along
-        // with its data; `s_01` (col 1) is hasher-set per row, `s_00` (col 0) is scattered from
-        // the hasher's last source column, and padding rows are filled directly below.
-        // The hasher data band (`HASHER_WIDTH` columns) starts at `DATA_COL_START`, with its last
-        // column scattered to `S_00_COL`, so the contiguous part fills the trace to its full width.
-        const _: () = assert!(DATA_COL_START + HASHER_WIDTH - 1 == CHIPLETS_WIDTH);
+        // Chiplets are stacked as hasher, bitwise, memory, ACE, then kernel ROM. Their selector
+        // prefixes begin at columns 1, 2, 3, 4, and 5. The widest hasher band fills every column
+        // up to `chip_clk`.
+        const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
 
         // Carve `trace` into the per-chiplet contiguous row bands.
         let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
@@ -263,11 +242,11 @@ impl Chiplets {
         let (kernel_band, padding_band) = rest.split_at_mut(kernel_rom_len * W);
 
         let mut hasher_fragment =
-            ChipletTraceFragment::with_scattered_last(hasher_band, W, 3, HASHER_WIDTH, 0, S_00_COL);
+            ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[0]);
         let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
             bitwise_band,
             W,
-            4,
+            2,
             BITWISE_WIDTH,
             hasher_len,
             &[],
@@ -275,31 +254,31 @@ impl Chiplets {
         let mut memory_fragment = ChipletTraceFragment::with_overheads(
             memory_band,
             W,
-            5,
+            3,
             MEMORY_WIDTH,
             memory_start,
-            &[3],
+            &[1],
         );
         let mut ace_fragment = ChipletTraceFragment::with_overheads(
             ace_band,
             W,
-            6,
+            4,
             ACE_CHIPLET_NUM_COLS,
             ace_start,
-            &[3, 4],
+            &[1, 2],
         );
         let mut kernel_rom_fragment = ChipletTraceFragment::with_overheads(
             kernel_band,
             W,
-            7,
+            5,
             KERNEL_ROM_TRACE_WIDTH,
             kernel_rom_start,
-            &[3, 4, 5],
+            &[1, 2, 3],
         );
 
         rayon::scope(|s| {
             s.spawn(move |_| {
-                hasher.fill_trace(&mut hasher_fragment);
+                hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
             });
             s.spawn(move |_| {
                 bitwise.fill_trace(&mut bitwise_fragment);
@@ -320,26 +299,25 @@ impl Chiplets {
     }
 }
 
-/// Fills padding rows after the kernel ROM region: the four `s1..s4` selectors = ONE,
-/// chip_clk = row + 1.
+/// Fills padding rows after the kernel ROM region: cols 1..=4 = ONE, chip_clk = row + 1.
 fn fill_padding_rows(band: &mut [Felt], row_offset: usize) {
     const W: usize = CHIPLETS_WIDTH;
     let (rows, _) = band.as_chunks_mut::<W>();
     for (i, row) in rows.iter_mut().enumerate() {
-        row[DATA_COL_START] = ONE;
-        row[DATA_COL_START + 1] = ONE;
-        row[DATA_COL_START + 2] = ONE;
-        row[DATA_COL_START + 3] = ONE;
-        row[CHIP_CLK_COL] = Felt::from_u32((row_offset + i + 1) as u32);
+        row[1] = ONE;
+        row[2] = ONE;
+        row[3] = ONE;
+        row[4] = ONE;
+        row[W - 1] = Felt::from_u32((row_offset + i + 1) as u32);
     }
 }
 
 // HELPER STRUCTS
 // ================================================================================================
 
-/// Result of a Merkle tree node update. The result contains the old Merkle_root, which
-/// corresponding to the old_value, and the new merkle_root, for the updated value. As well as the
-/// row address of the execution trace at which the computation started.
+/// Result of a Merkle tree node update.
+///
+/// Contains the old root, the new root, and the trace row where the computation started.
 #[derive(Debug, Copy, Clone)]
 pub struct MerkleRootUpdate {
     address: Felt,

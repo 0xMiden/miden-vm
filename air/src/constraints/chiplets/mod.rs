@@ -1,8 +1,7 @@
-//! Chiplets constraints module.
+//! Chiplets trace constraints.
 //!
-//! Currently we implement:
-//! - chiplet selector constraints (including hasher internal selectors)
-//! - permutation sub-chiplet main-trace constraints
+//! This module enforces:
+//! - chiplet selector constraints
 //! - controller sub-chiplet main-trace constraints
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
@@ -17,7 +16,6 @@ pub mod bitwise;
 pub mod columns;
 pub mod hasher_control;
 pub mod memory;
-pub mod permutation;
 pub mod selectors;
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -47,8 +45,7 @@ pub fn enforce_main<AB>(
         .when_transition()
         .assert_eq(next.chip_clk.into(), local.chip_clk.into() + AB::Expr::ONE);
 
-    // Hasher sub-chiplets: permutation + controller.
-    permutation::enforce_permutation_constraints(builder, local, next, &selectors.permutation);
+    // Hasher controller.
     hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
 
     bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
