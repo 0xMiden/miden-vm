@@ -131,75 +131,73 @@ impl Deserializable for TraceGenerationContext {
             fragment_size: usize::read_from(source)?,
             max_stack_depth: usize::read_from(source)?,
         };
-        validate_trace_generation_context_invariants(&context)?;
-        validate_trace_generation_context_forest_ids(&context)?;
+        context.validate_invariants()?;
+        context.validate_forest_ids()?;
         Ok(context)
     }
 }
 
-fn validate_trace_generation_context_invariants(
-    context: &TraceGenerationContext,
-) -> Result<(), DeserializationError> {
-    if context.fragment_size == 0 {
-        return Err(DeserializationError::InvalidValue(
-            "trace generation fragment_size must be non-zero".into(),
-        ));
-    }
-    if context.max_stack_depth < MIN_STACK_DEPTH {
-        return Err(DeserializationError::InvalidValue(format!(
-            "trace generation max_stack_depth {} is below minimum {MIN_STACK_DEPTH}",
-            context.max_stack_depth
-        )));
-    }
-    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
-        let stack_depth = fragment.state.stack.stack_depth();
-        if stack_depth > context.max_stack_depth {
+impl TraceGenerationContext {
+    fn validate_invariants(&self) -> Result<(), DeserializationError> {
+        if self.fragment_size == 0 {
+            return Err(DeserializationError::InvalidValue(
+                "trace generation fragment_size must be non-zero".into(),
+            ));
+        }
+        if self.max_stack_depth < MIN_STACK_DEPTH {
             return Err(DeserializationError::InvalidValue(format!(
-                "fragment {fragment_index}: stack depth {stack_depth} exceeds max_stack_depth {}",
-                context.max_stack_depth
+                "trace generation max_stack_depth {} is below minimum {MIN_STACK_DEPTH}",
+                self.max_stack_depth
             )));
         }
-    }
-    Ok(())
-}
-
-fn validate_trace_generation_context_forest_ids(
-    context: &TraceGenerationContext,
-) -> Result<(), DeserializationError> {
-    let store_len = context.mast_forest_store.len();
-    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
-        validate_mast_forest_id(
-            fragment.initial_mast_forest_id,
-            store_len,
-            "core trace fragment initial_mast_forest_id",
-        )?;
-        for forest_id in fragment.continuation.iter_enter_forest_ids() {
-            validate_mast_forest_id(
-                forest_id,
-                store_len,
-                "core trace fragment continuation EnterForest",
-            )
-            .map_err(|err| {
-                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
-            })?;
+        for (fragment_index, fragment) in self.core_trace_contexts.iter().enumerate() {
+            let stack_depth = fragment.state.stack.stack_depth();
+            if stack_depth > self.max_stack_depth {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "fragment {fragment_index}: stack depth {stack_depth} exceeds max_stack_depth {}",
+                    self.max_stack_depth
+                )));
+            }
         }
-        for forest_id in fragment.replay.mast_forest_resolution.iter_forest_ids() {
+        Ok(())
+    }
+
+    fn validate_forest_ids(&self) -> Result<(), DeserializationError> {
+        let store_len = self.mast_forest_store.len();
+        for (fragment_index, fragment) in self.core_trace_contexts.iter().enumerate() {
             validate_mast_forest_id(
-                forest_id,
+                fragment.initial_mast_forest_id,
                 store_len,
-                "core trace fragment MastForestResolutionReplay",
-            )
-            .map_err(|err| {
-                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
-            })?;
+                "core trace fragment initial_mast_forest_id",
+            )?;
+            for forest_id in fragment.continuation.iter_enter_forest_ids() {
+                validate_mast_forest_id(
+                    forest_id,
+                    store_len,
+                    "core trace fragment continuation EnterForest",
+                )
+                .map_err(|err| {
+                    DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+                })?;
+            }
+            for forest_id in fragment.replay.mast_forest_resolution.iter_forest_ids() {
+                validate_mast_forest_id(
+                    forest_id,
+                    store_len,
+                    "core trace fragment MastForestResolutionReplay",
+                )
+                .map_err(|err| {
+                    DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+                })?;
+            }
         }
-    }
 
-    for forest_id in context.hasher_for_chiplet.iter_hash_basic_block_forest_ids() {
-        validate_mast_forest_id(forest_id, store_len, "hasher HashBasicBlock replay")?;
-    }
+        for forest_id in self.hasher_for_chiplet.iter_hash_basic_block_forest_ids() {
+            validate_mast_forest_id(forest_id, store_len, "hasher HashBasicBlock replay")?;
+        }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 fn validate_mast_forest_id(

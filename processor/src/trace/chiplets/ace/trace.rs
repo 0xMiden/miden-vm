@@ -511,6 +511,9 @@ impl CircuitEvaluation {
     }
 }
 
+// ARBITRARY TEST SUPPORT
+// ================================================================================================
+
 #[cfg(feature = "arbitrary")]
 mod arbitrary {
     use proptest::{collection, prelude::*};
