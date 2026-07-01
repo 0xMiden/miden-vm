@@ -1,0 +1,33 @@
+[package]
+name = "midenc-hir-type"
+description = "Type system and utilities for Miden HIR"
+version = "0.8.0"
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://github.com/0xMiden/compiler"
+categories = ["compilers"]
+keywords = ["compiler", "miden"]
+license = "MIT"
+readme = "README.md"
+edition.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["serde"]
+serde = [
+  "dep:serde",
+  "dep:serde_repr",
+  "dep:miden-serde-utils",
+  "smallvec/serde",
+]
+std = ["miden-serde-utils/std"]
+
+[dependencies]
+miden-formatting.workspace = true
+miden-serde-utils = { workspace = true, optional = true }
+smallvec = { workspace = true, features = ["drain_filter"] }
+serde = { workspace = true, optional = true }
+serde_repr = { workspace = true, optional = true }
+thiserror.workspace = true
