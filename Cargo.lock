@@ -1428,10 +1428,8 @@ dependencies = [
  "miden-precompiles",
  "miden-precompiles-codegen",
  "miden-processor",
- "miden-prover",
  "miden-test-utils",
  "miden-utils-sync",
- "miden-verifier",
  "num",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
@@ -1886,7 +1884,6 @@ dependencies = [
  "serde",
  "serde-wincode",
  "thiserror",
- "tracing",
  "wincode",
 ]
 

@@ -32,5 +32,4 @@ miden-precompiles.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 wincode.workspace = true
