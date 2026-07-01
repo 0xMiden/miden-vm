@@ -79,8 +79,7 @@ A **precompile** is the framework's extension point: an implementation of the `P
 that claims one tag id and, within that slice of tag space, defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
 DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate, with MASM wrappers
-under the `miden::precompiles` namespace. Mock/test-support precompiles still exercise the
-framework in lower-level tests.
+under the `miden::precompiles` namespace.
 
 A precompile supplies three things:
 

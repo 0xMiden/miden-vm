@@ -1394,7 +1394,6 @@ dependencies = [
  "derive_more",
  "insta",
  "log",
- "miden-core",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",

@@ -6,8 +6,7 @@
 //! to TRUE.
 //!
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
-//! provides system-event plumbing. Mock/test-support precompiles live in
-//! `crate::testing::precompile`.
+//! provides system-event plumbing.
 
 mod node;
 mod precompile;
@@ -63,7 +62,7 @@ impl DeferredRootTracker {
 // ERROR
 // ================================================================================================
 
-/// Coarse deferred-framework failures shared by state and mock/test-support precompiles.
+/// Coarse deferred-framework failures shared by deferred state and precompile evaluation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeferredError {
     #[error("invalid or unknown deferred tag")]
