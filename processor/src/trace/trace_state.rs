@@ -1812,9 +1812,27 @@ impl Serializable for MastForestResolutionReplay {
 impl Deserializable for MastForestResolutionReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            mast_forest_resolutions: read_vec_deque(source)?,
+            mast_forest_resolutions: read_mast_forest_resolution_queue(source)?,
         })
     }
+}
+
+fn read_mast_forest_resolution_queue<R: ByteReader>(
+    source: &mut R,
+) -> Result<VecDeque<(MastNodeId, MastForestId)>, DeserializationError> {
+    let len = read_bounded_len(
+        source,
+        "MastForestResolutionReplay",
+        u32::min_serialized_size() + MastForestId::min_serialized_size(),
+    )?;
+    let mut values = VecDeque::with_capacity(len);
+    for _ in 0..len {
+        values.push_back((
+            MastNodeId::from(u32::read_from(source)?),
+            MastForestId::read_from(source)?,
+        ));
+    }
+    Ok(values)
 }
 
 impl Serializable for MemoryReadsReplay {
@@ -2084,7 +2102,7 @@ impl Deserializable for HasherOp {
             ))),
             2 => Ok(Self::HashBasicBlock((
                 MastForestId::read_from(source)?,
-                MastNodeId::read_from(source)?,
+                MastNodeId::from(u32::read_from(source)?),
                 Word::read_from(source)?,
             ))),
             3 => Ok(Self::BuildMerkleRoot((
@@ -2107,7 +2125,7 @@ impl Deserializable for HasherOp {
     fn min_serialized_size() -> usize {
         u8::min_serialized_size()
             + (MastForestId::min_serialized_size()
-                + MastNodeId::min_serialized_size()
+                + u32::min_serialized_size()
                 + Word::min_serialized_size())
     }
 }
