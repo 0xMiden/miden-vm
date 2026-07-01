@@ -1,4 +1,4 @@
-Keccak256 and SHA512 procedures call the corresponding<br />`::miden::precompiles::crypto::hashes` implementations.<br />
+Hash procedures.<br />
 
 
 ## miden::core::crypto::hashes

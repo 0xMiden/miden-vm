@@ -77,9 +77,8 @@ the `miden::precompiles` namespace.
 
 ## Examples
 
-- Hash wrappers such as `miden::precompiles::crypto::hashes::keccak256` and
-  `miden::precompiles::crypto::hashes::sha512` register the input/result nodes needed for the hash
-  claim and log a statement digest that verifies the claimed digest.
+- Hash wrappers such as `miden::precompiles::crypto::hashes::keccak256` register the input/result
+  nodes needed for the hash claim and log a statement digest that verifies the claimed digest.
 - Signature wrappers under `miden::precompiles::crypto::dsa` register the public key, message or
   prehash, signature, and verification predicate nodes, then log the predicate statement.
 

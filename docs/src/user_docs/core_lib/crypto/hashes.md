@@ -6,8 +6,6 @@ sidebar_position: 3
 # Cryptographic hashes
 Namespace `miden::core::crypto::hashes` contains modules for commonly used cryptographic hash functions.
 
-> **Compatibility status:** The `miden::core::crypto::hashes::keccak256` and `miden::core::crypto::hashes::sha512` modules are restored for namespace/API stability. Their MASM procedure bodies are currently skeletons that trap rather than return placeholder digests, so the Keccak256 and SHA512 sections document the intended restored API rather than fully working implementations today. They are intended to delegate to `::miden::precompiles::*` in a follow-up. Users should continue to load `CoreLibrary` for the `miden::core` namespace; that future delegation is an implementation detail of the core compatibility modules.
-
 ## BLAKE3
 Module `miden::core::crypto::hashes::blake3` contains procedures for computing hashes using [BLAKE3](https://blake3.io/) hash function. The input and output elements are assumed to contain one 32-bit value per element.
 
@@ -17,9 +15,7 @@ Module `miden::core::crypto::hashes::blake3` contains procedures for computing h
 | merge   | Computes BLAKE3 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element) |
 
 ## Keccak256
-Module `miden::core::crypto::hashes::keccak256` contains compatibility procedures for computing hashes using [Keccak256](https://keccak.team/keccak.html) hash function.
-
-> **Warning:** These compatibility procedures currently trap. The signatures below describe the intended API after the core compatibility module delegates to `::miden::precompiles::*` in a follow-up.
+Module `miden::core::crypto::hashes::keccak256` contains procedures for computing hashes using [Keccak256](https://keccak.team/keccak.html).
 
 Data is represented using u32 arrays and u8 arrays with the following conventions:
 
@@ -44,16 +40,6 @@ Module `miden::core::crypto::hashes::sha256` contains procedures for computing h
 | merge   | Computes SHA256 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
 | hash_bytes | Given a memory address and a message length in bytes, computes its SHA256 digest. There must be space for writing the padding after the message in memory, and the padding space must be all zeros before the procedure is called.<br /><br />Input: `[addr, len, ...]`<br />Output: `[dig0, dig1, ..., dig7, ...]`<br /><br />Panics if any loaded message word is not a valid 32-bit unsigned integer or padding range checks fail. |
 
-## SHA512
-Module `miden::core::crypto::hashes::sha512` contains compatibility procedures for computing hashes using the SHA512 hash function.
-
-> **Warning:** This compatibility procedure currently traps. The signature below describes the intended API after the core compatibility module delegates to `::miden::precompiles::*` in a follow-up.
-
-Data representation and u32/u8 packing conventions are the same as in Keccak256. The only difference is the digest size: SHA512 digests are 64 bytes, represented as `DIGEST_U32[16] = [d_0, ..., d_15]`.
-
-| Procedure   | Description |
-|-------------|-------------|
-| hash_bytes  | Computes SHA512 hash of data stored in memory.<br /><br />Input: `[ptr, len_bytes, ...]`<br />Output: `[DIGEST_U32[16], ...]`<br /><br />Where:<br />- `ptr`: word-aligned memory address containing `INPUT_U32[len_u32]` where `len_u32=⌈len_bytes/4⌉`<br />- `len_bytes`: number of bytes to hash<br />- `INPUT_U32[len_u32] ~ INPUT_U8[len_bytes]` with `u32` packing (unused bytes in final `u32` must be 0)<br />- `DIGEST_U32[16] = [d_0, ..., d_15] = SHA512(INPUT_U8[len_bytes])` |
 
 ## Poseidon2
 Module `miden::core::crypto::hashes::poseidon2` contains procedures for computing and managing hashes using the [Poseidon2](https://eprint.iacr.org/2023/323) hash function.

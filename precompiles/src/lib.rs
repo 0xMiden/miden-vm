@@ -19,9 +19,7 @@ mod dsa;
 mod hash;
 mod math;
 
-pub use hash::{
-    HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
-};
+pub use hash::{HashFunction, HashPrecompile, keccak256::Keccak256Precompile};
 pub use math::{
     curve::{
         CurveId, CurvePoint, CurvePrecompile, CurveSpec, ShortWeierstrassSpec, TwistedEdwardsSpec,
@@ -117,7 +115,6 @@ pub mod event_handlers {
     pub fn default_event_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             hash_handlers::keccak256_digest_event_handler(),
-            hash_handlers::sha512_digest_event_handler(),
             uint_handlers::field_inv_event_handler(),
         ]
     }
@@ -130,7 +127,6 @@ pub mod event_handlers {
 pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())
-        .with_precompile(Sha512Precompile::default())
         .with_precompile(UintPrecompile)
         .with_precompile(CurvePrecompile)
 }

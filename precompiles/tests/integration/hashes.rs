@@ -1,5 +1,5 @@
 use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
-use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
+use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::ExecutionError;
 
 use crate::helpers::{
@@ -20,30 +20,12 @@ fn keccak_hash_1_chunk_mem_writes_expected_digest() {
 }
 
 #[test]
-fn sha512_hash_1_chunk_mem_writes_expected_digest() {
-    let input: Vec<u8> = (0u8..32).collect();
-
-    let sha512 = run_hash_mem("sha512", "hash_1_chunk_mem", &input, 16)
-        .expect("sha512::hash_1_chunk_mem must execute");
-    assert_eq!(sha512, pack_digest(&Sha512::hash(&input)));
-}
-
-#[test]
 fn keccak_hash_bytes_mem_handles_short_preimages() {
     let input = b"hash wrapper coverage";
 
     let keccak = run_hash_mem("keccak256", "hash_bytes_mem", input, 8)
         .expect("keccak256::hash_bytes_mem must execute");
     assert_eq!(keccak, pack_digest(&Keccak256::hash(input)));
-}
-
-#[test]
-fn sha512_hash_bytes_mem_handles_short_preimages() {
-    let input = b"hash wrapper coverage";
-
-    let sha512 = run_hash_mem("sha512", "hash_bytes_mem", input, 16)
-        .expect("sha512::hash_bytes_mem must execute");
-    assert_eq!(sha512, pack_digest(&Sha512::hash(input)));
 }
 
 #[test]
@@ -56,27 +38,6 @@ fn keccak_hash_2_chunks_mem_hashes_concatenated_inputs() {
     let output = run_hash_mem("keccak256", "hash_2_chunks_mem", &preimage, 8)
         .expect("keccak256::hash_2_chunks_mem must execute");
     assert_eq!(output, pack_digest(&Keccak256::hash(&preimage)));
-}
-
-#[test]
-fn sha512_hash_2_chunks_mem_hashes_concatenated_inputs() {
-    let left: Vec<u8> = (0u8..32).collect();
-    let right: Vec<u8> = (32u8..64).collect();
-    let mut preimage = left;
-    preimage.extend_from_slice(&right);
-
-    let output = run_hash_mem("sha512", "hash_2_chunks_mem", &preimage, 16)
-        .expect("sha512::hash_2_chunks_mem must execute");
-    assert_eq!(output, pack_digest(&Sha512::hash(&preimage)));
-}
-
-#[test]
-fn sha512_hash_3_chunks_mem_hashes_96_byte_preimages() {
-    let input: Vec<u8> = (0u8..96).collect();
-
-    let output = run_hash_mem("sha512", "hash_3_chunks_mem", &input, 16)
-        .expect("sha512::hash_3_chunks_mem must execute");
-    assert_eq!(output, pack_digest(&Sha512::hash(&input)));
 }
 
 fn run_hash_mem(
@@ -117,7 +78,6 @@ fn hash_precompile_cycle_baselines() {
     let mut bytes64 = left;
     bytes64.extend_from_slice(&right);
     let short = b"hash wrapper coverage";
-    let bytes96: Vec<u8> = (0u8..96).collect();
 
     let mut mismatches = Vec::new();
     for (name, source, expected) in [
@@ -127,34 +87,14 @@ fn hash_precompile_cycle_baselines() {
             153,
         ),
         (
-            "sha512_hash_1_chunk_mem",
-            cycle_hash_mem_source("sha512", "hash_1_chunk_mem", &input),
-            160,
-        ),
-        (
             "keccak_hash_2_chunks_mem",
             cycle_hash_mem_source("keccak256", "hash_2_chunks_mem", &bytes64),
             153,
         ),
         (
-            "sha512_hash_2_chunks_mem",
-            cycle_hash_mem_source("sha512", "hash_2_chunks_mem", &bytes64),
-            160,
-        ),
-        (
             "keccak_hash_bytes_mem_short",
             cycle_hash_mem_source("keccak256", "hash_bytes_mem", short),
             200,
-        ),
-        (
-            "sha512_hash_bytes_mem_short",
-            cycle_hash_mem_source("sha512", "hash_bytes_mem", short),
-            208,
-        ),
-        (
-            "sha512_hash_3_chunks_mem",
-            cycle_hash_mem_source("sha512", "hash_3_chunks_mem", &bytes96),
-            161,
         ),
     ] {
         let output =

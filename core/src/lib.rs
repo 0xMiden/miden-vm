@@ -96,7 +96,7 @@ pub mod crypto {
             poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,
-            sha2::{Sha256, Sha512},
+            sha2::Sha256,
         };
     }
 
@@ -105,7 +105,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_poseidon2};
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, falcon512_poseidon2};
     }
 }
 

@@ -79,8 +79,8 @@ impl ExecutionOptions {
     /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
     pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
 
-    /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
-    /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
+    /// Default maximum number of input bytes for a single hash precompile invocation.
+    /// Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
     /// Default maximum approximate number of field elements allowed in deferred state.

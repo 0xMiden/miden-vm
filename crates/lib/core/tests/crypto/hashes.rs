@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, deferred::DeferredState, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::CoreLibrary;
-use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
+use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
@@ -42,28 +42,6 @@ proc truncate_stack_to_8
 end
 "#;
 
-const TRUNCATE_STACK_TO_16_PROC: &str = r#"
-@locals(16)
-proc truncate_stack_to_16
-    loc_storew_le.0 dropw
-    loc_storew_le.4 dropw
-    loc_storew_le.8 dropw
-    loc_storew_le.12 dropw
-    sdepth neq.16
-    while.true
-        drop
-        sdepth neq.16
-    end
-    loc_loadw_le.12
-    swapw.3
-    loc_loadw_le.8
-    swapw.2
-    loc_loadw_le.4
-    swapw
-    loc_loadw_le.0
-end
-"#;
-
 #[test]
 fn core_keccak256_hash_bytes_returns_expected_digest() {
     let input = b"core hash compatibility";
@@ -96,36 +74,6 @@ fn core_keccak256_merge_returns_expected_digest() {
 }
 
 #[test]
-fn core_sha512_hash_bytes_returns_expected_digest() {
-    let input = b"core hash compatibility";
-
-    let output = run_core_hash_bytes("sha512", input).expect("sha512::hash_bytes must execute");
-    assert_deferred_state_round_trips(&output);
-    assert_eq!(read_stack_felts(&output, 16), pack_digest(&Sha512::hash(input)));
-}
-
-#[test]
-fn core_sha512_hash_returns_expected_digest() {
-    let input: Vec<u8> = (0u8..32).collect();
-
-    let output = run_core_fixed_hash("sha512", &input).expect("sha512::hash must execute");
-    assert_deferred_state_round_trips(&output);
-    assert_eq!(read_stack_felts(&output, 16), pack_digest(&Sha512::hash(&input)));
-}
-
-#[test]
-fn core_sha512_merge_returns_expected_digest() {
-    let left: Vec<u8> = (0u8..32).collect();
-    let right: Vec<u8> = (32u8..64).collect();
-    let mut preimage = left.clone();
-    preimage.extend_from_slice(&right);
-
-    let output = run_core_merge("sha512", &left, &right).expect("sha512::merge must execute");
-    assert_deferred_state_round_trips(&output);
-    assert_eq!(read_stack_felts(&output, 16), pack_digest(&Sha512::hash(&preimage)));
-}
-
-#[test]
 fn core_hash_wrapper_cycle_baselines() {
     let input: Vec<u8> = (0u8..32).collect();
     let left: Vec<u8> = (0u8..32).collect();
@@ -135,11 +83,8 @@ fn core_hash_wrapper_cycle_baselines() {
     let mut mismatches = Vec::new();
     for (name, source, expected) in [
         ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 212),
-        ("core_sha512_hash", cycle_fixed_hash_source("sha512", &input), 243),
         ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 232),
-        ("core_sha512_merge", cycle_merge_source("sha512", &left, &right), 259),
         ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 248),
-        ("core_sha512_hash_bytes_short", cycle_hash_bytes_source("sha512", short), 278),
     ] {
         let output =
             run_core_program(&source).unwrap_or_else(|err| panic!("{name} failed: {err:?}"));
@@ -286,7 +231,6 @@ fn cycle_hash_bytes_source(module: &str, input: &[u8]) -> String {
 fn truncate_proc_for_module(module: &str) -> &'static str {
     match module {
         "keccak256" => TRUNCATE_STACK_TO_8_PROC,
-        "sha512" => TRUNCATE_STACK_TO_16_PROC,
         _ => panic!("unsupported hash module {module}"),
     }
 }
@@ -294,7 +238,6 @@ fn truncate_proc_for_module(module: &str) -> &'static str {
 fn truncate_call_for_module(module: &str) -> &'static str {
     match module {
         "keccak256" => "truncate_stack_to_8",
-        "sha512" => "truncate_stack_to_16",
         _ => panic!("unsupported hash module {module}"),
     }
 }

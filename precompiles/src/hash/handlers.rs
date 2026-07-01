@@ -10,12 +10,10 @@ use miden_processor::{
     event::{EventError, EventHandler},
 };
 
-use super::{HashFunction, keccak256::Keccak256Hash, sha512::Sha512Hash};
+use super::{HashFunction, keccak256::Keccak256Hash};
 
 pub(crate) const KECCAK256_DIGEST_EVENT_NAME: EventName =
     EventName::new("miden::precompiles::crypto::hashes::keccak256::digest");
-pub(crate) const SHA512_DIGEST_EVENT_NAME: EventName =
-    EventName::new("miden::precompiles::crypto::hashes::sha512::digest");
 
 const BYTES_PER_U32: usize = size_of::<u32>();
 
@@ -24,10 +22,6 @@ pub(crate) fn keccak256_digest_event_handler() -> (EventName, Arc<dyn EventHandl
         KECCAK256_DIGEST_EVENT_NAME,
         Arc::new(HashDigestHandler::<Keccak256Hash>::default()),
     )
-}
-
-pub(crate) fn sha512_digest_event_handler() -> (EventName, Arc<dyn EventHandler>) {
-    (SHA512_DIGEST_EVENT_NAME, Arc::new(HashDigestHandler::<Sha512Hash>::default()))
 }
 
 struct HashDigestHandler<H>(PhantomData<H>);

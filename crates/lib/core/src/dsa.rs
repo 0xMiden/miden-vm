@@ -8,7 +8,6 @@
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
-//! - [`eddsa_ed25519`]: EdDSA over Ed25519 with SHA-512 hashing
 //! - [`falcon512_poseidon2`]: Falcon-512 with Poseidon2 hashing
 
 // ECDSA K256 KECCAK
@@ -149,52 +148,6 @@ pub mod ecdsa_k256_keccak {
 
     fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
         limbs.map(Felt::from_u32)
-    }
-}
-
-// EDDSA ED25519
-// ================================================================================================
-
-/// EdDSA Ed25519 with SHA-512 signature helpers.
-///
-/// Functions in this module generate advice data for the compatibility
-/// `::miden::core::crypto::dsa::eddsa_ed25519` wrappers. These wrappers are currently restored as
-/// MASM skeletons and are intended to delegate to the official precompiles later.
-pub mod eddsa_ed25519 {
-    extern crate alloc;
-
-    use alloc::vec::Vec;
-
-    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
-    use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey};
-
-    /// Signs the provided message with the supplied secret key and encodes this signature and the
-    /// associated public key into a vector of field elements in the format expected by the
-    /// compatibility `::miden::core::crypto::dsa::eddsa_ed25519::verify` wrapper.
-    ///
-    /// See [`encode_signature()`] for more info.
-    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
-        let pk = sk.public_key();
-        let sig = sk.sign(msg);
-        encode_signature(&pk, &sig)
-    }
-
-    /// Encodes the provided public key and signature into a vector of field elements in the format
-    /// expected by the compatibility `::miden::core::crypto::dsa::eddsa_ed25519::verify` wrapper.
-    ///
-    /// The encoding format is:
-    /// 1. The Ed25519 public key encoded as 8 packed-u32 felts (32 bytes total).
-    /// 2. The EdDSA signature encoded as 16 packed-u32 felts (64 bytes total).
-    ///
-    /// The two chunks are concatenated as `[PK[8] || SIG[16]]` so they can be streamed straight to
-    /// the advice provider before invoking `eddsa_ed25519::verify`.
-    pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
-        let mut out = Vec::new();
-        let pk_bytes = pk.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&pk_bytes));
-        let sig_bytes = sig.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&sig_bytes));
-        out
     }
 }
 

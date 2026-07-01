@@ -7,9 +7,8 @@ The generic deferred-computation framework stays in [`miden-core`](../core), und
 This crate exposes a `registry()` function that returns a `miden_core::deferred::PrecompileRegistry` — the registry that routes deferred tags to their owning precompile — populated with the precompiles this crate provides.
 
 ## Provided precompiles
-- **Hashes** (`keccak256`, `sha512`): a `preimage` → `digest` reduction plus an `eq` predicate, with MASM wrappers under `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`).
+- **Hashes** (`keccak256`): a `preimage` → `digest` reduction plus an `eq` predicate, with MASM wrappers under `miden::precompiles::crypto::hashes::keccak256` (`hash`, `hash_bytes`, `merge`).
 - **Math-native secp256k1 ECDSA** (`ecdsa_secp256k1`): a trapping prehashed verifier exposed as `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash`. It verifies raw affine secp256k1 public keys, prehashes, and `(r, s)` signatures stored as little-endian `u32` limbs. It uses the UInt and curve deferred precompiles, applying the signature equation's scalar multiplications with a two-pair curve MSM.
-- **Math-native Ed25519 EdDSA** (`eddsa_ed25519`): a trapping verifier exposed as `miden::precompiles::crypto::dsa::eddsa_ed25519::assert_verify`. It verifies native affine `A` and `R` points, a canonical scalar `S`, and a fixed 32-byte message. It recompresses `R` and `A` only to build the Ed25519 challenge `SHA512(R_compressed || A_compressed || message)`. The signature memory is contiguous as `R || S`.
 
 ## secp256k1 ECDSA trapping verifier ABI
 
@@ -36,33 +35,6 @@ The verifier traps on malformed limbs, non-canonical scalars, invalid/off-curve 
 
 `assert_verify_prehash` registers `[u1]G + [u2]Q` as one two-pair curve MSM over scalar/point digest pairs.
 
-## Ed25519 EdDSA trapping verifier ABI
-
-`miden::precompiles::crypto::dsa::eddsa_ed25519::assert_verify` has stack contract:
-
-```text
-Input:  [a_ptr, sig_ptr, msg_ptr, ...]
-Output: [...]
-```
-
-It is assert/trap-only and returns no boolean. `A` and `R` are supplied as native affine Ed25519 points; the MASM verifier does not decompress compressed encodings. Point and scalar limbs are stored as little-endian `u32` felts:
-
-```text
-a_ptr[0..8]      = A.x, little-endian u32 limbs over the Ed25519 base field
-a_ptr[8..16]     = A.y, little-endian u32 limbs over the Ed25519 base field
-
-sig_ptr[0..8]    = R.x, little-endian u32 limbs over the Ed25519 base field
-sig_ptr[8..16]   = R.y, little-endian u32 limbs over the Ed25519 base field
-sig_ptr[16..24]  = S, little-endian u32 limbs modulo the Ed25519 scalar field
-
-msg_ptr[0..8]    = fixed 32-byte message, packed as eight little-endian u32 felts
-```
-
-The verifier builds `R_compressed || A_compressed || message[32]` in local scratch memory, hashes it with the SHA-512 precompile, reduces the 512-bit digest modulo the Ed25519 scalar field, rejects low-order `A` and `R` by checking `[8]P != identity`, and asserts:
-
-```text
-[S]B == R + [h]A
-```
 
 ## Crate features
 Miden precompiles can be compiled with the following features:

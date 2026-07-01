@@ -20,7 +20,6 @@ use crate::codec::{chunks_to_bytes, n_chunks};
 
 pub(crate) mod handlers;
 pub mod keccak256;
-pub mod sha512;
 
 // HASH FUNCTION
 // ================================================================================================
