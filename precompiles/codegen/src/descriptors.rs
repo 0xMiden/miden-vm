@@ -12,6 +12,21 @@ pub const ZERO_LIMBS: Limbs = [0; 8];
 pub const ONE_LIMBS: Limbs = [1, 0, 0, 0, 0, 0, 0, 0];
 pub const TWO_LIMBS: Limbs = [2, 0, 0, 0, 0, 0, 0, 0];
 
+/// VM-owned store pointer for the U256 wrapping-domain bound (`2^256 - 1`).
+pub const U256_BOUND_PTR: u32 = 1;
+/// VM-owned store pointer for the secp256k1 base-field bound (`p - 1`).
+pub const K1_BASE_BOUND_PTR: u32 = 2;
+/// VM-owned store pointer for the secp256k1 scalar-field bound (`n - 1`).
+pub const K1_SCALAR_BOUND_PTR: u32 = 3;
+/// VM-owned store pointer for the secp256r1 base-field bound (`p - 1`).
+pub const R1_BASE_BOUND_PTR: u32 = 4;
+/// VM-owned store pointer for the secp256r1 scalar-field bound (`n - 1`).
+pub const R1_SCALAR_BOUND_PTR: u32 = 5;
+/// VM-owned store pointer for the Ed25519 base-field bound (`p - 1`).
+pub const ED25519_BASE_BOUND_PTR: u32 = 6;
+/// VM-owned store pointer for the Ed25519 scalar-field bound (`l - 1`).
+pub const ED25519_SCALAR_BOUND_PTR: u32 = 7;
+
 /// Marker for arithmetic modulo `2^256`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct U256;
@@ -288,7 +303,34 @@ impl UintDomain {
         Self::Ed25519Scalar,
     ];
 
-    /// Returns the supported domain for a tag-local id.
+    /// Returns the VM-owned store pointer for this domain's bound/modulus pin.
+    pub const fn bound_ptr(self) -> u32 {
+        match self {
+            Self::U256 => U256_BOUND_PTR,
+            Self::K1Base => K1_BASE_BOUND_PTR,
+            Self::K1Scalar => K1_SCALAR_BOUND_PTR,
+            Self::R1Base => R1_BASE_BOUND_PTR,
+            Self::R1Scalar => R1_SCALAR_BOUND_PTR,
+            Self::Ed25519Base => ED25519_BASE_BOUND_PTR,
+            Self::Ed25519Scalar => ED25519_SCALAR_BOUND_PTR,
+        }
+    }
+
+    /// Returns the uint domain whose bound is pinned at `ptr`.
+    pub const fn from_bound_ptr(ptr: u32) -> Option<Self> {
+        match ptr {
+            U256_BOUND_PTR => Some(Self::U256),
+            K1_BASE_BOUND_PTR => Some(Self::K1Base),
+            K1_SCALAR_BOUND_PTR => Some(Self::K1Scalar),
+            R1_BASE_BOUND_PTR => Some(Self::R1Base),
+            R1_SCALAR_BOUND_PTR => Some(Self::R1Scalar),
+            ED25519_BASE_BOUND_PTR => Some(Self::Ed25519Base),
+            ED25519_SCALAR_BOUND_PTR => Some(Self::Ed25519Scalar),
+            _ => None,
+        }
+    }
+
+    /// Returns the supported domain for a stable local domain id.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <U256 as UintSpec>::ID => Some(Self::U256),
@@ -302,7 +344,7 @@ impl UintDomain {
         }
     }
 
-    /// Returns the stable local domain selector used in uint tags.
+    /// Returns the stable local domain selector.
     pub fn id(self) -> Felt {
         match self {
             Self::U256 => <U256 as UintSpec>::ID,
@@ -484,7 +526,7 @@ impl UintPrecompileDescriptor {
 
     pub fn value_tag(domain: UintDomain) -> Tag {
         let op_id = Felt::new(Self::VALUE_OP_ID).expect("uint VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, domain.id(), ZERO])
+        Tag::precompile(Self::id(), [op_id, Felt::from(domain.bound_ptr()), ZERO])
             .expect("uint precompile id is not framework-reserved")
     }
 
@@ -812,4 +854,29 @@ fn sub_raw(lhs: Limbs, rhs: Limbs) -> (Limbs, u32) {
         borrow = u64::from((lhs[i] as u64) < subtrahend);
     }
     (out, borrow as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_bound_pointers_round_trip_domains() {
+        let expected_ptrs = [
+            U256_BOUND_PTR,
+            K1_BASE_BOUND_PTR,
+            K1_SCALAR_BOUND_PTR,
+            R1_BASE_BOUND_PTR,
+            R1_SCALAR_BOUND_PTR,
+            ED25519_BASE_BOUND_PTR,
+            ED25519_SCALAR_BOUND_PTR,
+        ];
+
+        for (domain, expected_ptr) in UintDomain::ALL.into_iter().zip(expected_ptrs) {
+            assert_eq!(domain.bound_ptr(), expected_ptr);
+            assert_eq!(UintDomain::from_bound_ptr(expected_ptr), Some(domain));
+        }
+        assert_eq!(UintDomain::from_bound_ptr(0), None);
+        assert_eq!(UintDomain::from_bound_ptr(8), None);
+    }
 }

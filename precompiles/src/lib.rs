@@ -33,7 +33,11 @@ pub use math::{
     r1_base::R1Base,
     r1_scalar::R1Scalar,
     u256::U256,
-    uint::{Limbs, UintDomain, UintPrecompile, UintSpec},
+    uint::{
+        ED25519_BASE_BOUND_PTR, ED25519_SCALAR_BOUND_PTR, K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR,
+        Limbs, R1_BASE_BOUND_PTR, R1_SCALAR_BOUND_PTR, U256_BOUND_PTR, UintDomain, UintPrecompile,
+        UintSpec,
+    },
 };
 
 #[cfg(feature = "std")]

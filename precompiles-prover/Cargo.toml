@@ -1,0 +1,37 @@
+[package]
+name = "miden-precompiles-prover"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+itertools.workspace = true
+miden-air = { workspace = true, features = ["std"] }
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-precompiles.workspace = true
+miden-lifted-air = { version = "0.27", default-features = false }
+miden-lifted-stark = { version = "0.27", features = ["testing"] }
+miden-stateful-hasher = "0.27"
+p3-air = "0.6.1"
+p3-challenger = "0.6.1"
+p3-dft = "0.6.1"
+p3-field = "0.6.1"
+p3-goldilocks = "0.6.1"
+p3-matrix = "0.6.1"
+p3-symmetric = "0.6.1"
+rand = "0.9"
+ruint = "1.18"
+
+[dev-dependencies]
+# Known-good secp256k1 ("k1") reference — the oracle for EC circuit
+# cross-validation tests (RustCrypto, pure Rust, no C deps).
+k256 = "0.13"
+# Prover span profiling (`PROFILE=1` on the benches) — research only.
+tracing.workspace = true
+tracing-subscriber = "0.3"
