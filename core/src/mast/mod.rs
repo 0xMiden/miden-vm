@@ -50,6 +50,9 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "serde")]
+use crate::serde::{Deserializable, SliceReader};
+
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use node::arbitrary;
@@ -61,19 +64,17 @@ pub use node::{
     OpBatch, SplitNode, SplitNodeBuilder,
 };
 
-#[cfg(feature = "serde")]
-use crate::serde::{Deserializable, Serializable, SliceReader};
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    serde::{ByteWriter, DeserializationError},
+    serde::{ByteWriter, DeserializationError, Serializable},
     utils::{Idx, IndexVec, hash_string_to_word},
 };
 
 mod serialization;
 pub use serialization::{
     AdviceMapView, AdviceValueView, MastForestReadMode, MastForestReadView, MastForestView,
-    MastForestWireView, MastNodeEntry, MastNodeInfo,
+    MastForestWireView, MastNodeEntry, MastNodeInfo, SparseMastForestReadOptions,
 };
 
 mod untrusted;
@@ -838,7 +839,6 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -904,6 +904,12 @@ impl Idx for MastNodeId {}
 impl From<MastNodeId> for u32 {
     fn from(value: MastNodeId) -> Self {
         value.0
+    }
+}
+
+impl Serializable for MastNodeId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        Serializable::write_into(&self.0, target);
     }
 }
 
