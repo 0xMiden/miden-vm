@@ -1,5 +1,7 @@
 # Changelog
 
+## v0.23.5 (2026-07-02)
+
 ## v0.23.4 (2026-06-23)
 
 - Preserved semantic struct and field names when emitting debug types, so debug dumps no longer fall back to anonymous struct metadata ([#3269](https://github.com/0xMiden/miden-vm/pull/3269)).
