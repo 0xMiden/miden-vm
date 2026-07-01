@@ -6,10 +6,13 @@
 use alloc::vec::Vec;
 use core::num::NonZeroU32;
 
-use miden_core::{Felt, deferred::PrecompileError};
+use miden_core::{
+    Felt,
+    deferred::{Node, PrecompileError},
+};
 
 /// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
-pub const BYTES_PER_CHUNK: u32 = 32;
+pub const BYTES_PER_CHUNK: u32 = Node::PACKED_BYTES_PER_CHUNK as u32;
 
 /// Number of 8-felt chunks needed to encode `n_bytes` of u32-packed input.
 ///

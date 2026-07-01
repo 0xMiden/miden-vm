@@ -16,15 +16,15 @@
 //! - `perm_seq_id_chunks` is the chunk-content P2 absorption head.
 //! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the two one-shot P2 absorptions
 //!   this layer drives.
-//!
-//! [`hash_digest_chunks`] / [`hash_keccak_node`] are kept exported so older
-//! standalone tests (which build [`KeccakNodeInvocation`]s by hand,
-//! without the chunk / sponge / P2 stack) can still pre-compute the
-//! reference hashes.
 
 use std::collections::HashMap;
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    deferred::{Digest, Node},
+    field::QuadFelt,
+};
+use miden_precompiles::Keccak256Precompile;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -57,7 +57,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct KeccakNodeInvocation {
     /// Message byte length.
-    pub len_bytes: u64,
+    pub len_bytes: u32,
     /// The 4-lane Keccak-256 digest, laid out as
     /// `[lo_0, hi_0, lo_1, hi_1, lo_2, hi_2, lo_3, hi_3]` (lane `j` =
     /// `(d[2j], d[2j+1])` as u32 halves on Memory64).
@@ -91,7 +91,7 @@ impl KeccakNodeInvocation {
     /// Sponge perms = Keccak blocks = `floor(len_bytes / 136) + 1`
     /// under multi-rate-10*1 padding.
     pub fn n_sponge_perms(&self) -> u64 {
-        self.len_bytes / 136 + 1
+        u64::from(self.len_bytes) / 136 + 1
     }
 
     /// Chunks in this invocation's chain = `max(1, ceil(len_bytes / 32))`.
@@ -99,7 +99,7 @@ impl KeccakNodeInvocation {
     /// `H_input_chunks` tail read at `perm_seq_id_chunks + n_chunks − 1`
     /// stays in range (= `perm_seq_id_chunks`).
     pub fn n_chunks(&self) -> u64 {
-        self.len_bytes.div_ceil(32).max(1)
+        u64::from(self.len_bytes).div_ceil(Node::PACKED_BYTES_PER_CHUNK as u64).max(1)
     }
 }
 
@@ -146,10 +146,19 @@ pub fn generate_trace_from_invocations(
 /// perm_seq_id_chunks, len_bytes, perm_seq_id_digest_chunks, perm_seq_id_keccak,
 /// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult.
 fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
-    let len_bytes = Felt::new(inv.len_bytes).expect("len_bytes fits in canonical Goldilocks");
+    let len_bytes = Felt::from(inv.len_bytes);
     let d_felts: [Felt; 8] = inv.d.map(Felt::from);
-    let h_digest_chunks = hash_digest_chunks(&d_felts);
-    let h_keccak = hash_keccak_node(&inv.h_input_chunks, &h_digest_chunks, len_bytes);
+    let h_digest_chunks = Node::chunks(vec![d_felts])
+        .expect("Keccak digest chunks are non-empty")
+        .digest()
+        .into_elements();
+    let h_keccak = Keccak256Precompile::assert_node(
+        inv.len_bytes,
+        Digest::new(inv.h_input_chunks),
+        Digest::new(h_digest_chunks),
+    )
+    .digest()
+    .into_elements();
 
     trace.extend([
         Felt::ONE,
@@ -167,30 +176,6 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     trace.extend(h_digest_chunks);
     trace.extend(h_keccak);
     trace.extend([Felt::from(inv.out_mult)]);
-}
-
-/// Compute the digest-chunk hash: one Poseidon2 perm over
-/// `(rate0 = D[0..4], rate1 = D[4..8], cap = VM Tag::CHUNKS)`. Returns the
-/// first 4 lanes of the post-perm state.
-pub fn hash_digest_chunks(d: &[Felt; 8]) -> [Felt; NUM_HASH] {
-    let rate0 = [d[0], d[1], d[2], d[3]];
-    let rate1 = [d[4], d[5], d[6], d[7]];
-    Poseidon2Requires::digest_of(P2Cap::chunk(), &[(rate0, rate1)]).as_array()
-}
-
-/// Compute the Keccak-node hash: one Poseidon2 perm over
-/// `(rate0 = H_input_chunks, rate1 = H_digest_chunks, cap = VM Keccak-256 assertion tag)`.
-/// Returns the first 4 lanes of the post-perm state.
-pub fn hash_keccak_node(
-    h_input_chunks: &[Felt; NUM_HASH],
-    h_digest_chunks: &[Felt; NUM_HASH],
-    len_bytes: Felt,
-) -> [Felt; NUM_HASH] {
-    Poseidon2Requires::digest_of(
-        P2Cap::keccak256_assertion(len_bytes),
-        &[(*h_input_chunks, *h_digest_chunks)],
-    )
-    .as_array()
 }
 
 // REQUIRES ACCUMULATOR
@@ -290,11 +275,9 @@ impl KeccakNodeRequires {
         let _ = p2.require_digest(h_digest_chunks);
 
         // H_keccak = Poseidon2(H_input_chunks || H_digest_chunks || cap_keccak)
-        let len_bytes_u32 = u32::try_from(input.len()).expect("len_bytes fits in u32");
-        let len_bytes = u64::from(len_bytes_u32);
-        let len_bytes_felt = Felt::from(len_bytes_u32);
+        let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_out = p2.require_one_shot(
-            P2Cap::keccak256_assertion(len_bytes_felt),
+            P2Cap::keccak256_assertion(len_bytes),
             h_input_chunks,
             h_digest_chunks.as_array(),
         );

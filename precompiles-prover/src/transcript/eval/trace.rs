@@ -45,7 +45,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    deferred::{Digest, fold_deferred_root},
+    field::QuadFelt,
+};
 use miden_precompiles::CurvePrecompile;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -338,6 +342,13 @@ impl TranscriptEvalRequires {
         self.consume(b);
         let absorption = p2.require_one_shot(P2Cap::and(), lhs.as_array(), rhs.as_array());
         let _ = p2.require_digest(absorption.digest);
+        debug_assert_eq!(
+            absorption.digest,
+            P2Digest::from(fold_deferred_root(
+                Digest::new(lhs.as_array()),
+                Digest::new(rhs.as_array()),
+            )),
+        );
         let hash = absorption.digest;
         let out = self.fresh(hash);
         self.nodes.push(EvalNode {
@@ -1170,14 +1181,6 @@ fn push_node_row(
 /// Row 0's `h[4]` columns (the first-row root pin) as a digest.
 fn root_hash(trace: &[Felt]) -> P2Digest {
     P2Digest(core::array::from_fn(|i| trace[COL_H_BEGIN + i]))
-}
-
-/// One AND-node Poseidon2 perm: hash `lhs || rhs || VM Tag::AND`. Returns
-/// the first 4 felts of the post-perm state — the node hash a parent chains
-/// onto. For tests / callers that want the digest without driving the p2
-/// accumulator.
-pub fn transcript_node_hash(lhs: P2Digest, rhs: P2Digest) -> P2Digest {
-    Poseidon2Requires::digest_of(P2Cap::and(), &[(lhs.as_array(), rhs.as_array())])
 }
 
 // PROVER
