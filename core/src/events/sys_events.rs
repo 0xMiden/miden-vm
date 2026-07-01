@@ -298,11 +298,10 @@ pub enum SystemEvent {
     /// Registers and eagerly evaluates a deferred node whose full payload is on the operand stack.
     ///
     /// `TAG` is one word (4 field elements). `PAYLOAD_LO || PAYLOAD_HI` is eight field elements:
-    /// either one [`crate::deferred::DataChunk`], two child digests (`lhs || rhs`) for a join, one
-    /// `lhs || rhs` pair for a pair-list node, or `child_digest || params` for a unary node. Exact
-    /// [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed
-    /// id-2 tags are rejected during tag decode. Unary `params` are literal payload data and are
-    /// separate from the tag's immediate arguments. The installed registry decodes `TAG` via
+    /// either one [`crate::deferred::DataChunk`], two child digests (`lhs || rhs`) for a join, or
+    /// one `lhs || rhs` pair for a pair-list node. Exact [`crate::deferred::Tag::CHUNKS`]
+    /// (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed id-2 tags are rejected during tag
+    /// decode. The installed registry decodes `TAG` via
     /// [`crate::deferred::DeferredState::decode`]; `TRUE` is not accepted by this event. Tags that
     /// semantically require more data chunks or pairs are rejected during precompile-specific
     /// evaluation. Registration is performed by [`crate::deferred::DeferredState::register`], so
@@ -329,9 +328,9 @@ pub enum SystemEvent {
     /// The tag is emitted first in advice-pop order so `adv_pushw adv_pushw adv_pushw` leaves
     /// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack for a single 8-felt payload. Data
     /// payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving canonical
-    /// chunk order. Join and unary payloads use the same two-word LIFO convention; join leaves
-    /// `[lhs, rhs, TAG, ...]`, and unary leaves `[child_digest, params, TAG, ...]`. `TRUE` pushes
-    /// only `Tag::TRUE`. These felts are an unbound host hint, so proof-relevant code must bind
+    /// chunk order. Join payloads use the same two-word LIFO convention, leaving
+    /// `[lhs, rhs, TAG, ...]`. `TRUE` pushes only `Tag::TRUE`. These felts are an unbound host
+    /// hint, so proof-relevant code must bind
     /// them to circuit-visible data before relying on them.
     ///
     /// Inputs:
@@ -360,10 +359,10 @@ pub enum SystemEvent {
     ///
     /// This is the payload-only compatibility event. Data payloads push two words per 8-felt chunk
     /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
-    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join and unary
-    /// payloads use the same two-word LIFO convention; join leaves `[lhs, rhs, ...]`, and unary
-    /// leaves `[child_digest, params, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These
-    /// felts are an unbound host hint, so proof-relevant code must bind them to circuit-visible
+    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join payloads use
+    /// the same two-word LIFO convention, leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE`
+    /// pushes no advice. These felts are an unbound host hint, so proof-relevant code must bind
+    /// them to circuit-visible
     /// data before relying on them.
     ///
     /// Inputs:
@@ -382,10 +381,9 @@ pub enum SystemEvent {
     /// [`crate::deferred::DataChunk`] values from memory starting at `ptr`; exact
     /// [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) registers those chunks as framework-owned
     /// opaque data, while other data tags remain precompile-owned. Malformed id-2 tags are rejected
-    /// during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs. Join and unary
-    /// tags require `n_chunks == 1` and interpret the single chunk as `lhs || rhs` or
-    /// `child_digest || params`, with unary `params` remaining literal payload data. `TRUE` is not
-    /// accepted. The handler performs a cheap budget pre-check before allocating or reading memory,
+    /// during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs. Join tags require
+    /// `n_chunks == 1` and interpret the single chunk as `lhs || rhs`. `TRUE` is not accepted. The
+    /// handler performs a cheap budget pre-check before allocating or reading memory,
     /// then delegates registration to [`crate::deferred::DeferredState::register`].
     ///
     /// This event does not push advice and does not return the node digest. Assembly code that

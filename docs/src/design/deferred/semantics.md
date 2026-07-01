@@ -44,7 +44,7 @@ pub struct DeferredState {
 - Structural nodes may reference only children already present in `nodes`, except for the implicit
   `TRUE_DIGEST`:
   - `Join` has two child digests.
-  - `Unary` has one child digest plus literal `params`; those `params` are not a child edge.
+  - `PairList` has one or more pairs of child digests.
 - Re-registering identical content is idempotent and free.
 - Reusing an existing digest for different content is rejected as a conflicting node.
 
@@ -76,8 +76,6 @@ The precompile's `decode` result is the framework shape gate:
   reads exactly the stack-supplied `n_chunks`; precompile evaluation checks any tag-derived semantic
   data length.
 - `NodeType::Join` authorizes exactly one 8-felt payload block, interpreted as two child digests.
-- `NodeType::Unary` authorizes exactly one 8-felt payload block, interpreted as
-  `child_digest || params`.
 - `NodeType::PairList` authorizes a non-empty list of `lhs_digest || rhs_digest` chunks. Precompile
   evaluation checks any tag-derived semantic pair count.
 
@@ -114,8 +112,6 @@ owning `Precompile` with a `DeferredContext`.
 - `get_node(digest)` queries the registered/original node by digest without evaluating it.
 - `evaluate_digest(digest)` evaluates a registered child digest to its canonical digest.
 - `evaluate_digest_pair(lhs, rhs)` evaluates two registered child digests to canonical digests.
-- Unary precompiles typically call `Payload::as_unary()` and evaluate only the returned child digest;
-  the returned `params` word is payload data, distinct from `Tag::args()`.
 - `ensure_equal(lhs, rhs)` evaluates two children and requires their canonical digests to match.
 - `register(node)` inserts a freshly minted helper node and returns its original digest.
 
@@ -132,7 +128,7 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 
 - data entries carry literal data chunks;
 - join entries emit two child indices;
-- unary entries emit one child index and carry `params` literally.
+- pair-list entries emit pairs of child indices.
 
 The wire root is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the
 final entry. `from_wire(registry, wire, max_elements)` decodes untrusted wire, rejects non-canonical

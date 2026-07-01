@@ -26,7 +26,7 @@ use super::{
     PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
-    Felt, Word, ZERO,
+    Felt, ZERO,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -45,8 +45,8 @@ pub const TRUE_INDEX: u32 = 0;
 /// One explicit deferred DAG entry in topological wire order.
 ///
 /// Wire index 0 is implicit TRUE. `entries[i]` has wire index `i + 1`. Structural children must
-/// reference `TRUE_INDEX` or an earlier entry. Unary `params` are literal payload data, not child
-/// indices. Pair-list pairs store structural child references in payload order.
+/// reference `TRUE_INDEX` or an earlier entry. Pair-list pairs store structural child references in
+/// payload order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WireEntry {
@@ -54,8 +54,6 @@ pub enum WireEntry {
     Data { tag: Tag, chunks: Vec<DataChunk> },
     /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
     Join { tag: Tag, lhs: u32, rhs: u32 },
-    /// One child reference plus one literal parameter word.
-    Unary { tag: Tag, child: u32, params: Word },
     /// One or more structural child-reference pairs.
     PairList { tag: Tag, pairs: Vec<(u32, u32)> },
 }
@@ -194,9 +192,6 @@ impl<'a> WireDecoder<'a> {
             let node = match entry {
                 WireEntry::Data { tag, chunks } => self.decode_data_entry(*tag, chunks)?,
                 WireEntry::Join { tag, lhs, rhs } => self.decode_join_entry(*tag, *lhs, *rhs)?,
-                WireEntry::Unary { tag, child, params } => {
-                    self.decode_unary_entry(*tag, *child, *params)?
-                },
                 WireEntry::PairList { tag, pairs } => self.decode_pair_list_entry(*tag, pairs)?,
             };
             self.push_entry(node)?;
@@ -240,28 +235,7 @@ impl<'a> WireDecoder<'a> {
         node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
         match node_type {
             NodeType::Join => Ok(node),
-            NodeType::True | NodeType::Data | NodeType::Unary | NodeType::PairList => {
-                Err(IntegrityError::InvalidStructure)
-            },
-        }
-    }
-
-    fn decode_unary_entry(
-        &self,
-        tag: Tag,
-        child: u32,
-        params: Word,
-    ) -> Result<Node, IntegrityError> {
-        let child = self.resolve_index(child)?;
-        let node = Node::unary(tag, child, params).map_err(|_| IntegrityError::InvalidStructure)?;
-        let node_type = self
-            .precompiles
-            .decode_node_type(node.tag())
-            .map_err(|_| IntegrityError::InvalidStructure)?;
-        node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
-        match node_type {
-            NodeType::Unary => Ok(node),
-            NodeType::True | NodeType::Data | NodeType::Join | NodeType::PairList => {
+            NodeType::True | NodeType::Data | NodeType::PairList => {
                 Err(IntegrityError::InvalidStructure)
             },
         }
@@ -366,13 +340,6 @@ impl WireEncoder {
                 let rhs = self.index_for(rhs)?;
                 WireEntry::Join { tag: node.tag(), lhs, rhs }
             },
-            NodeType::Unary => {
-                let (child, params) =
-                    node.payload().as_unary().map_err(|_| IntegrityError::InvalidStructure)?;
-                self.visit_state_digest(state, child)?;
-                let child = self.index_for(child)?;
-                WireEntry::Unary { tag: node.tag(), child, params }
-            },
             NodeType::PairList => {
                 let pairs =
                     node.payload().as_pair_list().map_err(|_| IntegrityError::InvalidStructure)?;
@@ -431,14 +398,8 @@ impl Serializable for WireEntry {
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
             },
-            Self::Unary { tag, child, params } => {
-                target.write_u8(2);
-                tag.write_into(target);
-                target.write_u32(*child);
-                params.write_into(target);
-            },
             Self::PairList { tag, pairs } => {
-                target.write_u8(3);
+                target.write_u8(2);
                 tag.write_into(target);
                 target.write_usize(pairs.len());
                 for (lhs, rhs) in pairs {
@@ -470,12 +431,6 @@ impl Deserializable for WireEntry {
                 Ok(Self::Join { tag, lhs, rhs })
             },
             2 => {
-                let tag = Tag::read_from(source)?;
-                let child = source.read_u32()?;
-                let params = Word::read_from(source)?;
-                Ok(Self::Unary { tag, child, params })
-            },
-            3 => {
                 let tag = Tag::read_from(source)?;
                 let pair_count = source.read_usize()?;
                 let pairs = source
@@ -551,7 +506,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        Felt, Word,
+        Felt,
         serde::{ByteWriter, Serializable},
     };
 
@@ -561,10 +516,6 @@ mod tests {
 
     fn tag(seed: u64) -> Tag {
         Tag::from_word(felts(seed)[..4].try_into().unwrap())
-    }
-
-    fn word(seed: u64) -> Word {
-        Word::new(felts(seed)[..4].try_into().unwrap())
     }
 
     fn wire(entries: Vec<WireEntry>) -> DeferredStateWire {
@@ -617,10 +568,9 @@ mod tests {
                 chunks: alloc::vec![felts(20), felts(30)],
             },
             WireEntry::Join { tag: tag(3), lhs: 1, rhs: TRUE_INDEX },
-            WireEntry::Unary { tag: tag(4), child: 2, params: word(40) },
             WireEntry::PairList {
                 tag: tag(5),
-                pairs: alloc::vec![(1, 2), (TRUE_INDEX, 4)],
+                pairs: alloc::vec![(1, 2), (TRUE_INDEX, 3)],
             },
         ]));
         assert_wire_round_trips(DeferredStateWire::default());
@@ -652,7 +602,7 @@ mod tests {
     fn wire_rejects_over_budget_pair_count() {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
-        bytes.write_u8(3); // PairList entry discriminant
+        bytes.write_u8(2); // PairList entry discriminant
         tag(1).write_into(&mut bytes);
         bytes.write_usize(usize::MAX);
 

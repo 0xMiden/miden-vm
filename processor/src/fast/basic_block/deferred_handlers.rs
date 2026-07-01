@@ -17,10 +17,9 @@ use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
 // ================================================================================================
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
 // 12 felts directly into one `hperm` to compute the node's digest. `TAG` is one word (4 felts).
-// The eight payload felts are one 8-felt data chunk, `lhs || rhs` child digests for a join, one
-// `lhs || rhs` pair for a pair-list node, or `child_digest || params` for a unary node. Exact
-// `Tag::CHUNKS` (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed id-2 tags are rejected.
-// Unary `params` are literal payload data, not tag args.
+// The eight payload felts are one 8-felt data chunk, `lhs || rhs` child digests for a join, or
+// one `lhs || rhs` pair for a pair-list node. Exact `Tag::CHUNKS` (`[2, 0, 0, 0]`) is
+// framework-owned opaque data; malformed id-2 tags are rejected.
 
 /// Stack offset of the payload's low half below the event id.
 const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
@@ -46,7 +45,7 @@ const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 // `[event_id, TAG, ptr, n_chunks, ...]` — no stack-resident payload. `TAG` is one word
 // (4 felts), and `n_chunks` is the number of 8-felt payload chunks to read from memory at `ptr`.
 // Data and pair-list nodes use that explicit chunk count; exact `Tag::CHUNKS` (`[2, 0, 0, 0]`)
-// is framework-owned opaque data. Join and unary nodes require `n_chunks == 1`.
+// is framework-owned opaque data. Join nodes require `n_chunks == 1`.
 
 /// Stack offset of the data tag word.
 const DATA_TAG_OFFSET: usize = 1;
@@ -71,11 +70,10 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
 /// Stack-resident registration of an operand-stack deferred node.
 ///
 /// The tag decodes to one [`DataChunk`] (8 field elements), a join payload containing two 4-felt
-/// child digests, a one-pair pair-list payload containing `lhs || rhs`, or a unary payload
-/// containing `child_digest || params`. Exact [`Tag::CHUNKS`] (`[2, 0, 0, 0]`) forms a
-/// framework-owned opaque data node; other id-2 tags are malformed and reject during tag decode.
-/// For unary nodes, `params` is a literal payload word and is separate from [`Tag::args`]. TRUE is
-/// not accepted. Tags that semantically require more than one data chunk or pair still form a
+/// child digests, or a one-pair pair-list payload containing `lhs || rhs`. Exact [`Tag::CHUNKS`]
+/// (`[2, 0, 0, 0]`) forms a framework-owned opaque data node; other id-2 tags are malformed and
+/// reject during tag decode. TRUE is not accepted. Tags that semantically require more than one
+/// data chunk or pair still form a
 /// one-chunk/one-pair node here; precompile-specific evaluation rejects the semantic length
 /// mismatch. Registration is delegated to [`miden_core::deferred::DeferredState::register`], so
 /// semantic failures, including false predicates, surface immediately. This event does not return
@@ -99,11 +97,6 @@ pub(super) fn handle_deferred_register(
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
             let rhs = Digest::new([block[4], block[5], block[6], block[7]]);
             Node::join(tag, lhs, rhs).map_err(PrecompileError::from)?
-        },
-        NodeType::Unary => {
-            let child = Digest::new([block[0], block[1], block[2], block[3]]);
-            let params = Word::new([block[4], block[5], block[6], block[7]]);
-            Node::unary(tag, child, params).map_err(PrecompileError::from)?
         },
         NodeType::PairList => {
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
@@ -147,9 +140,9 @@ pub(super) fn handle_deferred_evaluate_tag(
 /// two advice words per 8-felt chunk. Because both the advice stack and operand stack
 /// are LIFO, each chunk is placed on advice as HIGH then LOW (and chunks are processed in reverse
 /// before front-pushing) so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack
-/// for that chunk. Join and unary payloads use the same convention for their two words: join leaves
-/// `[lhs, rhs, ...]`, and unary leaves `[child_digest, params, ...]` after two `adv_pushw`s. TRUE
-/// emits no advice. These advice values are intentionally unbound: proof-relevant callers must bind
+/// for that chunk. Join payloads use the same convention for their two words, leaving
+/// `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice. These advice values are
+/// intentionally unbound: proof-relevant callers must bind
 /// them to circuit-visible data before relying on them.
 pub(super) fn handle_deferred_evaluate_payload(
     processor: &mut FastProcessor,
@@ -199,10 +192,9 @@ fn push_evaluated_payload(
 /// `n_chunks` value is the source of truth for the memory range. Data nodes read exactly
 /// `n_chunks` [`DataChunk`] values (8 field elements each); exact [`Tag::CHUNKS`]
 /// (`[2, 0, 0, 0]`) registers those chunks as framework-owned opaque data, while other data tags
-/// remain precompile-owned. Pair-list nodes interpret chunks as `lhs || rhs` pairs. Join and unary
-/// nodes require `n_chunks == 1` and interpret the one chunk as `lhs || rhs` or
-/// `child_digest || params` respectively, where unary `params` is literal payload data rather than
-/// [`Tag::args`]. TRUE is not accepted. After checking word alignment, address bounds, and a cheap
+/// remain precompile-owned. Pair-list nodes interpret chunks as `lhs || rhs` pairs. Join nodes
+/// require `n_chunks == 1` and interpret the one chunk as `lhs || rhs`. TRUE is not accepted. After
+/// checking word alignment, address bounds, and a cheap
 /// state-size precheck, registration and semantic evaluation are delegated to
 /// [`miden_core::deferred::DeferredState::register`], so registration failures surface during this
 /// event. This event does not return the node digest; any proof-relevant caller must compute that
@@ -224,8 +216,8 @@ pub(super) fn handle_deferred_register_data(
     let node_type = processor.deferred_state().decode(tag)?;
     match node_type {
         NodeType::Data | NodeType::PairList => {},
-        NodeType::Join | NodeType::Unary if n == 1 => {},
-        NodeType::Join | NodeType::Unary | NodeType::True => {
+        NodeType::Join if n == 1 => {},
+        NodeType::Join | NodeType::True => {
             return Err(PrecompileError::InvalidNode.into());
         },
     }
@@ -282,12 +274,6 @@ pub(super) fn handle_deferred_register_data(
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
             let rhs = Digest::new([block[4], block[5], block[6], block[7]]);
             Node::join(tag, lhs, rhs).map_err(PrecompileError::from)?
-        },
-        NodeType::Unary => {
-            let block = chunks.into_iter().next().ok_or(PrecompileError::InvalidNode)?;
-            let child = Digest::new([block[0], block[1], block[2], block[3]]);
-            let params = Word::new([block[4], block[5], block[6], block[7]]);
-            Node::unary(tag, child, params).map_err(PrecompileError::from)?
         },
         NodeType::PairList => {
             Node::try_pair_list_chunks(tag, chunks).map_err(PrecompileError::from)?

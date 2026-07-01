@@ -50,7 +50,6 @@ pub trait Precompile: Send + Sync {
     /// Common conventions:
     /// - canonical values return themselves after validating payload contents;
     /// - producing ops evaluate structural children and return the resulting canonical node;
-    /// - unary payload `params` are literal node data, not child digests or tag arguments;
     /// - predicates return [`Node::TRUE`] on success and [`PrecompileError::AssertionFailed`] on
     ///   mismatch;
     /// - multi-chunk data nodes usually evaluate to a single-chunk value.

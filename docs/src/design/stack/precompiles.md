@@ -14,7 +14,7 @@ the `miden::precompiles` namespace.
 | Concept | Description |
 | ------- | ----------- |
 | `Tag` | A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`, semantic `AND`, and opaque framework `CHUNKS`; precompile ids are derived from precompile names and interpret the remaining three `args` felts locally. |
-| `Node` | A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data chunks, join child digests, unary `child_digest || params`, pair lists of `lhs_digest || rhs_digest` chunks, or the framework `TRUE` sentinel. |
+| `Node` | A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework `TRUE` sentinel. |
 | `Precompile` | A host implementation that owns one precompile id, decodes the structural shape for its tags, evaluates nodes to canonical form, and optionally contributes canonical constants through `init()`. |
 | `PrecompileRegistry` | The verifier/host dispatcher for trusted precompile implementations. Verification must use the registry that corresponds to the proof-bound precompile set being accepted. |
 | `DeferredState` | The host-side DAG witness accumulated during execution. It tracks registered nodes, evaluates them under the registry, and maintains the rolling deferred root. |
@@ -65,8 +65,6 @@ the `miden::precompiles` namespace.
   - `NodeType::Data` accepts one or more opaque 8-felt chunks. For memory-backed registration,
     the stack-supplied `n_chunks` determines how many chunks are read.
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
-  - `NodeType::Unary` reads `child_digest || params`; `params` is literal payload data, not a child
-    edge.
   - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
     encode a pair count in tag arguments must check the actual payload length during evaluation.
 - `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` where

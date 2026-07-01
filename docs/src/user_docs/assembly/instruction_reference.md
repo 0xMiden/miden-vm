@@ -221,19 +221,16 @@ Deferred DAG details:
   - Data tags interpret those eight felts as a one-chunk data payload.
   - Join tags interpret them as `lhs_digest || rhs_digest`.
   - Pair-list tags interpret them as one `lhs_digest || rhs_digest` pair.
-  - Unary tags interpret them as `child_digest || params`; `params` is literal payload data, not a
-    child digest.
 
   `TRUE` is not accepted by this instruction. Tags that semantically require more data chunks or
   pairs fail during precompile evaluation. Code that later uses the node digest must compute it
   in-circuit from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
-- `adv.register_deferred_data` accepts data, pair-list, join, and unary tags. Its stack input includes
-  an explicit `n_chunks` count, and the host reads the same memory range that in-circuit digest code
-  must hash.
+- `adv.register_deferred_data` accepts data, pair-list, and join tags. Its stack input includes an
+  explicit `n_chunks` count, and the host reads the same memory range that in-circuit digest code must
+  hash.
   - Data tags read exactly `n_chunks` 8-felt chunks from word-aligned `ptr`.
   - Pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs.
   - Join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
-  - Unary tags require `n_chunks == 1` and interpret the chunk as `child_digest || params`.
 
   `TRUE` is not accepted. Code that later uses the node digest must compute it in-circuit from the
   same `TAG`, `ptr`, and `n_chunks` using the digest rule for the decoded payload shape.
@@ -249,8 +246,6 @@ Deferred DAG details:
     chunk order.
   - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
     after two `adv_pushw`s.
-  - Unary payloads use the same convention, leaving `child_digest` above `params` after two
-    `adv_pushw`s.
   - `TRUE` emits no advice.
 - Deferred-evaluation advice values are host-provided hints, so proof-relevant code must bind them
   to circuit-visible data before relying on them.

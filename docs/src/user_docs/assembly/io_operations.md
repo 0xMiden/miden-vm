@@ -85,13 +85,11 @@ Registration interprets payloads by the decoded tag shape:
 - `adv.register_deferred` reads one stack-resident payload block from `PAYLOAD_LO || PAYLOAD_HI`:
   - data tags interpret it as one data chunk;
   - join tags interpret it as `lhs_digest || rhs_digest`;
-  - pair-list tags interpret it as one `lhs_digest || rhs_digest` pair;
-  - unary tags interpret it as `child_digest || params`, where `params` is literal payload data.
+  - pair-list tags interpret it as one `lhs_digest || rhs_digest` pair.
 - `adv.register_deferred_data` reads exactly `n_chunks` blocks from word-aligned `ptr`:
   - data tags interpret them as opaque data chunks;
   - pair-list tags interpret them as `lhs_digest || rhs_digest` pairs;
-  - join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`;
-  - unary tags require `n_chunks == 1` and interpret the chunk as `child_digest || params`.
+  - join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
 
 Neither register instruction returns the node digest, so proof-relevant code that later uses it must
 compute the digest in-circuit from the same tag and payload or from the same `ptr`/`n_chunks` memory
@@ -107,7 +105,6 @@ Evaluation advice is also shape-dependent:
   - data chunks use advice pop order `HIGH` then `LOW`, so `adv_pushw adv_pushw` leaves `LOW` above
     `HIGH` on the operand stack;
   - join payloads leave `lhs_digest` above `rhs_digest` after two `adv_pushw`s;
-  - unary payloads leave `child_digest` above `params` after two `adv_pushw`s;
   - `TRUE` emits no payload advice.
 - `TRUE` emits `Tag::TRUE` for tag-only/full evaluation.
 

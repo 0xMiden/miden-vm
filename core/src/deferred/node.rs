@@ -124,13 +124,11 @@ impl Deserializable for Tag {
 
 /// In-memory body of a deferred node.
 ///
-/// Payloads have five representations:
+/// Payloads have four representations:
 ///
 /// - TRUE: the framework sentinel, carrying no data.
 /// - Data: one or more opaque [`DataChunk`]s.
 /// - Join: one [`DataChunk`] containing two child digests (`lhs || rhs`).
-/// - Unary: one [`DataChunk`] containing one child digest followed by one parameter word (`child ||
-///   params`).
 /// - PairList: one or more structural digest pairs, each chunked as `lhs || rhs`.
 ///
 /// The representation is private: external precompiles can inspect payloads through accessors, but
@@ -146,8 +144,6 @@ enum PayloadRepr {
     Data(Arc<[DataChunk]>),
     /// Two child digests encoded as `lhs || rhs`.
     Join(DataChunk),
-    /// One child digest and one literal parameter word encoded as `child || params`.
-    Unary(DataChunk),
     /// Non-empty structural digest pairs, stored as chunks `lhs || rhs`.
     PairList(Arc<[DataChunk]>),
 }
@@ -174,14 +170,6 @@ impl Payload {
         let [l0, l1, l2, l3] = lhs.into_elements();
         let [r0, r1, r2, r3] = rhs.into_elements();
         Self(PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]))
-    }
-
-    /// Creates a unary payload that references one child digest and carries one literal parameter
-    /// word.
-    fn unary(child: Digest, params: Word) -> Self {
-        let [c0, c1, c2, c3] = child.into_elements();
-        let [p0, p1, p2, p3] = params.into_elements();
-        Self(PayloadRepr::Unary([c0, c1, c2, c3, p0, p1, p2, p3]))
     }
 
     /// Creates a pair-list payload from a non-empty collection of structural digest pairs.
@@ -222,34 +210,32 @@ impl Payload {
     /// - TRUE returns no blocks.
     /// - Data returns its stored chunks.
     /// - Join returns one block containing `lhs || rhs`.
-    /// - Unary returns one block containing `child || params`.
     /// - PairList returns one block per pair, each containing `lhs || rhs`.
     pub fn as_chunks(&self) -> &[DataChunk] {
         match &self.0 {
             PayloadRepr::True => &[],
             PayloadRepr::Data(chunks) | PayloadRepr::PairList(chunks) => chunks,
-            PayloadRepr::Join(chunk) | PayloadRepr::Unary(chunk) => core::slice::from_ref(chunk),
+            PayloadRepr::Join(chunk) => core::slice::from_ref(chunk),
         }
     }
 
     /// Returns this payload's data chunks.
     ///
     /// - Data returns its stored chunks.
-    /// - TRUE, Join, and Unary return [`DeferredError::InvalidPayload`].
+    /// - TRUE, Join, and PairList return [`DeferredError::InvalidPayload`].
     pub fn as_data(&self) -> Result<&[DataChunk], DeferredError> {
         match &self.0 {
             PayloadRepr::Data(chunks) => Ok(chunks),
-            PayloadRepr::True
-            | PayloadRepr::Join(_)
-            | PayloadRepr::Unary(_)
-            | PayloadRepr::PairList(_) => Err(DeferredError::InvalidPayload),
+            PayloadRepr::True | PayloadRepr::Join(_) | PayloadRepr::PairList(_) => {
+                Err(DeferredError::InvalidPayload)
+            },
         }
     }
 
     /// Returns the single data chunk for value-like payloads.
     ///
     /// - One-chunk Data returns that chunk.
-    /// - Multi-chunk Data, TRUE, Join, and Unary return [`DeferredError::InvalidPayload`].
+    /// - Multi-chunk Data, TRUE, Join, and PairList return [`DeferredError::InvalidPayload`].
     pub fn as_value(&self) -> Result<&DataChunk, DeferredError> {
         match self.as_data()? {
             [chunk] => Ok(chunk),
@@ -260,52 +246,31 @@ impl Payload {
     /// Returns the child digests for join payloads.
     ///
     /// - Join returns `(lhs, rhs)`.
-    /// - TRUE, Data, and Unary return [`DeferredError::InvalidPayload`].
+    /// - TRUE, Data, and PairList return [`DeferredError::InvalidPayload`].
     pub fn as_join(&self) -> Result<(Digest, Digest), DeferredError> {
         match &self.0 {
             PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]) => {
                 Ok((Digest::new([*l0, *l1, *l2, *l3]), Digest::new([*r0, *r1, *r2, *r3])))
             },
-            PayloadRepr::True
-            | PayloadRepr::Data(_)
-            | PayloadRepr::Unary(_)
-            | PayloadRepr::PairList(_) => Err(DeferredError::InvalidPayload),
-        }
-    }
-
-    /// Returns the structural child digest and literal parameter word for unary payloads.
-    ///
-    /// - Unary returns `(child, params)`.
-    /// - TRUE, Data, and Join return [`DeferredError::InvalidPayload`].
-    ///
-    /// The canonical layout is `child || params`. Only `child` is a graph edge; `params` is payload
-    /// data and must not be interpreted as a digest reference.
-    pub fn as_unary(&self) -> Result<(Digest, Word), DeferredError> {
-        match &self.0 {
-            PayloadRepr::Unary([c0, c1, c2, c3, p0, p1, p2, p3]) => {
-                Ok((Digest::new([*c0, *c1, *c2, *c3]), Word::new([*p0, *p1, *p2, *p3])))
+            PayloadRepr::True | PayloadRepr::Data(_) | PayloadRepr::PairList(_) => {
+                Err(DeferredError::InvalidPayload)
             },
-            PayloadRepr::True
-            | PayloadRepr::Data(_)
-            | PayloadRepr::Join(_)
-            | PayloadRepr::PairList(_) => Err(DeferredError::InvalidPayload),
         }
     }
 
     fn pair_list_chunks(&self) -> Result<&[DataChunk], DeferredError> {
         match &self.0 {
             PayloadRepr::PairList(chunks) => Ok(chunks),
-            PayloadRepr::True
-            | PayloadRepr::Data(_)
-            | PayloadRepr::Join(_)
-            | PayloadRepr::Unary(_) => Err(DeferredError::InvalidPayload),
+            PayloadRepr::True | PayloadRepr::Data(_) | PayloadRepr::Join(_) => {
+                Err(DeferredError::InvalidPayload)
+            },
         }
     }
 
     /// Returns the structural digest pairs for pair-list payloads.
     ///
     /// - PairList decodes and returns its pairs in payload order.
-    /// - TRUE, Data, Join, and Unary return [`DeferredError::InvalidPayload`].
+    /// - TRUE, Data, and Join return [`DeferredError::InvalidPayload`].
     pub fn as_pair_list(&self) -> Result<Vec<(Digest, Digest)>, DeferredError> {
         Ok(self
             .pair_list_chunks()?
@@ -318,15 +283,11 @@ impl Payload {
     ///
     /// - TRUE and Data return no children.
     /// - Join returns `lhs`, then `rhs`.
-    /// - Unary returns only `child`; `params` is literal payload data and is intentionally omitted.
     /// - PairList returns `lhs0`, `rhs0`, `lhs1`, `rhs1`, ...
     fn children(&self) -> Vec<Digest> {
         match &self.0 {
             PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]) => {
                 alloc::vec![Digest::new([*l0, *l1, *l2, *l3]), Digest::new([*r0, *r1, *r2, *r3]),]
-            },
-            PayloadRepr::Unary([c0, c1, c2, c3, _p0, _p1, _p2, _p3]) => {
-                alloc::vec![Digest::new([*c0, *c1, *c2, *c3])]
             },
             PayloadRepr::PairList(chunks) => chunks
                 .iter()
@@ -394,19 +355,6 @@ impl Node {
         Ok(Self { tag, payload: Payload::join(lhs, rhs) })
     }
 
-    /// Creates a unary-shaped node that references one child digest and carries one parameter word.
-    ///
-    /// The payload is canonically encoded as `child || params` and is hashed as a single 8-felt
-    /// block under `tag`, just like one-block data and join payloads. The `params` word is literal
-    /// payload data, separate from [`Tag::args`], and is not a graph edge.
-    pub fn unary(tag: Tag, child: Digest, params: Word) -> Result<Self, DeferredError> {
-        let tag = Self::require_precompile_tag(tag)?;
-        Ok(Self {
-            tag,
-            payload: Payload::unary(child, params),
-        })
-    }
-
     /// Creates a pair-list-shaped node that references one or more structural digest pairs.
     pub fn try_pair_list(
         tag: Tag,
@@ -462,7 +410,6 @@ impl Node {
     ///
     /// - data and TRUE nodes have no children;
     /// - join nodes yield `lhs`, then `rhs`;
-    /// - unary nodes yield only `child`; `params` is literal payload data and is omitted;
     /// - pair-list nodes yield `lhs0`, `rhs0`, `lhs1`, `rhs1`, ...
     pub(crate) fn children(&self) -> impl Iterator<Item = Digest> + '_ {
         self.payload.children().into_iter()
@@ -536,8 +483,8 @@ impl Node {
 /// Framework shape a precompile declares for a recognized tag.
 ///
 /// The shape tells registration and wire validation whether a body is non-empty opaque data, two
-/// child digests, one child digest plus literal parameters, or a non-empty list of digest pairs. It
-/// intentionally does not carry data/pair-list arity: semantic lengths such as hash preimage byte
+/// child digests, or a non-empty list of digest pairs. It intentionally does not carry
+/// data/pair-list arity: semantic lengths such as hash preimage byte
 /// length or MSM pair count belong to precompile-specific tag arguments and are checked during
 /// precompile evaluation. `True` is the framework sentinel owned exclusively by [`Tag::TRUE`];
 /// precompiles never declare it. Predicate status is not a shape; predicates succeed by evaluating
@@ -550,8 +497,6 @@ pub enum NodeType {
     Data,
     /// Two child digests.
     Join,
-    /// One child digest and one literal parameter word.
-    Unary,
     /// Non-empty structural digest pairs.
     PairList,
 }
@@ -578,7 +523,6 @@ impl NodeType {
             Self::True if node.is_true() => Ok(()),
             Self::Data if node.payload.as_data().is_ok() => Ok(()),
             Self::Join if node.payload.as_join().is_ok() => Ok(()),
-            Self::Unary if node.payload.as_unary().is_ok() => Ok(()),
             Self::PairList if node.payload.pair_list_chunks().is_ok() => Ok(()),
             _ => Err(DeferredError::InvalidPayload),
         }
@@ -625,10 +569,6 @@ mod tests {
         assert_eq!(Node::try_data(Tag::AND, alloc::vec![chunk]), Err(DeferredError::InvalidTag));
         assert_eq!(Node::try_data(Tag::CHUNKS, alloc::vec![chunk]), Err(DeferredError::InvalidTag));
         assert_eq!(Node::join(Tag::AND, TRUE_DIGEST, TRUE_DIGEST), Err(DeferredError::InvalidTag));
-        assert_eq!(
-            Node::unary(Tag::AND, TRUE_DIGEST, Word::new([ZERO; 4])),
-            Err(DeferredError::InvalidTag)
-        );
         assert_eq!(
             Node::try_pair_list(Tag::AND, alloc::vec![(TRUE_DIGEST, TRUE_DIGEST)]),
             Err(DeferredError::InvalidTag)
@@ -754,32 +694,6 @@ mod tests {
     }
 
     #[test]
-    fn unary_round_trips_child_params_and_serializes() {
-        let child = Node::value(TAG_A, block(1)).unwrap().digest();
-        let params = Word::new([Felt::new_unchecked(9), Felt::new_unchecked(10), ZERO, ONE]);
-        let unary = Node::unary(TAG_B, child, params).unwrap();
-
-        assert_eq!(unary.payload().as_unary().unwrap(), (child, params));
-        assert!(unary.payload().as_join().is_err(), "unary payloads must not parse as joins");
-        assert!(unary.payload().as_data().is_err());
-
-        let mut payload = [ZERO; Node::DATA_CHUNK_FELT_LEN];
-        payload[..Word::NUM_ELEMENTS].copy_from_slice(child.as_elements());
-        payload[Word::NUM_ELEMENTS..].copy_from_slice(params.as_elements());
-
-        // External representation is `tag || child || params`.
-        assert_eq!(unary.felt_len(), Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN);
-        let mut expected = TAG_B.as_word().to_vec();
-        expected.extend_from_slice(&payload);
-        assert_eq!(unary.to_felts(), expected);
-        assert_eq!(unary.payload().as_chunks(), &[payload][..]);
-
-        assert_eq!(unary.children().collect::<Vec<_>>(), alloc::vec![child]);
-        assert!(NodeType::Unary.validate_node(&unary).is_ok());
-        assert!(NodeType::Join.validate_node(&unary).is_err());
-    }
-
-    #[test]
     fn pair_list_is_non_empty() {
         assert!(Payload::try_pair_list(Vec::<(Digest, Digest)>::new()).is_err());
         assert!(Node::try_pair_list(TAG_A, Vec::<(Digest, Digest)>::new()).is_err());
@@ -802,7 +716,6 @@ mod tests {
         assert_eq!(node.payload().as_pair_list().unwrap(), pairs);
         assert!(node.payload().as_data().is_err());
         assert!(node.payload().as_join().is_err());
-        assert!(node.payload().as_unary().is_err());
         assert_eq!(
             node.children().collect::<Vec<_>>(),
             alloc::vec![scalar_0, point_0, scalar_1, point_1]

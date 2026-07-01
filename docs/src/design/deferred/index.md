@@ -65,13 +65,12 @@ content yields an identical digest, so equal subterms are shared automatically (
     digest, message, hash preimage, coordinate, or some other local value;
   - a join payload: two child digests (`lhs`, `rhs`) for anything referential, such as a binary
     operation, predicate, or AND step;
-  - a unary payload: one child digest plus one 4-felt parameter word, canonically encoded as
-    `child_digest || params`. Only `child_digest` is a graph edge; `params` is literal payload data,
-    distinct from the tag's immediate `args`, and is not interpreted as a digest reference.
+  - a pair-list payload: one or more `lhs || rhs` digest pairs for precompile-specific multi-pair
+    structures.
 
 The digest binds the tag in the Poseidon2 capacity, so a node's address commits to *both* its
-identity and its body. A unary payload is still one 8-felt block, so it is absorbed under the tag in
-the same digest path as one-block data and join payloads.
+identity and its body. Every non-empty payload is absorbed as one or more 8-felt blocks under the
+node tag.
 
 ## Precompiles
 
@@ -89,8 +88,6 @@ A precompile supplies three things:
   semantic and is checked during precompile evaluation:
   - `NodeType::Data` declares a non-empty opaque data payload.
   - `NodeType::Join` declares one payload block containing two child digests.
-  - `NodeType::Unary` declares one payload block containing `child_digest || params`; the `params`
-    word is part of the node payload, not part of `Tag::args()`.
   - `NodeType::PairList` declares a non-empty list of structural `lhs || rhs` digest pairs.
   - `NodeType::True` is reserved for the framework TRUE sentinel; a precompile must not return it.
 - `evaluate(args, payload, …) -> Result<Node>` — computes a node's **canonical form**. The
@@ -98,7 +95,7 @@ A precompile supplies three things:
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
   (evaluate operands, return the `TRUE` node on success or fail otherwise). These roles are
   conventions, not a fixed taxonomy — a precompile is free to define unary operations, multi-ary
-  constructors, and so on over data, unary, and join payloads.
+  constructors, and so on over data, join, and pair-list payloads.
 - `init() -> Vec<Node>` — contributes any canonical constant values (e.g. `ZERO`, `ONE`, a curve
   generator) at registry-initialization time.
 
@@ -132,14 +129,13 @@ a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, one `lhs_digest || rhs_digest` pair for a pair-list node, or `child_digest || params` for a unary node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`; unary `params` is not a child edge. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
-| `register_deferred_data`   | `[TAG, ptr, n_chunks, …]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. Data tags read exactly `n_chunks` 8-felt chunks from word-aligned memory at `ptr`; pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs; join and unary tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest` or `child_digest || params`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit from the same `TAG` and memory range using the digest rule for the decoded payload shape. |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, n_chunks, …]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. Data tags read exactly `n_chunks` 8-felt chunks from word-aligned memory at `ptr`; pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs; join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit from the same `TAG` and memory range using the digest rule for the decoded payload shape. |
 | `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
 | `evaluate_deferred_tag`    | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
-| `evaluate_deferred_payload` | `[NODE_DIGEST, …]`              | Payload-only compatibility event. Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join and unary payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` for joins and `child_digest` above `params` for unary payloads after two `adv_pushw`s. `TRUE` emits no advice. |
+| `evaluate_deferred_payload` | `[NODE_DIGEST, …]`              | Payload-only compatibility event. Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
-`register_*` validate the tag's shape and child closure for structural payloads. For unary nodes,
-only `child_digest` participates in child closure; `params` is literal payload data. They store the
+`register_*` validate the tag's shape and child closure for structural payloads. They store the
 original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
 fails.
 
@@ -205,7 +201,7 @@ lowers state to a passive, canonical, topologically ordered entry stream:
 - `entries[i]` has wire index `i + 1`;
 - data entries carry literal data chunks;
 - join entries encode both children by index;
-- unary entries encode only `child_digest` by index and carry `params` as a literal word;
+- pair-list entries encode each pair's children by index;
 - structural child indices may reference only `0` or earlier entries;
 - empty `entries` opens `TRUE_DIGEST`; a non-empty wire opens the digest of the last entry.
 
@@ -220,8 +216,7 @@ evaluation. This validates the wire's own implicit root; proof verification comp
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
    entry (translating structural child indices back to digests), decode its tag, check that the entry
    variant and payload shape match the declared `NodeType`, reject explicit `TRUE`, reject duplicate
-   digests, and require structural children to reference only earlier entries; unary `params` are
-   copied as payload data and are not resolved through the index table;
+   digests, and require structural children to reference only earlier entries;
 2. **canonicality** — register decoded entries into a fresh state, set the implicit wire root as
    `state.root`, and require `state.to_wire() == wire`; this rejects dangling nodes,
    non-root-last encodings, and equivalent-but-reordered topological wire;
