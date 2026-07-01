@@ -5,7 +5,6 @@
 use alloc::{sync::Arc, vec::Vec};
 use std::println;
 
-use super::{FLAG_HASHLESS, FLAG_SPARSE, MAGIC, VERSION};
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
@@ -205,9 +204,8 @@ fn generate_fuzz_seeds() {
         );
 
         let mut invalid_sparse_header = Vec::new();
-        invalid_sparse_header.write_bytes(MAGIC);
-        invalid_sparse_header.write_u8(FLAG_HASHLESS | FLAG_SPARSE);
-        invalid_sparse_header.write_bytes(&VERSION);
+        invalid_sparse_header.write_bytes(b"SMST");
+        invalid_sparse_header.write_bytes(&[0, 0, 0]);
         invalid_sparse_header.write_usize(usize::MAX);
         write_mast_seed(sparse_targets, "invalid_sparse_header.bin", &invalid_sparse_header);
     }
