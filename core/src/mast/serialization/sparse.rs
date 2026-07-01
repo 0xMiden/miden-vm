@@ -1,9 +1,9 @@
 use alloc::{format, string::ToString, vec::Vec};
 
 use super::{
-    FLAG_HASHLESS, FLAG_SPARSE, MAGIC, MastNodeEntry, VERSION,
+    MastNodeEntry,
     basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder},
-    layout::{OffsetTrackingReader, TrackingReader, WireFlags, read_and_validate_header},
+    layout::{OffsetTrackingReader, TrackingReader},
 };
 use crate::{
     Word,
@@ -15,12 +15,12 @@ use crate::{
     },
 };
 
-const SPARSE_FLAGS: u8 = FLAG_HASHLESS | FLAG_SPARSE;
+const SPARSE_MAGIC: &[u8; 4] = b"SMST";
+const SPARSE_VERSION: [u8; 3] = [0, 0, 0];
 
 fn sparse_mast_forest_min_serialized_size() -> usize {
-    MAGIC.len()
-        + 1
-        + VERSION.len()
+    SPARSE_MAGIC.len()
+        + SPARSE_VERSION.len()
         + usize::min_serialized_size() * 7
         + Word::min_serialized_size()
         + usize::min_serialized_size()
@@ -56,9 +56,8 @@ pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target
     let non_external_count =
         entries.iter().filter(|entry| !matches!(entry, MastNodeEntry::External)).count();
 
-    target.write_bytes(MAGIC);
-    target.write_u8(SPARSE_FLAGS);
-    target.write_bytes(&VERSION);
+    target.write_bytes(SPARSE_MAGIC);
+    target.write_bytes(&SPARSE_VERSION);
 
     target.write_usize(forest.procedure_roots().len());
     target.write_usize(forest.num_nodes());
@@ -128,9 +127,7 @@ pub(super) fn read_sparse_from<R: ByteReader>(
     source: &mut R,
 ) -> Result<SparseMastForest, DeserializationError> {
     let mut reader = TrackingReader::new(source);
-    let (raw_flags, _version) = read_and_validate_header(&mut reader)?;
-    let flags = WireFlags::new(raw_flags);
-    validate_sparse_flags(flags)?;
+    read_and_validate_sparse_header(&mut reader)?;
 
     let root_count = read_bounded_count(&mut reader, size_of::<u32>(), "procedure root count")?;
     let source_node_count = reader.read_usize()?;
@@ -225,23 +222,24 @@ pub(super) fn read_sparse_from<R: ByteReader>(
     )
 }
 
-fn validate_sparse_flags(flags: WireFlags) -> Result<(), DeserializationError> {
-    if !flags.is_sparse() {
-        return Err(DeserializationError::InvalidValue(
-            "SPARSE flag is not set; use MastForest readers for dense input".to_string(),
-        ));
-    }
-    if !flags.is_hashless() {
-        return Err(DeserializationError::InvalidValue(
-            "sparse MAST payloads must also set HASHLESS".to_string(),
-        ));
-    }
-    if flags.bits() != SPARSE_FLAGS {
+fn read_and_validate_sparse_header<R: ByteReader>(
+    source: &mut R,
+) -> Result<(), DeserializationError> {
+    let magic: [u8; 4] = source.read_array()?;
+    if magic != *SPARSE_MAGIC {
         return Err(DeserializationError::InvalidValue(format!(
-            "invalid sparse MAST flag combination: {:#04x}",
-            flags.bits()
+            "Invalid sparse MAST magic bytes. Expected '{:?}', got '{:?}'",
+            *SPARSE_MAGIC, magic
         )));
     }
+
+    let version: [u8; 3] = source.read_array()?;
+    if version != SPARSE_VERSION {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Unsupported sparse MAST version. Got '{version:?}', but only '{SPARSE_VERSION:?}' is supported",
+        )));
+    }
+
     Ok(())
 }
 
