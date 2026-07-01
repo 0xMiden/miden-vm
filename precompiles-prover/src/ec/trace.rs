@@ -19,6 +19,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles::CurveId;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
@@ -103,10 +104,11 @@ struct Point {
 }
 
 /// `*Requires` accumulator for the EC stores: the group and point
-/// ledgers (each ptr = position + 1 in its own namespace) plus the
-/// `EcGroup` / `EcPoint` demand ledgers. The entries are the only
+/// ledgers (each ptr = position + 1 in its own namespace, with
+/// VM-owned fixed rows preseeded for known short-Weierstrass curves) plus
+/// the `EcGroup` / `EcPoint` demand ledgers. The entries are the only
 /// [`EcGroupPtr`] / [`EcPointPtr`] constructors.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EcStoreRequires {
     groups: Vec<Group>,
     points: Vec<Point>,
@@ -130,16 +132,49 @@ pub struct EcStoreRequires {
     pai_rows: BTreeMap<EcGroupPtr, EcPointPtr>,
 }
 
+impl Default for EcStoreRequires {
+    fn default() -> Self {
+        let mut store = Self {
+            groups: Vec::new(),
+            points: Vec::new(),
+            by_coords: HashMap::new(),
+            by_curve: HashMap::new(),
+            group_demand: BTreeMap::new(),
+            point_demand: BTreeMap::new(),
+            pai_rows: BTreeMap::new(),
+        };
+
+        // Preseed VM-owned short-Weierstrass group slots. This keeps prover-side dense
+        // rows aligned with public curve-MSM tags: row 1 is secp256k1, row 2 is
+        // secp256r1. Unused rows simply carry mult = 0 in the group trace.
+        for curve in [CurveId::Secp256k1, CurveId::Secp256r1] {
+            let ptr = EcGroupPtr(curve.group_ptr());
+            debug_assert_eq!(ptr.0 as usize, store.groups.len() + 1);
+            let group = Group {
+                a: UintPtr::from_addr(curve.a_ptr()),
+                b: UintPtr::from_addr(curve.b_ptr()),
+                bound: UintPtr::from_addr(curve.base_domain().bound_ptr()),
+                scalar_bound: Some(UintPtr::from_addr(curve.scalar_domain().bound_ptr())),
+            };
+            store.by_curve.insert((group.a, group.b, group.bound), ptr);
+            store.groups.push(group);
+        }
+
+        store
+    }
+}
+
 impl EcStoreRequires {
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Bind a group to its curve params (uints sharing the modulus at
-    /// `bound`). The scalar bound starts vacuous. **Deduped by the curve
-    /// `(a, b, bound)`** — a repeat returns the existing group (its PAI
-    /// rides [`add_pai`](Self::add_pai)'s own per-group dedup). Returns
-    /// the group's handle.
+    /// `bound`). VM-owned fixed curves return their preseeded row with a
+    /// canonical scalar bound; ad-hoc groups start vacuous. **Deduped by
+    /// the curve `(a, b, bound)`** — a repeat returns the existing group
+    /// (its PAI rides [`add_pai`](Self::add_pai)'s own per-group dedup).
+    /// Returns the group's handle.
     pub fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
         if let Some(&existing) = self.by_curve.get(&(a, b, bound)) {
             return existing;
@@ -296,10 +331,10 @@ pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowM
     (groups_trace(&requires), points_trace(&requires))
 }
 
-/// The group table — one row per group in allocation order, padded to a
-/// power-of-two height (min 2). The ungated chain forces `ptr = row + 1`
-/// on every row, so pads carry their ptr too — they are simply rows
-/// whose `mult` (and params) stay zero, touching no bus.
+/// The group table — one row per group in fixed/dense allocation order,
+/// padded to a power-of-two height (min 2). The ungated chain forces
+/// `ptr = row + 1` on every row, so pads carry their ptr too — they are
+/// simply rows whose `mult` (and params) stay zero, touching no bus.
 fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
     let height = requires.groups.len().next_power_of_two().max(2);
     let mut vals = Vec::with_capacity(height * G_NUM_MAIN_COLS);

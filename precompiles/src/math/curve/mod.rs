@@ -9,7 +9,7 @@
 //! - `VALUE`: canonical point value, represented as a join payload `[x_digest, y_digest]`; the
 //!   identity point is the single canonical value `[TRUE_DIGEST, TRUE_DIGEST]`.
 //! - `ADD` / `SUB`: point addition and subtraction.
-//! - `MSM`: multi-scalar multiplication over one or more structural `(scalar_digest, point_digest)`
+//! - `MSM`: multi-scalar multiplication over one or more structural `(point_digest, scalar_digest)`
 //!   pairs.
 //! - `EQ`: trapping equality predicate that evaluates to `Node::TRUE` only when both operands
 //!   reduce to the same canonical point.
@@ -44,7 +44,6 @@ mod short_weierstrass;
 mod twisted_edwards;
 
 use alloc::vec::Vec;
-use core::num::NonZeroU32;
 
 use miden_core::{
     Felt, ZERO,
@@ -54,6 +53,10 @@ use miden_core::{
     },
 };
 use miden_precompiles_codegen::{CodegenCurveId, CurvePrecompileDescriptor};
+pub use miden_precompiles_codegen::{
+    ED25519_A_PTR, ED25519_D_PTR, ED25519_GROUP_PTR, K1_A_PTR, K1_B_PTR, K1_GROUP_PTR, R1_A_PTR,
+    R1_B_PTR, R1_GROUP_PTR,
+};
 
 use self::{ed25519::Ed25519, secp256k1::Secp256k1, secp256r1::Secp256r1};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
@@ -84,7 +87,7 @@ pub enum CurvePoint {
 /// - Violating these preconditions is not memory-unsafe, but formulas may return invalid or
 ///   nonsensical arithmetic results, or fail with `InvalidPayload`.
 pub trait CurveSpec: Sized + 'static {
-    /// Stable local curve selector carried in curve precompile tags.
+    /// Stable local curve selector retained for curve-specific dispatch metadata.
     const ID: Felt;
 
     /// Base field used by affine point coordinates.
@@ -221,7 +224,7 @@ impl CurveId {
     /// All fixed curves in deterministic precompile initialization order.
     pub const ALL: [Self; 3] = [Self::Secp256k1, Self::Secp256r1, Self::Ed25519];
 
-    /// Returns the supported curve for a tag-local id.
+    /// Returns the supported curve for an internal curve selector.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <Secp256k1 as CurveSpec>::ID => Some(Self::Secp256k1),
@@ -231,7 +234,7 @@ impl CurveId {
         }
     }
 
-    /// Returns the stable local curve selector used in curve tags.
+    /// Returns the stable local curve selector retained for dispatch metadata.
     pub fn id(self) -> Felt {
         match self {
             Self::Secp256k1 => miden_precompiles_codegen::SECP256K1_ID,
@@ -240,12 +243,37 @@ impl CurveId {
         }
     }
 
-    fn codegen_id(self) -> CodegenCurveId {
+    const fn codegen_id(self) -> CodegenCurveId {
         match self {
             Self::Secp256k1 => CodegenCurveId::Secp256k1,
             Self::Secp256r1 => CodegenCurveId::Secp256r1,
             Self::Ed25519 => CodegenCurveId::Ed25519,
         }
+    }
+
+    /// Returns the VM-owned group configuration pointer used in curve MSM tags.
+    pub const fn group_ptr(self) -> u32 {
+        self.codegen_id().group_ptr()
+    }
+
+    /// Returns the supported curve for a VM-owned group configuration pointer.
+    pub const fn from_group_ptr(ptr: u32) -> Option<Self> {
+        match CodegenCurveId::from_group_ptr(ptr) {
+            Some(CodegenCurveId::Secp256k1) => Some(Self::Secp256k1),
+            Some(CodegenCurveId::Secp256r1) => Some(Self::Secp256r1),
+            Some(CodegenCurveId::Ed25519) => Some(Self::Ed25519),
+            None => None,
+        }
+    }
+
+    /// Returns the VM-owned pointer for this curve's first coefficient.
+    pub const fn a_ptr(self) -> u32 {
+        self.codegen_id().a_ptr()
+    }
+
+    /// Returns the VM-owned pointer for this curve's second coefficient.
+    pub const fn b_ptr(self) -> u32 {
+        self.codegen_id().b_ptr()
     }
 
     /// Returns the base-field domain used by affine point coordinates.
@@ -264,6 +292,12 @@ impl CurveId {
             Self::Secp256r1 => UintDomain::R1Scalar,
             Self::Ed25519 => UintDomain::Ed25519Scalar,
         }
+    }
+
+    fn from_coefficient_ptrs(a_ptr: u32, b_ptr: u32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|curve| curve.a_ptr() == a_ptr && curve.b_ptr() == b_ptr)
     }
 
     /// Returns this curve's conventional generator point.
@@ -336,6 +370,10 @@ impl CurveId {
     }
 }
 
+fn u32_arg(arg: Felt) -> Option<u32> {
+    u32::try_from(arg.as_canonical_u64()).ok()
+}
+
 /// Recognized curve binary operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CurveBinaryOp {
@@ -348,14 +386,16 @@ enum CurveOp {
     Value(CurveId),
     Binary(CurveBinaryOp),
     Eq,
-    Msm { curve: CurveId, n: NonZeroU32 },
+    Msm { curve: CurveId },
 }
 
 impl CurveOp {
     fn decode(args: [Felt; 3]) -> Option<Self> {
         match args[0].as_canonical_u64() {
-            CurvePrecompile::VALUE_OP_ID if args[2] == ZERO => {
-                Some(Self::Value(CurveId::from_id(args[1])?))
+            CurvePrecompile::VALUE_OP_ID => {
+                let a_ptr = u32_arg(args[1])?;
+                let b_ptr = u32_arg(args[2])?;
+                Some(Self::Value(CurveId::from_coefficient_ptrs(a_ptr, b_ptr)?))
             },
             CurvePrecompile::ADD_OP_ID if args[1] == ZERO && args[2] == ZERO => {
                 Some(Self::Binary(CurveBinaryOp::Add))
@@ -364,10 +404,9 @@ impl CurveOp {
                 Some(Self::Binary(CurveBinaryOp::Sub))
             },
             CurvePrecompile::EQ_OP_ID if args[1] == ZERO && args[2] == ZERO => Some(Self::Eq),
-            CurvePrecompile::MSM_OP_ID => {
-                let curve = CurveId::from_id(args[1])?;
-                let n = u32::try_from(args[2].as_canonical_u64()).ok().and_then(NonZeroU32::new)?;
-                Some(Self::Msm { curve, n })
+            CurvePrecompile::MSM_OP_ID if args[2] == ZERO => {
+                let curve = CurveId::from_group_ptr(u32_arg(args[1])?)?;
+                Some(Self::Msm { curve })
             },
             _ => None,
         }
@@ -417,11 +456,8 @@ impl CurveNode {
                 let (lhs, rhs) = payload.as_join()?;
                 Self::Eq { lhs, rhs }
             },
-            CurveOp::Msm { curve, n } => {
+            CurveOp::Msm { curve } => {
                 let pairs = payload.as_pair_list()?;
-                if pairs.len() != n.get() as usize {
-                    return Err(DeferredError::InvalidPayload.into());
-                }
                 Self::Msm { curve, pairs }
             },
         })
@@ -458,9 +494,9 @@ impl CurvePrecompile {
         CurvePrecompileDescriptor::op_tag(op_id)
     }
 
-    /// Builds a canonical curve MSM tag for `curve` and non-zero pair count `n`.
-    pub fn msm_tag(curve: CurveId, n: NonZeroU32) -> Tag {
-        CurvePrecompileDescriptor::msm_tag(curve.codegen_id(), n)
+    /// Builds a canonical curve MSM tag for `curve`.
+    pub fn msm_tag(curve: CurveId) -> Tag {
+        CurvePrecompileDescriptor::msm_tag(curve.codegen_id())
     }
 
     /// Builds a point VALUE node from a point value.
@@ -522,20 +558,20 @@ impl CurvePrecompile {
 
     fn evaluate_msm_term(
         curve: CurveId,
-        scalar: Digest,
         point: Digest,
+        scalar: Digest,
         context: &mut DeferredContext<'_>,
-    ) -> Result<(Limbs, CurvePoint), PrecompileError> {
-        let (scalar_digest, point_digest) = context.evaluate_digest_pair(scalar, point)?;
-        let scalar_node = context.get_node(&scalar_digest).ok_or(PrecompileError::MissingNode)?;
+    ) -> Result<(CurvePoint, Limbs), PrecompileError> {
+        let (point_digest, scalar_digest) = context.evaluate_digest_pair(point, scalar)?;
         let point_node = context.get_node(&point_digest).ok_or(PrecompileError::MissingNode)?;
+        let scalar_node = context.get_node(&scalar_digest).ok_or(PrecompileError::MissingNode)?;
 
-        let scalar = UintPrecompile::limbs_from_value_node(scalar_node, curve.scalar_domain())?;
         let (point_curve, point) = Self::point_from_value_node(point_node, context)?;
         if point_curve != curve {
             return Err(DeferredError::InvalidPayload.into());
         }
-        Ok((scalar, point))
+        let scalar = UintPrecompile::limbs_from_value_node(scalar_node, curve.scalar_domain())?;
+        Ok((point, scalar))
     }
 
     fn evaluate_msm(
@@ -544,8 +580,8 @@ impl CurvePrecompile {
         context: &mut DeferredContext<'_>,
     ) -> Result<CurvePoint, PrecompileError> {
         let mut acc = CurvePoint::Identity;
-        for &(scalar, point) in pairs {
-            let (scalar, point) = Self::evaluate_msm_term(curve, scalar, point, context)?;
+        for &(point, scalar) in pairs {
+            let (point, scalar) = Self::evaluate_msm_term(curve, point, scalar, context)?;
             let term = curve.mul_scalar(point, scalar)?;
             acc = curve.add(acc, term)?;
         }
@@ -765,31 +801,43 @@ mod tests {
     }
 
     #[test]
-    fn decode_uses_curve_for_value_and_msm_tags() {
+    fn decode_uses_curve_public_pointers_for_value_and_msm_tags() {
         let precompile = CurvePrecompile;
-        let curve_id = CurveId::Secp256k1.id();
+        let curve = CurveId::Secp256k1;
 
         assert_eq!(
-            precompile.decode(CurvePrecompile::value_tag(CurveId::Secp256k1).args()),
+            CurvePrecompile::value_tag(curve).as_word(),
+            [
+                CurvePrecompile::id(),
+                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
+                Felt::from(curve.a_ptr()),
+                Felt::from(curve.b_ptr()),
+            ],
+        );
+        assert_eq!(
+            precompile.decode(CurvePrecompile::value_tag(curve).args()),
             Some(NodeType::Join)
+        );
+        assert_eq!(
+            CurvePrecompile::msm_tag(curve).as_word(),
+            [
+                CurvePrecompile::id(),
+                Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
+                Felt::from(curve.group_ptr()),
+                ZERO,
+            ],
+        );
+        assert_eq!(
+            precompile.decode(CurvePrecompile::msm_tag(curve).args()),
+            Some(NodeType::PairList)
         );
         assert_eq!(
             precompile.decode(CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID).args()),
             Some(NodeType::Join)
         );
-        assert_eq!(
-            precompile.decode(CurvePrecompile::msm_tag(CurveId::Secp256k1, NonZeroU32::MIN).args()),
-            Some(NodeType::PairList)
-        );
-        assert_eq!(
-            precompile.decode(
-                CurvePrecompile::msm_tag(CurveId::Secp256k1, NonZeroU32::new(2).unwrap()).args()
-            ),
-            Some(NodeType::PairList)
-        );
 
         let mut add_with_curve = CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID).args();
-        add_with_curve[1] = curve_id;
+        add_with_curve[1] = Felt::from(curve.group_ptr());
         assert_eq!(precompile.decode(add_with_curve), None);
 
         // Old native MUL128 (`[op=4, 0, 0]`) and MUL_SCALAR (`[op=5, 0, 0]`) tag shapes are
@@ -797,11 +845,22 @@ mod tests {
         assert_eq!(precompile.decode(CurvePrecompile::op_tag(4).args()), None);
         assert_eq!(precompile.decode(CurvePrecompile::op_tag(5).args()), None);
         assert_eq!(
-            precompile.decode([Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32), curve_id, ZERO]),
+            precompile.decode([
+                Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
+                Felt::from(curve.group_ptr()),
+                Felt::from_u32(1),
+            ]),
             None
         );
         assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99), ZERO]), None);
-        assert_eq!(precompile.decode([Felt::from_u32(0), curve_id, Felt::from_u32(1)]), None);
+        assert_eq!(
+            precompile.decode([
+                Felt::from_u32(0),
+                Felt::from(curve.a_ptr()),
+                Felt::new_unchecked(99)
+            ]),
+            None
+        );
     }
 
     #[test]
@@ -836,15 +895,15 @@ mod tests {
     }
 
     #[test]
-    fn msm_one_pair_evaluates_scalar_and_point_operands() {
+    fn msm_one_pair_evaluates_point_and_scalar_operands() {
         let mut state = state();
         let curve = CurveId::Secp256r1;
         let generator = CurvePrecompile::generator_node(curve);
         let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(curve, NonZeroU32::MIN),
-            vec![(scalar.digest(), generator.digest())],
+            CurvePrecompile::msm_tag(curve),
+            vec![(generator.digest(), scalar.digest())],
         )
         .expect("tag is curve-owned");
         let expected = CurvePrecompile::value_node(
@@ -867,8 +926,8 @@ mod tests {
         state.register(scalar_2.clone()).expect("scalar must register");
         state.register(scalar_3.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(curve, NonZeroU32::new(2).unwrap()),
-            vec![(scalar_2.digest(), generator.digest()), (scalar_3.digest(), generator.digest())],
+            CurvePrecompile::msm_tag(curve),
+            vec![(generator.digest(), scalar_2.digest()), (generator.digest(), scalar_3.digest())],
         )
         .expect("tag is curve-owned");
         let two_g = curve
@@ -886,22 +945,6 @@ mod tests {
     }
 
     #[test]
-    fn msm_rejects_pair_count_mismatch() {
-        let mut state = state();
-        let curve = CurveId::Secp256k1;
-        let generator = CurvePrecompile::generator_node(curve);
-        let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
-        state.register(scalar.clone()).expect("scalar must register");
-        let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(curve, NonZeroU32::new(2).unwrap()),
-            vec![(scalar.digest(), generator.digest())],
-        )
-        .expect("tag is curve-owned");
-
-        assert_invalid_payload(evaluate(&mut state, node));
-    }
-
-    #[test]
     fn msm_rejects_wrong_scalar_domain() {
         let mut state = state();
         let curve = CurveId::Secp256k1;
@@ -909,8 +952,8 @@ mod tests {
         let scalar = UintPrecompile::value_node(curve.base_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(curve, NonZeroU32::MIN),
-            vec![(scalar.digest(), generator.digest())],
+            CurvePrecompile::msm_tag(curve),
+            vec![(generator.digest(), scalar.digest())],
         )
         .expect("tag is curve-owned");
 
@@ -925,8 +968,8 @@ mod tests {
         let point = CurvePrecompile::generator_node(CurveId::Secp256r1);
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(curve, NonZeroU32::MIN),
-            vec![(scalar.digest(), point.digest())],
+            CurvePrecompile::msm_tag(curve),
+            vec![(point.digest(), scalar.digest())],
         )
         .expect("tag is curve-owned");
 
@@ -1048,13 +1091,13 @@ mod tests {
     }
 
     #[test]
-    fn fixed_curve_ids_and_generators_validate() {
+    fn fixed_curve_public_pointers_and_generators_validate() {
         for curve in CurveId::ALL {
-            assert_eq!(CurveId::from_id(curve.id()), Some(curve));
+            assert_eq!(CurveId::from_group_ptr(curve.group_ptr()), Some(curve));
             assert!(curve.is_on_curve(&curve.generator()));
             assert!(curve.scalar_domain().is_prime_field());
         }
-        assert_eq!(CurveId::from_id(Felt::new_unchecked(99)), None);
+        assert_eq!(CurveId::from_group_ptr(99), None);
         assert!(!K1Scalar::is_canonical(&K1Scalar::MODULUS));
     }
 }

@@ -46,6 +46,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles::CurvePrecompile;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -58,11 +59,12 @@ use crate::{
     transcript::{
         eval::{
             COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CAP_PARAM_B,
-            COL_CURVE_B, COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE,
-            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL,
-            COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO,
-            COL_LHS_BEGIN, COL_MSM_EXPR, COL_MSM_IDX, COL_OUT_MULT, COL_PARAM_A, COL_PERM_SEQ_ID,
-            COL_PTR, COL_RHS_BEGIN, COL_SBOUND_PTR, NUM_HASH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_CURVE_A, COL_CURVE_B, COL_GROUP_PTR, COL_H_BEGIN, COL_IS_ADD, COL_IS_AND,
+            COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS,
+            COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF,
+            COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_MSM_EXPR, COL_MSM_IDX, COL_OUT_MULT,
+            COL_PARAM_A, COL_PERM_SEQ_ID, COL_PTR, COL_RHS_BEGIN, COL_SBOUND_PTR, NUM_HASH,
+            NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::{EcOpId, UintOpId},
         poseidon2::{
@@ -116,7 +118,7 @@ impl UintNode {
 }
 
 /// A handle to a `Binding(hash, Group, point_ptr)` value — a curve point
-/// created by `EcCreate` or produced by a `EcBinOp`. Shared-use like
+/// created by `EcCreate` or produced by an `EcBinOp`. Shared-use like
 /// [`UintNode`]: ops take `&EcNode` and each use bumps the node's consumer
 /// count. The point handle is crate-private — at the DAG level a point is
 /// its hash; the curve `(a, b)` and coordinates are committed in that
@@ -209,9 +211,9 @@ enum NodeKind {
         r_ptr: u32,
         bound_ptr: u32,
     },
-    /// EcCreate — hashes two uint-coord child hashes `(x, y)` under the
-    /// `(EcCreate, a_ptr, b_ptr, 0)` cap, consumes both coords' `Uint`
-    /// bindings + the `EcGroup` (cap a/b ↔ group) and `EcPoint`
+    /// EcCreate — hashes two uint-coord child hashes `(x, y)` under the VM curve
+    /// VALUE cap `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`, consumes
+    /// both coords' `Uint` bindings + the `EcGroup` (cap a/b ↔ group) and `EcPoint`
     /// (membership) tuples, and binds `(hash, Group, point_ptr)`. The
     /// slice lays finite points (`is_pai = 0`).
     EcCreate {
@@ -229,8 +231,8 @@ enum NodeKind {
         /// flag instead of `is_ec_create`.
         is_pai: bool,
     },
-    /// EcBinOp — hashes two point child hashes under the `(EcBinOp,
-    /// op, 0, 0)` cap. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
+    /// EcBinOp — hashes two point child hashes under the VM curve op cap
+    /// `[CurvePrecompile::id(), op, 0, 0]`. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
     /// consumes the rearranged `EcGroupAdd(group, r, q, p)`, and both bind
     /// `(hash, Group, r_ptr)`; `Is` consumes no relation (shared
     /// `p_ptr = q_ptr`) and binds `(hash, True)` (`r_ptr = group_ptr = 0`).
@@ -506,11 +508,11 @@ impl TranscriptEvalRequires {
         out
     }
 
-    /// Record a EcCreate node — a curve point from two uint coords
+    /// Record an EcCreate node — a curve point from two uint coords
     /// `(x, y)` on the pinned curve `(a_ptr, b_ptr)`. Dedups by `(a, b, x
     /// hash, y hash)`; else drives the EC value work (group +
     /// eager-membership point) through `ec`, the Poseidon2 absorption of
-    /// `x.hash ‖ y.hash ‖ (EcCreate, a, b, 0)`, consumes both coords,
+    /// `x.hash ‖ y.hash ‖ [CurvePrecompile::id(), VALUE_OP_ID, a, b]`, consumes both coords,
     /// and binds `(hash, Group, point_ptr)`. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_create(
@@ -567,11 +569,11 @@ impl TranscriptEvalRequires {
         node
     }
 
-    /// Record a EcCreate/PAI node — the group's point-at-infinity on
+    /// Record an EcCreate/PAI node — the group's point-at-infinity on
     /// the pinned curve `(a_ptr, b_ptr)`. Dedups by `(a, b, 0, 0)` (one ∞
     /// per curve); else drives `ec.pai_on_curve` (the group + its PAI row,
     /// routing the row's `EcGroup` / `EcPoint` demand), the Poseidon2
-    /// absorption of `0 ‖ 0 ‖ (EcCreate, a, b, 0)`, and binds
+    /// absorption of `0 ‖ 0 ‖ [CurvePrecompile::id(), VALUE_OP_ID, a, b]`, and binds
     /// `(hash, Group, pai_ptr)`. No coord children. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_pai(
@@ -622,10 +624,10 @@ impl TranscriptEvalRequires {
         node
     }
 
-    /// Record a EcBinOp/Add node `R = P + Q`. Dedups by `(Add, P hash,
+    /// Record an EcBinOp/Add node `R = P + Q`. Dedups by `(Add, P hash,
     /// Q hash)`; else drives `ec.add` (the group law at provide mult 1)
     /// for `(group, R)`, the Poseidon2 absorption of `P.hash ‖ Q.hash ‖
-    /// (EcBinOp, Add, 0, 0)`, consumes both operands, and binds `(hash,
+    /// [CurvePrecompile::id(), ADD_OP_ID, 0, 0]`, consumes both operands, and binds `(hash,
     /// Group, r_ptr)`. Returns the shared-use [`EcNode`].
     pub fn ec_add(
         &mut self,
@@ -667,12 +669,12 @@ impl TranscriptEvalRequires {
         node
     }
 
-    /// Record a EcBinOp/Sub node `R = P − Q` — the *rearranged* relation
+    /// Record an EcBinOp/Sub node `R = P − Q` — the *rearranged* relation
     /// `R + Q = P` (one `EcGroupAdd` block via [`EcRequire::sub`]), the EC
     /// parallel of uint sub. Dedups by `(Sub, P hash, Q hash)`; else drives
     /// `ec.sub` (intern the witness `R`, certify `R + Q = P` at provide
     /// mult 1), consumes both operands, absorbs `P.hash ‖ Q.hash ‖
-    /// (EcBinOp, Sub, 0, 0)`, and binds `(hash, Group, r_ptr)` — `R`. The
+    /// [CurvePrecompile::id(), SUB_OP_ID, 0, 0]`, and binds `(hash, Group, r_ptr)` — `R`. The
     /// row carries `(p_ptr, q_ptr, r_ptr) = (P, Q, R)`; the AIR's Sub arm
     /// permutes the consume to `EcGroupAdd(g, R, Q, P)`. Returns the
     /// shared-use [`EcNode`].
@@ -719,7 +721,7 @@ impl TranscriptEvalRequires {
     /// Record a EcBinOp/Is node asserting `P ≡ Q` — point-ptr equality
     /// (canonical interning means equal points share a ptr), consuming
     /// both operands' Group bindings at one shared ptr, driving the
-    /// Poseidon2 absorption of `P.hash ‖ Q.hash ‖ (EcBinOp, Is, 0, 0)`,
+    /// Poseidon2 absorption of `P.hash ‖ Q.hash ‖ [CurvePrecompile::id(), EQ_OP_ID, 0, 0]`,
     /// and binding `(hash, True)`. Returns the foldable [`Truthy`].
     pub fn ec_is(&mut self, p: &EcNode, q: &EcNode, p2: &mut Poseidon2Requires) -> Truthy {
         assert_eq!(
@@ -752,8 +754,8 @@ impl TranscriptEvalRequires {
     /// Record an EcMsm claim node `R = Σ sᵢ·Pᵢ` — the chaining sponge over
     /// `terms = [(Pᵢ, sᵢ)]` (in `idx` order, matching the chiplet's
     /// `expr_ptr` term list). Each term folds into the sponge under
-    /// `cap = stateᵢ` (the IV `(EcMsm, group, 0, 0)` first, the prior
-    /// digest after); the node's hash is `state_k` and it binds
+    /// `cap = stateᵢ` (the VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group, 0]`
+    /// first, the prior digest after); the node's hash is `state_k` and it binds
     /// `(h_claim, Group, val)`. Consumes each term's child `Group`/`Uint`
     /// binding (their `out_mult`); the absorb rows additionally consume
     /// `MsmTerm` and the boundary `MsmExpr` over the bus (laid by the AIR).
@@ -998,6 +1000,14 @@ fn ec_op_col(op: EcOpId) -> usize {
     }
 }
 
+fn ec_op_id(op: EcOpId) -> u64 {
+    match op {
+        EcOpId::Add => CurvePrecompile::ADD_OP_ID,
+        EcOpId::Sub => CurvePrecompile::SUB_OP_ID,
+        EcOpId::Is => CurvePrecompile::EQ_OP_ID,
+    }
+}
+
 /// Copy two child digests into the `lhs` / `rhs` hash blocks.
 fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &P2Digest, rhs: &P2Digest) {
     let lhs = lhs.as_array();
@@ -1125,9 +1135,10 @@ fn push_node_row(
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr); // modulus
             row[COL_A_PTR] = Felt::from(*x_ptr); // x coord (0 on PAI)
             row[COL_B_PTR] = Felt::from(*y_ptr); // y coord (0 on PAI)
-            row[COL_PARAM_A] = Felt::from(*a_ptr); // cap slot 1 = curve a
+            row[COL_CURVE_A] = Felt::from(*a_ptr); // EcCreate cap slot 2 = curve a
+            // COL_PARAM_A stays 0: curve VALUE_OP_ID.
             row[COL_GROUP_PTR] = Felt::from(*group_ptr);
-            row[COL_CURVE_B] = Felt::from(*b_ptr); // cap slot 2 = curve b
+            row[COL_CURVE_B] = Felt::from(*b_ptr); // EcCreate cap slot 3 = curve b
             // The group's scalar bound (curve order `n` once an MSM fixed it,
             // else the coord bound) — pins the `EcGroup` consume's F_s field.
             row[COL_SBOUND_PTR] =
@@ -1148,7 +1159,7 @@ fn push_node_row(
             row[COL_PTR] = Felt::from(*r_ptr); // result (0 for Is)
             row[COL_A_PTR] = Felt::from(*p_ptr); // P
             row[COL_B_PTR] = Felt::from(*q_ptr); // Q
-            row[COL_PARAM_A] = Felt::from(*op as u8); // cap slot 1 = op id
+            row[COL_PARAM_A] = Felt::from_u32(ec_op_id(*op) as u32); // curve op cap slot 1
             row[COL_GROUP_PTR] = Felt::from(*group_ptr); // 0 for Is
         },
         NodeKind::EcMsm { .. } => unreachable!("EcMsm is laid as a multi-row run above"),

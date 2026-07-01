@@ -3,7 +3,7 @@
 //!
 //! Without these, [`P2Digest`] (output of the permutation) and
 //! [`P2Cap`] (capacity prefix carrying a domain separator such as a
-//! VM deferred tag or a local `(NodeTag, …, reserved)` tuple) collapse
+//! VM deferred tag word or a prover-local bootstrap pin tuple) collapse
 //! to the same primitive type — the compiler can't catch a
 //! digest accidentally fed in as a cap (or vice versa).
 
@@ -11,9 +11,9 @@ use miden_core::{
     Felt,
     deferred::{Digest, Tag},
 };
-use miden_precompiles::{Keccak256Precompile, UintPrecompile};
+use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintPrecompile};
 
-use crate::transcript::nodes::{EcOpId, NodeTag, UINT_PIN_CLAIM_TAG, UintOpId};
+use crate::transcript::nodes::{EcOpId, UINT_PIN_CLAIM_TAG, UintOpId};
 
 /// Output digest of a Poseidon2 absorption — `state[0..4]` after the
 /// last block's permutation.
@@ -33,9 +33,9 @@ impl From<Digest> for P2Digest {
 }
 
 /// Capacity prefix for a Poseidon2 absorption. VM deferred caps are raw
-/// VM tag words; prover-local field/uint/EC caps use `(tag, param_a,
-/// param_b, 0)`. Constructors for off-pattern caps stay open via the
-/// tuple-struct constructor.
+/// VM tag words; prover-local bootstrap-pin caps keep their local tuple.
+/// Constructors for off-pattern caps stay open via the tuple-struct
+/// constructor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct P2Cap(pub [Felt; 4]);
 
@@ -103,32 +103,41 @@ impl P2Cap {
         ])
     }
 
-    /// `(NodeTag::EcCreate, a_ptr, b_ptr, 0)` — capacity for a curve-point
-    /// construction node. The cap carries the curve coefficient pointers;
-    /// the modulus `p` threads in via the coordinates' shared bound.
+    /// VM curve `VALUE` capacity: `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`.
+    /// The cap carries the curve coefficient pointers; the modulus `p`
+    /// threads in via the coordinates' shared bound.
     pub fn ec_create(a_ptr: u32, b_ptr: u32) -> Self {
         Self([
-            Felt::from(NodeTag::EcCreate as u8),
+            CurvePrecompile::id(),
+            Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
             Felt::from(a_ptr),
             Felt::from(b_ptr),
-            Felt::ZERO,
         ])
     }
 
-    /// `(NodeTag::EcBinOp, op_id, 0, 0)` — capacity for a group add / sub / eq
-    /// node over two child point hashes. The curve threads from the operands'
-    /// `EcCreate` caps.
+    /// VM curve operation capacity: `[CurvePrecompile::id(), op_id, 0, 0]`
+    /// for group add / sub / eq nodes over two child point hashes. The curve
+    /// threads from the operands' VALUE caps.
     pub fn ec_op(op: EcOpId) -> Self {
-        Self([Felt::from(NodeTag::EcBinOp as u8), Felt::from(op as u8), Felt::ZERO, Felt::ZERO])
+        let op_id = match op {
+            EcOpId::Add => CurvePrecompile::ADD_OP_ID,
+            EcOpId::Sub => CurvePrecompile::SUB_OP_ID,
+            EcOpId::Is => CurvePrecompile::EQ_OP_ID,
+        };
+        Self([CurvePrecompile::id(), Felt::from_u32(op_id as u32), Felt::ZERO, Felt::ZERO])
     }
 
-    /// `(NodeTag::EcMsm, group_ptr, 0, 0)` — the **IV** of
-    /// an MSM-claim chaining sponge: the capacity fed to the *first*
-    /// absorb (`stateₒ`); subsequent absorbs thread `capᵢ = stateᵢ₋₁` (the
-    /// prior digest). The distinct `EcMsm` tag domain-separates MSM
-    /// hashes from every one-shot cap, and `param_a = group_ptr` binds the
-    /// claim to its group. See `docs/chiplets/ec-msm.md §6.2`.
+    /// VM curve MSM capacity: `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` —
+    /// the **IV** of an MSM-claim chaining sponge, fed to the *first* absorb
+    /// (`stateₒ`). Subsequent absorbs thread `capᵢ = stateᵢ₋₁` (the prior
+    /// digest). The group pointer binds the claim to its group. See
+    /// `docs/chiplets/ec-msm.md §6.2`.
     pub fn ec_msm_iv(group_ptr: u32) -> Self {
-        Self([Felt::from(NodeTag::EcMsm as u8), Felt::from(group_ptr), Felt::ZERO, Felt::ZERO])
+        Self([
+            CurvePrecompile::id(),
+            Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
+            Felt::from(group_ptr),
+            Felt::ZERO,
+        ])
     }
 }

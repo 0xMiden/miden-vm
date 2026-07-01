@@ -33,7 +33,7 @@ sig_ptr[8..16]     = s, little-endian u32 limbs
 
 The verifier traps on malformed limbs, non-canonical scalars, invalid/off-curve public keys, `r = 0`, or a failed ECDSA equation. `s = 0` is rejected by the existing `k1_scalar::inv(s)` path rather than a separate zero check. Because secp256k1 has cofactor 1, the verifier assumes the curve-membership check is sufficient and does not perform a separate subgroup check.
 
-`assert_verify_prehash` registers `[u1]G + [u2]Q` as one two-pair curve MSM over scalar/point digest pairs.
+`assert_verify_prehash` registers `[u1]G + [u2]Q` as one two-pair curve MSM over point/scalar digest pairs.
 
 
 ## Crate features

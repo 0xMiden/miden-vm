@@ -42,10 +42,11 @@
 //!
 //! ## Ptr discipline
 //!
-//! Groups and points are **separate ptr namespaces**, each
-//! allocator-assigned and consecutive (no caller-fixed addresses,
-//! unlike the uint store), so injectivity is the chain `ptr' = ptr + 1`
-//! gated to the active prefix — no gap column, no `Range16`. `act` is
+//! Groups and points are **separate ptr namespaces**. Group rows are
+//! dense and consecutive, with VM-owned fixed slots preseeded for known
+//! short-Weierstrass curves (K1 at row 1, R1 at row 2); later groups and
+//! points are allocator-assigned. Injectivity is the chain `ptr' = ptr +
+//! 1` gated to the active prefix — no gap column, no `Range16`. `act` is
 //! monotone (pads only at the tail) and all-zero pad rows touch no bus.
 
 pub mod add;

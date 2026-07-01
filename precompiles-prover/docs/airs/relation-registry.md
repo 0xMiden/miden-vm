@@ -237,7 +237,8 @@ MAC `κ_a·a·b + κ_c·c ≡ r (mod p)`.
 
 `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — a
 short-Weierstrass group's curve context (params + base-field modulus +
-scalar-field modulus; the latter equals `bound_ptr` until constrained).
+scalar-field modulus; VM-owned fixed groups carry their canonical scalar
+bound, ad-hoc groups equal `bound_ptr` until constrained).
 
 - **Provider** — [EcGroups](ec-groups.md): one per group row.
 - **Consumers** — [EcPointStore](ec-points.md) (binds a point's curve),

@@ -23,20 +23,23 @@ use miden::precompiles::math::{{BASE_FIELD_MODULE}}
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.
-# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE_OP_ID, CURVE_ID, 0].
+# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE_OP_ID, A_PTR, B_PTR].
 # - OP_TAG(op_id) = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/EQ.
-# - MSM_TAG       = one word [PRECOMPILE_ID, MSM_OP_ID, CURVE_ID, 1].
+# - MSM_TAG       = one word [PRECOMPILE_ID, MSM_OP_ID, GROUP_PTR, 0].
 # - POINT_VALUE   = `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]` under VALUE_TAG.
 
 const PRECOMPILE_ID = {{PRECOMPILE_ID}}
-const CURVE_ID = {{CURVE_ID}}
+const A_PTR = {{A_PTR}}
+const B_PTR = {{B_PTR}}
+const GROUP_PTR = {{GROUP_PTR}}
 const VALUE_OP_ID = {{VALUE_OP_ID}}
 const ADD_OP_ID = {{ADD_OP_ID}}
 const SUB_OP_ID = {{SUB_OP_ID}}
 const EQ_OP_ID = {{EQ_OP_ID}}
 const MSM_OP_ID = {{MSM_OP_ID}}
 
-# VALUE/MSM tags carry CURVE_ID. ADD/SUB/EQ tags are [PRECOMPILE_ID, op_id, 0, 0].
+# VALUE tags carry coefficient pointers. MSM tags carry GROUP_PTR.
+# ADD/SUB/EQ tags are [PRECOMPILE_ID, op_id, 0, 0].
 const VALUE_TAG = {{VALUE_TAG}}
 const ADD_TAG = {{ADD_TAG}}
 const SUB_TAG = {{SUB_TAG}}
@@ -157,10 +160,8 @@ end
 #! Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
 pub proc mul_scalar
-    swapw
-    # => [SCALAR_DIGEST, POINT_DIGEST, ...]
     push.MSM_TAG
-    # => [TAG(MSM n=1), SCALAR_DIGEST, POINT_DIGEST, ...]
+    # => [TAG(MSM), POINT_DIGEST, SCALAR_DIGEST, ...]
     exec.precompiles::register_expr
     # => [PRODUCT_POINT_DIGEST, ...]
 end
@@ -178,20 +179,19 @@ end
 #! Registers an MSM PairList staged in memory.
 #! Input:  [ptr, n, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
-#! Memory layout: pair i at ptr + 8*i is `[SCALAR_DIGEST, POINT_DIGEST]`.
+#! Memory layout: pair i at ptr + 8*i is `[POINT_DIGEST, SCALAR_DIGEST]`.
 pub proc msm_mem
-    dup.1
-    # => [n, ptr, n, ...]
-    push.CURVE_ID
+    push.0
+    push.GROUP_PTR
     push.MSM_OP_ID
     push.PRECOMPILE_ID
-    # => [TAG(MSM n), ptr, n, ...]
+    # => [TAG(MSM), ptr, n, ...]
     exec.precompiles::register_mem
     # => [MSM_POINT_DIGEST, ...]
 end
 
 #! Registers a two-pair MSM from stack operands.
-#! Input:  [SCALAR0_DIGEST, POINT0_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]
+#! Input:  [POINT0_DIGEST, SCALAR0_DIGEST, POINT1_DIGEST, SCALAR1_DIGEST, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
 @locals(16)
 pub proc msm2
@@ -211,8 +211,8 @@ end
 pub proc msm2_generator
     push.GENERATOR_DIGEST
     # => [GENERATOR_DIGEST, SCALAR0_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]
-    swapw
-    # => [SCALAR0_DIGEST, GENERATOR_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]
+    movupw.3 movdnw.2
+    # => [GENERATOR_DIGEST, SCALAR0_DIGEST, POINT1_DIGEST, SCALAR1_DIGEST, ...]
     exec.msm2
     # => [MSM_POINT_DIGEST, ...]
 end

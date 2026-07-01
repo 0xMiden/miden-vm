@@ -64,7 +64,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_precompiles::UintPrecompile;
+use miden_precompiles::{CurvePrecompile, UintPrecompile};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -80,7 +80,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        nodes::{EcOpId, NodeTag, UintOpId},
+        nodes::UintOpId,
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
@@ -152,14 +152,14 @@ pub const COL_IS_UINT_LEAF: usize = COL_IS_AND + 1;
 /// gates the `UintAdd`/`UintMul` wiring and, id-weighted against the op
 /// flags, materializes the cap's `param_a`.
 pub const COL_IS_UINT_OP: usize = COL_IS_UINT_LEAF + 1;
-/// EcCreate flag (tag 5, finite) — hashes two uint coords `(x, y)` into a
-/// curve point.
+/// EcCreate flag (finite) — hashes two uint coords `(x, y)` into a curve
+/// point under the VM curve VALUE cap.
 pub const COL_IS_EC_CREATE: usize = COL_IS_UINT_OP + 1;
-/// EcCreate/PAI flag (tag 5, the ∞ mode) — binds the group's
-/// point-at-infinity (no coord children). A distinct family bit from
-/// finite create so the `EcPoint` consume's `is_pai` field is degree-1.
+/// EcCreate/PAI flag (the ∞ mode) — binds the group's point-at-infinity
+/// (no coord children). A distinct family bit from finite create so the
+/// `EcPoint` consume's `is_pai` field is degree-1.
 pub const COL_IS_EC_PAI: usize = COL_IS_EC_CREATE + 1;
-/// EcBinOp family flag (tag 6) — set on every EC binary node (add/sub/is).
+/// EcBinOp family flag — set on every EC binary node (add/sub/is).
 /// Like the uint-op bit it gates the `EcGroupAdd` wiring while the op rides
 /// the shared one-hot below; the two op families are mutually exclusive, so
 /// those flags are shared.
@@ -200,27 +200,30 @@ pub const COL_PTR: usize = COL_IS_PINNED + 1;
 /// The uint's modulus pointer — carried on every `Uint`-typed bus message
 /// (uint-leaf and uint-op rows; 0 otherwise). VM uint value caps also commit it in cap slot 2.
 pub const COL_BOUND_PTR: usize = COL_PTR + 1;
-/// Physical column for the row-kind-aware uint cap slot 2.
+/// Physical column for row-kind-aware cap slot 2.
 pub const COL_PIN_PTR: usize = COL_BOUND_PTR + 1;
-/// Semantic alias for [`COL_PIN_PTR`]. VM uint value rows put `bound_ptr` here;
-/// bootstrap pin rows put `pin_ptr = ptr` here.
+/// Semantic alias for [`COL_PIN_PTR`]. VM uint value rows put `bound_ptr` here,
+/// bootstrap pin rows put `pin_ptr = ptr`.
 pub const COL_CAP_PARAM_B: usize = COL_PIN_PTR;
+/// Semantic alias for [`COL_PIN_PTR`] on EcCreate rows: curve coefficient `a`'s
+/// uint-store pointer, i.e. cap slot 2 of the VM curve VALUE tag.
+pub const COL_CURVE_A: usize = COL_PIN_PTR;
 /// The lhs operand ptr — uint-op / ec-op lhs, or the x-coord on EcCreate
 /// (0 elsewhere). On `Is` rows `b_ptr = a_ptr` *is* the equality.
 pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
 /// The rhs operand ptr — binary ops' rhs, or the y-coord on EcCreate
 /// (0 on non-op rows).
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
-/// The cap's `param_a` slot, materialized to keep the cap degree-1:
-/// `bound_ptr` on bootstrap pin rows, the op id on op rows, the curve's `a_ptr`
-/// on EcCreate, 0 elsewhere. VM uint value rows use `VALUE_OP_ID = 0`.
+/// Row-kind-aware cap slot 1: `bound_ptr` on bootstrap pin rows, the op id
+/// on op rows, and 0 elsewhere. VM uint value and EcCreate rows use
+/// `VALUE_OP_ID = 0`.
 pub const COL_PARAM_A: usize = COL_B_PTR + 1;
 /// Witnessed EC-store group handle, fed to the `EcGroup` / `EcPoint` /
 /// `EcGroupAdd` consumes and pinned by their provides. Nonzero only on
 /// Ec-create / pai / op rows.
 pub const COL_GROUP_PTR: usize = COL_PARAM_A + 1;
-/// Cap slot 2 (`param_b`) on an EcCreate row = the curve's `b_ptr`;
-/// 0 elsewhere. Free on create (the `EcGroup` consume pins it).
+/// Cap slot 3 on EcCreate rows = the curve's `b_ptr`; 0 elsewhere. Free on
+/// create (the `EcGroup` consume pins it).
 pub const COL_CURVE_B: usize = COL_GROUP_PTR + 1;
 
 // ================================================================
@@ -256,8 +259,9 @@ pub const COL_MSM_IDX: usize = COL_IS_MSM_LAST + 1;
 /// value to — see the run-constancy constraints below.
 pub const COL_MSM_EXPR: usize = COL_MSM_IDX + 1;
 /// First felt of the threaded capacity `stateᵢ` fed to this absorb's
-/// perm. The first row's = the IV `(EcMsm, group_ptr, 0, 0)`; each
-/// later row's = the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
+/// perm. The first row's = the VM curve MSM IV
+/// `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]`; each later row's =
+/// the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
 /// only cross-row hash link. Pinned 0 off absorb rows; the Poseidon2 cap
 /// lookup for EcMsm rows is supplied by the dynamic-cap aux column.
 pub const COL_ABSORB_CAP_BEGIN: usize = COL_MSM_EXPR + 1;
@@ -295,7 +299,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// Five aux columns:
+// Nine aux columns:
 //
 // - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND rows), provide `h` as `True`
 //   (AND / zero / `Is` rows) + `Range16(out_mult)` (1 fraction, ungated).
@@ -504,10 +508,14 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         );
         // Materialize cap slot 2 without a deg-2 Poseidon2 cap component:
         // VM uint value rows use `bound_ptr`; bootstrap pin rows use `ptr`.
+        // EcCreate rows reuse this physical cell as `COL_CURVE_A`, pinned by
+        // the `EcGroup` consume below.
         let cap_param_b: AB::Expr = local[COL_CAP_PARAM_B].into();
         let expected_cap_param_b =
             is_uint_leaf * bound_ptr.clone() + is_pinned.clone() * (ptr - bound_ptr.clone());
-        builder.assert_zero(cap_param_b - expected_cap_param_b);
+        builder.assert_zero(
+            (AB::Expr::ONE - is_create.clone()) * (cap_param_b.clone() - expected_cap_param_b),
+        );
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
         // Ec create. On `Is` (either family) b_ptr = a_ptr *is* the equality.
@@ -525,24 +533,26 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
 
         // Materialize cap slot 1: bootstrap pin rows use `bound_ptr`, VM uint
-        // value rows use `VALUE_OP_ID = 0`, and op rows use their family op id.
+        // and EcCreate rows use `VALUE_OP_ID = 0`, and op rows use their
+        // family op id.
         let param_a: AB::Expr = local[COL_PARAM_A].into();
         let uint_op_id: AB::Expr = is_add.clone()
             + is_sub.clone() * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
             + is_mul * AB::Expr::from(Felt::from(UintOpId::Mul as u8))
             + is_is.clone() * AB::Expr::from(Felt::from(UintOpId::Is as u8));
         let ec_op_id: AB::Expr = is_add
-            + is_sub * AB::Expr::from(Felt::from(EcOpId::Sub as u8))
-            + is_is.clone() * AB::Expr::from(Felt::from(EcOpId::Is as u8));
+            * AB::Expr::from(Felt::from_u32(CurvePrecompile::ADD_OP_ID as u32))
+            + is_sub * AB::Expr::from(Felt::from_u32(CurvePrecompile::SUB_OP_ID as u32))
+            + is_is.clone() * AB::Expr::from(Felt::from_u32(CurvePrecompile::EQ_OP_ID as u32));
         let tag_param =
             is_pinned * bound_ptr + is_uint_op * uint_op_id + is_ec_op.clone() * ec_op_id;
-        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * (param_a - tag_param));
+        builder.assert_zero(param_a - tag_param);
 
-        // group_ptr: the witnessed EC-store handle, nonzero only on Ec
-        // create / pai and the result-binding ec ops (add/sub, not Is) — the
+        // group_ptr: the witnessed EC-store handle, nonzero only on EcCreate
+        // / PAI and the result-binding ec ops (add/sub, not Is) — the
         // EcGroup / EcPoint / EcGroupAdd consumes read it; pinned by those
         // provides, never a binding / hash entity.
-        // group_ptr also carries the EcMsm group (the IV's param_a and the
+        // group_ptr also carries the EcMsm group (the IV's third slot and the
         // boundary's MsmExpr / Group binding) on every absorb row.
         builder.assert_zero(
             (AB::Expr::ONE
@@ -551,8 +561,8 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
                 - is_ec_msm.clone())
                 * group_ptr.clone(),
         );
-        // curve_b (cap slot 2 on both create modes = the curve's b_ptr):
-        // zero off create rows (free there — the EcGroup consume pins it).
+        // curve_b (EcCreate cap slot 3 = the curve's b_ptr): zero off create
+        // rows (free there — the EcGroup consume pins it).
         // On absorb rows curve_b = 0 too (is_create = 0); their Poseidon2 cap
         // is supplied separately from `absorb_cap`.
         builder.assert_zero((AB::Expr::ONE - is_create.clone()) * curve_b);
@@ -584,12 +594,13 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let continues = is_ec_msm.clone() * (AB::Expr::ONE - is_msm_last.clone());
         // The next row *starts* a run iff it is an absorb and this row is not
         // a continuation source (non-absorb, or the prior run's last). Then
-        // its cap = the IV `(EcMsm, group_next, 0, 0)`.
+        // its cap = the VM curve MSM IV
+        // `[CurvePrecompile::id(), MSM_OP_ID, group_next, 0]`.
         let starts = is_ec_msm_next * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last);
         let iv: [AB::Expr; NUM_HASH] = [
-            AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
+            AB::Expr::from(CurvePrecompile::id()),
+            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
             group_next,
-            AB::Expr::ZERO,
             AB::Expr::ZERO,
         ];
         for i in 0..NUM_HASH {
@@ -603,11 +614,12 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // Row 0 can itself be an MSM run start — the `starts` transition never
         // fires *into* row 0 — so its IV is pinned here. Without this the
         // row-0 `absorb_cap` is a free capacity IV, leaving the
-        // `(EcMsm, group_ptr)` domain separator unenforced for a row-0 run.
+        // `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` domain separator
+        // unenforced for a row-0 run.
         let iv_local: [AB::Expr; NUM_HASH] = [
-            AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
+            AB::Expr::from(CurvePrecompile::id()),
+            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
             group_ptr,
-            AB::Expr::ZERO,
             AB::Expr::ZERO,
         ];
         for i in 0..NUM_HASH {
@@ -639,7 +651,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // hash) while binding the node to *another* expression's value — a
         // forged value under a correct hash, which root-comparison cannot
         // catch. Holding `group_ptr` constant likewise keeps the run-start IV
-        // `(EcMsm, group, …)` on the claim's own group.
+        // `[CurvePrecompile::id(), MSM_OP_ID, group, 0]` on the claim's own group.
         let msm_expr: AB::Expr = local[COL_MSM_EXPR].into();
         let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].into();
         let group_local: AB::Expr = local[COL_GROUP_PTR].into();
@@ -750,7 +762,8 @@ where
         // Node-perm capacity, every slot degree-1. Runtime uint values use
         // `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`; uint ops use
         // `[UintPrecompile::id(), op_id, 0, 0]`; bootstrap pins use
-        // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+        // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`; EcCreate rows use
+        // `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`.
         let and_cap = Tag::AND.as_word();
         let static_node = is_and
             + is_uint_leaf.clone()
@@ -758,17 +771,17 @@ where
             + is_create.clone()
             + is_ec_op.clone();
         let uint_precompile_id = LB::Expr::from(UintPrecompile::id());
+        let curve_precompile_id = LB::Expr::from(CurvePrecompile::id());
         let pin_claim_tag =
             LB::Expr::from(Felt::from(crate::transcript::nodes::UINT_PIN_CLAIM_TAG));
         let cap = [
             and_gate.clone() * LB::Expr::from(and_cap[0])
                 + (is_uint_leaf + op_lhs_gate.clone()) * uint_precompile_id.clone()
                 + is_pinned * (pin_claim_tag - uint_precompile_id)
-                + is_create.clone() * LB::Expr::from(Felt::from(NodeTag::EcCreate as u8))
-                + is_ec_op.clone() * LB::Expr::from(Felt::from(NodeTag::EcBinOp as u8)),
+                + (is_create.clone() + is_ec_op.clone()) * curve_precompile_id.clone(),
             and_gate.clone() * LB::Expr::from(and_cap[1]) + param_a,
-            and_gate.clone() * LB::Expr::from(and_cap[2]) + cap_param_b + curve_b,
-            LB::Expr::ZERO,
+            and_gate.clone() * LB::Expr::from(and_cap[2]) + cap_param_b,
+            and_gate.clone() * LB::Expr::from(and_cap[3]) + curve_b,
         ];
 
         // Per-insert mult degrees: the one-hot gates (perm `node`, AND / op
@@ -1047,7 +1060,7 @@ where
         // The scalar-field bound, carried separately from the coord bound so
         // an MSM-exercised group consumes its `EcGroup` under `n`, not `p`.
         let g_sbound: LB::Expr = local[COL_SBOUND_PTR].into();
-        let g_param_a: LB::Expr = local[COL_PARAM_A].into();
+        let g_curve_a: LB::Expr = local[COL_CURVE_A].into();
         let g_curve_b: LB::Expr = local[COL_CURVE_B].into();
         let g_group: LB::Expr = local[COL_GROUP_PTR].into();
         let g_pai: LB::Expr = local[COL_IS_EC_PAI].into();
@@ -1131,7 +1144,7 @@ where
                                     is_create.clone(),
                                     EcGroupMsg {
                                         group_ptr: g_group.clone(),
-                                        a_ptr: g_param_a.clone(),
+                                        a_ptr: g_curve_a.clone(),
                                         b_ptr: g_curve_b.clone(),
                                         bound_ptr: g_bound.clone(),
                                         scalar_bound_ptr: g_sbound.clone(),

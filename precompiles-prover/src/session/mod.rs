@@ -441,8 +441,9 @@ impl Session {
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
         // The eval chip reads each EcCreate row's scalar bound from the EC
-        // store (the curve order `n` for an MSM-exercised group, else the
-        // coord bound) — `&` so the store survives for `ec_store_traces`.
+        // store (VM-owned fixed groups carry their canonical curve order;
+        // ad-hoc groups carry the constrained scalar bound, else the coord
+        // bound) — `&` so the store survives for `ec_store_traces`.
         let eval = eval_trace(self.eval, root, &self.ec.store);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);

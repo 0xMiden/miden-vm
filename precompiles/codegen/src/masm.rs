@@ -4,7 +4,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::num::NonZeroU32;
 use std::{fs, path::Path};
 
 use miden_core::Word;
@@ -238,7 +237,9 @@ fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
         ("BASE_FIELD_MODULE", config.base_field_module.to_string()),
         ("BASE_FIELD_DESCRIPTION", config.base_field_description.to_string()),
         ("PRECOMPILE_ID", CurvePrecompileDescriptor::id().as_canonical_u64().to_string()),
-        ("CURVE_ID", curve.id().as_canonical_u64().to_string()),
+        ("A_PTR", curve.a_ptr().to_string()),
+        ("B_PTR", curve.b_ptr().to_string()),
+        ("GROUP_PTR", curve.group_ptr().to_string()),
         ("VALUE_OP_ID", CurvePrecompileDescriptor::VALUE_OP_ID.to_string()),
         ("ADD_OP_ID", CurvePrecompileDescriptor::ADD_OP_ID.to_string()),
         ("SUB_OP_ID", CurvePrecompileDescriptor::SUB_OP_ID.to_string()),
@@ -248,10 +249,7 @@ fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
         ("ADD_TAG", op_tag(CurvePrecompileDescriptor::ADD_OP_ID)),
         ("SUB_TAG", op_tag(CurvePrecompileDescriptor::SUB_OP_ID)),
         ("EQ_TAG", op_tag(CurvePrecompileDescriptor::EQ_OP_ID)),
-        (
-            "MSM_TAG",
-            word_literal(tag_word(CurvePrecompileDescriptor::msm_tag(curve, NonZeroU32::MIN))),
-        ),
+        ("MSM_TAG", word_literal(tag_word(CurvePrecompileDescriptor::msm_tag(curve)))),
         (
             "IDENTITY_DIGEST",
             word_literal(digest_word(CurvePrecompileDescriptor::identity_node(curve).digest())),

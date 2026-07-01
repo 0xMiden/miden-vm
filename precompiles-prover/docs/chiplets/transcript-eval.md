@@ -54,17 +54,17 @@ the uint / EC op rows.
 | 26 | `is_pinned` | uint leaf row is a bootstrap pin claim (binds `True`) vs runtime transient (binds `Uint`) |
 | 27 | `ptr` | the binding's value ptr: stored uint / witnessed op result / created-or-result point / EcMsm value point; `0` on `Is` |
 | 28 | `bound_ptr` | the modulus ptr threaded through every Uint-typed message of the row; scalar bound on EcMsm absorb rows; `0` else |
-| 29 | `cap_param_b` | row-kind-aware cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on bootstrap pin rows, `0` on uint op rows |
+| 29 | `cap_param_b` / `curve_a` | row-kind-aware cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on bootstrap pin rows, curve `a_ptr` on EC create rows, `0` on uint op rows |
 | 30 | `a_ptr` | lhs operand ptr, EC x-coordinate ptr, or EcMsm base ptr; `0` else |
 | 31 | `b_ptr` | rhs operand ptr, EC y-coordinate ptr, or EcMsm scalar ptr; `= a_ptr` on `Is`; `0` else |
-| 32 | `param_a` | cap slot 1, materialized: `bound_ptr` on bootstrap pin rows, `0` on VM uint value rows, op id on op rows, curve `a_ptr` on EC create |
-| 33 | `group_ptr` | witnessed EC-store group handle on EC create / value-producing EC ops / EcMsm rows; `0` else |
-| 34 | `curve_b` | cap slot 2 on EC-create rows = curve `b_ptr`; `0` else |
+| 32 | `param_a` | cap slot 1, materialized: `bound_ptr` on bootstrap pin rows, `0` on VM uint value and EC create rows, op id on op rows |
+| 33 | `group_ptr` | witnessed EC-store group handle on EC create / value-producing EC ops / EcMsm rows; VM-owned for fixed curves (K1 = 1, R1 = 2); `0` else |
+| 34 | `curve_b` | cap slot 3 on EC-create rows = curve `b_ptr`; `0` else |
 | 35 | `is_ec_msm` | EcMsm family flag, set on every absorb row |
 | 36 | `is_msm_last` | EcMsm boundary flag, set on the run's final absorb row |
 | 37 | `msm_idx` | EcMsm absorb position counter |
 | 38 | `msm_expr` | EcMsm claim expression ptr |
-| 39–42 | `absorb_cap[4]` | threaded EcMsm capacity state |
+| 39–42 | `absorb_cap[4]` | threaded EcMsm capacity state; first row uses VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` |
 | 43 | `sbound_ptr` | scalar-field modulus ptr for EC-create / PAI rows |
 
 Public values: `root_hash[0..4]` — just the transcript root
@@ -112,8 +112,9 @@ the EC relation consumes; col 7 = the EcMsm dynamic Poseidon2 cap; col 8
   chiplets + store; the row is pure ptr wiring, and the result ptr is a
   nondeterministic witness on the binding, never in the hash.
 - **EC op** (one op flag set under `is_ec_op`): unhash point child
-  hashes `lhs||rhs` → `h` under the `(EcBinOp, op_id, 0, 0)` cap;
-  consume `Binding(lhs, Group, p_ptr)` and `Binding(rhs, Group, q_ptr)`.
+  hashes `lhs||rhs` → `h` under the VM curve op cap
+  `[CurvePrecompile::id(), op_id, 0, 0]`; consume
+  `Binding(lhs, Group, p_ptr)` and `Binding(rhs, Group, q_ptr)`.
   `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub` consumes the
   rearranged `EcGroupAdd(group, r, q, p)`, and both provide
   `Binding(h, Group, r_ptr)`. `Is` carries `q_ptr = p_ptr`, consumes no
@@ -143,10 +144,11 @@ which forces `root_hash = 0`.
   `ptr` to leaf + value-op + create / EcMsm-boundary rows, `bound_ptr`
   to leaf + uint-op + create / EcMsm rows, `a_ptr` / `b_ptr` to op /
   create / EcMsm rows; `is_is·(b_ptr − a_ptr) = 0` (the `Is` equality).
-- the materialized cap slots: `pin_ptr = is_pinned·ptr` (two deg-2
-  constraints) and `param_a` = `bound_ptr` on uint leaf rows / the
-  family-gated op id on op rows / curve `a_ptr` on EC-create rows / `0`
-  elsewhere.
+- the materialized cap slots: `cap_param_b` = `bound_ptr` on VM uint value
+  rows / `pin_ptr = ptr` on bootstrap pin rows; the same cell is read via the
+  `curve_a` alias on EC-create rows. `param_a` = `bound_ptr` on bootstrap pin
+  rows / the family-gated VM uint or curve op id on op rows / `0` elsewhere,
+  and `curve_b` = curve `b_ptr` on EC-create rows / `0` elsewhere.
 
 ## Bus balance
 
@@ -169,7 +171,7 @@ valid assertions" reduces to bus σ = 0 plus the first-row pin.
 The deg-2 `−out_mult` provides top cols 0 / 2 / 5 / 8 at constraint
 deg 5 (col 1 at 4, cols 3 / 4 / 6 lower, col 7 trivial); the uniform
 one-hot keeps every bus mult ≤ deg-2, and the materialized cap-slot columns
-(`cap_param_b` / `param_a`) keep one-shot caps deg-1. So
+(`cap_param_b` / `param_a` / `curve_b`) keep one-shot caps deg-1. So
 `log_quotient_degree = 2` (`tests::uint_dag::eval_chip_stays_at_lqd_2` pins it).
 
 ## Construction

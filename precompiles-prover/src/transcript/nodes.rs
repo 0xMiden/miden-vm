@@ -19,10 +19,10 @@
 //! | 2      | `UintLeaf`         | reserved                                   |
 //! | 3      | `UintPinClaim`     | bootstrap uint pin claim                   |
 //! | 4      | `UintOp`           | reserved                                   |
-//! | 5      | `EcCreate`         | curve-point construction                  |
-//! | 6      | `EcBinOp`          | group add / sub / is                      |
+//! | 5      | `EcCreate`         | reserved; curve VALUE now uses VM tag      |
+//! | 6      | `EcBinOp`          | reserved; curve ops now use VM tags        |
 //! | 7      | `Keccak`           | `keccak(chunks) == digest` relation        |
-//! | 8      | `EcMsm`            | multi-scalar-mul claim (absorb-run sponge) |
+//! | 8      | `EcMsm`            | reserved; curve MSM now uses VM tag        |
 
 /// Capacity tag for bootstrap uint pin claims.
 ///
@@ -43,14 +43,12 @@ pub enum NodeTag {
     EcCreate = 5,
     EcBinOp = 6,
     Keccak = 7,
-    /// Multi-scalar-multiplication claim `R = Σ sᵢ·Pᵢ`, hashed as a
-    /// chaining sponge over the term sequence `(Pᵢ.hash, sᵢ.hash)` — a
-    /// **variable-length** run of absorb rows in the eval chip (every
-    /// other node is one row). Capacity-threaded by row adjacency
-    /// (`capᵢ = stateᵢ₋₁`); the first absorb's cap is the IV
-    /// `(EcMsm, group_ptr, 0, 0)`, which domain-separates MSM hashes
-    /// from every one-shot cap. The node *is* its value point
-    /// (binds `Group`); see `docs/chiplets/ec-msm.md §6.2`.
+    /// Reserved local tag id for the multi-scalar-multiplication claim shape.
+    /// Current curve MSM transcript caps use the VM curve MSM tag
+    /// `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]`; the eval chip still
+    /// lays MSM as a capacity-threaded variable-length run where
+    /// `capᵢ = stateᵢ₋₁`. The node *is* its value point (binds `Group`); see
+    /// `docs/chiplets/ec-msm.md §6.2`.
     EcMsm = 8,
 }
 
@@ -77,12 +75,12 @@ pub enum UintOpId {
     Is = 4,
 }
 
-/// Operation discriminant of a [`NodeTag::EcBinOp`] node.
+/// Operation discriminant of a curve binary-op node.
 ///
-/// The cap is `(EcBinOp, op_id, 0, 0)`. The preimage rate is
+/// The VM cap is `[CurvePrecompile::id(), op_id, 0, 0]`. The preimage rate is
 /// `lhs_hash ‖ rhs_hash` over two `Group` children; the result point rides
 /// the node's `Binding` as a nondeterministic ptr. The curve threads from
-/// the operands' [`NodeTag::EcCreate`] caps.
+/// the operands' curve VALUE caps.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
 /// |---|---|---|
