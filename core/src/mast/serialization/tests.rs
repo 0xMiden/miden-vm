@@ -836,9 +836,8 @@ fn write_sparse_test_payload(
     assert_eq!(full_ids.len(), full_digests.len());
 
     let mut bytes = Vec::new();
-    bytes.write_bytes(MAGIC);
-    bytes.write_u8(FLAG_HASHLESS | FLAG_SPARSE);
-    bytes.write_bytes(&VERSION);
+    bytes.write_bytes(b"SMST");
+    bytes.write_bytes(&[0, 0, 0]);
 
     bytes.write_usize(roots.len());
     bytes.write_usize(source_node_count);
@@ -1046,19 +1045,19 @@ fn dense_mast_readers_reject_sparse_payloads() {
     let materialized = MastForest::read_from_bytes(&bytes);
     assert_matches!(
         materialized,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("SPARSE flag is set")
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Invalid magic bytes")
     );
 
     let wire_view = MastForestWireView::new(&bytes);
     assert_matches!(
         wire_view,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("SPARSE flag is set")
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Invalid magic bytes")
     );
 
     let untrusted = UntrustedMastForest::read_from_bytes(&bytes);
     assert_matches!(
         untrusted,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("SPARSE flag is set")
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Invalid magic bytes")
     );
 }
 
@@ -1073,7 +1072,7 @@ fn sparse_reader_rejects_dense_payloads() {
     let result = SparseMastForest::read_from_bytes(&forest.to_bytes());
     assert_matches!(
         result,
-        Err(DeserializationError::InvalidValue(msg)) if msg.contains("SPARSE flag is not set")
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Invalid sparse MAST magic bytes")
     );
 }
 
@@ -1588,7 +1587,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 5], "Version should be [0, 0, 5]");
+    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
 }
 
 fn read_header_counts(bytes: &[u8]) -> (usize, usize) {

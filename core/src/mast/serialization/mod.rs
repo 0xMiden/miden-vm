@@ -76,14 +76,13 @@
 //! same contiguous array on the wire.
 //!
 //! Public entry points adopt these policies:
-//! - [`MastForest::read_from_bytes`]: trusted dense execution payload, no hashless or sparse
-//!   support.
+//! - [`MastForest::read_from_bytes`]: trusted dense execution payload, no hashless support.
 //! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless and legacy
-//!   debug-bearing payloads, and rejects sparse payloads.
+//!   debug-bearing payloads.
 //! - [`crate::mast::SparseMastForest::read_from_bytes`] /
-//!   [`crate::mast::SparseMastForest::read_from_bytes_with_options`]: trusted sparse replay
-//!   payloads for serialized trace-generation inputs. Sparse payloads currently carry full-node
-//!   digests and do not recompute them on read.
+//!   [`crate::mast::SparseMastForest::read_from_bytes_with_options`]: separate trusted sparse
+//!   replay payloads for serialized trace-generation inputs. Sparse payloads currently carry
+//!   full-node digests and do not recompute them on read.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
@@ -179,16 +178,10 @@ const MAGIC: &[u8; 4] = b"MAST";
 /// from local structure.
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
-/// Flag indicating that the payload uses sparse MAST replay serialization.
-///
-/// Sparse payloads preserve the source forest's [`MastNodeId`] space and therefore cannot be read
-/// through dense [`MastForest`] entry points.
-pub(super) const FLAG_SPARSE: u8 = 0x04;
-
 /// Mask for reserved flag bits that must be zero.
 ///
-/// Bit 0 and bits 3-7 are reserved for future use. If any are set, deserialization fails.
-const FLAGS_RESERVED_MASK: u8 = 0xf9;
+/// Bit 0 and bits 2-7 are reserved for future use. If any are set, deserialization fails.
+const FLAGS_RESERVED_MASK: u8 = 0xfd;
 
 /// The format version.
 ///
@@ -215,15 +208,13 @@ const FLAGS_RESERVED_MASK: u8 = 0xf9;
 ///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
 ///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
 ///   debug-presence flag.
-/// - [0, 0, 5]: Added SPARSE flag (bit 2). Sparse payloads preserve sparse replay IDs and are
-///   accepted only by SparseMastForest readers.
 ///
 /// Legacy wire versions (pre-#3192 decorator terminology):
 ///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
 ///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
 ///   [0,0,3] removed the unused decorator-count wire field.
 ///   [0,0,4] eliminated the decorator wire slots entirely.
-const VERSION: [u8; 3] = [0, 0, 5];
+const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
