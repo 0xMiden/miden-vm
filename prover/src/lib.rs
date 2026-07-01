@@ -134,7 +134,7 @@ fn prove_execution_trace(
     let hash_fn = options.hash_fn();
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
-    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+    let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
     let (core_matrix, chiplets_matrix) = {
         let _span = tracing::info_span!("to_core_chiplets_matrices").entered();
@@ -145,23 +145,23 @@ fn prove_execution_trace(
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
         },
     }?;
 
@@ -174,15 +174,15 @@ fn prove_execution_trace(
 
 /// Generates a multi-AIR STARK proof for the (Core, Chiplets) trace pair and public values.
 ///
-/// Pre-seeds the challenger with the protocol parameters, public values, and the
-/// concatenated kernel-procedure digests (the only variable-length public input today,
-/// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR prover.
+/// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
+/// statement `aux_inputs` (program hash, transcript state, and the concatenated kernel-procedure
+/// digests). Then delegates to the lifted multi-AIR prover.
 pub fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
     chiplets_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
-    kernel_felts: &[Felt],
+    aux_inputs: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -191,11 +191,12 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    // `air_inputs` are the fixed public values; `aux_inputs` are the kernel-procedure
-    // digests (the only variable-length public input today). The lifted prover absorbs
-    // both into Fiat-Shamir internally, along with the per-AIR trace heights.
+    // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
+    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
+    // digests). The lifted prover absorbs both into Fiat-Shamir internally, along with the per-AIR
+    // trace heights.
     let statement =
-        Statement::new(MidenMultiAir::new(), public_values.to_vec(), kernel_felts.to_vec())
+        Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let prover_statement = ProverStatement::new(statement, vec![core_trace, chiplets_trace])
         .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;

@@ -38,18 +38,13 @@ pub enum LayoutKind {
 pub struct AceConfig {
     /// Number of quotient chunks used by the AIR.
     pub num_quotient_chunks: usize,
-    /// Number of variable-length public input groups.
-    /// Each group produces one reduced extension field element.
-    /// The layout policy handles alignment (e.g., MASM word-aligns each group to
-    /// 2 EF slots; Native uses 1 EF slot per group).
-    pub num_vlpi_groups: usize,
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
-    /// Whether this circuit is a multi-AIR combined circuit. When `true`, the
-    /// stark-vars region reserves additional EF slots for the multi-AIR β
-    /// coefficients (one per AIR) and per-AIR lifted selector triples (one per
-    /// AIR). Default: `false` (single-AIR layout).
-    pub is_multi_air: bool,
+    /// Number of AIRs the circuit is built over. With `1` the layout is the plain
+    /// single-AIR layout; with `num_airs >= 2` the stark-vars region reserves
+    /// additional EF slots for the per-AIR multi-AIR β coefficients (one per AIR)
+    /// and lifted selector triples (one per AIR).
+    pub num_airs: usize,
 }
 
 /// Output of the ACE codegen pipeline (layout + DAG).
@@ -93,11 +88,11 @@ where
 {
     let periodic_columns = air.periodic_columns();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
-    let layout = match (config.layout, config.is_multi_air) {
+    let layout = match (config.layout, config.num_airs >= 2) {
         (LayoutKind::Native, false) => InputLayout::new(counts),
         (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
-        (LayoutKind::Native, true) => InputLayout::new_multi_air(counts),
-        (LayoutKind::Masm, true) => InputLayout::new_masm_multi_air(counts),
+        (LayoutKind::Native, true) => InputLayout::new_multi_air(counts, config.num_airs),
+        (LayoutKind::Masm, true) => InputLayout::new_masm_multi_air(counts, config.num_airs),
     };
     layout.validate();
 
@@ -147,20 +142,11 @@ where
         "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
     );
 
-    // Convert logical VLPI groups to EF slots based on layout policy.
-    // MASM word-aligns each group (4 base felts = 2 EF slots per group).
-    // Native uses 1 EF slot per group (no padding).
-    let num_vlpi = match config.layout {
-        LayoutKind::Masm => config.num_vlpi_groups * 2,
-        LayoutKind::Native => config.num_vlpi_groups,
-    };
-
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),
         num_public: air.num_public_values(),
-        num_vlpi,
         num_randomness,
         num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,

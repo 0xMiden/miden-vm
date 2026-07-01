@@ -67,7 +67,6 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
-    assert!(!get(InputKey::Gamma).is_zero(), "gamma is zero");
 
     // Vanishing polynomial
     assert!(
@@ -101,9 +100,8 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
+        num_airs: 2,
     };
 
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ace circuit");
