@@ -203,7 +203,7 @@ where
         // - 8: DYN            -  9: HORNERBASE
         // - 10: HORNEREXT      - 11: PUSH
         // - 12: DYNCALL        - 13: EVALCIRCUIT
-        // - 14: LOGPRECOMPILE  - 15: (unused)
+        // - 14: LOGDEFERRED  - 15: (unused)
         let degree5_extra: E = decoder.extra[0].into();
         let degree5_op_flags: [E; NUM_DEGREE_5_OPS] =
             array::from_fn(|i| degree5_extra.clone() * b3210[i].clone());
@@ -399,8 +399,8 @@ where
             = op7(opcodes::SWAPW2)
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
-            // +LOGPRECOMPILE — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
-            + op5(opcodes::LOGPRECOMPILE)
+            // +LOGDEFERRED — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
+            + op5(opcodes::LOGDEFERRED)
             // -MSTREAM/PIPE  - s12 is incremented by these ops.
             - stream_word_ops.clone()
             // -SWAPW3         - s12..s15 are SWAPW3's target word.
@@ -961,9 +961,9 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of EVALCIRCUIT operation.
         #[expect(dead_code)]
         evalcircuit => opcodes::EVALCIRCUIT,
-        /// Operation Flag of LOG_PRECOMPILE operation.
+        /// Operation Flag of LOG_DEFERRED operation.
         #[expect(dead_code)]
-        log_precompile => opcodes::LOGPRECOMPILE,
+        log_deferred => opcodes::LOGDEFERRED,
         /// Operation Flag of HORNERBASE operation.
         hornerbase => opcodes::HORNERBASE,
         /// Operation Flag of HORNEREXT operation.

@@ -16,6 +16,7 @@ use crate::{
     fast::{BreakReason, FastProcessor},
 };
 
+mod deferred_handlers;
 mod sys_event_handlers;
 pub use sys_event_handlers::SystemEventError;
 use sys_event_handlers::handle_system_event;

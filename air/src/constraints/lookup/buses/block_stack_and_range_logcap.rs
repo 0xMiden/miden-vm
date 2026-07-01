@@ -2,7 +2,7 @@
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 range-check removes: gated by u32 opcodes.
-//! - Log-precompile transcript-state: gated by the log precompile opcode.
+//! - Log-deferred transcript-state: gated by the log deferred opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
 //! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
@@ -18,7 +18,7 @@
 //!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
 //!     batch (7 branches, mutually exclusive via decoder opcode flags).
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
-//!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
+//!   - Log-deferred transcript-state batch: 1 remove + 1 add gated by `log_deferred`.
 //! - **Sibling group** (always on):
 //!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
 //!     it fires on every row. Lives in its own group because it overlaps (row-wise) with every
@@ -33,7 +33,7 @@
 //! - Block-stack: {JOIN, SPLIT, SPAN, DYN, LOOP, DYNCALL, CALL, SYSCALL, END, RESPAN}
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
 //!   U32MADD, …} — prefix_100 in the opcode encoding.
-//! - LOGPRECOMPILE: {LOGPRECOMPILE} — a single opcode.
+//! - LOGDEFERRED: {LOGDEFERRED} — a single opcode.
 //!
 //! No row can fire two of these simultaneously. The END-simple / END-call/syscall split
 //! inside block-stack is mutually exclusive via the `is_call + is_syscall ≤ 1` end-flag
@@ -53,7 +53,7 @@
 //! | END call/syscall remove (Full msg) | 5 | Full, denom 1 | 6 | 5 |
 //! | RESPAN batch (k=2, f=respan deg 4) | — | Simple | 6 | 5 |
 //! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | logpre batch (k=2, f=log_precompile deg 5) | — | LogPrecompile, denom 1 | **7** | **6** |
+//! | logpre batch (k=2, f=log_deferred deg 5) | — | LogDeferred, denom 1 | **7** | **6** |
 //!
 //! Main group max: `U_g = 7, V_g = 6`.
 //!
@@ -73,10 +73,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{BlockStackMsg, LogPrecompileMsg, RangeMsg},
+        messages::{BlockStackMsg, LogDeferredMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::log_precompile::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
+    trace::log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -138,12 +138,12 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
-    let f_log_precompile = op_flags.log_precompile();
+    let f_log_deferred = op_flags.log_deferred();
 
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
-    // LOGPRECOMPILE transcript-state add/remove payloads.
+    // LOGDEFERRED transcript-state add/remove payloads.
     let state_prev: [LB::Var; 4] =
         array::from_fn(|i| user_helpers[HELPER_STATE_PREV_RANGE.start + i]);
     let state_new: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_STATE_NEW_RANGE.start + i));
@@ -314,7 +314,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     // ---- u32 range-check removes (BusId::RangeCheck) ----
                     // Four simultaneous range-check removals under the u32rc flag. Mutually
                     // exclusive with all block-stack branches (u32 ops are disjoint from
-                    // control-flow ops) and with logpre (disjoint from LOGPRECOMPILE).
+                    // control-flow ops) and with logpre (disjoint from LOGDEFERRED).
                     g.batch(
                         "u32_range_check",
                         f_u32rc,
@@ -327,23 +327,23 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
-                    // ---- Log-precompile transcript-state update (BusId::LogPrecompileTranscript)
-                    // ---- Remove the previous transcript state, add the next. Mutually
-                    // exclusive with all block-stack branches and with u32rc.
+                    // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
+                    // Remove the previous deferred root, add the next. Mutually exclusive with all
+                    // block-stack branches and with u32rc.
                     g.batch(
-                        "log_precompile_state",
-                        f_log_precompile,
+                        "log_deferred_state",
+                        f_log_deferred,
                         move |b| {
                             let state_prev_expr = state_prev.map(LB::Expr::from);
                             b.remove(
                                 "logpre_state_remove",
-                                LogPrecompileMsg { state: state_prev_expr },
+                                LogDeferredMsg { state: state_prev_expr },
                                 Deg { v: 5, u: 6 },
                             );
                             let state_new_expr = state_new.map(LB::Expr::from);
                             b.add(
                                 "logpre_state_add",
-                                LogPrecompileMsg { state: state_new_expr },
+                                LogDeferredMsg { state: state_new_expr },
                                 Deg { v: 5, u: 6 },
                             );
                         },

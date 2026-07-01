@@ -19,7 +19,7 @@ help:
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
-	@printf "  make check-constraints          # Check core-lib constraint artifacts\n"
+	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
@@ -324,8 +324,8 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run precompile_request_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run deferred_state_wire_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run deferred_state_wire_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run project_toml_parse --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \

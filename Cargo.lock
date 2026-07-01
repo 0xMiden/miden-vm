@@ -1425,11 +1425,11 @@ dependencies = [
  "miden-crypto",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-precompiles",
+ "miden-precompiles-codegen",
  "miden-processor",
- "miden-prover",
  "miden-test-utils",
  "miden-utils-sync",
- "miden-verifier",
  "num",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
@@ -1674,6 +1674,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-precompiles"
+version = "0.25.0"
+dependencies = [
+ "miden-assembly",
+ "miden-core",
+ "miden-crypto",
+ "miden-mast-package",
+ "miden-package-registry",
+ "miden-precompiles-codegen",
+ "miden-processor",
+ "miden-utils-sync",
+ "rand_chacha 0.10.0",
+]
+
+[[package]]
+name = "miden-precompiles-codegen"
+version = "0.25.0"
+dependencies = [
+ "miden-core",
+]
+
+[[package]]
 name = "miden-processor"
 version = "0.25.0"
 dependencies = [
@@ -1725,6 +1747,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
+ "miden-precompiles",
  "miden-processor",
  "serde",
  "serde-wincode",
@@ -1798,6 +1821,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-mast-package",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-verifier",
@@ -1856,10 +1880,10 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
+ "miden-precompiles",
  "serde",
  "serde-wincode",
  "thiserror",
- "tracing",
  "wincode",
 ]
 
@@ -1876,6 +1900,7 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-mast-package",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-serde-macros",

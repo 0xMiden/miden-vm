@@ -14,7 +14,7 @@ use crate::{CoreCols, MidenAirBuilder};
 const STACK_DEPTH: usize = 16;
 
 /// Number of public values at the tail of the public_values slice
-/// (stack_inputs + stack_outputs + pc_transcript_state).
+/// (stack_inputs + stack_outputs + deferred_root).
 const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH + 4;
 
 // ENTRY POINTS

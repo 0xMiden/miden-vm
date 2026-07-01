@@ -42,7 +42,8 @@ pub use miden_processor::{
     trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
+    DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
+    event::EventHandler,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
@@ -83,6 +84,17 @@ pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
         let namespace = path.strip_prefix("::").unwrap_or(&path);
         format!("namespace {namespace}\n\n{source}")
     }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn new_vm_default_processor(
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    options: ExecutionOptions,
+) -> Result<FastProcessor, ExecutionError> {
+    FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .with_deferred_precompiles(miden_precompiles::registry())
 }
 
 // CONSTANTS
@@ -382,9 +394,12 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits");
+        let processor = new_vm_default_processor(
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default(),
+        )
+        .expect("test processor should initialize with default precompiles");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -563,14 +578,13 @@ impl Test {
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let fast_stack_result = {
-            let fast_processor = FastProcessor::new_with_options(
+            let fast_processor = new_vm_default_processor(
                 stack_inputs,
                 self.advice_inputs.clone(),
-                miden_processor::ExecutionOptions::default()
+                ExecutionOptions::default()
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
-            )
-            .map_err(ExecutionError::advice_error_no_context)?;
+            )?;
             if let Some(debug_info) = debug_info.as_ref() {
                 fast_processor.execute_trace_inputs_with_package_debug_info_sync(
                     &program, debug_info, &mut host,
@@ -600,9 +614,11 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?;
+        let processor = new_vm_default_processor(
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default(),
+        )?;
 
         if let Some(debug_info) = debug_info.as_ref() {
             processor
@@ -629,7 +645,7 @@ impl Test {
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
-            miden_processor::ExecutionOptions::default(),
+            ExecutionOptions::default(),
             ProvingOptions::default(),
         )
         .unwrap();
@@ -769,9 +785,12 @@ impl Test {
         let compare_error_diagnostics = debug_info.is_none();
 
         let fast_result_by_step = {
-            let fast_process = FastProcessor::new(stack_inputs)
-                .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits");
+            let fast_process = new_vm_default_processor(
+                stack_inputs,
+                self.advice_inputs.clone(),
+                ExecutionOptions::default(),
+            )
+            .expect("test processor should initialize with default precompiles");
             if let Some(debug_info) = debug_info.as_ref() {
                 fast_process
                     .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)

@@ -72,7 +72,12 @@ type BatchMerkleResult = (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>);
 // PUBLIC API
 // ================================================================================================
 
-/// Deserialize a STARK proof and build the advice inputs for the MASM recursive verifier.
+/// Deserialize raw Poseidon2 STARK proof bytes and build advice inputs for the MASM recursive
+/// verifier.
+///
+/// This helper trusts the caller-supplied [`PublicInputs`]. It does not inspect an execution proof
+/// or rehydrate deferred-state wire, so callers must supply the exact final deferred root committed
+/// by the proof.
 pub fn generate_advice_inputs(
     proof_bytes: &[u8],
     pub_inputs: PublicInputs,
@@ -397,7 +402,7 @@ fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
+    felts.extend_from_slice(pub_inputs.deferred_root().as_ref());
     let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
     fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
     fixed_len

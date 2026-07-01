@@ -1,8 +1,9 @@
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_core::deferred::Digest;
 
 use crate::{
     ContextId, ExecutionError, Felt, MemoryError, Word, advice::AdviceError,
-    crypto::merkle::MerklePath, errors::OperationError, precompile::PrecompileTranscriptState,
+    crypto::merkle::MerklePath, errors::OperationError,
 };
 
 // PROCESSOR
@@ -40,6 +41,16 @@ pub(crate) trait Processor: Sized {
 
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
+
+    /// Returns the current deferred root.
+    fn deferred_root(&self) -> Word;
+
+    /// Logs a verified deferred statement digest and advances the deferred root.
+    fn log_deferred_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Word,
+    ) -> Result<(), OperationError>;
 }
 
 // SYSTEM INTERFACE
@@ -60,12 +71,6 @@ pub(crate) trait SystemInterface {
     /// Returns the current context ID.
     fn ctx(&self) -> ContextId;
 
-    /// Returns the current precompile-transcript state (the rolling digest of all recorded
-    /// commitments).
-    ///
-    /// Used by `log_precompile` to thread the transcript across invocations.
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
-
     // MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -77,11 +82,6 @@ pub(crate) trait SystemInterface {
 
     // Increments the clock by 1.
     fn increment_clock(&mut self);
-
-    /// Sets the precompile-transcript state to a new value.
-    ///
-    /// Called by `log_precompile` after recording a new commitment.
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     // CALL STATE
     // --------------------------------------------------------------------------------------------

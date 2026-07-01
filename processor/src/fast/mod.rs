@@ -4,8 +4,8 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
-    precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
@@ -143,9 +143,8 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
-    pc_transcript: PrecompileTranscript,
+    /// Deferred witness accumulated during execution and returned for verifier rehydration.
+    deferred_state: DeferredState,
 }
 
 impl FastProcessor {
@@ -156,7 +155,7 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript: self.pc_transcript,
+            deferred_state: self.deferred_state,
         }
     }
 
@@ -234,9 +233,12 @@ impl FastProcessor {
     ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
-    /// [`Self::with_advice`] or use [`Self::new_with_options`].
+    /// [`Self::with_advice`] or use [`Self::new_with_options`]. Installed deferred precompiles and
+    /// any accumulated deferred state are preserved; only the remaining deferred-state budget is
+    /// updated to match the new options.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        self.deferred_state.set_max_elements(options.max_deferred_elements());
         self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
@@ -276,8 +278,12 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
+            deferred_state: DeferredState::new(
+                Arc::new(PrecompileRegistry::new()),
+                options.max_deferred_elements(),
+            )
+            .expect("empty deferred registry initialization cannot fail"),
             options,
-            pc_transcript: PrecompileTranscript::new(),
         })
     }
 
@@ -300,6 +306,33 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Low-level hook for installing deferred precompiles into this processor's deferred state.
+    ///
+    /// `FastProcessor` starts with the framework's empty registry because it is the raw processor
+    /// layer. Use this hook for direct processor integration, custom registries, or tests.
+    /// High-level VM/prover/CLI entry points install the official `miden-precompiles` registry
+    /// automatically.
+    pub fn with_deferred_precompiles(
+        mut self,
+        precompiles: PrecompileRegistry,
+    ) -> Result<Self, ExecutionError> {
+        self.deferred_state
+            .extend_precompiles(precompiles)
+            .map_err(ExecutionError::deferred_error_no_context)?;
+        Ok(self)
+    }
+
+    /// Returns the deferred witness accumulated during execution.
+    #[inline(always)]
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
+    }
+
+    #[inline(always)]
+    pub(super) fn deferred_state_mut(&mut self) -> &mut DeferredState {
+        &mut self.deferred_state
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -431,10 +464,9 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript.
-    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
-        (self.advice, self.memory, self.pc_transcript)
+    /// Consumes the processor and returns the advice provider and memory.
+    pub fn into_parts(self) -> (AdviceProvider, Memory) {
+        (self.advice, self.memory)
     }
 
     /// Returns a reference to the execution options.
@@ -619,14 +651,14 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile transcript at the end of execution.
+/// The output of a program execution, containing the state of the stack, advice provider, memory,
+/// and final deferred state at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_transcript: PrecompileTranscript,
+    pub deferred_state: DeferredState,
 }
 
 // SYSTEM CALL STATE

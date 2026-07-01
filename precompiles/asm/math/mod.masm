@@ -1,0 +1,24 @@
+#! Arithmetic deferred precompile wrappers.
+
+pub mod ed25519
+pub mod ed25519_base
+pub mod ed25519_scalar
+pub mod k1_base
+pub mod k1_scalar
+pub mod r1_base
+pub mod r1_scalar
+pub mod secp256k1
+pub mod secp256r1
+pub mod u256
+
+#! Returns whether the raw little-endian u256 limbs on the operand stack are all zero.
+#! Input:  [VALUE_U32[8], ...]
+#! Output: [is_zero, ...]
+pub proc is_zero_raw_u256
+    eq.0
+    repeat.7
+        swap
+        eq.0
+        and
+    end
+end

@@ -8,14 +8,17 @@ pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
 
+pub mod precompiles {
+    pub use miden_precompiles::*;
+}
+
+use miden_precompiles::event_handlers as precompile_event_handlers;
+
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::{
-    events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry,
-    serde::Deserializable,
-};
+use miden_core::{events::EventName, mast::MastForest, serde::Deserializable};
 use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
@@ -23,11 +26,7 @@ use miden_utils_sync::LazyLock;
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     debug::default_debug_handlers,
-    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
-    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
-    keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
-    sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -53,18 +52,13 @@ use crate::handlers::{
 ///
 /// The core library provides several categories of functionality:
 ///
-/// - **Cryptographic primitives**: Hash functions (Keccak256, SHA-512), digital signature
-///   verification (ECDSA, EdDSA-Ed25519, Falcon), and authenticated encryption (AEAD decryption).
+/// - **Cryptographic primitives**: Poseidon2, Blake3, SHA-256, Falcon signature verification,
+///   authenticated encryption (AEAD decryption), and official deferred precompile wrappers under
+///   `::miden::precompiles`.
 /// - **Mathematical operations**: Division operations for u64, u128, and u256.
 /// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
 ///   array utilities with lower-bound search capabilities.
 /// - **Memory operations**: Efficient hashing and "un-hashing" of large amounts of data.
-///
-/// Many of these operations are implemented as **precompiles** - special procedures that execute
-/// outside the Miden VM but are verified as part of the proof. Precompiles allow for efficient
-/// execution of complex operations that would be expensive to compute directly in the VM, while
-/// maintaining the security guarantees of the Miden proof system. The core library includes
-/// precompiles for cryptographic operations like hash functions and signature verification.
 ///
 /// # Usage
 ///
@@ -93,9 +87,6 @@ use crate::handlers::{
 /// These handlers can print private values if a program moves witness data onto the operand stack
 /// or into memory. Privacy-sensitive hosts should replace or unregister these handlers. Advice
 /// debug handlers can expose witness data directly, so hosts must opt into those explicitly.
-///
-/// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
-/// precompile verifiers required to validate core library precompile requests.
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
@@ -142,10 +133,6 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
-            (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
-            (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
-            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
-            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
@@ -156,17 +143,8 @@ impl CoreLibrary {
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ];
         handlers.extend(default_debug_handlers());
+        handlers.extend(precompile_event_handlers::default_event_handlers());
         handlers
-    }
-
-    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
-    /// core library precompile requests.
-    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
-        PrecompileVerifierRegistry::new()
-            .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
-            .with_verifier(&SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile))
-            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
-            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }
 }
 

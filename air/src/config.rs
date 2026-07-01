@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(17246763836728246237),
-    Felt::new_unchecked(9838047215024765106),
-    Felt::new_unchecked(15366705014579132635),
-    Felt::new_unchecked(14157638374955997968),
+    Felt::new_unchecked(2093769913804214420),
+    Felt::new_unchecked(2865512903735413157),
+    Felt::new_unchecked(481516512333928892),
+    Felt::new_unchecked(5125545183454056961),
 ];
 
 /// Observes PCS protocol parameters into the challenger.

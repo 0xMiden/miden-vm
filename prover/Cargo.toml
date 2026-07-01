@@ -16,12 +16,13 @@ edition.workspace = true
 [features]
 default = ["std"]
 concurrent = ["std", "miden-air/concurrent", "miden-crypto/concurrent", "miden-processor/concurrent"]
-std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
+std = ["miden-air/std", "miden-debug-types/std", "miden-precompiles/std", "miden-processor/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true
 

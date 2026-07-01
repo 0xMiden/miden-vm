@@ -1,0 +1,46 @@
+[package]
+name = "miden-precompiles"
+version.workspace = true
+description = "Concrete deferred precompile implementations for the Miden VM"
+documentation = "https://docs.rs/miden-precompiles"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "deferred", "zkp"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+std = ["miden-core/std", "miden-crypto/std", "miden-processor/std", "miden-utils-sync/std"]
+
+[dependencies]
+# Miden dependencies
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-mast-package.workspace = true
+miden-precompiles-codegen.workspace = true
+miden-processor.workspace = true
+miden-utils-sync.workspace = true
+
+[dev-dependencies]
+miden-assembly.workspace = true
+miden-precompiles-codegen = { workspace = true, features = ["std"] }
+miden-processor = { workspace = true, features = ["testing"] }
+rand_chacha.workspace = true
+
+[build-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-precompiles-codegen = { workspace = true, features = ["std"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration/mod.rs"

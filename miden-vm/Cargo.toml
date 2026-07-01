@@ -57,6 +57,8 @@ serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
+    "miden-core-lib/std",
+    "miden-precompiles/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -72,6 +74,7 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true

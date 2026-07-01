@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::chiplets::hasher::{Hasher, STATE_WIDTH};
+use miden_core::deferred::Tag;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
@@ -440,33 +441,33 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     Ok(OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, acc_tmp })
 }
 
-// LOG PRECOMPILE OPERATION
+// LOG DEFERRED OPERATION
 // ================================================================================================
 
-/// Folds a precomputed statement into the rolling precompile-transcript state.
+/// Folds a precomputed statement digest into the rolling deferred root.
 ///
 /// Stack transition:
-/// `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
+/// `[_, STATEMENT, _, ...] -> [DEFERRED_ROOT_NEW, OUT_RATE1, OUT_CAP, ...]`
 ///
-/// - Hasher computes `merge(STATE_PREV, STMNT) = rate0(Poseidon2([STATE_PREV, STMNT, ZERO]))`;
-///   `STATE_NEW` is the rate0 half of the output.
-/// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
-///   helper registers.
-/// - `STMNT` lives at stack[4..8] (HPERM rate1 lanes) so the chiplet bus's β⁶..β⁹ products share
-///   with HPERM.
+/// - Hasher computes `Node::and(DEFERRED_ROOT_PREV, STATEMENT).digest()` using `Tag::AND` as the
+///   Poseidon2 capacity word.
+/// - `DEFERRED_ROOT_PREV` is threaded internally and exposed to constraints via helper registers.
+/// - `STATEMENT` lives at stack[4..8] (HPERM rate1 lanes) so the chiplet bus's β⁶..β⁹ products
+///   share with HPERM.
 /// - Output is identity-mapped to `stack_next[0..12]`, also matching HPERM's output layout.
 #[inline(always)]
-pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
+pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    let stmnt: Word = processor.stack().get_word(4);
-    let state_prev = processor.system().precompile_transcript_state();
+    let statement_digest: Word = processor.stack().get_word(4);
+    let state_prev = processor.deferred_root();
 
-    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
+    // Hasher input: [RATE0 = DEFERRED_ROOT_PREV, RATE1 = STATEMENT, CAPACITY = Tag::AND].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
     hasher_state[Hasher::RATE0_RANGE].copy_from_slice(state_prev.as_slice());
-    hasher_state[Hasher::RATE1_RANGE].copy_from_slice(stmnt.as_slice());
+    hasher_state[Hasher::RATE1_RANGE].copy_from_slice(statement_digest.as_slice());
+    hasher_state[Hasher::CAPACITY_RANGE].copy_from_slice(&Tag::AND.as_word());
 
     let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
@@ -474,7 +475,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
     let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
-    processor.system_mut().set_precompile_transcript_state(state_new);
+    processor.log_deferred_statement(statement_digest, state_new)?;
 
     processor.stack_mut().set_word(0, &state_new);
     processor.stack_mut().set_word(4, &out_rate1);
@@ -482,7 +483,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
 
     tracer.record_hasher_permute(hasher_state, output_state);
 
-    Ok(OperationHelperRegisters::LogPrecompile { addr, state_prev })
+    Ok(OperationHelperRegisters::LogDeferred { addr, state_prev })
 }
 
 // STREAM CIPHER OPERATION
