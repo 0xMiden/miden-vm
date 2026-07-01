@@ -67,8 +67,9 @@ fn fold_balance<A>(
 
 /// A curve fixture: the uint store holds the modulus + params +
 /// coordinates + membership transients, the mul requires hold the
-/// membership trio (provides required), the group table holds group @1
-/// and the point store PAI @1, the point @2.
+/// membership trio (provides required), the group table holds the VM-owned
+/// preseeded short-Weierstrass slots plus this fixture's group, and the
+/// point store holds PAI @1 and the point @2.
 struct Fixture {
     store: UintStoreRequires,
     muls: UintMulRequires,
@@ -166,15 +167,24 @@ fn check_groups(main: &RowMajorMatrix<Felt>) {
 #[test]
 fn ec_stores_hold_and_balance() {
     let mut rng = StdRng::seed_from_u64(0xec_0001);
-    let t = k1_fixture().traces();
-    // Group table: group @1 pads to height 2. Point store: PAI @1,
-    // point @2 — exactly height 2, no pad.
-    assert_eq!(t.groups.height(), 2);
+    let fx = k1_fixture();
+    let (group, _) = fx.ec.point_params(fx.point);
+    let group_row = (group.addr() as usize - 1) * G_NUM_MAIN_COLS;
+    let t = fx.traces();
+    // Group table: VM-owned K1/R1 slots plus the fixture-created group @3,
+    // padded to height 4. Point store: PAI @1, point @2 — exactly height 2,
+    // no pad.
+    assert_eq!(t.groups.height(), 4);
     assert_eq!(t.points.height(), 2);
     assert_eq!(t.points.values[COL_IS_PAI], Felt::ONE, "row 0 is the canonical PAI",);
     assert_eq!(t.points.values[NUM_MAIN_COLS + COL_IS_PAI], Felt::ZERO);
-    // The vacuous scalar bound defaults to the F_p handle on both sides.
-    assert_eq!(t.groups.values[G_COL_SBOUND_PTR], t.points.values[COL_SBOUND_PTR],);
+    // The vacuous scalar bound defaults to the F_p handle on both point rows
+    // and the owning group row.
+    assert_eq!(t.groups.values[group_row + G_COL_SBOUND_PTR], t.points.values[COL_SBOUND_PTR],);
+    assert_eq!(
+        t.groups.values[group_row + G_COL_SBOUND_PTR],
+        t.points.values[NUM_MAIN_COLS + COL_SBOUND_PTR],
+    );
 
     check_groups(&t.groups);
     check_points(&t.points);
@@ -210,13 +220,19 @@ fn constrained_scalar_bound_balances() {
     let n_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364140");
     let fs = fx.store.pin_modulus(2, n_minus_1);
     let (group, _) = fx.ec.point_params(fx.point);
+    let group_row = (group.addr() as usize - 1) * G_NUM_MAIN_COLS;
     fx.ec.set_scalar_bound(group, fs);
     let t = fx.traces();
-    assert_eq!(t.groups.values[G_COL_SBOUND_PTR], Felt::from(fs.addr()));
+    assert_eq!(t.groups.values[group_row + G_COL_SBOUND_PTR], Felt::from(fs.addr()));
     assert_eq!(
         t.points.values[COL_SBOUND_PTR],
         Felt::from(fs.addr()),
-        "point rows resolve the constrained scalar bound",
+        "PAI row resolves the constrained scalar bound",
+    );
+    assert_eq!(
+        t.points.values[NUM_MAIN_COLS + COL_SBOUND_PTR],
+        Felt::from(fs.addr()),
+        "finite point row resolves the constrained scalar bound",
     );
 
     check_groups(&t.groups);
@@ -320,12 +336,17 @@ fn group_ptr_chain_is_ungated() {
 
 #[test]
 fn forged_group_mult_unbalances() {
-    // Zeroing the group row's provide mult leaves the point rows'
-    // EcGroup consumes dangling — the dual of the phantom group.
+    // Zeroing the live fixture group's provide mult leaves the point rows'
+    // EcGroup consumes dangling — the dual of the phantom group. The fixture
+    // group is not hardcoded to row 0 because the group table starts with
+    // VM-owned preseeded rows.
     let mut rng = StdRng::seed_from_u64(0xec_3017);
-    let t = k1_fixture().traces();
+    let fx = k1_fixture();
+    let (group, _) = fx.ec.point_params(fx.point);
+    let group_mult = (group.addr() as usize - 1) * G_NUM_MAIN_COLS + crate::ec::groups::COL_MULT;
+    let t = fx.traces();
     let mut forged = t.groups.clone();
-    forged.values[crate::ec::groups::COL_MULT] = Felt::ZERO;
+    forged.values[group_mult] = Felt::ZERO;
 
     check_groups(&forged);
     assert_ne!(residual(&t, &forged, &t.points, &mut rng), 0);
