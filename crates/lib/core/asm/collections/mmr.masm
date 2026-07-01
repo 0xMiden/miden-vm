@@ -114,6 +114,599 @@ pub proc num_peaks_to_message_size
   # => [even_count_min, ...]
 end
 
+#! Given the num_peaks of a MMR, returns the number of padded peak words.
+#!
+#! Input: [num_peaks, ...]
+#! Output: [num_words, ...]
+proc num_peaks_to_padded_words
+  # the peaks are padded to a minimum length of 16.
+  push.16 u32max
+  # => [count_min, ...]
+
+  # when the number of peaks is greater than 16, then they are padded to an even number.
+  dup is_odd add
+  # => [even_count_min, ...]
+end
+
+#! Computes the raw rooted frontier root of the given MMR.
+#!
+#! This root does not bind the MMR length by itself. When exposed across trust boundaries,
+#! it must be authenticated together with the MMR length stored at `mmr_ptr`.
+#!
+#! The root folds the path to `num_leaves`: each set bit consumes a peak on the left, while each
+#! unset bit folds in an empty subtree on the right. Empty-subtree roots are derived on the fly by
+#! squaring (`merge(empty, empty)`), starting from the empty leaf `ZERO`.
+#!
+#! The accumulator and current empty-subtree root are kept on the operand stack as two words
+#! `[ACC, EMPTY]`, with the remaining length bits in `loc.0` and the peak cursor in `loc.1`, so the
+#! fold avoids per-iteration memory traffic. Two folding shortcuts keep the hash count minimal:
+#!  - leading unset bits are folded once instead of twice, since `ACC` and `EMPTY` coincide until
+#!    the first peak is consumed;
+#!  - `EMPTY` is squared only while an unset bit still remains, skipping a trailing all-ones run.
+#!
+#! Input: [mmr_ptr, ...]
+#! Output: [ROOT, ...]
+pub proc root
+  # load num_leaves
+  dup mem_load
+  # => [num_leaves, mmr_ptr, ...]
+
+  # peak_end = mmr_ptr + 4 + 4 * num_peaks, the address just past the last peak.
+  dup u32assert u32popcnt mul.4 movup.2 add add.4
+  # => [peak_end, num_leaves, ...]
+
+  swap exec.root_from_peak_end
+  # => [ROOT, ...]
+end
+
+#! Computes the raw rooted frontier root from a trusted length and peak-end cursor.
+#!
+#! Input: [num_leaves, peak_end, ...]
+#! Output: [ROOT, ...]
+@locals(2)
+proc root_from_peak_end
+  # empty MMR root is the empty leaf root.
+  dup eq.0
+  if.true
+    drop drop padw
+    # => [ZERO, ...]
+  else
+    # cursor = peak_end (loc.1).
+    swap loc_store.1
+    # => [num_leaves, ...]
+
+    # remaining length bits (loc.0)
+    loc_store.0
+    # => [...]
+
+    # ACC = EMPTY = empty_subtree_root(0) = ZERO, kept on the stack as [ACC, EMPTY].
+    padw padw
+    # => [ACC, EMPTY, ...]
+
+    # Phase 1: fold the leading unset bits. While the lowest remaining bit is unset, ACC and EMPTY
+    # both equal empty_subtree_root(level), so a single squaring advances them together.
+    loc_load.0 is_odd not
+    while.true
+      dupw hmerge
+      loc_load.0 u32shr.1 dup loc_store.0 is_odd not
+    end
+
+    # The lowest remaining bit is now set, so ACC = empty_subtree_root(level). Seed EMPTY with it.
+    swapw dropw dupw
+    # => [ACC, EMPTY, ...]
+
+    # Phase 2: fold the remaining bits, now that ACC and EMPTY have diverged.
+    push.1
+    while.true
+      loc_load.0 is_odd
+      if.true
+        # set bit: ACC = merge(peak, ACC), consuming the next peak.
+        loc_load.1 sub.4 dup loc_store.1
+        padw movup.4 mem_loadw_le
+        # => [PEAK, ACC, EMPTY, ...]
+        hmerge
+      else
+        # unset bit: ACC = merge(ACC, EMPTY), preserving EMPTY for higher levels.
+        dupw.1 swapw hmerge
+      end
+      # => [ACC, EMPTY, ...]
+
+      # advance bits
+      loc_load.0 u32shr.1 dup loc_store.0
+      # => [bits, ACC, EMPTY, ...]
+
+      # square EMPTY only while an unset bit still remains (bits & (bits + 1) != 0), skipping the
+      # squaring for a trailing all-ones run where EMPTY is never used again.
+      dup u32wrapping_add.1 u32and neq.0
+      if.true
+        swapw dupw hmerge swapw
+        # => [ACC, EMPTY, ...]
+      end
+
+      loc_load.0 neq.0
+    end
+
+    # ACC holds the root.
+    swapw dropw
+    # => [ROOT, ...]
+  end
+end
+
+#! Computes the authenticated rooted frontier pair for the given MMR.
+#!
+#! The returned root is the raw frontier root from `root`; the MMR length is returned alongside it
+#! so callers can authenticate `(num_leaves, root)`.
+#!
+#! Input: [mmr_ptr, ...]
+#! Output: [ROOT, num_leaves, ...]
+pub proc root_with_len
+  dup mem_load
+  # => [num_leaves, mmr_ptr, ...]
+
+  swap exec.root
+  # => [ROOT, num_leaves, ...]
+end
+
+#! Computes the Merkle Mountain Belt prototype root.
+#!
+#! The MMB memory layout is `[num_leaves, 0, 0, 0] || peaks`, where the peaks are U-MMB
+#! mountains ordered from oldest to newest.
+#!
+#! The range boundaries are not tracked via mountain heights: with `bits = num_leaves + 1`,
+#! the splits sit at the set bits of `split_mask = bits & !((bits << 1) & (bits >> 1))` (see
+#! `mmb_verify_leaf`). The mask is shifted so the boundary after the oldest mountain sits at
+#! bit 31, and the fold consumes one bit per peak from the top — the bit is the exit condition
+#! of the inner per-range loop, so the fold needs no per-mountain branch at all.
+#!
+#! The range and belt accumulators are kept on the operand stack as `[RANGE_ACC, BELT_ACC]`,
+#! so the fold avoids per-iteration memory traffic; only the boundary bits and the peak cursor
+#! bound live in locals.
+#!
+#! Input: [mmb_ptr, ...]
+#! Output: [ROOT, ...]
+@locals(3)
+pub proc mmb_root
+  dup mem_load
+  # => [num_leaves, mmb_ptr, ...]
+
+  dup eq.0
+  if.true
+    drop drop padw
+    # => [ZERO, ...]
+  else
+    # bits = num_leaves + 1; mountain count = floor(log2(bits)).
+    add.1 dup ilog2
+    # => [count, bits, mmb_ptr, ...]
+
+    # loc.1 = peak cursor = mmb_ptr + 4; loc.2 = cursor bound = cursor + 4 * count.
+    movup.2 add.4 dup loc_store.1
+    dup.1 mul.4 add loc_store.2
+    # => [count, bits, ...]
+
+    # loc.0 = range boundary bits: split_mask aligned so the boundary consumed after folding
+    # the oldest peak sits at bit 31. The shift also discards the always-set bit at position
+    # `count` (the boundary above the oldest mountain, which opens no range).
+    swap dup u32shl.1 dup.1 u32shr.1 u32and u32not u32and
+    # => [split_mask, count, ...]
+    swap push.32 swap sub u32shl loc_store.0
+    # => [...]
+
+    # Accumulators live on the operand stack: [RANGE_ACC = ZERO, BELT_ACC = ZERO].
+    padw padw
+
+    # Outer loop: one iteration per range.
+    push.1
+    while.true
+      # Inner loop: fold peaks into the range until a boundary bit or the cursor bound.
+      push.1
+      while.true
+        # RANGE_ACC' = merge(RANGE_ACC, PEAK).
+        loc_load.1 dup add.4 loc_store.1
+        padw movup.4 mem_loadw_le swapw hmerge
+        # => [RANGE_ACC, BELT_ACC, ...]
+
+        # Continue while the boundary bit after this peak is unset and peaks remain.
+        loc_load.0 dup u32shl.1 loc_store.0 u32shr.31 not
+        loc_load.1 loc_load.2 neq and
+      end
+
+      # Close the range: BELT_ACC' = merge(BELT_ACC, RANGE_ACC); reopen with RANGE_ACC = ZERO.
+      swapw hmerge padw
+      # => [ZERO, BELT_ACC, ...]
+
+      loc_load.1 loc_load.2 neq
+    end
+
+    # The fold ends with a dead range accumulator above the finished belt.
+    dropw
+    # => [ROOT, ...]
+  end
+end
+
+#! Computes the authenticated `(num_leaves, MMB_ROOT)` pair.
+#!
+#! Input: [mmb_ptr, ...]
+#! Output: [ROOT, num_leaves, ...]
+pub proc mmb_root_with_len
+  dup mem_load
+  # => [num_leaves, mmb_ptr, ...]
+
+  swap exec.mmb_root
+  # => [ROOT, num_leaves, ...]
+end
+
+#! Verifies a Merkle Mountain Belt prototype leaf proof against authenticated `(num_leaves, ROOT)`.
+#!
+#! The proof is stored at `proof_ptr` using this memory layout:
+#! - `proof_ptr + 0`: proof length
+#! - `proof_ptr + 1`: opened position
+#! - `proof_ptr + 4`: opened leaf word
+#! - then one 8-element entry per sibling:
+#!   - `entry + 0`: direction, where 0 means sibling is left and 1 means sibling is right
+#!   - `entry + 4`: sibling word
+#!
+#! The proof is bound to the opened position: the MMB shape is fully determined by the
+#! authenticated `num_leaves`, so the mountain containing `position`, its height, and the
+#! range/belt fold counts are derived here in closed form (no loop over the mountains) and the
+#! proof length and every stored direction are asserted equal to that canonical path. A proof
+#! for one position therefore cannot be relabeled to authenticate another.
+#!
+#! With `bits = num_leaves + 1` (the shape bit pattern `mmb_root` folds over) and
+#! `g = num_leaves - position`, the closed forms are:
+#! - mountain bit position: `pos = m - 1 + (bits mod 2^m + 2^m <= g)` where `m = ilog2(g)`;
+#! - mountain height: `pos + ((bits >> pos) & 1)`; mountain start: `((bits >> (pos+1)) - 1)
+#!   shifted left by `pos+1`, so the in-mountain position is `position - start`;
+#! - range splits sit at the set bits of `split_mask = bits & !((bits << 1) & (bits >> 1))`
+#!   (a split between the mountains at bit positions `k` and `k-1` for each set bit `k`), so
+#!   with `low = split_mask & (2^(pos+1) - 2)`: the ranges right of the leaf's range are
+#!   `popcount(low)` and the peaks right of its mountain in its range are `pos - ilog2(low | 1)`.
+#!
+#! Input: [proof_ptr, ROOT, num_leaves, ...]
+#! Output: [...]
+@locals(9)
+pub proc mmb_verify_leaf
+  # loc.1 = stored proof length.
+  dup mem_load loc_store.1
+  # => [proof_ptr, ROOT, num_leaves, ...]
+
+  # loc.2 = claimed position; check position < num_leaves.
+  dup add.1 mem_load dup loc_store.2
+  # => [position, proof_ptr, ROOT, num_leaves, ...]
+  dup.6 u32assert2 u32lt assert.err="position is not an existing MMB leaf"
+  # => [proof_ptr, ROOT, num_leaves, ...]
+
+  # loc.3 = bits = num_leaves + 1.
+  movup.5 add.1 loc_store.3
+  # => [proof_ptr, ROOT, ...]
+
+  # loc.4 = pos = m - 1 + (bits mod 2^m + 2^m <= g), with g = num_leaves - position.
+  loc_load.3 sub.1 loc_load.2 sub
+  # => [g, proof_ptr, ROOT, ...]
+  dup ilog2
+  # => [m, g, ...]
+  dup pow2
+  # => [2^m, m, g, ...]
+  dup sub.1 loc_load.3 swap u32and
+  # => [bits mod 2^m, 2^m, m, g, ...]
+  add movup.2 u32lte
+  # => [in_higher_mountain, m, ...]
+  add sub.1 loc_store.4
+  # => [proof_ptr, ROOT, ...]
+
+  # loc.5 = mountain height = pos + ((bits >> pos) & 1).
+  loc_load.3 loc_load.4 u32shr
+  # => [s, ...]
+  dup is_odd loc_load.4 add loc_store.5
+  # => [s, ...]
+
+  # loc.6 = in-mountain position = position - ((s >> 1) - 1) * 2^(pos+1).
+  loc_load.4 add.1 pow2
+  # => [2^(pos+1), s, ...]
+  swap u32shr.1 sub.1 dup.1 mul
+  # => [mountain_start, 2^(pos+1), ...]
+  loc_load.2 swap sub loc_store.6
+  # => [2^(pos+1), proof_ptr, ROOT, ...]
+
+  # Range splits below the mountain: low = split_mask & (2^(pos+1) - 2).
+  loc_load.3 u32shl.1 loc_load.3 u32shr.1 u32and u32not loc_load.3 u32and
+  # => [split_mask, 2^(pos+1), ...]
+  swap sub.2 u32and
+  # => [low, ...]
+
+  # loc.8 = ranges right of the leaf's range; loc.7 = peaks right of its mountain in its range.
+  dup u32popcnt loc_store.8
+  u32or.1 ilog2 loc_load.4 swap sub loc_store.7
+  # => [proof_ptr, ROOT, ...]
+
+  # The canonical proof folds the mountain path, one left sibling per fold phase (range and
+  # belt), plus the right siblings for the peaks and ranges past the leaf.
+  loc_load.5 add.2 loc_load.7 add loc_load.8 add
+  loc_load.1 assert_eq.err="proof length does not match the opened position"
+
+  # Load leaf word from proof_ptr + 4.
+  dup add.4 padw movup.4 mem_loadw_le
+  # => [ACC, proof_ptr, ROOT, ...]
+
+  # cursor = proof_ptr + 8
+  movup.4 add.8
+  # => [cursor, ACC, ROOT, ...]
+
+  # Phase 1: climb the leaf's mountain; the sibling is right exactly when the local position
+  # bit is unset, and the stored direction must agree. Each phase loops until the cursor
+  # reaches its bound (loc.0), which is cheaper per iteration than a count-down counter.
+  dup loc_load.5 mul.8 add loc_store.0
+  dup loc_load.0 neq
+  while.true
+    loc_load.6 dup u32shr.1 loc_store.6 is_odd not
+    # => [dir, cursor, ACC, ROOT, ...]
+    dup dup.2 mem_load assert_eq.err="proof direction does not match the opened position"
+    # => [dir, cursor, ACC, ROOT, ...]
+    dup.1 add.4 padw movup.4 mem_loadw_le
+    # => [SIBLING, dir, cursor, ACC, ROOT, ...]
+    movup.5 add.8 movdn.9
+    # => [SIBLING, dir, ACC, cursor+8, ROOT, ...]
+    movup.4
+    # => [dir, SIBLING, ACC, cursor+8, ROOT, ...]
+    if.true
+      # right sibling: ACC = merge(ACC, SIBLING).
+      swapw hmerge
+    else
+      # left sibling: ACC = merge(SIBLING, ACC).
+      hmerge
+    end
+    movup.4
+    # => [cursor, ACC, ROOT, ...]
+    dup loc_load.0 neq
+  end
+
+  # Phase 2: enter the range fold; the peaks left of the mountain are bagged as a left sibling.
+  dup mem_load assertz.err="proof direction does not match the opened position"
+  dup add.4 padw movup.4 mem_loadw_le
+  movup.4 add.8 movdn.8
+  # => [SIBLING, ACC, cursor+8, ROOT, ...]
+  hmerge movup.4
+  # => [cursor, ACC, ROOT, ...]
+
+  # Phase 3: fold the peaks right of the mountain into the range (right siblings only, so the
+  # merge needs no branch).
+  dup loc_load.7 mul.8 add loc_store.0
+  dup loc_load.0 neq
+  while.true
+    dup mem_load assert.err="proof direction does not match the opened position"
+    dup add.4 padw movup.4 mem_loadw_le
+    movup.4 add.8 movdn.8
+    # => [SIBLING, ACC, cursor+8, ROOT, ...]
+    swapw hmerge movup.4
+    # => [cursor, ACC, ROOT, ...]
+    dup loc_load.0 neq
+  end
+
+  # Phase 4: enter the belt fold; the ranges left of the leaf's range are bagged as a left
+  # sibling.
+  dup mem_load assertz.err="proof direction does not match the opened position"
+  dup add.4 padw movup.4 mem_loadw_le
+  movup.4 add.8 movdn.8
+  hmerge movup.4
+  # => [cursor, ACC, ROOT, ...]
+
+  # Phase 5: fold the ranges right of the leaf's range into the belt (right siblings only).
+  dup loc_load.8 mul.8 add loc_store.0
+  dup loc_load.0 neq
+  while.true
+    dup mem_load assert.err="proof direction does not match the opened position"
+    dup add.4 padw movup.4 mem_loadw_le
+    movup.4 add.8 movdn.8
+    swapw hmerge movup.4
+    dup loc_load.0 neq
+  end
+  # => [cursor, ACC, ROOT, ...]
+
+  # Computed root must match authenticated root.
+  drop
+  assert_eqw
+end
+
+#! Authenticates an MMB commitment `(num_leaves, ROOT)` and loads its peaks into memory.
+#!
+#! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
+#! followed by the peaks (oldest to newest, zero-padded to a 16-word minimum and an even count,
+#! the same padding rule `pack`/`unpack` use). The peaks are loaded into memory at `mmb_ptr` in
+#! the `mmb_root` layout and the belt root is recomputed over them and asserted equal to `ROOT`.
+#!
+#! `num_leaves` is taken from the operand stack as a *trusted* input and is what the recomputed
+#! belt is folded over, which authenticates the advice peaks against the `(num_leaves, ROOT)`
+#! pair. Note that unlike the rooted frontier — whose root folds over the length bits — the raw
+#! belt root does NOT bind the length by itself: lengths with the same mountain count and range
+#! structure (e.g. 7 and 8) fold the same peaks to the same root. The MMB commitment is
+#! therefore the pair, as in the crypto-side `BeltSummary`; callers must never treat `ROOT`
+#! alone as a commitment.
+#!
+#! On success the MMB is laid out at `mmb_ptr` exactly as `mmb_root` expects, so `mmb_add` can
+#! be used against the authenticated peaks.
+#!
+#! Input: [ROOT, num_leaves, mmb_ptr, ...]
+#! Output: [...]
+@locals(1)
+pub proc mmb_unpack
+  # store the trusted num_leaves at mmb_ptr; `mmb_root` reads it from there.
+  dup.4 dup.6 mem_store
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # loc.0 = padded-peak pairs beyond the 16-word fast path (zero whenever the mountain count
+  # is at most 16, which holds for any MMB below 2^17 leaves).
+  dup.4 u32assert add.1 ilog2 exec.num_peaks_to_padded_words sub.16 u32shr.1 loc_store.0
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Pull `[num_leaves, 0, 0, 0] || padded_peaks` to the advice stack and assert the header
+  # length matches the trusted length from the operand stack.
+  adv.push_mapval
+  adv_pushw
+  dup.8 assert_eq.err="advice header does not match the trusted MMB length"
+  drop drop drop
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Set up adv_pipe state with cursor = mmb_ptr + 4 at depth 12, then load the first 16 padded
+  # words via 8 unrolled adv_pipes (1 cycle each, no hash-chiplet rows) and any extras two
+  # words at a time.
+  dup.5 add.4 padw padw padw
+  # => [PAD, PAD, PAD, peak_start, ROOT, num_leaves, mmb_ptr, ...]
+  adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe
+  loc_load.0 neq.0
+  while.true
+    adv_pipe
+    loc_load.0 sub.1 dup loc_store.0 neq.0
+  end
+
+  # Drop the leftover sponge state and the advanced cursor.
+  dropw dropw dropw drop
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Recompute the belt root over the trusted length and assert it matches the commitment.
+  movup.5 exec.mmb_root
+  # => [COMPUTED_ROOT, ROOT, num_leaves, ...]
+  assert_eqw.err="belt root does not match the unpacked peaks"
+  drop
+end
+
+#! Appends a leaf to the MMB.
+#!
+#! This is the lazy U-MMB append: the new leaf joins as a height-0 mountain and at most the
+#! rightmost mergeable pair of mountains is merged. With `m = num_leaves' + 1` (the post-append
+#! shape bits), the merge is skipped exactly when `m` is a power of two; otherwise the pair
+#! sits at mountain positions `j` and `j + 1` from the right, where `j` is the index of the
+#! lowest set bit of `m`, and the mountains right of the pair slide down one slot.
+#!
+#! This updates the peaks in memory only; the belt commitment is recomputed on demand by
+#! `mmb_root`.
+#!
+#! Input: [EL, mmb_ptr, ...]
+#! Output: [...]
+@locals(2)
+pub proc mmb_add
+  # loc.0 = mmb_ptr; loc.1 = num_leaves' = num_leaves + 1.
+  movup.4 dup loc_store.0
+  mem_load add.1 dup loc_store.1
+  # => [num_leaves', EL, ...]
+
+  # The new leaf becomes the newest mountain at index old_count = ilog2(num_leaves').
+  ilog2 mul.4 loc_load.0 add add.4
+  # => [leaf_addr, EL, ...]
+  mem_storew_le dropw
+  # => [...]
+
+  loc_load.1 loc_load.0 mem_store
+  # => [...]
+
+  # Merge step: skipped exactly when num_leaves' + 1 is a power of two.
+  loc_load.1 dup add.1 u32and neq.0
+  if.true
+    # j = lowest set bit index of m = num_leaves' + 1; the pair's left member sits at index
+    # ilog2(num_leaves') - j - 1 (post-add count is ilog2(num_leaves') + 1).
+    loc_load.1 add.1 dup u32not u32wrapping_add.1 u32and ilog2
+    # => [j, ...]
+    loc_load.1 ilog2 swap sub sub.1
+    # => [left_idx, ...]
+    mul.4 loc_load.0 add add.4
+    # => [addr_left, ...]
+
+    # Merged peak = merge(left, right), stored in the left slot.
+    dup add.4 padw movup.4 mem_loadw_le
+    # => [PEAK_RIGHT, addr_left, ...]
+    dup.4 padw movup.4 mem_loadw_le
+    # => [PEAK_LEFT, PEAK_RIGHT, addr_left, ...]
+    hmerge
+    # => [MERGED, addr_left, ...]
+    movup.4 dup movdn.5 mem_storew_le dropw
+    # => [addr_left, ...]
+
+    # Slide the j mountains right of the pair down one slot. The copy runs until the source
+    # reaches the post-add peak end = mmb_ptr + 4 + 4 * (ilog2(num_leaves') + 1).
+    loc_load.1 ilog2 add.1 mul.4 loc_load.0 add add.4 loc_store.1
+    add.8
+    # => [src, ...]
+    dup loc_load.1 neq
+    while.true
+      dup padw movup.4 mem_loadw_le
+      # => [W, src, ...]
+      dup.4 sub.4 mem_storew_le dropw
+      # => [src, ...]
+      add.4
+      dup loc_load.1 neq
+    end
+    drop
+  end
+end
+#!
+#! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
+#! followed by the peaks (the same value layout `pack`/`unpack` use). The peaks are loaded into
+#! memory at `mmr_ptr` and the frontier root is recomputed over them and asserted equal to `ROOT`.
+#!
+#! `num_leaves` is taken from the operand stack as a *trusted* input (committed alongside `ROOT`)
+#! and is what the recomputed root is folded over, so the pair `(num_leaves, ROOT)` is bound
+#! together: a longer frontier padded with empty leaves shares the raw root but is rejected here.
+#!
+#! On success the MMR is laid out at `mmr_ptr` exactly as `unpack` leaves it, so `get`/`add` can be
+#! used against the authenticated peaks.
+#!
+#! Input: [ROOT, num_leaves, mmr_ptr, ...]
+#! Output: [...]
+@locals(2)
+pub proc unpack_frontier
+  # store the trusted num_leaves at mmr_ptr; `root_from_peak_end` reads it from there.
+  dup.4 dup.6 mem_store
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # compute num_peaks once; reuse it for peak_end and the padded-word load count.
+  dup.4 u32assert exec.num_leaves_to_num_peaks
+  # => [num_peaks, ROOT, num_leaves, mmr_ptr, ...]
+
+  # loc.1 = peak_end = mmr_ptr + 4 + 4 * num_peaks.
+  dup mul.4 dup.7 add add.4 loc_store.1
+  # => [num_peaks, ROOT, num_leaves, mmr_ptr, ...]
+
+  # loc.0 = remaining padded-peak pairs beyond the 16-word fast path
+  # (= (padded_words - 16) / 2; zero whenever num_peaks <= 16).
+  exec.num_peaks_to_padded_words sub.16 u32shr.1 loc_store.0
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # Pull `[num_leaves, 0, 0, 0] || padded_peaks` to the advice stack and assert the header length
+  # matches the trusted length from the operand stack.
+  adv.push_mapval
+  adv_pushw
+  dup.8 assert_eq
+  drop drop drop
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # Set up adv_pipe state with cursor = mmr_ptr + 4 at depth 12.
+  dup.5 add.4 padw padw padw
+  # => [PAD, PAD, PAD, peak_start, ROOT, num_leaves, mmr_ptr, ...]
+
+  # Load the first 16 padded peak words via 8 unrolled adv_pipes. `adv_pipe` is 1 cycle and writes
+  # 2 words to memory while leaving the sponge capacity unchanged, so this load is free of
+  # hash-chiplet rows.
+  adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe
+  # => [R0, R1, C, peak_start+64, ROOT, num_leaves, mmr_ptr, ...]
+
+  # Load any extras (padded peaks beyond 16) two at a time. The body never runs when
+  # num_peaks <= 16, which is the common case.
+  loc_load.0 neq.0
+  while.true
+    adv_pipe
+    loc_load.0 sub.1 dup loc_store.0 neq.0
+  end
+
+  # Drop the leftover sponge state and the advanced cursor.
+  dropw dropw dropw drop
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # Recompute the frontier root over the trusted length and assert it matches the commitment.
+  dup.4 loc_load.1 swap exec.root_from_peak_end
+  # => [COMPUTED_ROOT, ROOT, num_leaves, mmr_ptr, ...]
+  assert_eqw
+  # => [num_leaves, mmr_ptr, ...]
+  drop drop
+end
+
 #! Writes the MMR who's peaks hash to `HASH` to the memory location pointed to by `mmr_ptr`.
 #!
 #! Input: [HASH, mmr_ptr, ...]
