@@ -44,8 +44,9 @@ impl<'a> EcRequire<'a> {
     /// Asserts `b ≠ 0` — the EcCreate guard that keeps `(0, 0)` off
     /// the curve, so the DAG may encode PAI as zero coordinates.
     ///
-    /// The group's **scalar bound** starts vacuous (the tuple carries
-    /// the `F_p` handle) until
+    /// VM-owned fixed groups are preseeded with their canonical scalar
+    /// bound. An ad-hoc group's **scalar bound** starts vacuous (the tuple
+    /// carries the `F_p` handle) until
     /// [`constrain_scalar_bound`](Self::constrain_scalar_bound) names
     /// the scalar-field modulus.
     pub fn create_group(&mut self, a: U256, b: U256, bound: UintPtr) -> (EcGroupPtr, EcPointPtr) {

@@ -27,6 +27,26 @@ pub const ED25519_BASE_BOUND_PTR: u32 = 6;
 /// VM-owned store pointer for the Ed25519 scalar-field bound (`l - 1`).
 pub const ED25519_SCALAR_BOUND_PTR: u32 = 7;
 
+/// VM-owned store pointer for the secp256k1 curve coefficient `A`.
+pub const K1_A_PTR: u32 = 8;
+/// VM-owned store pointer for the secp256k1 curve coefficient `B`.
+pub const K1_B_PTR: u32 = 9;
+/// VM-owned store pointer for the secp256r1 curve coefficient `A`.
+pub const R1_A_PTR: u32 = 10;
+/// VM-owned store pointer for the secp256r1 curve coefficient `B`.
+pub const R1_B_PTR: u32 = 11;
+/// VM-owned store pointer for the Ed25519 curve coefficient `A`.
+pub const ED25519_A_PTR: u32 = 12;
+/// VM-owned store pointer for the Ed25519 curve coefficient `D`.
+pub const ED25519_D_PTR: u32 = 13;
+
+/// VM-owned store pointer for the secp256k1 group configuration.
+pub const K1_GROUP_PTR: u32 = 1;
+/// VM-owned store pointer for the secp256r1 group configuration.
+pub const R1_GROUP_PTR: u32 = 2;
+/// VM-owned store pointer for the Ed25519 group configuration.
+pub const ED25519_GROUP_PTR: u32 = 3;
+
 /// Marker for arithmetic modulo `2^256`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct U256;
@@ -149,9 +169,6 @@ impl Ed25519Scalar {
 
 /// Spec for one fixed uint arithmetic domain.
 pub trait UintSpec: 'static {
-    /// Stable local domain selector carried in uint precompile tags.
-    const ID: Felt;
-
     /// Encoded modulus limbs. `[0; 8]` is the `2^256` wrapping-domain sentinel.
     const ENCODED_MODULUS: Limbs;
 
@@ -232,42 +249,35 @@ pub trait UintSpec: 'static {
 }
 
 impl UintSpec for U256 {
-    const ID: Felt = ZERO;
     const ENCODED_MODULUS: Limbs = U256::ENCODED_MODULUS;
 }
 
 impl UintSpec for K1Base {
-    const ID: Felt = Felt::new_unchecked(1);
     const ENCODED_MODULUS: Limbs = K1Base::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
 
 impl UintSpec for K1Scalar {
-    const ID: Felt = Felt::new_unchecked(2);
     const ENCODED_MODULUS: Limbs = K1Scalar::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
 
 impl UintSpec for R1Base {
-    const ID: Felt = Felt::new_unchecked(3);
     const ENCODED_MODULUS: Limbs = R1Base::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
 
 impl UintSpec for R1Scalar {
-    const ID: Felt = Felt::new_unchecked(4);
     const ENCODED_MODULUS: Limbs = R1Scalar::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
 
 impl UintSpec for Ed25519Base {
-    const ID: Felt = Felt::new_unchecked(5);
     const ENCODED_MODULUS: Limbs = Ed25519Base::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
 
 impl UintSpec for Ed25519Scalar {
-    const ID: Felt = Felt::new_unchecked(6);
     const ENCODED_MODULUS: Limbs = Ed25519Scalar::MODULUS;
     const IS_PRIME_FIELD: bool = true;
 }
@@ -327,33 +337,6 @@ impl UintDomain {
             ED25519_BASE_BOUND_PTR => Some(Self::Ed25519Base),
             ED25519_SCALAR_BOUND_PTR => Some(Self::Ed25519Scalar),
             _ => None,
-        }
-    }
-
-    /// Returns the supported domain for a stable local domain id.
-    pub fn from_id(id: Felt) -> Option<Self> {
-        match id {
-            id if id == <U256 as UintSpec>::ID => Some(Self::U256),
-            id if id == <K1Base as UintSpec>::ID => Some(Self::K1Base),
-            id if id == <K1Scalar as UintSpec>::ID => Some(Self::K1Scalar),
-            id if id == <R1Base as UintSpec>::ID => Some(Self::R1Base),
-            id if id == <R1Scalar as UintSpec>::ID => Some(Self::R1Scalar),
-            id if id == <Ed25519Base as UintSpec>::ID => Some(Self::Ed25519Base),
-            id if id == <Ed25519Scalar as UintSpec>::ID => Some(Self::Ed25519Scalar),
-            _ => None,
-        }
-    }
-
-    /// Returns the stable local domain selector.
-    pub fn id(self) -> Felt {
-        match self {
-            Self::U256 => <U256 as UintSpec>::ID,
-            Self::K1Base => <K1Base as UintSpec>::ID,
-            Self::K1Scalar => <K1Scalar as UintSpec>::ID,
-            Self::R1Base => <R1Base as UintSpec>::ID,
-            Self::R1Scalar => <R1Scalar as UintSpec>::ID,
-            Self::Ed25519Base => <Ed25519Base as UintSpec>::ID,
-            Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::ID,
         }
     }
 
@@ -560,11 +543,52 @@ impl CodegenCurveId {
         }
     }
 
-    pub fn base_domain(self) -> UintDomain {
+    pub const fn base_domain(self) -> UintDomain {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
             Self::Secp256r1 => UintDomain::R1Base,
             Self::Ed25519 => UintDomain::Ed25519Base,
+        }
+    }
+
+    pub const fn group_ptr(self) -> u32 {
+        match self {
+            Self::Secp256k1 => K1_GROUP_PTR,
+            Self::Secp256r1 => R1_GROUP_PTR,
+            Self::Ed25519 => ED25519_GROUP_PTR,
+        }
+    }
+
+    pub const fn from_group_ptr(ptr: u32) -> Option<Self> {
+        match ptr {
+            K1_GROUP_PTR => Some(Self::Secp256k1),
+            R1_GROUP_PTR => Some(Self::Secp256r1),
+            ED25519_GROUP_PTR => Some(Self::Ed25519),
+            _ => None,
+        }
+    }
+
+    pub const fn a_ptr(self) -> u32 {
+        match self {
+            Self::Secp256k1 => K1_A_PTR,
+            Self::Secp256r1 => R1_A_PTR,
+            Self::Ed25519 => ED25519_A_PTR,
+        }
+    }
+
+    pub const fn b_ptr(self) -> u32 {
+        match self {
+            Self::Secp256k1 => K1_B_PTR,
+            Self::Secp256r1 => R1_B_PTR,
+            Self::Ed25519 => ED25519_D_PTR,
+        }
+    }
+
+    pub const fn scalar_domain(self) -> UintDomain {
+        match self {
+            Self::Secp256k1 => UintDomain::K1Scalar,
+            Self::Secp256r1 => UintDomain::R1Scalar,
+            Self::Ed25519 => UintDomain::Ed25519Scalar,
         }
     }
 
@@ -663,7 +687,7 @@ impl CurvePrecompileDescriptor {
 
     pub fn value_tag(curve: CodegenCurveId) -> Tag {
         let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, curve.id(), ZERO])
+        Tag::precompile(Self::id(), [op_id, Felt::from(curve.a_ptr()), Felt::from(curve.b_ptr())])
             .expect("curve precompile id is not framework-reserved")
     }
 
@@ -673,9 +697,9 @@ impl CurvePrecompileDescriptor {
             .expect("curve precompile id is not framework-reserved")
     }
 
-    pub fn msm_tag(curve: CodegenCurveId, n: core::num::NonZeroU32) -> Tag {
+    pub fn msm_tag(curve: CodegenCurveId) -> Tag {
         let op_id = Felt::new(Self::MSM_OP_ID).expect("curve MSM op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, curve.id(), Felt::from_u32(n.get())])
+        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr()), ZERO])
             .expect("curve precompile id is not framework-reserved")
     }
 
