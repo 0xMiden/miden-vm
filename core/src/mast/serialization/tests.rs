@@ -524,10 +524,11 @@ fn test_mast_forest_wire_view_large_counts() {
     let mut forest = MastForest::new();
     let mut roots = Vec::new();
 
-    for _ in 0..300 {
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
-            .unwrap();
+    for value in 0..300 {
+        let block_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(value))])
+                .add_to_forest(&mut forest)
+                .unwrap();
         roots.push(block_id);
     }
 
@@ -551,6 +552,12 @@ fn external_digest_offset(view: &MastForestWireView<'_>, node_index: usize) -> u
 fn read_word_at(bytes: &[u8], offset: usize) -> Word {
     let mut reader = SliceReader::new(&bytes[offset..offset + Word::min_serialized_size()]);
     Word::read_from(&mut reader).unwrap()
+}
+
+fn read_words_at(bytes: &[u8], offset: usize, count: usize) -> Vec<Word> {
+    (0..count)
+        .map(|index| read_word_at(bytes, offset + index * Word::min_serialized_size()))
+        .collect()
 }
 
 #[test]
@@ -645,6 +652,119 @@ fn test_mast_forest_wire_view_external_digests_are_ordered_by_node_index() {
         second
     );
     assert_eq!(read_word_at(&bytes, external_digest_offset(&view, third_id.to_usize())), third);
+}
+
+#[test]
+fn test_mast_forest_wire_payload_includes_sorted_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let first = Word::new([
+        Felt::new_unchecked(30),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let second = Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let third = Word::new([
+        Felt::new_unchecked(20),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+
+    let first_id = ExternalNodeBuilder::new(first).add_to_forest(&mut forest).unwrap();
+    let second_id = ExternalNodeBuilder::new(second).add_to_forest(&mut forest).unwrap();
+    let third_id = ExternalNodeBuilder::new(third).add_to_forest(&mut forest).unwrap();
+    forest.make_root(first_id);
+    forest.make_root(second_id);
+    forest.make_root(third_id);
+
+    let bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let sorted = vec![second, third, first];
+
+    assert_eq!(
+        read_words_at(&bytes, view.root_digest_offset(), view.procedure_root_count()),
+        sorted
+    );
+    assert_eq!(read_words_at(&bytes, view.dependency_digest_offset(), 3), sorted);
+    assert_eq!(
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
+        forest.commitment()
+    );
+}
+
+#[test]
+fn test_mast_forest_readers_reject_duplicate_dependency_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root_id);
+
+    let duplicate = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let bytes = forest.to_bytes();
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency commitment digest section is not strictly sorted")
+    );
+
+    let result = MastForestWireView::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency commitment digest section is not strictly sorted")
+    );
+}
+
+#[test]
+fn test_mast_forest_readers_reject_mismatched_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let first = ExternalNodeBuilder::new(Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]))
+    .add_to_forest(&mut forest)
+    .unwrap();
+    forest.make_root(first);
+
+    let mut bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let root_digest_offset = view.root_digest_offset();
+    Word::default().write_into(
+        &mut &mut bytes[root_digest_offset..root_digest_offset + Word::min_serialized_size()],
+    );
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("root commitment digest 0 does not match")
+    );
+
+    let result = MastForestWireView::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("root commitment digest 0 does not match")
+    );
 }
 
 #[test]
@@ -756,6 +876,86 @@ fn sparse_mast_round_trip_preserves_external_full_node() {
     assert_eq!(restored.get_digest_by_id(unvisited), None);
 }
 
+#[test]
+fn sparse_mast_round_trip_preserves_sorted_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let high = Word::new([
+        Felt::new_unchecked(30),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let low = Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let middle = Word::new([
+        Felt::new_unchecked(20),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+
+    let high_id = ExternalNodeBuilder::new(high).add_to_forest(&mut forest).unwrap();
+    let low_id = ExternalNodeBuilder::new(low).add_to_forest(&mut forest).unwrap();
+    let middle_id = ExternalNodeBuilder::new(middle).add_to_forest(&mut forest).unwrap();
+    forest.make_root(high_id);
+    forest.make_root(low_id);
+    forest.make_root(middle_id);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(high_id, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+    let sorted = vec![low, middle, high];
+
+    assert_eq!(restored.commitment_root_digests(), sorted.as_slice());
+    assert_eq!(restored.dependency_digests(), &[high]);
+    assert_eq!(
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
+        restored.commitment()
+    );
+    assert!(restored.get_node_by_id(low_id).is_none());
+    assert!(restored.get_node_by_id(middle_id).is_none());
+    assert_eq!(restored.get_digest_by_id(low_id), Some(low));
+    assert_eq!(restored.get_digest_by_id(middle_id), Some(middle));
+}
+
+#[test]
+fn sparse_mast_readers_reject_duplicate_dependency_commitment_inputs() {
+    let mut forest = MastForest::new();
+    let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root_id);
+
+    let duplicate = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let first_external = ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    let second_external = ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(root_id, VisitKind::FullVisit);
+    builder.record_visit(first_external, VisitKind::FullVisit);
+    builder.record_visit(second_external, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    let result = SparseMastForest::read_from_bytes(&sparse.to_bytes());
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("dependency digest section is not strictly sorted")
+    );
+}
+
 fn write_sparse_test_payload(
     source_node_count: usize,
     roots: &[MastNodeId],
@@ -780,12 +980,36 @@ fn write_sparse_test_payload(
         entries.iter().filter(|entry| matches!(entry, MastNodeEntry::External)).count(),
     );
     bytes.write_usize(full_ids.len());
+    let mut dependency_digests: Vec<Word> = entries
+        .iter()
+        .zip(full_digests)
+        .filter_map(|(entry, &digest)| matches!(entry, MastNodeEntry::External).then_some(digest))
+        .collect();
+    dependency_digests.sort_unstable();
+    bytes.write_usize(dependency_digests.len());
     bytes.write_usize(basic_block_data.len());
 
     for root in roots {
         root.0.write_into(&mut bytes);
     }
     commitment.write_into(&mut bytes);
+    let mut root_digests: Vec<Word> = roots
+        .iter()
+        .map(|root| {
+            full_ids
+                .iter()
+                .position(|id| id == root)
+                .map(|index| full_digests[index])
+                .unwrap_or(commitment)
+        })
+        .collect();
+    root_digests.sort_unstable();
+    for digest in root_digests {
+        digest.write_into(&mut bytes);
+    }
+    for digest in dependency_digests {
+        digest.write_into(&mut bytes);
+    }
     bytes.write_bytes(basic_block_data);
     for id in full_ids {
         id.0.write_into(&mut bytes);
@@ -815,7 +1039,7 @@ fn sparse_reader_allows_large_source_node_count_with_small_payload() {
         &[MastNodeEntry::Block { ops_offset: block_offset }],
         &[block.digest()],
         &basic_block_data,
-        block.digest(),
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[block.digest()]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -854,7 +1078,7 @@ fn sparse_reader_reconstructs_forward_full_child_digests() {
         ],
         &[expected_root_digest, left_block.digest(), right_block.digest()],
         &basic_block_data,
-        expected_root_digest,
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[expected_root_digest]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -894,12 +1118,15 @@ fn sparse_reader_preserves_forced_full_node_digest() {
         ],
         &[forced_root_digest, child_block.digest()],
         &basic_block_data,
-        forced_root_digest,
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[forced_root_digest]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
     assert_eq!(restored.get_digest_by_id(root), Some(forced_root_digest));
-    assert_eq!(restored.commitment(), forced_root_digest);
+    assert_eq!(
+        restored.commitment(),
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[forced_root_digest])
+    );
 }
 
 #[test]
@@ -936,7 +1163,7 @@ fn sparse_reader_reconstructs_deep_forward_full_child_chain() {
         &entries,
         &full_digests,
         &basic_block_data,
-        expected_root_digest,
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[expected_root_digest]),
     );
 
     let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
@@ -958,7 +1185,7 @@ fn sparse_reader_rejects_trailing_bytes_with_exact_prefix_budget() {
         &[MastNodeEntry::Block { ops_offset: block_offset }],
         &[block.digest()],
         &basic_block_data,
-        block.digest(),
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[block.digest()]),
     );
 
     bytes_with_trailing.push(0);
@@ -1026,6 +1253,8 @@ fn sparse_serialized_parts_reject_missing_child_digest() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
 
     assert_matches!(
@@ -1049,6 +1278,8 @@ fn sparse_serialized_parts_reject_duplicate_full_ids() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
 
     assert_matches!(
@@ -1073,6 +1304,8 @@ fn sparse_serialized_parts_reject_duplicate_digest_only_ids() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
 
     assert_matches!(
@@ -1096,11 +1329,85 @@ fn sparse_serialized_parts_reject_full_digest_overlap() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
 
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("overlaps a digest-only entry")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_root_commitment_digest_not_bound_to_root_id() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let forged_root_digests = vec![sparse.get_digest_by_id(false_branch).unwrap()];
+    let forged_commitment =
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&forged_root_digests);
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        forged_commitment,
+        forged_root_digests,
+        sparse.dependency_digests().to_vec(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("does not match procedure roots")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_dependency_digest_not_bound_to_full_external_node() {
+    let mut forest = MastForest::new();
+    let low = Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let high = Word::new([
+        Felt::new_unchecked(20),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let low_id = ExternalNodeBuilder::new(low).add_to_forest(&mut forest).unwrap();
+    let high_id = ExternalNodeBuilder::new(high).add_to_forest(&mut forest).unwrap();
+    forest.make_root(low_id);
+    forest.make_root(high_id);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(low_id, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        vec![low, high],
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("does not match full external nodes")
     );
 }
 
@@ -1120,6 +1427,8 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
     assert_matches!(
         result,
@@ -1137,6 +1446,8 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
     assert_matches!(
         result,
@@ -1153,6 +1464,8 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
         vec![out_of_range],
         sparse.advice_map().clone(),
         sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
     );
     assert_matches!(
         result,
@@ -1520,7 +1833,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
+    assert_eq!(&bytes[5..8], &[0, 0, 5], "Version should be [0, 0, 5]");
 }
 
 fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
@@ -1594,6 +1907,8 @@ fn test_deserialization_rejects_mismatched_header_counts() {
     forest.make_root(block_id);
 
     let mut bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let original_advice_map_offset = view.root_digest_offset() + Word::min_serialized_size();
     let mut offset = 8;
     let internal_count_offset = offset;
     let _internal_node_count = read_usize_at(&bytes, &mut offset).unwrap();
@@ -1610,6 +1925,10 @@ fn test_deserialization_rejects_mismatched_header_counts() {
         .copy_from_slice(&encoded_internal);
     bytes[external_count_offset..external_count_offset + encoded_external.len()]
         .copy_from_slice(&encoded_external);
+    bytes.splice(
+        original_advice_map_offset..original_advice_map_offset,
+        Word::default().to_bytes(),
+    );
 
     let result = MastForestWireView::new(&bytes);
     assert_matches!(
@@ -1713,7 +2032,7 @@ fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
 }
 
 #[test]
-fn test_materialized_deserialization_preserves_duplicate_roots() {
+fn test_materialized_deserialization_rejects_duplicate_root_commitment_inputs() {
     let mut forest = MastForest::new();
     let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
@@ -1722,10 +2041,13 @@ fn test_materialized_deserialization_preserves_duplicate_roots() {
     forest.commitment = forest.compute_nodes_commitment(&forest.roots);
 
     let bytes = forest.to_bytes();
-    let restored = MastForest::read_from_bytes(&bytes).unwrap();
 
-    assert_eq!(restored.procedure_roots(), &[root_id, root_id]);
-    assert_eq!(restored.commitment(), forest.commitment());
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("root commitment digest section is not strictly sorted")
+    );
 }
 
 fn assert_untrusted_overspec_logging(

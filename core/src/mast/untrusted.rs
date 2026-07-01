@@ -108,7 +108,9 @@ impl UntrustedMastForest {
     ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
         let is_hashless = self.layout.is_hashless();
-        let forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
+        let (forest, bytes, layout, remaining_allocation_budget) = self
+            .into_materialized_with_serialized_parts()
+            .map_err(MastForestError::Deserialization)?;
 
         // Step 1: Validate over-specified wire hashes instead of silently rewriting them.
         if !is_hashless {
@@ -117,6 +119,13 @@ impl UntrustedMastForest {
 
         // Step 2: Validate the recomputed forest.
         forest.validate()?;
+
+        serialization::validate_commitment_input_sections_from_parts(
+            &bytes,
+            layout,
+            remaining_allocation_budget,
+        )
+        .map_err(MastForestError::Deserialization)?;
 
         Ok(forest)
     }

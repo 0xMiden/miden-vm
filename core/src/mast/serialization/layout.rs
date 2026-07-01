@@ -33,6 +33,8 @@ pub(crate) struct ForestLayout {
     node_entry_offset: usize,
     external_digest_offset: usize,
     node_hash_offset: Option<usize>,
+    root_digest_offset: usize,
+    dependency_digest_offset: usize,
     advice_map_offset: usize,
 }
 
@@ -51,6 +53,7 @@ pub(super) struct MastForestHeader {
     roots_offset: usize,
     basic_block_len: usize,
     external_digests_len: usize,
+    root_digests_len: usize,
     node_entries_len: usize,
     core_tail_len: usize,
 }
@@ -140,6 +143,14 @@ impl ForestLayout {
     pub(super) fn node_hash_offset(&self) -> Option<usize> {
         self.node_hash_offset
     }
+
+    pub(super) fn root_digest_offset(&self) -> usize {
+        self.root_digest_offset
+    }
+
+    pub(super) fn dependency_digest_offset(&self) -> usize {
+        self.dependency_digest_offset
+    }
 }
 
 // WIRE FLAGS
@@ -217,6 +228,12 @@ impl MastForestHeader {
 
         let roots_count = source.read_usize()?;
         validate_budgeted_count(source, roots_count, size_of::<u32>(), "root count")?;
+        validate_budgeted_count(
+            source,
+            roots_count,
+            crate::Word::min_serialized_size(),
+            "root digest count",
+        )?;
         let roots_len_bytes = roots_count.checked_mul(size_of::<u32>()).ok_or_else(|| {
             DeserializationError::InvalidValue("roots length overflow".to_string())
         })?;
@@ -226,6 +243,11 @@ impl MastForestHeader {
             .ok_or_else(|| {
                 DeserializationError::InvalidValue("external digest length overflow".to_string())
             })?;
+        let root_digests_len =
+            roots_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(|| {
+                DeserializationError::InvalidValue("root digest length overflow".to_string())
+            })?;
+        let dependency_digests_len = external_digests_len;
         let node_entries_len =
             node_count.checked_mul(MastNodeEntry::SERIALIZED_SIZE).ok_or_else(|| {
                 DeserializationError::InvalidValue("node entry length overflow".to_string())
@@ -240,6 +262,10 @@ impl MastForestHeader {
         let node_digest_len = external_digests_len.checked_add(node_hash_len).ok_or_else(|| {
             DeserializationError::InvalidValue("node digest length overflow".to_string())
         })?;
+        let commitment_digest_len =
+            root_digests_len.checked_add(dependency_digests_len).ok_or_else(|| {
+                DeserializationError::InvalidValue("commitment digest length overflow".to_string())
+            })?;
 
         // The basic-block section length is encoded after the roots section on the wire.
         let roots_offset = source.offset();
@@ -249,6 +275,7 @@ impl MastForestHeader {
         let core_tail_len = basic_block_len
             .checked_add(node_digest_len)
             .and_then(|len| len.checked_add(node_entries_len))
+            .and_then(|len| len.checked_add(commitment_digest_len))
             .ok_or_else(|| {
                 DeserializationError::InvalidValue("core payload length overflow".to_string())
             })?;
@@ -263,6 +290,7 @@ impl MastForestHeader {
             roots_offset,
             basic_block_len,
             external_digests_len,
+            root_digests_len,
             node_entries_len,
             core_tail_len,
         })
@@ -387,6 +415,25 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
             DeserializationError::InvalidValue("node hash offset overflow".to_string())
         })?)
     };
+    let root_digest_offset = if let Some(node_hash_offset) = node_hash_offset {
+        let node_hash_len = header
+            .internal_node_count
+            .checked_mul(crate::Word::min_serialized_size())
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("node hash length overflow".to_string())
+            })?;
+        node_hash_offset.checked_add(node_hash_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("root digest offset overflow".to_string())
+        })?
+    } else {
+        external_digest_offset.checked_add(header.external_digests_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("root digest offset overflow".to_string())
+        })?
+    };
+    let dependency_digest_offset =
+        root_digest_offset.checked_add(header.root_digests_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("dependency digest offset overflow".to_string())
+        })?;
     let advice_map_offset =
         basic_block_offset.checked_add(header.core_tail_len).ok_or_else(|| {
             DeserializationError::InvalidValue("advice map offset overflow".to_string())
@@ -411,6 +458,8 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         node_entry_offset,
         external_digest_offset,
         node_hash_offset,
+        root_digest_offset,
+        dependency_digest_offset,
         advice_map_offset,
     })
 }
