@@ -1,7 +1,6 @@
 //! Host event handlers for uint wrapper advice.
 
 use alloc::{sync::Arc, vec, vec::Vec};
-use core::{error::Error, fmt};
 
 use miden_core::{Felt, ZERO, events::EventName};
 use miden_processor::{
@@ -50,25 +49,16 @@ impl EventHandler for UintFieldInvHandler {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum UintFieldInvError {
+    #[error("expected uint deferred precompile")]
     ExpectedUintPrecompile,
+    #[error("expected a canonical uint VALUE node")]
     ExpectedUintValue,
+    #[error("unknown uint domain")]
     UnknownDomain,
+    #[error("uint domain is not a declared prime field")]
     UnsupportedDomain,
+    #[error("cannot invert zero in a finite field")]
     ZeroValue,
 }
-
-impl fmt::Display for UintFieldInvError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ExpectedUintPrecompile => f.write_str("expected uint deferred precompile"),
-            Self::ExpectedUintValue => f.write_str("expected a canonical uint VALUE node"),
-            Self::UnknownDomain => f.write_str("unknown uint domain"),
-            Self::UnsupportedDomain => f.write_str("uint domain is not a declared prime field"),
-            Self::ZeroValue => f.write_str("cannot invert zero in a finite field"),
-        }
-    }
-}
-
-impl Error for UintFieldInvError {}

@@ -1,7 +1,7 @@
 //! Host event handlers for hash wrapper advice.
 
 use alloc::{sync::Arc, vec, vec::Vec};
-use core::{error::Error, fmt, marker::PhantomData, mem::size_of};
+use core::{marker::PhantomData, mem::size_of};
 
 use miden_core::{WORD_SIZE, events::EventName, utils::bytes_to_packed_u32_elements};
 use miden_processor::{
@@ -106,76 +106,32 @@ fn read_memory_packed_u32(
     Ok(out)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum HashDigestEventError {
+    #[error("{hash} input length {len_bytes} bytes exceeds maximum of {max} bytes")]
     InputTooLong {
         hash: &'static str,
         len_bytes: u64,
         max: usize,
     },
-    InputLengthTooLarge {
-        hash: &'static str,
-        len_bytes: u64,
-    },
-    AddressOverflow {
-        start: u64,
-        len_bytes: usize,
-    },
-    UnalignedAddress {
-        address: u64,
-    },
-    MemoryAccessFailed {
-        address: u32,
-    },
-    InvalidValue {
-        value: u64,
-        address: u32,
-    },
-    InvalidPadding {
-        value: u8,
-        position: usize,
-    },
+    #[error("{hash} input length {len_bytes} exceeds addressable range")]
+    InputLengthTooLarge { hash: &'static str, len_bytes: u64 },
+    #[error(
+        "address overflow while reading u32-packed memory: start={start}, len_bytes={len_bytes}"
+    )]
+    AddressOverflow { start: u64, len_bytes: usize },
+    #[error("address {address} is not word-aligned (must be divisible by {})", WORD_SIZE)]
+    UnalignedAddress { address: u64 },
+    #[error("failed to read memory at address {address}")]
+    MemoryAccessFailed { address: u32 },
+    #[error("field element value {value} at address {address} exceeds u32::MAX")]
+    InvalidValue { value: u64, address: u32 },
+    #[error("non-zero padding byte {value:#x} at byte position {position}")]
+    InvalidPadding { value: u8, position: usize },
+    #[error("{hash} digest length {len_bytes} bytes did not match expected {expected_bytes} bytes")]
     InvalidDigestLength {
         hash: &'static str,
         len_bytes: usize,
         expected_bytes: usize,
     },
 }
-
-impl fmt::Display for HashDigestEventError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InputTooLong { hash, len_bytes, max } => {
-                write!(f, "{hash} input length {len_bytes} bytes exceeds maximum of {max} bytes")
-            },
-            Self::InputLengthTooLarge { hash, len_bytes } => {
-                write!(f, "{hash} input length {len_bytes} exceeds addressable range")
-            },
-            Self::AddressOverflow { start, len_bytes } => write!(
-                f,
-                "address overflow while reading u32-packed memory: start={start}, len_bytes={len_bytes}"
-            ),
-            Self::UnalignedAddress { address } => {
-                write!(
-                    f,
-                    "address {address} is not word-aligned (must be divisible by {WORD_SIZE})"
-                )
-            },
-            Self::MemoryAccessFailed { address } => {
-                write!(f, "failed to read memory at address {address}")
-            },
-            Self::InvalidValue { value, address } => {
-                write!(f, "field element value {value} at address {address} exceeds u32::MAX")
-            },
-            Self::InvalidPadding { value, position } => {
-                write!(f, "non-zero padding byte {value:#x} at byte position {position}")
-            },
-            Self::InvalidDigestLength { hash, len_bytes, expected_bytes } => write!(
-                f,
-                "{hash} digest length {len_bytes} bytes did not match expected {expected_bytes} bytes"
-            ),
-        }
-    }
-}
-
-impl Error for HashDigestEventError {}

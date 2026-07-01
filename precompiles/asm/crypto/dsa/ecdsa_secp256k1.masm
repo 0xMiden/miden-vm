@@ -46,7 +46,6 @@ const K1_N_HI = [0xfffffffe, 0xffffffff, 0xffffffff, 0xffffffff]
 #! - SIG_R != 0 is checked here, and k1_scalar::inv traps/binds correctness for SIG_S != 0;
 #! - U1/U2 are passed as scalar digests to the curve scalar multiplication wrappers;
 #! - scalar/curve equality constraints are logged through deferred precompile machinery.
-@locals(0)
 pub proc assert_verify_prehash
     exec.prepare_verify_prehash_inputs
     # => [pubkey_ptr, U1, U2, SIG_R, ...]
@@ -64,7 +63,6 @@ end
 #!
 #! Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]
 #! Output: [pubkey_ptr, U1_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
-@locals(0)
 proc prepare_verify_prehash_inputs
     swap
     # => [digest_ptr, pubkey_ptr, sig_ptr, ...]
@@ -102,7 +100,6 @@ end
 #!
 #! Input:  [pubkey_ptr, U1_DIGEST, U2_DIGEST, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
-@locals(0)
 proc msm_mul_scalar
     exec.secp256k1::load_mem
     # => [Q_DIGEST, U1_DIGEST, U2_DIGEST, ...]
@@ -124,7 +121,6 @@ end
 #! Output: [DIFF_I, borrow_out, ...]
 #!
 #! Preconditions: A_I and N_I are u32 values, and borrow_in is boolean.
-@locals(0)
 proc sub_limb_with_borrow
     movup.2
     # => [A_I, N_I, borrow_in, ...]
@@ -154,7 +150,6 @@ end
 #! Output: [mod_ptr + 1, borrow_out, ...]
 #!
 #! Preconditions: A_I and mem[mod_ptr] are u32 values, and borrow_in is boolean.
-@locals(0)
 proc borrow_limb_from_ptr
     dup mem_load
     # => [N_I, mod_ptr, borrow_in, A_I, ...]
@@ -187,7 +182,6 @@ end
 #! Output: [mod_ptr + 8, borrow, ...]
 #!
 #! Preconditions: VALUE and mem[mod_ptr..mod_ptr+8] are u32 values.
-@locals(0)
 proc borrow_u256_sub_mod_ptr_unchecked
     push.0 swap
     # => [mod_ptr, borrow=0, VALUE_U32[8], ...]
@@ -205,7 +199,6 @@ end
 #!
 #! The output placement uses `movdn.9`: for every limb, the number of stack items between DIFF_I and
 #! its final position is always 9 (`mod_ptr`, `borrow`, and seven other u256 limbs).
-@locals(0)
 proc sub_limb_with_borrow_from_ptr
     dup mem_load
     # => [N_I, mod_ptr, borrow_in, A_I, REMAINING_VALUE_LIMBS, PREVIOUS_DIFF_LIMBS, ...]
@@ -228,7 +221,6 @@ end
 #! Preconditions:
 #! - VALUE and mem[mod_ptr..mod_ptr+8] are u32 values;
 #! - VALUE >= MODULUS, so the final borrow is zero.
-@locals(0)
 proc sub_u256_mod_ptr_unchecked
     push.0 swap
     # => [mod_ptr, borrow=0, VALUE_U32[8], ...]
@@ -295,7 +287,6 @@ end
 #!
 #! Preconditions: digest_ptr is double-word aligned and points to eight u32-range felts.
 #! The raw prehash satisfies z < 2^256 < 2n, so one conditional subtraction is sufficient.
-@locals(0)
 proc load_reduced_z_k1_from_ptr
     padw padw padw
     # => [R0=0w, R1=0w, C=0w, digest_ptr, ...]
@@ -367,7 +358,6 @@ end
 #! - SIG_R_SCALAR_VALUE_DIGEST is a canonical k1 scalar VALUE digest, e.g. from load_signature_k1;
 #! - secp256k1::eval binds VERIFY_POINT_DIGEST to the returned canonical curve VALUE payload;
 #! - after identity rejection succeeds, X_OR_TRUE_DIGEST/Y_OR_TRUE_DIGEST are real coordinate digests.
-@locals(0)
 proc assert_x_eq_scalar_k1
     exec.secp256k1::eval
     # => [VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]

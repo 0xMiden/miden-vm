@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 #[cfg(feature = "std")]
 use std::path::PathBuf;
 
-use miden_core::{deferred::PrecompileRegistry, mast::MastForest, serde::Deserializable};
+use miden_core::{deferred::PrecompileRegistry, serde::Deserializable};
 use miden_mast_package::Package;
 use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
@@ -61,20 +61,9 @@ impl PrecompilesLibrary {
     pub const SERIALIZED: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-precompiles.masp"));
 
-    /// Returns a reference to the [`MastForest`] underlying the precompiles library.
-    pub fn mast_forest(&self) -> &Arc<MastForest> {
-        self.0.mast_forest()
-    }
-
     /// Returns a reference to the underlying [`Arc<Package>`].
     pub fn package(&self) -> Arc<Package> {
         self.0.clone()
-    }
-}
-
-impl AsRef<Package> for PrecompilesLibrary {
-    fn as_ref(&self) -> &Package {
-        &self.0
     }
 }
 
