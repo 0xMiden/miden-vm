@@ -124,7 +124,7 @@ fn p2_caps_match_vm_sources() {
     assert_eq!(P2Cap::chunk().as_array(), Tag::CHUNKS.as_word());
     assert_eq!(P2Cap::and().as_array(), Tag::AND.as_word());
     assert_eq!(
-        P2Cap::keccak256_assertion(Felt::from(len_bytes)).as_array(),
+        P2Cap::keccak256_assertion(len_bytes).as_array(),
         Keccak256Precompile::assert_tag(len_bytes).as_word(),
     );
 }

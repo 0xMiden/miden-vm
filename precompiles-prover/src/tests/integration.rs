@@ -4,7 +4,7 @@
 //! constraint at every row of the trace, catching any mismatch between
 //! witness generation and constraint definitions.
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, deferred::Node, field::QuadFelt};
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -241,7 +241,16 @@ fn chunk_and_p2_traces_verify_with_shared_challenges() {
     }
     // All invocations are distinct → no interning hits; both sides
     // lay one cycle per chunk across all invocations.
-    let total_chunks: u32 = invs.iter().map(|i| i.num_chunks() as u32).sum();
+    let total_chunks: u32 = invs
+        .iter()
+        .map(|i| {
+            Node::chunks_from_bytes(&i.input)
+                .payload()
+                .as_data()
+                .expect("chunks_from_bytes creates data payload")
+                .len() as u32
+        })
+        .sum();
     assert_eq!(chunk_req.total_chunks(), total_chunks);
     assert_eq!(p2.total_cycles(), total_chunks);
 

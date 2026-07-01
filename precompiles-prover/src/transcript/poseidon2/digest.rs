@@ -11,7 +11,7 @@ use miden_core::{
     Felt,
     deferred::{Digest, Tag},
 };
-use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintPrecompile};
+use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 
 use crate::transcript::nodes::{EcOpId, UINT_PIN_CLAIM_TAG, UintOpId};
 
@@ -58,23 +58,14 @@ impl P2Cap {
 
     /// VM Keccak-256 assertion tag (`[Keccak256Precompile::id(), 0,
     /// len_bytes, 0]`) — capacity for the Keccak-node transcript hash.
-    pub fn keccak256_assertion(len_bytes: Felt) -> Self {
-        Self([
-            Keccak256Precompile::id(),
-            Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID),
-            len_bytes,
-            Felt::ZERO,
-        ])
+    pub fn keccak256_assertion(len_bytes: u32) -> Self {
+        Self(Keccak256Precompile::assert_tag(len_bytes).as_word())
     }
 
     /// VM uint `VALUE` capacity: `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`.
     pub fn uint_value(bound_ptr: u32) -> Self {
-        Self([
-            UintPrecompile::id(),
-            Felt::new(UintPrecompile::VALUE_OP_ID).expect("uint VALUE op id must fit in a felt"),
-            Felt::from(bound_ptr),
-            Felt::ZERO,
-        ])
+        let domain = UintDomain::from_bound_ptr(bound_ptr).expect("known uint bound pointer");
+        Self(UintPrecompile::value_tag(domain).as_word())
     }
 
     /// Bootstrap uint pin-claim capacity: `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
@@ -95,12 +86,7 @@ impl P2Cap {
             UintOpId::Mul => UintPrecompile::MUL_OP_ID,
             UintOpId::Is => UintPrecompile::EQ_OP_ID,
         };
-        Self([
-            UintPrecompile::id(),
-            Felt::new(op_id).expect("uint op id must fit in a felt"),
-            Felt::ZERO,
-            Felt::ZERO,
-        ])
+        Self(UintPrecompile::op_tag(op_id).as_word())
     }
 
     /// VM curve `VALUE` capacity: `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`.

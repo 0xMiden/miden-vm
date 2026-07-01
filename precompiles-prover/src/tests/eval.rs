@@ -11,7 +11,11 @@
 //! the eval chip's local constraints + its internal σ recurrence, not
 //! cross-chiplet bus balance — that's the full-stack integration test.
 
-use miden_core::{Felt, deferred::Tag, field::QuadFelt};
+use miden_core::{
+    Felt,
+    deferred::{Digest, fold_deferred_root},
+    field::QuadFelt,
+};
 use miden_lifted_air::{BaseAir, LiftedAir};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -24,7 +28,7 @@ use crate::{
             COL_ACT, COL_CAP_PARAM_B, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT,
             NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES,
             PUBLIC_ROOT_BEGIN, TranscriptEvalAir,
-            trace::{TranscriptEvalRequires, Truthy, generate_trace, transcript_node_hash},
+            trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
         poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
     },
@@ -36,6 +40,10 @@ use crate::{
 
 fn random_hash(rng: &mut impl Rng) -> P2Digest {
     P2Digest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))
+}
+
+fn fold_deferred_hash(lhs: P2Digest, rhs: P2Digest) -> P2Digest {
+    P2Digest::from(fold_deferred_root(Digest::new(lhs.as_array()), Digest::new(rhs.as_array())))
 }
 
 /// One AND fold (the standalone-test equivalent of
@@ -204,26 +212,14 @@ fn build_root_matches_left_leaning_chain() {
     let public_root = acc.hash();
     let main = generate_trace(req, acc, &EcStoreRequires::new());
 
-    let t1 = transcript_node_hash(P2Digest::default(), a);
-    let t2 = transcript_node_hash(t1, b);
-    let t3 = transcript_node_hash(t2, c);
+    let t1 = fold_deferred_hash(P2Digest::default(), a);
+    let t2 = fold_deferred_hash(t1, b);
+    let t3 = fold_deferred_hash(t2, c);
     assert_eq!(public_root, t3);
 
     // Root sits at row 0 (first-row pin), its h = public_root.
     let row0_h: [Felt; NUM_HASH] = core::array::from_fn(|i| main.values[COL_H_BEGIN + i]);
     assert_eq!(row0_h, t3.as_array());
-}
-
-#[test]
-fn transcript_node_hash_uses_vm_and_cap() {
-    let lhs = P2Digest([Felt::from(11u32); 4]);
-    let rhs = P2Digest([Felt::from(22u32); 4]);
-    let expected = Poseidon2Requires::digest_of(
-        P2Cap(Tag::AND.as_word()),
-        &[(lhs.as_array(), rhs.as_array())],
-    );
-
-    assert_eq!(transcript_node_hash(lhs, rhs), expected);
 }
 
 #[test]

@@ -162,11 +162,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         utils::bytes_to_packed_u32_elements,
     };
 
-    fn pack_chunks(bytes: &[u8]) -> Vec<[Felt; 8]> {
-        let mut felts = bytes_to_packed_u32_elements(bytes);
-        let n = felts.len().div_ceil(8).max(1);
-        felts.resize(n * 8, ZERO);
-        felts.chunks_exact(8).map(|c| core::array::from_fn(|i| c[i])).collect()
+    fn chunks_from_bytes(bytes: &[u8]) -> Vec<[Felt; 8]> {
+        Node::chunks_from_bytes(bytes)
+            .payload()
+            .as_data()
+            .expect("chunks_from_bytes creates data payload")
+            .to_vec()
     }
 
     fn digest_chunks<H: HashFunction>(input: &[u8]) -> Vec<[Felt; 8]> {
@@ -228,7 +229,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let assertion = assert_registers(
         &mut state,
         input.len() as u32,
-        pack_chunks(input),
+        chunks_from_bytes(input),
         digest_chunks::<H>(input),
     )
     .expect("matching hash assertion should register");
@@ -238,8 +239,8 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let mut wrong = digest_chunks::<H>(input);
     wrong[0][0] = if wrong[0][0] == ZERO { Felt::from_u32(1) } else { ZERO };
     let mut state = fresh();
-    let err =
-        assert_registers(&mut state, input.len() as u32, pack_chunks(input), wrong).unwrap_err();
+    let err = assert_registers(&mut state, input.len() as u32, chunks_from_bytes(input), wrong)
+        .unwrap_err();
     assert_error(err, PrecompileError::AssertionFailed);
 
     let too_long: Vec<u8> = (0u8..33).collect();
@@ -247,20 +248,20 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let err = assert_registers(
         &mut state,
         too_long.len() as u32,
-        vec![pack_chunks(&too_long)[0]],
+        vec![chunks_from_bytes(&too_long)[0]],
         digest_chunks::<H>(&too_long),
     )
     .unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
-    let mut padded = pack_chunks(&[1, 2, 3]);
+    let mut padded = chunks_from_bytes(&[1, 2, 3]);
     padded[0][0] = Felt::from_u32(u32::from_le_bytes([1, 2, 3, 0xaa]));
     let mut state = fresh();
     let err = assert_registers(&mut state, 3, padded, digest_chunks::<H>(&[1, 2, 3])).unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
     let non_u32 = Felt::new_unchecked(u64::from(u32::MAX) + 1);
-    let mut preimage = pack_chunks(input);
+    let mut preimage = chunks_from_bytes(input);
     preimage[0][0] = non_u32;
     let mut state = fresh();
     let err = assert_registers(&mut state, input.len() as u32, preimage, digest_chunks::<H>(input))
@@ -270,13 +271,15 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let mut expected = digest_chunks::<H>(input);
     expected[0][0] = non_u32;
     let mut state = fresh();
-    let err =
-        assert_registers(&mut state, input.len() as u32, pack_chunks(input), expected).unwrap_err();
+    let err = assert_registers(&mut state, input.len() as u32, chunks_from_bytes(input), expected)
+        .unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
-    let precompile_owned_data =
-        Node::try_data(HashPrecompile::<H>::assert_tag(input.len() as u32), pack_chunks(input))
-            .expect("data node is syntactically constructible");
+    let precompile_owned_data = Node::try_data(
+        HashPrecompile::<H>::assert_tag(input.len() as u32),
+        chunks_from_bytes(input),
+    )
+    .expect("data node is syntactically constructible");
     let mut state = fresh();
     let preimage = state.register(precompile_owned_data).unwrap_err();
     assert_error(preimage, PrecompileError::InvalidNode);
@@ -287,7 +290,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     assert_eq!(state.evaluate_digest(zero).unwrap(), TRUE_DIGEST);
 
     let mut state = fresh();
-    let preimage_chunks = pack_chunks(input);
+    let preimage_chunks = chunks_from_bytes(input);
     let expected_chunks = digest_chunks::<H>(input);
     let preimage = state.register(Node::chunks(preimage_chunks).unwrap()).unwrap();
     let expected = state.register(Node::chunks(expected_chunks).unwrap()).unwrap();

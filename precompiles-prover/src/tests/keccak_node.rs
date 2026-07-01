@@ -6,7 +6,11 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption of the activity flag, boundary, and continuity edges.
 
-use miden_core::{Felt, deferred::Tag, field::QuadFelt};
+use miden_core::{
+    Felt,
+    deferred::{Digest, Node},
+    field::QuadFelt,
+};
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -20,20 +24,14 @@ use crate::{
                 COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS,
                 COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS,
                 COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS,
-                NUM_MAIN_COLS,
-                trace::{
-                    KeccakNodeInvocation, generate_trace_from_invocations, hash_digest_chunks,
-                    hash_keccak_node,
-                },
+                NUM_HASH, NUM_MAIN_COLS,
+                trace::{KeccakNodeInvocation, generate_trace_from_invocations},
             },
             sponge::trace::SpongeSeqId,
         },
     },
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    transcript::poseidon2::{
-        P2Cap,
-        trace::{PermSeqId, Poseidon2Requires},
-    },
+    transcript::poseidon2::trace::PermSeqId,
 };
 
 // HELPERS
@@ -49,7 +47,7 @@ fn check_with_invocations(_seed: u64, invocations: &[KeccakNodeInvocation]) {
 /// runs the AIR's local constraints + LogUp σ recurrence, both of
 /// which are agnostic to the digest bytes (cross-chiplet content
 /// consistency lives at the integration-test layer).
-fn anchored_inv(seed: u64, len_bytes: u64) -> KeccakNodeInvocation {
+fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
     let mut rng = StdRng::seed_from_u64(seed);
     KeccakNodeInvocation {
         len_bytes,
@@ -68,7 +66,7 @@ fn anchored_inv(seed: u64, len_bytes: u64) -> KeccakNodeInvocation {
 /// orchestrator's continuity equations against `prev`. P2 digest-chunks /
 /// keccak cycles are free witnesses (the orchestrator's continuity
 /// doesn't constrain them); we just pick fresh cycles per invocation.
-fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u64) -> KeccakNodeInvocation {
+fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
     let mut rng = StdRng::seed_from_u64(seed);
     KeccakNodeInvocation {
         len_bytes,
@@ -142,31 +140,29 @@ fn log_quotient_degree_matches_design_target() {
 // ================================================================================================
 
 #[test]
-fn hash_digest_chunks_uses_vm_chunks_cap() {
-    let d: [Felt; 8] = core::array::from_fn(|i| Felt::from((i + 1) as u32));
-    let rate0 = [d[0], d[1], d[2], d[3]];
-    let rate1 = [d[4], d[5], d[6], d[7]];
-    let expected =
-        Poseidon2Requires::digest_of(P2Cap(Tag::CHUNKS.as_word()), &[(rate0, rate1)]).as_array();
+fn generated_row_uses_vm_chunk_and_keccak_node_digests() {
+    let inv = anchored_inv(0x33, 200);
+    let main = generate_trace_from_invocations(core::slice::from_ref(&inv));
 
-    assert_eq!(hash_digest_chunks(&d), expected);
-}
-
-#[test]
-fn hash_keccak_node_uses_vm_keccak_assertion_cap() {
-    let h_input_chunks: [Felt; 4] = core::array::from_fn(|i| Felt::from((10 + i) as u32));
-    let h_digest_chunks: [Felt; 4] = core::array::from_fn(|i| Felt::from((20 + i) as u32));
-    let len_bytes = 200u32;
-    let expected = Poseidon2Requires::digest_of(
-        P2Cap(Keccak256Precompile::assert_tag(len_bytes).as_word()),
-        &[(h_input_chunks, h_digest_chunks)],
+    let d_felts: [Felt; 8] = inv.d.map(Felt::from);
+    let h_digest_chunks = Node::chunks(vec![d_felts])
+        .expect("Keccak digest chunks are non-empty")
+        .digest()
+        .into_elements();
+    let h_keccak = Keccak256Precompile::assert_node(
+        inv.len_bytes,
+        Digest::new(inv.h_input_chunks),
+        Digest::new(h_digest_chunks),
     )
-    .as_array();
+    .digest()
+    .into_elements();
 
-    assert_eq!(
-        hash_keccak_node(&h_input_chunks, &h_digest_chunks, Felt::from(len_bytes)),
-        expected,
-    );
+    let row_h_digest_chunks: [Felt; NUM_HASH] =
+        core::array::from_fn(|i| main.values[COL_H_DIGEST_CHUNKS_BEGIN + i]);
+    let row_h_keccak: [Felt; NUM_HASH] =
+        core::array::from_fn(|i| main.values[COL_H_KECCAK_BEGIN + i]);
+    assert_eq!(row_h_digest_chunks, h_digest_chunks);
+    assert_eq!(row_h_keccak, h_keccak);
 }
 
 // CONSTRAINT TESTS

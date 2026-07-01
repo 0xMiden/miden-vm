@@ -10,6 +10,7 @@ use super::DeferredError;
 use crate::{
     Felt, Word,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 
 /// Stable address of a deferred [`Node`], computed as a 4-felt Poseidon2 digest.
@@ -357,6 +358,12 @@ pub struct Node {
 impl Node {
     pub(crate) const DATA_CHUNK_FELT_LEN: usize = 8;
 
+    /// Number of little-endian bytes represented by one [`DataChunk`].
+    ///
+    /// Each of the eight field elements stores one packed `u32`, so a chunk carries 32 bytes.
+    pub const PACKED_BYTES_PER_CHUNK: usize =
+        Self::DATA_CHUNK_FELT_LEN * core::mem::size_of::<u32>();
+
     /// Canonical TRUE node returned by predicates that verify successfully.
     pub const TRUE: Node = Node {
         tag: Tag::TRUE,
@@ -386,6 +393,22 @@ impl Node {
             tag: Tag::CHUNKS,
             payload: Payload::try_data(chunks)?,
         })
+    }
+
+    /// Creates a framework-owned opaque chunk-list data node from bytes.
+    ///
+    /// Bytes are packed little-endian into `u32` field elements, padded with zero felts to a
+    /// non-empty multiple of one [`DataChunk`], and wrapped in the framework [`Tag::CHUNKS`] node.
+    /// Empty byte strings therefore encode as a single all-zero chunk.
+    pub fn chunks_from_bytes(bytes: &[u8]) -> Self {
+        let mut felts = bytes_to_packed_u32_elements(bytes);
+        let n_chunks = felts.len().div_ceil(Self::DATA_CHUNK_FELT_LEN).max(1);
+        felts.resize(n_chunks * Self::DATA_CHUNK_FELT_LEN, ZERO);
+        let chunks = felts
+            .chunks_exact(Self::DATA_CHUNK_FELT_LEN)
+            .map(|chunk| core::array::from_fn(|i| chunk[i]))
+            .collect::<Vec<_>>();
+        Self::chunks(chunks).expect("chunks_from_bytes always creates at least one chunk")
     }
 
     /// Creates a join-shaped node that references two child digests.
@@ -690,6 +713,27 @@ mod tests {
 
         let precompile_data = Node::try_data(TAG_A, chunks).unwrap();
         assert_ne!(node.digest(), precompile_data.digest());
+    }
+
+    #[test]
+    fn chunks_from_bytes_packs_little_endian_u32s_and_zero_pads() {
+        assert_eq!(Node::PACKED_BYTES_PER_CHUNK, 32);
+
+        let empty = Node::chunks_from_bytes(&[]);
+        assert_eq!(empty.tag(), Tag::CHUNKS);
+        assert_eq!(empty.payload().as_data().unwrap(), &[[ZERO; 8]][..]);
+
+        let partial = Node::chunks_from_bytes(&[1, 2, 3, 4, 5]);
+        let mut expected = [ZERO; 8];
+        expected[0] = Felt::from_u32(0x0403_0201);
+        expected[1] = Felt::from_u32(0x0000_0005);
+        assert_eq!(partial.payload().as_data().unwrap(), &[expected][..]);
+
+        let multi = Node::chunks_from_bytes(&[7; Node::PACKED_BYTES_PER_CHUNK + 1]);
+        assert_eq!(multi.payload().as_data().unwrap().len(), 2);
+        assert_eq!(multi.payload().as_data().unwrap()[0], [Felt::from_u32(0x0707_0707); 8]);
+        assert_eq!(multi.payload().as_data().unwrap()[1][0], Felt::from_u32(7));
+        assert_eq!(&multi.payload().as_data().unwrap()[1][1..], &[ZERO; 7][..]);
     }
 
     #[test]

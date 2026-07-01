@@ -1,22 +1,25 @@
 //! Fixed-pin bootstrap tests.
 
-use miden_core::Felt;
+use miden_core::{
+    Felt,
+    deferred::{Digest, fold_deferred_root},
+};
 use miden_precompiles::UintDomain;
 
 use crate::{
     math::{U256, from_limbs32, to_limbs32},
     session::Session,
-    transcript::{
-        eval::trace::transcript_node_hash,
-        poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
-    },
+    transcript::poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
     uint::trace::PIN_NAMESPACE_END,
 };
 
 fn fold_truthy_hashes(hashes: impl IntoIterator<Item = P2Digest>) -> P2Digest {
     let mut acc = P2Digest::default();
     for hash in hashes {
-        acc = transcript_node_hash(acc, hash);
+        acc = P2Digest::from(fold_deferred_root(
+            Digest::new(acc.as_array()),
+            Digest::new(hash.as_array()),
+        ));
     }
     acc
 }
