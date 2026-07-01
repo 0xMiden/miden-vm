@@ -2,6 +2,10 @@
 
 ## v0.23.5 (2026-07-02)
 
+#### Enhancements
+
+- Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3316](https://github.com/0xMiden/miden-vm/pull/3316)).
+
 ## v0.23.4 (2026-06-23)
 
 - Preserved semantic struct and field names when emitting debug types, so debug dumps no longer fall back to anonymous struct metadata ([#3269](https://github.com/0xMiden/miden-vm/pull/3269)).
