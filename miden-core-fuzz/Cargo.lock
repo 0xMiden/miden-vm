@@ -708,7 +708,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "miden-assembly"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "log",
  "miden-assembly-syntax-cst",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "derive_more",
  "log",
@@ -834,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1044,7 +1044,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1053,7 +1053,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "miden-crypto",
  "proptest",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "lock_api",
  "loom",

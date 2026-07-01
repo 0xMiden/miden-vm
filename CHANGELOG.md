@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.24.1 (2026-07-01)
+## v0.24.2 (2026-07-01)
 
 - Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
 - Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
