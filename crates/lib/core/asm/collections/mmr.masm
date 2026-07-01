@@ -129,7 +129,7 @@ end
 #!    The address is expected to be word-aligned.
 #!
 #! Cycles: 162 + 9 * extra_peak_pair cycles
-#!    where `extra_peak` is the number of peak pairs in addition to the first
+#!    where `extra_peak_pair` is the number of peak pairs in addition to the first
 #!    16, i.e. `round_up((num_of_peaks - 16) / 2)`
 pub proc unpack
   # load the num_leaves and peaks to the advice_stack (0 cycles)

@@ -7,6 +7,7 @@
 - Added a Blake3 pure execution benchmark axis and reduced processor benchmark compile time by relaxing forced inlining in execution helpers ([#3289](https://github.com/0xMiden/miden-vm/pull/3289)).
 - Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
+- Added `scripts/check-user-doc-cycles.sh` to verify user-facing core library and assembly instruction cycle counts against generated MASM docs and measured `clk` fixtures ([#3111](https://github.com/0xMiden/miden-vm/issues/3111)).
 
 ## v0.24.0 (2026-06-24)
 
