@@ -36,15 +36,25 @@
 //! inherit the store's 16-bit `Range16` through the `UintVal` tie; no-wrap
 //! holds trivially (`|coeff| ≲ 2³⁵ ≪ 2⁶³`).
 //!
-//! ## Layout (period-8, one value per row)
+//! ## Layout (period-4, one value per row)
 //!
-//! 8×32 per row (a whole 256-bit value), so `a`, `b`, `c` and `p` each take
-//! a single row; the two `UintVal` halves (offsets 0/1) are both consumed
-//! from that one row. Each operand row hosts its own block scalar in the
-//! cell past the limbs — `is_b_zero` on the `b` row, `is_c_zero` on the `c`
-//! row, the reduction bit `k` on the `p` row — read locally, so no scalar
-//! needs constancy transport. The carries take one row each; a `term` row
-//! (hosting the provide mult) closes the SZ.
+//! 8×32 per row (a whole 256-bit value): `a`, `b`, `c` and `p` each take a
+//! single row, in that fixed order, and the two `UintVal` halves (offsets
+//! 0/1) are both consumed from that one row. `p` sits last in the period, so
+//! it doubles as the block's closing row — the `UintAdd` provide and the
+//! `id == 0` assertion both fire there, with no dedicated term row.
+//!
+//! Every row's five cells past the limbs (8–12) host that row's own block
+//! scalar plus a share of the seven-limb signed carry pair `γ⁺` / `γ⁻`: `a`
+//! has no scalar of its own, so all five go to carries; `b` and `c` each
+//! spend one on their zero-sentinel flag, `p` spends one on the reduction
+//! bit `k` and one on the provide multiplicity — the rest carry `γ⁺` / `γ⁻`.
+//! [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`] are the placement tables the
+//! AIR, trace-gen and prover all read, mirroring the pattern
+//! [`UintMul`](crate::uint::mul)'s `GAMMA_SLOTS` uses for its own carries:
+//! the `id` accumulation is additive across rows, so splitting a carry
+//! vector over several rows' spare cells costs nothing beyond the placement
+//! table itself.
 //!
 //! Two zero-sentinel modes, one per operand row: **`is_c_zero`** drops the
 //! `c` side (`a + b ≡ 0` — negation with an unstored zero result) and
@@ -52,16 +62,12 @@
 //! **equality certificate** `a = c`, both canonical under one modulus;
 //! consumed e.g. by the EC group law's `x₁ = x₂` / `y₁ = y₂` case ties).
 //!
-//! | row | role   | cells 0–7 / scalar        | id contributes            |
-//! |-----|--------|----------------------------|---------------------------|
-//! | 0   | `a`    | a's 8×32 limbs             | `+a(β)`                   |
-//! | 1   | `b`    | b's 8×32 limbs; `is_b_zero`@8 | `+b(β)·(1 − is_b_zero)` |
-//! | 2   | `c`    | c's 8×32 limbs; `is_c_zero`@8 | `−c(β)·(1 − is_c_zero)` |
-//! | 3   | `p`    | bound's 8×32 limbs; `k`@8  | `−k·(bound(β) + 1)`       |
-//! | 4   | `cpos` | γ⁺₀..₆ (cells 0–6)         | `+Σ γ⁺ⱼ(β^{j+1} − t·βʲ)`  |
-//! | 5   | `cneg` | γ⁻₀..₆ (cells 0–6)         | `−Σ γ⁻ⱼ(β^{j+1} − t·βʲ)`  |
-//! | 6   | —      | (spare)                    | 0                         |
-//! | 7   | `term` | `mult` (cell 0)            | assert `id = 0`           |
+//! | row | role | cells 0–7  | cells 8–12                                   |
+//! |-----|------|------------|-----------------------------------------------|
+//! | 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄                                       |
+//! | 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12    |
+//! | 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12            |
+//! | 3   | `p`  | p's limbs  | `k`@8, γ⁻₆@9, `mult`@12 (10–11 spare)          |
 
 pub mod trace;
 
@@ -134,24 +140,26 @@ where
 /// Limb cells per value row: the full 8×32-bit view (both `UintVal` halves)
 /// laid on one row.
 pub const NUM_LIMBS: usize = 8;
+/// Cell columns per row: 8 limbs plus 5 scalar/carry cells (8–12).
+pub const NUM_CELLS: usize = 13;
 /// Scalar cell past the limbs holding this row's flag: `is_b_zero` on the
 /// `b` row, `is_c_zero` on the `c` row, the reduction bit `k` on the `p`
 /// row. Read locally by that row's role-gated constraints.
 pub const CELL_FLAG: usize = 8;
 /// `a`'s pointer (cycle-constant per block).
-pub const COL_A_PTR: usize = 9;
+pub const COL_A_PTR: usize = NUM_CELLS;
 /// `b`'s pointer (cycle-constant).
-pub const COL_B_PTR: usize = 10;
+pub const COL_B_PTR: usize = NUM_CELLS + 1;
 /// `c`'s pointer — the witnessed result (cycle-constant).
-pub const COL_C_PTR: usize = 11;
+pub const COL_C_PTR: usize = NUM_CELLS + 2;
 /// the shared modulus's pointer = `bound_ptr` (cycle-constant).
-pub const COL_BOUND_PTR: usize = 12;
+pub const COL_BOUND_PTR: usize = NUM_CELLS + 3;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op blocks,
 /// 0 on padding. Gates every `UintVal` consume so an all-zero padding
 /// block stays off the bus — with the zero sentinel gone, nothing provides
 /// the `(0, 0, off, 0…)` tuples bare periodic flags would emit there.
-pub const COL_ACT: usize = 13;
-pub const NUM_MAIN_COLS: usize = 14;
+pub const COL_ACT: usize = NUM_CELLS + 4;
+pub const NUM_MAIN_COLS: usize = NUM_CELLS + 5;
 
 /// B-row cell holding the `is_b_zero` flag: when set, `b` is the (unstored)
 /// zero — the `+b(β)` term and the `b` `UintVal` consumes are dropped, and
@@ -169,29 +177,54 @@ pub const CELL_IS_B_ZERO: usize = CELL_FLAG;
 pub const CELL_IS_C_ZERO: usize = CELL_FLAG;
 /// P-row cell holding the boolean reduction bit `k`.
 pub const CELL_K: usize = CELL_FLAG;
-/// Term-row cell holding the `UintAdd` provide multiplicity = consumer
-/// count (one per eval `UintOp` node, 0 for bare ptr-space ops) — read
-/// only by the term-row provide.
-pub const TERM_CELL_MULT: usize = 0;
+/// P-row cell holding the `UintAdd` provide multiplicity = consumer count
+/// (one per eval `UintOp` node, 0 for bare ptr-space ops) — read only by
+/// the closing row's provide.
+pub const TERM_CELL_MULT: usize = 12;
 
-/// Block period: one add op = 8 rows (a / b / c / p one row each, two carry
-/// rows, a spare, and the term row).
-pub const PERIOD: usize = 8;
+/// Block period: one add op = 4 rows, `a` / `b` / `c` / `p` one row each.
+pub const PERIOD: usize = 4;
 
-// One-hot periodic role selectors (one column each, period 8). Row 6 needs
-// no selector — it is the spare row and contributes nothing; the term role
-// sits on the last row (7) so the cycle-constancy `not_term` gate drops
-// exactly at the block boundary.
-const PCOL_A: usize = 0;
-const PCOL_B: usize = 1;
-const PCOL_C: usize = 2;
-const PCOL_P: usize = 3;
-const PCOL_CPOS: usize = 4;
-const PCOL_CNEG: usize = 5;
-const PCOL_TERM: usize = 6;
-const NUM_PERIODIC: usize = 7;
-/// Row each periodic one-hot column fires on (index = `PCOL_*`).
-const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3, 4, 5, 7];
+// One-hot periodic role selectors (one column each, period 4): selector `i`
+// fires on row `i`, so the role index doubles as the row index.
+pub const ROW_A: usize = 0;
+pub const ROW_B: usize = 1;
+pub const ROW_C: usize = 2;
+/// The modulus row, last in the period — it doubles as the block's closing
+/// row (the `UintAdd` provide and the `id == 0` assertion both fire here).
+pub const ROW_P: usize = 3;
+const NUM_PERIODIC: usize = PERIOD;
+
+/// Carry vector length: `deg Γ = 6` (see the module identity), 7 limbs.
+pub const NUM_GAMMA: usize = 7;
+
+/// The `γ⁺` (binary carry chain of `a + b`) placement table: slot `j` hosts
+/// `γ⁺ⱼ` at `(row, cell)`. `a` has no scalar of its own so it hosts five;
+/// `b` the remaining two, in the cells left over past its zero-sentinel
+/// flag. Shared verbatim by the AIR (weights), trace-gen (placement) and
+/// the aux builder (the `id` mirror), so the three cannot drift.
+pub const GAMMA_POS_SLOTS: [(usize, usize); NUM_GAMMA] = [
+    (ROW_A, 8),
+    (ROW_A, 9),
+    (ROW_A, 10),
+    (ROW_A, 11),
+    (ROW_A, 12),
+    (ROW_B, 9),
+    (ROW_B, 10),
+];
+/// The `γ⁻` (binary carry chain of `c + k·p`) placement table, continuing
+/// where [`GAMMA_POS_SLOTS`] leaves off: two cells left on `b`, four on `c`
+/// past its own flag, and one on `p` past its flag and the provide-mult
+/// cell (cells 10–11 on `p` are unused).
+pub const GAMMA_NEG_SLOTS: [(usize, usize); NUM_GAMMA] = [
+    (ROW_B, 11),
+    (ROW_B, 12),
+    (ROW_C, 9),
+    (ROW_C, 10),
+    (ROW_C, 11),
+    (ROW_C, 12),
+    (ROW_P, 9),
+];
 
 // Aux layout (FLATTENED to lqd 1): cols 0..7 = LogUp fraction columns,
 // one/two fractions each so every closing constraint is degree ≤ 3; col 7
@@ -223,9 +256,8 @@ impl BaseAir<Felt> for UintAddAir {
     }
 
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        ROLE_ROWS
-            .iter()
-            .map(|&row| {
+        (0..PERIOD)
+            .map(|row| {
                 let mut col = vec![Felt::ZERO; PERIOD];
                 col[row] = Felt::ONE;
                 col
@@ -261,18 +293,15 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-        // Role selectors.
+        // Role selectors — the role index doubles as the row index.
         let sel: [AB::Expr; NUM_PERIODIC] = {
             let p = builder.periodic_values();
             array::from_fn(|i| p[i].into())
         };
-        let a_sel = sel[PCOL_A].clone();
-        let b_sel = sel[PCOL_B].clone();
-        let c_sel = sel[PCOL_C].clone();
-        let p_sel = sel[PCOL_P].clone();
-        let cpos = sel[PCOL_CPOS].clone();
-        let cneg = sel[PCOL_CNEG].clone();
-        let term_sel = sel[PCOL_TERM].clone();
+        let a_sel = sel[ROW_A].clone();
+        let b_sel = sel[ROW_B].clone();
+        let c_sel = sel[ROW_C].clone();
+        let p_sel = sel[ROW_P].clone();
 
         // β^0 .. β^7.
         let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
@@ -293,11 +322,6 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         // radix, so the 32-bit limbs recombine to the 256-bit value at β).
         let full_sum: AB::ExprEF =
             (0..8).fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[j]));
-        // The carry-row weight Σⱼ₌₀⁶ γⱼ·(β^{j+1} − t·βʲ) = (β − t)·Γ(β).
-        let carry_term: AB::ExprEF = (0..7).fold(AB::ExprEF::ZERO, |s, j| {
-            let w = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            s + w * AB::Expr::from(local[j])
-        });
 
         // Block scalars, read locally on their own rows.
         let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].into();
@@ -306,19 +330,51 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_active: AB::Expr = AB::Expr::ONE - is_b_zero.clone();
         let c_active: AB::Expr = AB::Expr::ONE - is_c_zero.clone();
 
+        // Carry contributions: each slot's weight (β^{j+1} − t·βʲ) times its
+        // hosting row's cell, gated by that row's own selector — whichever
+        // physical row the placement table puts it on.
+        let mut carry_pos: AB::ExprEF = AB::ExprEF::ZERO;
+        for (j, &(row, cell)) in GAMMA_POS_SLOTS.iter().enumerate() {
+            let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+            carry_pos += w * sel[row].clone() * AB::Expr::from(local[cell]);
+        }
+        let mut carry_neg: AB::ExprEF = AB::ExprEF::ZERO;
+        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
+            let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+            carry_neg += w * sel[row].clone() * AB::Expr::from(local[cell]);
+        }
+
         // Per-row `id` contributions (one selector fires per row, so the
         // cross terms vanish): +a, +b·(1−is_b_zero), −c·(1−is_c_zero),
-        // −k·(bound(β)+1), ±carries.
-        let contrib: AB::ExprEF = full_sum.clone() * a_sel.clone()
+        // −k·(bound(β)+1), ±carries (spread over whichever rows host them).
+        let contrib: AB::ExprEF = full_sum.clone() * a_sel
             + full_sum.clone() * (b_sel.clone() * b_active)
             - full_sum.clone() * (c_sel.clone() * c_active)
             - (full_sum.clone() + bp[0].clone()) * (p_sel.clone() * k.clone())
-            + carry_term.clone() * cpos.clone()
-            - carry_term * cneg.clone();
+            + carry_pos
+            - carry_neg;
 
         builder.when_first_row().assert_zero_ext(id.clone());
         builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-        builder.assert_zero_ext(id * term_sel.clone());
+
+        // The closing row (`p`) has a nonzero contribution of its own — its
+        // `−k·(bound(β)+1)` term plus its share of γ⁻ — so the closure check
+        // folds it in directly instead of reading it back from `id_next`.
+        // That keeps the check local to the block's last row, so it also
+        // covers the trace's final block: relying on `id_next` would read
+        // the wrap-around first row's pinned zero regardless of whether that
+        // last block actually closed. Built from p's own cells only (not the
+        // shared `contrib`, whose other-role terms carry their own periodic
+        // gates and would needlessly bloat this constraint's degree once
+        // multiplied by `p_sel`).
+        let mut p_own: AB::ExprEF = -(full_sum + bp[0].clone()) * k.clone();
+        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
+            if row == ROW_P {
+                let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+                p_own -= w * AB::Expr::from(local[cell]);
+            }
+        }
+        builder.assert_zero_ext((id + p_own) * p_sel.clone());
 
         // k is the boolean reduction bit (p-row scalar).
         builder.assert_zero(p_sel.clone() * k.clone() * (AB::Expr::ONE - k));
@@ -328,12 +384,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
 
         // A provide must come from an active block. The `UintAdd` provide is
-        // gated only by `sel[TERM]` (not `act`), and the operand consumes are
-        // act-gated — so an `act = 0` block with zeroed limbs (the SZ closes
-        // trivially) and a witnessed term-row `mult` would provide a *false*
-        // relation onto the bus. Force the term-row mult to 0 when act = 0.
+        // gated only by `sel[ROW_P]` (not `act`), and the operand consumes
+        // are act-gated — so an `act = 0` block with zeroed limbs (the SZ
+        // closes trivially) and a witnessed closing-row `mult` would provide
+        // a *false* relation onto the bus. Force the mult to 0 when act = 0.
         builder.assert_zero(
-            term_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
+            p_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
         );
 
         // is_c_zero (a c-row scalar) is boolean, and forces c_ptr = 0 — the
@@ -351,17 +407,17 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
         builder.assert_zero(b_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
-        // Carry booleanity: γ⁺ / γ⁻ ∈ {0, 1}, seven limbs each on their row.
-        for &cell in local.iter().take(7) {
-            let lj: AB::Expr = cell.into();
-            let boolean = lj.clone() * (AB::Expr::ONE - lj);
-            builder.assert_zero((cpos.clone() + cneg.clone()) * boolean);
+        // Carry booleanity: every γ⁺ / γ⁻ cell, gated by whichever row's
+        // selector the placement table assigns it to.
+        for &(row, cell) in GAMMA_POS_SLOTS.iter().chain(GAMMA_NEG_SLOTS.iter()) {
+            let lj: AB::Expr = local[cell].into();
+            builder.assert_zero(sel[row].clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
 
         // Cycle-constancy: the four ptrs + act are constant within a block
-        // (every row but the terminal one, which the not_term gate drops at
-        // the block boundary — term sits on the last row of the period).
-        let not_term: AB::Expr = AB::Expr::ONE - term_sel;
+        // (every row but the closing one, which the not_term gate drops at
+        // the block boundary — the modulus row sits last in the period).
+        let not_term: AB::Expr = AB::Expr::ONE - p_sel;
         for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
@@ -461,8 +517,8 @@ where
 
         // The two 4×32 `UintVal` halves of the value on this row: the lo
         // half (cells 0..4, offset 0) and the hi half (cells 4..8, offset
-        // 1). Both operand halves consume from the same row now (a, b, c
-        // and p each take one row), so no next-row read is needed.
+        // 1). Both operand halves consume from the same row (a, b, c and p
+        // each take one row), so no next-row read is needed.
         let lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
         let hi: [LB::Expr; 4] = array::from_fn(|k| local[4 + k].into());
 
@@ -483,38 +539,38 @@ where
         // Each operand consumes both `UintVal` halves from its own row. The
         // a/p multiplicities are `sel·act`; the gated b/c halves carry
         // `sel·(1−is_zero)·act` (degree 3). (flag, ptr, offset, limbs, deg).
-        let a_lo = (sel[PCOL_A].clone(), a_ptr.clone(), LB::Expr::ZERO, lo.clone(), consume_deg);
-        let a_hi = (sel[PCOL_A].clone(), a_ptr.clone(), LB::Expr::ONE, hi.clone(), consume_deg);
+        let a_lo = (sel[ROW_A].clone(), a_ptr.clone(), LB::Expr::ZERO, lo.clone(), consume_deg);
+        let a_hi = (sel[ROW_A].clone(), a_ptr.clone(), LB::Expr::ONE, hi.clone(), consume_deg);
         let b_lo = (
-            sel[PCOL_B].clone() * b_active.clone(),
+            sel[ROW_B].clone() * b_active.clone(),
             b_ptr.clone(),
             LB::Expr::ZERO,
             lo.clone(),
             gated_consume_deg,
         );
         let b_hi = (
-            sel[PCOL_B].clone() * b_active,
+            sel[ROW_B].clone() * b_active,
             b_ptr.clone(),
             LB::Expr::ONE,
             hi.clone(),
             gated_consume_deg,
         );
         let c_lo = (
-            sel[PCOL_C].clone() * c_active.clone(),
+            sel[ROW_C].clone() * c_active.clone(),
             c_ptr.clone(),
             LB::Expr::ZERO,
             lo.clone(),
             gated_consume_deg,
         );
         let c_hi = (
-            sel[PCOL_C].clone() * c_active,
+            sel[ROW_C].clone() * c_active,
             c_ptr.clone(),
             LB::Expr::ONE,
             hi.clone(),
             gated_consume_deg,
         );
-        let p_lo = (sel[PCOL_P].clone(), bound_ptr.clone(), LB::Expr::ZERO, lo, consume_deg);
-        let p_hi = (sel[PCOL_P].clone(), bound_ptr.clone(), LB::Expr::ONE, hi, consume_deg);
+        let p_lo = (sel[ROW_P].clone(), bound_ptr.clone(), LB::Expr::ZERO, lo, consume_deg);
+        let p_hi = (sel[ROW_P].clone(), bound_ptr.clone(), LB::Expr::ONE, hi, consume_deg);
 
         // Flattened LogUp (lqd 1), one/two fractions per column. The four
         // gated b/c consumes carry degree-3 multiplicities
@@ -551,7 +607,7 @@ where
                                 );
                                 b.insert(
                                     "provide-uintadd",
-                                    neg_mult.clone() * sel[PCOL_TERM].clone(),
+                                    neg_mult.clone() * sel[ROW_P].clone(),
                                     UintAddMsg {
                                         bound_ptr: bound_ptr.clone(),
                                         a_ptr: a_ptr.clone(),
