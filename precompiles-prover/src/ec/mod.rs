@@ -399,6 +399,7 @@ where
                                         c_ptr: a_ptr.clone(),
                                         r_ptr: u_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
+                                        is_sub: LB::Expr::ZERO,
                                     },
                                     member_deg,
                                 );
@@ -413,6 +414,7 @@ where
                                         c_ptr: b_ptr.clone(),
                                         r_ptr: w_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
+                                        is_sub: LB::Expr::ZERO,
                                     },
                                     member_deg,
                                 );
@@ -427,6 +429,7 @@ where
                                         c_ptr: bound_ptr.clone(),
                                         r_ptr: w_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
+                                        is_sub: LB::Expr::ZERO,
                                     },
                                     member_deg,
                                 );

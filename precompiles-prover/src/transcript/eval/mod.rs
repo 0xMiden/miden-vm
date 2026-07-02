@@ -1030,6 +1030,7 @@ where
                                         c_ptr: bound_ptr.clone(),
                                         r_ptr: ptr,
                                         bound_ptr,
+                                        is_sub: LB::Expr::ZERO,
                                     },
                                     one_deg,
                                 );

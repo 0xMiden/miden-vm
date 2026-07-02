@@ -82,9 +82,9 @@ pub(crate) struct EcAddOp {
     pub p_coords: Option<(UintPtr, UintPtr)>,
     pub q_coords: Option<(UintPtr, UintPtr)>,
     /// Transient cells of the live formulas, in cell order —
-    /// `(slope_aux, λ, inv, t)` on the slope row, `(w, e, u, x₃)` on the
-    /// tail row, `y₃` opening the res row — `None` (all-zero cells) for
-    /// the cases that allocate none.
+    /// `(slope_aux, λ, inv, t)` on the slope row, `(y₃, e, —, x₃)` on the
+    /// tail row (cell 2 dead, the res row's cell 0 free) — `None` (all-zero
+    /// cells) for the cases that allocate none.
     pub transients: Option<[UintPtr; 9]>,
     /// Fresh-mint flag (closure cert): `true` iff this op *first* minted
     /// `r` (a generic/double `add_point_at` miss) — the op that owns `r`'s
@@ -156,7 +156,7 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
     for (cell, ptr) in transients[NUM_CELLS..2 * NUM_CELLS].iter().enumerate() {
         set(ROW_TAIL, cell, *ptr);
     }
-    set(ROW_RES, 0, transients[8]); // CELL_Y3
+    set(ROW_RES, 0, transients[8]); // res cell 0 (free — y₃ rides the tail row)
 
     // Hosted scalars: the result / scalar-bound / group ptrs on the res
     // row, the operand ptrs + the `EcGroupAdd` provide multiplicity
