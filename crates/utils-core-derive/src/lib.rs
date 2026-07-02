@@ -272,6 +272,7 @@ fn generate_mast_forest_contributor_impl(
 
     quote! {
         impl #generics crate::mast::MastForestContributor for #enum_name #generics {
+            #[cfg(any(test, feature = "arbitrary"))]
             fn add_to_forest(self, forest: &mut crate::mast::MastForest) -> Result<crate::mast::MastNodeId, crate::mast::MastForestError> {
                 match self {
                     #(#add_to_forest_arms),*
@@ -280,11 +281,11 @@ fn generate_mast_forest_contributor_impl(
 
             fn fingerprint_for_node(
                 &self,
-                forest: &crate::mast::MastForest,
+                context: &impl crate::mast::MastNodeContext,
                 hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::Word>,
             ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
+                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(context, hash_by_node_id)),*
                 }
             }
 

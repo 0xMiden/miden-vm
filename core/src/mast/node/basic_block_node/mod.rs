@@ -1,10 +1,12 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
-    mast::{MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{MastForest, MastForestError, MastNodeId},
     operations::Operation,
     prettier::PrettyPrint,
     serde::Serializable,
@@ -16,7 +18,7 @@ pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 pub(crate) use op_batch::collect_immediate_placements;
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
@@ -821,61 +823,10 @@ impl BasicBlockNodeBuilder {
 
         Ok(BasicBlockNode { op_batches, digest })
     }
-
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    ///
-    /// For BasicBlockNode, this is equivalent to the normal `add_to_forest` since basic blocks
-    /// don't have child nodes to validate.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Process based on operation data type
-        let (op_batches, digest) = match self.operation_data {
-            OperationData::Raw { operations } => {
-                if operations.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
-
-                // Use the forced digest if provided, otherwise use the computed digest
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                (op_batches, digest)
-            },
-            OperationData::Batched { op_batches } => {
-                if op_batches.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // For batched operations, digest must be set
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                (op_batches, digest)
-            },
-        };
-
-        // Create the node in the forest.
-        let node_id = forest
-            .nodes
-            .push(MastNode::Block(BasicBlockNode { op_batches, digest }))
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
 }
 
 impl MastForestContributor for BasicBlockNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         // Process based on operation data type
         let (op_batches, digest) = match self.operation_data {
@@ -914,7 +865,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
     fn fingerprint_for_node(
         &self,
-        _forest: &MastForest,
+        _context: &impl MastNodeContext,
         _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         let (op_batches, digest) = match &self.operation_data {
