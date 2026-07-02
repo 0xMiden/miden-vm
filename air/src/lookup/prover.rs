@@ -1,46 +1,8 @@
-//! Prover-path adapter — pushes individual `(m, v)` fractions per
-//! interaction into a dense per-column flat [`LookupFractions`] buffer
-//! owned by the caller.
+//! [`LookupBuilder`] adapter for concrete prover rows.
 //!
-//! Implements [`LookupBuilder`] for concrete base-field rows. Where the
-//! [constraint-path adapter](super::constraint::ConstraintLookupBuilder)
-//! emits symbolic `(V, U)` constraint expressions against a
-//! `LiftedAirBuilder`, this adapter consumes two concrete rows of
-//! base-field values and **pushes the individual fractions** each
-//! interaction contributes — one `(multiplicity, denominator)` entry per
-//! active interaction, appended to the current column's flat Vec inside
+//! The prover path evaluates an AIR against base-field row values and appends one
+//! `(multiplicity, encoded_denominator)` entry for each active lookup interaction to
 //! [`LookupFractions`].
-//!
-//! ## Runtime shape
-//!
-//! The caller:
-//!
-//! 1. Builds one [`Challenges<EF>`] once, outside the per-row loop.
-//! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::from_shape`], sized from
-//!    [`LookupAir::column_shape`]. Each column's internal Vec is `Vec::with_capacity(num_rows *
-//!    shape[col])` so pushes in the row loop never re-allocate.
-//! 3. For each row pair, constructs a `ProverLookupBuilder` (cheap — just stores pointers), calls
-//!    `air.eval(&mut lb)`, then drops the builder. `column(f)` records how many fractions the row
-//!    pushed into `LookupFractions::counts_per_row[col]`, so the downstream accumulator can later
-//!    slice each row's contribution out via a running cursor without a separate offsets array.
-//!
-//! ## Flag-zero skip
-//!
-//! `add` / `remove` / `insert` short-circuit on `flag == F::ZERO`,
-//! avoiding both the `msg.encode()` call and the Vec push when the
-//! interaction is inactive. `batch(flag, build)` sets an `active` bit on
-//! the child `ProverBatch` so individual pushes inside the batch skip
-//! work together when the outer flag is zero.
-//!
-//! ## Encoded-group collapse
-//!
-//! Per the plan (§Prover-path adapter) the cached-encoding split is
-//! collapsed on the prover side: [`LookupColumn::group`] and
-//! [`LookupColumn::group_with_cached_encoding`] both open a
-//! [`ProverGroup`] against the same column fraction `Vec`, and the
-//! cached-encoding variant runs only the `canonical` closure (the
-//! `encoded` closure is dropped unused, since the canonical description
-//! is always the cheapest path for concrete rows).
 
 use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
@@ -59,12 +21,9 @@ use super::{
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
-/// Concrete-row `LookupBuilder` running on two rows of base-field values.
+/// [`LookupBuilder`] over one concrete current/next-row window.
 ///
-/// See the module docs for the full runtime shape. Parameterised
-/// by the base field `F` and the extension field `EF`; every `Expr` /
-/// `Var` / `VarEF` etc. associated type collapses to `F` or `EF`
-/// directly — there is no symbolic tree on the prover side.
+/// All expression-like associated types collapse to concrete field values on this path.
 pub struct ProverLookupBuilder<'a, F, EF>
 where
     F: Field,
@@ -73,10 +32,7 @@ where
     main: RowWindow<'a, F>,
     periodic_values: &'a [F],
     challenges: &'a Challenges<EF>,
-    /// Dense per-column fraction buffers shared across all rows. Each
-    /// [`LookupBuilder::next_column`] call appends the current row's fractions to the end of
-    /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
-    /// `fractions.counts_per_row[column_idx]`.
+    /// Dense per-column fraction buffers shared across all rows.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
 }
@@ -90,10 +46,10 @@ where
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
-    /// - `challenges`: precomputed LogUp challenges (shared across every row — the caller builds
+    /// - `challenges`: precomputed LogUp challenges (shared across every row; the caller builds
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
-    ///   air.num_columns()`; the builder never calls `air.eval` itself — that's the caller's job).
+    ///   air.num_columns()`; the builder never calls `air.eval` itself).
     /// - `fractions`: dense per-column fraction buffers, sized once via
     ///   [`LookupFractions::from_shape`] and re-used across every row of the same trace.
     ///
@@ -132,7 +88,7 @@ where
 /// [`LookupFractions`] buffer the collection phase produces.
 ///
 /// Generic over the base field `F` and extension field `EF`. The caller supplies the
-/// main trace and periodic columns — this function does row slicing, periodic-column
+/// main trace and periodic columns. This function does row slicing, periodic-column
 /// indexing, and fraction collection. Concrete AIRs wrap this with their own
 /// periodic-column layout.
 ///
@@ -147,7 +103,7 @@ where
 /// # Panics
 ///
 /// Panics in debug builds if any row pushes more fractions into a column than that
-/// column's declared [`LookupAir::column_shape`] bound — this indicates the emitter's
+/// column's declared [`LookupAir::column_shape`] bound. This indicates the emitter's
 /// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
 pub fn build_lookup_fractions<A, F, EF>(
     air: &A,
@@ -169,6 +125,8 @@ where
 
     // Fill one chunk of rows into a fresh per-chunk `LookupFractions`.
     let process_chunk = |row_lo: usize, row_hi: usize| -> LookupFractions<F, EF> {
+        // The caller builds challenges and the fraction buffer once. Each row creates this cheap
+        // adapter, calls `air.eval(&mut lb)`, then records per-column counts for accumulation.
         let mut chunk = LookupFractions::from_shape(shape.clone(), row_hi - row_lo);
         let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
         for r in row_lo..row_hi {
@@ -290,12 +248,7 @@ where
 // PROVER COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`ProverLookupBuilder::next_column`].
-///
-/// Holds a mutable borrow of the column's per-row fraction `Vec`. Each
-/// group opened inside the column reborrows the same `Vec` and pushes
-/// fractions onto it — no intermediate `(N, D)` state, no
-/// cross-denominator clearing.
+/// Per-column handle scoped to one [`LookupBuilder::next_column`] invocation.
 pub struct ProverColumn<'c, F, EF>
 where
     F: Field,
@@ -338,9 +291,8 @@ where
         _encoded: impl FnOnce(&mut Self::Group<'g>),
         deg: Deg,
     ) {
-        // Prover path runs only the `canonical` closure; both closures must describe
-        // identical interaction sets, so the `encoded` fast path has no advantage on
-        // concrete rows and is discarded.
+        // The prover path runs only the canonical closure. Cached encodings are a
+        // constraint-path optimization; concrete rows encode each active message directly.
         self.group(name, canonical, deg);
     }
 }
@@ -348,13 +300,9 @@ where
 // PROVER GROUP
 // ================================================================================================
 
-/// Per-group handle used for both the simple and cached-encoding paths
-/// on the prover side.
+/// Per-group handle used by the prover path.
 ///
-/// Pushes individual `(multiplicity, denominator)` fractions onto the
-/// column's per-row `Vec`. No `(N, D)` state, no cross-denominator
-/// clearing — LogUp's aux-trace builder consumes individual fractions
-/// downstream.
+/// Pushes individual `(multiplicity, denominator)` fractions into the column buffer.
 ///
 /// ## Boolean-flag convention
 ///
@@ -365,13 +313,6 @@ where
 /// `multiplicity` for `insert`). This matches the constraint path's
 /// `(V_g, U_g)` algebra, which silently assumes flag is 0 or 1 —
 /// non-boolean flags produce wrong results on both sides.
-///
-/// ## Encoded-group methods
-///
-/// The encoding primitives (`beta_powers`, `bus_prefix`, `insert_encoded`)
-/// use the default panicking implementations from [`LookupGroup`] — the
-/// prover path always runs the `canonical` closure, never the `encoded`
-/// one, so these methods should never be reached.
 pub struct ProverGroup<'g, F, EF>
 where
     F: Field,

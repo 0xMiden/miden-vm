@@ -3,19 +3,19 @@
 //!
 //! Combines three tables on a single LogUp column:
 //!
-//! 1. **Sibling table** (`BusId::SiblingTable`) — Merkle update siblings. On hasher controller
-//!    input rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old
-//!    path, adds siblings). The direction bit `b = node_index − 2·node_index_next` selects which
+//! 1. Sibling table (`BusId::SiblingTable`). Merkle update siblings. On hasher controller input
+//!    rows with `s0 = 1, s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old
+//!    path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which
 //!    half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add,
 //!    two remove).
-//! 2. **ACE memory reads** (chiplet-responses column) — on ACE chiplet rows, the block selector
+//! 2. ACE memory reads (chiplet-responses column). On ACE chiplet rows, the block selector
 //!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
 //!    Both are removed from the chiplets bus.
-//! 3. **Memory-side range checks** (`BusId::RangeCheck`) — on memory chiplet rows, a five-remove
-//!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
-//!    `w0`, `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0,
-//!    2^14)` (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit
-//!    memory address space.
+//! 3. Memory-side range checks (`BusId::RangeCheck`). On memory chiplet rows, a five-remove batch
+//!    consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values `w0`,
+//!    `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0, 2^14)`
+//!    (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit memory
+//!    address space.
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, and
@@ -34,6 +34,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
+        chiplets::columns::ControllerCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
@@ -47,14 +48,13 @@ use crate::{
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
 /// Three row-type-disjoint interaction sets, mutually exclusive via the chiplet tri-state:
-/// - **Sibling-table** on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
+/// - Sibling table on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
 ///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
-///   one of the four fires per row → 1 fraction.
-/// - **ACE memory reads** on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are
-///   mutually exclusive via `block_sel` → 1 fraction.
-/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
-///   `d1`, `w0`, `w1`, `4·w1`) fires unconditionally when the outer batch flag is active → 5
-///   fractions.
+///   one of the four is active per row. Max: 1 fraction.
+/// - ACE memory reads on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are mutually
+///   exclusive via `block_sel`. Max: 1 fraction.
+/// - Memory-side range checks on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
+///   `d1`, `w0`, `w1`, `4·w1`) is active under the outer batch flag. Max: 5 fractions.
 ///
 /// Row-type disjointness means only one set fires per row, so the per-row max is
 /// `max(1, 1, 5) = 5`.
@@ -77,25 +77,21 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ctrl = local.controller();
     let ctrl_next = next.controller();
 
-    let hs0: LB::Expr = ctrl.s0.into();
-    let hs1: LB::Expr = ctrl.s1.into();
-    let hs2: LB::Expr = ctrl.s2.into();
-
-    // MU/MV controller-row flags for sibling-table participation. Both share `s0 * s1 = 1`;
-    // they differ on `s2` (MU: `s2 = 1`, MV: `s2 = 0`) and fire at each Merkle path step.
+    // MU/MV controller-row flags for sibling-table participation. Both require input rows
+    // (`s0 = 1, s1 = 1`); `s2` distinguishes MU (`s2 = 1`) from MV (`s2 = 0`) at each Merkle
+    // path step.
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
+    let (f_mv_all, f_mu_all) = merkle_update_sibling_flags(controller_flag, ctrl);
 
-    // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)` —
-    // sibling messages only use the rate halves.
+    // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)`.
+    // Sibling messages only use the rate halves.
     let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     let mrupdate_id = ctrl.mrupdate_id;
     let node_index = ctrl.node_index;
 
-    // Direction bit `b = node_index − 2·node_index_next`. The bit / one_minus_bit combine
-    // multiplicatively into the sibling flags below — they're computed once and cloned into
+    // Direction bit `b = node_index - 2 * node_index_next`. The bit / one_minus_bit combine
+    // multiplicatively into the sibling flags below. They are computed once and cloned into
     // each `g.add` / `g.remove` flag argument.
     let node_index_next: LB::Expr = ctrl_next.node_index.into();
     let bit: LB::Expr = node_index.into() - node_index_next.double();
@@ -200,10 +196,13 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let id_1: LB::Expr = ace_id_1.into();
                             let id_2: LB::Expr = ace_id_2.into();
                             let eval_op: LB::Expr = ace_eval_op.into();
-                            let element = id_1
-                                + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
-                                + (eval_op + LB::Expr::ONE)
-                                    * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+
+                            // ACE EVAL rows read the packed instruction
+                            // `id_1 + id_2 * 2^30 + (eval_op + 1) * 2^60`.
+                            let id_2_slot = id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
+                            let eval_op_slot = (eval_op + LB::Expr::ONE)
+                                * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+                            let element = id_1 + id_2_slot + eval_op_slot;
                             MemoryMsg::read_element(ctx, addr, clk, element)
                         },
                         Deg { v: 5, u: 6 },
@@ -211,9 +210,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
 
                     // --- MEMORY-SIDE RANGE CHECKS (BusId::RangeCheck) ---
                     // Five removes per memory-active row:
-                    // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's
+                    // - `d0`, `d1`: the two 16-bit delta limbs used by the memory chiplet's
                     //   sorted-access constraints.
-                    // - `w0`, `w1`, `4·w1` — the word-address decomposition limbs. The `4·w1` check
+                    // - `w0`, `w1`, `4·w1`: the word-address decomposition limbs. The `4·w1` check
                     //   additionally enforces `w1 ∈ [0, 2^14)`, which bounds `word_addr = 4·(w0 +
                     //   2^16·w1) < 2^32`.
                     g.batch(
@@ -249,4 +248,18 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
         },
         Deg { v: 7, u: 8 },
     );
+}
+
+fn merkle_update_sibling_flags<E, V>(controller_flag: E, ctrl: &ControllerCols<V>) -> (E, E)
+where
+    E: PrimeCharacteristicRing + Clone,
+    V: Copy + Into<E>,
+{
+    let hs0: E = ctrl.s0.into();
+    let hs1: E = ctrl.s1.into();
+    let hs2: E = ctrl.s2.into();
+
+    let f_mu_all = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
+    let f_mv_all = controller_flag * hs0 * hs1 * hs2.not();
+    (f_mv_all, f_mu_all)
 }
