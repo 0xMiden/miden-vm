@@ -672,7 +672,7 @@ where
                                     "consume-tangent-2ly",
                                     dbl.clone() * at_slope.clone(),
                                     UintMulMsg {
-                                        kappa_a: two,
+                                        kappa_a: two.clone(),
                                         kappa_c: zero.clone(),
                                         a_ptr: lambda.clone(),
                                         b_ptr: py.clone(),
@@ -723,10 +723,16 @@ where
             col_deg,
         );
 
-        // Col 2 (fractions): the shared tail as two fused mul-subtracts (no
-        // `w` / `u` intermediate store, no `x₃` / `y₃` sub op) — all fire in
-        // the slope-row window, `e` / `x₃` / `y₃` read via next off the
-        // tail row — plus double's y-equality.
+        // Col 2 (fractions): the shared tail, two fused mul-subtracts (no
+        // `w` / `u` store, no `x₃` / `y₃` sub op). All fire on the slope-row
+        // window — `e` / `x₃` / `y₃` live on the tail row, read via next. The
+        // x₃ subtract splits by case: generic forms `t = x₁ + x₂` then
+        // `x₃ = λ² − t` (κ_c = 1); double, where `x₁ = x₂`, folds `t = 2x₁`
+        // into `x₃ = λ² − 2·x₁` (κ_c = 2, c = x₁) and lays no `t` add.
+        //
+        // generic's `t = x₁ + x₂`, or double's fused `x₃ = λ² − 2·x₁` —
+        // mutually exclusive, exactly one fires per live op — plus double's
+        // y-equality.
         builder.next_column(
             |col| {
                 col.group(
@@ -736,11 +742,10 @@ where
                             "tail",
                             LB::Expr::ONE,
                             |b| {
-                                // t = x₁ + x₂ (2x via the same block when
-                                // doubling).
+                                // generic: t = x₁ + x₂.
                                 b.insert(
                                     "consume-t-add",
-                                    tail.clone() * at_slope.clone(),
+                                    generic.clone() * at_slope.clone(),
                                     UintAddMsg {
                                         bound_ptr: bound.clone(),
                                         a_ptr: px.clone(),
@@ -749,10 +754,26 @@ where
                                     },
                                     f2,
                                 );
-                                // the fused x₃ = λ² − t.
+                                // double: the fused x₃ = λ² − 2·x₁.
                                 b.insert(
-                                    "consume-x3-macsub",
-                                    tail.clone() * at_slope.clone(),
+                                    "consume-x3-macsub-dbl",
+                                    dbl.clone() * at_slope.clone(),
+                                    UintMulMsg {
+                                        kappa_a: one.clone(),
+                                        kappa_c: two.clone(),
+                                        a_ptr: lambda.clone(),
+                                        b_ptr: lambda.clone(),
+                                        c_ptr: px.clone(),
+                                        r_ptr: x3_next.clone(),
+                                        bound_ptr: bound.clone(),
+                                        is_sub: one.clone(),
+                                    },
+                                    f2,
+                                );
+                                // generic: the fused x₃ = λ² − t.
+                                b.insert(
+                                    "consume-x3-macsub-gen",
+                                    generic.clone() * at_slope.clone(),
                                     UintMulMsg {
                                         kappa_a: one.clone(),
                                         kappa_c: one.clone(),

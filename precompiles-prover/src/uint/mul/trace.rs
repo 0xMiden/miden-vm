@@ -84,16 +84,16 @@ impl MulOp {
 }
 
 /// The canonical 17-limb quotient `q_committed` of an op (`q < κₐ·p ≤
-/// 2²⁷²`) plus the subtractive `borrow ∈ {0, 1}` — the modulus the
-/// canonical reduction adds back on underflow (`false` for additive ops).
+/// 2²⁷²`) plus the subtractive `borrow ∈ {0, 1, 2}` — the moduli the
+/// canonical reduction adds back on underflow (`0` for additive ops).
 /// The identity is `κₐ·a·b ± κ_c·c = r + (q_committed − borrow)·p`.
-pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> ([u32; NUM_Q_LIMBS], bool) {
+pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> ([u32; NUM_Q_LIMBS], u8) {
     let (q, rem, borrow) = if op.is_sub {
         math::mac_sub_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound)
     } else {
         let (q, rem) =
             math::mac_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound);
-        (q, rem, false)
+        (q, rem, 0u8)
     };
     debug_assert_eq!(rem, vals.r, "the op's r must be the canonical MAC remainder");
     debug_assert!(q >> 272 == math::U320::ZERO, "quotient exceeds 17 limbs (κₐ out of contract?)",);
@@ -123,7 +123,7 @@ pub(crate) fn gamma_halves(
     op: &MulOp,
     vals: &MulVals,
     q: &[u32; NUM_Q_LIMBS],
-    borrow: bool,
+    borrow: u8,
 ) -> [(u16, u16); NUM_GAMMA] {
     let (a, b, bound) = (to_limbs16(vals.a), to_limbs16(vals.b), to_limbs16(vals.bound));
     let c32 = to_limbs32(vals.c);
@@ -279,7 +279,7 @@ pub(crate) fn op_block(
     op: &MulOp,
     v: &MulVals,
     q: &[u32; NUM_Q_LIMBS],
-    borrow: bool,
+    borrow: u8,
     gammas: &[(u16, u16); NUM_GAMMA],
     mult: ProvideMult,
 ) -> Vec<Felt> {

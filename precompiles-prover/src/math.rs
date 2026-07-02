@@ -103,13 +103,12 @@ pub fn mac_sub_reduce(kappa_a: u16, a: U256, b: U256, kappa_c: u16, c: U256, bou
 /// ```
 ///
 /// with `r ≤ bound`, `q_committed ≥ 0` (the trace's 17 16-bit quotient
-/// limbs), and `borrow ∈ {0, 1}` the single modulus the subtraction adds
-/// back when `κₐ·a·b < κ_c·c` (the canonical reduction wraps up by one
-/// `p`). For the `κ_c = 1` shapes the EC tail records, `κₐ·a·b ≥ 0 > c − p`,
-/// so the underflow never exceeds one modulus and `borrow` is a bit;
-/// `q_committed = 0` on that branch. A `κ_c > 1` op that underflows by more
-/// than one `p` has no single-bit representation — debug-asserted, since the
-/// contract is `κ_c ≤ 1` for the subtractive mode.
+/// limbs), and `borrow` the number of moduli the canonical reduction adds
+/// back when `κₐ·a·b < κ_c·c` (`q_committed = 0` on that branch). The
+/// underflow is `d = κ_c·c − κₐ·a·b < κ_c·p`, so `borrow ≤ κ_c`: a bit for
+/// the EC tail's `κ_c = 1` (`λ²−t`, `λe−y₁`) and `∈ {0, 1, 2}` for its
+/// `κ_c = 2` (`λ²−2x₁` doubling). The subtractive mode's contract is
+/// `κ_c ≤ 2`, matching the AIR's `borrow ∈ {0, 1, 2}` constraint.
 pub fn mac_sub_div_rem(
     kappa_a: u16,
     a: U256,
@@ -117,18 +116,25 @@ pub fn mac_sub_div_rem(
     kappa_c: u16,
     c: U256,
     bound: U256,
-) -> (U320, U256, bool) {
+) -> (U320, U256, u8) {
     let ab: U512 = a.widening_mul(b);
     let p = U576::from(bound) + U576::ONE;
     let prod = U576::from(ab) * U576::from(kappa_a);
     let sub = U576::from(c) * U576::from(kappa_c);
     if prod >= sub {
         let (q, r) = (prod - sub).div_rem(p);
-        (q.to(), r.to(), false)
+        (q.to(), r.to(), 0)
     } else {
+        // r = (−d) mod p, borrow = (r + d)/p = the moduli wrapped up.
         let d = sub - prod;
-        debug_assert!(d < p, "mac_sub underflow exceeds one modulus (κ_c > 1?)");
-        (U320::ZERO, (p - d).to(), true)
+        let (qd, rd) = d.div_rem(p);
+        debug_assert!(qd < U576::from(2u32), "mac_sub underflow exceeds 2p (κ_c > 2?)");
+        let qd = qd.as_limbs()[0] as u8;
+        if rd == U576::ZERO {
+            (U320::ZERO, U256::ZERO, qd)
+        } else {
+            (U320::ZERO, (p - rd).to(), qd + 1)
+        }
     }
 }
 
