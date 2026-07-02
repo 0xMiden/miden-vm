@@ -1,16 +1,17 @@
 #![cfg(test)]
+
 mod signing_key {
     use alloc::string::{String, ToString};
 
-    use miden_field::Felt;
-    #[cfg(feature = "std")]
-    use miden_field::Word;
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    use miden_field::{Felt, Word};
     #[cfg(feature = "std")]
     use miden_serde_utils::ByteReader;
     use miden_serde_utils::{Deserializable, Serializable};
 
     use crate::{
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
+        hash::poseidon2::Poseidon2,
         rand::test_utils::seeded_rng,
     };
 
@@ -29,6 +30,23 @@ mod signing_key {
         let pk_bytes = public_key.to_bytes();
         let recovered_pk = PublicKey::read_from_bytes(&pk_bytes).unwrap();
         assert_eq!(public_key, recovered_pk);
+    }
+
+    #[test]
+    fn test_public_key_serialization_uses_compressed_sec1() {
+        let mut rng = seeded_rng([14u8; 32]);
+        let public_key = SigningKey::with_rng(&mut rng).public_key();
+
+        let serialized = public_key.to_bytes();
+        let affine_sec1 = public_key.as_affine().to_sec1_point(true);
+
+        assert_eq!(serialized.len(), 33);
+        assert!(matches!(serialized[0], 0x02 | 0x03));
+        assert_eq!(serialized.as_slice(), affine_sec1.as_bytes());
+
+        let recovered_pk = PublicKey::read_from_bytes(&serialized).unwrap();
+        assert_eq!(public_key, recovered_pk);
+        assert_eq!(public_key.to_string(), canonical_hex(&serialized));
     }
 
     #[test]
@@ -202,6 +220,48 @@ mod signing_key {
             s.push_str(&format!("{byte:02x}"));
         }
         s
+    }
+
+    #[test]
+    fn test_public_key_native_commitment_test_vector() {
+        let mut secret_key_bytes = [0u8; 32];
+        secret_key_bytes[31] = 1;
+        let signing_key = SigningKey::read_from_bytes(&secret_key_bytes).unwrap();
+        let public_key = signing_key.public_key();
+
+        const COMPRESSED_SEC1: [u8; 33] = [
+            0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce,
+            0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81,
+            0x5b, 0x16, 0xf8, 0x17, 0x98,
+        ];
+        const NATIVE_ELEMENTS: [Felt; 16] = [
+            Felt::new_unchecked(0x16f81798),
+            Felt::new_unchecked(0x59f2815b),
+            Felt::new_unchecked(0x2dce28d9),
+            Felt::new_unchecked(0x029bfcdb),
+            Felt::new_unchecked(0xce870b07),
+            Felt::new_unchecked(0x55a06295),
+            Felt::new_unchecked(0xf9dcbbac),
+            Felt::new_unchecked(0x79be667e),
+            Felt::new_unchecked(0xfb10d4b8),
+            Felt::new_unchecked(0x9c47d08f),
+            Felt::new_unchecked(0xa6855419),
+            Felt::new_unchecked(0xfd17b448),
+            Felt::new_unchecked(0x0e1108a8),
+            Felt::new_unchecked(0x5da4fbfc),
+            Felt::new_unchecked(0x26a3c465),
+            Felt::new_unchecked(0x483ada77),
+        ];
+        const COMMITMENT: Word = Word::new([
+            Felt::new_unchecked(11823917948314246078),
+            Felt::new_unchecked(15960174880805474786),
+            Felt::new_unchecked(15208912687411787098),
+            Felt::new_unchecked(1636772189670681504),
+        ]);
+
+        assert_eq!(public_key.to_bytes(), COMPRESSED_SEC1);
+        assert_eq!(public_key.to_commitment(), Poseidon2::hash_elements(&NATIVE_ELEMENTS));
+        assert_eq!(public_key.to_commitment(), COMMITMENT);
     }
 
     #[cfg(feature = "std")]
