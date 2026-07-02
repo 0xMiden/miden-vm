@@ -13,7 +13,8 @@ use crate::{
         ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor,
         MastForestError, MastForestView, MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch,
         SparseMastForest, SparseMastForestBuilder, SparseMastForestReadOptions, SplitNodeBuilder,
-        UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
+        UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind, compute_advice_commitment,
+        compute_mast_forest_commitment_from_parts,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -398,7 +399,7 @@ fn test_mast_forest_view_trait_matches_serialized_view() {
         Felt::new_unchecked(14),
     ]);
     let advice_values = vec![Felt::new_unchecked(15), Felt::new_unchecked(16)];
-    forest.advice_map_mut().insert(advice_key, advice_values.clone());
+    forest = forest.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values.clone())]));
 
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
@@ -464,7 +465,7 @@ fn test_mast_forest_read_view_modes_match() {
         Felt::new_unchecked(24),
     ]);
     let advice_values = vec![Felt::new_unchecked(25), Felt::new_unchecked(26)];
-    forest.advice_map_mut().insert(advice_key, advice_values.clone());
+    forest = forest.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values.clone())]));
 
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
@@ -561,10 +562,23 @@ fn read_words_at(bytes: &[u8], offset: usize, count: usize) -> Vec<Word> {
 }
 
 fn forest_commitment_from_inputs(root_digests: &[Word], dependency_digests: &[Word]) -> Word {
-    miden_crypto::hash::poseidon2::Poseidon2::merge(&[
+    forest_commitment_from_inputs_and_advice(
+        root_digests,
+        dependency_digests,
+        &AdviceMap::default(),
+    )
+}
+
+fn forest_commitment_from_inputs_and_advice(
+    root_digests: &[Word],
+    dependency_digests: &[Word],
+    advice_map: &AdviceMap,
+) -> Word {
+    compute_mast_forest_commitment_from_parts(
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(root_digests),
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(dependency_digests),
-    ])
+        compute_advice_commitment(advice_map),
+    )
 }
 
 #[test]
@@ -879,6 +893,54 @@ fn sparse_mast_round_trip_preserves_external_full_node() {
     assert_eq!(restored.get_digest_by_id(external), Some(external_digest));
     assert!(restored.get_node_by_id(unvisited).is_none());
     assert_eq!(restored.get_digest_by_id(unvisited), None);
+}
+
+#[test]
+fn sparse_mast_round_trip_binds_advice_map_to_commitment() {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root);
+
+    let advice_key = Word::new([
+        Felt::new_unchecked(31),
+        Felt::new_unchecked(32),
+        Felt::new_unchecked(33),
+        Felt::new_unchecked(34),
+    ]);
+    let advice_values = vec![Felt::new_unchecked(35), Felt::new_unchecked(36)];
+    let forest = Arc::new(
+        forest.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values.clone())])),
+    );
+
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(root, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+
+    assert_eq!(restored.commitment(), forest.commitment());
+    assert_eq!(restored.advice_commitment(), forest.advice_commitment());
+    assert_eq!(restored.advice_map().get(&advice_key).unwrap().as_ref(), advice_values);
+
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests = sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        AdviceMap::default(),
+        sparse.commitment(),
+        sparse.commitment_root_digests().to_vec(),
+        sparse.dependency_digests().to_vec(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("digest sections do not match commitment")
+    );
 }
 
 #[test]
@@ -2041,8 +2103,6 @@ fn test_materialized_deserialization_rejects_duplicate_root_commitment_inputs() 
         .add_to_forest(&mut forest)
         .unwrap();
     forest.roots = vec![root_id, root_id];
-    forest.commitment =
-        forest_commitment_from_inputs(&[forest[root_id].digest(), forest[root_id].digest()], &[]);
 
     let bytes = forest.to_bytes();
 
