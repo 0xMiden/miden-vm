@@ -26,9 +26,9 @@ fn supported_curves() -> [CurveCase; 3] {
             curve: CurveId::Secp256r1,
         },
         CurveCase {
-            module: "ed25519",
+            module: "ed25519_sw",
             scalar_module: "ed25519_scalar",
-            curve: CurveId::Ed25519,
+            curve: CurveId::Ed25519Sw,
         },
     ]
 }

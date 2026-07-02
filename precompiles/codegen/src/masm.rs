@@ -92,11 +92,11 @@ const CURVE_CONFIGS: &[CurveMasmConfig] = &[
         curve: CodegenCurveId::Secp256r1,
     },
     CurveMasmConfig {
-        path: "asm/math/ed25519.masm",
-        title: "ED25519",
+        path: "asm/math/ed25519_sw.masm",
+        title: "ED25519-SW",
         base_field_module: "ed25519_base",
         base_field_description: "Ed25519 base-field",
-        curve: CodegenCurveId::Ed25519,
+        curve: CodegenCurveId::Ed25519Sw,
     },
 ];
 

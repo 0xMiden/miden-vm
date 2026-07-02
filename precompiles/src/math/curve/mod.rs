@@ -16,7 +16,7 @@
 //!
 //! Affine coordinates are canonical uint values in the curve's base-field domain. Concrete user
 //! modules are generated separately under
-//! `miden::precompiles::math::{secp256k1,secp256r1,ed25519}`.
+//! `miden::precompiles::math::{secp256k1,secp256r1,ed25519_sw}`.
 //!
 //! ## Trust contract
 //!
@@ -37,7 +37,7 @@
 //! This precompile does not provide compressed point encodings, subgroup checks, signature
 //! semantics, or public API stability guarantees beyond this internal precompile contract.
 
-mod ed25519;
+mod ed25519_sw;
 mod secp256k1;
 mod secp256r1;
 mod short_weierstrass;
@@ -54,7 +54,7 @@ use miden_core::{
 };
 use miden_precompiles_codegen::{CodegenCurveId, CurvePrecompileDescriptor};
 
-use self::{ed25519::Ed25519, secp256k1::Secp256k1, secp256r1::Secp256r1};
+use self::{ed25519_sw::Ed25519Sw, secp256k1::Secp256k1, secp256r1::Secp256r1};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
 /// Curve-generic point value.
@@ -206,19 +206,19 @@ pub trait ShortWeierstrassSpec: CurveSpec {
 pub enum CurveId {
     Secp256k1,
     Secp256r1,
-    Ed25519,
+    Ed25519Sw,
 }
 
 impl CurveId {
     /// All fixed curves in deterministic precompile initialization order.
-    pub const ALL: [Self; 3] = [Self::Secp256k1, Self::Secp256r1, Self::Ed25519];
+    pub const ALL: [Self; 3] = [Self::Secp256k1, Self::Secp256r1, Self::Ed25519Sw];
 
     /// Returns the supported curve for a tag-local id.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <Secp256k1 as CurveSpec>::ID => Some(Self::Secp256k1),
             id if id == <Secp256r1 as CurveSpec>::ID => Some(Self::Secp256r1),
-            id if id == <Ed25519 as CurveSpec>::ID => Some(Self::Ed25519),
+            id if id == <Ed25519Sw as CurveSpec>::ID => Some(Self::Ed25519Sw),
             _ => None,
         }
     }
@@ -228,7 +228,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => miden_precompiles_codegen::SECP256K1_ID,
             Self::Secp256r1 => miden_precompiles_codegen::SECP256R1_ID,
-            Self::Ed25519 => miden_precompiles_codegen::ED25519_ID,
+            Self::Ed25519Sw => miden_precompiles_codegen::ED25519_SW_ID,
         }
     }
 
@@ -236,7 +236,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => CodegenCurveId::Secp256k1,
             Self::Secp256r1 => CodegenCurveId::Secp256r1,
-            Self::Ed25519 => CodegenCurveId::Ed25519,
+            Self::Ed25519Sw => CodegenCurveId::Ed25519Sw,
         }
     }
 
@@ -245,7 +245,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
             Self::Secp256r1 => UintDomain::R1Base,
-            Self::Ed25519 => UintDomain::Ed25519Base,
+            Self::Ed25519Sw => UintDomain::Ed25519Base,
         }
     }
 
@@ -254,7 +254,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => UintDomain::K1Scalar,
             Self::Secp256r1 => UintDomain::R1Scalar,
-            Self::Ed25519 => UintDomain::Ed25519Scalar,
+            Self::Ed25519Sw => UintDomain::Ed25519Scalar,
         }
     }
 
@@ -263,7 +263,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::generator(),
             Self::Secp256r1 => Secp256r1::generator(),
-            Self::Ed25519 => Ed25519::generator(),
+            Self::Ed25519Sw => Ed25519Sw::generator(),
         }
     }
 
@@ -273,7 +273,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::point_from_affine(x, y),
             Self::Secp256r1 => Secp256r1::point_from_affine(x, y),
-            Self::Ed25519 => Ed25519::point_from_affine(x, y),
+            Self::Ed25519Sw => Ed25519Sw::point_from_affine(x, y),
         }
     }
 
@@ -282,7 +282,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::is_on_curve(point),
             Self::Secp256r1 => Secp256r1::is_on_curve(point),
-            Self::Ed25519 => Ed25519::is_on_curve(point),
+            Self::Ed25519Sw => Ed25519Sw::is_on_curve(point),
         }
     }
 
@@ -291,7 +291,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::add(lhs, rhs),
             Self::Secp256r1 => Secp256r1::add(lhs, rhs),
-            Self::Ed25519 => Ed25519::add(lhs, rhs),
+            Self::Ed25519Sw => Ed25519Sw::add(lhs, rhs),
         }
     }
 
@@ -300,7 +300,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::neg(point),
             Self::Secp256r1 => Secp256r1::neg(point),
-            Self::Ed25519 => Ed25519::neg(point),
+            Self::Ed25519Sw => Ed25519Sw::neg(point),
         }
     }
 
@@ -309,7 +309,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::sub(lhs, rhs),
             Self::Secp256r1 => Secp256r1::sub(lhs, rhs),
-            Self::Ed25519 => Ed25519::sub(lhs, rhs),
+            Self::Ed25519Sw => Ed25519Sw::sub(lhs, rhs),
         }
     }
 
@@ -323,7 +323,7 @@ impl CurveId {
         match self {
             Self::Secp256k1 => Secp256k1::mul_scalar(point, scalar),
             Self::Secp256r1 => Secp256r1::mul_scalar(point, scalar),
-            Self::Ed25519 => Ed25519::mul_scalar(point, scalar),
+            Self::Ed25519Sw => Ed25519Sw::mul_scalar(point, scalar),
         }
     }
 }
@@ -723,10 +723,7 @@ mod tests {
     use miden_core::deferred::DeferredState;
 
     use super::*;
-    use crate::math::{
-        k1_scalar::K1Scalar,
-        uint::{UintPrecompile, ZERO_LIMBS},
-    };
+    use crate::math::{k1_scalar::K1Scalar, uint::UintPrecompile};
 
     fn state() -> DeferredState {
         DeferredState::new(Arc::new(crate::registry()), usize::MAX)
@@ -1019,24 +1016,26 @@ mod tests {
     }
 
     #[test]
-    fn ed25519_affine_identity_canonicalizes() {
-        const ONE_LIMBS: Limbs = [1, 0, 0, 0, 0, 0, 0, 0];
-
-        let curve = CurveId::Ed25519;
-        assert_eq!(curve.point_from_affine(ZERO_LIMBS, ONE_LIMBS).unwrap(), CurvePoint::Identity);
-
+    fn ed25519_sw_identity_canonicalizes() {
+        let curve = CurveId::Ed25519Sw;
         let generator = curve.generator();
         let neg_generator = curve.neg(generator).expect("valid negation");
+
+        assert_eq!(curve.add(generator, CurvePoint::Identity).unwrap(), generator);
         assert_eq!(curve.add(generator, neg_generator).unwrap(), CurvePoint::Identity);
 
-        let x = UintPrecompile::value_node(curve.base_domain(), ZERO_LIMBS);
-        let y = UintPrecompile::value_node(curve.base_domain(), ONE_LIMBS);
-        let point = CurvePrecompile::affine_node_from_digests(curve, x.digest(), y.digest());
         let mut state = state();
-        state.register(x).expect("x coordinate must register");
-        state.register(y).expect("y coordinate must register");
+        let generator = CurvePrecompile::generator_node(curve);
+        let identity = CurvePrecompile::identity_node(curve);
+        let node = Node::join(
+            CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+            generator.digest(),
+            identity.digest(),
+        )
+        .expect("tag is curve-owned");
 
-        assert_eq!(evaluate(&mut state, point).unwrap(), CurvePrecompile::identity_node(curve));
+        assert_eq!(evaluate(&mut state, identity.clone()).unwrap(), identity);
+        assert_eq!(evaluate(&mut state, node).unwrap(), generator);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 #! Arithmetic deferred precompile wrappers.
 
-pub mod ed25519
+pub mod ed25519_sw
 pub mod ed25519_base
 pub mod ed25519_scalar
 pub mod k1_base

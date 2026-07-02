@@ -12,7 +12,7 @@ const ASM_DIR_PATH: &str = "asm";
 const ASSETS_DIR_PATH: &str = "assets";
 const GENERATED_ASM_DIR_PATH: &str = "asm";
 const GENERATED_MATH_FILES: &[&str] = &[
-    "math/ed25519.masm",
+    "math/ed25519_sw.masm",
     "math/ed25519_base.masm",
     "math/ed25519_scalar.masm",
     "math/k1_base.masm",

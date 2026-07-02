@@ -506,7 +506,7 @@ impl UintPrecompileDescriptor {
 pub enum CodegenCurveId {
     Secp256k1,
     Secp256r1,
-    Ed25519,
+    Ed25519Sw,
 }
 
 impl CodegenCurveId {
@@ -514,7 +514,7 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => SECP256K1_ID,
             Self::Secp256r1 => SECP256R1_ID,
-            Self::Ed25519 => ED25519_ID,
+            Self::Ed25519Sw => ED25519_SW_ID,
         }
     }
 
@@ -522,7 +522,7 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
             Self::Secp256r1 => UintDomain::R1Base,
-            Self::Ed25519 => UintDomain::Ed25519Base,
+            Self::Ed25519Sw => UintDomain::Ed25519Base,
         }
     }
 
@@ -530,14 +530,14 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => (SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y),
             Self::Secp256r1 => (SECP256R1_GENERATOR_X, SECP256R1_GENERATOR_Y),
-            Self::Ed25519 => (ED25519_GENERATOR_X, ED25519_GENERATOR_Y),
+            Self::Ed25519Sw => (ED25519_SW_GENERATOR_X, ED25519_SW_GENERATOR_Y),
         }
     }
 }
 
 pub const SECP256K1_ID: Felt = Felt::new_unchecked(1);
 pub const SECP256R1_ID: Felt = Felt::new_unchecked(2);
-pub const ED25519_ID: Felt = Felt::new_unchecked(3);
+pub const ED25519_SW_ID: Felt = Felt::new_unchecked(3);
 
 pub const SECP256K1_GENERATOR_X: Limbs = [
     0x16f8_1798,
@@ -584,7 +584,7 @@ pub const SECP256R1_GENERATOR_Y: Limbs = [
 ];
 
 /// Ed25519 base point mapped to the short-Weierstrass model `X = u + 486662/3`.
-pub const ED25519_GENERATOR_X: Limbs = [
+pub const ED25519_SW_GENERATOR_X: Limbs = [
     0xaaad_245a,
     0xaaaa_aaaa,
     0xaaaa_aaaa,
@@ -597,7 +597,7 @@ pub const ED25519_GENERATOR_X: Limbs = [
 
 /// Ed25519 base point mapped to the short-Weierstrass model using the even square root of
 /// `-486664` in the Edwards-to-Montgomery map.
-pub const ED25519_GENERATOR_Y: Limbs = [
+pub const ED25519_SW_GENERATOR_Y: Limbs = [
     0x8131_2c14,
     0xd616_3a5d,
     0x9283_9e4d,
