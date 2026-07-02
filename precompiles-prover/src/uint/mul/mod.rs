@@ -185,10 +185,11 @@ pub const COL_KAPPA_A: usize = 14;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op
 /// blocks, 0 on padding; gates every bus flag + the γ offset constant.
 pub const COL_ACT: usize = 15;
-/// Subtractive-underflow borrow `∈ {0, 1}` (cycle-constant): the single
-/// modulus the canonical reduction adds back when `is_sub` and the product
-/// `< κ_c·c`. Read on the p-rows (where `bound(β)` is live) to contribute
-/// `borrow·(bound(β)+1)` to the SZ identity. Pinned to 0 unless `is_sub`.
+/// Subtractive-underflow borrow `∈ {0, 1, 2}` (cycle-constant): the moduli
+/// the canonical reduction adds back when `is_sub` and the product
+/// `< κ_c·c` (up to 2 for the `κ_c = 2` doubling `λ² − 2x₁`). Read on the
+/// p-rows (where `bound(β)` is live) to contribute `borrow·(bound(β)+1)`
+/// to the SZ identity. Pinned to 0 unless `is_sub`.
 pub const COL_BORROW: usize = 16;
 pub const NUM_MAIN_COLS: usize = 17;
 
@@ -459,13 +460,17 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // act is the boolean block-active flag (cycle-constant).
         builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
 
-        // `is_sub` (term-row cell) is boolean; `borrow` (cycle-constant) is
-        // boolean and only fires in the subtractive mode (`borrow ⟹ is_sub`),
+        // `is_sub` (term-row cell) is boolean; `borrow` (cycle-constant)
+        // ∈ {0, 1, 2} — a `κ_c = 2` double (`λ² − 2x₁`) underflows by up to
+        // 2p — and only fires in the subtractive mode (`borrow ⟹ is_sub`),
         // so an additive op cannot smuggle a +p shift onto its quotient.
         let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
         builder
             .assert_zero(sel[ROW_TERM].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
-        builder.assert_zero(borrow.clone() * (AB::Expr::ONE - borrow.clone()));
+        let two = AB::Expr::from(Felt::from(2u32));
+        builder.assert_zero(
+            borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),
+        );
         builder.assert_zero(sel[ROW_TERM].clone() * borrow * (AB::Expr::ONE - is_sub));
 
         // A provide must come from an active block. The `UintMul` provide is

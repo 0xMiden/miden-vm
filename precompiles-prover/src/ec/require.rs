@@ -410,10 +410,12 @@ impl<'a> EcRequire<'a> {
         (group, r, pai)
     }
 
-    /// The live cases' shared tail: `t = x₁ + x₂`, `x₃ = λ² − t`,
-    /// `e = x₁ − x₃`, `y₃ = λ·e − y₁` — the two mul-subtracts fused (no `w`
-    /// / `u` intermediate store, no `x₃` / `y₃` sub op). `R` is minted as a
-    /// **closure-cert** point — its membership rides this block's
+    /// The live cases' shared tail: `x₃ = λ² − t`, `e = x₁ − x₃`,
+    /// `y₃ = λ·e − y₁` — the two mul-subtracts fused (no `w` / `u`
+    /// intermediate store, no `x₃` / `y₃` sub op). generic forms
+    /// `t = x₁ + x₂`; double, where `x₁ = x₂`, folds `t = 2x₁` into x₃'s
+    /// `κ_c = 2` subtract, so it lays no `t` add/store at all. `R` is minted
+    /// as a **closure-cert** point — its membership rides this block's
     /// `EcOnCurveCert` (the group law is closed → on-curve operands give an
     /// on-curve result), so it pays *no* MAC trio.
     /// Returns the block's transient ptr cells (in cell order), `R`'s
@@ -429,15 +431,23 @@ impl<'a> EcRequire<'a> {
         qx: UintPtr,
         group: EcGroupPtr,
     ) -> ([UintPtr; 9], EcPointPtr, bool) {
-        let t = self.uint.add(px, qx);
-        let x3 = self.uint.mac_sub(1, lambda, lambda, 1, t);
+        let null = UintPtr::from_addr(0);
+        // double: x₁ = x₂ (the operands share a coord ptr under value
+        // interning), so t = x₁ + x₂ = 2x₁ folds straight into the x₃
+        // mul-subtract as κ_c = 2, c = x₁ — no separate t add/store. generic
+        // keeps t = x₁ + x₂ and the κ_c = 1 subtract.
+        let (t, x3) = if px == qx {
+            (null, self.uint.mac_sub(1, lambda, lambda, 2, px))
+        } else {
+            let t = self.uint.add(px, qx);
+            (t, self.uint.mac_sub(1, lambda, lambda, 1, t))
+        };
         let e = self.uint.sub(px, x3);
         let y3 = self.uint.mac_sub(1, lambda, e, 1, py);
         // A fresh result (the value-dedup miss) mints — its ptr is the
         // maximum (> operands), satisfying the strict ordering the cert
         // rests on; a hit reuses its existing certified row and mints = false.
         let (r, mints) = self.store.add_point_cert(group, x3, y3);
-        let null = UintPtr::from_addr(0);
         ([slope_aux, lambda, inv, t, y3, e, null, x3, null], r, mints)
     }
 }
