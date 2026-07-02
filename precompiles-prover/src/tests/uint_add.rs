@@ -24,7 +24,7 @@ use crate::{
     uint::{
         UintStoreAir,
         add::{
-            NUM_MAIN_COLS, PERIOD, UintAddAir,
+            CELL_IS_B_ZERO, COL_B_PTR, COL_C_PTR, NUM_MAIN_COLS, PERIOD, UintAddAir,
             trace::{UintAddRequires, generate_trace},
         },
         trace::{UintStoreRequires, generate_trace as store_trace},
@@ -92,12 +92,12 @@ fn add_constraints_hold() {
     let mut rng = StdRng::seed_from_u64(0xadd1);
     let (add, mut store, k) = sample_add(&mut rng, false);
     let main = generate_trace(add, &mut store);
-    assert_eq!(main.height(), PERIOD, "one op = one period-16 block");
+    assert_eq!(main.height(), PERIOD, "one op = one period-8 block");
 
-    // The carry rows (cpos at 11/12, cneg at 13/14) must carry: a real op
-    // exercises γ⁺ / γ⁻, not a degenerate carry-free sum.
-    let carries_nonzero = (11..15)
-        .flat_map(|r| (0..4).map(move |c| (r, c)))
+    // The carry rows (cpos at 4, cneg at 5) must carry: a real op exercises
+    // γ⁺ / γ⁻, not a degenerate carry-free sum.
+    let carries_nonzero = (4..6)
+        .flat_map(|r| (0..7).map(move |c| (r, c)))
         .any(|(r, c)| main.values[r * NUM_MAIN_COLS + c] != Felt::ZERO);
     assert!(carries_nonzero, "the add must carry across limbs");
     let _ = k;
@@ -125,8 +125,8 @@ fn add_rejects_wrong_result() {
     let mut rng = StdRng::seed_from_u64(0xbad_add);
     let (add, mut store, _k) = sample_add(&mut rng, false);
     let mut main = generate_trace(add, &mut store);
-    // c_lo is row 5; bump its low limb.
-    main.values[5 * NUM_MAIN_COLS] += Felt::from(1u32);
+    // c is row 2; bump its low limb.
+    main.values[2 * NUM_MAIN_COLS] += Felt::from(1u32);
 
     crate::tests::check_local(UintAddAir, &main);
 }
@@ -256,7 +256,7 @@ fn add_pad_blocks_stay_off_the_bus() {
         add.record(ptrs[l], ptrs[r], c_ptr, fp, 0);
     }
     let add_main = generate_trace(add, &mut store);
-    assert_eq!(add_main.height(), 64, "3 ops pad to 4 blocks");
+    assert_eq!(add_main.height(), 32, "3 ops pad to 4 blocks");
     let mut bpl = BytePairLutRequires::new();
     let store_main = store_trace(store, &mut bpl);
     let bpl_main = bpl_trace(bpl);
@@ -297,9 +297,9 @@ fn add_inactive_block_cannot_provide() {
         add.record(ptrs[l], ptrs[r], c_ptr, fp, 0);
     }
     let mut add_main = generate_trace(add, &mut store);
-    assert_eq!(add_main.height(), 64, "3 ops pad to 4 blocks");
-    // Pad block = block 3 (rows 48..63); its term row is 63, TERM_CELL_MULT = 0.
-    add_main.values[63 * NUM_MAIN_COLS] = Felt::from(1u32);
+    assert_eq!(add_main.height(), 32, "3 ops pad to 4 blocks");
+    // Pad block = block 3 (rows 24..31); its term row is 31, TERM_CELL_MULT = 0.
+    add_main.values[31 * NUM_MAIN_COLS] = Felt::from(1u32);
     crate::tests::check_local(UintAddAir, &add_main);
 }
 
@@ -366,9 +366,9 @@ fn equality_certificate_holds_and_balances() {
     // (the `a` operand + modulus; no `b`, the unstored zero).
     let main = generate_trace(add, &mut store);
 
-    // b rows (2–4) stay zero; the B-hub flags is_b_zero.
-    assert_eq!(main.values[3 * NUM_MAIN_COLS], Felt::ONE, "B-hub flag set");
-    assert_eq!(main.values[2 * NUM_MAIN_COLS], Felt::ZERO, "b_lo limbs zero");
+    // The b row stays zero; its scalar cell flags is_b_zero.
+    assert_eq!(main.values[NUM_MAIN_COLS + CELL_IS_B_ZERO], Felt::ONE, "is_b_zero flag set",);
+    assert_eq!(main.values[NUM_MAIN_COLS], Felt::ZERO, "b limbs zero");
 
     crate::tests::check_local(UintAddAir, &main);
 
@@ -395,14 +395,12 @@ fn is_b_zero_rejects_unequal_values() {
     let mut rng = StdRng::seed_from_u64(0xe0_bad);
     let (add, mut store, _k) = sample_add(&mut rng, false);
     let mut main = generate_trace(add, &mut store);
-    main.values[3 * NUM_MAIN_COLS] = Felt::ONE; // B-hub: is_b_zero := 1
-    for row in [2, 4] {
-        for c in 0..4 {
-            main.values[row * NUM_MAIN_COLS + c] = Felt::ZERO; // b limbs
-        }
+    main.values[NUM_MAIN_COLS + CELL_IS_B_ZERO] = Felt::ONE; // is_b_zero := 1
+    for c in 0..8 {
+        main.values[NUM_MAIN_COLS + c] = Felt::ZERO; // zero the b row's limbs
     }
-    for row in 0..16 {
-        main.values[row * NUM_MAIN_COLS + 5] = Felt::ZERO; // COL_B_PTR
+    for row in 0..PERIOD {
+        main.values[row * NUM_MAIN_COLS + COL_B_PTR] = Felt::ZERO;
     }
 
     crate::tests::check_local(UintAddAir, &main);
@@ -423,9 +421,9 @@ fn is_b_zero_rejects_named_operand_ptr() {
     let mut add = UintAddRequires::new();
     add.record_eq(a_ptr, a_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
-    // Forge a b_ptr into the flagged block (cycle-constant, all 16 rows).
-    for r in 0..16 {
-        main.values[r * NUM_MAIN_COLS + 5] = Felt::from(3u32); // COL_B_PTR
+    // Forge a b_ptr into the flagged block (cycle-constant, all rows).
+    for r in 0..PERIOD {
+        main.values[r * NUM_MAIN_COLS + COL_B_PTR] = Felt::from(3u32);
     }
 
     crate::tests::check_local(UintAddAir, &main);
@@ -449,9 +447,9 @@ fn is_c_zero_rejects_named_result_ptr() {
     let mut add = UintAddRequires::new();
     add.record_to_zero(a_ptr, neg_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
-    // Forge a c_ptr into the flagged block (cycle-constant, all 16 rows).
-    for r in 0..16 {
-        main.values[r * NUM_MAIN_COLS + 6] = Felt::from(4u32); // COL_C_PTR
+    // Forge a c_ptr into the flagged block (cycle-constant, all rows).
+    for r in 0..PERIOD {
+        main.values[r * NUM_MAIN_COLS + COL_C_PTR] = Felt::from(4u32);
     }
 
     crate::tests::check_local(UintAddAir, &main);
