@@ -151,7 +151,7 @@ fn run_core_program_with_advice(
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_deferred_precompiles(miden_core_lib::precompiles::registry())?;
+    .with_deferred_precompiles(miden_precompiles::registry())?;
 
     let output = processor.execute_sync(&program, &mut host);
     if let Ok(output) = &output {
@@ -162,10 +162,10 @@ fn run_core_program_with_advice(
 }
 
 fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
-    let registry = Arc::new(miden_core_lib::precompiles::registry());
+    let registry = Arc::new(miden_precompiles::registry());
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
     let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX)
-        .expect("deferred wire must rehydrate under miden-core-lib precompiles registry");
+        .expect("deferred wire must rehydrate under miden-precompiles registry");
     assert_eq!(
         rehydrated.root(),
         output.deferred_state.root(),

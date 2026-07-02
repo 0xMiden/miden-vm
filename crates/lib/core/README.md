@@ -9,7 +9,9 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
-`CoreLibrary` also includes the official deferred precompile wrappers under the `miden::precompiles` namespace, so users do not need to link or load a separate precompiles package for standard Miden programs.
+`CoreLibrary` also bundles deferred precompile support used internally by core wrappers,
+so users do not need any separate precompile-package wiring for standard Miden programs. Users
+should call the stable facades under `miden::core::*`.
 
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.

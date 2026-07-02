@@ -32,37 +32,37 @@ const U256_CONFIG: UintMasmConfig = UintMasmConfig {
 };
 
 const K1_BASE_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/k1_base.masm",
+    path: "asm/math/field/k1_base.masm",
     title: "SECP256K1 BASE-FIELD",
     domain: UintDomain::K1Base,
 };
 
 const K1_SCALAR_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/k1_scalar.masm",
+    path: "asm/math/field/k1_scalar.masm",
     title: "SECP256K1 SCALAR-FIELD",
     domain: UintDomain::K1Scalar,
 };
 
 const R1_BASE_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/r1_base.masm",
+    path: "asm/math/field/r1_base.masm",
     title: "SECP256R1 BASE-FIELD",
     domain: UintDomain::R1Base,
 };
 
 const R1_SCALAR_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/r1_scalar.masm",
+    path: "asm/math/field/r1_scalar.masm",
     title: "SECP256R1 SCALAR-FIELD",
     domain: UintDomain::R1Scalar,
 };
 
 const ED25519_BASE_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/ed25519_base.masm",
+    path: "asm/math/field/ed25519_base.masm",
     title: "ED25519 BASE-FIELD",
     domain: UintDomain::Ed25519Base,
 };
 
 const ED25519_SCALAR_FIELD: UintMasmConfig = UintMasmConfig {
-    path: "asm/math/ed25519_scalar.masm",
+    path: "asm/math/field/ed25519_scalar.masm",
     title: "ED25519 SCALAR-FIELD",
     domain: UintDomain::Ed25519Scalar,
 };
@@ -78,21 +78,21 @@ const FIELD_CONFIGS: &[UintMasmConfig] = &[
 
 const CURVE_CONFIGS: &[CurveMasmConfig] = &[
     CurveMasmConfig {
-        path: "asm/math/secp256k1.masm",
+        path: "asm/math/curve/secp256k1.masm",
         title: "SECP256K1",
         base_field_module: "k1_base",
         base_field_description: "secp256k1 base-field",
         curve: CodegenCurveId::Secp256k1,
     },
     CurveMasmConfig {
-        path: "asm/math/secp256r1.masm",
+        path: "asm/math/curve/secp256r1.masm",
         title: "SECP256R1",
         base_field_module: "r1_base",
         base_field_description: "secp256r1 base-field",
         curve: CodegenCurveId::Secp256r1,
     },
     CurveMasmConfig {
-        path: "asm/math/ed25519_sw.masm",
+        path: "asm/math/curve/ed25519_sw.masm",
         title: "ED25519-SW",
         base_field_module: "ed25519_base",
         base_field_description: "Ed25519 base-field",
@@ -439,6 +439,8 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&unrelated_file).unwrap(), "keep me");
         assert!(out_dir.join("asm/math/u256.masm").exists());
+        assert!(out_dir.join("asm/math/field/k1_base.masm").exists());
+        assert!(out_dir.join("asm/math/curve/secp256k1.masm").exists());
 
         fs::remove_dir_all(&out_dir).unwrap();
     }

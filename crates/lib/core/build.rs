@@ -236,7 +236,7 @@ trim_paths = true
         ),
     )
     .into_diagnostic()?;
-    fs::write(aggregate_dir.join("mod.masm"), "pub mod core\npub mod precompiles\n")
+    fs::write(aggregate_dir.join("mod.masm"), "pub mod core\nmod precompiles\n")
         .into_diagnostic()?;
 
     copy_masm_tree(core_asm_dir, &aggregate_dir.join("core"))?;

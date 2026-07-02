@@ -43,12 +43,10 @@ pub fn asm_source_dir() -> PathBuf {
 
 /// The Miden precompiles library, wrapping the compiled `miden-precompiles` [`Package`].
 ///
-/// The package bundles the MASM procedures exported under the `miden::precompiles` namespace,
-/// including hash wrappers, arithmetic wrappers, signature wrappers, and deferred-DAG helper
-/// procedures. When the package is dynamically linked during assembly, these procedures can be
-/// called from any Miden program and are serialized as 32 bytes.
-///
-/// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`].
+/// The package bundles MASM support procedures for hash wrappers, arithmetic wrappers, signature
+/// wrappers, and deferred-DAG helpers. These MASM modules are currently internal implementation
+/// detail for core-library facades and precompile tests, while the crate's deferred
+/// [`PrecompileRegistry`] is provided separately via [`registry`].
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]

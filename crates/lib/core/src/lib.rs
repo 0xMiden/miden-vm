@@ -8,10 +8,6 @@ pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
 
-pub mod precompiles {
-    pub use miden_precompiles::*;
-}
-
 use miden_precompiles::event_handlers as precompile_event_handlers;
 
 extern crate alloc;
@@ -53,8 +49,8 @@ use crate::handlers::{
 /// The core library provides several categories of functionality:
 ///
 /// - **Cryptographic primitives**: Poseidon2, Blake3, SHA-256, Falcon signature verification,
-///   authenticated encryption (AEAD decryption), and official deferred precompile wrappers under
-///   `::miden::precompiles`.
+///   authenticated encryption (AEAD decryption), and stable core facades for bundled deferred
+///   precompiles under `::miden::core::*`.
 /// - **Mathematical operations**: Division operations for u64, u128, and u256.
 /// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
 ///   array utilities with lower-bound search capabilities.

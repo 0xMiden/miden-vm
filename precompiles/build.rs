@@ -12,15 +12,15 @@ const ASM_DIR_PATH: &str = "asm";
 const ASSETS_DIR_PATH: &str = "assets";
 const GENERATED_ASM_DIR_PATH: &str = "asm";
 const GENERATED_MATH_FILES: &[&str] = &[
-    "math/ed25519_sw.masm",
-    "math/ed25519_base.masm",
-    "math/ed25519_scalar.masm",
-    "math/k1_base.masm",
-    "math/k1_scalar.masm",
-    "math/r1_base.masm",
-    "math/r1_scalar.masm",
-    "math/secp256k1.masm",
-    "math/secp256r1.masm",
+    "math/curve/ed25519_sw.masm",
+    "math/curve/secp256k1.masm",
+    "math/curve/secp256r1.masm",
+    "math/field/ed25519_base.masm",
+    "math/field/ed25519_scalar.masm",
+    "math/field/k1_base.masm",
+    "math/field/k1_scalar.masm",
+    "math/field/r1_base.masm",
+    "math/field/r1_scalar.masm",
     "math/u256.masm",
 ];
 

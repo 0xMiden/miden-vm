@@ -396,9 +396,8 @@ proofs carry `DeferredStateWire`, and verifiers rehydrate that wire under the su
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
 4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
 opcode entry. `STMNT` must already be present in the processor's deferred state and evaluate to
-`TRUE`; otherwise execution fails when the opcode attempts to log it. The `miden-precompiles` MASM
-package exposes user-facing helpers such as `miden::precompiles::log_deferred` and concrete hash,
-arithmetic, curve, and signature wrappers that register and log these statement digests.
+`TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and precompile
+support code wrap this low-level opcode by registering nodes and logging statement digests.
 
 Additionally, the processor maintains a persistent rolling deferred root that is updated with each
 `LOG_DEFERRED` invocation. The previous root is provided non‑deterministically via helper

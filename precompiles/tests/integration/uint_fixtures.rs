@@ -134,7 +134,7 @@ impl<M: UintSpec> UintModule<M> {
             "
             {TRUNCATE_STACK_TO_OUTPUT_PROC}
 
-            use miden::precompiles::math::{module}
+            use {module_use_path}
             begin
                 {stores}
                 push.{MEM_PTR}
@@ -151,6 +151,7 @@ impl<M: UintSpec> UintModule<M> {
             end
             ",
             module = self.module,
+            module_use_path = self.module_use_path(),
             stores = masm_store_u32x8(stack_value, MEM_PTR),
             push_value = masm_push_u32x8(memory_value),
             out_hi = OUT_PTR + 4,
@@ -436,13 +437,13 @@ impl<M: UintSpec> UintModule<M> {
             "
             {TRUNCATE_STACK_TO_OUTPUT_PROC}
 
-            use miden::precompiles::math::{module}
+            use {module_use_path}
             begin
                 {body}
                 exec.truncate_stack_to_output
             end
             ",
-            module = self.module,
+            module_use_path = self.module_use_path(),
         );
         let output = run_precompile_program(&source).unwrap_or_else(|err| {
             panic!("{} {label} must succeed: {err:?}", self.module);
@@ -460,13 +461,21 @@ impl<M: UintSpec> UintModule<M> {
     fn program(&self, body: &str) -> String {
         format!(
             "
-            use miden::precompiles::math::{module}
+            use {module_use_path}
             begin
                 {body}
             end
             ",
-            module = self.module,
+            module_use_path = self.module_use_path(),
         )
+    }
+
+    fn module_use_path(&self) -> String {
+        if M::IS_PRIME_FIELD {
+            format!("miden::precompiles::math::field::{}", self.module)
+        } else {
+            format!("miden::precompiles::math::{}", self.module)
+        }
     }
 }
 
@@ -483,8 +492,8 @@ pub fn assert_cross_modulus_children_rejected(lhs: &'static str, rhs: &'static s
 
     let source = format!(
         "
-        use miden::precompiles::math::{lhs}
-        use miden::precompiles::math::{rhs}
+        use miden::precompiles::math::field::{lhs}
+        use miden::precompiles::math::field::{rhs}
         begin
             exec.{rhs}::push_one_digest
             exec.{lhs}::push_one_digest

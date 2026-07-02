@@ -14,9 +14,8 @@
 //! - `EQ`: trapping equality predicate that evaluates to `Node::TRUE` only when both operands
 //!   reduce to the same canonical point.
 //!
-//! Affine coordinates are canonical uint values in the curve's base-field domain. Concrete user
-//! modules are generated separately under
-//! `miden::precompiles::math::{secp256k1,secp256r1,ed25519_sw}`.
+//! Affine coordinates are canonical uint values in the curve's base-field domain. Concrete MASM
+//! support modules are generated separately and are currently internal implementation detail.
 //!
 //! ## Trust contract
 //!

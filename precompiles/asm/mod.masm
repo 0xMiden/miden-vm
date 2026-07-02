@@ -1,7 +1,7 @@
-#! Top-level module of the `miden::precompiles` namespace.
+#! Top-level module for internal deferred-precompile MASM support.
 #!
-#! Concrete deferred precompiles are exported from here and its submodules. The helper procedures in
-#! this module are shared by generated and hand-written precompile wrappers.
+#! Concrete deferred-precompile support modules live here and in submodules. The helper procedures in
+#! this module are shared by generated and hand-written wrappers.
 
 pub mod crypto
 pub mod math

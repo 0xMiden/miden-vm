@@ -13,7 +13,7 @@ use super::{UintDomain, precompile::UintPrecompile};
 
 /// Event used by generated field uint wrappers to request an inverse witness from the host.
 pub(crate) const UINT_FIELD_INV_EVENT_NAME: EventName =
-    EventName::new("miden::precompiles::math::uint::field_inv");
+    EventName::new("miden::precompiles::math::field::field_inv");
 
 /// Returns the uint field inverse handler entry expected by [`miden_processor::HostLibrary`].
 pub(crate) fn field_inv_event_handler() -> (EventName, Arc<dyn EventHandler>) {

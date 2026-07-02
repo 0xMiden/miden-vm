@@ -81,8 +81,8 @@ node tag.
 A **precompile** is the framework's extension point: an implementation of the `Precompile` trait
 that claims one tag id and, within that slice of tag space, defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
-DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate, with MASM wrappers
-under the `miden::precompiles` namespace.
+DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate; MASM support code
+for them is currently treated as internal implementation detail.
 
 A precompile supplies three things:
 
@@ -242,8 +242,7 @@ This framework is now the proof-bound precompile substrate. In its current form:
 - `ExecutionProof` carries a canonical `DeferredStateWire`, which the verifier rehydrates under the
   caller-supplied `PrecompileRegistry` before checking the STARK proof;
 - the `miden-precompiles` crate provides concrete hash, arithmetic, curve, and native signature
-  wrappers under the `miden::precompiles` namespace.
+  precompile implementations used by core-library facades and registry-based verification.
 
-Proof-bound code uses the `miden::precompiles` wrappers and registry-based verification. More
-generic DAG resource accounting remains a follow-up; the external STARK that verifies a committed
-DAG, the **Precompile VM**, is described in GitHub discussion #3005.
+More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
+committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

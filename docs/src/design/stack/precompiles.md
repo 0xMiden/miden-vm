@@ -6,8 +6,8 @@ content-addressed deferred DAG described in [Deferred computation](../deferred/i
 register deferred nodes, log statement digests that evaluate to `TRUE`, proofs carry
 `DeferredStateWire`, and verifiers rehydrate that wire under a supplied `PrecompileRegistry`.
 
-Concrete proof-bound wrappers live in the `miden-precompiles` crate and are exposed to MASM under
-the `miden::precompiles` namespace.
+Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
+modules are currently internal implementation detail used by core-library facades and tests.
 
 ## Current data model
 
@@ -23,8 +23,8 @@ the `miden::precompiles` namespace.
 
 ## Lifecycle overview
 
-1. **Wrapper registers nodes** – A `miden::precompiles` MASM procedure stages node payloads on the
-   operand stack or in memory and emits `adv.register_deferred` / `adv.register_deferred_data`.
+1. **Wrapper registers nodes** – Internal MASM support code stages node payloads on the operand
+   stack or in memory and emits `adv.register_deferred` / `adv.register_deferred_data`.
    Registration stores the node in host-side `DeferredState`, checks structural child closure, and
    evaluates the node immediately under the installed registry.
 2. **Wrapper binds digests in-circuit** – The wrapper computes any proof-relevant node digest from the
@@ -75,10 +75,10 @@ the `miden::precompiles` namespace.
 
 ## Examples
 
-- Hash wrappers such as `miden::precompiles::crypto::hashes::keccak256` register the input/result
-  nodes needed for the hash claim and log a statement digest that verifies the claimed digest.
-- Signature wrappers under `miden::precompiles::crypto::dsa` register the public key, message or
-  prehash, signature, and verification predicate nodes, then log the predicate statement.
+- Hash support wrappers register the input/result nodes needed for the hash claim and log a
+  statement digest that verifies the claimed digest.
+- Signature support wrappers register the public key, message or prehash, signature, and
+  verification predicate nodes, then log the predicate statement.
 
 
 ## Related reading

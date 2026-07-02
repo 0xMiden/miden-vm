@@ -7,12 +7,12 @@ The generic deferred-computation framework stays in [`miden-core`](../core), und
 This crate exposes a `registry()` function that returns a `miden_core::deferred::PrecompileRegistry` — the registry that routes deferred tags to their owning precompile — populated with the precompiles this crate provides.
 
 ## Provided precompiles
-- **Hashes** (`keccak256`): a `preimage` → `digest` reduction plus an `eq` predicate, with MASM wrappers under `miden::precompiles::crypto::hashes::keccak256` (`hash`, `hash_bytes`, `merge`).
-- **Math-native secp256k1 ECDSA** (`ecdsa_secp256k1`): a trapping prehashed verifier exposed as `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash`. It verifies raw affine secp256k1 public keys, prehashes, and `(r, s)` signatures stored as little-endian `u32` limbs. It uses the UInt and curve deferred precompiles, applying the signature equation's scalar multiplications with a two-pair curve MSM.
+- **Hashes** (`keccak256`): a `preimage` → `digest` reduction plus an `eq` predicate, used by bundled MASM support code for core hash facades.
+- **Math-native secp256k1 ECDSA** (`ecdsa_secp256k1`): a trapping prehashed verifier used by bundled MASM support code. It verifies raw affine secp256k1 public keys, prehashes, and `(r, s)` signatures stored as little-endian `u32` limbs. It uses the UInt and curve deferred precompiles, applying the signature equation's scalar multiplications with a two-pair curve MSM.
 
 ## secp256k1 ECDSA trapping verifier ABI
 
-`miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` has stack contract:
+The internal secp256k1 ECDSA support wrapper has stack contract:
 
 ```text
 Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]

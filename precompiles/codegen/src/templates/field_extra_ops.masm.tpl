@@ -70,7 +70,7 @@ end
 #! canonical VALUE node, then proves correctness by logging `eq(mul(X_DIGEST, INV_DIGEST), one)`
 #! into the deferred root using only existing MUL and EQ nodes.
 pub proc inv
-    emit.event("miden::precompiles::math::uint::field_inv")
+    emit.event("miden::precompiles::math::field::field_inv")
     # => [X_DIGEST, ...]
 
     adv_pushw

@@ -1,6 +1,6 @@
-use miden::precompiles::math::k1_base
-use miden::precompiles::math::k1_scalar
-use miden::precompiles::math::secp256k1
+use miden::precompiles::math::curve::secp256k1
+use miden::precompiles::math::field::k1_base
+use miden::precompiles::math::field::k1_scalar
 
 # ECDSA SECP256K1 TRAPPING VERIFIER
 # ================================================================================================

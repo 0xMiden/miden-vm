@@ -1,14 +1,7 @@
 #! Arithmetic deferred precompile wrappers.
 
-pub mod ed25519_sw
-pub mod ed25519_base
-pub mod ed25519_scalar
-pub mod k1_base
-pub mod k1_scalar
-pub mod r1_base
-pub mod r1_scalar
-pub mod secp256k1
-pub mod secp256r1
+pub mod field
+pub mod curve
 pub mod u256
 
 #! Returns whether the raw little-endian u256 limbs on the operand stack are all zero.

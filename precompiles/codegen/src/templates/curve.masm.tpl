@@ -3,7 +3,7 @@
 # Regenerate with: {{REGENERATE_COMMAND}}
 
 use miden::precompiles
-use miden::precompiles::math::{{BASE_FIELD_MODULE}}
+use miden::precompiles::math::field::{{BASE_FIELD_MODULE}}
 
 # {{TITLE}} CURVE DEFERRED PRECOMPILE WRAPPERS
 # ================================================================================================

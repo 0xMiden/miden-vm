@@ -123,7 +123,7 @@ fn core_library_exports_crypto_wrappers() {
 }
 
 #[test]
-fn core_library_package_exports_core_and_precompiles() {
+fn core_library_package_exports_core_but_hides_precompiles() {
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
@@ -132,20 +132,28 @@ fn core_library_package_exports_core_and_precompiles() {
     for path in [
         "::miden::core::math::u64::overflowing_add",
         "::miden::core::crypto::hashes::sha256::hash",
-        "::miden::precompiles::math::u256::push_zero_digest",
-        "::miden::precompiles::crypto::hashes::keccak256::hash_bytes_mem",
     ] {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
             "{path} must be exported by aggregate corelib",
         );
     }
+
+    for path in [
+        "::miden::precompiles::math::u256::push_zero_digest",
+        "::miden::precompiles::crypto::hashes::keccak256::hash_bytes_mem",
+    ] {
+        assert!(
+            package.get_procedure_root_by_path(path).is_none(),
+            "{path} must not be exported by aggregate corelib",
+        );
+    }
 }
 
 #[test]
-fn core_lib_reexports_precompile_api() {
-    let _ = miden_core_lib::precompiles::registry();
-    let _ = miden_core_lib::precompiles::PrecompilesLibrary::default();
+fn precompile_api_is_available_from_precompiles_crate() {
+    let _ = miden_precompiles::registry();
+    let _ = miden_precompiles::PrecompilesLibrary::default();
 }
 
 #[test]
@@ -153,12 +161,18 @@ fn core_library_links_precompile_wrappers_without_precompiles_library() {
     use miden_assembly::{Assembler, Linkage};
     use miden_core_lib::CoreLibrary;
 
-    let source = "begin exec.::miden::precompiles::math::u256::push_zero_digest dropw end";
+    let source = concat!(
+        "begin ",
+        "push.0 push.0 ",
+        "exec.::miden::core::crypto::hashes::keccak256::hash_bytes ",
+        "dropw dropw ",
+        "end",
+    );
     Assembler::default()
         .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
         .expect("failed to link core library")
-        .assemble_program("core_links_precompiles", source)
-        .expect("failed to assemble program against core-provided precompiles");
+        .assemble_program("core_links_precompile_wrappers", source)
+        .expect("failed to assemble program against core precompile wrappers");
 }
 
 #[test]
@@ -170,7 +184,7 @@ fn core_library_load_registers_precompile_handlers() {
     let mut host = DefaultHost::default();
     host.load_library(&core_lib).expect("failed to load core library");
 
-    for (event, _) in miden_core_lib::precompiles::event_handlers::default_event_handlers() {
+    for (event, _) in miden_precompiles::event_handlers::default_event_handlers() {
         assert_eq!(host.resolve_event(event.to_event_id()), Some(&event));
     }
 }
