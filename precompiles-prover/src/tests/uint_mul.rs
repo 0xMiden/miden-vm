@@ -148,7 +148,8 @@ fn mul_constraints_hold() {
     // The carries must be exercised: some γ cell pair differs from the
     // zero encoding (lo, hi) = (0, 2¹⁵).
     let vals = op.resolve(&store);
-    let gammas = gamma_halves(&op, &vals, &canonical_q(&op, &vals));
+    let (q, borrow) = canonical_q(&op, &vals);
+    let gammas = gamma_halves(&op, &vals, &q, borrow);
     assert!(
         gammas.iter().any(|&(lo, hi)| (lo, hi) != (0, 1 << 15)),
         "a random MAC must carry",
@@ -284,11 +285,11 @@ fn mul_q_range_checks_are_load_bearing() {
 
     let (op, mult) = mul.ops[0];
     let vals = op.resolve(&store);
-    let mut q = canonical_q(&op, &vals);
+    let (mut q, borrow) = canonical_q(&op, &vals);
     assert!(q[1] >= 1, "fixture needs a borrowable q₁ (reseed if not)");
     q[0] += 1 << 16;
     q[1] -= 1;
-    let forged = op_block(&op, &vals, &q, &gamma_halves(&op, &vals, &q), mult);
+    let forged = op_block(&op, &vals, &q, borrow, &gamma_halves(&op, &vals, &q, borrow), mult);
 
     // The honest pass routes store demand + the canonical-q Range16
     // checks into the buses …

@@ -19,10 +19,10 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR, GAMMA_OFFSET,
-    GAMMA_SLOTS, NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A_HI, ROW_A_LO,
-    ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM, S_KEEP,
-    TERM_CELL_C_PTR, TERM_CELL_KAPPA_C, TERM_CELL_MULT, UintMulAir,
+    AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BORROW, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR,
+    GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A_HI,
+    ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM,
+    S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_MULT, UintMulAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -46,6 +46,9 @@ pub(crate) struct MulOp {
     pub c: UintPtr,
     pub r: UintPtr,
     pub bound: UintPtr,
+    /// `false` for `κₐ·a·b + κ_c·c ≡ r`, `true` for the subtractive
+    /// `κₐ·a·b − κ_c·c ≡ r` (the EC tail's fused `λ²−t` / `λe−y₁`).
+    pub is_sub: bool,
 }
 
 /// An op's values resolved from the store, in field order
@@ -70,21 +73,34 @@ impl MulOp {
             r: value(self.r),
             bound: value(self.bound),
         };
-        debug_assert_eq!(
-            vals.r,
-            math::mac_reduce(self.kappa_a, vals.a, vals.b, self.kappa_c, vals.c, vals.bound),
-            "r must equal (κₐ·a·b + κ_c·c) mod p",
-        );
+        let expected = if self.is_sub {
+            math::mac_sub_reduce(self.kappa_a, vals.a, vals.b, self.kappa_c, vals.c, vals.bound)
+        } else {
+            math::mac_reduce(self.kappa_a, vals.a, vals.b, self.kappa_c, vals.c, vals.bound)
+        };
+        debug_assert_eq!(vals.r, expected, "r must equal (κₐ·a·b ± κ_c·c) mod p");
         vals
     }
 }
 
-/// The canonical 17-limb quotient of an op — `q < κₐ·p ≤ 2²⁷²`.
-pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> [u32; NUM_Q_LIMBS] {
-    let (q, rem) = math::mac_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound);
+/// The canonical 17-limb quotient `q_committed` of an op (`q < κₐ·p ≤
+/// 2²⁷²`) plus the subtractive `borrow ∈ {0, 1}` — the modulus the
+/// canonical reduction adds back on underflow (`false` for additive ops).
+/// The identity is `κₐ·a·b ± κ_c·c = r + (q_committed − borrow)·p`.
+pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> ([u32; NUM_Q_LIMBS], bool) {
+    let (q, rem, borrow) = if op.is_sub {
+        math::mac_sub_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound)
+    } else {
+        let (q, rem) =
+            math::mac_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound);
+        (q, rem, false)
+    };
     debug_assert_eq!(rem, vals.r, "the op's r must be the canonical MAC remainder");
     debug_assert!(q >> 272 == math::U320::ZERO, "quotient exceeds 17 limbs (κₐ out of contract?)",);
-    array::from_fn(|i| ((q.as_limbs()[i / 4] >> (16 * (i % 4))) as u32) & 0xffff)
+    (
+        array::from_fn(|i| ((q.as_limbs()[i / 4] >> (16 * (i % 4))) as u32) & 0xffff),
+        borrow,
+    )
 }
 
 /// The 31 carry coefficients of the SZ identity, committed sign-offset:
@@ -92,21 +108,30 @@ pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> [u32; NUM_Q_LIMBS] {
 /// synthetic division of `E_pre` by `(X − t)`:
 ///
 /// ```text
-/// E_pre(X) = κₐ·a(X)b(X) + κ_c·C(X²) − q(X)·(bound(X) + 1) − R(X²)
+/// E_pre(X) = κₐ·a(X)b(X) ± κ_c·C(X²) − q(X)·(bound(X) + 1) − R(X²)
+///                                     + borrow·(bound(X) + 1)
 /// γₖ = (dₖ + γₖ₋₁) / t,    t = 2¹⁶
 /// ```
 ///
-/// `q` is a parameter (not recomputed) so a forged limb *encoding* of
-/// the same quotient value — the attack the `Range16` checks exist to
-/// stop — can be witnessed in tests.
+/// The sign on `κ_c·C` is `−` for `is_sub`, and the subtractive `borrow`
+/// adds one `(bound + 1)` back (`q` here is `q_committed`, so
+/// `q_committed − borrow` is the true quotient). `q` / `borrow` are
+/// parameters (not recomputed) so a forged limb *encoding* of the same
+/// quotient value — the attack the `Range16` checks exist to stop — can be
+/// witnessed in tests.
 pub(crate) fn gamma_halves(
     op: &MulOp,
     vals: &MulVals,
     q: &[u32; NUM_Q_LIMBS],
+    borrow: bool,
 ) -> [(u16, u16); NUM_GAMMA] {
     let (a, b, bound) = (to_limbs16(vals.a), to_limbs16(vals.b), to_limbs16(vals.bound));
     let c32 = to_limbs32(vals.c);
     let r32 = to_limbs32(vals.r);
+    // 0 for additive ops, so the borrow term vanishes without gating; the
+    // c term flips sign for the subtractive shape.
+    let borrow = borrow as i128;
+    let c_sign: i128 = if op.is_sub { -1 } else { 1 };
     let d = |k: usize| -> i128 {
         let ab: i128 = (k.saturating_sub(15)..=k.min(15))
             .map(|i| a[i] as i128 * b[k - i] as i128)
@@ -118,8 +143,16 @@ pub(crate) fn gamma_halves(
         if k < NUM_Q_LIMBS {
             d -= q[k] as i128;
         }
+        // +borrow·(bound + 1): the modulus added back on subtractive
+        // underflow (borrow = 0 ⟹ no effect).
+        if k < 16 {
+            d += borrow * bound[k] as i128;
+        }
+        if k == 0 {
+            d += borrow;
+        }
         if k.is_multiple_of(2) && k / 2 < 8 {
-            d += op.kappa_c as i128 * c32[k / 2] as i128 - r32[k / 2] as i128;
+            d += c_sign * op.kappa_c as i128 * c32[k / 2] as i128 - r32[k / 2] as i128;
         }
         d
     };
@@ -184,7 +217,50 @@ impl UintMulRequires {
         bound: UintPtr,
         mult: ProvideMult,
     ) {
-        let op = MulOp { kappa_a, kappa_c, a, b, c, r, bound };
+        self.insert(kappa_a, a, b, kappa_c, c, r, bound, false, mult);
+    }
+
+    /// Record the subtractive `κₐ·a·b − κ_c·c ≡ r (mod p)` (the EC tail's
+    /// fused `λ²−t` / `λe−y₁`). `r` is the caller-assigned canonical
+    /// remainder; the underflow borrow is derived at trace-gen.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_sub(
+        &mut self,
+        kappa_a: u16,
+        a: UintPtr,
+        b: UintPtr,
+        kappa_c: u16,
+        c: UintPtr,
+        r: UintPtr,
+        bound: UintPtr,
+        mult: ProvideMult,
+    ) {
+        self.insert(kappa_a, a, b, kappa_c, c, r, bound, true, mult);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert(
+        &mut self,
+        kappa_a: u16,
+        a: UintPtr,
+        b: UintPtr,
+        kappa_c: u16,
+        c: UintPtr,
+        r: UintPtr,
+        bound: UintPtr,
+        is_sub: bool,
+        mult: ProvideMult,
+    ) {
+        let op = MulOp {
+            kappa_a,
+            kappa_c,
+            a,
+            b,
+            c,
+            r,
+            bound,
+            is_sub,
+        };
         match self.dedup.get(&op) {
             Some(&i) => self.ops[i].1 += mult,
             None => {
@@ -203,6 +279,7 @@ pub(crate) fn op_block(
     op: &MulOp,
     v: &MulVals,
     q: &[u32; NUM_Q_LIMBS],
+    borrow: bool,
     gammas: &[(u16, u16); NUM_GAMMA],
     mult: ProvideMult,
 ) -> Vec<Felt> {
@@ -242,6 +319,7 @@ pub(crate) fn op_block(
     set(ROW_TERM, TERM_CELL_MULT, mult);
     set(ROW_TERM, TERM_CELL_C_PTR, op.c.addr());
     set(ROW_TERM, TERM_CELL_KAPPA_C, op.kappa_c as u32);
+    set(ROW_TERM, TERM_CELL_IS_SUB, op.is_sub as u32);
     for row in 0..PERIOD {
         set(row, COL_A_PTR, op.a.addr());
         set(row, COL_B_PTR, op.b.addr());
@@ -249,6 +327,7 @@ pub(crate) fn op_block(
         set(row, COL_BOUND_PTR, op.bound.addr());
         set(row, COL_KAPPA_A, op.kappa_a as u32);
         set(row, COL_ACT, 1);
+        set(row, COL_BORROW, borrow as u32);
     }
     block.into_iter().flatten().collect()
 }
@@ -280,8 +359,8 @@ pub fn generate_trace(
         store.require_uintval(op.r);
 
         let v = op.resolve(store);
-        let q = canonical_q(op, &v);
-        let gammas = gamma_halves(op, &v, &q);
+        let (q, borrow) = canonical_q(op, &v);
+        let gammas = gamma_halves(op, &v, &q, borrow);
         for &qi in &q {
             bpl.require_range16(qi as u16);
         }
@@ -292,7 +371,7 @@ pub fn generate_trace(
         bpl.require_range16(op.kappa_a);
         bpl.require_range16(op.kappa_c);
 
-        vals.extend(op_block(op, &v, &q, &gammas, *mult));
+        vals.extend(op_block(op, &v, &q, borrow, &gammas, *mult));
     }
     // Padding blocks: all-zero (act = 0) rows that touch no bus.
     vals.resize(height * NUM_MAIN_COLS, Felt::ZERO);
@@ -359,6 +438,16 @@ pub(crate) fn build_aux(
         let role_contrib: QuadFelt = match row_kind {
             _ if row_kind == ROW_B_LO => s_reg * lo_sum,
             _ if row_kind == ROW_B_HI => s_reg * hi_sum,
+            // +borrow·(bound(β)+1), split across the p-rows where bound(β)
+            // lives (the +1 of p = bound + 1 rides p_lo's β⁰).
+            _ if row_kind == ROW_P_LO => {
+                let borrow = main.values[r * NUM_MAIN_COLS + COL_BORROW];
+                QuadFelt::from(borrow) * (lo_sum + QuadFelt::ONE)
+            },
+            _ if row_kind == ROW_P_HI => {
+                let borrow = main.values[r * NUM_MAIN_COLS + COL_BORROW];
+                QuadFelt::from(borrow) * hi_sum
+            },
             _ if row_kind == ROW_Q_LO => {
                 -((s_reg + QuadFelt::ONE)
                     * (0..NUM_CELLS)
@@ -373,7 +462,9 @@ pub(crate) fn build_aux(
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
                 let kappa_c = main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_KAPPA_C];
-                QuadFelt::from(kappa_c) * val_sum
+                let is_sub = main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_IS_SUB];
+                let signed = (Felt::ONE - Felt::from(2u32) * is_sub) * kappa_c;
+                QuadFelt::from(signed) * val_sum
             },
             _ => QuadFelt::ZERO,
         };

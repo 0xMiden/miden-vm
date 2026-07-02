@@ -17,7 +17,7 @@
 //! itself, which is all the `is` predicate needs.
 
 use crate::{
-    math::{U256, add_reduce, mac_reduce, sub_reduce},
+    math::{U256, add_reduce, mac_reduce, mac_sub_reduce, sub_reduce},
     uint::{
         add::trace::UintAddRequires,
         mul::trace::UintMulRequires,
@@ -151,6 +151,32 @@ impl<'a> UintRequire<'a> {
         let r = mac_reduce(kappa_a, a.value, b.value, kappa_c, c.value, bound);
         let r_ptr = self.store.intern(r, a.bound_ptr);
         self.mul.record(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
+        r_ptr
+    }
+
+    /// Record the subtractive scaled MAC `κₐ·a·b − κ_c·c mod p` over stored
+    /// uints sharing a modulus, interning the result — the fused
+    /// multiply-subtract the EC tail folds `λ²−t` / `λ·e−y₁` into (one mul
+    /// op instead of a mul, a store and a sub). Returns the result's handle.
+    pub fn mac_sub(
+        &mut self,
+        kappa_a: u16,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        kappa_c: u16,
+        c_ptr: UintPtr,
+    ) -> UintPtr {
+        let (a, bound) = self.resolve(a_ptr);
+        let (b, _) = self.resolve(b_ptr);
+        let (c, _) = self.resolve(c_ptr);
+        assert!(
+            a.bound_ptr == b.bound_ptr && a.bound_ptr == c.bound_ptr,
+            "mac operands must share a modulus",
+        );
+        let r = mac_sub_reduce(kappa_a, a.value, b.value, kappa_c, c.value, bound);
+        let r_ptr = self.store.intern(r, a.bound_ptr);
+        self.mul
+            .record_sub(kappa_a, a_ptr, b_ptr, kappa_c, c_ptr, r_ptr, a.bound_ptr, 1);
         r_ptr
     }
 

@@ -91,6 +91,47 @@ pub fn mac_div_rem(
     (q.to(), r.to())
 }
 
+/// `(κₐ·a·b − κ_c·c) mod p` — the subtractive scaled-MAC reduction.
+pub fn mac_sub_reduce(kappa_a: u16, a: U256, b: U256, kappa_c: u16, c: U256, bound: U256) -> U256 {
+    mac_sub_div_rem(kappa_a, a, b, kappa_c, c, bound).1
+}
+
+/// `(q_committed, r, borrow)` of `κₐ·a·b − κ_c·c ≡ r (mod p)`, written
+///
+/// ```text
+/// κₐ·a·b − κ_c·c = r + (q_committed − borrow)·p
+/// ```
+///
+/// with `r ≤ bound`, `q_committed ≥ 0` (the trace's 17 16-bit quotient
+/// limbs), and `borrow ∈ {0, 1}` the single modulus the subtraction adds
+/// back when `κₐ·a·b < κ_c·c` (the canonical reduction wraps up by one
+/// `p`). For the `κ_c = 1` shapes the EC tail records, `κₐ·a·b ≥ 0 > c − p`,
+/// so the underflow never exceeds one modulus and `borrow` is a bit;
+/// `q_committed = 0` on that branch. A `κ_c > 1` op that underflows by more
+/// than one `p` has no single-bit representation — debug-asserted, since the
+/// contract is `κ_c ≤ 1` for the subtractive mode.
+pub fn mac_sub_div_rem(
+    kappa_a: u16,
+    a: U256,
+    b: U256,
+    kappa_c: u16,
+    c: U256,
+    bound: U256,
+) -> (U320, U256, bool) {
+    let ab: U512 = a.widening_mul(b);
+    let p = U576::from(bound) + U576::ONE;
+    let prod = U576::from(ab) * U576::from(kappa_a);
+    let sub = U576::from(c) * U576::from(kappa_c);
+    if prod >= sub {
+        let (q, r) = (prod - sub).div_rem(p);
+        (q.to(), r.to(), false)
+    } else {
+        let d = sub - prod;
+        debug_assert!(d < p, "mac_sub underflow exceeds one modulus (κ_c > 1?)");
+        (U320::ZERO, (p - d).to(), true)
+    }
+}
+
 /// `v⁻¹ mod p` (requires `gcd(v, p) = 1`) — the witness inverse for
 /// slope denominators and friends. Extended-gcd under the hood, so no
 /// primality assumption.
