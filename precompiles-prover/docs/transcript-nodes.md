@@ -26,10 +26,10 @@ VM `Tag::CHUNKS = [2, 0, 0, 0]`, and the terminal Keccak assertion uses
 ```
 
 Explicit transcript uint pin claims use
-`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. Fixed uint domains and fixed
-curve coefficients are not represented by default pin-claim nodes; the
-verifier loads their `UintVal` halves as external LogUp boundary consumes.
-EC nodes use VM curve precompile caps:
+`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. Fixed uint domains, fixed
+curve coefficients, and fixed curve group tuples are not represented by default
+transcript nodes; the verifier loads their `UintVal` / `EcGroup` requirements
+as external LogUp boundary consumes. EC nodes use VM curve precompile caps:
 
 ```text
 [CurvePrecompile::id(), VALUE_OP_ID, a_ptr,     b_ptr]
@@ -37,8 +37,9 @@ EC nodes use VM curve precompile caps:
 [CurvePrecompile::id(), MSM_OP_ID,   group_ptr, 0]   # MSM IV
 ```
 
-`group_ptr` is the VM-owned curve group configuration pointer, e.g.
-`K1_GROUP_PTR = 1` and `R1_GROUP_PTR = 2` from `miden-precompiles`.
+`group_ptr` is the VM-owned curve group configuration pointer from
+`CurveId::ALL` (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`,
+`ED25519_GROUP_PTR = 3` today).
 
 ## Hash preimage — Miden-native 12-felt state
 
@@ -115,9 +116,9 @@ local AIR constraints. Violating them is rejected as a malformed node.
 - **EcBinOp**: VM curve op cap; slot 1 is `op_id ∈ [1, 4]`, cap slots 2 and 3
   are `0`; the curve threads through the operands' hashes and relation witnesses.
 - **EcMsm IV**: VM curve MSM cap; slot 1 is `MSM_OP_ID`, cap slot 2 is the
-  canonical VM-owned `group_ptr` (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`), and
-  cap slot 3 is `0`. Later absorbs use the prior digest as the capacity instead
-  of this IV.
+  canonical VM-owned `group_ptr` from `CurveId::ALL` (`K1_GROUP_PTR = 1`,
+  `R1_GROUP_PTR = 2`, `ED25519_GROUP_PTR = 3` today), and cap slot 3 is `0`.
+  Later absorbs use the prior digest as the capacity instead of this IV.
 
 ### VM `CHUNKS` — not an eval-chip node
 
@@ -141,9 +142,10 @@ The eval row consumes both stored halves,
 `UintVal(pin_ptr, bound_ptr, 0, lo)` and
 `UintVal(pin_ptr, bound_ptr, 1, hi)`, and provides
 `Binding(h_pin, True)`. Bounds/moduli may be self-pins (`pin_ptr = bound_ptr`),
-but default fixed domains and curve coefficients use verifier-loaded
-`UintVal` boundary consumes instead. Manual pin claims are ordinary `True`
-leaves that fold wherever the caller places them in the transcript.
+but default fixed domains and curve coefficients use verifier-loaded `UintVal`
+boundary consumes instead. Fixed curve group tuples are likewise loaded as
+`EcGroup` boundary consumes. Manual pin claims are ordinary `True` leaves that
+fold wherever the caller places them in the transcript.
 
 ### VM uint ops
 

@@ -119,7 +119,7 @@ impl ChunkRequires {
 
     /// Register an invocation; lays a fresh chunk-row span and calls
     /// `p2.require_absorption` to claim its P2 cycle range. Empty input
-    /// lays one canonical all-zero chunk (see [`Invocation::num_chunks`]),
+    /// lays one canonical all-zero chunk (see `Invocation::num_chunks`),
     /// so the span is always non-empty.
     pub fn require(&mut self, inv: &Invocation, p2: &mut Poseidon2Requires) -> ChunkOutput {
         let f_per_chunk = Node::chunks_from_bytes(&inv.input)

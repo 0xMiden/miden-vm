@@ -3,7 +3,7 @@
 //!
 //! Without these, [`P2Digest`] (output of the permutation) and
 //! [`P2Cap`] (capacity prefix carrying a domain separator such as a
-//! VM deferred tag word or a prover-local bootstrap pin tuple) collapse
+//! VM deferred tag word or a prover-local explicit pin tuple) collapse
 //! to the same primitive type — the compiler can't catch a
 //! digest accidentally fed in as a cap (or vice versa).
 
@@ -33,7 +33,7 @@ impl From<Digest> for P2Digest {
 }
 
 /// Capacity prefix for a Poseidon2 absorption. VM deferred caps are raw
-/// VM tag words; prover-local bootstrap-pin caps keep their local tuple.
+/// VM tag words; prover-local explicit-pin caps keep their local tuple.
 /// Constructors for off-pattern caps stay open via the tuple-struct
 /// constructor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -68,7 +68,7 @@ impl P2Cap {
         Self(UintPrecompile::value_tag(domain).as_word())
     }
 
-    /// Bootstrap uint pin-claim capacity: `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+    /// Explicit uint pin-claim capacity: `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
     pub fn uint_pin_claim(bound_ptr: u32, pin_ptr: u32) -> Self {
         Self([
             Felt::from(UINT_PIN_CLAIM_TAG),

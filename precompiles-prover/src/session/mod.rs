@@ -19,8 +19,8 @@
 //!
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
-//! explicit bootstrap/fixed-pin helpers, `pin_uint`, the [`UintNode`] value ops (`uint_leaf`,
-//! `uint_add` / `uint_sub` / `uint_mul`, the `uint_is` predicate), and the `Truthy`
+//! explicit `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
+//! `uint_mul`, the `uint_is` predicate), and the `Truthy`
 //! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
 //! intern with canonical `(value, modulus)` dedup, so equal values share
@@ -78,6 +78,7 @@ use crate::{
 
 mod fixed;
 mod prove;
+pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
@@ -120,25 +121,19 @@ impl Session {
             ec: EcStores::new(),
             msm: EcMsmRequires::new(),
         };
-        session.install_fixed_uint_manifest();
+        session.install_fixed_uints();
+        session.ec.store.require_fixed_groups();
         session
     }
 
-    /// Fixed uint domains and curve coefficients are installed by [`Session::new`] and constrained
-    /// by verifier-side `UintVal` boundary consumes. They no longer emit default transcript
-    /// claims.
-    pub fn bootstrap_fixed_pins(&mut self) -> Vec<Truthy> {
-        Vec::new()
-    }
-
-    fn install_fixed_uint_manifest(&mut self) {
-        for fixed in fixed::fixed_uint_manifest() {
-            let value = from_limbs32(&fixed.value);
-            let ptr = if fixed.ptr == fixed.bound_ptr {
-                self.uint.store.pin_modulus(fixed.ptr, value)
+    fn install_fixed_uints(&mut self) {
+        for (addr, bound_addr, limbs) in fixed::fixed_uints() {
+            let value = from_limbs32(&limbs);
+            let ptr = if addr == bound_addr {
+                self.uint.store.pin_modulus(addr, value)
             } else {
-                let bound = self.uint.store.pinned(fixed.bound_ptr);
-                self.uint.store.intern_fixed_pinned(fixed.ptr, value, bound)
+                let bound = self.uint.store.pinned(bound_addr);
+                self.uint.store.intern_fixed_pinned(addr, value, bound)
             };
             self.uint.store.require_uintval(ptr);
         }
@@ -389,7 +384,7 @@ impl Session {
 
     /// Number of MSM expressions laid so far (intros + combines + negs) — a
     /// chain-cost diagnostic, e.g. to compare addition-chain
-    /// [`strategies`](crate::session::strategies). Not a DAG quantity.
+    /// [`strategies`]. Not a DAG quantity.
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }

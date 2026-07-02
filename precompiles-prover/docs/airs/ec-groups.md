@@ -20,7 +20,10 @@ while ad-hoc groups use `bound_ptr` until constrained — see `groups.rs:1–33`
 For VM-owned fixed groups, the uint values behind `a_ptr`, `b_ptr`,
 `bound_ptr`, and `scalar_bound_ptr` are verifier-loaded via external
 [`UintVal`](relation-registry.md#10--uintval) boundary consumes, not default
-transcript pin claims. It **provides** the
+transcript pin claims. The verifier also requires each fixed curve
+[`EcGroup`](relation-registry.md#14--ecgroup) tuple once, so those rows'
+provide multiplicities include one boundary demand even when no program
+claim uses the group. It **provides** the
 [`EcGroup`](relation-registry.md#14--ecgroup) tuple
 consumed by every
 point of the group (the point store's context certification) and every
@@ -71,7 +74,7 @@ six are written by `groups_trace` (`trace.rs:334–352`).
 | 2 | `COL_B_PTR` | uint store ptr (`0` on pads) | curve `b`'s uint ptr (`b ≠ 0` is the `EcCreate` guard, asserted at the require layer — not here) (`groups.rs:58–59`; `trace.rs:340`) |
 | 3 | `COL_BOUND_PTR` | uint store ptr (`0` on pads) | the base-field modulus ptr (fixes `F_p`) (`groups.rs:60–61`; `trace.rs:341`) |
 | 4 | `COL_SBOUND_PTR` | uint store ptr (`0` on pads) | the scalar-field modulus ptr (fixes `F_s`); resolves to `bound_ptr` while no scalar arithmetic constrains it (`scalar_bound.unwrap_or(bound)`) (`groups.rs:62–64`; `trace.rs:342`) |
-| 5 | `COL_MULT` | `[0, 2³²)` (`ProvideMult` = `u32`); `0` on pads | the `EcGroup` provide multiplicity = consumer count (every point of the group + every live-case add op); `0` on pad rows — the only liveness signal this chiplet needs (`groups.rs:65–68`; `trace.rs:343–349`) |
+| 5 | `COL_MULT` | `[0, 2³²)` (`ProvideMult` = `u32`); `0` on pads | the `EcGroup` provide multiplicity = consumer count (every point of the group + every live-case add op + one verifier boundary demand for fixed VM-owned groups); `0` on pad rows — the only liveness signal this chiplet needs (`groups.rs:65–68`; `trace.rs:343–349`) |
 
 *(6 rows documented = `NUM_MAIN_COLS = 6`.)*
 
@@ -130,9 +133,12 @@ The tuple is emitted from the row's own ptr cells in field order
 Provides ⇒ **negative** multiplicity: the coefficient is `0 − COL_MULT`
 (`groups.rs:170–172`). The multiplicity is the stored consumer-count cell
 `mult`, negated; it is pinned to actual demand by the global bus balance
-`Σ σ = 0` (no range check on the multiplicity value). Pads carry
-`mult = 0`, so they make no net bus contribution — which is exactly why
-the provide needs **no `act` gate** (`groups.rs:170–172`).
+`Σ σ = 0` (no range check on the multiplicity value). For fixed VM-owned
+curve rows, `Session::new()` records one extra `EcGroup` demand matching
+the verifier boundary consume, so an otherwise-unused fixed group still
+provides once. Pads carry `mult = 0`, so they make no net bus contribution
+— which is exactly why the provide needs **no `act` gate**
+(`groups.rs:170–172`).
 
 ### Consumes
 

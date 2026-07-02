@@ -9,38 +9,25 @@
 //! relations must catch (a forged result ptr; a re-encoded op id that
 //! passes every local constraint and dies on the Poseidon2 cap bus).
 
-use std::collections::HashMap;
-
-use miden_air::lookup::{
-    Challenges, LookupAir,
-    debug::{check_trace_balance, trace::DebugTraceBuilder},
-};
+use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::LiftedAir;
-use miden_precompiles::{K1_BASE_BOUND_PTR, R1_BASE_BOUND_PTR, UintDomain, curve_coefficients};
+use miden_precompiles::{K1_BASE_BOUND_PTR, R1_BASE_BOUND_PTR, UintDomain};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use super::uint::random_uint_below;
 use crate::{
-    hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
-    },
-    logup::LookupMessage,
     math::{U256, add_reduce, from_limbs32, mac_reduce},
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{NUM_CHIPLETS, Session, SessionTraces, statements::horner_sign_paths},
+    session::{Session, SessionTraces, statements::horner_sign_paths},
+    tests::bus_balance::session_stack_residual,
     transcript::{
         eval::{
             COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PARAM_A, COL_PTR,
             NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::UintOpId,
-        poseidon2::Poseidon2Air,
     },
-    uint::{UintStoreAir, UintValMsg, add::UintAddAir, mul::UintMulAir},
 };
 
 /// VM-owned fixed domains used by these DAG tests.
@@ -65,111 +52,11 @@ fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
     })
 }
 
-/// Fold one chiplet's per-denom balance into the cross-chiplet
-/// accumulator. `net[denom] = (multiplicity summed across chiplets, a
-/// sample message repr for the failure diagnostic)`. Local copy of the
-/// `integration.rs` helper, on the 0.26 signature: bus balance ignores
-/// public values, so the `pv` slot is `&[]` (the σ/n `inv_n` input is
-/// gone) and the `A` bound resolves to `miden_lifted_air::LiftedAir`.
-fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) where
-    A: LiftedAir<Felt, QuadFelt>,
-    for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
-{
-    let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
-    for u in report.unmatched {
-        let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
-        entry.0 += u.net_multiplicity;
-        if entry.1.is_empty()
-            && let Some(c) = u.contributions.first()
-        {
-            entry.1 = c.msg_repr.clone();
-        }
-    }
-}
-
-/// Net the uint-DAG chiplet stack over every bus and return the unbalanced denominators
-/// (empty ⟺ the multiset closes). Mirrors the fixed-UintVal boundary consumes injected by
-/// `ChipletMultiAir::eval_external`.
-fn stack_residual(
-    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
-    challenges: &Challenges<QuadFelt>,
-) -> Vec<(Felt, String)> {
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], challenges, &mut net);
-    fold_balance(&UintAddAir, mains[9], challenges, &mut net);
-    fold_balance(&UintMulAir, mains[10], challenges, &mut net);
-    fold_fixed_uint_external_balance(challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).collect()
-}
-
-fn fold_fixed_uint_external_balance(
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) {
-    for domain in UintDomain::ALL {
-        fold_fixed_uint_external(
-            challenges,
-            net,
-            domain.bound_ptr(),
-            domain.bound_ptr(),
-            domain.minus_one(),
-        );
-    }
-    for coefficient in curve_coefficients() {
-        fold_fixed_uint_external(
-            challenges,
-            net,
-            coefficient.ptr,
-            coefficient.bound_ptr,
-            coefficient.value,
-        );
-    }
-}
-
-fn fold_fixed_uint_external(
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-    ptr: u32,
-    bound_ptr: u32,
-    value: [u32; 8],
-) {
-    for offset in 0..2 {
-        let start = offset * 4;
-        let msg = UintValMsg {
-            ptr: Felt::from(ptr),
-            bound_ptr: Felt::from(bound_ptr),
-            offset: Felt::from(offset as u32),
-            limbs: core::array::from_fn(|i| Felt::from(value[start + i])),
-        };
-        let entry = net.entry(msg.encode(challenges)).or_insert((Felt::ZERO, String::new()));
-        entry.0 += Felt::ONE;
-        if entry.1.is_empty() {
-            entry.1 =
-                format!("fixed UintVal external ptr={ptr} bound_ptr={bound_ptr} offset={offset}");
-        }
-    }
-}
-
 fn assert_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
     let [alpha, beta] = random_challenges(rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&traces.mains(), &challenges);
+    let mains = traces.mains();
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(
         residual.is_empty(),
         "uint-DAG stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -220,13 +107,11 @@ fn horner_sign_alternation_full_stack() {
 
     // 22 eval rows (AND + zero + 6 leaves + 13 value ops + Is) pad to 32; fixed
     // uints live only in the store and verifier boundary correction, not eval rows.
-    // The add/mul relation counts are unchanged, and the store's dynamic rows plus
-    // the 13 fixed rows still pad to 32 blocks.
+    // The add/mul relation counts are unchanged.
     let mains = traces.mains();
     assert_eq!(mains[7].height(), 32, "eval: 22 rows pad to 32");
     assert_eq!(mains[9].height(), 128, "uint-add: 7 blocks pad to 8");
     assert_eq!(mains[10].height(), 128, "uint-mul: 6 blocks pad to 8");
-    assert_eq!(mains[8].height(), 256, "store: 28 blocks pad to 32");
 
     traces.check();
     assert_balanced(&traces, &mut rng);
@@ -381,7 +266,7 @@ fn forged_result_ptr_unbalances() {
     mains[7] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&mains, &challenges);
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
@@ -423,7 +308,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     mains[7] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&mains, &challenges);
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(!residual.is_empty(), "a re-encoded op id must unbalance");
 }
 

@@ -4,7 +4,7 @@
 //! The narrow, central hasher + binder for the transcript DAG. Each
 //! active row evaluates one node: it hashes the node's preimage on
 //! Poseidon2 and settles the node's `Binding`-bus tuple. The eval chip is
-//! the sole provider of the `Binding` bus, except [`KeccakNodeAir`], which
+//! the sole provider of the `Binding` bus, except `KeccakNodeAir`, which
 //! fuses its own terminal keccak `True` (there is no transient Keccak —
 //! see `docs/transcript-eval.md`). Domain chiplets (the `UintStore`,
 //! `UintAdd` / `UintMul`, future group) stay ptr-only and never touch
@@ -128,7 +128,7 @@ pub const COL_H_END: usize = COL_H_BEGIN + NUM_HASH;
 pub const COL_IS_ZERO: usize = COL_H_END;
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
 /// parents that consume it (DAG sharing / dedup, mirroring
-/// [`KeccakNodeAir`]'s `out_mult`). A plain count pinned to the
+/// `KeccakNodeAir`'s `out_mult`). A plain count pinned to the
 /// consumer count by `Binding` bus balance — not range-checked (see
 /// `docs/lookup-argument.md`); `0` on the root (no parent) and on
 /// inactive rows.
@@ -190,7 +190,7 @@ pub const COL_IS_IS: usize = COL_IS_MUL + 1;
 // cap slot 1; cap_param_b = row-kind-aware cap slot 2; group_ptr / curve_b = EC handles).
 // ================================================================
 
-/// Pin-claim flag for a uint leaf row: 1 = bootstrap pin claim, 0 = runtime
+/// Pin-claim flag for a uint leaf row: 1 = explicit pin claim, 0 = runtime
 /// VM value row. Locally gates the True / Uint binding fork.
 pub const COL_IS_PINNED: usize = COL_IS_IS + 1;
 /// The pointer the row's binding carries: the stored uint on uint-leaf
@@ -203,7 +203,7 @@ pub const COL_BOUND_PTR: usize = COL_PTR + 1;
 /// Physical column for row-kind-aware cap slot 2.
 pub const COL_PIN_PTR: usize = COL_BOUND_PTR + 1;
 /// Semantic alias for [`COL_PIN_PTR`]. VM uint value rows put `bound_ptr` here,
-/// bootstrap pin rows put `pin_ptr = ptr`.
+/// explicit pin rows put `pin_ptr = ptr`.
 pub const COL_CAP_PARAM_B: usize = COL_PIN_PTR;
 /// Semantic alias for [`COL_PIN_PTR`] on EcCreate rows: curve coefficient `a`'s
 /// uint-store pointer, i.e. cap slot 2 of the VM curve VALUE tag.
@@ -214,7 +214,7 @@ pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
 /// The rhs operand ptr — binary ops' rhs, or the y-coord on EcCreate
 /// (0 on non-op rows).
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
-/// Row-kind-aware cap slot 1: `bound_ptr` on bootstrap pin rows, the op id
+/// Row-kind-aware cap slot 1: `bound_ptr` on explicit pin rows, the op id
 /// on op rows, and 0 elsewhere. VM uint value and EcCreate rows use
 /// `VALUE_OP_ID = 0`.
 pub const COL_PARAM_A: usize = COL_B_PTR + 1;
@@ -507,14 +507,14 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
                 * bound_ptr.clone(),
         );
         // Materialize cap slot 2 without a deg-2 Poseidon2 cap component:
-        // VM uint value rows use `bound_ptr`; bootstrap pin rows use `ptr`.
+        // VM uint value rows use `bound_ptr`; explicit pin rows use `ptr`.
         // EcCreate rows reuse this physical cell as `COL_CURVE_A`, pinned by
         // the `EcGroup` consume below.
         let cap_param_b: AB::Expr = local[COL_CAP_PARAM_B].into();
         let expected_cap_param_b =
             is_uint_leaf * bound_ptr.clone() + is_pinned.clone() * (ptr - bound_ptr.clone());
         builder.assert_zero(
-            (AB::Expr::ONE - is_create.clone()) * (cap_param_b.clone() - expected_cap_param_b),
+            (AB::Expr::ONE - is_create.clone()) * (cap_param_b - expected_cap_param_b),
         );
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
@@ -532,7 +532,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         );
         builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
 
-        // Materialize cap slot 1: bootstrap pin rows use `bound_ptr`, VM uint
+        // Materialize cap slot 1: explicit pin rows use `bound_ptr`, VM uint
         // and EcCreate rows use `VALUE_OP_ID = 0`, and op rows use their
         // family op id.
         let param_a: AB::Expr = local[COL_PARAM_A].into();
@@ -761,7 +761,7 @@ where
 
         // Node-perm capacity, every slot degree-1. Runtime uint values use
         // `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`; uint ops use
-        // `[UintPrecompile::id(), op_id, 0, 0]`; bootstrap pins use
+        // `[UintPrecompile::id(), op_id, 0, 0]`; explicit pins use
         // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`; EcCreate rows use
         // `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`.
         let and_cap = Tag::AND.as_word();
@@ -778,7 +778,7 @@ where
             and_gate.clone() * LB::Expr::from(and_cap[0])
                 + (is_uint_leaf + op_lhs_gate.clone()) * uint_precompile_id.clone()
                 + is_pinned * (pin_claim_tag - uint_precompile_id)
-                + (is_create.clone() + is_ec_op.clone()) * curve_precompile_id.clone(),
+                + (is_create.clone() + is_ec_op.clone()) * curve_precompile_id,
             and_gate.clone() * LB::Expr::from(and_cap[1]) + param_a,
             and_gate.clone() * LB::Expr::from(and_cap[2]) + cap_param_b,
             and_gate.clone() * LB::Expr::from(and_cap[3]) + curve_b,

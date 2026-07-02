@@ -287,8 +287,8 @@ impl<'a> EcRequire<'a> {
     /// *rearranged* relation `R + Q = P` — one `EcGroupAdd` block, the EC
     /// parallel of [`UintRequire::sub`](crate::uint::UintRequire::sub)'s
     /// `y + z = x`. The witness `R` (value-only
-    /// [`sub_value`](Self::sub_value)) is interned, then
-    /// [`add_inner`](Self::add_inner) for `(R, Q)` re-derives and
+    /// `sub_value`) is interned, then
+    /// `add_inner` for `(R, Q)` re-derives and
     /// *certifies* `R + Q`, deduping its result onto the existing `P` — so
     /// `R` is the block's bound operand, `P` its result. `mult` is the
     /// `EcGroupAdd` provide multiplicity (1 per eval `EcBinOp/Sub` row).

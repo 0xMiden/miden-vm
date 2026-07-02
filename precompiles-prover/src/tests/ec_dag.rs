@@ -9,35 +9,22 @@
 //! every bus (the EC node family activated: `EcGroupAdd` live at mult 1,
 //! the eval chip consuming `EcGroup` / `EcPoint` / `EcGroupAdd`).
 
-use std::collections::HashMap;
-
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles::{CurveId, UintDomain, curve_coefficients};
+use miden_precompiles::CurveId;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
-    hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
-    },
-    logup::LookupMessage,
     math::{U256, from_hex},
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces},
-    tests::integration::fold_balance,
-    transcript::{
-        eval::{
-            COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB,
-            COL_PTR, NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
-        },
-        poseidon2::Poseidon2Air,
+    tests::bus_balance::session_stack_residual,
+    transcript::eval::{
+        COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB, COL_PTR,
+        NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
     },
-    uint::{UintStoreAir, UintValMsg, add::UintAddAir, mul::UintMulAir},
 };
 
 /// secp256k1 VM-owned uint/curve pointers.
@@ -272,75 +259,8 @@ fn dag_residual_with(
     rng: &mut impl Rng,
 ) -> usize {
     let mains = traces.mains();
-    // Mirror `ChipletMultiAir::eval_external`: fold every chiplet's LogUp
-    // balance, then inject the verifier-side fixed-UintVal boundary consumes.
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, eval_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-    fold_balance(&UintAddAir, mains[9], &challenges, &mut net);
-    fold_balance(&UintMulAir, mains[10], &challenges, &mut net);
-    fold_balance(&EcGroupsAir, mains[11], &challenges, &mut net);
-    fold_balance(&EcPointStoreAir, mains[12], &challenges, &mut net);
-    fold_balance(&EcGroupAddAir, add_main, &challenges, &mut net);
-    fold_balance(&EcMsmAir, mains[14], &challenges, &mut net);
-    fold_fixed_uint_external_balance(&challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
-}
-
-fn fold_fixed_uint_external_balance(
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) {
-    for domain in UintDomain::ALL {
-        fold_fixed_uint_external(
-            challenges,
-            net,
-            domain.bound_ptr(),
-            domain.bound_ptr(),
-            domain.minus_one(),
-        );
-    }
-    for coefficient in curve_coefficients() {
-        fold_fixed_uint_external(
-            challenges,
-            net,
-            coefficient.ptr,
-            coefficient.bound_ptr,
-            coefficient.value,
-        );
-    }
-}
-
-fn fold_fixed_uint_external(
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-    ptr: u32,
-    bound_ptr: u32,
-    value: [u32; 8],
-) {
-    for offset in 0..2 {
-        let start = offset * 4;
-        let msg = UintValMsg {
-            ptr: Felt::from(ptr),
-            bound_ptr: Felt::from(bound_ptr),
-            offset: Felt::from(offset as u32),
-            limbs: core::array::from_fn(|i| Felt::from(value[start + i])),
-        };
-        let entry = net.entry(msg.encode(challenges)).or_insert((Felt::ZERO, String::new()));
-        entry.0 += Felt::ONE;
-        if entry.1.is_empty() {
-            entry.1 =
-                format!("fixed UintVal external ptr={ptr} bound_ptr={bound_ptr} offset={offset}");
-        }
-    }
+    session_stack_residual(&mains, &[(7, eval_main), (13, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this

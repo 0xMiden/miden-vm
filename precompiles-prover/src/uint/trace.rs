@@ -6,7 +6,7 @@
 //! a power of two (min 1) with self-referential zero blocks at fresh tail
 //! ptrs — each its own modulus and its own single `UintVal` consumer, so
 //! padding nets out on the bus without touching the demand ledger.
-//! [`build_aux`] drives the LogUp running sum (the `UintVal` provide /
+//! `build_aux` drives the LogUp running sum (the `UintVal` provide /
 //! consume) and the Schwartz–Zippel `id` register, whose per-row
 //! accumulation mirrors [`super::UintStoreAir`]'s `contrib` exactly.
 
@@ -83,10 +83,10 @@ fn carries(v32: &[u32; 8], comp32: &[u32; 8]) -> [u16; 7] {
 }
 
 /// Demand ledger for the [`UintVal`](crate::relations::BusId::UintVal) bus:
-/// every consumer — the store's own bound-refs ([`require_bound_refs`]),
+/// every consumer — the store's own bound-refs (`require_bound_refs`),
 /// eval uint-leaves, future add / mul — records per-ptr demand, and the
 /// store reads the totals for each uint's provide multiplicity. Mirrors
-/// [`BytePairLutRequires`](crate::primitives::byte_pair_lut::BytePairLutRequires)
+/// [`BytePairLutRequires`]
 /// for the `Range16` bus.
 #[derive(Debug, Default)]
 pub struct UintValRequires {
@@ -298,7 +298,7 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
 }
 
 /// Build the UintStore main trace from the [`UintStoreRequires`]
-/// accumulator — the sorted uints (padded per [`padded_blocks`]) plus the
+/// accumulator — the sorted uints (padded per `padded_blocks`) plus the
 /// `UintVal` demand ledger (each uint's `uintval_mult` = its total
 /// consumers). One uint = one [`PERIOD`]-row block; `ptr`/`bound_ptr` are
 /// repeated on every row of the block (cycle-constant), while the

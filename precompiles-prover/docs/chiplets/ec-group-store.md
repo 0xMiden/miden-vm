@@ -17,14 +17,16 @@ columns, a single aux column each:
 
 Recording rides [`EcRequire`](../../src/ec/require.rs):
 `create_group(a, b, bound_ptr)` asserts `b ≠ 0`, interns/dedups the params,
-hits preseeded VM-owned K1/R1 group rows when applicable, establishes the
+hits preseeded VM-owned fixed-curve group rows when applicable, establishes the
 group's canonical PAI row via the store, and returns `(group, pai)`;
 `constrain_scalar_bound(group, fs)` names the scalar-field modulus once something
 needs it for ad-hoc groups, and `add_point(group, x, y)` interns the coordinates
 and records + requires the membership trio. The fixed uints behind VM-owned
 curve coefficients, base-field domains, and scalar-field domains are loaded by
 the verifier as external `UintVal` boundary consumes by default, not as
-transcript pin claims.
+transcript pin claims. The fixed curve group rows are also verifier-required
+as external `EcGroup` boundary consumes, while this table remains their
+provider.
 
 ## The model
 
@@ -50,10 +52,12 @@ ptr injectivity, and the membership demand.
 ## Rows + ptr discipline
 
 One row role per store, **separate ptr namespaces**. Group rows are dense from
-1, with VM-owned fixed slots preseeded for supported short-Weierstrass curves
-(`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`); the coefficient/domain uint values
-those rows name are verifier-loaded through `UintVal` boundary consumes. Point
-rows remain allocator-consecutive from 1:
+1, with VM-owned fixed slots generated from `CurveId::ALL` (currently
+`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`, `ED25519_GROUP_PTR = 3`); the
+coefficient/domain uint values those rows name are verifier-loaded through
+`UintVal` boundary consumes, and
+the group tuples themselves are verifier-required once through external
+`EcGroup` boundary consumes. Point rows remain allocator-consecutive from 1:
 
 | store | binds | provides |
 |---|---|---|
@@ -70,9 +74,11 @@ tie to a real group.
 **The scalar bound.** The group tuple bundles a second modulus handle:
 `scalar_bound_ptr`, the stored `n − 1` of the group order — the modulus
 that scalar arithmetic (nondeterministic addition-chain constraints,
-ladder exponents) runs under. VM-owned K1/R1 group rows are preseeded
+ladder exponents) runs under. VM-owned fixed-curve group rows are preseeded
 with their canonical scalar-field bound pointers from `miden-precompiles`,
-whose values are boundary-loaded like the curve coefficients. For ad-hoc
+whose values are boundary-loaded like the curve coefficients; the row's
+`EcGroup` tuple is also boundary-required once, so the preseeded pointer
+binding is itself anchored. For ad-hoc
 groups, session-side it is `None` until something constrains it
 (`constrain_scalar_bound`), and while vacuous it resolves at trace-gen to
 the group's own `F_p` handle — a well-formed stored uint consumed by nothing

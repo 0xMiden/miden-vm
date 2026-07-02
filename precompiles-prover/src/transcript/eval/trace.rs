@@ -5,7 +5,7 @@
 //! claim — issued for a binding a downstream chip provides
 //! ([`issue`](TranscriptEvalRequires::issue), e.g. the keccak chip's
 //! `Binding(H_keccak, True)`), as a `ZERO_HASH` leaf
-//! ([`zero`](TranscriptEvalRequires::zero)), for a bootstrap uint pin
+//! ([`zero`](TranscriptEvalRequires::zero)), for an explicit uint pin
 //! claim, or by the `Is` predicate. A `UintNode` stands for a
 //! `Binding(hash, Uint, ptr, bound_ptr)` value — a transient uint leaf
 //! or an arithmetic op's result — consumed any number of times by
@@ -187,10 +187,10 @@ enum NodeKind {
     Zero,
     /// AND node folding two children's bindings into the node hash.
     And { lhs: P2Digest, rhs: P2Digest },
-    /// Uint leaf / bootstrap pin claim — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`,
+    /// Uint leaf / explicit pin claim — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`,
     /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the VM uint value cap
     /// `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and bind
-    /// `Binding(hash, Uint, ptr, bound_ptr)`. Bootstrap pin claims use
+    /// `Binding(hash, Uint, ptr, bound_ptr)`. Explicit pin claims use
     /// `(UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
     /// `Binding(hash, True)`.
     UintLeaf {
@@ -361,7 +361,7 @@ impl TranscriptEvalRequires {
 
     /// Record a uint value row (shared by [`uint_leaf`](Self::uint_leaf) and
     /// [`pin_uint`](Self::pin_uint)): drive the Poseidon2 absorption of `lo ‖ hi` under either
-    /// the runtime uint-leaf cap or the bootstrap pin-claim cap, then push the row. Returns the
+    /// the runtime uint-leaf cap or the explicit pin-claim cap, then push the row. Returns the
     /// node id + hash.
     fn push_uint_leaf(
         &mut self,
@@ -855,7 +855,7 @@ impl TranscriptEvalRequires {
         }
     }
 
-    /// Record a bootstrap uint pin claim binding `value` to `Binding(hash, True)`.
+    /// Record an explicit uint pin claim binding `value` to `Binding(hash, True)`.
     ///
     /// The cap is `(UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the row consumes both
     /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
@@ -1102,10 +1102,10 @@ fn push_node_row(
             row[COL_IS_PINNED] = Felt::from(*is_pinned as u8);
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
-            // Cap slot 2: VM runtime value rows commit `bound_ptr`; bootstrap pin rows commit
+            // Cap slot 2: VM runtime value rows commit `bound_ptr`; explicit pin rows commit
             // `pin_ptr = ptr`.
             row[COL_CAP_PARAM_B] = Felt::from(if *is_pinned { *ptr } else { *bound_ptr });
-            // Cap slot 1: bootstrap pin rows commit `bound_ptr`; VM runtime value rows use
+            // Cap slot 1: explicit pin rows commit `bound_ptr`; VM runtime value rows use
             // VALUE_OP_ID = 0.
             row[COL_PARAM_A] = Felt::from(if *is_pinned { *bound_ptr } else { 0 });
         },

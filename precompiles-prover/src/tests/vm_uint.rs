@@ -57,9 +57,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
     const PIN_PTR: u32 = 1000;
 
     let mut session = Session::new();
-    let bootstrap = session.bootstrap_fixed_pins();
-    assert!(bootstrap.is_empty(), "fixed VM pins are verifier-constrained, not root-folded");
-    let root0 = session.assert_and_fold(bootstrap);
+    let root0 = session.zero();
     assert_eq!(root0.hash(), P2Digest::default());
 
     let domain = UintDomain::U256;

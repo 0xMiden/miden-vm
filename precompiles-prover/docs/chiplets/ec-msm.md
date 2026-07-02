@@ -304,7 +304,8 @@ h_claim = state_k
 > run of `is_ec_msm` absorb rows (last `is_msm_last`), the capacity threaded by
 > row adjacency (the chip's first cross-row constraint), and a dynamic cap
 > lookup against `absorb_cap`. `group_ptr` is the VM-owned group configuration
-> pointer (K1 = 1, R1 = 2). Driven by `Session::ec_msm`; proven end-to-end in
+> pointer from `CurveId::ALL` (K1 = 1, R1 = 2, Ed25519 = 3 today). Driven by
+> `Session::ec_msm`; proven end-to-end in
 > `src/tests/ec_msm.rs` and the `ec_msm_ecdsa` example. The `ℓ → #E` retype is
 > deferred (identity for cofactor-1 k1; required for the ed25519 `8ℓ` bound —
 > see §7 step 5).
@@ -327,8 +328,8 @@ needs no intermediate bindings, at the cost of one new cross-row constraint.
 - **IV** (first absorb row): `cap = IV`, the VM curve MSM tag
   `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` — distinct from every
   one-shot cap, so MSM hashes cannot collide with AND/leaf/op hashes. For fixed
-  short-Weierstrass curves, `group_ptr` is the canonical VM-owned constant
-  (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`).
+  curves, `group_ptr` is the canonical VM-owned constant from `CurveId::ALL`
+  (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`, `ED25519_GROUP_PTR = 3` today).
 - **Per absorb**: consume `Binding(Pᵢ.hash, Group, Pᵢ_ptr)` and
   `Binding(sᵢ.hash, Uint, sᵢ_ptr)` (tying the rate to real child nodes) and
   `MsmClaimTerm(claim_expr, Pᵢ_ptr, sᵢ_ptr)` — the **positionless** seam term,

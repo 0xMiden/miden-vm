@@ -14,6 +14,7 @@ use miden_air::lookup::{
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::LiftedAir;
+use miden_precompiles::CurveId;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -37,7 +38,7 @@ use crate::{
             UintMulAir,
             trace::{UintMulRequires, generate_trace as mul_trace},
         },
-        trace::{UintStoreRequires, generate_trace as store_trace},
+        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
     },
 };
 
@@ -68,8 +69,8 @@ fn fold_balance<A>(
 /// A curve fixture: the uint store holds the modulus + params +
 /// coordinates + membership transients, the mul requires hold the
 /// membership trio (provides required), the group table holds the VM-owned
-/// preseeded short-Weierstrass slots plus this fixture's group, and the
-/// point store holds PAI @1 and the point @2.
+/// fixed curve slots plus this fixture's group, and the point store holds
+/// PAI @1 and the point @2.
 struct Fixture {
     store: UintStoreRequires,
     muls: UintMulRequires,
@@ -164,6 +165,24 @@ fn check_groups(main: &RowMajorMatrix<Felt>) {
     crate::tests::check_local(EcGroupsAir, main);
 }
 
+fn group_trace_with_pad_row() -> (RowMajorMatrix<Felt>, usize) {
+    let mut store = EcStoreRequires::new();
+    let mut live_groups = CurveId::ALL.len();
+    while live_groups.is_power_of_two() {
+        let base = 10_000 + live_groups as u32 * 3;
+        store.create_group(
+            UintPtr::from_addr(base),
+            UintPtr::from_addr(base + 1),
+            UintPtr::from_addr(base + 2),
+        );
+        live_groups += 1;
+    }
+
+    let (groups, _) = ec_store_traces(store);
+    assert!(groups.height() > live_groups);
+    (groups, live_groups)
+}
+
 #[test]
 fn ec_stores_hold_and_balance() {
     let mut rng = StdRng::seed_from_u64(0xec_0001);
@@ -171,10 +190,10 @@ fn ec_stores_hold_and_balance() {
     let (group, _) = fx.ec.point_params(fx.point);
     let group_row = (group.addr() as usize - 1) * G_NUM_MAIN_COLS;
     let t = fx.traces();
-    // Group table: VM-owned K1/R1 slots plus the fixture-created group @3,
-    // padded to height 4. Point store: PAI @1, point @2 — exactly height 2,
-    // no pad.
-    assert_eq!(t.groups.height(), 4);
+    // Group table: VM-owned fixed curve slots plus the fixture-created group,
+    // padded to a power-of-two height. Point store: PAI @1, point @2 — exactly
+    // height 2, no pad.
+    assert_eq!(t.groups.height(), (CurveId::ALL.len() + 1).next_power_of_two());
     assert_eq!(t.points.height(), 2);
     assert_eq!(t.points.values[COL_IS_PAI], Felt::ONE, "row 0 is the canonical PAI",);
     assert_eq!(t.points.values[NUM_MAIN_COLS + COL_IS_PAI], Felt::ZERO);
@@ -328,8 +347,10 @@ fn group_ptr_chain_is_ungated() {
     // row, pads included (a pad is just a mult = 0 row). Rewriting a pad
     // row's ptr — the move that would mint a duplicate group id — trips
     // the ungated chain.
-    let mut forged = k1_fixture().traces().groups;
-    forged.values[G_NUM_MAIN_COLS] = Felt::ONE; // pad row ptr := 1 (dup of row 0)
+    let (groups, live_groups) = group_trace_with_pad_row();
+    let mut forged = groups;
+    let pad_row = live_groups * G_NUM_MAIN_COLS;
+    forged.values[pad_row] = Felt::ONE; // pad row ptr := 1 (dup of row 0)
 
     check_groups(&forged);
 }
@@ -354,12 +375,12 @@ fn forged_group_mult_unbalances() {
 
 #[test]
 fn empty_stores_hold() {
-    // No groups, no points: each store is all-zero pad rows that must
-    // satisfy every constraint and touch no bus.
+    // No runtime groups or points: fixed group rows plus pad rows must satisfy
+    // every constraint and touch no bus unless separately required.
     let (groups_main, points_main) = ec_store_traces(EcStoreRequires::new());
-    assert_eq!(groups_main.height(), 2);
+    assert_eq!(groups_main.height(), CurveId::ALL.len().next_power_of_two());
     assert_eq!(points_main.height(), 2);
-    assert_eq!(groups_main.values.len(), 2 * G_NUM_MAIN_COLS);
+    assert_eq!(groups_main.values.len(), groups_main.height() * G_NUM_MAIN_COLS);
     check_groups(&groups_main);
     check_points(&points_main);
 }

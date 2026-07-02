@@ -7,9 +7,10 @@ How the transcript DAG is *evaluated*. Companion to
 [`src/transcript/eval`](../src/transcript/eval/): the VM `AND` tree —
 the live transcript root, which replaced the spine — uint storage + the
 runtime-value / explicit-pin seam ([`chiplets/uint.md`](chiplets/uint.md)),
-and **uint arithmetic + the `is` predicate** (`UintOp` nodes consuming the
+**uint arithmetic + the `is` predicate** (`UintOp` nodes consuming the
 [UintAdd](chiplets/uint-add.md) / [UintMul](chiplets/uint-mul.md)
-relations by ptr). Group is the roadmap.
+relations by ptr), and EC create / binop / MSM nodes consuming the EC
+relations by ptr.
 
 ## What the transcript is
 
@@ -20,12 +21,12 @@ hash. Proving the root "evaluates to `True`" means every assertion in
 the DAG holds. The verifier trusts the root; the proof shows the root
 is a well-formed transcript of valid assertions.
 
-Fixed uint domains and fixed curve coefficients are not implicit transcript
-leaves. By default the verifier loads their `UintVal` halves as external LogUp
-boundary consumes, constraining the uint store without changing the public
-root. `Session::pin_uint` remains available when a statement explicitly wants
-`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` folded into the root as a
-`True` claim.
+Fixed uint domains, fixed curve coefficients, and fixed curve group tuples are
+not implicit transcript leaves. By default the verifier loads their relation
+boundary consumes (`UintVal` for uint values, `EcGroup` for group metadata)
+without changing the public root. `Session::pin_uint` remains available when a
+statement explicitly wants `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
+folded into the root as a `True` claim.
 
 ## Two orthogonal relations
 

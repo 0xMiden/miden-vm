@@ -27,8 +27,9 @@
 //! `ptr = row + 1` is then forced for any prover — pads included, which
 //! are simply rows with `mult = 0` — so ptr → tuple is injective by
 //! construction, with no booleanity, no monotonicity, no flag column.
-//! Tracegen preseeds the VM-owned short-Weierstrass slots (row 1 = K1,
-//! row 2 = R1), so public curve-MSM tags and prover group rows agree.
+//! Tracegen preseeds VM-owned fixed curve slots from `CurveId::ALL` (K1 row 1,
+//! R1 row 2, Ed25519 row 3 today), so public curve-MSM tags and prover group
+//! rows agree.
 //! Everything else about a group — `b ≠ 0`, the params being uints
 //! under `bound` — is certified at the require layer and transitively
 //! by consumers (membership MACs route `a` / `b` through the mul

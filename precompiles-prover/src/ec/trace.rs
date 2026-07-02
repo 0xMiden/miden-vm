@@ -105,7 +105,7 @@ struct Point {
 
 /// `*Requires` accumulator for the EC stores: the group and point
 /// ledgers (each ptr = position + 1 in its own namespace, with
-/// VM-owned fixed rows preseeded for known short-Weierstrass curves) plus
+/// VM-owned fixed rows preseeded from `CurveId::ALL`) plus
 /// the `EcGroup` / `EcPoint` demand ledgers. The entries are the only
 /// [`EcGroupPtr`] / [`EcPointPtr`] constructors.
 #[derive(Debug)]
@@ -144,10 +144,9 @@ impl Default for EcStoreRequires {
             pai_rows: BTreeMap::new(),
         };
 
-        // Preseed VM-owned short-Weierstrass group slots. This keeps prover-side dense
-        // rows aligned with public curve-MSM tags: row 1 is secp256k1, row 2 is
-        // secp256r1. Unused rows simply carry mult = 0 in the group trace.
-        for curve in [CurveId::Secp256k1, CurveId::Secp256r1] {
+        // Preseed VM-owned group slots. This keeps prover-side dense rows aligned with public
+        // curve-MSM tags. Unused rows simply carry mult = 0 in the group trace.
+        for curve in CurveId::ALL {
             let ptr = EcGroupPtr(curve.group_ptr());
             debug_assert_eq!(ptr.0 as usize, store.groups.len() + 1);
             let group = Group {
@@ -279,6 +278,26 @@ impl EcStoreRequires {
     /// (e.g. an add op resolving the curve's `a`).
     pub fn require_ecgroup(&mut self, group: EcGroupPtr) {
         *self.group_demand.entry(group).or_insert(0) += 1;
+    }
+
+    /// Record verifier-side consumes for every fixed group preseeded by [`Self::new`].
+    pub fn require_fixed_groups(&mut self) {
+        for curve in CurveId::ALL {
+            let group = EcGroupPtr::from_addr(curve.group_ptr());
+            debug_assert_eq!(
+                self.group_params(group),
+                (
+                    UintPtr::from_addr(curve.a_ptr()),
+                    UintPtr::from_addr(curve.b_ptr()),
+                    UintPtr::from_addr(curve.base_domain().bound_ptr()),
+                )
+            );
+            debug_assert_eq!(
+                self.group_sbound(group),
+                UintPtr::from_addr(curve.scalar_domain().bound_ptr())
+            );
+            self.require_ecgroup(group);
+        }
     }
 
     /// Record one external consumer of the point's `EcPoint` tuple

@@ -26,15 +26,15 @@ use crate::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
-    logup::{LookupMessage, lookup_challenges_from_slice, sigma_sum},
+    logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
-    session::{NUM_CHIPLETS, SessionTraces, fixed::fixed_uint_manifest},
+    session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{TestDigest, TestProof, test_challenger, test_config},
     transcript::{
         eval::TranscriptEvalAir,
         poseidon2::{P2Digest, Poseidon2Air},
     },
-    uint::{UintStoreAir, UintValMsg, add::UintAddAir, mul::UintMulAir},
+    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
 
 /// The fifteen chiplet AIRs wrapped into one enum — the heterogeneous
@@ -79,6 +79,14 @@ macro_rules! delegate {
             ChipletAir::EcMsm => EcMsmAir.$method($($arg),*),
         }
     };
+}
+
+fn eval_lifted<A, AB>(air: &A, builder: &mut AB)
+where
+    A: LiftedAir<Felt, QuadFelt>,
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder);
 }
 
 impl ChipletAir {
@@ -142,7 +150,23 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
         delegate!(self, build_aux_trace, main, air_inputs, aux_inputs, challenges)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        delegate!(self, eval, builder);
+        match self {
+            ChipletAir::Chunk => eval_lifted(&ChunkAir, builder),
+            ChipletAir::Poseidon2 => eval_lifted(&Poseidon2Air, builder),
+            ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
+            ChipletAir::Bitwise64 => eval_lifted(&Bitwise64Air, builder),
+            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
+            ChipletAir::KeccakSponge => eval_lifted(&KeccakSpongeAir, builder),
+            ChipletAir::KeccakNode => eval_lifted(&KeccakNodeAir, builder),
+            ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
+            ChipletAir::UintStore => eval_lifted(&UintStoreAir, builder),
+            ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
+            ChipletAir::UintMul => eval_lifted(&UintMulAir, builder),
+            ChipletAir::EcGroups => eval_lifted(&EcGroupsAir, builder),
+            ChipletAir::EcPointStore => eval_lifted(&EcPointStoreAir, builder),
+            ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
+            ChipletAir::EcMsm => eval_lifted(&EcMsmAir, builder),
+        }
     }
 }
 
@@ -166,32 +190,34 @@ impl Default for ChipletMultiAir {
     }
 }
 
-fn fixed_uint_boundary_correction(challenges: &[QuadFelt]) -> Result<QuadFelt, ReductionError> {
+fn fixed_boundary_correction(challenges: &[QuadFelt]) -> Result<QuadFelt, ReductionError> {
     let lookup_challenges = lookup_challenges_from_slice(challenges);
+    Ok(boundary_correction(
+        &lookup_challenges,
+        fixed_uintval_msgs(),
+        "fixed UintVal boundary denominator was zero",
+    )? + boundary_correction(
+        &lookup_challenges,
+        fixed_ecgroup_msgs(),
+        "fixed EcGroup boundary denominator was zero",
+    )?)
+}
+
+fn boundary_correction<M>(
+    challenges: &Challenges<QuadFelt>,
+    messages: impl IntoIterator<Item = M>,
+    zero_denominator: &'static str,
+) -> Result<QuadFelt, ReductionError>
+where
+    M: LookupMessage<Felt, QuadFelt>,
+{
     let mut correction = QuadFelt::ZERO;
-
-    for fixed in fixed_uint_manifest() {
-        for offset in 0..2 {
-            let start = offset * 4;
-            let msg = UintValMsg {
-                ptr: Felt::from(fixed.ptr),
-                bound_ptr: Felt::from(fixed.bound_ptr),
-                offset: Felt::from(offset as u32),
-                limbs: [
-                    Felt::from(fixed.value[start]),
-                    Felt::from(fixed.value[start + 1]),
-                    Felt::from(fixed.value[start + 2]),
-                    Felt::from(fixed.value[start + 3]),
-                ],
-            };
-            let Some(inv) = msg.encode(&lookup_challenges).try_inverse() else {
-                return Err("fixed UintVal boundary denominator was zero".into());
-            };
-            // External fixed pins are positive `UintVal` consumes.
-            correction += inv;
-        }
+    for msg in messages {
+        let Some(inv) = msg.encode(challenges).try_inverse() else {
+            return Err(zero_denominator.into());
+        };
+        correction += inv;
     }
-
     Ok(correction)
 }
 
@@ -213,7 +239,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
         aux_values: &[&[QuadFelt]],
         _log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values) + fixed_uint_boundary_correction(challenges)?])
+        Ok(vec![sigma_sum(aux_values) + fixed_boundary_correction(challenges)?])
     }
 }
 

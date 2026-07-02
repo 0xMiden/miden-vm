@@ -12,7 +12,7 @@
 //! main trace.
 //!
 //! The fall-out wiring:
-//! - `chunk_seq_id_head` / `chunk_ptr` and `sponge_seq_id_head` come from the [`SpongeOutput`].
+//! - `chunk_seq_id_head` / `chunk_ptr` and `sponge_seq_id_head` come from the `SpongeOutput`.
 //! - `perm_seq_id_chunks` is the chunk-content P2 absorption head.
 //! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the two one-shot P2 absorptions
 //!   this layer drives.

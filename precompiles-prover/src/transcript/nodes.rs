@@ -17,16 +17,16 @@
 //! | 0      | `Transcript`       | assertion-chain node (AND over children)   |
 //! | 1      | `Chunk`            | generic chunk capacity domain separator    |
 //! | 2      | `UintLeaf`         | reserved                                   |
-//! | 3      | `UintPinClaim`     | bootstrap uint pin claim                   |
+//! | 3      | `UintPinClaim`     | explicit uint pin claim                    |
 //! | 4      | `UintOp`           | reserved                                   |
 //! | 5      | `EcCreate`         | reserved; curve VALUE now uses VM tag      |
 //! | 6      | `EcBinOp`          | reserved; curve ops now use VM tags        |
 //! | 7      | `Keccak`           | `keccak(chunks) == digest` relation        |
 //! | 8      | `EcMsm`            | reserved; curve MSM now uses VM tag        |
 
-/// Capacity tag for bootstrap uint pin claims.
+/// Capacity tag for explicit uint pin claims.
 ///
-/// Pin claims commit `store[pin_ptr] = value` as initial-root inputs.
+/// Pin claims commit `store[pin_ptr] = value` as explicit root inputs.
 pub const UINT_PIN_CLAIM_TAG: u8 = 3;
 
 /// Transcript node type, stamped into the `tag_id` capacity slot of a

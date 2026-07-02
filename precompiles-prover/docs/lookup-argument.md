@@ -23,10 +23,12 @@ require is matched by a corresponding provide.
 
 A verifier may also load fixed public relation tuples as **boundary
 consumes**: the verifier contributes the same `+1/encoding` term as a
-require, without any trace row. Current use: fixed `UintVal` halves for
-uint domains and fixed curve coefficients. These boundary consumes pin
-store values through LogUp only; they are not transcript nodes and do not
-change the public root unless separately asserted by the eval chip.
+require, without any trace row. Current uses: fixed `UintVal` halves for
+uint domains and fixed curve coefficients, and fixed `EcGroup` tuples for
+VM-owned fixed curve groups. These boundary consumes pin store values / group
+metadata through LogUp only; they are not transcript nodes
+and do not change the public root unless separately asserted by the eval
+chip.
 
 ## The fixed-consume invariant (why provide multiplicities aren't range-checked)
 

@@ -232,7 +232,7 @@ end
 #! Evaluates a curve expression and binds the advised canonical VALUE payload to the input digest.
 #! Input:  [POINT_EXPR_DIGEST, ...]
 #! Output: [POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, ...]
-#! Advice is untrusted. This wrapper re-hashes the advised VALUE payload with the pinned VALUE_TAG and
+#! Advice is untrusted. This wrapper re-hashes the advised VALUE payload with the fixed VALUE_TAG and
 #! logs `eq(EXPR_DIGEST, VALUE_DIGEST)` before returning the value digest and coordinate digests.
 pub proc eval
     adv.evaluate_deferred_payload

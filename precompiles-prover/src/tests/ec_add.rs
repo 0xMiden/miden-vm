@@ -40,7 +40,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::ChipletAir,
     stark_config::{test_challenger, test_config},
-    tests::integration::fold_balance,
+    tests::bus_balance::fold_balance,
     uint::{
         UintRequire, UintStoreAir,
         add::{

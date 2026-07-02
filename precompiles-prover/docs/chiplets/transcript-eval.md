@@ -17,9 +17,9 @@ pin-claim row** hashes a stored uint's value (pulled from the
 rate). Runtime uint leaves use `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr,
 0]` and bind `Binding(h, Uint, ptr, bound_ptr)`. Explicit
 `Session::pin_uint` claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
-and bind `Binding(h, True)`. Default fixed domains and curve coefficients do
-not create eval rows; their `UintVal` halves are verifier-loaded LogUp
-boundary consumes.
+and bind `Binding(h, True)`. Default fixed uint domains, fixed curve
+coefficients, and fixed curve group tuples do not create eval rows; their
+`UintVal` / `EcGroup` requirements are verifier-loaded LogUp boundary consumes.
 The **uint ops** (`Add` / `Sub` / `Mul` / `Is`, selected by `is_add` /
 `is_sub` / `is_mul` / `is_is` under `is_uint_op`) hash two child hashes under
 `[UintPrecompile::id(), op_id, 0, 0]`, consume the children's `Uint` bindings
@@ -61,7 +61,7 @@ the uint / EC op rows.
 | 30 | `a_ptr` | lhs operand ptr, EC x-coordinate ptr, or EcMsm base ptr; `0` else |
 | 31 | `b_ptr` | rhs operand ptr, EC y-coordinate ptr, or EcMsm scalar ptr; `= a_ptr` on `Is`; `0` else |
 | 32 | `param_a` | cap slot 1, materialized: `bound_ptr` on explicit pin rows, `0` on VM uint value and EC create rows, op id on op rows |
-| 33 | `group_ptr` | witnessed EC-store group handle on EC create / value-producing EC ops / EcMsm rows; VM-owned for fixed curves (K1 = 1, R1 = 2); `0` else |
+| 33 | `group_ptr` | witnessed EC-store group handle on EC create / value-producing EC ops / EcMsm rows; VM-owned for fixed curves in `CurveId::ALL` order; `0` else |
 | 34 | `curve_b` | cap slot 3 on EC-create rows = curve `b_ptr`; `0` else |
 | 35 | `is_ec_msm` | EcMsm family flag, set on every absorb row |
 | 36 | `is_msm_last` | EcMsm boundary flag, set on the run's final absorb row |
@@ -71,8 +71,8 @@ the uint / EC op rows.
 | 43 | `sbound_ptr` | scalar-field modulus ptr for EC-create / PAI rows |
 
 Public values: `root_hash[0..4]` — just the transcript root
-(`PUBLIC_ROOT_BEGIN = 0`). Fixed `UintVal` boundary consumes are relation
-seam data, not root-folded claims.
+(`PUBLIC_ROOT_BEGIN = 0`). Fixed boundary consumes are relation seam data,
+not root-folded claims.
 
 Aux (9 columns): col 0 = the True-path `Binding` (consume `lhs` /
 `rhs` on AND rows, provide `h` as `True` on AND / zero / `Is` rows;

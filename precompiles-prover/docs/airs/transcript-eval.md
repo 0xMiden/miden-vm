@@ -27,8 +27,8 @@ It folds a content-addressed DAG of node families into one Poseidon2 root:
   runtime value rows use `[UINT_PRECOMPILE_ID, VALUE_OP_ID, bound_ptr, 0]`,
   while manual `Session::pin_uint` rows use
   `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` and bind `True`. Fixed uint
-  domains and fixed curve coefficients do not create default eval rows; the
-  verifier loads their `UintVal` halves as external LogUp boundary consumes.
+  domains, fixed curve coefficients, and fixed curve group tuples do not create
+  default eval rows; the verifier loads them as external LogUp boundary consumes.
 - **uint op** (`Add`/`Sub`/`Mul`/`Is`) — hashes two child hashes under
   `[UINT_PRECOMPILE_ID, op_id, 0, 0]` and ties the children's `Uint` bindings
   to a [`UintAdd`](relation-registry.md#11--uintadd) /
@@ -84,9 +84,9 @@ the `curve_a` alias and put curve `b_ptr` in `curve_b`.
 | Aux width | `NUM_AUX_COLS = 9` LogUp columns, `COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 3, 1, 4]` (no Schwartz–Zippel register) |
 
 Public values: `public_root[0..4]` — just the transcript root
-(`PUBLIC_ROOT_BEGIN = 0`, `NUM_PUBLIC_VALUES = 4`). Verifier-loaded
-`UintVal` boundary consumes are relation-boundary data, not transcript-root
-claims.
+(`PUBLIC_ROOT_BEGIN = 0`, `NUM_PUBLIC_VALUES = 4`). Verifier-loaded fixed
+boundary consumes (`UintVal` and `EcGroup`) are relation-boundary data, not
+transcript-root claims.
 
 ## Main columns
 

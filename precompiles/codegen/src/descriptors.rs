@@ -313,7 +313,7 @@ impl UintDomain {
         Self::Ed25519Scalar,
     ];
 
-    /// Returns the VM-owned store pointer for this domain's bound/modulus pin.
+    /// Returns the VM-owned store pointer for this domain's fixed bound/modulus.
     pub const fn bound_ptr(self) -> u32 {
         match self {
             Self::U256 => U256_BOUND_PTR,
@@ -326,7 +326,7 @@ impl UintDomain {
         }
     }
 
-    /// Returns the uint domain whose bound is pinned at `ptr`.
+    /// Returns the uint domain assigned to the fixed bound pointer `ptr`.
     pub const fn from_bound_ptr(ptr: u32) -> Option<Self> {
         match ptr {
             U256_BOUND_PTR => Some(Self::U256),
@@ -535,6 +535,8 @@ pub enum CodegenCurveId {
 }
 
 impl CodegenCurveId {
+    pub const ALL: [Self; 3] = [Self::Secp256k1, Self::Secp256r1, Self::Ed25519];
+
     pub fn id(self) -> Felt {
         match self {
             Self::Secp256k1 => SECP256K1_ID,

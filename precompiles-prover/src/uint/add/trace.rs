@@ -3,7 +3,7 @@
 //! [`generate_trace`] lays each add op out as a [`PERIOD`]-row block: the
 //! operand halves (pulled from the store over `UintVal`), the binary carry
 //! chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`), and a closing `term` row.
-//! [`UintAddProver`] drives the LogUp running sum and the Schwartz–Zippel `id`
+//! `UintAddProver` drives the LogUp running sum and the Schwartz–Zippel `id`
 //! register, whose per-row accumulation mirrors [`super::UintAddAir`]'s
 //! `contrib` exactly.
 

@@ -1,44 +1,55 @@
-//! Fixed uints loaded by the verifier boundary, not transcript bootstrap claims.
+//! Fixed environment loaded by verifier boundary consumes, not transcript claims.
 //!
-//! The manifest is deterministic protocol data. [`Session`](super::Session) installs these uints in
-//! the store by default and records one external `UintVal` demand for each full value; the matching
-//! positive consumes are injected by `ChipletMultiAir::eval_external`.
+//! This is deterministic protocol data: [`Session`](super::Session) installs fixed uints in the
+//! uint store, preseeds fixed curve groups in the EC group table, and records external `UintVal`
+//! / `EcGroup` demands. Matching positive consumes are injected by
+//! `ChipletMultiAir::eval_external`.
 
-use miden_precompiles::{Limbs, UintDomain, curve_coefficients};
+use miden_core::Felt;
+use miden_precompiles::{CurveId, Limbs, UintDomain};
 
-/// One fixed uint at a VM-owned store pointer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct FixedUint {
-    pub ptr: u32,
-    pub bound_ptr: u32,
-    pub value: Limbs,
+use crate::{ec::EcGroupMsg, uint::UintValMsg};
+
+/// Fixed uints in dependency order: modulus/bound self-pins first, then coefficients under those
+/// bounds.
+pub(crate) fn fixed_uints() -> impl Iterator<Item = (u32, u32, Limbs)> {
+    UintDomain::ALL
+        .into_iter()
+        .map(|domain| {
+            let ptr = domain.bound_ptr();
+            (ptr, ptr, domain.minus_one())
+        })
+        .chain(CurveId::ALL.into_iter().flat_map(|curve| {
+            let bound_ptr = curve.base_domain().bound_ptr();
+            [
+                (curve.a_ptr(), bound_ptr, curve.a_value()),
+                (curve.b_ptr(), bound_ptr, curve.b_value()),
+            ]
+        }))
 }
 
-const NUM_CURVE_COEFFICIENTS: usize = 6;
+/// Verifier-side `UintVal` consumes for the fixed uint environment.
+pub(crate) fn fixed_uintval_msgs() -> impl Iterator<Item = UintValMsg<Felt>> {
+    fixed_uints().flat_map(|(ptr, bound_ptr, limbs)| {
+        (0..2).map(move |offset| {
+            let start = offset * 4;
+            UintValMsg {
+                ptr: Felt::from(ptr),
+                bound_ptr: Felt::from(bound_ptr),
+                offset: Felt::from(offset as u32),
+                limbs: core::array::from_fn(|i| Felt::from(limbs[start + i])),
+            }
+        })
+    })
+}
 
-/// Number of fixed uints installed by default: all domain bounds plus all curve coefficients.
-pub(crate) const FIXED_UINT_COUNT: usize = UintDomain::ALL.len() + NUM_CURVE_COEFFICIENTS;
-
-/// Fixed uint manifest in dependency order: modulus/bound self-pins first, then coefficients under
-/// those bounds.
-pub(crate) fn fixed_uint_manifest() -> Vec<FixedUint> {
-    let mut fixed = Vec::with_capacity(FIXED_UINT_COUNT);
-
-    for domain in UintDomain::ALL {
-        let ptr = domain.bound_ptr();
-        fixed.push(FixedUint {
-            ptr,
-            bound_ptr: ptr,
-            value: domain.minus_one(),
-        });
-    }
-
-    fixed.extend(curve_coefficients().into_iter().map(|coefficient| FixedUint {
-        ptr: coefficient.ptr,
-        bound_ptr: coefficient.bound_ptr,
-        value: coefficient.value,
-    }));
-
-    debug_assert_eq!(fixed.len(), FIXED_UINT_COUNT);
-    fixed
+/// Verifier-side `EcGroup` consumes for the fixed curve groups.
+pub(crate) fn fixed_ecgroup_msgs() -> impl Iterator<Item = EcGroupMsg<Felt>> {
+    CurveId::ALL.into_iter().map(|curve| EcGroupMsg {
+        group_ptr: Felt::from(curve.group_ptr()),
+        a_ptr: Felt::from(curve.a_ptr()),
+        b_ptr: Felt::from(curve.b_ptr()),
+        bound_ptr: Felt::from(curve.base_domain().bound_ptr()),
+        scalar_bound_ptr: Felt::from(curve.scalar_domain().bound_ptr()),
+    })
 }

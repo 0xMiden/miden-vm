@@ -92,7 +92,7 @@ pub const NOP_SLACK_BEGIN: usize = EXTRA_BLOCK_BEGIN + EXTRA_BLOCK_LEN;
 /// Number of NOP slack slots.
 pub const NOP_SLACK_LEN: usize = SPONGE_PERIOD - NOP_SLACK_BEGIN;
 
-/// Number of Keccak-f[1600] round constants the sponge provides per
+/// Number of Keccak-f\[1600] round constants the sponge provides per
 /// permutation (= Keccak's 24 active rounds; the 25th cycle row in the
 /// round chiplet is the dead round and carries no RC).
 pub const NUM_RC: usize = 24;
@@ -100,7 +100,7 @@ pub const NUM_RC: usize = 24;
 // KECCAK-f[1600] ROUND CONSTANTS
 // ================================================================================================
 
-/// Standard FIPS 202 Keccak-f[1600] round constants, indexed by round.
+/// Standard FIPS 202 Keccak-f\[1600] round constants, indexed by round.
 ///
 /// Provided by the sponge to the round chiplet on Memory64 at IP
 /// `25 + n·3200 + r·128` for cycle `n`, round `r`. See `docs/chiplets/keccak-sponge.md`
