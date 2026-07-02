@@ -241,10 +241,16 @@ impl<'a> EcRequire<'a> {
                     (EcAddCase::Cancel, self.store.group_pai(group), None, false)
                 } else {
                     // double: s ≡ 3x² + a and 2λy ≡ s (the κ's carry the
-                    // tangent constants; shared r_ptr = s), λ = s·(2y)⁻¹,
-                    // the equality certificates x₁ = x₂ / y₁ = y₂, and
-                    // the nonzero witness inv = b·y₁⁻¹ certified by
-                    // inv·y₁ ≡ b — the 2y denominator's invertibility.
+                    // tangent constants; shared r_ptr = s), λ = s·(2y)⁻¹, and
+                    // the equality certificates x₁ = x₂ / y₁ = y₂. No
+                    // `y₁ ≠ 0` witness: the slope pin `2λy ≡ s = 3x² + a`
+                    // already excludes `y = 0`, since on a **smooth** curve a
+                    // 2-torsion point has `3x² + a ≠ 0` (simple cubic root),
+                    // so `2λ·0 ≡ s ≠ 0` is unsatisfiable — a `y = 0` self-add
+                    // can only take the `cancel` branch (2·(2-torsion) = ∞).
+                    // The `inv` transient is unused here (the slot rides the
+                    // null ptr); `generic` keeps its own `inv·d ≡ b`
+                    // disequality.
                     debug_assert_eq!(y1, y2, "on-curve x₁ = x₂ forces y₂ = ±y₁");
                     let s = self.uint.mac(3, px, px, 1, a);
                     let s_v = self.uint.value(s);
@@ -252,12 +258,10 @@ impl<'a> EcRequire<'a> {
                     let lambda_val = mac_reduce(1, s_v, two_y_inv, 0, U256::ZERO, bound_v);
                     let lambda = self.uint.intern(lambda_val, bound);
                     self.uint.mac_into(2, lambda, py, 0, bound, s);
-                    let inv_val = mac_reduce(1, b_v, mod_inv(y1, bound_v), 0, U256::ZERO, bound_v);
-                    let inv = self.uint.intern(inv_val, bound);
-                    self.uint.mac_into(1, inv, py, 0, bound, b);
                     self.uint.value_eq(px, qx);
                     self.uint.value_eq(py, qy);
-                    let (transients, r, fresh) = self.add_tail(s, lambda, inv, px, py, qx, group);
+                    let null = UintPtr::from_addr(0);
+                    let (transients, r, fresh) = self.add_tail(s, lambda, null, px, py, qx, group);
                     (EcAddCase::Double, r, Some(transients), fresh)
                 }
             },

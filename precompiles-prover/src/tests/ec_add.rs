@@ -745,6 +745,39 @@ fn double_forged_as_cancel_unbalances() {
 }
 
 #[test]
+fn ed25519_torsion_forged_as_double_unbalances() {
+    // Soundness of dropping the double-case `y₁ ≠ 0` witness. The ed25519 SW
+    // image's 2-torsion point T = (A/3, 0) self-adds to ∞ via `cancel`. A
+    // forger flips that block to `double` to launder it into a *finite*
+    // tangent result. It is locally valid — `x₁ = x₂` and `y₁ = y₂ = 0`
+    // satisfy the native double ties — but the slope pin `2λy ≡ 3x² + a` is
+    // unsatisfiable at `y = 0` on this smooth curve (`3x² + a ≠ 0`), so no
+    // honest tangent certs exist: double's recorded MACs are absent and
+    // `cancel`'s `y₁ + y₂ ≡ 0` cert dangles. The bus rejects it — exactly the
+    // guard the removed `inv·y ≡ b` MAC used to give, now free.
+    let bound = "7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEC";
+    let a_w = "2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA984914A144";
+    let b_w = "7B425ED097B425ED097B425ED097B425ED097B425ED097B4260B5E9C7710C864";
+    let x_t = "2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2451";
+
+    let mut stack = EcStack::new(from_hex(bound));
+    let fp = stack.fp;
+    let mut ec = stack.require();
+    let (group, _pai) = ec.create_group(from_hex(a_w), from_hex(b_w), fp);
+    let t_pt = ec.add_point(group, from_hex(x_t), from_hex("0"));
+    ec.add(t_pt, t_pt, 0); // honest: routes through cancel → ∞
+    let traces = stack.traces();
+
+    let forged = tamper_block0(traces.ec_add_main(), &[(COL_CANCEL, 0), (COL_DBL, 1)]);
+    let mut rng = StdRng::seed_from_u64(0xECADD_25519F);
+    check_ec_add(&forged);
+
+    let mut mains = traces.mains();
+    mains[6] = &forged;
+    assert_ne!(stack_residual(&mains, &mut rng), 0);
+}
+
+#[test]
 fn forged_result_ptr_unbalances() {
     // Repoint R at a different stored point: the result consume binds
     // (r, group, x₃, y₃) and G's row binds different coordinates — no
