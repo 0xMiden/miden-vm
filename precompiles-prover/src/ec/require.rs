@@ -212,25 +212,22 @@ impl<'a> EcRequire<'a> {
             (Some(_), None) => (EcAddCase::PaiQ, p, None, false),
             (Some((px, py)), Some((qx, qy))) => {
                 let bound_v = self.uint.value(bound);
-                let b_v = self.uint.value(b);
                 let (x1, y1) = (self.uint.value(px), self.uint.value(py));
                 let (x2, y2) = (self.uint.value(qx), self.uint.value(qy));
 
                 if x1 != x2 {
-                    // generic: d = x₂ − x₁, the chord λ·d + y₁ ≡ y₂ with
-                    // λ = (y₂ − y₁)·d⁻¹ interned, and the disequality
-                    // witness inv = b·d⁻¹ certified by inv·d ≡ b ≠ 0 —
-                    // what pins λ to the unique chord slope.
-                    let d = self.uint.sub(qx, px);
+                    // generic: d = x₂ − x₁, certified nonzero on its own
+                    // `UintAdd` tuple (`nz = 1` — see `sub_nonzero`, and
+                    // `uint::add`'s "Nonzero certificate"), and the chord
+                    // λ·d + y₁ ≡ y₂ with λ = (y₂ − y₁)·d⁻¹ interned — what
+                    // pins λ to the unique chord slope.
+                    let d = self.uint.sub_nonzero(qx, px);
                     let d_inv = mod_inv(sub_reduce(x2, x1, bound_v), bound_v);
                     let dy = sub_reduce(y2, y1, bound_v);
                     let lambda_val = mac_reduce(1, dy, d_inv, 0, U256::ZERO, bound_v);
                     let lambda = self.uint.intern(lambda_val, bound);
                     self.uint.mac_into(1, lambda, d, 1, py, qy);
-                    let inv_val = mac_reduce(1, b_v, d_inv, 0, U256::ZERO, bound_v);
-                    let inv = self.uint.intern(inv_val, bound);
-                    self.uint.mac_into(1, inv, d, 0, bound, b);
-                    let (transients, r, fresh) = self.add_tail(d, lambda, inv, px, py, qx, group);
+                    let (transients, r, fresh) = self.add_tail(d, lambda, px, py, qx, group);
                     (EcAddCase::Generic, r, Some(transients), fresh)
                 } else if add_reduce(y1, y2, bound_v) == U256::ZERO {
                     // cancel (covers `y = 0` 2-torsion doubling): the
@@ -248,9 +245,6 @@ impl<'a> EcRequire<'a> {
                     // 2-torsion point has `3x² + a ≠ 0` (simple cubic root),
                     // so `2λ·0 ≡ s ≠ 0` is unsatisfiable — a `y = 0` self-add
                     // can only take the `cancel` branch (2·(2-torsion) = ∞).
-                    // The `inv` transient is unused here (the slot rides the
-                    // null ptr); `generic` keeps its own `inv·d ≡ b`
-                    // disequality.
                     debug_assert_eq!(y1, y2, "on-curve x₁ = x₂ forces y₂ = ±y₁");
                     let s = self.uint.mac(3, px, px, 1, a);
                     let s_v = self.uint.value(s);
@@ -260,8 +254,7 @@ impl<'a> EcRequire<'a> {
                     self.uint.mac_into(2, lambda, py, 0, bound, s);
                     self.uint.value_eq(px, qx);
                     self.uint.value_eq(py, qy);
-                    let null = UintPtr::from_addr(0);
-                    let (transients, r, fresh) = self.add_tail(s, lambda, null, px, py, qx, group);
+                    let (transients, r, fresh) = self.add_tail(s, lambda, px, py, qx, group);
                     (EcAddCase::Double, r, Some(transients), fresh)
                 }
             },
@@ -429,7 +422,6 @@ impl<'a> EcRequire<'a> {
         &mut self,
         slope_aux: UintPtr,
         lambda: UintPtr,
-        inv: UintPtr,
         px: UintPtr,
         py: UintPtr,
         qx: UintPtr,
@@ -452,7 +444,9 @@ impl<'a> EcRequire<'a> {
         // maximum (> operands), satisfying the strict ordering the cert
         // rests on; a hit reuses its existing certified row and mints = false.
         let (r, mints) = self.store.add_point_cert(group, x3, y3);
-        ([slope_aux, lambda, inv, t, y3, e, null, x3, null], r, mints)
+        // Cell 2 (once the disequality witness `inv`) is unused: `generic`'s
+        // `d ≠ 0` now rides `d`'s own `UintAdd` tuple (`nz = 1`).
+        ([slope_aux, lambda, null, t, y3, e, null, x3, null], r, mints)
     }
 }
 

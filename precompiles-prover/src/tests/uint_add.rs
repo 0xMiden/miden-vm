@@ -24,8 +24,8 @@ use crate::{
     uint::{
         UintStoreAir,
         add::{
-            CELL_IS_B_ZERO, COL_B_PTR, COL_C_PTR, GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS,
-            PERIOD, TERM_CELL_MULT, UintAddAir,
+            CELL_D_W, CELL_D_WS, CELL_IS_B_ZERO, COL_B_PTR, COL_C_PTR, COL_NZ, GAMMA_NEG_SLOTS,
+            GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, TERM_CELL_MULT, UintAddAir,
             trace::{UintAddRequires, generate_trace},
         },
         trace::{UintStoreRequires, generate_trace as store_trace},
@@ -453,6 +453,113 @@ fn is_c_zero_rejects_named_result_ptr() {
     for r in 0..PERIOD {
         main.values[r * NUM_MAIN_COLS + COL_C_PTR] = Felt::from(4u32);
     }
+
+    crate::tests::check_local(UintAddAir, &main);
+}
+
+/// `a + b ≡ c (mod p)` with `nz = 1` certifies `b ≠ 0` on the same block —
+/// the disequality cert `ec::add`'s generic case consumes in place of a
+/// full inverse modmul. Constraints hold, the `w` / `wS` witness cells are
+/// correctly set, and the buses balance exactly as the plain `record`
+/// arrangement (the cert adds no new bus traffic — `nz` just rides the
+/// existing `UintAdd` tuple).
+#[test]
+fn nz_cert_holds_and_balances() {
+    let mut rng = StdRng::seed_from_u64(0xd15_e571);
+    let bound = random_modulus(&mut rng);
+    let a = random_uint_below(&mut rng, bound);
+    let b = random_uint_below(&mut rng, bound);
+    assert_ne!(b, U256::ZERO, "need b ≠ 0 for the cert to be provable");
+    let c = add_reduce(a, b, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    let b_ptr = store.intern_pinned(3, b, fp);
+    let c_ptr = store.intern(c, fp);
+
+    let mut add = UintAddRequires::new();
+    add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
+    let main = generate_trace(add, &mut store);
+
+    const ROW_B: usize = 1;
+    assert_eq!(main.values[ROW_B * NUM_MAIN_COLS + COL_NZ], Felt::ONE);
+    let w = main.values[ROW_B * NUM_MAIN_COLS + CELL_D_W];
+    let ws = main.values[ROW_B * NUM_MAIN_COLS + CELL_D_WS];
+    assert_ne!(w, Felt::ZERO, "w must be a genuine inverse candidate");
+    assert_eq!(ws, Felt::ONE, "wS must pin to 1 when the cert holds");
+
+    crate::tests::check_local(UintAddAir, &main);
+
+    let mut bpl = BytePairLutRequires::new();
+    let store_main = store_trace(store, &mut bpl);
+    let bpl_main = bpl_trace(bpl);
+    let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
+    let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+    fold_balance(&UintAddAir, &main, &challenges, &mut net);
+    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+    assert_eq!(residual, 0, "the nz-cert block balances like any other add");
+}
+
+#[test]
+#[should_panic]
+fn nz_cert_forged_zero_rejected() {
+    // A prover cannot claim nz = 1 (b ≠ 0) while zeroing b's own limbs:
+    // S collapses to 0, so wS − 1 = −1 ≠ 0 regardless of the witnessed w
+    // (nothing inverts to make w·0 = 1).
+    let mut rng = StdRng::seed_from_u64(0x2e_80f0);
+    let bound = random_modulus(&mut rng);
+    let a = random_uint_below(&mut rng, bound);
+    let b = random_uint_below(&mut rng, bound);
+    assert_ne!(b, U256::ZERO);
+    let c = add_reduce(a, b, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    let b_ptr = store.intern_pinned(3, b, fp);
+    let c_ptr = store.intern(c, fp);
+
+    let mut add = UintAddRequires::new();
+    add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
+    let mut main = generate_trace(add, &mut store);
+
+    const ROW_B: usize = 1;
+    for j in 0..8 {
+        main.values[ROW_B * NUM_MAIN_COLS + j] = Felt::ZERO;
+    }
+
+    crate::tests::check_local(UintAddAir, &main);
+}
+
+#[test]
+#[should_panic]
+fn nz_cert_wrong_ws_rejected() {
+    // Forging wS to a value ≠ w·S (with nz = 1) must be rejected — the pin
+    // constraint `b_sel·(wS − w·S) = 0` catches it before the main check
+    // ever sees a self-consistent (but false) wS = 1.
+    let mut rng = StdRng::seed_from_u64(0x7b_d157);
+    let bound = random_modulus(&mut rng);
+    let a = random_uint_below(&mut rng, bound);
+    let b = random_uint_below(&mut rng, bound);
+    assert_ne!(b, U256::ZERO);
+    let c = add_reduce(a, b, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    let b_ptr = store.intern_pinned(3, b, fp);
+    let c_ptr = store.intern(c, fp);
+
+    let mut add = UintAddRequires::new();
+    add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
+    let mut main = generate_trace(add, &mut store);
+
+    const ROW_B: usize = 1;
+    main.values[ROW_B * NUM_MAIN_COLS + CELL_D_WS] = Felt::ONE + Felt::ONE;
 
     crate::tests::check_local(UintAddAir, &main);
 }
