@@ -1556,6 +1556,22 @@ mod tests {
     }
 
     #[test]
+    fn package_digest_changes_when_advice_map_changes() {
+        let first = build_package().with_advice_map(AdviceMap::from_iter([(
+            Word::from([Felt::new_unchecked(1), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
+            vec![Felt::new_unchecked(10)],
+        )]));
+        let second = build_package().with_advice_map(AdviceMap::from_iter([(
+            Word::from([Felt::new_unchecked(2), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
+            vec![Felt::new_unchecked(10)],
+        )]));
+
+        assert_eq!(first.interface_digest(), second.interface_digest());
+        assert_ne!(first.digest(), second.digest());
+        assert_ne!(first.content_digest(), second.content_digest());
+    }
+
+    #[test]
     fn package_content_digest_changes_when_account_component_metadata_changes() {
         let package = build_package();
         let digest = package.content_digest();

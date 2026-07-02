@@ -5,6 +5,7 @@ use proptest::prelude::*;
 
 use crate::{
     Felt, WORD_SIZE, Word,
+    advice::AdviceMap,
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
@@ -132,12 +133,12 @@ fn test_commitment_caching() {
     let commitment4 = forest.commitment();
     assert_eq!(commitment3, commitment4);
 
-    // Test that advice_map mutations don't invalidate the cache
-    forest.advice_map_mut().insert(Word::from([Felt::ZERO; 4]), vec![]);
+    // Adding advice map entries changes the cached commitment.
+    forest = forest.with_advice_map(AdviceMap::from_iter([(Word::from([Felt::ZERO; 4]), vec![])]));
     let commitment5 = forest.commitment();
-    assert_eq!(
+    assert_ne!(
         commitment3, commitment5,
-        "advice_map mutation should not invalidate commitment cache"
+        "advice_map changes should invalidate commitment cache"
     );
 
     // Test that remove_nodes invalidates the cache
@@ -145,7 +146,7 @@ fn test_commitment_caching() {
     forest.remove_nodes(&nodes_to_remove); // Empty set, but still calls the method
     let commitment7 = forest.commitment();
     // Since we didn't actually remove anything, commitment should still be the same
-    assert_eq!(commitment3, commitment7);
+    assert_eq!(commitment5, commitment7);
 }
 
 #[test]

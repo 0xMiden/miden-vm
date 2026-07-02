@@ -65,7 +65,7 @@ pub use node::{
 };
 
 use crate::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     advice::AdviceMap,
     serde::{ByteWriter, DeserializationError, Serializable},
     utils::{Idx, IndexVec, hash_string_to_word},
@@ -118,8 +118,24 @@ pub struct MastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Commitment to this MAST forest's roots and external dependencies.
+    /// Commitments to this MAST forest's roots, external dependencies, and advice map.
+    commitment: MastForestCommitment,
+}
+
+/// Commitment values derived from a MAST forest.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct MastForestCommitment {
+    /// Commitment to the forest's roots, external dependencies, and advice map.
     commitment: Word,
+
+    /// Commitment to this MAST forest's public procedure roots.
+    interface_commitment: Word,
+
+    /// Commitment to this MAST forest's external dependencies.
+    dependency_commitment: Word,
+
+    /// Commitment to this MAST forest's advice map.
+    advice_commitment: Word,
 }
 
 /// Complete parts needed to construct a finalized [`MastForest`].
@@ -166,7 +182,11 @@ impl MastForest {
         }
 
         let forest = Self {
-            commitment: compute_mast_forest_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(
+                &parts.nodes,
+                &parts.roots,
+                &parts.advice_map,
+            ),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
@@ -191,7 +211,11 @@ impl MastForest {
             }
         }
         Ok(Self {
-            commitment: compute_mast_forest_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(
+                &parts.nodes,
+                &parts.roots,
+                &parts.advice_map,
+            ),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
@@ -238,16 +262,6 @@ impl MastForest {
     #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
         self.mark_root(new_root_id);
-    }
-
-    pub(in crate::mast) fn add_external_node(
-        &mut self,
-        node: MastNode,
-    ) -> Result<MastNodeId, MastForestError> {
-        debug_assert!(node.is_external());
-        let node_id = self.nodes.push(node).map_err(|_| MastForestError::TooManyNodes)?;
-        self.commitment = self.compute_mast_forest_commitment();
-        Ok(node_id)
     }
 
     /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
@@ -454,10 +468,11 @@ fn remove_nodes(
     (retained_nodes, id_remappings)
 }
 
-fn empty_mast_forest_commitment() -> Word {
+fn empty_mast_forest_commitment() -> MastForestCommitment {
     let interface_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
     let dependency_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
-    miden_crypto::hash::poseidon2::Poseidon2::merge(&[interface_commitment, dependency_commitment])
+    let advice_commitment = compute_advice_commitment(&AdviceMap::default());
+    MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
 fn compute_nodes_commitment(
@@ -479,13 +494,64 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
     miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
 }
 
+pub(in crate::mast) fn compute_advice_commitment(advice_map: &AdviceMap) -> Word {
+    let entry_commitments = advice_map
+        .iter()
+        .map(|(key, values)| {
+            let mut elements = Vec::with_capacity(WORD_SIZE + 2 + values.len());
+            elements.extend_from_slice(key.as_elements());
+            let value_len = values.len() as u64;
+            elements.push(Felt::from_u32(value_len as u32));
+            elements.push(Felt::from_u32((value_len >> 32) as u32));
+            elements.extend_from_slice(values);
+            miden_crypto::hash::poseidon2::Poseidon2::hash_elements(&elements)
+        })
+        .collect::<Vec<_>>();
+
+    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&entry_commitments)
+}
+
+impl MastForestCommitment {
+    fn new(
+        interface_commitment: Word,
+        dependency_commitment: Word,
+        advice_commitment: Word,
+    ) -> Self {
+        let commitment = compute_mast_forest_commitment_from_parts(
+            interface_commitment,
+            dependency_commitment,
+            advice_commitment,
+        );
+        Self {
+            commitment,
+            interface_commitment,
+            dependency_commitment,
+            advice_commitment,
+        }
+    }
+}
+
+pub(in crate::mast) fn compute_mast_forest_commitment_from_parts(
+    interface_commitment: Word,
+    dependency_commitment: Word,
+    advice_commitment: Word,
+) -> Word {
+    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[
+        interface_commitment,
+        dependency_commitment,
+        advice_commitment,
+    ])
+}
+
 fn compute_mast_forest_commitment(
     nodes: &IndexVec<MastNodeId, MastNode>,
     roots: &[MastNodeId],
-) -> Word {
+    advice_map: &AdviceMap,
+) -> MastForestCommitment {
     let interface_commitment = compute_nodes_commitment(nodes, roots);
     let dependency_commitment = compute_dependency_commitment(nodes);
-    miden_crypto::hash::poseidon2::Poseidon2::merge(&[interface_commitment, dependency_commitment])
+    let advice_commitment = compute_advice_commitment(advice_map);
+    MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -565,7 +631,7 @@ impl MastForest {
     /// The commitment is computed as the sequential hash of all procedure root digests after
     /// sorting them by digest.
     pub fn interface_commitment(&self) -> Word {
-        self.compute_nodes_commitment(&self.roots)
+        self.commitment.interface_commitment
     }
 
     /// Returns the commitment to this MAST forest's external dependencies.
@@ -573,18 +639,25 @@ impl MastForest {
     /// The commitment is computed as the sequential hash of all external node digests after
     /// sorting them by digest.
     pub fn dependency_commitment(&self) -> Word {
-        compute_dependency_commitment(&self.nodes)
+        self.commitment.dependency_commitment
     }
 
-    fn compute_mast_forest_commitment(&self) -> Word {
-        compute_mast_forest_commitment(&self.nodes, &self.roots)
+    /// Returns the commitment to this MAST forest's advice map.
+    ///
+    /// The commitment is computed over advice entries in key order.
+    pub fn advice_commitment(&self) -> Word {
+        self.commitment.advice_commitment
+    }
+
+    fn compute_mast_forest_commitment(&self) -> MastForestCommitment {
+        compute_mast_forest_commitment(&self.nodes, &self.roots, &self.advice_map)
     }
 
     /// Returns the commitment to this MAST forest.
     ///
-    /// The commitment is computed as `hash(interface_commitment || dependency_commitment)`.
+    /// The commitment is computed from the interface, dependency, and advice commitments.
     pub fn commitment(&self) -> Word {
-        self.commitment
+        self.commitment.commitment
     }
 
     /// Returns the number of nodes in this MAST forest.
@@ -604,12 +677,8 @@ impl MastForest {
     /// Returns this forest with `advice_map` entries added.
     pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
         self.advice_map.extend(advice_map);
+        self.commitment = self.compute_mast_forest_commitment();
         self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn advice_map_mut(&mut self) -> &mut AdviceMap {
-        &mut self.advice_map
     }
 
     // SERIALIZATION

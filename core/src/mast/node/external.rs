@@ -155,7 +155,12 @@ impl ExternalNodeBuilder {
 
 impl MastForestContributor for ExternalNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        forest.add_external_node(ExternalNode { digest: self.digest }.into())
+        let node_id = forest
+            .nodes
+            .push(ExternalNode { digest: self.digest }.into())
+            .map_err(|_| MastForestError::TooManyNodes)?;
+        forest.commitment = forest.compute_mast_forest_commitment();
+        Ok(node_id)
     }
 
     fn fingerprint_for_node(
@@ -191,7 +196,12 @@ impl ExternalNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        forest.add_external_node(ExternalNode { digest: self.digest }.into())
+        let node_id = forest
+            .nodes
+            .push(ExternalNode { digest: self.digest }.into())
+            .map_err(|_| MastForestError::TooManyNodes)?;
+        forest.commitment = forest.compute_mast_forest_commitment();
+        Ok(node_id)
     }
 }
 

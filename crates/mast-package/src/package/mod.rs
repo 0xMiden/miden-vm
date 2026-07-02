@@ -167,7 +167,11 @@ impl Package {
 
     fn recompute_mast_commitment(&mut self) -> Result<(), ManifestValidationError> {
         let interface_digest = self.compute_interface_digest()?;
-        self.digest = Poseidon2::merge(&[interface_digest, self.mast.dependency_commitment()]);
+        self.digest = Poseidon2::merge_many(&[
+            interface_digest,
+            self.mast.dependency_commitment(),
+            self.mast.advice_commitment(),
+        ]);
         Ok(())
     }
 
@@ -191,16 +195,18 @@ impl Package {
         Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
     }
 
-    /// Produces a new library with the existing [`MastForest`] and where all key/values in the
+    /// Produces a new package with the existing [`MastForest`] and where all key/values in the
     /// provided advice map are added to the internal advice map.
     pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
         self.extend_advice_map(advice_map);
         self
     }
 
-    /// Extends the advice map of this library
+    /// Extends the advice map of this package.
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
+        self.recompute_mast_commitment()
+            .expect("package digest should be computable after extending advice map");
     }
 
     /// Removes all package-owned debug information from this package.
@@ -237,7 +243,8 @@ impl Package {
         &self.mast
     }
 
-    /// Returns the digest of the package's exported interface and external MAST dependencies.
+    /// Returns the digest of the package's exported interface, external dependencies, and advice
+    /// map.
     #[inline]
     pub fn digest(&self) -> Word {
         self.digest
@@ -254,9 +261,9 @@ impl Package {
 
     /// Returns a digest of the package content relevant to assembly and dependency resolution.
     ///
-    /// This is distinct from [`Self::digest`], which commits only to package code and external
-    /// MAST dependencies. The content digest currently binds the package digest, package name,
-    /// semantic version, package kind, manifest, and any semantic package sections. Package
+    /// This is distinct from [`Self::digest`], which commits only to package code, external MAST
+    /// dependencies, and advice data. The content digest currently binds the package digest,
+    /// package name, semantic version, package kind, manifest, and any semantic package sections. Package
     /// descriptions and opaque custom sections are intentionally excluded for now;
     /// kernel-section binding is added separately.
     pub fn content_digest(&self) -> Word {

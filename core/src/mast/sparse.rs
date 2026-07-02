@@ -10,7 +10,10 @@ use miden_utils_indexing::newtype_id;
 use crate::{
     Word,
     advice::AdviceMap,
-    mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
+    mast::{
+        ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
+        compute_advice_commitment, compute_mast_forest_commitment_from_parts,
+    },
     utils::Idx,
 };
 
@@ -64,7 +67,7 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Cached commitment to the original MAST forest's roots and external dependencies.
+    /// Cached commitment to the original MAST forest's roots, external dependencies, and advice map.
     commitment_cache: Word,
 
     /// Sorted source root digests used as the forest commitment input.
@@ -113,11 +116,16 @@ impl SparseMastForest {
         Poseidon2::merge_many(&self.dependency_digests)
     }
 
+    /// Returns the commitment to this sparse forest's advice map.
+    pub fn advice_commitment(&self) -> Word {
+        compute_advice_commitment(&self.advice_map)
+    }
+
     /// Returns the commitment to this sparse forest.
     ///
-    /// The commitment value is derived from the source forest's procedure root digests and external
-    /// dependency digests. It is therefore equal to the commitment of the source [`MastForest`]
-    /// from which this sparse forest was built.
+    /// The commitment value is derived from the source forest's procedure root digests, external
+    /// dependency digests, and advice map. It is therefore equal to the commitment of the source
+    /// [`MastForest`] from which this sparse forest was built.
     pub fn commitment(&self) -> Word {
         self.commitment_cache
     }
@@ -161,6 +169,7 @@ impl SparseMastForest {
         validate_sparse_commitment(
             &commitment_root_digests,
             &dependency_digests,
+            &advice_map,
             commitment_cache,
         )?;
         validate_dependency_commitment_inputs(&nodes, &dependency_digests)?;
@@ -224,12 +233,14 @@ fn validate_sorted_digests(
 fn validate_sparse_commitment(
     root_digests: &[Word],
     dependency_digests: &[Word],
+    advice_map: &AdviceMap,
     commitment: Word,
 ) -> Result<(), crate::serde::DeserializationError> {
-    let computed = Poseidon2::merge(&[
+    let computed = compute_mast_forest_commitment_from_parts(
         Poseidon2::merge_many(root_digests),
         Poseidon2::merge_many(dependency_digests),
-    ]);
+        compute_advice_commitment(advice_map),
+    );
     if computed != commitment {
         return Err(crate::serde::DeserializationError::InvalidValue(
             "sparse commitment digest sections do not match commitment".into(),
