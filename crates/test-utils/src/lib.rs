@@ -87,6 +87,10 @@ pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
 }
 
 #[cfg(not(target_family = "wasm"))]
+/// Constructs a processor with the same default deferred-precompile registry as the VM facade.
+///
+/// Prefer this helper over `FastProcessor::new_with_options` in tests that exercise the default VM
+/// environment. This can be revisited if `miden-precompiles` no longer depends on the processor.
 fn new_vm_default_processor(
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,

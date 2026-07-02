@@ -125,7 +125,6 @@ cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fu
 cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-
 ### Package Deserialization Targets
 
 These targets exercise package deserializers used by `.masp`.

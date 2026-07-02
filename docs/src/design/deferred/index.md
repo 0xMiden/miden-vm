@@ -65,8 +65,12 @@ content yields an identical digest, so equal subterms are shared automatically (
     digest, message, hash preimage, coordinate, or some other local value;
   - a join payload: two child digests (`lhs`, `rhs`) for anything referential, such as a binary
     operation, predicate, or AND step;
-  - a pair-list payload: one or more `lhs || rhs` digest pairs for precompile-specific multi-pair
-    structures.
+  - a pair-list payload: one or more structural digest pairs for precompile-specific multi-pair
+    structures. Pairs are encoded in payload order as 8-felt chunks `lhs || rhs`, and their child
+    order is `lhs0`, `rhs0`, `lhs1`, `rhs1`, and so on. Canonical wire encodes the same ordered
+    pairs as topological child indices. Empty pair lists are rejected; exact pair-count/arity
+    constraints are semantic and enforced by the owning precompile. Budget accounting treats each
+    pair as one ordinary 8-felt payload block, in addition to the tag word.
 
 The digest binds the tag in the Poseidon2 capacity, so a node's address commits to *both* its
 identity and its body. Every non-empty payload is absorbed as one or more 8-felt blocks under the
@@ -94,8 +98,8 @@ A precompile supplies three things:
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
   (evaluate operands, return the `TRUE` node on success or fail otherwise). These roles are
-  conventions, not a fixed taxonomy — a precompile is free to define unary operations, multi-ary
-  constructors, and so on over data, join, and pair-list payloads.
+  conventions, not a fixed taxonomy — a precompile is free to define multi-ary constructors and so
+  on over data, join, and pair-list payloads.
 - `init() -> Vec<Node>` — contributes any canonical constant values (e.g. `ZERO`, `ONE`, a curve
   generator) at registry-initialization time.
 
