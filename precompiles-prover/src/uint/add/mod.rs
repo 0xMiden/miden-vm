@@ -44,11 +44,12 @@
 //! it doubles as the block's closing row — the `UintAdd` provide and the
 //! `id == 0` assertion both fire there, with no dedicated term row.
 //!
-//! Every row's five cells past the limbs (8–12) host that row's own block
-//! scalar plus a share of the seven-limb signed carry pair `γ⁺` / `γ⁻`: `a`
-//! has no scalar of its own, so all five go to carries; `b` and `c` each
-//! spend one on their zero-sentinel flag, `p` spends one on the reduction
-//! bit `k` and one on the provide multiplicity — the rest carry `γ⁺` / `γ⁻`.
+//! Every row's cells past the limbs (8–14) host that row's own block scalar
+//! plus a share of the seven-limb signed carry pair `γ⁺` / `γ⁻`: `a` has no
+//! scalar of its own, so five go to carries; `b` and `c` each spend one on
+//! their zero-sentinel flag, `p` spends one on the reduction bit `k` and one
+//! on the provide multiplicity — the rest carry `γ⁺` / `γ⁻`. `b` additionally
+//! hosts the nonzero-certificate witness (cells 13–14, see below).
 //! [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`] are the placement tables the
 //! AIR, trace-gen and prover all read, mirroring the pattern
 //! [`UintMul`](crate::uint::mul)'s `GAMMA_SLOTS` uses for its own carries:
@@ -62,12 +63,23 @@
 //! **equality certificate** `a = c`, both canonical under one modulus;
 //! consumed e.g. by the EC group law's `x₁ = x₂` / `y₁ = y₂` case ties).
 //!
-//! | row | role | cells 0–7  | cells 8–12                                   |
+//! **Nonzero certificate.** A block's cycle-constant `nz` flag ([`COL_NZ`])
+//! additionally certifies `b ≠ 0` when set, in place of a full inverse
+//! modmul: `S = Σⱼ bⱼ` — a native sum of `b`'s eight 32-bit limbs, no
+//! β-weighting, `< 2³⁵ < p_Goldilocks` so no wrap — is `0 ⟺ b = 0`, and
+//! `nz · (w·S − 1) = 0` with a witnessed candidate inverse `w`
+//! ([`CELL_D_W`], `w·S` hoisted to [`CELL_D_WS`] to keep the check degree 3)
+//! proves `S ≠ 0`. `nz` rides the `UintAdd` bus tuple as a 5th field, so a
+//! consumer can demand `nz = 1` on the same block that already proves
+//! `a + b ≡ c` — the EC group law's generic-add case uses this on its
+//! `d = x₂ − x₁` subtraction instead of a separate disequality MAC.
+//!
+//! | row | role | cells 0–7  | cells 8–14                                   |
 //! |-----|------|------------|-----------------------------------------------|
 //! | 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄                                       |
-//! | 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12    |
+//! | 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12, `w`@13 `wS`@14 |
 //! | 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12            |
-//! | 3   | `p`  | p's limbs  | `k`@8, γ⁻₆@9, `mult`@12 (10–11 spare)          |
+//! | 3   | `p`  | p's limbs  | `k`@8, γ⁻₆@9, `mult`@12 (10–11, 13–14 spare)   |
 
 pub mod trace;
 
@@ -96,24 +108,28 @@ use crate::{
 // MESSAGES
 // ================================================================================================
 
-/// LogUp message for the [`UintAdd`](BusId::UintAdd) relation: the 4-tuple
-/// `(bound_ptr, a_ptr, b_ptr, c_ptr)` asserting `a + b ≡ c (mod p)` for the
-/// three stored uints sharing modulus `bound_ptr`. *Provided* by
-/// [`UintAddAir`] at the op's consumer count; consumed by the eval chip's
-/// add (`a + b = c`), sub (the arrangement `b + r = a`) and neg
-/// (`c_ptr = 0`, the `is_c_zero` form) `UintOp` nodes, and by the EC
-/// group law's certificates (including the `b_ptr = 0` `is_b_zero` form,
-/// the equality certificate `a = c`). Address 0 is never stored, so a 0
-/// ptr-slot always reads as "the unstored zero", never as a value.
+/// LogUp message for the [`UintAdd`](BusId::UintAdd) relation: the
+/// 5-tuple `(bound_ptr, a_ptr, b_ptr, c_ptr, nz)` asserting `a + b ≡ c
+/// (mod p)` for the three stored uints sharing modulus `bound_ptr`, plus
+/// — when `nz = 1` — the certified fact `b ≠ 0` (see "Nonzero
+/// certificate" below). *Provided* by [`UintAddAir`] at the op's
+/// consumer count; consumed by the eval chip's add (`a + b = c`), sub
+/// (the arrangement `b + r = a`) and neg (`c_ptr = 0`, the `is_c_zero`
+/// form) `UintOp` nodes (all `nz = 0`), and by the EC group law's
+/// certificates (including the `b_ptr = 0` `is_b_zero` form, the
+/// equality certificate `a = c`, and the generic add's `nz = 1` disequality
+/// cert on its `d = x₂ − x₁` subtraction). Address 0 is never stored, so
+/// a 0 ptr-slot always reads as "the unstored zero", never as a value.
 ///
 /// Encoded as `bus_prefix[UintAdd] + β⁰·bound_ptr + β¹·a_ptr + β²·b_ptr +
-/// β³·c_ptr`.
+/// β³·c_ptr + β⁴·nz`.
 #[derive(Debug, Clone)]
 pub struct UintAddMsg<E> {
     pub bound_ptr: E,
     pub a_ptr: E,
     pub b_ptr: E,
     pub c_ptr: E,
+    pub nz: E,
 }
 
 impl<E, EF> LookupMessage<E, EF> for UintAddMsg<E>
@@ -129,6 +145,7 @@ where
                 self.a_ptr.clone(),
                 self.b_ptr.clone(),
                 self.c_ptr.clone(),
+                self.nz.clone(),
             ],
         )
     }
@@ -141,7 +158,7 @@ where
 /// laid on one row.
 pub const NUM_LIMBS: usize = 8;
 /// Cell columns per row: 8 limbs plus 5 scalar/carry cells (8–12).
-pub const NUM_CELLS: usize = 13;
+pub const NUM_CELLS: usize = 15;
 /// Scalar cell past the limbs holding this row's flag: `is_b_zero` on the
 /// `b` row, `is_c_zero` on the `c` row, the reduction bit `k` on the `p`
 /// row. Read locally by that row's role-gated constraints.
@@ -159,7 +176,13 @@ pub const COL_BOUND_PTR: usize = NUM_CELLS + 3;
 /// block stays off the bus — with the zero sentinel gone, nothing provides
 /// the `(0, 0, off, 0…)` tuples bare periodic flags would emit there.
 pub const COL_ACT: usize = NUM_CELLS + 4;
-pub const NUM_MAIN_COLS: usize = NUM_CELLS + 5;
+/// Nonzero-certificate flag (cycle-constant): 1 when this block additionally
+/// certifies `b ≠ 0` — see "Nonzero certificate" below. Read both on the `b`
+/// row (where the certificate is checked) and the `p` row (where it rides
+/// the `UintAdd` provide tuple), which a single cycle-constant column makes
+/// free — `b` and `p` are three rows apart, outside any local/next window.
+pub const COL_NZ: usize = NUM_CELLS + 5;
+pub const NUM_MAIN_COLS: usize = NUM_CELLS + 6;
 
 /// B-row cell holding the `is_b_zero` flag: when set, `b` is the (unstored)
 /// zero — the `+b(β)` term and the `b` `UintVal` consumes are dropped, and
@@ -175,6 +198,15 @@ pub const CELL_IS_B_ZERO: usize = CELL_FLAG;
 /// avoid referencing a stored zero, which can't be pinned untyped for an
 /// arbitrary modulus.
 pub const CELL_IS_C_ZERO: usize = CELL_FLAG;
+/// B-row cell holding the witnessed candidate inverse `w` of `S = Σⱼ bⱼ`
+/// (the row's eight 32-bit limbs, native-summed — `S < 2³⁵ < p_Goldilocks`,
+/// so no wrap) — the nonzero certificate's witness, meaningful only when
+/// [`COL_NZ`] is set. See "Nonzero certificate" below.
+pub const CELL_D_W: usize = 13;
+/// B-row cell pinning `wS = w · S`, so the nz-cert's main check
+/// (`nz · (wS − 1) = 0`) reads one degree-1 cell instead of multiplying `w`
+/// and `S` inline at the point that also carries `nz` and `b_sel`.
+pub const CELL_D_WS: usize = 14;
 /// P-row cell holding the boolean reduction bit `k`.
 pub const CELL_K: usize = CELL_FLAG;
 /// P-row cell holding the `UintAdd` provide multiplicity = consumer count
@@ -407,6 +439,23 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
         builder.assert_zero(b_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
+        // Nonzero certificate: when `nz = 1`, this block additionally
+        // certifies `b ≠ 0` — the disequality cert the EC group law's
+        // generic-add case consumes in place of a full inverse modmul.
+        // `S = Σⱼ bⱼ` (a native sum of `b`'s eight 32-bit limbs — no
+        // β-weighting, so no LogUp challenge needed here — stays
+        // `< 2³⁵ < p_Goldilocks`, no wrap) is `0 ⟺ b = 0`; `w` is the
+        // witnessed candidate inverse, `wS` its pinned product (hoisted so
+        // the main check stays degree 3 instead of stacking
+        // `b_sel·nz·w·S` at degree 5).
+        let nz: AB::Expr = local[COL_NZ].into();
+        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
+        let s_sum: AB::Expr = (0..8).fold(AB::Expr::ZERO, |s, j| s + AB::Expr::from(local[j]));
+        let w: AB::Expr = local[CELL_D_W].into();
+        let ws: AB::Expr = local[CELL_D_WS].into();
+        builder.assert_zero(b_sel.clone() * (ws.clone() - w * s_sum));
+        builder.assert_zero(b_sel * nz * (ws - AB::Expr::ONE));
+
         // Carry booleanity: every γ⁺ / γ⁻ cell, gated by whichever row's
         // selector the placement table assigns it to.
         for &(row, cell) in GAMMA_POS_SLOTS.iter().chain(GAMMA_NEG_SLOTS.iter()) {
@@ -414,11 +463,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
             builder.assert_zero(sel[row].clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
 
-        // Cycle-constancy: the four ptrs + act are constant within a block
-        // (every row but the closing one, which the not_term gate drops at
-        // the block boundary — the modulus row sits last in the period).
+        // Cycle-constancy: the four ptrs + act + nz are constant within a
+        // block (every row but the closing one, which the not_term gate
+        // drops at the block boundary — the modulus row sits last in the
+        // period).
         let not_term: AB::Expr = AB::Expr::ONE - p_sel;
-        for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT] {
+        for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT, COL_NZ] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
             builder.assert_zero(not_term.clone() * (there - here));
@@ -513,6 +563,7 @@ where
         let c_ptr: LB::Expr = local[COL_C_PTR].into();
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
         let act: LB::Expr = local[COL_ACT].into();
+        let nz: LB::Expr = local[COL_NZ].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].into();
 
         // The two 4×32 `UintVal` halves of the value on this row: the lo
@@ -613,6 +664,7 @@ where
                                         a_ptr: a_ptr.clone(),
                                         b_ptr: b_ptr.clone(),
                                         c_ptr: c_ptr.clone(),
+                                        nz: nz.clone(),
                                     },
                                     provide_deg,
                                 );

@@ -712,6 +712,7 @@ where
                                         a_ptr: s_a.clone(),
                                         b_ptr: s_b.clone(),
                                         c_ptr: scalar.clone(),
+                                        nz: LB::Expr::ZERO,
                                     },
                                     one_deg,
                                 );
@@ -727,6 +728,7 @@ where
                                         a_ptr: s_a.clone(),
                                         b_ptr: scalar.clone(),
                                         c_ptr: LB::Expr::ZERO,
+                                        nz: LB::Expr::ZERO,
                                     },
                                     one_deg,
                                 );
@@ -744,6 +746,7 @@ where
                                         a_ptr: neg_ya.clone(),
                                         b_ptr: neg_yr.clone(),
                                         c_ptr: LB::Expr::ZERO,
+                                        nz: LB::Expr::ZERO,
                                     },
                                     two_deg,
                                 );

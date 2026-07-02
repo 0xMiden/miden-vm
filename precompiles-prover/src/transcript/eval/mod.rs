@@ -1016,6 +1016,7 @@ where
                                             + is_sub.clone() * ptr.clone(),
                                         c_ptr: is_add.clone() * ptr.clone()
                                             + is_sub.clone() * a_ptr.clone(),
+                                        nz: LB::Expr::ZERO,
                                     },
                                     mixed_deg,
                                 );
