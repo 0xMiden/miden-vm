@@ -1,5 +1,8 @@
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{
+    deferred::DEFAULT_MAX_DEFERRED_ELEMENTS as DEFAULT_DEFERRED_STATE_ELEMENTS,
+    program::MIN_STACK_DEPTH,
+};
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -84,7 +87,7 @@ impl ExecutionOptions {
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
     /// Default maximum approximate number of field elements allowed in deferred state.
-    pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+    pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = DEFAULT_DEFERRED_STATE_ELEMENTS;
 
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).

@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_DEFERRED_ELEMENTS;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -54,12 +55,39 @@ pub use exports::*;
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under the built-in precompile registry.
+/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within the
+///   default deferred-state verifier budget.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
+) -> Result<u32, VerificationError> {
+    verify_with_max_deferred_elements(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        DEFAULT_MAX_DEFERRED_ELEMENTS,
+    )
+}
+
+/// Returns the security level of the proof if the specified program was executed correctly against
+/// the specified inputs and outputs, using an explicit deferred-state verifier budget.
+///
+/// Use this when verifying proofs produced with a non-default deferred-state execution budget.
+///
+/// # Errors
+/// Returns an error if:
+/// - The provided proof does not prove a correct execution of the program.
+/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within
+///   `max_deferred_elements`.
+pub fn verify_with_max_deferred_elements(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    max_deferred_elements: usize,
 ) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
     let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
@@ -67,7 +95,7 @@ pub fn verify(
     let state = DeferredState::from_wire(
         Arc::new(miden_precompiles::registry()),
         &deferred_wire,
-        usize::MAX,
+        max_deferred_elements,
     )?;
 
     verify_stark(program_info, stack_inputs, stack_outputs, state.root(), hash_fn, proof_bytes)?;

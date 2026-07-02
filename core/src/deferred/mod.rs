@@ -30,6 +30,9 @@ pub type DeferredRoot = Digest;
 /// Fixed capacity word used to domain-separate deferred root folds.
 pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
 
+/// Default maximum approximate number of field elements allowed in deferred state.
+pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
     Node::and(root, statement).digest()
