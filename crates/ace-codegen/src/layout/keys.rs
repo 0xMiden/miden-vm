@@ -10,16 +10,12 @@ pub enum InputKey {
     AuxRandAlpha,
     /// Aux randomness β supplied as an input.
     AuxRandBeta,
-    /// Multi-AIR β coefficient for Core. Set to β if Core is at proof_order position 0
-    /// (`core_height ≤ chiplets_height`), else 1. Only present in `is_multi_air = true`.
-    MultiAirBetaCore,
-    /// Multi-AIR β coefficient for Chiplets. Complement of `MultiAirBetaCore`.
-    MultiAirBetaChip,
+    /// Multi-AIR β coefficient for the AIR at instance index `air` (caller order).
+    /// The verifier assigns β to the AIR at proof_order position 0 and 1 to the other.
+    /// Only present in layouts built with `num_airs >= 2`.
+    MultiAirBeta(usize),
     /// Main trace value at (offset, index).
-    Main {
-        offset: usize,
-        index: usize,
-    },
+    Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
     AuxCoord {
         offset: usize,
@@ -28,11 +24,9 @@ pub enum InputKey {
     },
     /// Aux bus boundary value at the given index.
     AuxBusBoundary(usize),
-    /// Variable-length public input reduction at the given group index.
-    VlpiReduction(usize),
-    /// Batching challenge gamma for combining the constraint evaluation with the
-    /// auxiliary trace boundary checks.
-    Gamma,
+    /// Reserved stark-vars slot, kept zero. Provides word-alignment padding for the base
+    /// stark-vars block; not referenced by the production circuit.
+    Reserved,
     /// Composition challenge used to fold constraints.
     Alpha,
     /// `zeta^N`, where `N` is the trace length.
@@ -45,16 +39,14 @@ pub enum InputKey {
     IsLast,
     /// Precomputed transition selector: `z - g^{-1}`.
     IsTransition,
-    /// Per-AIR lifted selectors for Core at `z^{r_core}` (`r_core = n_max / n_core`).
-    /// Equal to the canonical `IsFirst`/`IsLast`/`IsTransition` when Core is at log_max.
-    /// Only present in `is_multi_air = true`.
-    IsFirstCore,
-    IsLastCore,
-    IsTransitionCore,
-    /// Per-AIR lifted selectors for Chiplets at `z^{r_chip}`. Mirror of `*Core`.
-    IsFirstChip,
-    IsLastChip,
-    IsTransitionChip,
+    /// Per-AIR lifted first-row selector at `z^{r_air}` (`r_air = n_max / n_air`) for the
+    /// AIR at instance index `air` (caller order). Equal to the canonical `IsFirst` when
+    /// the AIR is at log_max. Only present in layouts built with `num_airs >= 2`.
+    IsFirstAir(usize),
+    /// Per-AIR lifted last-row selector. Mirror of [`InputKey::IsFirstAir`].
+    IsLastAir(usize),
+    /// Per-AIR lifted transition selector. Mirror of [`InputKey::IsFirstAir`].
+    IsTransitionAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
     /// `f = h^N`, the chunk shift ratio between cosets.
@@ -84,8 +76,9 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
-            InputKey::MultiAirBetaCore => layout.stark.multi_air_beta_core,
-            InputKey::MultiAirBetaChip => layout.stark.multi_air_beta_chip,
+            InputKey::MultiAirBeta(air) => {
+                layout.stark.multi_air.as_ref().and_then(|m| m.beta(air))
+            },
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),
@@ -103,10 +96,6 @@ impl InputKeyMapper<'_> {
                 }
             },
             InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::VlpiReduction(i) => {
-                let local = i * layout.vlpi_stride;
-                layout.regions.vlpi_reductions.index(local)
-            },
             // Extension-field stark vars.
             InputKey::Alpha => Some(layout.stark.alpha),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),
@@ -114,13 +103,16 @@ impl InputKeyMapper<'_> {
             InputKey::IsFirst => Some(layout.stark.is_first),
             InputKey::IsLast => Some(layout.stark.is_last),
             InputKey::IsTransition => Some(layout.stark.is_transition),
-            InputKey::IsFirstCore => layout.stark.is_first_core,
-            InputKey::IsLastCore => layout.stark.is_last_core,
-            InputKey::IsTransitionCore => layout.stark.is_transition_core,
-            InputKey::IsFirstChip => layout.stark.is_first_chip,
-            InputKey::IsLastChip => layout.stark.is_last_chip,
-            InputKey::IsTransitionChip => layout.stark.is_transition_chip,
-            InputKey::Gamma => Some(layout.stark.gamma),
+            InputKey::IsFirstAir(air) => {
+                layout.stark.multi_air.as_ref().and_then(|m| m.selector(air, 0))
+            },
+            InputKey::IsLastAir(air) => {
+                layout.stark.multi_air.as_ref().and_then(|m| m.selector(air, 1))
+            },
+            InputKey::IsTransitionAir(air) => {
+                layout.stark.multi_air.as_ref().and_then(|m| m.selector(air, 2))
+            },
+            InputKey::Reserved => Some(layout.stark.reserved),
             // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),
             InputKey::F => Some(layout.stark.f),

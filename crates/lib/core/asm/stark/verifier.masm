@@ -81,7 +81,8 @@ pub proc verify
     #==============================================================================================
 
     # The AIR-specific implementation handles: drawing aux randomness, reseeding with the
-    # aux trace commitment, and absorbing aux trace boundary values into the transcript.
+    # aux trace commitment, absorbing aux trace boundary values into the transcript, and
+    # asserting any AIR-specific boundary identities over the absorbed values.
     # For AIRs without an auxiliary trace, the implementation is a no-op.
     exec.utils::observe_aux_trace
     # => [...]
@@ -123,7 +124,7 @@ pub proc verify
     exec.utils::swap_air_regions_if_chip_first
 
     #==============================================================================================
-    #       VI) Draw gamma for the LogUp boundary batching and evaluate constraints
+    #       VI) Evaluate constraints
     #==============================================================================================
 
     exec.utils::execute_constraint_evaluation_check
