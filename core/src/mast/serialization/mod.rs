@@ -235,10 +235,20 @@ impl MastForest {
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.
     fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
-        assert!(
-            self.validate_dense_node_order().is_ok(),
-            "dense MAST forests must be canonical before serialization"
-        );
+        if self.validate_dense_node_order().is_err() {
+            // Construction-phase forests may still be append-ordered. Finalized forests take the
+            // direct path below; this fallback prevents public serialization from panicking before
+            // callers have moved through a finalization path.
+            let canonical = MastForest::from_raw_parts(
+                self.nodes.clone(),
+                self.roots.clone(),
+                self.advice_map.clone(),
+            )
+            .expect("dense MAST forest must be valid before serialization");
+            canonical.write_into_with_options(target, hashless);
+            return;
+        }
+
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
