@@ -235,6 +235,10 @@ impl MastForest {
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.
     fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
+        assert!(
+            self.validate_dense_node_order().is_ok(),
+            "dense MAST forests must be canonical before serialization"
+        );
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
@@ -247,7 +251,7 @@ impl MastForest {
 
         // header counts
         let node_count = self.nodes.len();
-        let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
+        let external_node_count = self.nodes.iter().take_while(|node| node.is_external()).count();
         let internal_node_count = node_count - external_node_count;
         target.write_usize(internal_node_count);
         target.write_usize(external_node_count);
@@ -296,7 +300,6 @@ impl MastForest {
             digest.write_into(target);
         }
 
-        external_digests.sort_unstable();
         for digest in external_digests {
             digest.write_into(target);
         }

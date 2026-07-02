@@ -471,9 +471,33 @@ fn validate_node_entries(
 ) -> Result<(), DeserializationError> {
     let mut reader = SliceReader::new(node_entries);
     let mut counted_externals = 0usize;
+    let mut previous_class = SerializedNodeClass::External;
 
-    for _ in 0..node_count {
+    for node_index in 0..node_count {
         let node_entry = MastNodeEntry::read_from(&mut reader)?;
+        let node_class = serialized_node_class(node_entry);
+
+        if node_index < external_node_count {
+            if !matches!(node_entry, MastNodeEntry::External) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "node {node_index} is not external but is inside the external node prefix"
+                )));
+            }
+        } else if matches!(node_entry, MastNodeEntry::External) {
+            return Err(DeserializationError::InvalidValue(format!(
+                "external node {node_index} appears outside the external node prefix"
+            )));
+        }
+
+        if node_class < previous_class {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node {node_index} has class {node_class:?} after {previous_class:?}"
+            )));
+        }
+        previous_class = node_class;
+
+        validate_child_order(node_index, node_entry)?;
+
         if matches!(node_entry, MastNodeEntry::External) {
             counted_externals = counted_externals.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("external node count overflow".to_string())
@@ -485,6 +509,62 @@ fn validate_node_entries(
         return Err(DeserializationError::InvalidValue(format!(
             "header external node count {external_node_count} does not match {counted_externals} external node entries"
         )));
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum SerializedNodeClass {
+    External,
+    BasicBlock,
+    Internal,
+}
+
+fn serialized_node_class(node_entry: MastNodeEntry) -> SerializedNodeClass {
+    match node_entry {
+        MastNodeEntry::External => SerializedNodeClass::External,
+        MastNodeEntry::Block { .. } => SerializedNodeClass::BasicBlock,
+        MastNodeEntry::Join { .. }
+        | MastNodeEntry::Split { .. }
+        | MastNodeEntry::Loop { .. }
+        | MastNodeEntry::Call { .. }
+        | MastNodeEntry::SysCall { .. }
+        | MastNodeEntry::Dyn
+        | MastNodeEntry::Dyncall => SerializedNodeClass::Internal,
+    }
+}
+
+fn validate_child_order(
+    node_index: usize,
+    node_entry: MastNodeEntry,
+) -> Result<(), DeserializationError> {
+    fn check_child(node_index: usize, child_id: u32) -> Result<(), DeserializationError> {
+        if child_id as usize >= node_index {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node {node_index} references child {child_id} which does not appear before it"
+            )));
+        }
+        Ok(())
+    }
+
+    match node_entry {
+        MastNodeEntry::Join { left_child_id, right_child_id } => {
+            check_child(node_index, left_child_id)?;
+            check_child(node_index, right_child_id)?;
+        },
+        MastNodeEntry::Split { if_branch_id, else_branch_id } => {
+            check_child(node_index, if_branch_id)?;
+            check_child(node_index, else_branch_id)?;
+        },
+        MastNodeEntry::Loop { body_id } => check_child(node_index, body_id)?,
+        MastNodeEntry::Call { callee_id } | MastNodeEntry::SysCall { callee_id } => {
+            check_child(node_index, callee_id)?;
+        },
+        MastNodeEntry::Block { .. }
+        | MastNodeEntry::Dyn
+        | MastNodeEntry::Dyncall
+        | MastNodeEntry::External => {},
     }
 
     Ok(())

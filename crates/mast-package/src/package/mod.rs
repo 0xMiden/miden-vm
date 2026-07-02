@@ -263,8 +263,8 @@ impl Package {
     ///
     /// This is distinct from [`Self::digest`], which commits only to package code, external MAST
     /// dependencies, and advice data. The content digest currently binds the package digest,
-    /// package name, semantic version, package kind, manifest, and any semantic package sections. Package
-    /// descriptions and opaque custom sections are intentionally excluded for now;
+    /// package name, semantic version, package kind, manifest, and any semantic package sections.
+    /// Package descriptions and opaque custom sections are intentionally excluded for now;
     /// kernel-section binding is added separately.
     pub fn content_digest(&self) -> Word {
         let mut bytes = Vec::new();

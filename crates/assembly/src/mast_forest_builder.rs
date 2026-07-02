@@ -543,9 +543,8 @@ impl MastForestBuilder {
     /// Finalization preserves every recorded procedure root and every pending node reachable from
     /// those roots. Pending records which are unreachable from all roots are pruned.
     ///
-    /// External nodes are emitted before non-external nodes. This preserves the positional
-    /// convention used by externally linked procedure roots while still keeping final node IDs
-    /// local to the resulting forest.
+    /// Final nodes are emitted in dense `MastForest` order: external nodes, then basic blocks,
+    /// then internal nodes with children before parents.
     ///
     /// Finalization must happen in the order used below: plan the live layout first, materialize
     /// live nodes so builder-local refs have final node IDs, then register metadata against those
