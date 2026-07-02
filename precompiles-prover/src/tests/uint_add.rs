@@ -24,7 +24,8 @@ use crate::{
     uint::{
         UintStoreAir,
         add::{
-            CELL_IS_B_ZERO, COL_B_PTR, COL_C_PTR, NUM_MAIN_COLS, PERIOD, UintAddAir,
+            CELL_IS_B_ZERO, COL_B_PTR, COL_C_PTR, GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS,
+            PERIOD, TERM_CELL_MULT, UintAddAir,
             trace::{UintAddRequires, generate_trace},
         },
         trace::{UintStoreRequires, generate_trace as store_trace},
@@ -92,13 +93,14 @@ fn add_constraints_hold() {
     let mut rng = StdRng::seed_from_u64(0xadd1);
     let (add, mut store, k) = sample_add(&mut rng, false);
     let main = generate_trace(add, &mut store);
-    assert_eq!(main.height(), PERIOD, "one op = one period-8 block");
+    assert_eq!(main.height(), PERIOD, "one op = one period-4 block");
 
-    // The carry rows (cpos at 4, cneg at 5) must carry: a real op exercises
-    // γ⁺ / γ⁻, not a degenerate carry-free sum.
-    let carries_nonzero = (4..6)
-        .flat_map(|r| (0..7).map(move |c| (r, c)))
-        .any(|(r, c)| main.values[r * NUM_MAIN_COLS + c] != Felt::ZERO);
+    // The γ⁺ / γ⁻ carry slots must carry: a real op exercises them, not a
+    // degenerate carry-free sum.
+    let carries_nonzero = GAMMA_POS_SLOTS
+        .iter()
+        .chain(GAMMA_NEG_SLOTS.iter())
+        .any(|&(r, c)| main.values[r * NUM_MAIN_COLS + c] != Felt::ZERO);
     assert!(carries_nonzero, "the add must carry across limbs");
     let _ = k;
 
@@ -199,7 +201,7 @@ fn duplicate_relations_collapse() {
     assert_eq!(main.height(), PERIOD, "duplicates collapse onto one block");
     let term_row = PERIOD - 1;
     assert_eq!(
-        main.values[term_row * NUM_MAIN_COLS],
+        main.values[term_row * NUM_MAIN_COLS + TERM_CELL_MULT],
         Felt::from(2u32),
         "the collapsed block provides at the accumulated mult",
     );
@@ -256,7 +258,7 @@ fn add_pad_blocks_stay_off_the_bus() {
         add.record(ptrs[l], ptrs[r], c_ptr, fp, 0);
     }
     let add_main = generate_trace(add, &mut store);
-    assert_eq!(add_main.height(), 32, "3 ops pad to 4 blocks");
+    assert_eq!(add_main.height(), 16, "3 ops pad to 4 blocks");
     let mut bpl = BytePairLutRequires::new();
     let store_main = store_trace(store, &mut bpl);
     let bpl_main = bpl_trace(bpl);
@@ -297,9 +299,9 @@ fn add_inactive_block_cannot_provide() {
         add.record(ptrs[l], ptrs[r], c_ptr, fp, 0);
     }
     let mut add_main = generate_trace(add, &mut store);
-    assert_eq!(add_main.height(), 32, "3 ops pad to 4 blocks");
-    // Pad block = block 3 (rows 24..31); its term row is 31, TERM_CELL_MULT = 0.
-    add_main.values[31 * NUM_MAIN_COLS] = Felt::from(1u32);
+    assert_eq!(add_main.height(), 16, "3 ops pad to 4 blocks");
+    // Pad block = block 3 (rows 12..15); its closing (p) row is 15.
+    add_main.values[15 * NUM_MAIN_COLS + TERM_CELL_MULT] = Felt::from(1u32);
     crate::tests::check_local(UintAddAir, &add_main);
 }
 
