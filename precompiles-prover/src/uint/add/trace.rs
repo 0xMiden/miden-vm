@@ -1,14 +1,13 @@
 //! UintAdd trace generation + aux builder.
 //!
 //! [`generate_trace`] lays each add op out as a [`PERIOD`]-row block: the
-//! operand halves (pulled from the store over `UintVal`), the binary carry
-//! chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`), and a closing `term` row.
-//! `UintAddProver` drives the LogUp running sum and the Schwartz–Zippel `id`
+//! full 8×32 operand rows (pulled from the store over `UintVal`), the binary
+//! carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`), and a closing `term` row.
+//! `build_aux` drives the LogUp running sum and the Schwartz–Zippel `id`
 //! register, whose per-row accumulation mirrors [`super::UintAddAir`]'s
 //! `contrib` exactly.
 
 use alloc::{collections::BTreeMap, vec::Vec};
-use core::array;
 
 use miden_core::{
     Felt,
@@ -17,8 +16,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, B_HUB_CELL_IS_B_ZERO, C_HUB_CELL_IS_C_ZERO, COL_A_PTR, COL_ACT, K_HUB_CELL_K,
-    NUM_MAIN_COLS, PERIOD, UintAddAir,
+    AUX_WIDTH, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_ACT, NUM_MAIN_COLS, PERIOD,
+    TERM_CELL_MULT, UintAddAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -125,7 +124,7 @@ impl UintAddRequires {
     }
 }
 
-/// Per-op values resolved from the store (as the 4×32 views trace-gen
+/// Per-op values resolved from the store (as the full 8×32 views trace-gen
 /// lays out) plus the derived witness: the reduction bit `k` and the two
 /// binary carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`, with
 /// `p = bound + 1`).
@@ -171,9 +170,9 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
 
 /// Build the UintAdd main trace from the recorded ops — one op = one
 /// [`PERIOD`]-row block, the values + witnesses resolved from the store.
-/// The four ptrs + `act` repeat on every row (cycle-constant); the block
-/// scalars live in their host rows' cells — `is_b_zero` on the B-hub,
-/// `is_c_zero` on the C-hub, `k` on the K-hub, the provide multiplicity
+/// The four ptrs + `act` repeat on every row (cycle-constant); each
+/// operand row hosts its own block scalar — `is_b_zero` on the `b` row,
+/// `is_c_zero` on the `c` row, `k` on the `p` row, the provide multiplicity
 /// on the term row. Padded to a power-of-two height.
 ///
 /// The same pass routes each block's `UintVal` demand into the store
@@ -198,33 +197,28 @@ pub fn generate_trace(
         }
         store.require_uintval(op.bound);
         let w = witness(op, store);
-        // Limb rows: the 4×32 halves of a / b / c / bound (hubs between
-        // the b / c / p halves), then γ⁺ / γ⁻ and the term row.
-        let half = |v: &[u32; 8], hi: bool| -> [Felt; 4] {
-            array::from_fn(|k| Felt::from(v[if hi { 4 + k } else { k }]))
+
+        // Rows 0–7: a / b / c / p (each a full 8×32 value on cells 0–7,
+        // its scalar past the limbs), γ⁺ / γ⁻ (7 bits on cells 0–6), a
+        // spare row, then the term row.
+        let mut block = [[Felt::ZERO; NUM_MAIN_COLS]; PERIOD];
+        let put = |row: &mut [Felt; NUM_MAIN_COLS], v: &[u32; 8]| {
+            for j in 0..8 {
+                row[j] = Felt::from(v[j]);
+            }
         };
-        let carry_row = |g: &[u16; 7], from: usize, count: usize| -> [Felt; 4] {
-            array::from_fn(|k| if k < count { Felt::from(g[from + k]) } else { Felt::ZERO })
-        };
-        let scalar_row = |s: Felt| -> [Felt; 4] { [s, Felt::ZERO, Felt::ZERO, Felt::ZERO] };
-        let rows: [[Felt; 4]; PERIOD] = [
-            half(&w.a, false),                             // a_lo
-            half(&w.a, true),                              // a_hi
-            half(&w.b, false),                             // b_lo
-            scalar_row(Felt::from(op.b.is_none() as u32)), // B-hub: is_b_zero
-            half(&w.b, true),                              // b_hi
-            half(&w.c, false),                             // c_lo
-            scalar_row(Felt::from(op.c.is_none() as u32)), // C-hub: is_c_zero
-            half(&w.c, true),                              // c_hi
-            half(&w.bound, false),                         // p_lo
-            scalar_row(Felt::from(w.k)),                   // K-hub
-            half(&w.bound, true),                          // p_hi
-            carry_row(&w.gamma_pos, 0, 4),                 // cpos_lo: γ⁺₀..₃
-            carry_row(&w.gamma_pos, 4, 3),                 // cpos_hi: γ⁺₄..₆
-            carry_row(&w.gamma_neg, 0, 4),                 // cneg_lo: γ⁻₀..₃
-            carry_row(&w.gamma_neg, 4, 3),                 // cneg_hi: γ⁻₄..₆
-            scalar_row(Felt::from(*mult)),                 // term: provide mult
-        ];
+        put(&mut block[0], &w.a); // a
+        put(&mut block[1], &w.b); // b
+        put(&mut block[2], &w.c); // c
+        put(&mut block[3], &w.bound); // p
+        block[1][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
+        block[2][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
+        block[3][CELL_K] = Felt::from(w.k);
+        for j in 0..7 {
+            block[4][j] = Felt::from(w.gamma_pos[j]); // cpos: γ⁺₀..₆
+            block[5][j] = Felt::from(w.gamma_neg[j]); // cneg: γ⁻₀..₆
+        }
+        block[7][TERM_CELL_MULT] = Felt::from(*mult); // term
 
         // Cycle-constant metadata (cols COL_A_PTR..=COL_ACT), identical on
         // every row of the block.
@@ -235,11 +229,9 @@ pub fn generate_trace(
             Felt::from(op.bound.addr()),
             Felt::ONE, // act: a real op block
         ];
-        for limbs in rows {
-            let mut row = [Felt::ZERO; NUM_MAIN_COLS];
-            row[..4].copy_from_slice(&limbs);
+        for row in block.iter_mut() {
             row[COL_A_PTR..=COL_ACT].copy_from_slice(&meta);
-            vals.extend(row);
+            vals.extend_from_slice(row);
         }
     }
     // Padding blocks keep the zero fill — in particular act = 0, taking
@@ -267,8 +259,8 @@ pub(crate) fn build_aux(
     }
     let t32 = QuadFelt::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
-    // Col 1: the SZ register. id[0] = 0; id[r+1] = id[r] + contrib(row r),
-    // contrib matching UintAddAir's role-gated expression exactly.
+    // The SZ register. id[0] = 0; id[r+1] = id[r] + contrib(row r), contrib
+    // matching UintAddAir's role-gated expression exactly (all local now).
     let logup_width = logup.width();
     let mut data = Vec::with_capacity(AUX_WIDTH * n);
     let mut id = QuadFelt::ZERO;
@@ -276,59 +268,30 @@ pub(crate) fn build_aux(
         data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
         data.push(id); // the register past the LogUp columns
 
-        let limb = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        // The hub-hosted scalars, as their host rows' neighbors see
-        // them: the lo rows read the flag / k from the *next* row, the
-        // hubs read locally and fire against the next row's limbs.
-        let cell_next = |c: usize| -> Felt { main.values[(r + 1) * NUM_MAIN_COLS + c] };
-        let lo_sum = (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[c] * QuadFelt::from(limb(c)));
-        let hi_sum = (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[4 + c] * QuadFelt::from(limb(c)));
-        let carry_lo = (0..4)
-            .fold(QuadFelt::ZERO, |s, j| (s) + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(j)));
-        let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, m| {
-            let j = 4 + m;
-            s + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(m))
-        });
-        let hi_next =
-            || (0..4).fold(QuadFelt::ZERO, |s, c| s + bp[4 + c] * QuadFelt::from(cell_next(c)));
+        let cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
+        let full_sum = (0..8).fold(QuadFelt::ZERO, |s, j| s + bp[j] * QuadFelt::from(cell(j)));
+        let carry_term = (0..7)
+            .fold(QuadFelt::ZERO, |s, j| s + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(cell(j)));
         let contrib: QuadFelt = match r % PERIOD {
-            0 => lo_sum, // a_lo
-            1 => hi_sum, // a_hi
-            // b_lo: dropped when is_b_zero (the next row's B-hub cell).
+            0 => full_sum, // a
+            // b: dropped when is_b_zero.
+            1 => {
+                let b_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_B_ZERO));
+                full_sum * b_active
+            },
+            // c: dropped when is_c_zero.
             2 => {
-                let b_active = QuadFelt::ONE - QuadFelt::from(cell_next(B_HUB_CELL_IS_B_ZERO));
-                lo_sum * b_active
+                let c_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_C_ZERO));
+                -(full_sum * c_active)
             },
-            // B-hub: b's hi half against the next row's limbs.
+            // p: −k·(bound(β) + 1).
             3 => {
-                let b_active = QuadFelt::ONE - QuadFelt::from(limb(B_HUB_CELL_IS_B_ZERO));
-                hi_next() * b_active
+                let k = QuadFelt::from(cell(CELL_K));
+                -(k * (full_sum + bp[0]))
             },
-            // c_lo: dropped when is_c_zero (the next row's C-hub cell).
-            5 => {
-                let c_active = QuadFelt::ONE - QuadFelt::from(cell_next(C_HUB_CELL_IS_C_ZERO));
-                -(lo_sum * c_active)
-            },
-            // C-hub: c's hi half against the next row's limbs.
-            6 => {
-                let c_active = QuadFelt::ONE - QuadFelt::from(limb(C_HUB_CELL_IS_C_ZERO));
-                -(hi_next() * c_active)
-            },
-            // p_lo: −k·(bound_lo(β) + 1), k from the next row's K-hub.
-            8 => {
-                let k = QuadFelt::from(cell_next(K_HUB_CELL_K));
-                -(k * lo_sum + bp[0] * k)
-            },
-            // K-hub: −k·bound_hi(β) against the next row's limbs.
-            9 => {
-                let k = QuadFelt::from(limb(K_HUB_CELL_K));
-                -(k * hi_next())
-            },
-            11 => carry_lo,      // cpos_lo
-            12 => carry_hi,      // cpos_hi
-            13 => -carry_lo,     // cneg_lo
-            14 => -carry_hi,     // cneg_hi
-            _ => QuadFelt::ZERO, // b_hi / c_hi / p_hi (ride the hubs), term
+            4 => carry_term,     // cpos
+            5 => -carry_term,    // cneg
+            _ => QuadFelt::ZERO, // spare / term
         };
         id += contrib;
     }
