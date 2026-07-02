@@ -4523,10 +4523,9 @@ fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
     assert_diagnostic!(err, "invalid syscall: callee must be resolvable to kernel module");
 }
 
-/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
-/// forest is compacted via self-merge.
+/// Reproduces issue #3035: a MAST with padded basic blocks must not grow during self-merge.
 #[test]
-fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
     let context = TestContext::default();
     let module = context.parse_module(source_file!(
         &context,
@@ -4562,21 +4561,21 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         bytes.len()
     };
     let original_nodes = forest.nodes().len();
-    let (compacted, _) = forest.compact();
-    let compacted_size = compacted.to_bytes().len();
-    let compacted_explicit_size = {
+    let (merged, _) = MastForest::merge([&forest]).into_diagnostic()?;
+    let merged_size = merged.to_bytes().len();
+    let merged_explicit_size = {
         let mut bytes = Vec::new();
-        compacted.write_into(&mut bytes);
+        merged.write_into(&mut bytes);
         bytes.len()
     };
-    let compacted_nodes = compacted.nodes().len();
+    let merged_nodes = merged.nodes().len();
 
     assert!(
-        compacted_size <= original_size,
-        "MastForest::compact increased serialized execution size: \
-         original={original_size}, compacted={compacted_size}, \
-         explicit={explicit_size}, compacted_explicit={compacted_explicit_size}, \
-         original_nodes={original_nodes}, compacted_nodes={compacted_nodes}"
+        merged_size <= original_size,
+        "MastForest self-merge increased serialized execution size: \
+         original={original_size}, merged={merged_size}, \
+         explicit={explicit_size}, merged_explicit={merged_explicit_size}, \
+         original_nodes={original_nodes}, merged_nodes={merged_nodes}"
     );
 
     Ok(())

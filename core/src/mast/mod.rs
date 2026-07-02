@@ -269,38 +269,6 @@ impl MastForest {
         id_remappings
     }
 
-    /// Compacts the forest by merging duplicate nodes.
-    ///
-    /// This operation performs node deduplication by merging the forest with itself.
-    /// This method consumes the forest and returns a new compacted forest.
-    ///
-    /// The process works by:
-    /// 1. Merging the forest with itself to deduplicate identical nodes
-    /// 2. Updating internal node references and remappings
-    /// 3. Returning the compacted forest and root map
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let forest = MastForest::new();
-    /// // Add nodes to the forest
-    ///
-    /// // Compact the forest (consumes the original)
-    /// let (compacted_forest, root_map) = forest.compact();
-    ///
-    /// // compacted_forest is now compacted with duplicate nodes merged
-    /// ```
-    pub fn compact(self) -> (MastForest, MastForestRootMap) {
-        // Merge with itself to deduplicate nodes
-        // Note: This cannot fail for a self-merge under normal conditions.
-        // The only possible failure (TooManyNodes) would require the original forest to be at a
-        // capacity limit, at which point compaction wouldn't help.
-        MastForest::merge([&self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge")
-    }
-
     /// Merges all `forests` into a new [`MastForest`].
     ///
     /// Merging two forests means combining all their constituent parts, i.e. [`MastNode`]s and
