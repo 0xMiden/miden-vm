@@ -196,3 +196,86 @@ const _: () = {
             == NUM_POSEIDON2_PERMUTATION_PERIODIC_COLUMNS
     );
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poseidon2_step_selectors_are_exclusive() {
+        let periodic = Poseidon2PermutationPeriodicCols::new();
+
+        for row in 0..HASH_CYCLE_LEN {
+            let init_ext = periodic.is_init_ext[row];
+            let ext = periodic.is_ext[row];
+            let packed_int = periodic.is_packed_int[row];
+            let int_ext = periodic.is_int_ext[row];
+
+            assert_eq!(init_ext * (init_ext - Felt::ONE), Felt::ZERO);
+            assert_eq!(ext * (ext - Felt::ONE), Felt::ZERO);
+            assert_eq!(packed_int * (packed_int - Felt::ONE), Felt::ZERO);
+            assert_eq!(int_ext * (int_ext - Felt::ONE), Felt::ZERO);
+
+            let sum = init_ext + ext + packed_int + int_ext;
+            assert!(sum == Felt::ZERO || sum == Felt::ONE, "selectors overlap on row {row}: {sum}");
+
+            if row == HASH_CYCLE_LEN - 1 {
+                assert_eq!(sum, Felt::ZERO);
+            } else {
+                assert_eq!(sum, Felt::ONE);
+            }
+        }
+    }
+
+    #[test]
+    fn poseidon2_external_round_constants_are_correct() {
+        let periodic = Poseidon2PermutationPeriodicCols::new();
+
+        for lane in 0..STATE_WIDTH {
+            assert_eq!(periodic.ark[lane][0], Hasher::ARK_EXT_INITIAL[0][lane]);
+
+            for row in 1..=3 {
+                assert_eq!(periodic.ark[lane][row], Hasher::ARK_EXT_INITIAL[row][lane]);
+            }
+
+            assert_eq!(periodic.ark[lane][11], Hasher::ARK_EXT_TERMINAL[0][lane]);
+            for row in 12..=14 {
+                assert_eq!(periodic.ark[lane][row], Hasher::ARK_EXT_TERMINAL[row - 11][lane]);
+            }
+        }
+    }
+
+    #[test]
+    fn poseidon2_internal_round_constants_are_correct() {
+        let periodic = Poseidon2PermutationPeriodicCols::new();
+
+        for triple in 0..7 {
+            let row = 4 + triple;
+            for lane in 0..NUM_SBOX_WITNESSES {
+                assert_eq!(
+                    periodic.ark[lane][row],
+                    Hasher::ARK_INT[triple * NUM_SBOX_WITNESSES + lane]
+                );
+            }
+
+            for lane in NUM_SBOX_WITNESSES..STATE_WIDTH {
+                assert_eq!(periodic.ark[lane][row], Felt::ZERO);
+            }
+        }
+    }
+
+    #[test]
+    fn poseidon2_boundary_row_is_zero() {
+        let periodic = Poseidon2PermutationPeriodicCols::new();
+        let row = HASH_CYCLE_LEN - 1;
+
+        assert_eq!(periodic.is_init_ext[row], Felt::ZERO);
+        assert_eq!(periodic.is_ext[row], Felt::ZERO);
+        assert_eq!(periodic.is_packed_int[row], Felt::ZERO);
+        assert_eq!(periodic.is_int_ext[row], Felt::ZERO);
+
+        for lane in 0..STATE_WIDTH {
+            assert_eq!(periodic.ark[lane][row], Felt::ZERO);
+        }
+    }
+}

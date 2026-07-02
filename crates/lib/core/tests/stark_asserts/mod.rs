@@ -172,21 +172,6 @@ fn init_seed_trace_length_too_large_has_message() {
 }
 
 #[test]
-fn generate_aux_randomness_mismatch_has_message() {
-    let source = "
-        use miden::core::stark::constants
-        use miden::core::stark::random_coin
-        begin
-            push.11.22.33.44 exec.constants::r1_ptr mem_storew_be dropw
-            push.99.44.11.22 exec.constants::aux_rand_nd_ptr mem_storew_be dropw
-            exec.random_coin::generate_aux_randomness
-        end
-    ";
-    let test = build_test!(source, &[]);
-    expect_assert_error_message!(test);
-}
-
-#[test]
 fn check_pow_invalid_has_message() {
     // Store query_pow_bits = 16 so check_pow actually exercises the PoW path.
     // Use a valid trace height so init_seed succeeds.

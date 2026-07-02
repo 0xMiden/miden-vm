@@ -7,7 +7,6 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         aux_width: 2,
         num_aux_boundary: 2,
         num_public: 5,
-        num_vlpi: 0,
         num_randomness: 2,
         num_periodic: 1,
         num_quotient_chunks: 2,
@@ -49,7 +48,7 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(layout.index(InputKey::IsFirst), Some(base + 3));
     assert_eq!(layout.index(InputKey::IsLast), Some(base + 4));
     assert_eq!(layout.index(InputKey::IsTransition), Some(base + 5));
-    assert_eq!(layout.index(InputKey::Gamma), Some(base + 6));
+    assert_eq!(layout.index(InputKey::Reserved), Some(base + 6));
     // Base-field values: slots 7-9
     assert_eq!(layout.index(InputKey::Weight0), Some(base + 7));
     assert_eq!(layout.index(InputKey::F), Some(base + 8));

@@ -3,7 +3,7 @@
 //! This module ties together the major layers:
 //! - build a verifier-style DAG from AIR constraints,
 //! - choose a READ layout for inputs,
-//! - emit a circuit that mirrors verifier evaluation.
+//! - emit a circuit that matches verifier evaluation.
 
 use miden_crypto::{
     field::{Algebra, ExtensionField, Field, TwoAdicField},
@@ -21,10 +21,6 @@ use crate::{
 };
 
 /// Layout strategy for arranging ACE inputs.
-///
-/// - `Native`: minimal, no alignment/padding; useful for native (off-VM) evaluation.
-/// - `Masm`: matches the recursive verifier READ layout (alignment, padding, and randomness
-///   ordering).
 #[derive(Debug, Clone, Copy)]
 pub enum LayoutKind {
     /// Minimal layout used for off-VM evaluation.
@@ -38,29 +34,22 @@ pub enum LayoutKind {
 pub struct AceConfig {
     /// Number of quotient chunks used by the AIR.
     pub num_quotient_chunks: usize,
-    /// Number of variable-length public input groups.
-    /// Each group produces one reduced extension field element.
-    /// The layout policy handles alignment (e.g., MASM word-aligns each group to
-    /// 2 EF slots; Native uses 1 EF slot per group).
-    pub num_vlpi_groups: usize,
-    /// Layout policy (Native vs Masm).
+    /// Layout policy.
     pub layout: LayoutKind,
+    /// Number of AIRs represented by the circuit layout.
+    pub num_airs: usize,
 }
 
-/// Output of the ACE codegen pipeline (layout + DAG).
+/// Output of the ACE codegen pipeline.
 #[derive(Debug)]
 pub struct AceArtifacts<EF> {
     /// Input layout describing the READ section order.
     pub layout: InputLayout,
-    /// DAG that mirrors the verifier evaluation.
+    /// DAG that matches verifier evaluation.
     pub dag: AceDag<EF>,
 }
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
-///
-/// This builds the constraint-evaluation DAG, validates layout invariants, and
-/// emits the off-VM circuit representation. The circuit performs the constraint
-/// evaluation check at the out-of-domain point z.
 pub fn build_ace_circuit_for_air<A, F, EF>(
     air: &A,
     config: AceConfig,
@@ -86,11 +75,19 @@ where
     EF: ExtensionField<F>,
     SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
+    if config.num_airs == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "num_airs must be at least 1".into(),
+        });
+    }
+
     let periodic_columns = air.periodic_columns();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
-    let layout = match config.layout {
-        LayoutKind::Native => InputLayout::new(counts),
-        LayoutKind::Masm => InputLayout::new_masm(counts),
+    let layout = match (config.layout, config.num_airs >= 2) {
+        (LayoutKind::Native, false) => InputLayout::new(counts),
+        (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
+        (LayoutKind::Native, true) => InputLayout::new_multi_air(counts, config.num_airs),
+        (LayoutKind::Masm, true) => InputLayout::new_masm_multi_air(counts, config.num_airs),
     };
     layout.validate();
 
@@ -140,20 +137,11 @@ where
         "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
     );
 
-    // Convert logical VLPI groups to EF slots based on layout policy.
-    // MASM word-aligns each group (4 base felts = 2 EF slots per group).
-    // Native uses 1 EF slot per group (no padding).
-    let num_vlpi = match config.layout {
-        LayoutKind::Masm => config.num_vlpi_groups * 2,
-        LayoutKind::Native => config.num_vlpi_groups,
-    };
-
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),
         num_public: air.num_public_values(),
-        num_vlpi,
         num_randomness,
         num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,

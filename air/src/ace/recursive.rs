@@ -4,13 +4,13 @@ use miden_ace_codegen::{AceConfig, AceError, LayoutKind};
 use miden_core::{Felt, Word};
 
 use super::multi_air::build_multi_air_ace_circuit_for_order;
-use crate::ProofOrder;
+use crate::{MIDEN_AIR_COUNT, ProofOrder};
 
 /// ACE codegen settings used by the recursive verifier's MASM evaluator.
 const RECURSIVE_VERIFIER_ACE_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
-    num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
+    num_airs: MIDEN_AIR_COUNT,
 };
 
 /// Encoded recursive-verifier ACE circuit and the metadata consumed by MASM.

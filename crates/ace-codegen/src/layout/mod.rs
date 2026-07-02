@@ -1,6 +1,6 @@
 //! Input layout definitions for ACE circuit evaluation.
 //!
-//! The layout mirrors the MASM verifier READ section: values are stored as
+//! The layout matches the MASM verifier READ section: values are stored as
 //! extension-field elements in point-major order (all openings at `zeta`
 //! followed by all openings at `g * zeta`). Auxiliary trace and quotient
 //! chunk openings are provided as base-field coordinates and merged into
@@ -18,8 +18,8 @@
 //! - Lagrange-kernel weights and shifts for quotient chunk recomposition.
 //! - Constraint folding with the composition challenge and final root check.
 //!
-//! The current "stark vars" block provides precomputed selectors and the
-//! Lagrange-kernel weights used in quotient chunk recomposition:
+//! The "stark vars" block provides precomputed selectors and the Lagrange-kernel weights used in
+//! quotient chunk recomposition:
 //! - Precomputed selectors (computed in MASM, supplied as inputs):
 //!   - `is_first = (z^N - 1) / (z - 1)`
 //!   - `is_last  = (z^N - 1) / (z - g^{-1})`
@@ -32,16 +32,15 @@
 //!
 //! Layout order (both Native and Masm):
 //! 1) public_values
-//! 2) vlpi_reductions
-//! 3) aux randomness (alpha/beta)
-//! 4) main_curr
-//! 5) aux_curr
-//! 6) quotient_curr
-//! 7) main_next
-//! 8) aux_next
-//! 9) quotient_next
-//! 10) aux_bus_boundary
-//! 11) stark_vars
+//! 2) aux randomness (alpha/beta)
+//! 3) main_curr
+//! 4) aux_curr
+//! 5) quotient_curr
+//! 6) main_next
+//! 7) aux_next
+//! 8) quotient_next
+//! 9) aux_bus_boundary
+//! 10) stark_vars
 //!
 //! Notes:
 //! - `quotient_next` is included in the READ layout and is mapped via

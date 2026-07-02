@@ -14,7 +14,6 @@ fn minimal_layout(num_public: usize) -> InputLayout {
         aux_width: 0,
         num_aux_boundary: 0,
         num_public,
-        num_vlpi: 0,
         num_randomness: 2,
         num_periodic: 0,
         num_quotient_chunks: 1,
@@ -101,4 +100,28 @@ fn ace_simple_circuit_with_shared_terms() {
 
     let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero());
+}
+
+#[test]
+fn ace_encoding_rejects_non_final_root() {
+    let layout = minimal_layout(2);
+
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let b = builder.input(InputKey::Public(1));
+    let root = builder.add(a, b);
+    let _dead_op = builder.mul(root, b);
+
+    let dag = builder.build(root);
+    let circuit = emit_circuit(&dag, layout).expect("emit circuit");
+    let err = circuit.to_ace().expect_err("non-final root should be rejected");
+
+    assert!(
+        matches!(
+            err,
+            crate::AceError::InvalidInputLayout { ref message }
+                if message.contains("root must be the last operation")
+        ),
+        "expected non-final root layout error, got {err:?}"
+    );
 }

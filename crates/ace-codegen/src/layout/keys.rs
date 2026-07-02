@@ -10,13 +10,12 @@ const AIR_SELECTOR_TRANSITION_OFFSET: usize = 2;
 pub enum InputKey {
     /// Public input at the given index.
     Public(usize),
-    /// Aux randomness α supplied as an input.
+    /// Aux randomness alpha supplied as an input.
     AuxRandAlpha,
-    /// Aux randomness β supplied as an input.
+    /// Aux randomness beta supplied as an input.
     AuxRandBeta,
-    /// Multi-AIR beta challenge used to fold per-AIR constraint roots in proof order.
-    /// Only present in multi-AIR layouts.
-    MultiAirBeta,
+    /// Challenge used to fold per-AIR constraint roots in proof order.
+    MultiAirFoldBeta,
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
@@ -27,11 +26,8 @@ pub enum InputKey {
     },
     /// Aux bus boundary value at the given index.
     AuxBusBoundary(usize),
-    /// Variable-length public input reduction at the given group index.
-    VlpiReduction(usize),
-    /// Batching challenge gamma for combining the constraint evaluation with the
-    /// auxiliary trace boundary checks.
-    Gamma,
+    /// Reserved stark-vars slot, kept zero.
+    Reserved,
     /// Composition challenge used to fold constraints.
     Alpha,
     /// `zeta^N`, where `N` is the trace length.
@@ -40,17 +36,15 @@ pub enum InputKey {
     ZK,
     /// Precomputed first-row selector: `(z^N - 1) / (z - 1)`.
     IsFirst,
-    /// Precomputed last-row selector: `(z^N - 1) / (z - g^{-1})`.
+    /// Precomputed last-row selector: `(z^N - 1) / (z - g^-1)`.
     IsLast,
-    /// Precomputed transition selector: `z - g^{-1}`.
+    /// Precomputed transition selector: `z - g^-1`.
     IsTransition,
     /// Per-AIR lifted first-row selector.
-    ///
-    /// The index is the AIR's instance index. Only present in multi-AIR layouts.
     IsFirstAir(usize),
-    /// Per-AIR lifted last-row selector. The index is the AIR's instance index.
+    /// Per-AIR lifted last-row selector.
     IsLastAir(usize),
-    /// Per-AIR lifted transition selector. The index is the AIR's instance index.
+    /// Per-AIR lifted transition selector.
     IsTransitionAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
@@ -67,7 +61,7 @@ pub enum InputKey {
     },
 }
 
-/// Canonical InputKey → index mapping for a given layout.
+/// Canonical InputKey -> index mapping for a given layout.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct InputKeyMapper<'a> {
     pub(super) layout: &'a InputLayout,
@@ -81,7 +75,7 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
-            InputKey::MultiAirBeta => layout.stark.multi_air_beta_index(),
+            InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),
@@ -99,11 +93,7 @@ impl InputKeyMapper<'_> {
                 }
             },
             InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::VlpiReduction(i) => {
-                let local = i * layout.vlpi_stride;
-                layout.regions.vlpi_reductions.index(local)
-            },
-            // Extension-field stark vars.
+            InputKey::Reserved => Some(layout.stark.reserved),
             InputKey::Alpha => Some(layout.stark.alpha),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),
             InputKey::ZK => Some(layout.stark.z_k),
@@ -117,8 +107,6 @@ impl InputKeyMapper<'_> {
             InputKey::IsTransitionAir(i) => {
                 layout.stark.air_selector_index(i, AIR_SELECTOR_TRANSITION_OFFSET)
             },
-            InputKey::Gamma => Some(layout.stark.gamma),
-            // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),
             InputKey::F => Some(layout.stark.f),
             InputKey::S0 => Some(layout.stark.s0),

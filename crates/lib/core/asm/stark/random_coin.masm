@@ -245,7 +245,7 @@ end
 #!
 #! The relation wrapper stores RELATION_DIGEST before calling the generic verifier.
 #!
-#! Currently assumes a blowup factor equal to 8.
+#! The blowup factor is fixed to 8.
 #!
 #! Precondition: security parameters, relation digest, and trace-height metadata must already be
 #! stored in memory before calling this procedure.
@@ -539,15 +539,11 @@ end
 #! Draw a list of random extension field elements related to the auxiliary segment of the execution
 #! trace and store them.
 #!
-#! More specifically, we draw two challenges, alpha and beta. This means that our multi-set hash function
-#! has the form `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` for a message `m`.
-#!
-#! As these random challenges have already been used non-deterministically in prior computations, we
-#! also check that the generated challenges match the non-deterministically provided one.
+#! Draws alpha and beta for the LogUp multiset hash
+#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i`.
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 20
 pub proc generate_aux_randomness
 
     exec.sample_ext
@@ -555,46 +551,24 @@ pub proc generate_aux_randomness
     # => [beta0, beta1, alpha0, alpha1, ...]
 
     exec.constants::aux_rand_elem_ptr mem_storew_le
-    # => [beta0, beta1, alpha0, alpha1, ...]
-
-    # Pad with zeros, load with mem_loadw_le overwriting the padding so that we can compare
-    padw
-    # => [0, 0, 0, 0, beta0, beta1, alpha0, alpha1, ...]
-    exec.constants::aux_rand_nd_ptr mem_loadw_le
-    # => [nd_beta0, nd_beta1, nd_alpha0, nd_alpha1, beta0, beta1, alpha0, alpha1, ...]
-
-    # Assert sampled values match the non-deterministically provided ones.
-    # Comparison order: beta0, beta1, alpha0, alpha1 (memory offset 0, 1, 2, 3).
-    movup.4 assert_eq.err="aux randomness mismatch at element 0 (beta0)"
-    movup.3 assert_eq.err="aux randomness mismatch at element 1 (beta1)"
-    movup.2 assert_eq.err="aux randomness mismatch at element 2 (alpha0)"
-    assert_eq.err="aux randomness mismatch at element 3 (alpha1)"
-    #=> [...]
+    dropw
+    # => [...]
 end
 
-#! Draw constraint composition random coefficient and save it at `compos_coef_ptr`.
+#! Draw the constraint-composition challenges.
+#! Stores `[alpha0, alpha1, beta0, beta1]` at `composition_coef_ptr`. The generic verifier uses
+#! `alpha` for constraint folding. Relation-specific code may use `beta` for its own folding
+#! layout.
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 13
 pub proc generate_constraint_composition_coefficients
-    # Sample alpha (constraint folding challenge).
     exec.sample_ext
-    push.0.0
-    movup.3
-    movup.3
-    exec.constants::composition_coef_ptr
-    mem_storew_le dropw
-
-    # Sample beta for proof-order Horner folding, then write Word 5:
-    # [multi_air_beta_0, multi_air_beta_1, reserved, reserved].
     exec.sample_ext
-    # => [β_0, β_1, ...]
-    push.0.0
-    # => [0, 0, β_0, β_1, ...]
+    # => [beta0, beta1, alpha0, alpha1, ...]
     movup.3 movup.3
-    # => [β_0, β_1, 0, 0, ...]
-    exec.constants::auxiliary_ace_inputs_ptr add.20
+    # => [alpha0, alpha1, beta0, beta1, ...]
+    exec.constants::composition_coef_ptr
     mem_storew_le dropw
 end
 

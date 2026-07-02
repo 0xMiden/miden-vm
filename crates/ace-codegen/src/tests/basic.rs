@@ -104,7 +104,7 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::IsFirst, ef(47));
     set(InputKey::IsLast, ef(43));
     set(InputKey::IsTransition, ef(2) - ef(3));
-    set(InputKey::Gamma, ef(53));
+    set(InputKey::Reserved, ef(53));
     set(InputKey::Weight0, ef(31));
     set(InputKey::F, ef(37));
     set(InputKey::S0, ef(41));
@@ -122,8 +122,8 @@ fn test_verifier_dag_matches_manual_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -164,8 +164,8 @@ fn test_emitted_circuit_matches_dag_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -178,12 +178,28 @@ fn test_emitted_circuit_matches_dag_eval() {
 }
 
 #[test]
+fn pipeline_rejects_zero_airs() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+        num_airs: 0,
+    };
+
+    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    assert!(
+        matches!(err, crate::AceError::InvalidInputLayout { .. }),
+        "expected InvalidInputLayout, got {err:?}"
+    );
+}
+
+#[test]
 fn test_encoded_circuit_structure() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();

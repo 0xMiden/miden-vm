@@ -17,16 +17,16 @@ const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 5531081183747657585
-const RELATION_DIGEST_1 = 460361843215081769
-const RELATION_DIGEST_2 = 3381402192025193674
-const RELATION_DIGEST_3 = 2886510812575434322
+const RELATION_DIGEST_0 = 3612980804699817044
+const RELATION_DIGEST_1 = 8451738781606710415
+const RELATION_DIGEST_2 = 1394764538849721182
+const RELATION_DIGEST_3 = 14200508558721316877
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 4200708096623888928
-const ACE_REGISTRY_ROOT_1 = 16802930109262933554
-const ACE_REGISTRY_ROOT_2 = 9257830328934161454
-const ACE_REGISTRY_ROOT_3 = 728428326465517893
+const ACE_REGISTRY_ROOT_0 = 5350936486345964173
+const ACE_REGISTRY_ROOT_1 = 9671725353429978756
+const ACE_REGISTRY_ROOT_2 = 11780002168902008396
+const ACE_REGISTRY_ROOT_3 = 11242058310178775051
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -183,13 +183,23 @@ end
 #! - The wrapper records the AIR context before calling the generic STARK verifier.
 #! - The constraints evaluator authenticates the ACE program selected by the derived proof order.
 #!
-#! Inputs:  []
+#! The kernel-procedure digests and the stack i/o are read from caller memory at the
+#! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
+#! transcript state is loaded from the advice stack. `verify_proof` stages the reduced-inputs
+#! block before the transcript starts.
+#!
+#! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
 #! Outputs: []
 pub proc verify_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
+    # => [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
+
+    # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
+
+    exec.public_inputs::stage_reduced_inputs
     # => [...]
 
     exec.load_air_context

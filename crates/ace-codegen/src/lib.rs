@@ -2,7 +2,7 @@
 //!
 //! The pipeline is:
 //! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
-//! 2. Lower symbolic expressions into a DAG that mirrors verifier constraints evaluation.
+//! 2. Lower symbolic expressions into a DAG that matches verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
 //! The resulting circuit is intended to run inside the recursive verifier. All
@@ -16,7 +16,7 @@
 //! use miden_air::ChipletsAir;
 //! use miden_core::{Felt, field::QuadFelt};
 //!
-//! let config = AceConfig { num_quotient_chunks: 8, num_vlpi_groups: 1, layout: LayoutKind::Masm };
+//! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm, num_airs: 1 };
 //! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ChipletsAir, config)?;
 //! ```
 //!

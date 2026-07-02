@@ -87,20 +87,20 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(5531081183747657585),
-    Felt::new_unchecked(460361843215081769),
-    Felt::new_unchecked(3381402192025193674),
-    Felt::new_unchecked(2886510812575434322),
+    Felt::new_unchecked(3612980804699817044),
+    Felt::new_unchecked(8451738781606710415),
+    Felt::new_unchecked(1394764538849721182),
+    Felt::new_unchecked(14200508558721316877),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(4200708096623888928),
-    Felt::new_unchecked(16802930109262933554),
-    Felt::new_unchecked(9257830328934161454),
-    Felt::new_unchecked(728428326465517893),
+    Felt::new_unchecked(5350936486345964173),
+    Felt::new_unchecked(9671725353429978756),
+    Felt::new_unchecked(11780002168902008396),
+    Felt::new_unchecked(11242058310178775051),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -117,40 +117,40 @@ pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEP
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(12531639491665599770),
-        Felt::new_unchecked(17241365171794198305),
-        Felt::new_unchecked(14568280247544935403),
-        Felt::new_unchecked(2601405129360808997),
+        Felt::new_unchecked(18328373710584161736),
+        Felt::new_unchecked(7543487560786780045),
+        Felt::new_unchecked(9030428469415363051),
+        Felt::new_unchecked(15555277161351350417),
     ],
     [
-        Felt::new_unchecked(12108221902743691549),
-        Felt::new_unchecked(3740451213178297120),
-        Felt::new_unchecked(17653088437989362114),
-        Felt::new_unchecked(6601504528400081128),
+        Felt::new_unchecked(15751889535770340666),
+        Felt::new_unchecked(9647581229979897629),
+        Felt::new_unchecked(18054540605206848789),
+        Felt::new_unchecked(1057235226678338816),
     ],
     [
-        Felt::new_unchecked(6374774577986370323),
-        Felt::new_unchecked(7153574757483208810),
-        Felt::new_unchecked(3490067141982474516),
-        Felt::new_unchecked(16396354734119221871),
+        Felt::new_unchecked(18412565999427034082),
+        Felt::new_unchecked(4403492030897755),
+        Felt::new_unchecked(8476538168244723704),
+        Felt::new_unchecked(5906428015432945229),
     ],
     [
-        Felt::new_unchecked(17051341590177660465),
-        Felt::new_unchecked(4856885966576194941),
-        Felt::new_unchecked(18214240781597451554),
-        Felt::new_unchecked(15588086588698225338),
+        Felt::new_unchecked(118628321607645926),
+        Felt::new_unchecked(3681600524822368195),
+        Felt::new_unchecked(13716794233262176137),
+        Felt::new_unchecked(16602371413035877200),
     ],
     [
-        Felt::new_unchecked(13369448781528702756),
-        Felt::new_unchecked(11770107173758864857),
-        Felt::new_unchecked(11396425885432936384),
-        Felt::new_unchecked(2731546776265885158),
+        Felt::new_unchecked(712578240619045370),
+        Felt::new_unchecked(15502053786676963286),
+        Felt::new_unchecked(1221903534160993585),
+        Felt::new_unchecked(12240527606336924375),
     ],
     [
-        Felt::new_unchecked(7969903739856862717),
-        Felt::new_unchecked(243814296011888051),
-        Felt::new_unchecked(7171780900411118811),
-        Felt::new_unchecked(9007205853735440021),
+        Felt::new_unchecked(12175128083388173771),
+        Felt::new_unchecked(16614999614141036059),
+        Felt::new_unchecked(8403178353622709440),
+        Felt::new_unchecked(4040509629096709434),
     ],
     [
         Felt::new_unchecked(1422687632582465263),

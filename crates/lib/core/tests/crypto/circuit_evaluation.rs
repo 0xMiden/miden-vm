@@ -1,4 +1,5 @@
 use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
+use miden_air::MIDEN_AIR_COUNT;
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStackBuilder,
@@ -93,8 +94,8 @@ fn multi_air_eval_circuit_masm() {
     // circuit.
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
     };
     let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(
         config,

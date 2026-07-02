@@ -10,14 +10,12 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use super::boundary::{batch_logup_boundary_into_builder, multi_air_logup_boundary_config};
 use crate::{AIRS, MIDEN_AIR_COUNT, MidenAir, ProofOrder};
 
 /// Build the combined ACE circuit for the supplied proof order.
 ///
-/// The output circuit evaluates `combined + gamma * boundary = 0`, where `combined` is the
-/// proof-order Horner fold of the per-AIR alpha-folded roots, and `boundary` is the shared LogUp
-/// auxiliary-boundary identity.
+/// The output circuit evaluates the proof-order Horner fold of the per-AIR alpha-folded
+/// constraint roots.
 pub fn build_multi_air_ace_circuit_for_order<EF>(
     config: AceConfig,
     order: &ProofOrder,
@@ -28,9 +26,19 @@ where
 {
     const LMCS_ALIGNMENT: usize = 8;
 
+    if config.num_airs != MIDEN_AIR_COUNT {
+        return Err(AceError::InvalidInputLayout {
+            message: format!(
+                "Miden multi-AIR circuit expects {MIDEN_AIR_COUNT} AIRs, got {}",
+                config.num_airs
+            ),
+        });
+    }
+
+    let sub_config = AceConfig { num_airs: 1, ..config };
     let mut sub_dags = Vec::with_capacity(AIRS.len());
     for air in AIRS.iter().copied() {
-        let artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&air, config)?;
+        let artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&air, sub_config)?;
         sub_dags.push(build_air_sub_dag::<EF>(air, artifacts, LMCS_ALIGNMENT));
     }
 
@@ -51,12 +59,11 @@ where
             })?;
     for sub_dag in &sub_dags {
         if sub_dag.counts.num_public != reference_counts.num_public
-            || sub_dag.counts.num_vlpi != reference_counts.num_vlpi
             || sub_dag.counts.num_quotient_chunks != reference_counts.num_quotient_chunks
         {
             return Err(AceError::InvalidInputLayout {
                 message: format!(
-                    "{} AIR has incompatible public/VLPI/quotient counts",
+                    "{} AIR has incompatible public/quotient counts",
                     sub_dag.air.name()
                 ),
             });
@@ -68,7 +75,6 @@ where
         aux_width: combined_aux_w,
         num_aux_boundary: total_aux_values,
         num_public: reference_counts.num_public,
-        num_vlpi: reference_counts.num_vlpi,
         num_randomness: 2,
         num_periodic: total_periodic_columns,
         num_quotient_chunks: config.num_quotient_chunks,
@@ -122,23 +128,20 @@ where
         message: "multi-AIR circuit did not emit any AIR roots".into(),
     })?;
 
-    let beta = builder.input(InputKey::MultiAirBeta);
+    let fold_beta = builder.input(InputKey::MultiAirFoldBeta);
     let mut ordered = order.airs().iter().copied();
     let first_air = ordered.next().ok_or_else(|| AceError::InvalidInputLayout {
         message: "proof order must contain at least one AIR".into(),
     })?;
     let mut combined_acc = acc_for_air(&acc_by_air, first_air)?;
     for air in ordered {
-        let scaled = builder.mul(combined_acc, beta);
+        let scaled = builder.mul(combined_acc, fold_beta);
         combined_acc = builder.add(scaled, acc_for_air(&acc_by_air, air)?);
     }
 
     let combined_constraint = builder.sub(combined_acc, shared_qv);
-    let boundary_config = multi_air_logup_boundary_config(total_aux_values);
-    let final_root =
-        batch_logup_boundary_into_builder(&mut builder, combined_constraint, &boundary_config);
 
-    let combined_dag = builder.build(final_root);
+    let combined_dag = builder.build(combined_constraint);
     miden_ace_codegen::emit_circuit(&combined_dag, combined_layout)
 }
 

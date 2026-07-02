@@ -4,7 +4,7 @@
 //! evaluates the same ACE circuit in Rust.
 
 use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
+use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
@@ -18,6 +18,46 @@ use miden_processor::{ContextId, ExecutionOutput};
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
 const ORDER_TAG_PTR: u32 = 3223322764;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
+const OOD_EVALUATIONS_PTR: u32 = 3225419784;
+const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;
+const AUXILIARY_ACE_INPUTS_PTR: u32 = 3225420336;
+const ACE_CIRCUIT_STREAM_PTR: u32 = 3225420376;
+
+fn recursive_verifier_layout() -> InputLayout {
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    };
+
+    build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &ProofOrder::instance_order())
+        .expect("multi-AIR ace circuit")
+        .layout()
+        .clone()
+}
+
+#[test]
+fn ace_read_pointers_match_masm_layout() {
+    let layout = recursive_verifier_layout();
+
+    let beta = layout.index(InputKey::AuxRandBeta).expect("aux randomness beta");
+    let alpha = layout.index(InputKey::AuxRandAlpha).expect("aux randomness alpha");
+    let main_curr = layout.index(InputKey::Main { offset: 0, index: 0 }).expect("main curr");
+    let aux_bus = layout.index(InputKey::AuxBusBoundary(0)).expect("aux bus boundary");
+    let stark_vars = layout.index(InputKey::Alpha).expect("stark vars");
+
+    assert_eq!(alpha, beta + 1);
+    assert_eq!(OOD_EVALUATIONS_PTR - AUX_RAND_ELEM_PTR, 2 * (main_curr - beta) as u32);
+    assert_eq!(AUX_BUS_BOUNDARY_PTR - OOD_EVALUATIONS_PTR, 2 * (aux_bus - main_curr) as u32);
+    assert_eq!(
+        AUXILIARY_ACE_INPUTS_PTR - AUX_BUS_BOUNDARY_PTR,
+        2 * (stark_vars - aux_bus) as u32
+    );
+    assert_eq!(
+        ACE_CIRCUIT_STREAM_PTR - AUXILIARY_ACE_INPUTS_PTR,
+        2 * (layout.total_inputs - stark_vars) as u32
+    );
+}
 
 // EXTRACTION
 // ================================================================================================
@@ -71,7 +111,6 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
-    assert!(!get(InputKey::Gamma).is_zero(), "gamma is zero");
 
     // Vanishing polynomial
     assert!(
@@ -104,8 +143,8 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
     };
 
     let order = extract_order(output);

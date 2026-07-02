@@ -1,6 +1,7 @@
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::random_coin
+use miden::core::sys::vm::public_inputs
 
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
@@ -11,7 +12,10 @@ use miden::core::stark::random_coin
 #!   [commitment, aux0, aux1, aux2]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
-#! aux_bus_boundary_ptr.
+#! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
+#! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
+#! step I), then asserts `c_total + aux_sum == 0`, where `aux_sum` is the sum of the
+#! per-AIR LogUp finals. The sum is independent of proof order.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -21,6 +25,11 @@ use miden::core::stark::random_coin
 pub proc observe_aux_trace
     # Draw random extension field elements for the auxiliary trace.
     exec.random_coin::generate_aux_randomness
+    # => [...]
+
+    # Compute the outer-LogUp boundary correction `c_total` from the sampled aux randomness
+    # and the statement values staged before the transcript starts.
+    exec.public_inputs::compute_outer_logup_correction
     # => [...]
 
     # Assert precondition: input buffer must be empty.
@@ -69,4 +78,24 @@ pub proc observe_aux_trace
 
     # Fresh output available.
     push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+    # --- Outer-LogUp boundary check: assert c_total + aux_sum == 0 coordinate-wise ---
+
+    # aux_sum = sum of the three per-AIR LogUp finals absorbed above.
+    padw exec.constants::aux_bus_boundary_ptr mem_loadw_le
+    # => [b0_0, b0_1, b1_0, b1_1, ...]
+    ext2add
+    # => [sum0, sum1, ...]
+    exec.constants::aux_bus_boundary_ptr add.5 mem_load
+    exec.constants::aux_bus_boundary_ptr add.4 mem_load
+    # => [b2_0, b2_1, sum0, sum1, ...]
+    ext2add
+    # => [sum0, sum1, ...]
+    exec.constants::c_total_ptr add.1 mem_load
+    exec.constants::c_total_ptr mem_load
+    # => [c_total0, c_total1, sum0, sum1, ...]
+    ext2add
+    # => [r0, r1, ...]
+    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 0"
+    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 1"
 end

@@ -82,7 +82,40 @@ fn assert_recursive_verify(
 
     let source = "
         use miden::core::sys::vm
+
+        # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
+        #   Input:  [dst, count, ...]
+        #   Output: [...]
+        proc copy_advice_to_mem
+            dup.1 push.0 neq
+            while.true
+                # [dst, count, ...]
+                padw adv_loadw
+                # [w0, w1, w2, w3, dst, count, ...]
+                dup.4 mem_storew_le dropw
+                # [dst, count, ...]
+                add.4
+                # [dst+4, count, ...]
+                swap sub.4 swap
+                # [dst+4, count-4, ...]
+                dup.1 push.0 neq
+            end
+            drop drop
+        end
+
         begin
+            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
+
+            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
+            # (kernel_ptr = 0). Build [dst=0, count=4N].
+            dup.1 mul.4 push.0
+            exec.copy_advice_to_mem
+
+            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
+            # Build [dst=4096, count=32].
+            push.32 push.4096
+            exec.copy_advice_to_mem
+
             exec.vm::verify_proof
         end
     ";
@@ -169,7 +202,7 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Equal-heights regression: tiny program where both AIRs land at MIN_TRACE_LEN.
+/// Equal-heights regression: tiny program where every AIR lands at MIN_TRACE_LEN.
 /// Catches mistakes in the MASM `air_order` reconstruction's tie-break rule.
 #[test]
 fn test_equal_heights_recursive() {
@@ -181,8 +214,8 @@ fn test_equal_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
-/// Hash-heavy program where `chip_height > core_height`. Regression for the
-/// per-AIR-height boundary handling on the SLICED Core trace.
+/// Hash-heavy program where chiplets grow beyond the core trace. Regression for per-AIR-height
+/// boundary handling on the sliced core trace.
 #[test]
 fn test_hash_heavy_divergent_heights() {
     let source = "
@@ -300,7 +333,7 @@ mod fast_parallel {
         let trace = build_trace(trace_inputs).unwrap();
 
         // Build public inputs
-        let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+        let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
         // Per-AIR matrices for prove_multi.
         let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.to_air_matrices();
@@ -313,7 +346,7 @@ mod fast_parallel {
             chiplets_matrix,
             poseidon2_matrix,
             &public_values,
-            &kernel_felts,
+            &aux_inputs,
         )
         .expect("Proving failed");
 

@@ -3,16 +3,18 @@
 //! The Rust side parses the proof transcript, then provides the stack, Merkle store,
 //! and advice-map entries consumed by `crates/lib/core/asm/stark`.
 //!
-//! The advice stack ordering must match the MASM consumption order exactly:
+//! The advice stack ordering must match the MASM consumption order exactly. The kernel digests and
+//! stack i/o lead the tape because the test marshalling in `run_recursive_verifier` copies them
+//! into caller-owned memory before `verify_proof` runs:
 //!
+//!   kernel_digests -> stack i/o ->
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   Miden AIR heights ->
-//!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
-//!   aux randomness -> main commit -> aux commit ->
+//!   transcript state -> Miden AIR heights -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
-//! See `build_advice` for the authoritative layout.
+//! The program digest, kernel digest count, and kernel/stack-i/o pointers are supplied on the
+//! initial operand stack. See `build_advice` for the authoritative layout.
 
 use alloc::{
     string::{String, ToString},
@@ -95,16 +97,13 @@ pub fn generate_advice_inputs(
     )
     .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
-    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+    let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    let statement = Statement::<Felt, QuadFelt, _>::new(
-        MidenMultiAir::new(),
-        public_values,
-        kernel_felts.clone(),
-    )
-    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let statement =
+        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
     let verifier_instance = VerifierInstance::new(&config, &statement, None)
         .expect("Miden AIRs declare no preprocessed columns");
 
@@ -112,10 +111,7 @@ pub fn generate_advice_inputs(
 
     let heights = miden_trace_heights(&stark)?;
 
-    let kernel_digests: Vec<Word> = kernel_felts
-        .chunks_exact(4)
-        .map(|c| Word::new([c[0], c[1], c[2], c[3]]))
-        .collect();
+    let kernel_digests: Vec<Word> = pub_inputs.program_info().kernel_procedures().to_vec();
 
     build_advice(&config, &stark, heights, pub_inputs, &kernel_digests)
 }
@@ -140,8 +136,9 @@ fn miden_trace_heights(
 
 /// Packs the parsed STARK transcript into the advice inputs consumed by the MASM verifier.
 ///
-/// The initial operand stack is empty. The advice stack receives security parameters first, then
-/// the per-AIR heights and all remaining data in the order listed in the module doc.
+/// The initial operand stack contains caller pointers, the kernel digest count, and the program
+/// digest. The advice stack starts with data copied into caller memory by the test prologue, then
+/// continues in the order consumed by the verifier.
 fn build_advice(
     config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
@@ -154,8 +151,35 @@ fn build_advice(
         return Err(VerifierError::InvalidProofShape("unexpected number of aux-final groups"));
     }
 
-    let initial_stack = vec![];
+    // Caller-owned memory regions consumed by the test marshalling in `run_recursive_verifier`:
+    // kernel digests at KERNEL_PTR, stack i/o at STACK_IO_PTR. These must match the constants in
+    // that MASM prologue.
+    const KERNEL_PTR: u64 = 0;
+    const STACK_IO_PTR: u64 = 4096;
+
+    let num_kernel_proc_digests = kernel_digests.len();
+    let program_digest: Word = *pub_inputs.program_info().program_hash();
+    let program_digest = program_digest.as_elements();
+
+    // `kernel_ptr` is on top. `StackInputs::try_from_ints` puts `vec[0]` on top.
+    let initial_stack = vec![
+        KERNEL_PTR,
+        num_kernel_proc_digests as u64,
+        STACK_IO_PTR,
+        program_digest[0].as_canonical_u64(),
+        program_digest[1].as_canonical_u64(),
+        program_digest[2].as_canonical_u64(),
+        program_digest[3].as_canonical_u64(),
+    ];
+
     let mut advice_stack = Vec::new();
+
+    // Kernel procedure digests are copied into the caller region at KERNEL_PTR.
+    let kernel_advice = build_kernel_digest_advice(kernel_digests);
+    advice_stack.extend_from_slice(&kernel_advice);
+
+    // Stack i/o is copied into the caller region at STACK_IO_PTR.
+    advice_stack.extend_from_slice(&build_stack_io_advice(&pub_inputs));
 
     // Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
     let params = config::pcs_params();
@@ -167,33 +191,13 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
+    // Transcript state, loaded by `public_inputs::stage_reduced_inputs`.
+    advice_stack
+        .extend(pub_inputs.pc_transcript_state().as_ref().iter().map(Felt::as_canonical_u64));
+
     for height in heights.instance_order {
         advice_stack.push(height as u64);
     }
-
-    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
-    advice_stack.extend_from_slice(&fixed_len_inputs);
-
-    advice_stack.push(kernel_digests.len() as u64);
-
-    let kernel_advice = build_kernel_digest_advice(kernel_digests);
-    advice_stack.extend_from_slice(&kernel_advice);
-
-    if stark.randomness.len() < 2 {
-        return Err(VerifierError::InvalidProofShape(
-            "expected at least two randomness challenges",
-        ));
-    }
-    let alpha = stark.randomness[0];
-    let beta = stark.randomness[1];
-    let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
-    let alpha_coeffs: &[Felt] = alpha.as_basis_coefficients_slice();
-    advice_stack.extend_from_slice(&[
-        beta_coeffs[0].as_canonical_u64(),
-        beta_coeffs[1].as_canonical_u64(),
-        alpha_coeffs[0].as_canonical_u64(),
-        alpha_coeffs[1].as_canonical_u64(),
-    ]);
 
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
@@ -371,35 +375,24 @@ where
     Ok((vec![tree], advice_entries))
 }
 
-/// Build kernel digest advice data.
-///
-/// Each digest (4 elements) is padded to 8 elements with zeros, then reversed. This matches
-/// the format used by the MASM `reduce_kernel_digests` procedure which uses `mem_stream` +
-/// `horner_eval_base` to process digests in 8-element chunks.
+/// Build kernel digest advice data: 4 canonical felts per digest, in order. The test marshalling
+/// copies these felts into the caller-owned kernel region at KERNEL_PTR, which `verify_proof`
+/// hashes with `hash_elements` to recompute the kernel commitment.
 fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
-    let mut result = Vec::with_capacity(kernel_digests.len() * 8);
+    let mut result = Vec::with_capacity(kernel_digests.len() * 4);
     for digest in kernel_digests {
-        let mut padded: Vec<u64> =
-            digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
-        padded.resize(8, 0);
-        padded.reverse();
-        result.extend_from_slice(&padded);
+        result.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
     }
     result
 }
 
-/// Build the fixed-length public inputs in the order the MASM random coin observes them.
-///
-/// Must stay in sync with `PublicInputs::to_air_inputs()`.
-fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
+/// Build the fixed-length public inputs (stack i/o): stack inputs (16), stack outputs (16). The
+/// test marshalling copies these 32 felts into the caller-owned region at STACK_IO_PTR.
+fn build_stack_io_advice(pub_inputs: &PublicInputs) -> Vec<u64> {
     let mut felts = Vec::<Felt>::new();
-    felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
-    let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
-    fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
-    fixed_len
+    felts.iter().map(Felt::as_canonical_u64).collect()
 }
 
 fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {

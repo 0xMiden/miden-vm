@@ -5,7 +5,7 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{BaseAir, LiftedAir, MidenAir};
+use miden_air::{BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
@@ -17,8 +17,8 @@ fn core_air_dag_matches_manual_eval() {
     let air = MidenAir::Core;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -59,13 +59,13 @@ fn core_air_dag_rejects_mismatched_layout() {
     let air = MidenAir::Core;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        num_airs: 1,
     };
 
     let dag = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, dag_config).unwrap().dag;
@@ -84,8 +84,8 @@ fn core_air_dag_rejects_mismatched_layout() {
 fn synthetic_ood_adjusts_quotient_to_zero() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
+        num_airs: 1,
     };
 
     let artifacts =
@@ -114,8 +114,8 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
+        num_airs: 1,
     };
 
     let artifacts =
@@ -154,13 +154,13 @@ fn quotient_next_inputs_do_not_affect_eval() {
 }
 
 #[test]
-fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
+fn multi_air_ace_circuit_builds_and_has_multi_air_fold_beta_slots() {
     use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
     };
 
     let circuit =
@@ -181,9 +181,25 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
 
     let beta = layout
-        .index(InputKey::MultiAirBeta)
+        .index(InputKey::MultiAirFoldBeta)
         .expect("multi-air layout exposes folding beta");
     assert!(beta < layout.total_inputs, "beta slot must be within layout bounds");
+
+    for key in [
+        InputKey::IsFirstAir(0),
+        InputKey::IsLastAir(0),
+        InputKey::IsTransitionAir(0),
+        InputKey::IsFirstAir(1),
+        InputKey::IsLastAir(1),
+        InputKey::IsTransitionAir(1),
+        InputKey::IsFirstAir(2),
+        InputKey::IsLastAir(2),
+        InputKey::IsTransitionAir(2),
+    ] {
+        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
+        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    }
+    assert!(layout.index(InputKey::IsFirstAir(3)).is_none());
 }
 
 #[test]
@@ -192,8 +208,8 @@ fn multi_air_ace_circuit_emits_consistently() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
     };
 
     for order in ProofOrder::variants() {
@@ -214,8 +230,8 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
     };
 
     let circuit =

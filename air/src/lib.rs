@@ -15,7 +15,10 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::air::{ReductionError, WindowAccess};
+use miden_crypto::stark::{
+    air::{ReductionError, WindowAccess},
+    challenger::CanObserve,
+};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
@@ -30,8 +33,7 @@ pub mod trace;
 /// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
 /// statement; it dispatches per-trace work to Core, Chiplets, and Poseidon2 permutation AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
-/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
-/// Miden-specific types so it can be extracted into its own crate.
+/// The generic LogUp framework lives in [`crate::lookup`].
 pub mod logup {
     pub use crate::constraints::lookup::{
         BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
@@ -85,10 +87,10 @@ pub use export::*;
 // MIDEN AIR BUILDER
 // ================================================================================================
 
-/// Convenience super-trait that pins `LiftedAirBuilder` to our field.
+/// Convenience super-trait that pins `LiftedAirBuilder` to the Miden base field.
 ///
-/// All constraint functions in this crate should be generic over `AB: MidenAirBuilder`
-/// instead of spelling out the full `LiftedAirBuilder<F = Felt>` bound.
+/// Constraint functions use `AB: MidenAirBuilder` instead of the longer
+/// `LiftedAirBuilder<F = Felt>` bound.
 pub trait MidenAirBuilder: LiftedAirBuilder<F = Felt> {}
 impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 
@@ -141,28 +143,37 @@ impl PublicInputs {
         self.pc_transcript_state
     }
 
-    /// Returns the fixed-length public values and the variable-length kernel procedure digests
-    /// as a flat slice of `Felt`s.
+    /// Returns the canonical commitment to the kernel of the verified statement.
     ///
-    /// The fixed-length public values layout is:
+    /// This fixed-size word replaces the raw kernel-procedure digest list in Fiat-Shamir
+    /// observation. See [`Kernel::commitment`](miden_core::program::Kernel::commitment).
+    pub fn kernel_commitment(&self) -> Word {
+        self.program_info.kernel_commitment()
+    }
+
+    /// Returns the AIR public values (`air_inputs`) and statement inputs (`aux_inputs`).
+    ///
+    /// `air_inputs` (the values read by the AIR constraints) layout:
+    ///   [0..16]  stack inputs
+    ///   [16..32] stack outputs
+    ///
+    /// `aux_inputs` (statement inputs not read by the AIRs, consumed only by `observe` and
+    /// `eval_external`) layout:
     ///   [0..4]   program hash
-    ///   [4..20]  stack inputs
-    ///   [20..36] stack outputs
-    ///   [36..40] precompile transcript state
-    ///
-    /// The kernel procedure digests are returned as a single flat `Vec<Felt>` (concatenated
-    /// words), to be passed as a single variable-length public input slice to the verifier.
+    ///   [4..8]   precompile transcript state
+    ///   [8..]    kernel procedure digests (one word per kernel procedure)
     pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Felt>) {
-        let mut public_values = Vec::with_capacity(NUM_PUBLIC_VALUES);
-        public_values.extend_from_slice(self.program_info.program_hash().as_elements());
-        public_values.extend_from_slice(self.stack_inputs.as_ref());
-        public_values.extend_from_slice(self.stack_outputs.as_ref());
-        public_values.extend_from_slice(self.pc_transcript_state.as_ref());
+        let mut air_inputs = Vec::with_capacity(NUM_PUBLIC_VALUES);
+        air_inputs.extend_from_slice(self.stack_inputs.as_ref());
+        air_inputs.extend_from_slice(self.stack_outputs.as_ref());
 
-        let kernel_felts: Vec<Felt> =
-            Word::words_as_elements(self.program_info.kernel_procedures()).to_vec();
+        let kernel_felts = Word::words_as_elements(self.program_info.kernel_procedures());
+        let mut aux_inputs = Vec::with_capacity(AUX_KERNEL_DIGESTS + kernel_felts.len());
+        aux_inputs.extend_from_slice(self.program_info.program_hash().as_elements());
+        aux_inputs.extend_from_slice(self.pc_transcript_state.as_ref());
+        aux_inputs.extend_from_slice(kernel_felts);
 
-        (public_values, kernel_felts)
+        (air_inputs, aux_inputs)
     }
 
     /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
@@ -239,28 +250,32 @@ impl Deserializable for PublicInputs {
 // PROCESSOR AIR
 // ================================================================================================
 
-/// Number of fixed-length public values for the Miden VM AIR.
+/// Number of public values read by the Miden VM AIRs: the `air_inputs` shared by every AIR.
 ///
-/// Layout (40 Felts total):
-///   [0..4]   program hash
-///   [4..20]  stack inputs
-///   [20..36] stack outputs
-///   [36..40] precompile transcript state
-pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
+/// Layout (32 Felts total):
+///   [0..16]  stack inputs
+///   [16..32] stack outputs
+///
+/// The program hash and precompile transcript state are not read by any AIR constraint, so they
+/// are carried as `aux_inputs` and consumed only by [`MidenMultiAir::observe`] and
+/// [`MidenMultiAir::eval_external`].
+pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
 /// LogUp aux trace width: 4 core columns + 3 chiplet columns + 1 Poseidon2 column.
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
 
-// Public values layout offsets.
-const PV_PROGRAM_HASH: usize = 0;
-const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
+// `aux_inputs` layout offsets: statement inputs that the AIRs do not read. The fixed program
+// hash and transcript state occupy the first two words; the kernel-procedure digest list follows.
+const AUX_PROGRAM_HASH: usize = 0;
+const AUX_TRANSCRIPT_STATE: usize = WORD_SIZE;
+const AUX_KERNEL_DIGESTS: usize = 2 * WORD_SIZE;
 
 // CORE AIR
 // ================================================================================================
 
-/// Core-trace AIR.
+/// Core trace AIR.
 ///
-/// Owns the system, decoder, stack, and range-check segments.
+/// Enforces the system, decoder, stack, and range-check constraints.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 
@@ -277,18 +292,28 @@ impl CoreAir {
         constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
     }
 
-    /// LogUp boundary correction for the core trace: the running sum of every
-    /// boundary interaction reduced to its denominator contribution.
+    /// LogUp boundary correction for the core trace.
+    ///
+    /// The boundary input slice is `[program_hash (4) | transcript_state (4)]`; these statement
+    /// values close the block-hash and log-precompile buses.
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
         public_values: &[Felt],
-        var_len_public_inputs: &[&[Felt]],
+        boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
-        if !var_len_public_inputs.is_empty() {
+        if boundary_inputs.len() != 1 {
             return Err(format!(
-                "CoreAir expects 0 var-len public input slices, got {}",
-                var_len_public_inputs.len()
+                "CoreAir expects 1 boundary input slice, got {}",
+                boundary_inputs.len()
+            )
+            .into());
+        }
+        if boundary_inputs[0].len() != 2 * WORD_SIZE {
+            return Err(format!(
+                "CoreAir expects {} boundary felts (program hash + transcript state), got {}",
+                2 * WORD_SIZE,
+                boundary_inputs[0].len()
             )
             .into());
         }
@@ -296,7 +321,7 @@ impl CoreAir {
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
             public_values,
-            var_len_public_inputs,
+            var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
         };
@@ -367,27 +392,27 @@ impl ChipletsAir {
         constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
     }
 
-    /// LogUp boundary correction for the chiplets trace. The kernel digests are
-    /// the single var-len public input group; they boundary-cancel against the
-    /// kernel-rom bus, which lives on `CHIPLET_COLUMN_SHAPE[0]`. Consumed by
-    /// [`MidenMultiAir::eval_external`].
+    /// LogUp boundary correction for the chiplets trace.
+    ///
+    /// The boundary input slice contains the kernel-procedure digests; these statement values
+    /// close the kernel-ROM bus.
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
         public_values: &[Felt],
-        var_len_public_inputs: &[&[Felt]],
+        boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
-        if var_len_public_inputs.len() != 1 {
+        if boundary_inputs.len() != 1 {
             return Err(format!(
-                "ChipletsAir expects 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
+                "ChipletsAir expects 1 boundary input slice, got {}",
+                boundary_inputs.len()
             )
             .into());
         }
-        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+        if !boundary_inputs[0].len().is_multiple_of(WORD_SIZE) {
             return Err(format!(
                 "kernel digest felts length {} is not a multiple of {}",
-                var_len_public_inputs[0].len(),
+                boundary_inputs[0].len(),
                 WORD_SIZE
             )
             .into());
@@ -396,7 +421,7 @@ impl ChipletsAir {
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
             public_values,
-            var_len_public_inputs,
+            var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
         };
@@ -473,12 +498,12 @@ impl Poseidon2PermutationAir {
         self,
         _challenges: &Challenges<EF>,
         _public_values: &[Felt],
-        var_len_public_inputs: &[&[Felt]],
+        boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
-        if !var_len_public_inputs.is_empty() {
+        if !boundary_inputs.is_empty() {
             return Err(format!(
-                "Poseidon2PermutationAir expects 0 var-len public input slices, got {}",
-                var_len_public_inputs.len()
+                "Poseidon2PermutationAir expects 0 boundary input slices, got {}",
+                boundary_inputs.len()
             )
             .into());
         }
@@ -566,11 +591,25 @@ impl MidenAir {
         public_values: &[Felt],
         aux_inputs: &[Felt],
     ) -> Result<EF, ReductionError> {
+        if aux_inputs.len() < AUX_KERNEL_DIGESTS {
+            return Err(format!(
+                "aux_inputs length {} is shorter than the fixed prefix {AUX_KERNEL_DIGESTS}",
+                aux_inputs.len()
+            )
+            .into());
+        }
+
         match self {
-            Self::Core => CoreAir.boundary_correction(challenges, public_values, &[]),
-            Self::Chiplets => {
-                ChipletsAir.boundary_correction(challenges, public_values, &[aux_inputs])
-            },
+            Self::Core => CoreAir.boundary_correction(
+                challenges,
+                public_values,
+                &[&aux_inputs[..AUX_KERNEL_DIGESTS]],
+            ),
+            Self::Chiplets => ChipletsAir.boundary_correction(
+                challenges,
+                public_values,
+                &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
+            ),
             Self::Poseidon2Permutation => {
                 Poseidon2PermutationAir.boundary_correction(challenges, public_values, &[])
             },
@@ -763,7 +802,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // One real committed LogUp final per AIR instance.
+        // One committed LogUp final per AIR instance.
         1
     }
 
@@ -778,7 +817,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         debug_assert_eq!(
             committed.len(),
             1,
-            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+            "build_logup_aux_trace returns one committed final per AIR"
         );
         (aux_trace, committed)
     }
@@ -893,14 +932,64 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     }
 
     fn max_aux_inputs(&self) -> usize {
-        // The only var-len public input is the kernel-digest group: one `Word` per
-        // kernel procedure, capped at `Kernel::MAX_NUM_PROCEDURES`.
-        Kernel::MAX_NUM_PROCEDURES * WORD_SIZE
+        // aux_inputs = program hash (1 word) + transcript state (1 word) + one `Word` per kernel
+        // procedure digest, capped at `Kernel::MAX_NUM_PROCEDURES`.
+        AUX_KERNEL_DIGESTS + Kernel::MAX_NUM_PROCEDURES * WORD_SIZE
+    }
+
+    /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
+    ///
+    /// Uses a rate-aligned schedule: six 8-felt blocks, 48 felts total.
+    ///
+    /// ```text
+    /// [ kernel_H (4) | program_hash (4) ]
+    /// [ transcript_state (4) | 0,0,0,0 ]      trailing pad keeps the schedule rate-aligned
+    /// [ stack_inputs (16) ]                   two blocks
+    /// [ stack_outputs (16) ]                  two blocks
+    /// ```
+    ///
+    /// The kernel digests enter the transcript only through `kernel_H`
+    /// (see [`hash_kernel_digests`]), committing to the kernel with a fixed-size value instead
+    /// of the unbounded digest list.
+    fn observe<C: CanObserve<Felt>>(
+        &self,
+        challenger: &mut C,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        _log_trace_heights: &[u8],
+    ) {
+        assert_eq!(air_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
+
+        // `observe` cannot return an error; malformed aux inputs are rejected by `eval_external`.
+        let mut aux_prefix = [Felt::ZERO; AUX_KERNEL_DIGESTS];
+        let prefix_len = aux_inputs.len().min(AUX_KERNEL_DIGESTS);
+        aux_prefix[..prefix_len].copy_from_slice(&aux_inputs[..prefix_len]);
+
+        let kernel_felts = aux_inputs.get(AUX_KERNEL_DIGESTS..).unwrap_or(&[]);
+        let kernel_h = hash_kernel_input_felts(kernel_felts);
+        let program_hash = &aux_prefix[AUX_PROGRAM_HASH..AUX_PROGRAM_HASH + WORD_SIZE];
+        let transcript_state = &aux_prefix[AUX_TRANSCRIPT_STATE..AUX_TRANSCRIPT_STATE + WORD_SIZE];
+        let stack_io = air_inputs;
+
+        // Block 1: kernel_H | program_hash. Block 2: transcript_state | zero pad.
+        for &v in kernel_h.iter().chain(program_hash) {
+            challenger.observe(v);
+        }
+        for &v in transcript_state {
+            challenger.observe(v);
+        }
+        for _ in 0..WORD_SIZE {
+            challenger.observe(Felt::ZERO);
+        }
+        for &v in stack_io {
+            challenger.observe(v);
+        }
     }
 
     /// Cross-AIR LogUp closure: the sum of every committed aux final plus the
-    /// per-trace boundary corrections must vanish. `aux_inputs` carries the
-    /// kernel digests (the Chiplets var-len public input group).
+    /// per-trace boundary corrections must vanish. `aux_inputs` carries the program hash and
+    /// transcript state (consumed by the core boundary) followed by the kernel digests
+    /// (consumed by the chiplets boundary).
     fn eval_external(
         &self,
         challenges: &[EF],
@@ -925,7 +1014,36 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             )
             .into());
         }
-
+        if challenges.len() != trace::AUX_TRACE_RAND_CHALLENGES {
+            return Err(format!(
+                "expected {} aux trace challenges, got {}",
+                trace::AUX_TRACE_RAND_CHALLENGES,
+                challenges.len()
+            )
+            .into());
+        }
+        if air_inputs.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {NUM_PUBLIC_VALUES} public values, got {}",
+                air_inputs.len()
+            )
+            .into());
+        }
+        if aux_inputs.len() < AUX_KERNEL_DIGESTS {
+            return Err(format!(
+                "aux_inputs length {} is shorter than the fixed prefix {AUX_KERNEL_DIGESTS}",
+                aux_inputs.len()
+            )
+            .into());
+        }
+        let max_aux_inputs = <MidenMultiAir as MultiAir<Felt, EF>>::max_aux_inputs(self);
+        if aux_inputs.len() > max_aux_inputs {
+            return Err(format!(
+                "aux_inputs length {} exceeds maximum {max_aux_inputs}",
+                aux_inputs.len()
+            )
+            .into());
+        }
         let challenges = Challenges::<EF>::new(
             challenges[0],
             challenges[1],
@@ -953,20 +1071,45 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     }
 }
 
+// KERNEL DIGEST SUMMARY HASH
+// ================================================================================================
+
+/// Computes `kernel_H`, the fixed-size commitment to the kernel-procedure digests.
+///
+/// This is the canonical [`Kernel::commitment`] value expressed over the flattened digest
+/// felts: `hash_elements(kernel_felts)`. The empty digest list yields `hash_elements(&[])`.
+///
+/// `kernel_H` is absorbed into the Fiat-Shamir transcript in place of the unbounded kernel
+/// digest list, committing to the kernel with a fixed-size value.
+pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
+    assert!(
+        kernel_felts.len().is_multiple_of(WORD_SIZE),
+        "kernel digest felts must be whole words"
+    );
+    assert!(
+        kernel_felts.len() <= Kernel::MAX_NUM_PROCEDURES * WORD_SIZE,
+        "kernel digest felts exceed Kernel::MAX_NUM_PROCEDURES"
+    );
+
+    hash_kernel_input_felts(kernel_felts)
+}
+
+fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
+    miden_core::chiplets::hasher::hash_elements(kernel_felts).into()
+}
+
 // REDUCED-AUX BOUNDARY BUILDER
 // ================================================================================================
 
-/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
-/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
-/// running `EF` accumulator.
+/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp denominator
+/// contribution `multiplicity / encode(msg)` and sums them into a running `EF` accumulator.
 ///
-/// Boundary correction is computed by replaying the same structured boundary emissions used by
-/// the debug walker.
+/// Boundary correction is computed from the structured boundary messages emitted by each AIR.
 ///
-/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
-/// are non-zero with overwhelming probability. A malformed/adversarial proof can still
-/// drive a denominator to zero, so the reducer captures the first failure and surfaces it
-/// as a [`ReductionError`] to the verifier rather than panicking.
+/// Denominators are `alpha + sum_i beta^i * field_i` with random `alpha, beta`; on any
+/// legitimate proof they are non-zero with overwhelming probability. A malformed proof can still
+/// drive a denominator to zero, so the reducer captures the first failure and surfaces it as a
+/// [`ReductionError`] to the verifier rather than panicking.
 struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
     challenges: &'a Challenges<EF>,
     public_values: &'a [Felt],
@@ -1017,6 +1160,8 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use miden_core::field::QuadFelt;
 
     use super::*;
@@ -1102,5 +1247,84 @@ mod tests {
                 MidenAir::Poseidon2Permutation,
             ])
         );
+    }
+
+    #[test]
+    fn eval_external_rejects_partial_kernel_digest() {
+        let challenges =
+            [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let mut aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
+        aux_inputs.push(Felt::ONE);
+        let zero = QuadFelt::from(Felt::ZERO);
+        let core_aux = [zero];
+        let chiplets_aux = [zero];
+        let poseidon2_aux = [zero];
+        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+
+        let err = MidenMultiAir::new()
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("kernel digest felts length 1 is not a multiple of 4"));
+    }
+
+    #[test]
+    fn eval_external_rejects_too_many_kernel_digests() {
+        let challenges =
+            [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let max_aux_inputs = AUX_KERNEL_DIGESTS + Kernel::MAX_NUM_PROCEDURES * WORD_SIZE;
+        let actual_aux_inputs = max_aux_inputs + WORD_SIZE;
+        let aux_inputs = vec![Felt::ZERO; actual_aux_inputs];
+        let zero = QuadFelt::from(Felt::ZERO);
+        let core_aux = [zero];
+        let chiplets_aux = [zero];
+        let poseidon2_aux = [zero];
+        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+
+        let err = MidenMultiAir::new()
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .unwrap_err();
+
+        assert!(err.to_string().contains(&format!(
+            "aux_inputs length {actual_aux_inputs} exceeds maximum {max_aux_inputs}"
+        )));
+    }
+
+    #[test]
+    #[should_panic(expected = "kernel digest felts exceed Kernel::MAX_NUM_PROCEDURES")]
+    fn hash_kernel_digests_rejects_too_many_digest_felts() {
+        let kernel_felts = vec![Felt::ZERO; (Kernel::MAX_NUM_PROCEDURES + 1) * WORD_SIZE];
+
+        let _ = hash_kernel_digests(&kernel_felts);
+    }
+
+    #[test]
+    fn observe_handles_short_aux_inputs() {
+        #[derive(Default)]
+        struct FeltSink {
+            observed: Vec<Felt>,
+        }
+
+        impl CanObserve<Felt> for FeltSink {
+            fn observe(&mut self, value: Felt) {
+                self.observed.push(value);
+            }
+        }
+
+        let mut challenger = FeltSink::default();
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let multi_air = MidenMultiAir::new();
+
+        <MidenMultiAir as MultiAir<Felt, QuadFelt>>::observe(
+            &multi_air,
+            &mut challenger,
+            &air_inputs,
+            &[],
+            &[8, 8, 8],
+        );
+
+        assert_eq!(challenger.observed.len(), 48);
     }
 }
