@@ -553,7 +553,6 @@ fn full_stack_bus_balance_closes_with_empty_input() {
 
 use super::uint::{random_modulus, random_uint_below};
 use crate::{
-    ec::trace::EcStoreRequires,
     math::{from_hex, to_limbs32},
     transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
     uint::{
@@ -588,7 +587,7 @@ fn uint_leaf_binds_against_uint_store() {
     // its UintVal demand into the store's ledger.
     let root = eval_req.zero();
     eval_req.uint_leaf(v_ptr, fp, v_u32, &mut store, &mut p2);
-    let eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let eval_main = eval_trace(eval_req, root);
 
     // The store provides each UintVal with multiplicity = its demand: the
     // bound-refs (recorded on intern) + the eval leaf's consume of the
@@ -644,7 +643,7 @@ fn pinned_uint_leaf_folds_into_spine() {
     let modulus = eval_req.pin_uint(fp, fp, mod_v_u32, &mut store, &mut p2);
     let root = eval_req.record_and(zero, modulus, &mut p2);
     let public_root = root.hash();
-    let eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let eval_main = eval_trace(eval_req, root);
 
     // Store provides UintVal(1) (the modulus) with multiplicity = its self
     // bound-ref + the eval pin consume.
@@ -741,7 +740,7 @@ fn relocated_modulus_pin_unbalances() {
     let zero = eval_req.zero();
     let modulus = eval_req.pin_uint(fp, fp, to_limbs32(x), &mut store, &mut p2);
     let root = eval_req.record_and(zero, modulus, &mut p2);
-    let mut eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let mut eval_main = eval_trace(eval_req, root);
 
     // … with the laid row's dereference forged onto the relocated block.
     let pin_row = (0..eval_main.height())

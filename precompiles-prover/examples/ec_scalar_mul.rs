@@ -38,10 +38,9 @@ use miden_precompiles_prover::{
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-/// secp256k1 VM-owned uint/curve pointers.
+/// secp256k1 VM-owned uint/group pointers.
 const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
-const A_PTR: u32 = CurveId::Secp256k1.a_ptr();
-const B_PTR: u32 = CurveId::Secp256k1.b_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
 
 /// Big-endian field bytes → our `U256` (the KAT hex path).
 fn be(bytes: impl AsRef<[u8]>) -> U256 {
@@ -118,7 +117,7 @@ fn main() {
     // G as a shared EC-DAG node (the base, reused across all instances).
     let gx_n = session.uint_leaf(gx, FP);
     let gy_n = session.uint_leaf(gy, FP);
-    let g_pt = session.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
+    let g_pt = session.ec_create(GROUP_PTR, &gx_n, &gy_n);
 
     for &k in &scalars {
         let acc = scalar_mul(&mut session, &g_pt, k);
@@ -129,7 +128,7 @@ fn main() {
         let (kgx, kgy) = coords(&(g * scalar));
         let kgx_n = session.uint_leaf(kgx, FP);
         let kgy_n = session.uint_leaf(kgy, FP);
-        let expected = session.ec_create(A_PTR, B_PTR, &kgx_n, &kgy_n);
+        let expected = session.ec_create(GROUP_PTR, &kgx_n, &kgy_n);
         claims.push(session.ec_is(&acc, &expected)); // panics if k·G ≠ k256
     }
 

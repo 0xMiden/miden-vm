@@ -66,7 +66,7 @@ powers of `β`; encoding stays linear.
 | 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
 | 12 | [UintMul](#12--uintmul) | `(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` | UintMul | EcPointStore, EcGroupAdd, TranscriptEval |
 | 13 | [UintLimbs](#13--uintlimbs) | `(ptr, bound_ptr, offset, l0..l7)` | UintStore | UintMul |
-| 14 | [EcGroup](#14--ecgroup) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups | EcPointStore, EcGroupAdd, EcMsm, TranscriptEval, verifier boundary |
+| 14 | [EcGroup](#14--ecgroup) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups | EcPointStore, EcGroupAdd, EcMsm, verifier boundary |
 | 15 | [EcPoint](#15--ecpoint) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | EcPointStore | EcGroupAdd, EcMsm, TranscriptEval |
 | 16 | [EcGroupAdd](#16--ecgroupadd) | `(group_ptr, p_ptr, q_ptr, r_ptr)` | EcGroupAdd | EcMsm, TranscriptEval |
 | 17 | [EcOnCurveCert](#17--econcurvecert) | `(group_ptr, r_ptr)` | EcGroupAdd, EcMsm | EcPointStore |
@@ -252,9 +252,10 @@ bound, ad-hoc groups equal `bound_ptr` until constrained).
   verifier boundary requirement.
 - **Consumers** — [EcPointStore](ec-points.md) (binds a point's curve),
   [EcGroupAdd](ec-group-add.md) (the group-law context),
-  [EcMsm](ec-msm.md) (the scalar-bound pin),
-  [TranscriptEval](transcript-eval.md) (EcCreate / point-binding context),
-  and the verifier boundary for fixed curve group tuples.
+  [EcMsm](ec-msm.md) (the scalar-bound pin), and the verifier boundary for
+  fixed curve group tuples. TranscriptEval create rows do not consume
+  `EcGroup` directly; they carry `group_ptr` in the curve VALUE cap and consume
+  `EcPoint`.
 
 ## 15 — EcPoint
 
@@ -264,8 +265,8 @@ or the group's ∞ when `is_pai = 1`.
 - **Provider** — [EcPointStore](ec-points.md): one per point row.
 - **Consumers** — [EcGroupAdd](ec-group-add.md) (P, Q, R, and the ∞
   result of the cancel case), [EcMsm](ec-msm.md) (the ∞-pin of a neg's
-  value), [TranscriptEval](transcript-eval.md) (EcCreate / EcBinOp
-  operands and results).
+  value), [TranscriptEval](transcript-eval.md) (EcCreate / PAI point-binding
+  rows).
 
 ## 16 — EcGroupAdd
 

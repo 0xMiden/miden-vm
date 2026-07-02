@@ -689,7 +689,7 @@ impl CurvePrecompileDescriptor {
 
     pub fn value_tag(curve: CodegenCurveId) -> Tag {
         let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, Felt::from(curve.a_ptr()), Felt::from(curve.b_ptr())])
+        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr()), ZERO])
             .expect("curve precompile id is not framework-reserved")
     }
 

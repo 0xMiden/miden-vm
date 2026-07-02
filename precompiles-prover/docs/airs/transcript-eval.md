@@ -34,9 +34,11 @@ It folds a content-addressed DAG of node families into one Poseidon2 root:
   to a [`UintAdd`](relation-registry.md#11--uintadd) /
   [`UintMul`](relation-registry.md#12--uintmul) tuple by ptr and bound.
 - **EcCreate / EcCreate-PAI** — hashes two uint coord hashes (or none, for ∞)
-  under the VM curve VALUE cap `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr,
-  b_ptr]`; consumes [`EcGroup`](relation-registry.md#14--ecgroup) +
-  [`EcPoint`](relation-registry.md#15--ecpoint).
+  under the VM curve VALUE cap `[CurvePrecompile::id(), VALUE_OP_ID,
+  group_ptr, 0]`; consumes [`EcPoint`](relation-registry.md#15--ecpoint).
+  The [`EcGroup`](relation-registry.md#14--ecgroup) tuple remains the fixed
+  metadata pin for `group_ptr → (a, b, bound, scalar_bound)`, but create rows
+  do not consume it directly.
 - **EcBinOp** (`Add`/`Sub`/`Is`) — hashes two point hashes under the VM curve
   op cap `[CurvePrecompile::id(), op_id, 0, 0]`, tying value-producing operands
   to an [`EcGroupAdd`](relation-registry.md#16--ecgroupadd) tuple by ptr.
@@ -68,20 +70,20 @@ absorb; `ptr` is a leaf uint / op result / created point / MSM value;
 `a_ptr`/`b_ptr` are operands / coords / `(Pᵢ_ptr, sᵢ_ptr)`. Keeping every
 bus gate degree-1 (one-hot flags) is what holds the chip at
 `log_quotient_degree = 2` despite its width. Cap slots are **materialized**
-into columns (`param_a`, `cap_param_b`, `curve_b`) so the perm cap stays
-degree-1. VM uint value rows put `bound_ptr` in `cap_param_b`; explicit pin
-rows put `pin_ptr` there; EcCreate rows read the same physical column through
-the `curve_a` alias and put curve `b_ptr` in `curve_b`.
+from committed columns so the perm cap stays degree-1. VM uint value rows put
+`bound_ptr` in tag arg[1]; explicit pin rows put `pin_ptr` there; EcCreate rows
+put `group_ptr` in the curve VALUE cap's selector slot and leave the final cap
+slot `0`.
 
 ## Trace shape
 
 | Property | Value |
 |----------|-------|
-| Main width | `NUM_MAIN_COLS = 44` |
+| Main width | `NUM_MAIN_COLS = 42` |
 | Period | `1` (per-node rows, not period-blocked; `TranscriptEvalAir` is "Period 1") |
 | Height | `n_rows` rounded up to a power of two; row 0 is the root, then one row per non-root node (an EcMsm claim is a run of `absorbs.len()` rows), then a single merged zero-leaf row if any; trailing rows are all-zero (`act = 0`) padding |
 | Periodic columns | **none** (no role selectors — node kind is committed via the one-hot flag columns) |
-| Aux width | `NUM_AUX_COLS = 9` LogUp columns, `COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 3, 1, 4]` (no Schwartz–Zippel register) |
+| Aux width | `NUM_AUX_COLS = 9` LogUp columns, `COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 2, 1, 4]` (no Schwartz–Zippel register) |
 
 Public values: `public_root[0..4]` — just the transcript root
 (`PUBLIC_ROOT_BEGIN = 0`, `NUM_PUBLIC_VALUES = 4`). Verifier-loaded fixed
@@ -90,12 +92,12 @@ transcript-root claims.
 
 ## Main columns
 
-All 44 committed base-field columns (indices `0 .. NUM_MAIN_COLS−1`).
+All 42 committed base-field columns (indices `0 .. NUM_MAIN_COLS−1`).
 Columns are **heavily role-polymorphic**: a single cell means different
 things depending on which family flag fires on the row. The "On node
 kinds" column lists where the cell is live (it is pinned to `0`
-elsewhere). 4-felt blocks (`lhs`/`rhs`/`h`/`absorb_cap`) occupy four
-consecutive indices each.
+elsewhere). 4-felt blocks (`lhs`/`rhs`/`h`/`absorb_cap`,
+`DIGEST_WIDTH = 4`) occupy four consecutive indices each.
 
 | Idx | Name | On node kinds | Range / values | Meaning |
 |-----|------|---------------|----------------|---------|
@@ -118,25 +120,29 @@ consecutive indices each.
 | 25 | `COL_IS_IS` | uint-op / ec-op `Is` | `{0, 1}` | shared op flag `Is` (equality predicate; binds `True`) |
 | 26 | `COL_IS_PINNED` | uint leaf | `{0, 1}` | leaf-only: explicit transcript pin claim (→ `True`) vs runtime VM value row (→ `Uint`) |
 | 27 | `COL_PTR` | uint-leaf / result-op / EcCreate / EcMsm boundary | store ptr, or `0` | the binding's value ptr: stored uint / op result / created-or-result point / MSM value point (`0` on `Is` — binds `True`) |
-| 28 | `COL_BOUND_PTR` | uint-leaf / uint-op / create / EcMsm absorb | store ptr, or `0` | the uint modulus ptr threaded through every `Uint`-typed message and committed by VM uint value caps; the scalar bound on EcMsm absorbs |
-| 29 | `COL_PIN_PTR` / `COL_CAP_PARAM_B` / `COL_CURVE_A` | uint leaf / EcCreate / EcCreate-PAI | store ptr, or `0` | materialized cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on explicit pin rows, curve `a_ptr` on EcCreate rows |
-| 30 | `COL_A_PTR` | op lhs / EcCreate x-coord / EcMsm Pᵢ | store ptr, or `0` | lhs operand ptr; EcCreate x-coord; EcMsm base ptr. On `Is`, `b_ptr = a_ptr` *is* the equality |
-| 31 | `COL_B_PTR` | binary-op rhs / EcCreate y-coord / EcMsm sᵢ | store ptr, or `0` | rhs operand ptr; EcCreate y-coord; EcMsm scalar ptr |
-| 32 | `COL_PARAM_A` | explicit pin / op | `bound_ptr` / op id / `0` | materialized cap slot 1: `bound_ptr` on explicit pin rows, VM `VALUE_OP_ID = 0` on runtime uint value and EcCreate rows, op id on op rows |
-| 33 | `COL_GROUP_PTR` | EcCreate / EcCreate-PAI / result ec-op / EcMsm | EC-store handle, or `0` | witnessed EC-store group handle fed to `EcGroup`/`EcPoint`/`EcGroupAdd`/MSM consumes; pinned by their provides; never a binding/hash entity |
-| 34 | `COL_CURVE_B` | EcCreate / EcCreate-PAI | curve `b_ptr`, or `0` | materialized cap slot 3 on EcCreate rows; `0` elsewhere (free on create — the `EcGroup` consume pins it) |
-| 35 | `COL_IS_EC_MSM` | EcMsm (every absorb row) | `{0, 1}` | EcMsm family flag (in the activity one-hot) |
-| 36 | `COL_IS_MSM_LAST` | EcMsm boundary | `{0, 1}` | marks the run's last absorb (the boundary); sub-flag, **not** in the activity one-hot |
-| 37 | `COL_MSM_IDX` | EcMsm absorb | `[0, k)` | the absorb's **position counter** (`0` on a run's first row, `+1` each row, pinned by the main AIR); the boundary's `k = idx + 1` = term count (in `MsmExpr`). **Not** a chiplet term tag — the seam matches the positionless `MsmClaimTerm` as a set, so the absorb order (hence the root) is the caller's, decoupled from the chiplet's storage `idx` |
-| 38 | `COL_MSM_EXPR` | EcMsm absorb | expr ptr | the claim expression's `expr_ptr` (constant within a run); the `MsmClaimTerm`/`MsmExpr` consume key |
-| 39–42 | `COL_ABSORB_CAP` (`absorb_cap[4]`) | EcMsm absorb | each `∈` field | threaded capacity `stateᵢ` fed to this absorb's perm cap: VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` on a run's first row, the previous row's `h` after; `0` off absorb rows |
-| 43 | `COL_SBOUND_PTR` | EcCreate / EcCreate-PAI | scalar-field modulus ptr, or `0` | the group's **scalar** bound (curve order `n`) — the `scalar_bound_ptr` cell of the create rows' `EcGroup` consume, distinct from `bound_ptr` (the coord field `p`). VM-owned fixed groups carry their canonical scalar-bound ptr whose value is verifier-loaded through `UintVal`; ad-hoc groups resolve at trace-gen to a constrained `F_s` handle if set, else the coord bound. Witnessed, pinned by the `EcGroup` provide (like `group_ptr`), `0` elsewhere |
+| 28 | `COL_BOUND_PTR` | uint-leaf / uint-op / finite EcCreate / EcMsm absorb | store ptr, or `0` | the uint modulus ptr threaded through every `Uint`-typed message; on finite EcCreate it is the coordinate-field bound for the x/y child bindings; on EcMsm absorbs it is the scalar bound |
+| 29 | `COL_TAG_ARG1` | uint leaf / EcCreate / PAI | store ptr, group ptr, or `0` | physical tag-arg[1] / cap-slot-2 cell: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on explicit pin rows, and the curve `group_ptr` on EcCreate / PAI rows; create code uses semantic alias `COL_EC_CREATE_GROUP_PTR` |
+| 30 | `COL_A_PTR` | op lhs / finite EcCreate x-coord / EcMsm Pᵢ | store ptr, or `0` | lhs operand ptr; EcCreate x-coordinate; EcMsm base ptr. On `Is`, `b_ptr = a_ptr` *is* the equality |
+| 31 | `COL_B_PTR` | binary-op rhs / finite EcCreate y-coord / EcMsm sᵢ | store ptr, or `0` | rhs operand ptr; EcCreate y-coordinate; EcMsm scalar ptr |
+| 32 | `COL_TAG_ARG0` | explicit pin / op | `bound_ptr` / op id / `0` | physical tag-arg[0] / cap-slot-1 cell: `bound_ptr` on explicit pin rows, VM `VALUE_OP_ID = 0` on runtime uint value, EcCreate, and PAI rows, op id on op rows |
+| 33 | `COL_EC_CONTEXT_GROUP_PTR` | result ec-op / EcMsm | EC-store handle, or `0` | witnessed EC-store group handle for EC binops and MSM relation context; create/PAI rows instead reuse `COL_TAG_ARG1` (`COL_EC_CREATE_GROUP_PTR`) so the VALUE cap selector and `EcPoint` group are the same cell |
+| 34 | `COL_IS_EC_MSM` | EcMsm (every absorb row) | `{0, 1}` | EcMsm family flag (in the activity one-hot) |
+| 35 | `COL_IS_MSM_LAST` | EcMsm boundary | `{0, 1}` | marks the run's last absorb (the boundary); sub-flag, **not** in the activity one-hot |
+| 36 | `COL_MSM_IDX` | EcMsm absorb | `[0, k)` | the absorb's **position counter** (`0` on a run's first row, `+1` each row, pinned by the main AIR); the boundary's `k = idx + 1` = term count (in `MsmExpr`). **Not** a chiplet term tag — the seam matches the positionless `MsmClaimTerm` as a set, so the absorb order (hence the root) is the caller's, decoupled from the chiplet's storage `idx` |
+| 37 | `COL_MSM_EXPR` | EcMsm absorb | expr ptr | the claim expression's `expr_ptr` (constant within a run); the `MsmClaimTerm`/`MsmExpr` consume key |
+| 38–41 | `COL_ABSORB_CAP` (`absorb_cap[4]`) | EcMsm absorb | each `∈` field | threaded capacity `stateᵢ` fed to this absorb's perm cap: VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` on a run's first row, the previous row's `h` after; `0` off absorb rows |
+
+`COL_TAG_ARG1` physically precedes `COL_TAG_ARG0` because it reuses the
+heavily shared bound / pin / EcCreate-group cell. Source-level aliases use the
+`COL_<ROW_KIND>_<PAYLOAD>` form (`COL_UINT_VALUE_BOUND_PTR`,
+`COL_PIN_CLAIM_PIN_PTR`, `COL_EC_CREATE_GROUP_PTR`, …) when the row family is
+already known; generic constraints use the physical names above.
 
 ## Periodic columns
 
 **None.** Unlike the period-blocked uint/store chiplets, TranscriptEval is
 period-1 with one node per row, so node kind is committed in the one-hot
-flag columns (16–25, 35–36) rather than read from verifier-computed role
+flag columns (16–25, 34–35) rather than read from verifier-computed role
 selectors.
 
 ## Constraints
@@ -175,15 +181,13 @@ so e.g. an AND node's cap stays `[1, 0, 0, 0]`.
 |---|-----------|-----|-----------|
 | 13 | `(1 − is_uint_leaf) · is_pinned = 0` | 2 | `is_pinned` is leaf-only (mod.rs:496) |
 | 14 | `(not_uint_leaf − is_result_op − is_ec_create − is_ec_pai − is_msm_last) · ptr = 0` | 2 | `ptr` carries a binding ptr only on uint-leaf / result-op / create / EcMsm-boundary rows (`is_result_op = is_op − is_is`) (mod.rs:500) |
-| 15 | `(not_uint_leaf − is_uint_op − is_create − is_ec_msm) · bound_ptr = 0` | 2 | `bound_ptr` (the modulus / scalar bound) is read only on leaf / uint-op / create / EcMsm-absorb rows (mod.rs:508) |
-| 16 | `(1 − is_create) · (cap_param_b − is_uint_leaf·(1−is_pinned)·bound_ptr − is_pinned·ptr) = 0` | 3 | materialized cap slot 2 for VM uint value and explicit pin rows; on EcCreate rows the same cell is read as `curve_a` and pinned by the `EcGroup` consume |
-| 17 | `(1 − is_op − is_ec_create − is_ec_msm) · a_ptr = 0` | 2 | `a_ptr` lives on op / EcCreate / EcMsm rows (mod.rs:529) |
-| 18 | `(1 − is_op − is_ec_create − is_ec_msm) · b_ptr = 0` | 2 | `b_ptr` lives on op / EcCreate / EcMsm rows |
+| 15 | `(not_uint_leaf − is_uint_op − is_ec_create − is_ec_msm) · bound_ptr = 0` | 2 | `bound_ptr` (the modulus / scalar bound) is read only on leaf / uint-op / finite EcCreate coordinate-binding / EcMsm-absorb rows (mod.rs:508) |
+| 16 | `(1 − is_create) · (tag_arg1 − is_uint_leaf·(1−is_pinned)·bound_ptr − is_pinned·ptr) = 0` | 3 | constrains the reused tag-arg[1] cell on non-create rows; create/PAI rows are exempt because that same physical cell is the semantic `COL_EC_CREATE_GROUP_PTR` (`group_ptr`) and also feeds the `EcPoint` consume |
+| 17 | `(1 − is_op − is_ec_create − is_ec_msm) · a_ptr = 0` | 2 | `a_ptr` lives on op / finite EcCreate / EcMsm rows (mod.rs:529) |
+| 18 | `(1 − is_op − is_ec_create − is_ec_msm) · b_ptr = 0` | 2 | `b_ptr` lives on op / finite EcCreate / EcMsm rows |
 | 19 | `is_is · (b_ptr − a_ptr) = 0` | 2 | on `Is` (either family) `b_ptr = a_ptr` *is* the equality asserted over the bus |
-| 20 | `param_a − tag_param = 0` | 2 | materialized cap slot 1: `param_a = is_pinned·bound_ptr + is_uint_op·uint_op_id + is_ec_op·ec_op_id`; runtime VM uint value rows and EcCreate rows use `0` |
-| 21 | `(1 − is_create − is_ec_op·(1 − is_is) − is_ec_msm) · group_ptr = 0` | 3 | `group_ptr` is the witnessed EC handle on create / result ec-op (not `Is`) / EcMsm rows; pinned by those consumes' provides |
-| 22 | `(1 − is_create) · curve_b = 0` | 2 | `curve_b` (cap slot 3 = curve `b_ptr`) lives only on EcCreate rows; EcMsm caps are supplied separately from `absorb_cap` |
-| 23 | `(1 − is_create) · sbound_ptr = 0` | 2 | `sbound_ptr` (the group's scalar bound) is read only by the create rows' `EcGroup` consume — zero elsewhere; witnessed, not cap-committed, pinned to the group's scalar bound by that consume's provide (like `group_ptr`), so a wrong value can't balance |
+| 20 | `tag_arg0 − expected_tag_arg0 = 0` | 2 | materialized tag arg[0] / cap slot 1: `expected_tag_arg0 = is_pinned·bound_ptr + is_uint_op·uint_op_id + is_ec_op·ec_op_id`; runtime VM uint value rows and EcCreate rows use `0` |
+| 21 | `(1 − is_ec_op·(1 − is_is) − is_ec_msm) · group_ptr = 0` | 3 | `COL_EC_CONTEXT_GROUP_PTR` is live only on result ec-op (not `Is`) and EcMsm rows; create/PAI rows carry their group in `COL_TAG_ARG1` (`COL_EC_CREATE_GROUP_PTR`) instead |
 
 ### EcMsm capacity threading, position counter & last-row (the chip's only cross-row hash link)
 
@@ -192,9 +196,9 @@ run's first absorb, the previous row's digest on every later absorb. EcMsm's
 Poseidon2 cap lookup consumes these cells in aux col 7; one-shot node caps ride
 aux col 1.
 
-`msm_idx` (col 37) is a pure **position counter** within an absorb run (`0`
+`msm_idx` (col 36) is a pure **position counter** within an absorb run (`0`
 at the run start, `+1` per continuation), pinned by the main AIR (constraints
-28–30). The boundary's `k = msm_idx + 1` (consumed in `MsmExpr`) is the term
+25–27). The boundary's `k = msm_idx + 1` (consumed in `MsmExpr`) is the term
 count regardless of *which* terms the run absorbed:
 `idx` no longer tags a chiplet term — the seam matches the **positionless**
 `MsmClaimTerm` as a set — so the absorb order (hence the root) is the
@@ -202,15 +206,15 @@ caller's, decoupled from the chiplet's storage `idx`.
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 25 | `(1 − is_ec_msm) · absorb_cap[i] = 0`, `i ∈ 0..4` | 2 | off absorb rows the cap cells are 0 |
-| 26 | `when_transition: continues · (absorb_cap_next[i] − h[i]) = 0`, `i ∈ 0..4` | 3 | **continuation**: a non-last absorb (`continues = is_ec_msm·(1 − is_msm_last)`) sets the next row's cap to this row's digest `h` (`capᵢ₊₁ = stateᵢ₊₁`) |
-| 27 | `when_transition: starts · (absorb_cap_next[i] − iv[i]) = 0`, `i ∈ 0..4` | 3 | **run start**: when the next row begins a run (`starts = is_ec_msm_next·(1 − is_ec_msm + is_msm_last)`), its cap = the VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_next, 0]` |
-| 28 | `when_first_row: is_ec_msm · msm_idx = 0` | 2 | the position counter starts at `0` if row 0 opens an absorb run |
-| 29 | `when_transition: starts · msm_idx_next = 0` | 2 | a run's first absorb has position `0` (the counter resets at every run start) |
-| 30 | `when_transition: continues · (msm_idx_next − msm_idx − 1) = 0` | 3 | within a run the counter advances `+1` per absorb ⇒ the boundary's `msm_idx + 1 = k` is the term count |
-| 31 | `when_first_row: is_ec_msm · (absorb_cap[i] − iv_local[i]) = 0`, `i ∈ 0..4` | 2 | **row-0 run start**: the `starts` transition (27) never fires *into* row 0, so an MSM run *beginning* at row 0 would have a free capacity IV — leaving the VM curve MSM domain separator unenforced. This pins it with the local-row IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` |
-| 32 | `when_transition: continues · (msm_expr_next − msm_expr) = 0` | 3 | the claim expression is constant across an absorb run, so every absorbed term and the boundary `MsmExpr` refer to the same expression |
-| 33 | `when_transition: continues · (group_ptr_next − group_ptr) = 0` | 3 | the witnessed MSM group is constant across a run, matching the run-start IV to the boundary relation context |
+| 22 | `(1 − is_ec_msm) · absorb_cap[i] = 0`, `i ∈ 0..4` | 2 | off absorb rows the cap cells are 0 |
+| 23 | `when_transition: continues · (absorb_cap_next[i] − h[i]) = 0`, `i ∈ 0..4` | 3 | **continuation**: a non-last absorb (`continues = is_ec_msm·(1 − is_msm_last)`) sets the next row's cap to this row's digest `h` (`capᵢ₊₁ = stateᵢ₊₁`) |
+| 24 | `when_transition: starts · (absorb_cap_next[i] − iv[i]) = 0`, `i ∈ 0..4` | 3 | **run start**: when the next row begins a run (`starts = is_ec_msm_next·(1 − is_ec_msm + is_msm_last)`), its cap = the VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_next, 0]` |
+| 25 | `when_first_row: is_ec_msm · msm_idx = 0` | 2 | the position counter starts at `0` if row 0 opens an absorb run |
+| 26 | `when_transition: starts · msm_idx_next = 0` | 2 | a run's first absorb has position `0` (the counter resets at every run start) |
+| 27 | `when_transition: continues · (msm_idx_next − msm_idx − 1) = 0` | 3 | within a run the counter advances `+1` per absorb ⇒ the boundary's `msm_idx + 1 = k` is the term count |
+| 28 | `when_first_row: is_ec_msm · (absorb_cap[i] − iv_local[i]) = 0`, `i ∈ 0..4` | 2 | **row-0 run start**: the `starts` transition (24) never fires *into* row 0, so an MSM run *beginning* at row 0 would have a free capacity IV — leaving the VM curve MSM domain separator unenforced. This pins it with the local-row IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` |
+| 29 | `when_transition: continues · (msm_expr_next − msm_expr) = 0` | 3 | the claim expression is constant across an absorb run, so every absorbed term and the boundary `MsmExpr` refer to the same expression |
+| 30 | `when_transition: continues · (group_ptr_next − group_ptr) = 0` | 3 | the witnessed MSM group is constant across a run, matching the run-start IV to the boundary relation context |
 
 > **Note (degree convention).** Degrees follow the doc convention
 > ([README.md](README.md#degree-notes)): a boolean `assert_bool(x)` is
@@ -219,19 +223,15 @@ caller's, decoupled from the chiplet's storage `idx`.
 
 ## Buses & lookups
 
-`COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 3, 1, 4]` — nine LogUp columns
-batching, respectively, 3 / 4 / 3 / 2 / 2 / 3 / 3 / 1 / 4 mutually-exclusive
+`COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 2, 1, 4]` — nine LogUp columns
+batching, respectively, 3 / 4 / 3 / 2 / 2 / 3 / 2 / 1 / 4 mutually-exclusive
 fractions. All bus interactions are emitted in
 `<TranscriptEvalAir as LookupAir>::eval` (`src/transcript/eval/mod.rs`,
 the `next_column` chain).
 
-> ⚠ unverified: the AUX-layout doc-comment (mod.rs:286–326) and the col-0
-> comments describe a `Range16(out_mult)` fraction on column 0, but the
-> emitted col-0 batch has only the three fractions below (consume-lhs,
-> consume-rhs, provide-h) and `COLUMN_SHAPE[0] = 3`. The multiplicity is
-> pinned to the consumer count by bus balance and **not** range-checked
-> (consistent with [../chiplets/transcript-eval.md](../chiplets/transcript-eval.md)
-> and the `out_mult` column note) — the `Range16` mentions appear stale.
+`out_mult` is pinned by Binding-bus balance, not by a range-check lookup. Col 0
+therefore has exactly the three fractions listed below: consume-lhs, consume-rhs,
+and provide-h.
 
 ### Provides
 
@@ -272,8 +272,7 @@ one fires per row).
 | [`UintMul`](relation-registry.md#12--uintmul) (12) | `(1, 0, a_ptr, b_ptr, bound_ptr, ptr, bound_ptr)` | `is_mul` | 4 |
 | [`Binding`](relation-registry.md#8--binding) (8) | `(lhs, Group, a_ptr, 0)` — P operand | `is_ec_op` | 5 |
 | [`Binding`](relation-registry.md#8--binding) (8) | `(rhs, Group, b_ptr, 0)` — Q operand | `is_ec_op` | 5 |
-| [`EcGroup`](relation-registry.md#14--ecgroup) (14) | `(group_ptr, param_a, curve_b, bound_ptr, sbound_ptr)` | `is_create` | 6 |
-| [`EcPoint`](relation-registry.md#15--ecpoint) (15) | `(ptr, group_ptr, a_ptr, b_ptr, is_ec_pai)` | `is_create` | 6 |
+| [`EcPoint`](relation-registry.md#15--ecpoint) (15) | `(ptr, group_ptr, a_ptr, b_ptr, is_ec_pai)` with `group_ptr = COL_EC_CREATE_GROUP_PTR` | `is_create` | 6 |
 | [`EcGroupAdd`](relation-registry.md#16--ecgroupadd) (16) | `(group_ptr, p_ptr', q_ptr', r_ptr')` role-mixed per op | `is_ec_op·(1−is_is)` | 6 |
 | [`Poseidon2In`](relation-registry.md#6--poseidon2in) (6) | `(perm_seq_id, cap, absorb_cap[4])` | `is_ec_msm` | 7 |
 | [`Binding`](relation-registry.md#8--binding) (8) | `(lhs, Group, a_ptr, 0)` — Pᵢ | `is_ec_msm` | 8 |
@@ -285,9 +284,11 @@ one fires per row).
 
 The `node` perm gate is `is_and + is_uint_leaf + is_uint_op + is_create +
 is_ec_op + is_ec_msm` (every hashing kind). Col 1 supplies the static one-shot
-cap for AND/uint/EC-create/EC-op rows; col 7 supplies EcMsm's threaded
-`absorb_cap`. The two **role-mixed** relation tuples permute their ptr slots by
-the bare op flags (the family gate already pins the row):
+cap for AND/uint/EC-create/EC-op rows; the EC-create cap is
+`[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, where `group_ptr` is the
+row's `COL_EC_CREATE_GROUP_PTR` cell. Col 7 supplies EcMsm's threaded
+`absorb_cap`. The two **role-mixed** relation tuples permute their ptr
+slots by the bare op flags (the family gate already pins the row):
 
 - `UintAdd` — `Add: (bp, a, b, r)`; `Sub: (bp, b, r, a)` (the `b+r=a`
   arrangement).
@@ -316,8 +317,8 @@ choice; it never changes which tuples cross the bus. Per the source
   one `UintMul`.
 - **Col 5** (`binding-group`, 3, n5/d4): the P/Q `Group` consumes + the
   `Group` provide (mirrors col 0; gate extended by `is_msm_last`).
-- **Col 6** (`ec-relations`, 3, n4/d4): `EcGroup` + `EcPoint` (deg-1) +
-  the role-mixed `EcGroupAdd` (deg-2 message).
+- **Col 6** (`ec-relations`, 2, n4/d4): `EcPoint` (deg-1) + the role-mixed
+  `EcGroupAdd` (deg-2 message).
 - **Col 7** (`dynamic-cap`, 1, n1/d1): the dynamic `Poseidon2In::cap`
   fraction for EcMsm's threaded capacity.
 - **Col 8** (`ec-msm-absorb`, 4, n5/d4): per absorb row the Pᵢ `Group` +

@@ -133,10 +133,10 @@ interesting? No: `b = 0` puts `(0, 0)` *on* the curve as a rational
 ever has `b = 0`** (the only `b = 0` curves are the j-invariant-1728
 CM family, pairing-exotica, not precompile material), and none of our
 targets (7, 3, NIST's `b`, the ed25519 image's `b`) come close. So the
-wire/DAG encoding of PAI as coordinate values `(0, 0)` under a
-`(tag, a, b, 0)` cap is safe given a `b ≠ 0` assertion at
-`EcCreate` (a value check at recording — `EcRequire::create_group`
-asserts it). Encoding and representation then split
+wire/DAG encoding of PAI as coordinate values `(0, 0)` under the curve
+VALUE cap `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]` is safe
+given the group's `b ≠ 0` assertion (a value check at recording —
+`EcRequire::create_group` asserts it). Encoding and representation then split
 cleanly at the seam: the runner maps DAG-`(0,0)` ↔ store-`is_pai` in
 both directions, unambiguous precisely because `b ≠ 0` keeps `(0,0)`
 off the curve.
@@ -270,18 +270,21 @@ affine-complete chiplet (path 1) when ladders need adversarial-input
 completeness; keep RCB (path 2) as the fallback if the case-flag
 soundness review stalls.
 
-**What group pinning buys** (the `EcCreate` row): same-curve-ness of
-an op's operands is one `group_ptr` equality instead of three ptr
-equalities; the doubling formula's `a` resolves through the `EcGroup`
-tuple in the same lookup; and `b` — which no add/double formula uses —
-stays a membership-only concern. It is the `bound_ptr` trick one level
-up: indirection making "same context" a single column.
+**What group pinning buys**: same-curve-ness of an op's operands is one
+`group_ptr` equality instead of three ptr equalities; the doubling formula's
+`a` resolves through the `EcGroup` tuple in the same lookup; and `b` — which
+no add/double formula uses — stays a membership-only concern. TranscriptEval
+EcCreate rows now select the curve by putting `group_ptr` in the VALUE cap and
+consume only `EcPoint(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)`; they rely on
+the point store (and other relation chiplets) to close the unchanged `EcGroup`
+metadata relation. It is the `bound_ptr` trick one level up: indirection making
+"same context" a single column.
 
 ## Buses
 
 | Bus | Tuple | Provider |
 |---|---|---|
-| `EcGroup` (14) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups, mult = consumer count (every point of the group + every live-case add op) |
+| `EcGroup` (14) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups, mult = consumer count (points, group-law/MSM rows, and fixed boundary consumers; TranscriptEval create rows do not consume this bus directly) |
 | `EcPoint` (15) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | EcPointStore, mult = consumer count |
 
 Point rows consume: `EcGroup` ×1 (context certification — the PAI rows'

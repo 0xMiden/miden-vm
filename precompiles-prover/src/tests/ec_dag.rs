@@ -7,7 +7,7 @@
 //! k256's — so the `ec_is` assert is both the k256 cross-check and the
 //! two-chain dedup showcase. The prove/verify round-trip then closes
 //! every bus (the EC node family activated: `EcGroupAdd` live at mult 1,
-//! the eval chip consuming `EcGroup` / `EcPoint` / `EcGroupAdd`).
+//! create rows consuming `EcPoint`, and add/sub rows consuming `EcGroupAdd`).
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
@@ -27,10 +27,9 @@ use crate::{
     },
 };
 
-/// secp256k1 VM-owned uint/curve pointers.
+/// secp256k1 VM-owned uint/group pointers.
 const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
-const A_PTR: u32 = CurveId::Secp256k1.a_ptr();
-const B_PTR: u32 = CurveId::Secp256k1.b_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
@@ -66,13 +65,13 @@ fn ec_dag_3g_traces() -> SessionTraces {
     let gy_n = s.uint_leaf(gy, FP);
     let g2x_n = s.uint_leaf(g2x, FP);
     let g2y_n = s.uint_leaf(g2y, FP);
-    let g_pt = s.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
-    let g2_pt = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
+    let g_pt = s.ec_create(GROUP_PTR, &gx_n, &gy_n);
+    let g2_pt = s.ec_create(GROUP_PTR, &g2x_n, &g2y_n);
     let r = s.ec_add(&g_pt, &g2_pt); // chord: G + 2G = 3G
 
     let g3x_n = s.uint_leaf(g3x, FP);
     let g3y_n = s.uint_leaf(g3y, FP);
-    let expected = s.ec_create(A_PTR, B_PTR, &g3x_n, &g3y_n);
+    let expected = s.ec_create(GROUP_PTR, &g3x_n, &g3y_n);
 
     // k256 cross-check + two-chain dedup: `r` (add result) and `expected`
     // (k256 KAT) are distinct DAG nodes that must share one point ptr.
@@ -114,13 +113,13 @@ fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
         let yn = s.uint_leaf(y, FP);
-        s.ec_create(A_PTR, B_PTR, &xn, &yn)
+        s.ec_create(GROUP_PTR, &xn, &yn)
     };
 
     let g_pt = create(&mut s, gx, gy);
 
     // −G via Sub from the group's point-at-infinity, checked vs k256.
-    let inf = s.ec_pai(A_PTR, B_PTR, FP);
+    let inf = s.ec_pai(GROUP_PTR);
     let neg_g = s.ec_sub(&inf, &g_pt);
     let neg_kat = create(&mut s, ngx, ngy);
     let neg_claim = s.ec_is(&neg_g, &neg_kat);
@@ -163,10 +162,10 @@ fn ec_dag_pai_traces() -> SessionTraces {
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
         let yn = s.uint_leaf(y, FP);
-        s.ec_create(A_PTR, B_PTR, &xn, &yn)
+        s.ec_create(GROUP_PTR, &xn, &yn)
     };
 
-    let inf = s.ec_pai(A_PTR, B_PTR, FP);
+    let inf = s.ec_pai(GROUP_PTR);
     let g_pt = create(&mut s, gx, gy);
     let g2_pt = create(&mut s, g2x, g2y);
 
@@ -206,12 +205,12 @@ fn ec_dag_double_traces() -> SessionTraces {
 
     let gx_n = s.uint_leaf(gx, FP);
     let gy_n = s.uint_leaf(gy, FP);
-    let g_pt = s.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
+    let g_pt = s.ec_create(GROUP_PTR, &gx_n, &gy_n);
     let dbl = s.ec_add(&g_pt, &g_pt); // tangent: G + G = 2G
 
     let g2x_n = s.uint_leaf(g2x, FP);
     let g2y_n = s.uint_leaf(g2y, FP);
-    let g2_kat = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
+    let g2_kat = s.ec_create(GROUP_PTR, &g2x_n, &g2y_n);
     let claim = s.ec_is(&dbl, &g2_kat);
 
     let root = s.assert_and_fold([claim]);

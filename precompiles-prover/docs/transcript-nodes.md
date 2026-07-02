@@ -26,13 +26,13 @@ VM `Tag::CHUNKS = [2, 0, 0, 0]`, and the terminal Keccak assertion uses
 ```
 
 Explicit transcript uint pin claims use
-`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. Fixed uint domains, fixed
-curve coefficients, and fixed curve group tuples are not represented by default
-transcript nodes; the verifier loads their `UintVal` / `EcGroup` requirements
-as external LogUp boundary consumes. EC nodes use VM curve precompile caps:
+`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. Fixed uint domains and fixed
+curve group tuples are not represented by default transcript nodes; the verifier
+loads their `UintVal` / `EcGroup` requirements as external LogUp boundary
+consumes. EC nodes use VM curve precompile caps:
 
 ```text
-[CurvePrecompile::id(), VALUE_OP_ID, a_ptr,     b_ptr]
+[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]
 [CurvePrecompile::id(), op_id,       0,         0]
 [CurvePrecompile::id(), MSM_OP_ID,   group_ptr, 0]   # MSM IV
 ```
@@ -91,7 +91,7 @@ curve caps; the old EC `NodeTag` variants are reserved aliases only.
 | `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` | VM uint VALUE | the uint's 8×u32-LE value |
 | `[UintPrecompile::id(), op_id, 0, 0]` | VM uint op | `lhs_hash[4] \|\| rhs_hash[4]` |
 | `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` | explicit uint pin claim | the pinned uint's 8×u32-LE value |
-| `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]` | VM curve VALUE / PAI | `x_hash[4] \|\| y_hash[4]` (`0 \|\| 0` for PAI) |
+| `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]` | VM curve VALUE / PAI | `x_hash[4] \|\| y_hash[4]` (`0 \|\| 0` for PAI) |
 | `[CurvePrecompile::id(), op_id, 0, 0]` | VM curve op | `P_hash[4] \|\| Q_hash[4]` |
 | `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` | VM curve MSM IV | first MSM absorb; later absorbs use the prior digest as cap |
 
@@ -111,8 +111,8 @@ local AIR constraints. Violating them is rejected as a malformed node.
 - **Explicit uint pin claim**: cap slot 1 is `bound_ptr`, cap slot 2 is
   `pin_ptr`, and cap slot 3 is `0`. This commits `store[pin_ptr] = value` as
   a transcript assertion only when the caller creates such a node.
-- **EcCreate / PAI**: VM curve VALUE cap; slot 1 is `VALUE_OP_ID = 0`, slots
-  2 and 3 are the store addresses of the curve coefficients `a_ptr` and `b_ptr`.
+- **EcCreate / PAI**: VM curve VALUE cap; slot 1 is `VALUE_OP_ID = 0`, slot 2
+  is the canonical VM-owned `group_ptr` from `CurveId::ALL`, and slot 3 is `0`.
 - **EcBinOp**: VM curve op cap; slot 1 is `op_id ∈ [1, 4]`, cap slots 2 and 3
   are `0`; the curve threads through the operands' hashes and relation witnesses.
 - **EcMsm IV**: VM curve MSM cap; slot 1 is `MSM_OP_ID`, cap slot 2 is the

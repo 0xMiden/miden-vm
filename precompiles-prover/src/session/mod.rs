@@ -44,7 +44,7 @@ use crate::{
             require,
             trace::{EcExprPtr, EcMsmRequires, generate_trace as msm_trace},
         },
-        trace::generate_traces as ec_store_traces,
+        trace::{EcGroupPtr, generate_traces as ec_store_traces},
     },
     hash::{
         chunk::trace::{ChunkRequires, generate_trace as chunk_trace},
@@ -239,15 +239,24 @@ impl Session {
         self.eval.record_is(a, b, &mut self.p2)
     }
 
-    /// Create a curve point `(x, y)` on the short-Weierstrass curve
-    /// `y² = x³ + ax + b` whose pinned coefficients live at `a_ptr` /
-    /// `b_ptr` — the curve enters the DAG only here, committed in the
-    /// node's cap. Proves on-curve membership and binds `(h, Group,
-    /// point_ptr)`. Returns the shared-use [`EcNode`]. Panics if `(x, y)`
-    /// is not on the curve.
-    pub fn ec_create(&mut self, a_ptr: u32, b_ptr: u32, x: &UintNode, y: &UintNode) -> EcNode {
+    /// Create a curve point `(x, y)` on the fixed short-Weierstrass group
+    /// selected by `group_ptr`. The group row is preseeded in the EC store;
+    /// its `(a, b, bound)` metadata supplies the curve parameters and
+    /// coordinate field, while `group_ptr` is the curve cap selector. Proves
+    /// on-curve membership and binds `(h, Group, point_ptr)`.
+    /// Returns the shared-use [`EcNode`]. Panics if `(x, y)` is not on the
+    /// group or if the coordinate nodes are not stored under the group's base
+    /// field bound.
+    pub fn ec_create(&mut self, group_ptr: u32, x: &UintNode, y: &UintNode) -> EcNode {
+        let group = EcGroupPtr::from_addr(group_ptr);
+        let (_, _, bound) = self.ec.store.group_params(group);
+        assert_eq!(x.bound_ptr, y.bound_ptr, "coordinates must share a modulus");
+        assert_eq!(
+            x.bound_ptr, bound,
+            "coordinates must be stored under the group's base-field modulus",
+        );
         self.eval
-            .ec_create(a_ptr, b_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
+            .ec_create(group_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// Declare the **scalar field** of `point`'s group: from here its MSM
@@ -263,17 +272,12 @@ impl Session {
         self.ec.store.set_scalar_bound(group, UintPtr::from_addr(sbound_ptr));
     }
 
-    /// Create the group's point-at-infinity on the pinned curve
-    /// `(a_ptr, b_ptr)` over the field at `bound_ptr` — binds `(h, Group,
+    /// Create the selected group's point-at-infinity — binds `(h, Group,
     /// pai_ptr)`, the identity for `ec_add` pass-throughs (∞+Q, P+∞, ∞+∞).
-    pub fn ec_pai(&mut self, a_ptr: u32, b_ptr: u32, bound_ptr: u32) -> EcNode {
-        self.eval.ec_pai(
-            a_ptr,
-            b_ptr,
-            bound_ptr,
-            self.ec.require(self.uint.require()),
-            &mut self.p2,
-        )
+    pub fn ec_pai(&mut self, group_ptr: u32) -> EcNode {
+        let group = EcGroupPtr::from_addr(group_ptr);
+        let _ = self.ec.store.group_params(group);
+        self.eval.ec_pai(group_ptr, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// The DAG node `R = P + Q`: consumes one
@@ -445,11 +449,9 @@ impl Session {
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
-        // The eval chip reads each EcCreate row's scalar bound from the EC
-        // store (VM-owned fixed groups carry their canonical curve order;
-        // ad-hoc groups carry the constrained scalar bound, else the coord
-        // bound) — `&` so the store survives for `ec_store_traces`.
-        let eval = eval_trace(self.eval, root, &self.ec.store);
+        // Eval no longer needs to read EC group metadata directly: EcCreate
+        // rows hash the group pointer and bind it through their EcPoint consume.
+        let eval = eval_trace(self.eval, root);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);
         let sponge = sponge_trace(self.sponge);

@@ -287,7 +287,7 @@ This is the one real AIR extension the layer needs.
 ### 6.1 The hashing problem
 
 Today every active eval row is one node = one Poseidon2 perm. Column 1 emits
-`In{rate0 = lhs, rate1 = rhs, cap = (tag, param_a, cap_param_b, 0)}` +
+`In{rate0 = lhs, rate1 = rhs, cap = (tag, tag_arg0, tag_arg1, 0)}` +
 `Out{h}`; the cap is a fixed per-node domain-sep tag and nodes are independent
 (no cross-row state). A `k`-term MSM claim needs a multi-perm sponge:
 
@@ -323,7 +323,7 @@ needs no intermediate bindings, at the cost of one new cross-row constraint.
 - **Capacity threading** (the new constraint — the eval's first row-adjacency
   hash link; today nodes couple only through the bus): on an absorb→absorb
   transition, `cap(row) = h(row − 1)`. A flag-gated **cap-source mux**:
-  one-shot rows feed `(tag, param_a, cap_param_b, 0)`; absorb rows feed the
+  one-shot rows feed `(tag, tag_arg0, tag_arg1, 0)`; absorb rows feed the
   previous digest.
 - **IV** (first absorb row): `cap = IV`, the VM curve MSM tag
   `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` — distinct from every

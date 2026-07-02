@@ -251,7 +251,7 @@ impl CurveId {
         }
     }
 
-    /// Returns the VM-owned group configuration pointer used in curve MSM tags.
+    /// Returns the VM-owned group configuration pointer used in curve VALUE and MSM tags.
     pub const fn group_ptr(self) -> u32 {
         self.codegen_id().group_ptr()
     }
@@ -311,12 +311,6 @@ impl CurveId {
             Self::Secp256r1 => UintDomain::R1Scalar,
             Self::Ed25519 => UintDomain::Ed25519Scalar,
         }
-    }
-
-    fn from_coefficient_ptrs(a_ptr: u32, b_ptr: u32) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|curve| curve.a_ptr() == a_ptr && curve.b_ptr() == b_ptr)
     }
 
     /// Returns this curve's conventional generator point.
@@ -411,10 +405,9 @@ enum CurveOp {
 impl CurveOp {
     fn decode(args: [Felt; 3]) -> Option<Self> {
         match args[0].as_canonical_u64() {
-            CurvePrecompile::VALUE_OP_ID => {
-                let a_ptr = u32_arg(args[1])?;
-                let b_ptr = u32_arg(args[2])?;
-                Some(Self::Value(CurveId::from_coefficient_ptrs(a_ptr, b_ptr)?))
+            CurvePrecompile::VALUE_OP_ID if args[2] == ZERO => {
+                let curve = CurveId::from_group_ptr(u32_arg(args[1])?)?;
+                Some(Self::Value(curve))
             },
             CurvePrecompile::ADD_OP_ID if args[1] == ZERO && args[2] == ZERO => {
                 Some(Self::Binary(CurveBinaryOp::Add))
@@ -820,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_uses_curve_public_pointers_for_value_and_msm_tags() {
+    fn decode_uses_curve_group_pointers_for_value_and_msm_tags() {
         let precompile = CurvePrecompile;
         let curve = CurveId::Secp256k1;
 
@@ -829,8 +822,8 @@ mod tests {
             [
                 CurvePrecompile::id(),
                 Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
-                Felt::from(curve.a_ptr()),
-                Felt::from(curve.b_ptr()),
+                Felt::from(curve.group_ptr()),
+                ZERO,
             ],
         );
         assert_eq!(
@@ -871,12 +864,19 @@ mod tests {
             ]),
             None
         );
-        assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99), ZERO]), None);
         assert_eq!(
             precompile.decode([
-                Felt::from_u32(0),
-                Felt::from(curve.a_ptr()),
-                Felt::new_unchecked(99)
+                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
+                Felt::from(curve.group_ptr()),
+                Felt::from_u32(1),
+            ]),
+            None
+        );
+        assert_eq!(
+            precompile.decode([
+                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
+                Felt::new_unchecked(99),
+                ZERO,
             ]),
             None
         );

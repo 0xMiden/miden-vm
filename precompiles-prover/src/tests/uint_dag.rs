@@ -23,7 +23,7 @@ use crate::{
     tests::bus_balance::session_stack_residual,
     transcript::{
         eval::{
-            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PARAM_A, COL_PTR,
+            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
             NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::UintOpId,
@@ -270,7 +270,7 @@ fn forged_result_ptr_unbalances() {
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* `param_a` swapped
+/// Re-encoding an op's discriminant — flag *and* `tag_arg0` swapped
 /// consistently from `Add` to `Sub` — passes every local constraint
 /// (the one-hot, the cap materialization, the ptr pins). What rejects it
 /// is the bus: the row's cap message no longer matches the Poseidon2
@@ -297,7 +297,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     let row = find_op_row(&tampered, COL_IS_ADD);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_PARAM_A] = Felt::from(UintOpId::Sub as u8);
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_TAG_ARG0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).

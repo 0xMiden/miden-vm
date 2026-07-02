@@ -101,12 +101,44 @@ impl<'a> EcRequire<'a> {
         self.store.add_point(group, x, y, u, w)
     }
 
-    /// A curve point from already-interned handles — the EC-DAG entry a
-    /// `EcCreate` node lowers to. Creates/dedups the group `(a, b,
-    /// bound)` and its canonical PAI, then the eager-membership point
-    /// `(x, y)`. `a`/`b` are the pinned curve coefficients; all five are
-    /// interned uint ptrs (no values cross the boundary). Returns
-    /// `(group, point)`.
+    /// A curve point from already-interned handles on an existing group row
+    /// — the EC-DAG entry a `EcCreate` node lowers to once the transcript API
+    /// names `group_ptr` directly. The group's `(a, b, bound)` metadata is
+    /// read from the EC store; the canonical PAI is materialized for later
+    /// group-law cancel/pass-through cases, then the finite point pays eager
+    /// membership. The create row consumes the resulting `EcPoint` tuple; the
+    /// point-store row itself consumes the `EcGroup` tuple, so this helper does
+    /// not add a separate create-row `EcGroup` consume.
+    pub fn point_on_group(
+        &mut self,
+        group: EcGroupPtr,
+        x_ptr: UintPtr,
+        y_ptr: UintPtr,
+    ) -> EcPointPtr {
+        let (_, b_ptr, _) = self.store.group_params(group);
+        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
+        self.store.add_pai(group);
+        let point = self.add_point_at(group, x_ptr, y_ptr);
+        self.store.require_ecpoint(point);
+        point
+    }
+
+    /// The group's point-at-infinity from an existing group row — the
+    /// EC-DAG entry a `EcCreate`/PAI node lowers to once the transcript API
+    /// names `group_ptr` directly. Routes the eval row's `EcPoint(∞)` demand;
+    /// the PAI point-store row consumes the `EcGroup` tuple.
+    pub fn pai_on_group(&mut self, group: EcGroupPtr) -> EcPointPtr {
+        let (_, b_ptr, _) = self.store.group_params(group);
+        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
+        let pai = self.store.add_pai(group);
+        self.store.require_ecpoint(pai);
+        pai
+    }
+
+    /// A curve point from already-interned handles — the legacy coefficient
+    /// entry retained for direct callers/tests. Creates/dedups the group
+    /// `(a, b, bound)`, then delegates the point work to
+    /// [`point_on_group`](Self::point_on_group).
     pub fn point_on_curve(
         &mut self,
         a_ptr: UintPtr,
@@ -117,22 +149,14 @@ impl<'a> EcRequire<'a> {
     ) -> (EcGroupPtr, EcPointPtr) {
         assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
         let group = self.store.create_group(a_ptr, b_ptr, bound);
-        self.store.add_pai(group);
-        let point = self.add_point_at(group, x_ptr, y_ptr);
-        // The eval `EcCreate` row consumes one `EcGroup` (cap a/b ↔
-        // group) + one `EcPoint` (membership) — route that demand so the
-        // stores provide a matching copy. (The `EcGroupAdd` chiplet routes
-        // its own operand/result demand separately.)
-        self.store.require_ecgroup(group);
-        self.store.require_ecpoint(point);
+        let point = self.point_on_group(group, x_ptr, y_ptr);
         (group, point)
     }
 
-    /// The group's point-at-infinity from already-interned curve handles —
-    /// the EC-DAG entry a `EcCreate`/PAI node lowers to. Creates/dedups
-    /// the group `(a, b, bound)` and returns its canonical PAI row,
-    /// routing the eval row's `EcGroup` + `EcPoint(∞)` demand. `a`/`b` are
-    /// the pinned curve coefficients.
+    /// The group's point-at-infinity from already-interned curve handles — the
+    /// legacy coefficient entry retained for direct callers/tests.
+    /// Creates/dedups the group `(a, b, bound)`, then delegates to
+    /// [`pai_on_group`](Self::pai_on_group).
     pub fn pai_on_curve(
         &mut self,
         a_ptr: UintPtr,
@@ -141,9 +165,7 @@ impl<'a> EcRequire<'a> {
     ) -> (EcGroupPtr, EcPointPtr) {
         assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
         let group = self.store.create_group(a_ptr, b_ptr, bound);
-        let pai = self.store.add_pai(group);
-        self.store.require_ecgroup(group);
-        self.store.require_ecpoint(pai);
+        let pai = self.pai_on_group(group);
         (group, pai)
     }
 

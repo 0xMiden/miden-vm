@@ -25,10 +25,9 @@ use crate::{
     transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
 };
 
-/// secp256k1 VM-owned uint/curve pointers.
+/// secp256k1 VM-owned uint/group pointers.
 const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
-const A_PTR: u32 = CurveId::Secp256k1.a_ptr();
-const B_PTR: u32 = CurveId::Secp256k1.b_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
 const SN_PTR: u32 = CurveId::Secp256k1.scalar_domain().bound_ptr();
 
 fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
@@ -47,7 +46,7 @@ fn k256_coords(p: &ProjectivePoint) -> (U256, U256) {
 fn create(s: &mut Session, x: U256, y: U256) -> EcNode {
     let xn = s.uint_leaf(x, FP);
     let yn = s.uint_leaf(y, FP);
-    s.ec_create(A_PTR, B_PTR, &xn, &yn)
+    s.ec_create(GROUP_PTR, &xn, &yn)
 }
 
 /// `⟨G×1⟩ ⊕ ⟨2G×1⟩` (disjoint bases — a pure-copy walk, value `G + 2G =
@@ -95,10 +94,10 @@ fn msm_two_intro_combine_proves() {
 /// ([`Session::constrain_scalar_bound`]) *before* the intros — so their
 /// literal-1 scalars (and the group's `EcGroup` tuple) ride `n` while the
 /// coordinates stay under `p`. This is the regression for the eval
-/// [`COL_SBOUND_PTR`](crate::transcript::eval::COL_SBOUND_PTR) path: every
-/// EcCreate row must consume `EcGroup` under `n` to match the EC store's
-/// provide. The old `scalar_bound = coord_bound` hardcode dangled the
-/// `EcGroup` bus here (provide `n`, consume `p`), so `check` tripped.
+/// scalar-bound plumbing: point-store rows and MSM consumes must read the
+/// group's canonical scalar bound `n`, not fall back to the coordinate bound
+/// `p`. The old `scalar_bound = coord_bound` hardcode dangled the `EcGroup`
+/// bus here (provide `n`, consume `p`), so `check` tripped.
 fn msm_scalar_bound_n_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);

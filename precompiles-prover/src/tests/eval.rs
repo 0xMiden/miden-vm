@@ -21,12 +21,11 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::trace::EcStoreRequires,
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
     transcript::{
         eval::{
-            COL_ACT, COL_CAP_PARAM_B, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT,
-            NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES,
+            COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR,
+            DIGEST_WIDTH, NUM_AUX_COLS, NUM_MAIN_COLS, NUM_PUBLIC_VALUES as EVAL_NUM_PUBLIC_VALUES,
             PUBLIC_ROOT_BEGIN, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
@@ -85,7 +84,7 @@ fn build_eval_trace(rng: &mut impl Rng, k: usize) -> (RowMajorMatrix<Felt>, P2Di
         acc = fold_one(&mut req, &mut p2, acc, h);
     }
     let public_root = acc.hash();
-    (generate_trace(req, acc, &EcStoreRequires::new()), public_root)
+    (generate_trace(req, acc), public_root)
 }
 
 fn check_with_k(seed: u64, k: usize) {
@@ -126,7 +125,7 @@ fn uint_leaf_constraints_hold() {
     lay_uint_leaf(&mut req, &mut p2, 7, 3, v1);
     lay_uint_leaf(&mut req, &mut p2, 9, 3, v2);
 
-    let main = generate_trace(req, root, &EcStoreRequires::new());
+    let main = generate_trace(req, root);
     crate::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
 }
 
@@ -147,7 +146,7 @@ fn public_values_layout_is_transcript_root() {
     // *is* the 4-felt transcript root: it begins at index 0 and spans the
     // whole shared count — no `inv_n` prefix as in the old σ/n layout.
     assert_eq!(PUBLIC_ROOT_BEGIN, 0);
-    assert_eq!(EVAL_NUM_PUBLIC_VALUES, NUM_HASH);
+    assert_eq!(EVAL_NUM_PUBLIC_VALUES, DIGEST_WIDTH);
     // Eval declares exactly the shared count: it neither extends nor shrinks
     // the common `air_inputs`.
     assert_eq!(EVAL_NUM_PUBLIC_VALUES, NUM_PUBLIC_VALUES);
@@ -189,7 +188,7 @@ fn build_with_zero_root_yields_zero_hash() {
     let mut req = TranscriptEvalRequires::new();
     let root = req.zero();
     let public_root = root.hash();
-    let main = generate_trace(req, root, &EcStoreRequires::new());
+    let main = generate_trace(req, root);
     assert_eq!(public_root, P2Digest::default());
     assert_eq!(main.height(), 2);
 }
@@ -210,7 +209,7 @@ fn build_root_matches_left_leaning_chain() {
         acc = fold_one(&mut req, &mut p2, acc, h);
     }
     let public_root = acc.hash();
-    let main = generate_trace(req, acc, &EcStoreRequires::new());
+    let main = generate_trace(req, acc);
 
     let t1 = fold_deferred_hash(P2Digest::default(), a);
     let t2 = fold_deferred_hash(t1, b);
@@ -218,7 +217,7 @@ fn build_root_matches_left_leaning_chain() {
     assert_eq!(public_root, t3);
 
     // Root sits at row 0 (first-row pin), its h = public_root.
-    let row0_h: [Felt; NUM_HASH] = core::array::from_fn(|i| main.values[COL_H_BEGIN + i]);
+    let row0_h: [Felt; DIGEST_WIDTH] = core::array::from_fn(|i| main.values[COL_H_BEGIN + i]);
     assert_eq!(row0_h, t3.as_array());
 }
 
@@ -235,7 +234,7 @@ fn each_fold_defers_one_perm_seq_id_to_p2() {
     let mut acc = req.zero();
     acc = fold_one(&mut req, &mut p2, acc, h1);
     acc = fold_one(&mut req, &mut p2, acc, h2);
-    let _ = generate_trace(req, acc, &EcStoreRequires::new());
+    let _ = generate_trace(req, acc);
 
     // Two folds ⇒ two fresh p2 cycles past the prefill.
     assert_eq!(p2.total_cycles(), cycles_before + 2);
@@ -260,7 +259,7 @@ fn zero_leaves_merge_into_one_row() {
     };
     let root = fold_one(&mut req, &mut p2, t1, t2);
     let public_root = root.hash();
-    let main = generate_trace(req, root, &EcStoreRequires::new());
+    let main = generate_trace(req, root);
 
     // Exactly one is_zero row, carrying out_mult 2.
     let zero_rows: Vec<usize> = (0..main.height())
@@ -281,7 +280,7 @@ fn build_panics_on_stray_claim() {
     let mut req = TranscriptEvalRequires::new();
     let _stray = req.issue(P2Digest([Felt::from(9u8); 4]));
     let root = req.zero();
-    let _ = generate_trace(req, root, &EcStoreRequires::new());
+    let _ = generate_trace(req, root);
 }
 
 #[test]
@@ -290,7 +289,7 @@ fn build_panics_on_raw_keccak_root() {
     // A raw issued handle has no eval row, so it can't be pinned at row 0.
     let mut req = TranscriptEvalRequires::new();
     let h = req.issue(P2Digest([Felt::from(5u8); 4]));
-    let _ = generate_trace(req, h, &EcStoreRequires::new());
+    let _ = generate_trace(req, h);
 }
 
 // CONSTRAINT TESTS
@@ -403,12 +402,12 @@ fn corruption_pinned_leaf_cap_slot_mismatch() {
     let pinned = req.pin_uint(UintPtr::forged(7), UintPtr::forged(7), value, &mut scratch, &mut p2);
     let root = fold_one(&mut req, &mut p2, zero, pinned);
     let public_root = root.hash();
-    let mut main = generate_trace(req, root, &EcStoreRequires::new());
+    let mut main = generate_trace(req, root);
 
     let pin_row = (0..main.height())
         .find(|&r| main.values[r * NUM_MAIN_COLS + COL_IS_PINNED] == Felt::ONE)
         .expect("trace has a pinned leaf row");
-    main.values[pin_row * NUM_MAIN_COLS + COL_CAP_PARAM_B] += Felt::ONE;
+    main.values[pin_row * NUM_MAIN_COLS + COL_PIN_CLAIM_PIN_PTR] += Felt::ONE;
 
     crate::tests::check_local_inputs(TranscriptEvalAir, &main, public_root.as_array().to_vec());
 }

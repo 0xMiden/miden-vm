@@ -9,8 +9,8 @@ use crate::{
     session::Session,
     transcript::{
         eval::{
-            COL_BOUND_PTR, COL_CAP_PARAM_B, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP,
-            COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
+            COL_BOUND_PTR, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_PIN_CLAIM_PIN_PTR,
+            COL_PTR, COL_TAG_ARG1, COL_UINT_VALUE_BOUND_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
         },
         nodes::UintOpId,
         poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
@@ -84,7 +84,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
                 && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
         })
         .expect("expected pin row for explicit ptr");
-    assert_eq!(row_value(pin_row, COL_CAP_PARAM_B), Felt::from(PIN_PTR));
+    assert_eq!(row_value(pin_row, COL_PIN_CLAIM_PIN_PTR), Felt::from(PIN_PTR));
 
     let value_row = (0..eval.height())
         .find(|&row| {
@@ -93,12 +93,12 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
                 && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
         })
         .expect("expected VM uint value row for explicit ptr");
-    assert_eq!(row_value(value_row, COL_CAP_PARAM_B), Felt::from(bound_ptr));
+    assert_eq!(row_value(value_row, COL_UINT_VALUE_BOUND_PTR), Felt::from(bound_ptr));
 
     let op_row = (0..eval.height())
         .find(|&row| row_value(row, COL_IS_UINT_OP) == Felt::ONE)
         .expect("expected VM uint Is op row");
-    assert_eq!(row_value(op_row, COL_CAP_PARAM_B), Felt::ZERO);
+    assert_eq!(row_value(op_row, COL_TAG_ARG1), Felt::ZERO);
     assert_eq!(row_value(op_row, COL_BOUND_PTR), Felt::from(bound_ptr));
 
     traces.check();

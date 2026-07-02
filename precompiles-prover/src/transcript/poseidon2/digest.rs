@@ -89,15 +89,15 @@ impl P2Cap {
         Self(UintPrecompile::op_tag(op_id).as_word())
     }
 
-    /// VM curve `VALUE` capacity: `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]`.
-    /// The cap carries the curve coefficient pointers; the modulus `p`
-    /// threads in via the coordinates' shared bound.
-    pub fn ec_create(a_ptr: u32, b_ptr: u32) -> Self {
+    /// VM curve `VALUE` capacity: `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
+    /// The group pointer selects the fixed curve; its coefficient and bound
+    /// metadata are pinned by the EC group table.
+    pub fn ec_create(group_ptr: u32) -> Self {
         Self([
             CurvePrecompile::id(),
             Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
-            Felt::from(a_ptr),
-            Felt::from(b_ptr),
+            Felt::from(group_ptr),
+            Felt::ZERO,
         ])
     }
 
