@@ -12,13 +12,14 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 
 use super::{
-    AUX_WIDTH, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_ACT, GAMMA_NEG_SLOTS,
-    GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, TERM_CELL_MULT, UintAddAir,
+    AUX_WIDTH, CELL_D_W, CELL_D_WS, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_NZ,
+    GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P,
+    TERM_CELL_MULT, UintAddAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -35,13 +36,17 @@ use crate::{
 /// mode: `c` is the (unstored) zero, neither looked up nor subtracted
 /// (the `a + b ≡ 0` negation primitive, laid as the `c_ptr = 0`
 /// sentinel). `b = None` is the mirror `is_b_zero` mode: `a + 0 ≡ c`,
-/// the stored-value **equality certificate** `a = c`.
+/// the stored-value **equality certificate** `a = c`. `nz` additionally
+/// certifies `b ≠ 0` (see [`super::UintAddAir`]'s "Nonzero certificate")
+/// — part of the relation identity, like `is_sub` on `UintMul`: a plain
+/// provide can never satisfy an `nz = 1` consume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct AddOp {
     a: UintPtr,
     b: Option<UintPtr>,
     c: Option<UintPtr>,
     bound: UintPtr,
+    nz: bool,
 }
 
 /// Carries of an 8×32-bit addition `Σ (x + y)`: `out[j]` = carry **out of**
@@ -94,7 +99,41 @@ impl UintAddRequires {
         bound: UintPtr,
         mult: ProvideMult,
     ) {
-        self.push(AddOp { a, b: Some(b), c: Some(c), bound }, mult);
+        self.push(
+            AddOp {
+                a,
+                b: Some(b),
+                c: Some(c),
+                bound,
+                nz: false,
+            },
+            mult,
+        );
+    }
+
+    /// Record `a + b ≡ c (mod p)` **and** certify `b ≠ 0` — the disequality
+    /// cert the EC group law's generic-add case consumes on its
+    /// `d = x₂ − x₁` subtraction (`(a, b, c) = (x₁, d, x₂)`) in place of a
+    /// full inverse modmul. See [`super::UintAddAir`]'s "Nonzero
+    /// certificate".
+    pub fn record_nz(
+        &mut self,
+        a: UintPtr,
+        b: UintPtr,
+        c: UintPtr,
+        bound: UintPtr,
+        mult: ProvideMult,
+    ) {
+        self.push(
+            AddOp {
+                a,
+                b: Some(b),
+                c: Some(c),
+                bound,
+                nz: true,
+            },
+            mult,
+        );
     }
 
     /// Record `a + b ≡ 0 (mod p)` — the **negation** primitive (`b = −a`).
@@ -102,7 +141,7 @@ impl UintAddRequires {
     /// needs no reference to a stored zero (which can't be pinned untyped
     /// for an arbitrary modulus).
     pub fn record_to_zero(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr, mult: ProvideMult) {
-        self.push(AddOp { a, b: Some(b), c: None, bound }, mult);
+        self.push(AddOp { a, b: Some(b), c: None, bound, nz: false }, mult);
     }
 
     /// Record `a + 0 ≡ c (mod p)` — the **equality certificate** `a = c`
@@ -111,7 +150,7 @@ impl UintAddRequires {
     /// shared modulus the identity is exactly value equality — the EC
     /// group law's `x₁ = x₂` / `y₁ = y₂` case ties.
     pub fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
-        self.push(AddOp { a, b: None, c: Some(c), bound }, mult);
+        self.push(AddOp { a, b: None, c: Some(c), bound, nz: false }, mult);
     }
 
     fn push(&mut self, op: AddOp, mult: ProvideMult) {
@@ -137,6 +176,9 @@ struct Witness {
     k: u32,
     gamma_pos: [u16; 7],
     gamma_neg: [u16; 7],
+    /// The nonzero certificate's witness: `S⁻¹` (native Goldilocks
+    /// inverse of `b`'s raw limb sum), only meaningful when `op.nz`.
+    d_w: Felt,
 }
 
 fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
@@ -166,7 +208,27 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
         top, top_neg,
         "a + b and c + k·p must share the bit-256 carry (a + b = c + k·p)",
     );
-    Witness { a, b, c, bound, k, gamma_pos, gamma_neg }
+
+    // The nonzero certificate: S = Σⱼ bⱼ (native sum, no wrap — 8 limbs
+    // each < 2³² sum to < 2³⁵ ≪ p_Goldilocks), w = S⁻¹.
+    let d_w = if op.nz {
+        let s: u64 = b.iter().map(|&limb| u64::from(limb)).sum();
+        debug_assert_ne!(s, 0, "nz certifies b ≠ 0, but b's limbs sum to 0");
+        Felt::new(s).expect("S < 2^35 < Goldilocks p").inverse()
+    } else {
+        Felt::ZERO
+    };
+
+    Witness {
+        a,
+        b,
+        c,
+        bound,
+        k,
+        gamma_pos,
+        gamma_neg,
+        d_w,
+    }
 }
 
 /// Build the UintAdd main trace from the recorded ops — one op = one
@@ -224,18 +286,24 @@ pub fn generate_trace(
             block[row][cell] = Felt::from(w.gamma_neg[j]);
         }
         block[ROW_P][TERM_CELL_MULT] = Felt::from(*mult);
+        if op.nz {
+            let s_sum: Felt = block[ROW_B][0..8].iter().copied().sum();
+            block[ROW_B][CELL_D_W] = w.d_w;
+            block[ROW_B][CELL_D_WS] = w.d_w * s_sum;
+        }
 
-        // Cycle-constant metadata (cols COL_A_PTR..=COL_ACT), identical on
+        // Cycle-constant metadata (cols COL_A_PTR..=COL_NZ), identical on
         // every row of the block.
-        let meta: [Felt; 5] = [
+        let meta: [Felt; 6] = [
             Felt::from(op.a.addr()),
             Felt::from(op.b.map_or(0, UintPtr::addr)),
             Felt::from(op.c.map_or(0, UintPtr::addr)),
             Felt::from(op.bound.addr()),
             Felt::ONE, // act: a real op block
+            Felt::from(op.nz as u32),
         ];
         for row in block.iter_mut() {
-            row[COL_A_PTR..=COL_ACT].copy_from_slice(&meta);
+            row[COL_A_PTR..=COL_NZ].copy_from_slice(&meta);
             vals.extend_from_slice(row);
         }
     }

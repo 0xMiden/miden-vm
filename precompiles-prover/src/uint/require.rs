@@ -88,6 +88,22 @@ impl<'a> UintRequire<'a> {
         z_ptr
     }
 
+    /// Record the modular subtraction `x − y mod p`, as [`sub`](Self::sub),
+    /// **and** certify `z = x − y ≠ 0` — the disequality cert the EC group
+    /// law's generic-add case consumes on its `d = x₂ − x₁` subtraction in
+    /// place of a full inverse modmul. Panics if `x = y` (the certificate
+    /// would be false). Returns `z`'s handle.
+    pub fn sub_nonzero(&mut self, x_ptr: UintPtr, y_ptr: UintPtr) -> UintPtr {
+        let (x, bound) = self.resolve(x_ptr);
+        let (y, _) = self.resolve(y_ptr);
+        assert_eq!(x.bound_ptr, y.bound_ptr, "sub operands must share a modulus");
+        assert_ne!(x.value, y.value, "sub_nonzero requires x ≠ y");
+        let z = sub_reduce(x.value, y.value, bound);
+        let z_ptr = self.store.intern(z, x.bound_ptr);
+        self.add.record_nz(y_ptr, z_ptr, x_ptr, x.bound_ptr, 1);
+        z_ptr
+    }
+
     /// Record the modular negation `−v mod p`, interning `z = p − v` (or
     /// 0 for `v = 0`) and proving `v + z ≡ 0` via the `is_c_zero` add
     /// mode — the zero result is *unstored*, so no typed zero pin is

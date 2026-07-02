@@ -38,17 +38,19 @@
 //! Equality (`double`/`cancel`'s `x₁ = x₂`, `double`'s `y₁ = y₂`) is
 //! the [`is_b_zero`](crate::uint::add) `UintAdd` form `x₁ + 0 ≡ x₂` —
 //! value-level (distinct ptrs binding equal coordinates still close),
-//! deterministic, no limbs. Disequality (`generic`'s `x₁ ≠ x₂`) is an
-//! **inverse MAC against the group's `b`**: a stored witness `inv` with
+//! deterministic, no limbs. Disequality (`generic`'s `x₁ ≠ x₂`) rides the
+//! **`nz` flag on `d`'s own `UintAdd` tuple**: `d = x₂ − x₁` is already
+//! recorded as the arrangement `x₁ + d ≡ x₂` (the slope transient
+//! `consume-d-sub`), and demanding `nz = 1` on that same tuple certifies
+//! `d ≠ 0` — a limb-level certificate carried by the subtraction that's
+//! already there, no separate inverse MAC or witness.
 //!
-//! ```text
-//! inv·d + 0 ≡ b      (generic: d = x₂ − x₁, the slope transient)
-//! ```
-//!
-//! `b ≠ 0` (the EcCreate guard, doing double duty) makes the MAC
-//! unsatisfiable when `d = 0` — the λ-float attack dies in the mul
-//! chiplet, deterministically, with no β-dependent fingerprint, no aux
-//! witness registers, and no completeness gap.
+//! The λ-float attack (a forged `d = 0` letting an attacker float the
+//! chord slope) dies because a `nz = 1` provide only exists when the
+//! `UintAdd` chiplet's own certificate holds (`d`'s limbs sum to a
+//! Goldilocks-field-invertible nonzero value — see
+//! [`crate::uint::add`]'s "Nonzero certificate"), deterministically, with
+//! no β-dependent fingerprint and no completeness gap.
 //!
 //! `double` needs **no** analogous `y₁ ≠ 0` witness: its slope pin
 //! `2·λ·y₁ ≡ s` with `s = 3·x² + a` is itself the nonzero guard — at
@@ -84,7 +86,7 @@
 //!
 //! | row | cells 0–3 | emits |
 //! |---|---|---|
-//! | 0 `slope` | `(slope_aux, λ, inv, t)` | slope + predicate certs (local), tail certs (cells @ next) |
+//! | 0 `slope` | `(slope_aux, λ, —, t)` | slope + predicate certs (local), tail certs (cells @ next) |
 //! | 1 `tail`  | `(y₃, e, —, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` @ next) |
 //! | 2 `res`   | `(—, r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
 //! | 3 `term`  | `(mult, p, q, —)` | — (hosts only; the constancy gate drops here) |
@@ -224,11 +226,11 @@ pub const ROW_RES: usize = 2;
 pub const ROW_TERM: usize = 3;
 
 /// Row-0 cells: `slope_aux` is `d = x₂ − x₁` for `generic`, `s = 3x² + a`
-/// for `double`; `inv` is `generic`'s disequality witness `b·d⁻¹` (the null
-/// ptr on `double`, whose `y₁ ≠ 0` rides the slope pin instead).
+/// for `double`. Cell 2 is unused — `generic`'s disequality now rides `d`'s
+/// own `UintAdd` tuple (`nz = 1`, see the module doc) rather than a
+/// separate witnessed inverse.
 pub const CELL_SLOPE_AUX: usize = 0;
 pub const CELL_LAMBDA: usize = 1;
-pub const CELL_INV: usize = 2;
 pub const CELL_T: usize = 3;
 /// Row-1 (tail) cells: the fused result `y₃`, the `x₁ − x₃` witness `e`,
 /// and `x₃` (cell 2 is dead — the mul-subtracts leave no `w` / `u`
@@ -461,7 +463,6 @@ where
         // fused mul-subtracts read their result here in one window.
         let slope_aux: LB::Expr = local[CELL_SLOPE_AUX].into();
         let lambda: LB::Expr = local[CELL_LAMBDA].into();
-        let inv: LB::Expr = local[CELL_INV].into();
         let t: LB::Expr = local[CELL_T].into();
         let e: LB::Expr = next[CELL_E].into();
         let x3_next: LB::Expr = next[CELL_X3].into();
@@ -592,6 +593,7 @@ where
                                         a_ptr: py.clone(),
                                         b_ptr: qy.clone(),
                                         c_ptr: zero.clone(),
+                                        nz: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -617,7 +619,9 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 // generic: d = x₂ − x₁ (the arrangement
-                                // x₁ + d ≡ x₂) and the chord λ·d + y₁ ≡ y₂.
+                                // x₁ + d ≡ x₂, certified `d ≠ 0` — `nz = 1`
+                                // — in place of the separate inverse modmul
+                                // disequality) and the chord λ·d + y₁ ≡ y₂.
                                 b.insert(
                                     "consume-d-sub",
                                     generic.clone() * at_slope.clone(),
@@ -626,6 +630,7 @@ where
                                         a_ptr: px.clone(),
                                         b_ptr: slope_aux.clone(),
                                         c_ptr: qx.clone(),
+                                        nz: one.clone(),
                                     },
                                     f2,
                                 );
@@ -639,24 +644,6 @@ where
                                         b_ptr: slope_aux.clone(),
                                         c_ptr: py.clone(),
                                         r_ptr: qy.clone(),
-                                        bound_ptr: bound.clone(),
-                                        is_sub: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // generic's disequality witness:
-                                // inv·d ≡ b ≠ 0 ⟹ d ≠ 0 — what pins λ to
-                                // the unique chord slope.
-                                b.insert(
-                                    "consume-inv-d",
-                                    generic.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: zero.clone(),
-                                        a_ptr: inv.clone(),
-                                        b_ptr: slope_aux.clone(),
-                                        c_ptr: bound.clone(),
-                                        r_ptr: b_ptr.clone(),
                                         bound_ptr: bound.clone(),
                                         is_sub: zero.clone(),
                                     },
@@ -717,6 +704,7 @@ where
                                         a_ptr: px.clone(),
                                         b_ptr: zero.clone(),
                                         c_ptr: qx.clone(),
+                                        nz: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -758,6 +746,7 @@ where
                                         a_ptr: px.clone(),
                                         b_ptr: qx.clone(),
                                         c_ptr: t.clone(),
+                                        nz: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -802,6 +791,7 @@ where
                                         a_ptr: x3_next,
                                         b_ptr: e.clone(),
                                         c_ptr: px,
+                                        nz: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -829,8 +819,9 @@ where
                                     UintAddMsg {
                                         bound_ptr: bound,
                                         a_ptr: py,
-                                        b_ptr: zero,
+                                        b_ptr: zero.clone(),
                                         c_ptr: qy,
+                                        nz: zero,
                                     },
                                     f2,
                                 );
