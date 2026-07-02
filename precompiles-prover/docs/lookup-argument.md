@@ -21,12 +21,19 @@ is either:
 The LogUp running sum closes (sum to zero) exactly when every
 require is matched by a corresponding provide.
 
+A verifier may also load fixed public relation tuples as **boundary
+consumes**: the verifier contributes the same `+1/encoding` term as a
+require, without any trace row. Current use: fixed `UintVal` halves for
+uint domains and fixed curve coefficients. These boundary consumes pin
+store values through LogUp only; they are not transcript nodes and do not
+change the public root unless separately asserted by the eval chip.
+
 ## The fixed-consume invariant (why provide multiplicities aren't range-checked)
 
-**Every require weight in this VM is an AIR-determined constant —
-`1`, boolean-gated to `0` on padding/inactive rows (`act`, one-hot
-case/kind flags, periodic selectors), never a witnessed felt.** The
-sole non-`1` weights live on the `Memory64` *multiset* bus (e.g. a
+**Every require weight in this VM is an AIR- or verifier-determined
+constant — `1`, boolean-gated to `0` on padding/inactive rows (`act`,
+one-hot case/kind flags, periodic selectors), never a witnessed felt.**
+The sole non-`1` weights live on the `Memory64` *multiset* bus (e.g. a
 digest leaf consumed `2·act` times, the `dst_mult ∈ {1,2,3,5,12}`
 state-overwrite writes); those are still constants pinned by selectors,
 and `Memory64` is a multiset relation with its own model — it is *not*

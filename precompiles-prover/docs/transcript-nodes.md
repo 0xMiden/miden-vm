@@ -9,7 +9,7 @@ Adapted from the precompile-VM design doc (trunk's `pvm-design.md`,
 §3 / §4 / §6.3 / §6.7 / §7.1 / §8.4 / §8.5). The cherry-picked
 scope here covers the Keccak node types — **Chunk** and **Keccak** —
 plus the live uint family: VM uint **VALUE** / **Add** / **Sub** /
-**Mul** / **Eq** caps and the external bootstrap **UintPinClaim**;
+**Mul** / **Eq** caps and the explicit transcript **UintPinClaim**;
 the EC family: **EcCreate**, **EcBinOp**, and **EcMsm** rows, now using
 `CurvePrecompile` caps.
 
@@ -25,7 +25,10 @@ VM `Tag::CHUNKS = [2, 0, 0, 0]`, and the terminal Keccak assertion uses
 [UINT_PRECOMPILE_ID, op_id,       0,         0]
 ```
 
-Bootstrap uint pin claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+Explicit transcript uint pin claims use
+`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. Fixed uint domains and fixed
+curve coefficients are not represented by default pin-claim nodes; the
+verifier loads their `UintVal` halves as external LogUp boundary consumes.
 EC nodes use VM curve precompile caps:
 
 ```text
@@ -75,7 +78,7 @@ Future format changes should allocate explicit tag or parameter space.
 
 VM-owned caps come directly from `miden_core::deferred::Tag` and
 `miden_precompiles::{Keccak256Precompile, UintPrecompile, CurvePrecompile}`.
-The remaining local cap is the bootstrap uint pin-claim tag registered in
+The remaining local cap is the explicit uint pin-claim tag registered in
 [`src/transcript/nodes.rs`](../src/transcript/nodes.rs). Live EC rows use VM
 curve caps; the old EC `NodeTag` variants are reserved aliases only.
 
@@ -86,7 +89,7 @@ curve caps; the old EC `NodeTag` variants are reserved aliases only.
 | `[Keccak256Precompile::id(), 0, len_bytes, 0]` | VM Keccak-256 assertion | `H_input_chunks[4] \|\| H_digest_chunks[4]` |
 | `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` | VM uint VALUE | the uint's 8×u32-LE value |
 | `[UintPrecompile::id(), op_id, 0, 0]` | VM uint op | `lhs_hash[4] \|\| rhs_hash[4]` |
-| `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` | bootstrap uint pin claim | the pinned uint's 8×u32-LE value |
+| `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` | explicit uint pin claim | the pinned uint's 8×u32-LE value |
 | `[CurvePrecompile::id(), VALUE_OP_ID, a_ptr, b_ptr]` | VM curve VALUE / PAI | `x_hash[4] \|\| y_hash[4]` (`0 \|\| 0` for PAI) |
 | `[CurvePrecompile::id(), op_id, 0, 0]` | VM curve op | `P_hash[4] \|\| Q_hash[4]` |
 | `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` | VM curve MSM IV | first MSM absorb; later absorbs use the prior digest as cap |
@@ -104,9 +107,9 @@ local AIR constraints. Violating them is rejected as a malformed node.
   `bound_ptr`, and cap slot 3 is `0`.
 - **VM uint op**: cap slot 1 is `op_id ∈ [1, 4]`, cap slots 2 and 3 are `0`.
   Operand/result pointers and `bound_ptr` are carried by `Binding` and relation tuples.
-- **Bootstrap uint pin claim**: cap slot 1 is `bound_ptr`, cap slot 2 is
+- **Explicit uint pin claim**: cap slot 1 is `bound_ptr`, cap slot 2 is
   `pin_ptr`, and cap slot 3 is `0`. This commits `store[pin_ptr] = value` as
-  an initial-root input.
+  a transcript assertion only when the caller creates such a node.
 - **EcCreate / PAI**: VM curve VALUE cap; slot 1 is `VALUE_OP_ID = 0`, slots
   2 and 3 are the store addresses of the curve coefficients `a_ptr` and `b_ptr`.
 - **EcBinOp**: VM curve op cap; slot 1 is `op_id ∈ [1, 4]`, cap slots 2 and 3
@@ -124,9 +127,9 @@ chunks. KeccakNode also uses the same capacity inline to hash the 8 packed
 digest felts as a one-chunk payload. That digest commitment is not a physical
 extra ChunkAir row.
 
-### Bootstrap `UINT_PIN_CLAIM_TAG`
+### Manual `UINT_PIN_CLAIM_TAG`
 
-A bootstrap uint pin claim hashes the pinned value limbs under
+A manual transcript uint pin claim hashes the pinned value limbs under
 `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`:
 
 ```text
@@ -137,9 +140,10 @@ h_pin = H(rate || [UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0])
 The eval row consumes both stored halves,
 `UintVal(pin_ptr, bound_ptr, 0, lo)` and
 `UintVal(pin_ptr, bound_ptr, 1, hi)`, and provides
-`Binding(h_pin, True)`. Bounds/moduli are self-pins (`pin_ptr = bound_ptr`).
-Bootstrap pin claims fold deterministically into the initial root; program
-claims fold from that root.
+`Binding(h_pin, True)`. Bounds/moduli may be self-pins (`pin_ptr = bound_ptr`),
+but default fixed domains and curve coefficients use verifier-loaded
+`UintVal` boundary consumes instead. Manual pin claims are ordinary `True`
+leaves that fold wherever the caller places them in the transcript.
 
 ### VM uint ops
 
@@ -173,7 +177,9 @@ the short-Weierstrass curve `y² = x³ + ax + b` from two uint-node
 children `(x, y)`. The curve is named by the VM curve VALUE cap:
 slot 1 is `VALUE_OP_ID = 0`, slots 2 and 3 are the store addresses
 `a_ptr` and `b_ptr` of coefficients `a` and `b`, and the modulus `p`
-is inherited from the children's shared `bound_ptr`.
+is inherited from the children's shared `bound_ptr`. For VM-owned fixed
+curves, these coefficient/domain uints are verifier-loaded by `UintVal`
+boundary consumes, not by default transcript pin claims.
 
 `x = y = 0` (both children the zero uint) denotes the **point at
 infinity** — the group's canonical PAI row, bound with `is_pai = 1`.

@@ -20,9 +20,10 @@ inherit the check through the bus tie).
 
 The 4×32 view feeds the eval chip's Poseidon2 rate, the
 [UintAdd](uint-add.md) operands, and the mul chiplet's linear operands;
-the raw 8×16 view feeds [UintMul](uint-mul.md)'s convolution operands at
-16-bit granularity. Arithmetic lives entirely in those sibling relation
-AIRs; this chiplet only stores and range-checks.
+it also serves verifier-loaded boundary consumes for fixed uint domains and
+fixed curve coefficients. The raw 8×16 view feeds [UintMul](uint-mul.md)'s
+convolution operands at 16-bit granularity. Arithmetic lives entirely in
+those sibling relation AIRs; this chiplet only stores and range-checks.
 
 ## The identity (vertical Schwartz–Zippel)
 
@@ -162,7 +163,9 @@ mutually-exclusive fractions respectively.
 
 Each provide multiplicity is the stored consumer-count cell (`uintval_mult`
 / `uintlimbs_mult`), negated; both are pinned to actual demand by bus
-balance (no range check). The hub sits **between** the `v` halves so one
+balance (no range check). `uintval_mult` includes verifier-loaded boundary
+consumes for fixed domains / curve coefficients as well as AIR-row consumes.
+The hub sits **between** the `v` halves so one
 mult cell serves both halves: the offset-0 provide (on `v`-lo) reads it
 as the next row, the offset-1 provide (on the hub) reads it locally — a
 per-half split would let one ptr's lo half pair with another's hi into a

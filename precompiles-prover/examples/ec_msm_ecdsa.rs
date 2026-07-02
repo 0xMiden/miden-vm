@@ -49,6 +49,7 @@ use k256::{
     elliptic_curve::{PrimeField, sec1::ToEncodedPoint},
 };
 use miden_lifted_air::LiftedAir;
+use miden_precompiles::CurveId;
 use miden_precompiles_prover::{
     math::{U256, U512, U576, from_hex},
     session::{
@@ -59,14 +60,14 @@ use miden_precompiles_prover::{
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-const FP: u32 = 1;
-const A_PTR: u32 = 2;
-const B_PTR: u32 = 3;
-/// The scalar-field modulus slot — the curve order `n`, distinct from the
-/// coordinate field `p` at [`FP`]. MSM scalars route under `n` (a real
-/// secp256k1: `n ≠ p`); [`Session::constrain_scalar_bound`] points the
-/// group's scalars here.
-const SN_PTR: u32 = 4;
+/// secp256k1 VM-owned uint/curve pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const A_PTR: u32 = CurveId::Secp256k1.a_ptr();
+const B_PTR: u32 = CurveId::Secp256k1.b_ptr();
+/// Scalar-field bound pointer: the curve order `n`, distinct from the coordinate field `p` at
+/// [`FP`]. MSM scalars route under `n`; [`Session::constrain_scalar_bound`] points the group's
+/// scalars here.
+const SN_PTR: u32 = CurveId::Secp256k1.scalar_domain().bound_ptr();
 /// wNAF window for the `wnaf` strategy (digits odd, `|d| < 2^{w-1}`; the
 /// table is `2^{w-2}` odd multiples per base).
 const WNAF_W: usize = 5;
@@ -85,8 +86,8 @@ const LAMBDA: &str = "5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b
 /// coordinate twist: `φ(x, y) = (β·x mod p, y)`. The in-circuit `β·x`
 /// (a `UintMul` under the coordinate field) is the endomorphism cert.
 const BETA: &str = "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee";
-/// secp256k1 group order minus one (`n − 1`) — the stored scalar-field
-/// modulus pinned at [`SN_PTR`].
+/// secp256k1 group order minus one (`n − 1`). The VM-owned scalar-domain bound lives at
+/// [`SN_PTR`].
 const N_MINUS_1: &str = "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140";
 /// GLV scalar-piece width: each `kᵢ` splits into two ~128-bit halves.
 const GLV_BITS: usize = 128;
@@ -529,7 +530,6 @@ fn main() {
     assert!(n >= 1, "N >= 1");
     assert!((1..=255).contains(&bits), "bits in 1..=255");
 
-    let p_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E");
     let g = ProjectivePoint::GENERATOR;
 
     println!("=================================================");
@@ -539,14 +539,7 @@ fn main() {
 
     let gen_start = Instant::now();
     let mut session = Session::new();
-    let mut claims = vec![
-        session.pin_uint(FP, p_minus_1, FP),
-        session.pin_uint(A_PTR, from_hex("0"), FP),
-        session.pin_uint(B_PTR, from_hex("7"), FP),
-        // The scalar field `n` (self-referential modulus): MSM scalars route
-        // under it on every strategy.
-        session.pin_uint(SN_PTR, from_hex(N_MINUS_1), SN_PTR),
-    ];
+    let mut claims = Vec::new();
 
     // Create the generator node once (shared across all N — its EcCreate
     // dedups anyway). For `wnaf`, precompute G's odd-multiple table once; for

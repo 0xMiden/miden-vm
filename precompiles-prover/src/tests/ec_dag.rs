@@ -14,15 +14,17 @@ use std::collections::HashMap;
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles::{CurveId, UintDomain, curve_coefficients};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir},
+    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
     hash::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
+    logup::LookupMessage,
     math::{U256, from_hex},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -35,15 +37,13 @@ use crate::{
         },
         poseidon2::Poseidon2Air,
     },
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
+    uint::{UintStoreAir, UintValMsg, add::UintAddAir, mul::UintMulAir},
 };
 
-/// secp256k1: `p − 1`, curve `y² = x³ + 7` (a = 0, b = 7), pinned at the
-/// protocol addresses below.
-const P_MINUS_1: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E";
-const FP: u32 = 1;
-const A_PTR: u32 = 2;
-const B_PTR: u32 = 3;
+/// secp256k1 VM-owned uint/curve pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const A_PTR: u32 = CurveId::Secp256k1.a_ptr();
+const B_PTR: u32 = CurveId::Secp256k1.b_ptr();
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
@@ -74,9 +74,6 @@ fn ec_dag_3g_traces() -> SessionTraces {
     let (g3x, g3y) = k256_coords(&(g + g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let gx_n = s.uint_leaf(gx, FP);
     let gy_n = s.uint_leaf(gy, FP);
@@ -93,7 +90,7 @@ fn ec_dag_3g_traces() -> SessionTraces {
     // k256 cross-check + two-chain dedup: `r` (add result) and `expected`
     // (k256 KAT) are distinct DAG nodes that must share one point ptr.
     let claim = s.ec_is(&r, &expected);
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -126,9 +123,6 @@ fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let (ngx, ngy) = k256_coords(&(-g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
@@ -150,7 +144,7 @@ fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let g2_kat = create(&mut s, g2x, g2y);
     let sub_claim = s.ec_is(&diff, &g2_kat);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, neg_claim, sub_claim]);
+    let root = s.assert_and_fold([neg_claim, sub_claim]);
     s.finish(root)
 }
 
@@ -178,9 +172,6 @@ fn ec_dag_pai_traces() -> SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
@@ -200,7 +191,7 @@ fn ec_dag_pai_traces() -> SessionTraces {
     let c2 = s.ec_is(&pq, &g2_pt);
     let c3 = s.ec_is(&bb, &inf);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, c1, c2, c3]);
+    let root = s.assert_and_fold([c1, c2, c3]);
     s.finish(root)
 }
 
@@ -225,9 +216,6 @@ fn ec_dag_double_traces() -> SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let gx_n = s.uint_leaf(gx, FP);
     let gy_n = s.uint_leaf(gy, FP);
@@ -239,7 +227,7 @@ fn ec_dag_double_traces() -> SessionTraces {
     let g2_kat = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
     let claim = s.ec_is(&dbl, &g2_kat);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -264,7 +252,7 @@ fn ec_dag_double_proves() {
 // the cross-chiplet bus: a mismatched or dangling provide.
 // ============================================================================
 
-/// Net unmatched LogUp denominators across the full 14-chiplet stack
+/// Net unmatched LogUp denominators across the full 15-chiplet stack
 /// (0 ⟺ every bus closes), with the `eval` main replaced by `eval_main`.
 fn dag_residual(
     traces: &SessionTraces,
@@ -284,9 +272,8 @@ fn dag_residual_with(
     rng: &mut impl Rng,
 ) -> usize {
     let mains = traces.mains();
-    // 0.26 dropped per-chiplet public values; rebuild the σ/n `inv_n` slot
-    // `fold_balance` (whose `pv` param is unchanged on this branch) still
-    // reads, mirroring `tests::ec_add::stack_residual`.
+    // Mirror `ChipletMultiAir::eval_external`: fold every chiplet's LogUp
+    // balance, then inject the verifier-side fixed-UintVal boundary consumes.
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
     fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
@@ -303,7 +290,57 @@ fn dag_residual_with(
     fold_balance(&EcGroupsAir, mains[11], &challenges, &mut net);
     fold_balance(&EcPointStoreAir, mains[12], &challenges, &mut net);
     fold_balance(&EcGroupAddAir, add_main, &challenges, &mut net);
+    fold_balance(&EcMsmAir, mains[14], &challenges, &mut net);
+    fold_fixed_uint_external_balance(&challenges, &mut net);
     net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
+}
+
+fn fold_fixed_uint_external_balance(
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, (Felt, String)>,
+) {
+    for domain in UintDomain::ALL {
+        fold_fixed_uint_external(
+            challenges,
+            net,
+            domain.bound_ptr(),
+            domain.bound_ptr(),
+            domain.minus_one(),
+        );
+    }
+    for coefficient in curve_coefficients() {
+        fold_fixed_uint_external(
+            challenges,
+            net,
+            coefficient.ptr,
+            coefficient.bound_ptr,
+            coefficient.value,
+        );
+    }
+}
+
+fn fold_fixed_uint_external(
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, (Felt, String)>,
+    ptr: u32,
+    bound_ptr: u32,
+    value: [u32; 8],
+) {
+    for offset in 0..2 {
+        let start = offset * 4;
+        let msg = UintValMsg {
+            ptr: Felt::from(ptr),
+            bound_ptr: Felt::from(bound_ptr),
+            offset: Felt::from(offset as u32),
+            limbs: core::array::from_fn(|i| Felt::from(value[start + i])),
+        };
+        let entry = net.entry(msg.encode(challenges)).or_insert((Felt::ZERO, String::new()));
+        entry.0 += Felt::ONE;
+        if entry.1.is_empty() {
+            entry.1 =
+                format!("fixed UintVal external ptr={ptr} bound_ptr={bound_ptr} offset={offset}");
+        }
+    }
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this

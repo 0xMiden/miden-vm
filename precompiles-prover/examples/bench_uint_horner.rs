@@ -24,6 +24,7 @@
 use std::time::Instant;
 
 use miden_lifted_air::LiftedAir;
+use miden_precompiles::K1_BASE_BOUND_PTR;
 use miden_precompiles_prover::{
     math::{U256, from_hex},
     session::{ChipletAir, Session, statements::horner_sign_paths},
@@ -31,8 +32,8 @@ use miden_precompiles_prover::{
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-/// The modulus pin's protocol address.
-const FP: u32 = 1;
+/// VM fixed secp256k1 base-field bound pointer.
+const FP: u32 = K1_BASE_BOUND_PTR;
 
 /// A random uint strictly below the bound: the top 16 bits are reduced
 /// below the bound's (k1's are 0xFFFF), the lower bits are free.
@@ -76,7 +77,6 @@ fn main() {
     let gen_start = Instant::now();
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, p_minus_1, FP);
 
     let mut rng = StdRng::seed_from_u64(0x4042_1d06);
     let x = random_uint_below(&mut rng, p_minus_1);
@@ -84,7 +84,7 @@ fn main() {
 
     let (acc_a, acc_b) = horner_sign_paths(&mut session, x, &coeffs, FP);
     let claim = session.uint_is(&acc_a, &acc_b);
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
 
     let traces = session.finish(root);
     let public_root = traces.public_root();

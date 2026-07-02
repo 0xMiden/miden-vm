@@ -17,7 +17,11 @@ base field `F_p`), and the **scalar-field modulus handle**
 `scalar_bound_ptr` (fixing `F_s`, the modulus future scalar arithmetic
 runs under; VM-owned fixed groups carry their canonical scalar-field bound,
 while ad-hoc groups use `bound_ptr` until constrained — see `groups.rs:1–33`).
-It **provides** the [`EcGroup`](relation-registry.md#14--ecgroup) tuple
+For VM-owned fixed groups, the uint values behind `a_ptr`, `b_ptr`,
+`bound_ptr`, and `scalar_bound_ptr` are verifier-loaded via external
+[`UintVal`](relation-registry.md#10--uintval) boundary consumes, not default
+transcript pin claims. It **provides** the
+[`EcGroup`](relation-registry.md#14--ecgroup) tuple
 consumed by every
 point of the group (the point store's context certification) and every
 live-case `EcGroupAdd` op resolving the curve's `a`; it **consumes
@@ -62,11 +66,11 @@ six are written by `groups_trace` (`trace.rs:334–352`).
 
 | Col | Name | Range / values | Meaning |
 |-----|------|----------------|---------|
-| 0 | `COL_PTR` | `= row + 1` (dense from 1; `0` is the none-sentinel) | the group's store ptr; row 1 is the VM-owned K1 group, row 2 is the VM-owned R1 group, later rows are allocated densely; pinned to `row + 1` by the ungated chain on every row, pads included (`groups.rs:54–55`, `130–137`; `trace.rs`) |
+| 0 | `COL_PTR` | `= row + 1` (allocator-consecutive from 1; `0` is the none-sentinel) | the group's store ptr; pinned to `row + 1` by the ungated chain on every row, pads included (`groups.rs:54–55`, `130–137`; `trace.rs:336–337`) |
 | 1 | `COL_A_PTR` | uint store ptr (`0` on pads) | curve `a`'s uint ptr (`groups.rs:56–57`; `trace.rs:339`) |
 | 2 | `COL_B_PTR` | uint store ptr (`0` on pads) | curve `b`'s uint ptr (`b ≠ 0` is the `EcCreate` guard, asserted at the require layer — not here) (`groups.rs:58–59`; `trace.rs:340`) |
 | 3 | `COL_BOUND_PTR` | uint store ptr (`0` on pads) | the base-field modulus ptr (fixes `F_p`) (`groups.rs:60–61`; `trace.rs:341`) |
-| 4 | `COL_SBOUND_PTR` | uint store ptr (`0` on pads) | the scalar-field modulus ptr (fixes `F_s`); fixed K1/R1 rows use their VM-owned scalar-bound ptrs, while ad-hoc groups resolve to `bound_ptr` until scalar arithmetic constrains them (`scalar_bound.unwrap_or(bound)`) (`groups.rs:62–64`; `trace.rs`) |
+| 4 | `COL_SBOUND_PTR` | uint store ptr (`0` on pads) | the scalar-field modulus ptr (fixes `F_s`); resolves to `bound_ptr` while no scalar arithmetic constrains it (`scalar_bound.unwrap_or(bound)`) (`groups.rs:62–64`; `trace.rs:342`) |
 | 5 | `COL_MULT` | `[0, 2³²)` (`ProvideMult` = `u32`); `0` on pads | the `EcGroup` provide multiplicity = consumer count (every point of the group + every live-case add op); `0` on pad rows — the only liveness signal this chiplet needs (`groups.rs:65–68`; `trace.rs:343–349`) |
 
 *(6 rows documented = `NUM_MAIN_COLS = 6`.)*

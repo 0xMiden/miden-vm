@@ -62,7 +62,7 @@ powers of `β`; encoding stays linear.
 | 7 | [Poseidon2Out](#7--poseidon2out) | `(perm_seq_id, d0..d3)` | Poseidon2 | KeccakNode, TranscriptEval |
 | 8 | [Binding](#8--binding) | `(h0..h3, value_tag, ptr, bound_ptr)` | TranscriptEval, KeccakNode | TranscriptEval |
 | 9 | [ChunkChain](#9--chunkchain) | `(chunk_seq_id_head, perm_seq_id_head)` | Chunk | KeccakNode |
-| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm |
+| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm, verifier boundary |
 | 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
 | 12 | [UintMul](#12--uintmul) | `(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` | UintMul | EcPointStore, EcGroupAdd, TranscriptEval |
 | 13 | [UintLimbs](#13--uintlimbs) | `(ptr, bound_ptr, offset, l0..l7)` | UintStore | UintMul |
@@ -197,9 +197,16 @@ in the chunk chiplet's native sequence namespace.
 - **Provider** — [UintStore](uint-store.md): each stored uint's two halves.
 - **Consumers** — [UintAdd](uint-add.md) (a / b / c / modulus halves),
   [UintMul](uint-mul.md) (the linear c / r operands),
-  [TranscriptEval](transcript-eval.md) (uint-leaf nodes),
-  [EcMsm](ec-msm.md) (the literal-`1` scalar of an intro), and
-  [UintStore](uint-store.md) itself (a padding block's self bound-ref).
+  [TranscriptEval](transcript-eval.md) (runtime uint leaves and explicit
+  transcript pin claims), [EcMsm](ec-msm.md) (the literal-`1` scalar of an
+  intro), [UintStore](uint-store.md) itself (a padding block's self
+  bound-ref), and verifier-loaded boundary consumes for fixed uint domains
+  and fixed curve coefficient values.
+
+Verifier boundary consumes are not AIR rows and do not create
+[`Binding`](#8--binding) traffic. They simply add fixed public `UintVal`
+requirements at the LogUp seam, so the store must provide the expected
+halves at the named `(ptr, bound_ptr)`.
 
 ## 11 — UintAdd
 

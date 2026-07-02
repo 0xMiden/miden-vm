@@ -1,67 +1,53 @@
-//! Fixed-pin bootstrap tests.
+//! Fixed-manifest bootstrap tests.
 
-use miden_core::{
-    Felt,
-    deferred::{Digest, fold_deferred_root},
-};
 use miden_precompiles::UintDomain;
 
 use crate::{
-    math::{U256, from_limbs32, to_limbs32},
-    session::Session,
-    transcript::poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
-    uint::trace::PIN_NAMESPACE_END,
+    math::U256, session::Session, transcript::poseidon2::P2Digest, uint::trace::PIN_NAMESPACE_END,
 };
 
-fn fold_truthy_hashes(hashes: impl IntoIterator<Item = P2Digest>) -> P2Digest {
-    let mut acc = P2Digest::default();
-    for hash in hashes {
-        acc = P2Digest::from(fold_deferred_root(
-            Digest::new(acc.as_array()),
-            Digest::new(hash.as_array()),
-        ));
-    }
-    acc
-}
-
-fn bound_value(domain: UintDomain) -> U256 {
-    from_limbs32(&domain.minus_one())
-}
-
-fn bound_pin_claim_digest(domain: UintDomain) -> P2Digest {
-    let ptr = domain.bound_ptr();
-    let limbs = to_limbs32(bound_value(domain));
-    let lo = core::array::from_fn(|i| Felt::from(limbs[i]));
-    let hi = core::array::from_fn(|i| Felt::from(limbs[4 + i]));
-    Poseidon2Requires::digest_of(P2Cap::uint_pin_claim(ptr, ptr), &[(lo, hi)])
-}
-
 #[test]
-fn bootstrap_root_folds_fixed_bound_pin_claims() {
-    let expected = fold_truthy_hashes(UintDomain::ALL.into_iter().map(bound_pin_claim_digest));
-
+fn bootstrap_fixed_pins_emit_no_default_transcript_claims() {
     let mut session = Session::new();
     let claims = session.bootstrap_fixed_pins();
+    assert!(claims.is_empty(), "fixed manifest must not enter the public root by default");
+
     let root = session.assert_and_fold(claims);
-    assert_eq!(root.hash(), expected);
+    assert_eq!(root.hash(), P2Digest::default());
 
     let traces = session.finish(root);
-    assert_eq!(traces.public_root(), expected);
+    assert_eq!(traces.public_root(), P2Digest::default());
     traces.check();
 }
 
 #[test]
-fn bootstrap_keeps_common_runtime_constants_dynamic() {
+fn fixed_manifest_external_uintvals_prove_and_verify_with_empty_root() {
     let mut session = Session::new();
-    let _claims = session.bootstrap_fixed_pins();
+    let claims = session.bootstrap_fixed_pins();
+    assert!(claims.is_empty(), "fixed manifest is verifier-constrained, not root-folded");
+
+    let root = session.assert_and_fold(claims);
+    let traces = session.finish(root);
+    assert_eq!(traces.public_root(), P2Digest::default());
+
+    let proof = traces.prove();
+    assert_eq!(proof.public_root(), P2Digest::default());
+    proof.verify().expect("fixed uint external manifest proof should verify");
+}
+
+#[test]
+fn non_fixed_runtime_constants_allocate_transient_ptrs() {
+    let mut session = Session::new();
+    let claims = session.bootstrap_fixed_pins();
+    assert!(claims.is_empty());
 
     for domain in UintDomain::ALL {
         let bound_ptr = domain.bound_ptr();
-        for value in [U256::ZERO, U256::ONE, U256::from(2u8)] {
+        for value in [U256::from(42u8), U256::from(123u8)] {
             let node = session.uint_leaf(value, bound_ptr);
             assert!(
                 node.ptr.addr() >= PIN_NAMESPACE_END,
-                "ordinary constant {value} under {domain:?} reused a fixed pin ptr {}",
+                "ordinary constant {value} under {domain:?} reused a fixed ptr {}",
                 node.ptr.addr(),
             );
             assert_ne!(node.ptr.addr(), bound_ptr);

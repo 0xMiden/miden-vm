@@ -61,6 +61,56 @@ pub use miden_precompiles_codegen::{
 use self::{ed25519::Ed25519, secp256k1::Secp256k1, secp256r1::Secp256r1};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
+/// A fixed curve coefficient uint pinned at a VM-owned store pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurveCoefficient {
+    /// VM-owned pointer for this coefficient value.
+    pub ptr: u32,
+    /// VM-owned pointer for the uint domain bound/modulus used by this coefficient.
+    pub bound_ptr: u32,
+    /// Canonical coefficient value, little-endian u32 limbs.
+    pub value: Limbs,
+}
+
+/// Returns all fixed curve coefficients in VM pointer order.
+///
+/// The order is secp256k1 `A`/`B`, secp256r1 `A`/`B`, and Ed25519 `A`/`D`. Ed25519
+/// uses `A = -1 mod p` because this crate models it as `-x^2 + y^2 = 1 + D*x^2*y^2`.
+pub fn curve_coefficients() -> [CurveCoefficient; 6] {
+    [
+        CurveCoefficient {
+            ptr: CurveId::Secp256k1.a_ptr(),
+            bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
+            value: <Secp256k1 as ShortWeierstrassSpec>::A,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Secp256k1.b_ptr(),
+            bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
+            value: <Secp256k1 as ShortWeierstrassSpec>::B,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Secp256r1.a_ptr(),
+            bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
+            value: <Secp256r1 as ShortWeierstrassSpec>::A,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Secp256r1.b_ptr(),
+            bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
+            value: <Secp256r1 as ShortWeierstrassSpec>::B,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Ed25519.a_ptr(),
+            bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+            value: UintDomain::Ed25519Base.minus_one(),
+        },
+        CurveCoefficient {
+            ptr: CurveId::Ed25519.b_ptr(),
+            bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+            value: <Ed25519 as TwistedEdwardsSpec>::D,
+        },
+    ]
+}
+
 /// Curve-generic point value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurvePoint {

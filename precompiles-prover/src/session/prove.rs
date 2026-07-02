@@ -8,7 +8,10 @@
 //! round-trip under the test config, so a program never re-declares the
 //! harness.
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+};
 use miden_lifted_air::{
     BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, ReductionError, Statement,
 };
@@ -23,15 +26,15 @@ use crate::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
-    logup::sigma_sum,
+    logup::{LookupMessage, lookup_challenges_from_slice, sigma_sum},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
-    session::{NUM_CHIPLETS, SessionTraces},
+    session::{NUM_CHIPLETS, SessionTraces, fixed::fixed_uint_manifest},
     stark_config::{TestDigest, TestProof, test_challenger, test_config},
     transcript::{
         eval::TranscriptEvalAir,
         poseidon2::{P2Digest, Poseidon2Air},
     },
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
+    uint::{UintStoreAir, UintValMsg, add::UintAddAir, mul::UintMulAir},
 };
 
 /// The fifteen chiplet AIRs wrapped into one enum — the heterogeneous
@@ -163,6 +166,35 @@ impl Default for ChipletMultiAir {
     }
 }
 
+fn fixed_uint_boundary_correction(challenges: &[QuadFelt]) -> Result<QuadFelt, ReductionError> {
+    let lookup_challenges = lookup_challenges_from_slice(challenges);
+    let mut correction = QuadFelt::ZERO;
+
+    for fixed in fixed_uint_manifest() {
+        for offset in 0..2 {
+            let start = offset * 4;
+            let msg = UintValMsg {
+                ptr: Felt::from(fixed.ptr),
+                bound_ptr: Felt::from(fixed.bound_ptr),
+                offset: Felt::from(offset as u32),
+                limbs: [
+                    Felt::from(fixed.value[start]),
+                    Felt::from(fixed.value[start + 1]),
+                    Felt::from(fixed.value[start + 2]),
+                    Felt::from(fixed.value[start + 3]),
+                ],
+            };
+            let Some(inv) = msg.encode(&lookup_challenges).try_inverse() else {
+                return Err("fixed UintVal boundary denominator was zero".into());
+            };
+            // External fixed pins are positive `UintVal` consumes.
+            correction += inv;
+        }
+    }
+
+    Ok(correction)
+}
+
 impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     type Air = ChipletAir;
 
@@ -175,13 +207,13 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     /// `i`'s exposed permutation values — exactly one, its σ.
     fn eval_external(
         &self,
-        _challenges: &[QuadFelt],
+        challenges: &[QuadFelt],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         _log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values)])
+        Ok(vec![sigma_sum(aux_values) + fixed_uint_boundary_correction(challenges)?])
     }
 }
 

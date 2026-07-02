@@ -54,17 +54,21 @@ fn uint_value_hash_matches_vm_node_and_eq_op_cap() {
 
 #[test]
 fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
+    const PIN_PTR: u32 = 1000;
+
     let mut session = Session::new();
     let bootstrap = session.bootstrap_fixed_pins();
+    assert!(bootstrap.is_empty(), "fixed VM pins are verifier-constrained, not root-folded");
     let root0 = session.assert_and_fold(bootstrap);
+    assert_eq!(root0.hash(), P2Digest::default());
 
     let domain = UintDomain::U256;
     let bound_ptr = domain.bound_ptr();
 
     let pinned_value = U256::from(9u8);
-    let pin_claim = session.pin_uint(9, pinned_value, bound_ptr);
+    let pin_claim = session.pin_uint(PIN_PTR, pinned_value, bound_ptr);
     let pinned_value_node = session.uint_leaf(pinned_value, bound_ptr);
-    assert_eq!(pinned_value_node.ptr.addr(), 9);
+    assert_eq!(pinned_value_node.ptr.addr(), PIN_PTR);
     assert_ne!(pin_claim.hash(), pinned_value_node.hash());
 
     let eq = session.uint_is(&pinned_value_node, &pinned_value_node);
@@ -79,18 +83,18 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
         .find(|&row| {
             row_value(row, COL_IS_UINT_LEAF) == Felt::ONE
                 && row_value(row, COL_IS_PINNED) == Felt::ONE
-                && row_value(row, COL_PTR) == Felt::from(9u8)
+                && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
         })
-        .expect("expected pin row for ptr 9");
-    assert_eq!(row_value(pin_row, COL_CAP_PARAM_B), Felt::from(9u8));
+        .expect("expected pin row for explicit ptr");
+    assert_eq!(row_value(pin_row, COL_CAP_PARAM_B), Felt::from(PIN_PTR));
 
     let value_row = (0..eval.height())
         .find(|&row| {
             row_value(row, COL_IS_UINT_LEAF) == Felt::ONE
                 && row_value(row, COL_IS_PINNED) == Felt::ZERO
-                && row_value(row, COL_PTR) == Felt::from(9u8)
+                && row_value(row, COL_PTR) == Felt::from(PIN_PTR)
         })
-        .expect("expected VM uint value row for ptr 9");
+        .expect("expected VM uint value row for explicit ptr");
     assert_eq!(row_value(value_row, COL_CAP_PARAM_B), Felt::from(bound_ptr));
 
     let op_row = (0..eval.height())

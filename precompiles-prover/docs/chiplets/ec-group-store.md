@@ -21,7 +21,10 @@ hits preseeded VM-owned K1/R1 group rows when applicable, establishes the
 group's canonical PAI row via the store, and returns `(group, pai)`;
 `constrain_scalar_bound(group, fs)` names the scalar-field modulus once something
 needs it for ad-hoc groups, and `add_point(group, x, y)` interns the coordinates
-and records + requires the membership trio.
+and records + requires the membership trio. The fixed uints behind VM-owned
+curve coefficients, base-field domains, and scalar-field domains are loaded by
+the verifier as external `UintVal` boundary consumes by default, not as
+transcript pin claims.
 
 ## The model
 
@@ -48,8 +51,9 @@ ptr injectivity, and the membership demand.
 
 One row role per store, **separate ptr namespaces**. Group rows are dense from
 1, with VM-owned fixed slots preseeded for supported short-Weierstrass curves
-(`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`); point rows remain allocator-consecutive
-from 1:
+(`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`); the coefficient/domain uint values
+those rows name are verifier-loaded through `UintVal` boundary consumes. Point
+rows remain allocator-consecutive from 1:
 
 | store | binds | provides |
 |---|---|---|
@@ -67,8 +71,9 @@ tie to a real group.
 `scalar_bound_ptr`, the stored `n − 1` of the group order — the modulus
 that scalar arithmetic (nondeterministic addition-chain constraints,
 ladder exponents) runs under. VM-owned K1/R1 group rows are preseeded
-with their canonical scalar-field bound pointers from `miden-precompiles`.
-For ad-hoc groups, session-side it is `None` until something constrains it
+with their canonical scalar-field bound pointers from `miden-precompiles`,
+whose values are boundary-loaded like the curve coefficients. For ad-hoc
+groups, session-side it is `None` until something constrains it
 (`constrain_scalar_bound`), and while vacuous it resolves at trace-gen to
 the group's own `F_p` handle — a well-formed stored uint consumed by nothing
 scalar, keeping the tuple total with no none-sentinel special case. Consumers

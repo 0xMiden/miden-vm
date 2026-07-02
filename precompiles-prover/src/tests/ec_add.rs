@@ -72,8 +72,8 @@ const NEG_GY: &str = "B7C52588D95C3B9AA25B0403F1EEF75702E84BB7597AABE663B82F6F04
 /// whose y is −Gy — same y-negation as −G, *different* x.
 const BETA_GX: &str = "BCACE2E99DA01887AB0102B696902325872844067F15E98DA7BBA04400B88FCB";
 
-/// The modulus pin's protocol address in these tests.
-const FP: u32 = 1;
+/// Non-fixed modulus protocol address used by these ad-hoc tests.
+const FP: u32 = 1000;
 
 /// The arithmetic + EC chiplet subset, in canonical
 /// [`SessionTraces::mains`](crate::session::SessionTraces::mains) order:
@@ -285,9 +285,11 @@ fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng
     net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
 }
 
-/// A secp256k1 stack: the group table holds group @1, the point store
-/// canonical PAI @1, G @2, 2G @3 — every uint (params, coordinates,
-/// membership transients) interned canonically by the require layer.
+/// A secp256k1-shaped stack over a non-fixed uint modulus pin: the group
+/// table keeps VM-owned fixed rows first, while the point store holds this
+/// group's canonical PAI @1, G @2, 2G @3 — every uint (params,
+/// coordinates, membership transients) interned canonically by the require
+/// layer.
 struct K1 {
     stack: EcStack,
     group: EcGroupPtr,

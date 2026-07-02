@@ -11,12 +11,15 @@ binding-bus model and
 
 Several hashing node families are built, plus the zero leaf. The
 **Transcript AND-combinator** `h = Poseidon2(lhs || rhs || VM Tag::AND)[0..4]`
-folds two child `True` bindings into one. The **uint value / pin-claim row**
-hashes a stored uint's value (pulled from the [UintStore](uint.md) over
-`UintVal` — the 4×32 view fed straight as the perm rate). Runtime uint leaves
-use `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and bind
-`Binding(h, Uint, ptr, bound_ptr)`. Bootstrap pin claims use
-`[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` and bind `Binding(h, True)`.
+folds two child `True` bindings into one. The **uint value / explicit
+pin-claim row** hashes a stored uint's value (pulled from the
+[UintStore](uint.md) over `UintVal` — the 4×32 view fed straight as the perm
+rate). Runtime uint leaves use `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr,
+0]` and bind `Binding(h, Uint, ptr, bound_ptr)`. Explicit
+`Session::pin_uint` claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
+and bind `Binding(h, True)`. Default fixed domains and curve coefficients do
+not create eval rows; their `UintVal` halves are verifier-loaded LogUp
+boundary consumes.
 The **uint ops** (`Add` / `Sub` / `Mul` / `Is`, selected by `is_add` /
 `is_sub` / `is_mul` / `is_is` under `is_uint_op`) hash two child hashes under
 `[UintPrecompile::id(), op_id, 0, 0]`, consume the children's `Uint` bindings
@@ -51,13 +54,13 @@ the uint / EC op rows.
 | 20 | `is_ec_pai` | EC-create point-at-infinity family flag |
 | 21 | `is_ec_op` | EC binary-op family flag (`Add` / `Sub` / `Is`) |
 | 22–25 | `is_add` … `is_is` | shared op one-hot flags (`Add` / `Sub` / `Mul` / `Is`; `Mul` is uint-only) |
-| 26 | `is_pinned` | uint leaf row is a bootstrap pin claim (binds `True`) vs runtime transient (binds `Uint`) |
+| 26 | `is_pinned` | uint leaf row is an explicit transcript pin claim (binds `True`) vs runtime transient (binds `Uint`) |
 | 27 | `ptr` | the binding's value ptr: stored uint / witnessed op result / created-or-result point / EcMsm value point; `0` on `Is` |
 | 28 | `bound_ptr` | the modulus ptr threaded through every Uint-typed message of the row; scalar bound on EcMsm absorb rows; `0` else |
-| 29 | `cap_param_b` / `curve_a` | row-kind-aware cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on bootstrap pin rows, curve `a_ptr` on EC create rows, `0` on uint op rows |
+| 29 | `cap_param_b` / `curve_a` | row-kind-aware cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on explicit pin rows, curve `a_ptr` on EC create rows, `0` on uint op rows |
 | 30 | `a_ptr` | lhs operand ptr, EC x-coordinate ptr, or EcMsm base ptr; `0` else |
 | 31 | `b_ptr` | rhs operand ptr, EC y-coordinate ptr, or EcMsm scalar ptr; `= a_ptr` on `Is`; `0` else |
-| 32 | `param_a` | cap slot 1, materialized: `bound_ptr` on bootstrap pin rows, `0` on VM uint value and EC create rows, op id on op rows |
+| 32 | `param_a` | cap slot 1, materialized: `bound_ptr` on explicit pin rows, `0` on VM uint value and EC create rows, op id on op rows |
 | 33 | `group_ptr` | witnessed EC-store group handle on EC create / value-producing EC ops / EcMsm rows; VM-owned for fixed curves (K1 = 1, R1 = 2); `0` else |
 | 34 | `curve_b` | cap slot 3 on EC-create rows = curve `b_ptr`; `0` else |
 | 35 | `is_ec_msm` | EcMsm family flag, set on every absorb row |
@@ -68,7 +71,8 @@ the uint / EC op rows.
 | 43 | `sbound_ptr` | scalar-field modulus ptr for EC-create / PAI rows |
 
 Public values: `root_hash[0..4]` — just the transcript root
-(`PUBLIC_ROOT_BEGIN = 0`).
+(`PUBLIC_ROOT_BEGIN = 0`). Fixed `UintVal` boundary consumes are relation
+seam data, not root-folded claims.
 
 Aux (9 columns): col 0 = the True-path `Binding` (consume `lhs` /
 `rhs` on AND rows, provide `h` as `True` on AND / zero / `Is` rows;
@@ -76,7 +80,7 @@ Aux (9 columns): col 0 = the True-path `Binding` (consume `lhs` /
 cap}` + `Out`, shared by every one-shot hashing kind; col 2 = the
 value-path `Binding` — consume both `UintVal` halves on leaf rows +
 provide the row's value binding (leaf and value-op rows), `(1 −
-is_pinned)`-scaled so a bootstrap pin claim collapses to the `True` form;
+is_pinned)`-scaled so an explicit pin claim collapses to the `True` form;
 col 3 = the uint op-children `Binding` consumes (lhs / rhs `Uint` at
 `a_ptr` / `b_ptr`); col 4 = the uint relation consumes — one role-mixed
 `UintAdd` (add / sub) + one `UintMul` (κ slots the constants 1 / 0, the
@@ -92,10 +96,10 @@ the EC relation consumes; col 7 = the EcMsm dynamic Poseidon2 cap; col 8
 - **root** (row 0): same unhash + consumes, but `out_mult = 0` (no
   parent) so it provides nothing and *absorbs* the Binding σ; `h` is
   pinned to `root_hash` (public input) by `when_first_row`.
-- **uint value / pin claim** (`is_uint_leaf = 1`): unhash the uint's 4×32 value
-  (`lhs||rhs`) → `h`; runtime leaves use
+- **uint value / explicit pin claim** (`is_uint_leaf = 1`): unhash the uint's
+  4×32 value (`lhs||rhs`) → `h`; runtime leaves use
   `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and provide
-  `Binding(h, Uint, ptr, bound_ptr)`, while bootstrap pin claims use
+  `Binding(h, Uint, ptr, bound_ptr)`, while explicit pin claims use
   `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` with `pin_ptr = ptr` and
   provide `Binding(h, True)`. Both forms consume the two `UintVal` halves from
   the store.
@@ -145,15 +149,15 @@ which forces `root_hash = 0`.
   to leaf + uint-op + create / EcMsm rows, `a_ptr` / `b_ptr` to op /
   create / EcMsm rows; `is_is·(b_ptr − a_ptr) = 0` (the `Is` equality).
 - the materialized cap slots: `cap_param_b` = `bound_ptr` on VM uint value
-  rows / `pin_ptr = ptr` on bootstrap pin rows; the same cell is read via the
-  `curve_a` alias on EC-create rows. `param_a` = `bound_ptr` on bootstrap pin
+  rows / `pin_ptr = ptr` on explicit pin rows; the same cell is read via the
+  `curve_a` alias on EC-create rows. `param_a` = `bound_ptr` on explicit pin
   rows / the family-gated VM uint or curve op id on op rows / `0` elsewhere,
   and `curve_b` = curve `b_ptr` on EC-create rows / `0` elsewhere.
 
 ## Bus balance
 
 Each node's `out_mult` equals its consumer count, so the `Binding` σ nets
-to zero **internally**: internal-node, zero-leaf, `Is`, and
+to zero **internally**: internal-node, zero-leaf, `Is`, and explicit
 pinned-uint-leaf provides are matched by their parents' consumes; value
 bindings (transient leaves, op results) are matched by their consuming
 op rows; the external assertion leaves (KeccakNode's
@@ -162,7 +166,7 @@ provides nothing. A uint leaf additionally consumes both of its
 `UintVal` halves, matched by the [UintStore](uint.md)'s provide; an op
 row consumes its [UintAdd](uint-add.md) / [UintMul](uint-mul.md) tuple,
 matched by the relation chiplet's (now live) provide multiplicity. The
-only external anchor is the first-row `h = root_hash` local pin — there
+only Binding/root anchor is the first-row `h = root_hash` local pin — there
 is no public-root bus consume. So "the public root is the AND of all
 valid assertions" reduces to bus σ = 0 plus the first-row pin.
 
@@ -177,13 +181,14 @@ one-hot keeps every bus mult ≤ deg-2, and the materialized cap-slot columns
 ## Construction
 
 The tree is built explicitly from handles. Move-only `Truthy` handles
-stand for `Binding(_, True)` claims (`Session::keccak`, bootstrap
+stand for `Binding(_, True)` claims (`Session::keccak`, explicit
 `Session::pin_uint`, `Session::uint_is`). `assert_and(a, b)` folds two claims
 into an AND node, `assert_and_fold` left-folds a sequence from a `ZERO_HASH`
 base, and every issued handle must be consumed exactly once — by a fold, or as
-the `finish` root — or trace-gen rejects the stray claim. Shared-use `UintNode` handles stand for `Binding(_, Uint)`
-values (`Session::uint_leaf` and the value ops): each op-use bumps the
-node's consumer count (= its `out_mult`), ops dedup by
+the `finish` root — or trace-gen rejects the stray claim. Shared-use `UintNode`
+handles stand for `Binding(_, Uint)` values (`Session::uint_leaf` and the
+value ops): each op-use bumps the node's consumer count (= its `out_mult`),
+ops dedup by
 `(op, child hashes)` keccak-style, and a value node nothing ever
 consumed is rejected at `finish` as a dead DAG branch. The explicit
 shape is what lets a MASM-side recomputation match fold-for-fold.

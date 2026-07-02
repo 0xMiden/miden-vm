@@ -154,7 +154,7 @@ impl UintStoreRequires {
     /// under that field references. Returns its handle.
     pub fn pin_modulus(&mut self, addr: u32, bound: U256) -> UintPtr {
         let ptr = UintPtr(addr);
-        self.insert_pinned(ptr, bound, ptr);
+        self.insert_pinned(ptr, bound, ptr, false);
         ptr
     }
 
@@ -168,23 +168,44 @@ impl UintStoreRequires {
     pub fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
         let ptr = UintPtr(addr);
         assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
-        self.insert_pinned(ptr, value, bound);
+        self.insert_pinned(ptr, value, bound, false);
         ptr
     }
 
-    fn insert_pinned(&mut self, ptr: UintPtr, value: U256, bound_ptr: UintPtr) {
+    /// Intern a VM-owned fixed uint, allowing fixed protocol aliases with the same value under the
+    /// same bound. The canonical `(value, bound)` reverse index keeps the first pointer, so
+    /// ordinary value interning still has one deterministic representative.
+    pub fn intern_fixed_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
+        let ptr = UintPtr(addr);
+        assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
+        self.insert_pinned(ptr, value, bound, true);
+        ptr
+    }
+
+    fn insert_pinned(
+        &mut self,
+        ptr: UintPtr,
+        value: U256,
+        bound_ptr: UintPtr,
+        allow_value_alias: bool,
+    ) {
         assert!(
             (1..PIN_NAMESPACE_END).contains(&ptr.0),
             "pinned uint ptr {} outside the pin namespace [1, 2^16)",
             ptr.0,
         );
         assert!(!self.uints.contains_key(&ptr), "duplicate uint ptr {}", ptr.0,);
-        let prev = self.by_value.insert((value, bound_ptr), ptr);
-        assert!(
-            prev.is_none(),
-            "value already interned at ptr {} — pin before computing",
-            prev.unwrap().0,
-        );
+        match self.by_value.get(&(value, bound_ptr)).copied() {
+            Some(prev) if allow_value_alias => {
+                debug_assert_ne!(prev, ptr);
+            },
+            Some(prev) => {
+                panic!("value already interned at ptr {} — pin before computing", prev.0);
+            },
+            None => {
+                self.by_value.insert((value, bound_ptr), ptr);
+            },
+        }
         self.uints.insert(ptr, Uint { value, ptr, bound_ptr });
         self.demand.require(bound_ptr);
     }

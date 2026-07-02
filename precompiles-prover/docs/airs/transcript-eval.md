@@ -16,16 +16,19 @@ on Poseidon2 (witnessing the preimage, feeding it on
 result against [`Poseidon2Out`](relation-registry.md#7--poseidon2out)) and
 settles the node's `Binding` tuple, consuming its children's bindings.
 **Bus balance** then means the DAG was evaluated consistently — every
-consumed child binding is produced by some node. The only external anchor
-is the first-row pin `h = public_root`.
+consumed child binding is produced by some node. The only Binding/root
+anchor is the first-row pin `h = public_root`.
 
 It folds a content-addressed DAG of node families into one Poseidon2 root:
 
 - **AND** (VM `Tag::AND = [1, 0, 0, 0]`) — folds two child `True` bindings.
-- **uint value / pin row** — hashes a stored uint's 8×u32-LE value
+- **uint value / explicit pin row** — hashes a stored uint's 8×u32-LE value
   (pulled over [`UintVal`](relation-registry.md#10--uintval) as the perm rate);
   runtime value rows use `[UINT_PRECOMPILE_ID, VALUE_OP_ID, bound_ptr, 0]`,
-  bootstrap pin rows use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+  while manual `Session::pin_uint` rows use
+  `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` and bind `True`. Fixed uint
+  domains and fixed curve coefficients do not create default eval rows; the
+  verifier loads their `UintVal` halves as external LogUp boundary consumes.
 - **uint op** (`Add`/`Sub`/`Mul`/`Is`) — hashes two child hashes under
   `[UINT_PRECOMPILE_ID, op_id, 0, 0]` and ties the children's `Uint` bindings
   to a [`UintAdd`](relation-registry.md#11--uintadd) /
@@ -66,7 +69,7 @@ absorb; `ptr` is a leaf uint / op result / created point / MSM value;
 bus gate degree-1 (one-hot flags) is what holds the chip at
 `log_quotient_degree = 2` despite its width. Cap slots are **materialized**
 into columns (`param_a`, `cap_param_b`, `curve_b`) so the perm cap stays
-degree-1. VM uint value rows put `bound_ptr` in `cap_param_b`; bootstrap pin
+degree-1. VM uint value rows put `bound_ptr` in `cap_param_b`; explicit pin
 rows put `pin_ptr` there; EcCreate rows read the same physical column through
 the `curve_a` alias and put curve `b_ptr` in `curve_b`.
 
@@ -81,7 +84,9 @@ the `curve_a` alias and put curve `b_ptr` in `curve_b`.
 | Aux width | `NUM_AUX_COLS = 9` LogUp columns, `COLUMN_SHAPE = [3, 4, 3, 2, 2, 3, 3, 1, 4]` (no Schwartz–Zippel register) |
 
 Public values: `public_root[0..4]` — just the transcript root
-(`PUBLIC_ROOT_BEGIN = 0`, `NUM_PUBLIC_VALUES = 4`).
+(`PUBLIC_ROOT_BEGIN = 0`, `NUM_PUBLIC_VALUES = 4`). Verifier-loaded
+`UintVal` boundary consumes are relation-boundary data, not transcript-root
+claims.
 
 ## Main columns
 
@@ -111,13 +116,13 @@ consecutive indices each.
 | 23 | `COL_IS_SUB` | uint-op / ec-op `Sub` | `{0, 1}` | shared op flag `Sub` |
 | 24 | `COL_IS_MUL` | uint-op `Mul` | `{0, 1}` | shared op flag `Mul` (uint-only) |
 | 25 | `COL_IS_IS` | uint-op / ec-op `Is` | `{0, 1}` | shared op flag `Is` (equality predicate; binds `True`) |
-| 26 | `COL_IS_PINNED` | uint leaf | `{0, 1}` | leaf-only: bootstrap pin claim (→ `True`) vs runtime VM value row (→ `Uint`) |
+| 26 | `COL_IS_PINNED` | uint leaf | `{0, 1}` | leaf-only: explicit transcript pin claim (→ `True`) vs runtime VM value row (→ `Uint`) |
 | 27 | `COL_PTR` | uint-leaf / result-op / EcCreate / EcMsm boundary | store ptr, or `0` | the binding's value ptr: stored uint / op result / created-or-result point / MSM value point (`0` on `Is` — binds `True`) |
 | 28 | `COL_BOUND_PTR` | uint-leaf / uint-op / create / EcMsm absorb | store ptr, or `0` | the uint modulus ptr threaded through every `Uint`-typed message and committed by VM uint value caps; the scalar bound on EcMsm absorbs |
-| 29 | `COL_PIN_PTR` / `COL_CAP_PARAM_B` / `COL_CURVE_A` | uint leaf / EcCreate / EcCreate-PAI | store ptr, or `0` | materialized cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on bootstrap pin rows, curve `a_ptr` on EcCreate rows |
+| 29 | `COL_PIN_PTR` / `COL_CAP_PARAM_B` / `COL_CURVE_A` | uint leaf / EcCreate / EcCreate-PAI | store ptr, or `0` | materialized cap slot 2: `bound_ptr` on VM uint value rows, `pin_ptr = ptr` on explicit pin rows, curve `a_ptr` on EcCreate rows |
 | 30 | `COL_A_PTR` | op lhs / EcCreate x-coord / EcMsm Pᵢ | store ptr, or `0` | lhs operand ptr; EcCreate x-coord; EcMsm base ptr. On `Is`, `b_ptr = a_ptr` *is* the equality |
 | 31 | `COL_B_PTR` | binary-op rhs / EcCreate y-coord / EcMsm sᵢ | store ptr, or `0` | rhs operand ptr; EcCreate y-coord; EcMsm scalar ptr |
-| 32 | `COL_PARAM_A` | bootstrap pin / op | `bound_ptr` / op id / `0` | materialized cap slot 1: `bound_ptr` on bootstrap pin rows, VM `VALUE_OP_ID = 0` on runtime uint value and EcCreate rows, op id on op rows |
+| 32 | `COL_PARAM_A` | explicit pin / op | `bound_ptr` / op id / `0` | materialized cap slot 1: `bound_ptr` on explicit pin rows, VM `VALUE_OP_ID = 0` on runtime uint value and EcCreate rows, op id on op rows |
 | 33 | `COL_GROUP_PTR` | EcCreate / EcCreate-PAI / result ec-op / EcMsm | EC-store handle, or `0` | witnessed EC-store group handle fed to `EcGroup`/`EcPoint`/`EcGroupAdd`/MSM consumes; pinned by their provides; never a binding/hash entity |
 | 34 | `COL_CURVE_B` | EcCreate / EcCreate-PAI | curve `b_ptr`, or `0` | materialized cap slot 3 on EcCreate rows; `0` elsewhere (free on create — the `EcGroup` consume pins it) |
 | 35 | `COL_IS_EC_MSM` | EcMsm (every absorb row) | `{0, 1}` | EcMsm family flag (in the activity one-hot) |
@@ -125,7 +130,7 @@ consecutive indices each.
 | 37 | `COL_MSM_IDX` | EcMsm absorb | `[0, k)` | the absorb's **position counter** (`0` on a run's first row, `+1` each row, pinned by the main AIR); the boundary's `k = idx + 1` = term count (in `MsmExpr`). **Not** a chiplet term tag — the seam matches the positionless `MsmClaimTerm` as a set, so the absorb order (hence the root) is the caller's, decoupled from the chiplet's storage `idx` |
 | 38 | `COL_MSM_EXPR` | EcMsm absorb | expr ptr | the claim expression's `expr_ptr` (constant within a run); the `MsmClaimTerm`/`MsmExpr` consume key |
 | 39–42 | `COL_ABSORB_CAP` (`absorb_cap[4]`) | EcMsm absorb | each `∈` field | threaded capacity `stateᵢ` fed to this absorb's perm cap: VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` on a run's first row, the previous row's `h` after; `0` off absorb rows |
-| 43 | `COL_SBOUND_PTR` | EcCreate / EcCreate-PAI | scalar-field modulus ptr, or `0` | the group's **scalar** bound (curve order `n`) — the `scalar_bound_ptr` cell of the create rows' `EcGroup` consume, distinct from `bound_ptr` (the coord field `p`). VM-owned fixed groups carry their canonical scalar-bound ptr; ad-hoc groups resolve at trace-gen to a constrained `F_s` handle if set, else the coord bound. Witnessed, pinned by the `EcGroup` provide (like `group_ptr`), `0` elsewhere |
+| 43 | `COL_SBOUND_PTR` | EcCreate / EcCreate-PAI | scalar-field modulus ptr, or `0` | the group's **scalar** bound (curve order `n`) — the `scalar_bound_ptr` cell of the create rows' `EcGroup` consume, distinct from `bound_ptr` (the coord field `p`). VM-owned fixed groups carry their canonical scalar-bound ptr whose value is verifier-loaded through `UintVal`; ad-hoc groups resolve at trace-gen to a constrained `F_s` handle if set, else the coord bound. Witnessed, pinned by the `EcGroup` provide (like `group_ptr`), `0` elsewhere |
 
 ## Periodic columns
 
@@ -158,7 +163,7 @@ are into `src/transcript/eval/mod.rs`.
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
 | 10 | `is_zero · h[i] = 0`, `i ∈ 0..4` | 2 | a zero leaf has `h = 0`, so a prover can't shortcut a non-zero hash to the `True` base case (mod.rs:400) |
-| 11 | `when_first_row: h[i] − public_root[i] = 0`, `i ∈ 0..4` | 1 | **root pin** — the sole external anchor; row 0's hash is the public transcript root (empty transcript: row 0 is a zero leaf ⇒ `public_root = 0`) (mod.rs:407) |
+| 11 | `when_first_row: h[i] − public_root[i] = 0`, `i ∈ 0..4` | 1 | **root pin** — the sole Binding/root anchor; row 0's hash is the public transcript root (empty transcript: row 0 is a zero leaf ⇒ `public_root = 0`) (mod.rs:407) |
 | 12 | `(1 − act) · out_mult = 0` | 2 | inactive rows provide nothing (the `Binding` provide is `−out_mult`); the root's `out_mult = 0` is *not* pinned here — bus balance forces it (mod.rs:417) |
 
 ### Pointer / cap-slot scoping (ptr exemptions)
@@ -171,7 +176,7 @@ so e.g. an AND node's cap stays `[1, 0, 0, 0]`.
 | 13 | `(1 − is_uint_leaf) · is_pinned = 0` | 2 | `is_pinned` is leaf-only (mod.rs:496) |
 | 14 | `(not_uint_leaf − is_result_op − is_ec_create − is_ec_pai − is_msm_last) · ptr = 0` | 2 | `ptr` carries a binding ptr only on uint-leaf / result-op / create / EcMsm-boundary rows (`is_result_op = is_op − is_is`) (mod.rs:500) |
 | 15 | `(not_uint_leaf − is_uint_op − is_create − is_ec_msm) · bound_ptr = 0` | 2 | `bound_ptr` (the modulus / scalar bound) is read only on leaf / uint-op / create / EcMsm-absorb rows (mod.rs:508) |
-| 16 | `(1 − is_create) · (cap_param_b − is_uint_leaf·(1−is_pinned)·bound_ptr − is_pinned·ptr) = 0` | 3 | materialized cap slot 2 for VM uint value and bootstrap pin rows; on EcCreate rows the same cell is read as `curve_a` and pinned by the `EcGroup` consume |
+| 16 | `(1 − is_create) · (cap_param_b − is_uint_leaf·(1−is_pinned)·bound_ptr − is_pinned·ptr) = 0` | 3 | materialized cap slot 2 for VM uint value and explicit pin rows; on EcCreate rows the same cell is read as `curve_a` and pinned by the `EcGroup` consume |
 | 17 | `(1 − is_op − is_ec_create − is_ec_msm) · a_ptr = 0` | 2 | `a_ptr` lives on op / EcCreate / EcMsm rows (mod.rs:529) |
 | 18 | `(1 − is_op − is_ec_create − is_ec_msm) · b_ptr = 0` | 2 | `b_ptr` lives on op / EcCreate / EcMsm rows |
 | 19 | `is_is · (b_ptr − a_ptr) = 0` | 2 | on `Is` (either family) `b_ptr = a_ptr` *is* the equality asserted over the bus |
@@ -237,7 +242,7 @@ and padding provide nothing.
 | Bus | Tuple | Multiplicity | Fires on (col) |
 |-----|-------|--------------|----------------|
 | [`Binding`](relation-registry.md#8--binding) (8) — `True` | `(h, True, 0, 0)` | `−out_mult · (is_and + is_zero + is_is)` | AND ∪ zero ∪ `Is` (col 0) |
-| [`Binding`](relation-registry.md#8--binding) (8) — `Uint` | `(h, (1−is_pinned)·Uint, (1−is_pinned)·ptr, (1−is_pinned)·bound_ptr)` | `−out_mult · (is_uint_leaf + is_uint_op·(1−is_is))` | uint-leaf ∪ uint value-op (col 2) — a bootstrap pin claim's fields collapse to the `True` form |
+| [`Binding`](relation-registry.md#8--binding) (8) — `Uint` | `(h, (1−is_pinned)·Uint, (1−is_pinned)·ptr, (1−is_pinned)·bound_ptr)` | `−out_mult · (is_uint_leaf + is_uint_op·(1−is_is))` | uint-leaf ∪ uint value-op (col 2) — an explicit pin claim's fields collapse to the `True` form |
 | [`Binding`](relation-registry.md#8--binding) (8) — `Group` | `(h, Group, ptr, 0)` | `−out_mult · (is_create + is_ec_op·(1−is_is) + is_msm_last)` | EcCreate/PAI ∪ result ec-op ∪ EcMsm boundary (col 5) |
 
 The `Binding` bus is **self-referential**: these provides and the consumes
@@ -300,7 +305,7 @@ choice; it never changes which tuples cross the bus. Per the source
   `Binding` consumes + the `True` provide (the deg-2 provide dominates).
 - **Col 1** (`unhash-p2`, 4, n4/d4): the shared unhash perm — 3
   `Poseidon2In` + 1 `Poseidon2Out`, all deg-1 mults. AND rows use the
-  VM `[1, 0, 0, 0]` cap; uint value/op rows use VM uint caps; bootstrap pin
+  VM `[1, 0, 0, 0]` cap; uint value/op rows use VM uint caps; explicit pin
   rows use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`; EC create/op rows use
   VM curve caps. EcMsm's dynamic VM curve MSM IV rides col 7.
 - **Col 2** (`binding-uint`, 3, n4/d4): both `UintVal` halves + the forked

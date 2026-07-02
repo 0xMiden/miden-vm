@@ -5,6 +5,7 @@
 //! witness generation and constraint definitions.
 
 use miden_core::{Felt, deferred::Node, field::QuadFelt};
+use miden_precompiles::{UintDomain, curve_coefficients};
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -492,9 +493,11 @@ use miden_lifted_air::LiftedAir;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    logup::LookupMessage,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     transcript::eval::TranscriptEvalAir,
+    uint::UintValMsg,
 };
 
 /// Fold one chiplet's per-denom balance into the cross-chiplet accumulator.
@@ -520,6 +523,54 @@ pub(crate) fn fold_balance<A>(
             && let Some(c) = u.contributions.first()
         {
             entry.1 = c.msg_repr.clone();
+        }
+    }
+}
+
+fn fold_fixed_uint_external_balance(
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, (Felt, String)>,
+) {
+    for domain in UintDomain::ALL {
+        fold_fixed_uint_external(
+            challenges,
+            net,
+            domain.bound_ptr(),
+            domain.bound_ptr(),
+            domain.minus_one(),
+        );
+    }
+    for coefficient in curve_coefficients() {
+        fold_fixed_uint_external(
+            challenges,
+            net,
+            coefficient.ptr,
+            coefficient.bound_ptr,
+            coefficient.value,
+        );
+    }
+}
+
+fn fold_fixed_uint_external(
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, (Felt, String)>,
+    ptr: u32,
+    bound_ptr: u32,
+    value: [u32; 8],
+) {
+    for offset in 0..2 {
+        let start = offset * 4;
+        let msg = UintValMsg {
+            ptr: Felt::from(ptr),
+            bound_ptr: Felt::from(bound_ptr),
+            offset: Felt::from(offset as u32),
+            limbs: core::array::from_fn(|i| Felt::from(value[start + i])),
+        };
+        let entry = net.entry(msg.encode(challenges)).or_insert((Felt::ZERO, String::new()));
+        entry.0 += Felt::ONE;
+        if entry.1.is_empty() {
+            entry.1 =
+                format!("fixed UintVal external ptr={ptr} bound_ptr={bound_ptr} offset={offset}");
         }
     }
 }
@@ -563,6 +614,7 @@ fn full_stack_bus_balance_closes() {
     fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
+    fold_fixed_uint_external_balance(&challenges, &mut net);
 
     let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
@@ -606,6 +658,7 @@ fn full_stack_bus_balance_closes_with_empty_input() {
     fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
+    fold_fixed_uint_external_balance(&challenges, &mut net);
 
     let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
@@ -760,12 +813,13 @@ fn full_stack_pins_uints() {
     let input: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (_, keccak) = session.keccak(&input);
 
-    // A random modulus (self-referential) at ptr 1, and a value under it at
-    // ptr 2.
+    // A random modulus (self-referential) at a non-fixed ptr, and a value under it.
+    const MOD_PTR: u32 = 1000;
+    const VALUE_PTR: u32 = 1001;
     let bound = random_modulus(&mut rng);
-    let modulus = session.pin_uint(1, bound, 1);
+    let modulus = session.pin_uint(MOD_PTR, bound, MOD_PTR);
     let value = random_uint_below(&mut rng, bound);
-    let val = session.pin_uint(2, value, 1);
+    let val = session.pin_uint(VALUE_PTR, value, MOD_PTR);
     let root = session.assert_and_fold([keccak, modulus, val]);
 
     let traces = session.finish(root);
@@ -783,6 +837,7 @@ fn full_stack_pins_uints() {
     fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
+    fold_fixed_uint_external_balance(&challenges, &mut net);
 
     let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(
@@ -858,11 +913,16 @@ fn relocated_modulus_pin_unbalances() {
 /// constant's leaf hash commits (value, FP, own ptr), so the root anchors
 /// `store[ptr] = value ∧ value < p` for all four — with `a = 0` doubling
 /// as the *typed* zero (a pin of 0 under FP's bound, the role the old
-/// untyped sentinel could never fill). Five pins auto-pad to eight store
-/// blocks; every bus closes across the nine-chiplet stack.
+/// untyped sentinel could never fill). These explicit transcript pins use
+/// non-fixed addresses because `Session::new` already installs VM ptrs 1..13;
+/// every bus closes once the verifier-side fixed-manifest correction is included.
 #[test]
 fn full_stack_pins_k1_constants() {
-    const FP: u32 = 1;
+    const FP: u32 = 1000;
+    const GX_PTR: u32 = 1001;
+    const GY_PTR: u32 = 1002;
+    const A_PTR: u32 = 1003;
+    const B_PTR: u32 = 1004;
 
     let p_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E");
     let gx = from_hex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798");
@@ -875,16 +935,16 @@ fn full_stack_pins_k1_constants() {
     let handles = [
         keccak,
         session.pin_uint(FP, p_minus_1, FP),
-        session.pin_uint(2, gx, FP),
-        session.pin_uint(3, gy, FP),
-        session.pin_uint(4, a, FP),
-        session.pin_uint(5, b, FP),
+        session.pin_uint(GX_PTR, gx, FP),
+        session.pin_uint(GY_PTR, gy, FP),
+        session.pin_uint(A_PTR, a, FP),
+        session.pin_uint(B_PTR, b, FP),
     ];
     let root = session.assert_and_fold(handles);
     let traces = session.finish(root);
     let mains = traces.mains();
 
-    assert_eq!(mains[8].height(), 64, "5 pins + 3 padding blocks × 8 rows");
+    assert_eq!(mains[8].height(), 32 * 8, "13 fixed + 5 explicit pins + padding");
 
     let mut rng = StdRng::seed_from_u64(0x5ec9_2561);
     let [alpha, beta] = random_challenges(&mut rng);
@@ -899,6 +959,7 @@ fn full_stack_pins_k1_constants() {
     fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
     fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
     fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
+    fold_fixed_uint_external_balance(&challenges, &mut net);
 
     let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
     assert!(

@@ -33,7 +33,6 @@
 //! generic lifted-stark usage, not chiplet wiring.
 
 use miden_core::Felt;
-use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -77,6 +76,7 @@ use crate::{
     },
 };
 
+mod fixed;
 mod prove;
 pub mod statements;
 pub mod strategies;
@@ -107,7 +107,7 @@ pub struct Session {
 
 impl Session {
     pub fn new() -> Self {
-        Self {
+        let mut session = Self {
             p2: Poseidon2Requires::new(),
             chunk: ChunkRequires::new(),
             round: RoundRequires::new(),
@@ -119,18 +119,29 @@ impl Session {
             uint: UintStores::new(),
             ec: EcStores::new(),
             msm: EcMsmRequires::new(),
-        }
+        };
+        session.install_fixed_uint_manifest();
+        session
     }
 
-    /// Install the VM-owned uint bound self-pins and record their bootstrap pin claims.
+    /// Fixed uint domains and curve coefficients are installed by [`Session::new`] and constrained
+    /// by verifier-side `UintVal` boundary consumes. They no longer emit default transcript
+    /// claims.
     pub fn bootstrap_fixed_pins(&mut self) -> Vec<Truthy> {
-        UintDomain::ALL
-            .into_iter()
-            .map(|domain| {
-                let ptr = domain.bound_ptr();
-                self.pin_uint(ptr, from_limbs32(&domain.minus_one()), ptr)
-            })
-            .collect()
+        Vec::new()
+    }
+
+    fn install_fixed_uint_manifest(&mut self) {
+        for fixed in fixed::fixed_uint_manifest() {
+            let value = from_limbs32(&fixed.value);
+            let ptr = if fixed.ptr == fixed.bound_ptr {
+                self.uint.store.pin_modulus(fixed.ptr, value)
+            } else {
+                let bound = self.uint.store.pinned(fixed.bound_ptr);
+                self.uint.store.intern_fixed_pinned(fixed.ptr, value, bound)
+            };
+            self.uint.store.require_uintval(ptr);
+        }
     }
 
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
@@ -162,13 +173,12 @@ impl Session {
     /// Record an explicit uint pin claim at protocol address `ptr ∈ [1, 2^16)` under the modulus
     /// pinned at `bound_ptr`.
     ///
-    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the bootstrap
+    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
     /// pin-claim cap `(UINT_PIN_CLAIM_TAG, bound_ptr, ptr, 0)`, consumes both `UintVal` halves at
-    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. The fixed bootstrap
-    /// manifest uses this for bound self-pins via
-    /// [`bootstrap_fixed_pins`](Self::bootstrap_fixed_pins); ordinary runtime constants should
-    /// use [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
-    /// (`bound_ptr == ptr`).
+    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. Default fixed domains
+    /// and curve coefficients are already installed by [`Session::new`] and should not be pinned
+    /// manually; ordinary runtime constants should use [`uint_leaf`](Self::uint_leaf) instead. The
+    /// modulus itself is a self-referential pin (`bound_ptr == ptr`).
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
