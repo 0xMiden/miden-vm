@@ -20,7 +20,7 @@
 //! With the store holding `bound = p − 1` (so any modulus, incl. 2²⁵⁶, stays
 //! representable), the looked-up value is `bound` and the `+1` becomes a `−k`
 //! correction at `β⁰`. Verified at the LogUp challenge `β` by a single `id`
-//! ext-field register (aux col 1, excluded from σ by `num_logup_cols = 1`):
+//! ext-field register (aux col 7, excluded from σ by `num_logup_cols = 7`):
 //!
 //! ```text
 //! a(β) + b(β) − c(β) − k·bound(β) − k + (β − t)·Γ(β) = 0,    t = 2³²
@@ -36,41 +36,32 @@
 //! inherit the store's 16-bit `Range16` through the `UintVal` tie; no-wrap
 //! holds trivially (`|coeff| ≲ 2³⁵ ≪ 2⁶³`).
 //!
-//! ## Layout (narrow, period-16)
+//! ## Layout (period-8, one value per row)
 //!
-//! 4×32 per row (one `UintVal` half), mirroring the store's bound rows.
-//! a occupies two rows; b, c and p occupy two rows *plus a hub between
-//! their halves* hosting the block scalar each family reads
-//! (`is_b_zero` / `is_c_zero` / `k`) — the hub serves both halves
-//! through the two-row window (the lo row reads it as next, the hi
-//! half's events fire on the hub against the next row's limbs), so no
-//! scalar needs a column or constancy transport. The carries take two
-//! rows each; a `term` row (hosting the provide mult) closes the SZ.
-//! Periodic columns are verifier-computed, so the extra roles cost no
-//! opening width — the narrow 4-limb trace is Pareto-cheaper for the
-//! recursive verifier than an 8-wide / period-8 alternative.
+//! 8×32 per row (a whole 256-bit value), so `a`, `b`, `c` and `p` each take
+//! a single row; the two `UintVal` halves (offsets 0/1) are both consumed
+//! from that one row. Each operand row hosts its own block scalar in the
+//! cell past the limbs — `is_b_zero` on the `b` row, `is_c_zero` on the `c`
+//! row, the reduction bit `k` on the `p` row — read locally, so no scalar
+//! needs constancy transport. The carries take one row each; a `term` row
+//! (hosting the provide mult) closes the SZ.
 //!
-//! Two zero-sentinel modes, one per hub: **`is_c_zero`** drops the `c`
-//! side (`a + b ≡ 0` — negation with an unstored zero result) and
+//! Two zero-sentinel modes, one per operand row: **`is_c_zero`** drops the
+//! `c` side (`a + b ≡ 0` — negation with an unstored zero result) and
 //! **`is_b_zero`** drops the `b` side (`a + 0 ≡ c` — the stored-value
 //! **equality certificate** `a = c`, both canonical under one modulus;
 //! consumed e.g. by the EC group law's `x₁ = x₂` / `y₁ = y₂` case ties).
 //!
-//! | rows  | role          | cells (4×32 / scalar) | id contributes            |
-//! |-------|---------------|-----------------------|---------------------------|
-//! | 0–1   | `a` lo/hi     | a's 4×32 halves       | `+a(β)`                   |
-//! | 2     | `b` lo        | b's lo half           | `+b_lo(β)` (flag @ next)  |
-//! | 3     | `b` hub       | `is_b_zero` (cell 0)  | `+b_hi(β)` (limbs @ next) |
-//! | 4     | `b` hi        | b's hi half           | — (rides the hub)         |
-//! | 5     | `c` lo        | c's lo half           | `−c_lo(β)` (flag @ next)  |
-//! | 6     | `c` hub       | `is_c_zero` (cell 0)  | `−c_hi(β)` (limbs @ next) |
-//! | 7     | `c` hi        | c's hi half           | — (rides the hub)         |
-//! | 8     | `p` lo        | bound's lo half       | `−k·(bound_lo(β) + 1)` (k @ next) |
-//! | 9     | `k` hub       | `k` (cell 0)          | `−k·bound_hi(β)` (limbs @ next) |
-//! | 10    | `p` hi        | bound's hi half       | — (consume on its own row) |
-//! | 11–12 | `cpos` lo/hi  | γ⁺₀..₃ / γ⁺₄..₆       | `+Σ γ⁺ⱼ(β^{j+1} − t·βʲ)`  |
-//! | 13–14 | `cneg` lo/hi  | γ⁻₀..₃ / γ⁻₄..₆       | `−Σ γ⁻ⱼ(β^{j+1} − t·βʲ)`  |
-//! | 15    | `term`        | `mult` (cell 0)       | assert `id = 0`           |
+//! | row | role   | cells 0–7 / scalar        | id contributes            |
+//! |-----|--------|----------------------------|---------------------------|
+//! | 0   | `a`    | a's 8×32 limbs             | `+a(β)`                   |
+//! | 1   | `b`    | b's 8×32 limbs; `is_b_zero`@8 | `+b(β)·(1 − is_b_zero)` |
+//! | 2   | `c`    | c's 8×32 limbs; `is_c_zero`@8 | `−c(β)·(1 − is_c_zero)` |
+//! | 3   | `p`    | bound's 8×32 limbs; `k`@8  | `−k·(bound(β) + 1)`       |
+//! | 4   | `cpos` | γ⁺₀..₆ (cells 0–6)         | `+Σ γ⁺ⱼ(β^{j+1} − t·βʲ)`  |
+//! | 5   | `cneg` | γ⁻₀..₆ (cells 0–6)         | `−Σ γ⁻ⱼ(β^{j+1} − t·βʲ)`  |
+//! | 6   | —      | (spare)                    | 0                         |
+//! | 7   | `term` | `mult` (cell 0)            | assert `id = 0`           |
 
 pub mod trace;
 
@@ -140,84 +131,67 @@ where
 // COLUMN LAYOUT
 // ================================================================================================
 
-/// Limb / scalar cells per row: 4×32-bit (one `UintVal` half) for a/b/c/p
-/// rows, the binary carries γ⁺ / γ⁻ on the carry rows, or the hub / term
-/// scalars.
-pub const NUM_LIMBS: usize = 4;
+/// Limb cells per value row: the full 8×32-bit view (both `UintVal` halves)
+/// laid on one row.
+pub const NUM_LIMBS: usize = 8;
+/// Scalar cell past the limbs holding this row's flag: `is_b_zero` on the
+/// `b` row, `is_c_zero` on the `c` row, the reduction bit `k` on the `p`
+/// row. Read locally by that row's role-gated constraints.
+pub const CELL_FLAG: usize = 8;
 /// `a`'s pointer (cycle-constant per block).
-pub const COL_A_PTR: usize = 4;
+pub const COL_A_PTR: usize = 9;
 /// `b`'s pointer (cycle-constant).
-pub const COL_B_PTR: usize = 5;
+pub const COL_B_PTR: usize = 10;
 /// `c`'s pointer — the witnessed result (cycle-constant).
-pub const COL_C_PTR: usize = 6;
+pub const COL_C_PTR: usize = 11;
 /// the shared modulus's pointer = `bound_ptr` (cycle-constant).
-pub const COL_BOUND_PTR: usize = 7;
+pub const COL_BOUND_PTR: usize = 12;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op blocks,
 /// 0 on padding. Gates every `UintVal` consume so an all-zero padding
 /// block stays off the bus — with the zero sentinel gone, nothing provides
 /// the `(0, 0, off, 0…)` tuples bare periodic flags would emit there.
-pub const COL_ACT: usize = 8;
-pub const NUM_MAIN_COLS: usize = 9;
+pub const COL_ACT: usize = 13;
+pub const NUM_MAIN_COLS: usize = 14;
 
-// The four ptrs need joint visibility at the term-row provide *and* at
-// their scattered consume rows — only cycle-constancy transports that —
-// and `act` gates eight rows; everything else is a one-window scalar
-// hosted in a spare cell of its read site:
-
-/// B-hub cell holding the `is_b_zero` flag: when set, `b` is the
-/// (unstored) zero — the `+b(β)` terms and the `b` `UintVal` consumes
-/// are dropped, and `b_ptr` is forced to 0. The block then proves
-/// `a + 0 ≡ c (mod p)`, and with `a`, `c` both stored canonical under
-/// the shared modulus that is exactly the **equality certificate
-/// `a = c`** — value-level, ptr-free, no zero pin. Same
-/// between-the-halves window pattern as the C hub.
-pub const B_HUB_CELL_IS_B_ZERO: usize = 0;
-/// C-hub cell holding the `is_c_zero` flag: when set, `c` is the
-/// (unstored) zero — the `−c(β)` term and the `c` `UintVal` consumes are
-/// dropped, and `c_ptr` is forced to 0 (address 0 is never stored, so it
-/// reads as "none" on the `UintAdd` bus). Lets `a + b ≡ 0 (mod p)`
-/// (negation: `b = −a`) avoid referencing a stored zero, which can't be
-/// pinned untyped for an arbitrary modulus. The hub sits between the `c`
-/// halves: the c-lo events read it as the next row, the c-hi events fire
-/// *on* the hub (limbs from the next row) — one structurally shared cell.
-pub const C_HUB_CELL_IS_C_ZERO: usize = 0;
-/// K-hub cell holding the boolean reduction bit `k`: same between-the-
-/// halves pattern over the `p` rows — the p-lo `id` contribution reads it
-/// as the next row, the p-hi contribution fires on the hub against the
-/// next row's limbs. (The `p` consumes don't mention `k`, so they stay on
-/// their own rows.)
-pub const K_HUB_CELL_K: usize = 0;
+/// B-row cell holding the `is_b_zero` flag: when set, `b` is the (unstored)
+/// zero — the `+b(β)` term and the `b` `UintVal` consumes are dropped, and
+/// `b_ptr` is forced to 0. The block then proves `a + 0 ≡ c (mod p)`, and
+/// with `a`, `c` both stored canonical under the shared modulus that is
+/// exactly the **equality certificate `a = c`** — value-level, ptr-free, no
+/// zero pin.
+pub const CELL_IS_B_ZERO: usize = CELL_FLAG;
+/// C-row cell holding the `is_c_zero` flag: when set, `c` is the (unstored)
+/// zero — the `−c(β)` term and the `c` `UintVal` consumes are dropped, and
+/// `c_ptr` is forced to 0 (address 0 is never stored, so it reads as "none"
+/// on the `UintAdd` bus). Lets `a + b ≡ 0 (mod p)` (negation: `b = −a`)
+/// avoid referencing a stored zero, which can't be pinned untyped for an
+/// arbitrary modulus.
+pub const CELL_IS_C_ZERO: usize = CELL_FLAG;
+/// P-row cell holding the boolean reduction bit `k`.
+pub const CELL_K: usize = CELL_FLAG;
 /// Term-row cell holding the `UintAdd` provide multiplicity = consumer
 /// count (one per eval `UintOp` node, 0 for bare ptr-space ops) — read
 /// only by the term-row provide.
 pub const TERM_CELL_MULT: usize = 0;
 
-/// Block period: one add op = 16 rows (a × 2, b / c / p × 2 + a hub
-/// each, carries × 4, term).
-pub const PERIOD: usize = 16;
+/// Block period: one add op = 8 rows (a / b / c / p one row each, two carry
+/// rows, a spare, and the term row).
+pub const PERIOD: usize = 8;
 
-// One-hot periodic role selectors (one column each, period 16). Rows 4
-// (b-hi) and 7 (c-hi) need no selector — their consumes and `id`
-// contributions fire on their hubs via next-row access; the term role
-// sits on the last row (15) so the cycle-constancy `not_term` gate
-// drops exactly at the block boundary.
-const PCOL_A_LO: usize = 0;
-const PCOL_A_HI: usize = 1;
-const PCOL_B_LO: usize = 2;
-const PCOL_B_HUB: usize = 3;
-const PCOL_C_LO: usize = 4;
-const PCOL_C_HUB: usize = 5;
-const PCOL_P_LO: usize = 6;
-const PCOL_K_HUB: usize = 7;
-const PCOL_P_HI: usize = 8;
-const PCOL_CPOS_LO: usize = 9;
-const PCOL_CPOS_HI: usize = 10;
-const PCOL_CNEG_LO: usize = 11;
-const PCOL_CNEG_HI: usize = 12;
-const PCOL_TERM: usize = 13;
-const NUM_PERIODIC: usize = 14;
+// One-hot periodic role selectors (one column each, period 8). Row 6 needs
+// no selector — it is the spare row and contributes nothing; the term role
+// sits on the last row (7) so the cycle-constancy `not_term` gate drops
+// exactly at the block boundary.
+const PCOL_A: usize = 0;
+const PCOL_B: usize = 1;
+const PCOL_C: usize = 2;
+const PCOL_P: usize = 3;
+const PCOL_CPOS: usize = 4;
+const PCOL_CNEG: usize = 5;
+const PCOL_TERM: usize = 6;
+const NUM_PERIODIC: usize = 7;
 /// Row each periodic one-hot column fires on (index = `PCOL_*`).
-const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3, 4, 5, 7];
 
 // Aux layout (FLATTENED to lqd 1): cols 0..7 = LogUp fraction columns,
 // one/two fractions each so every closing constraint is degree ≤ 3; col 7
@@ -292,18 +266,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
             let p = builder.periodic_values();
             array::from_fn(|i| p[i].into())
         };
-        let a_lo = sel[PCOL_A_LO].clone();
-        let a_hi = sel[PCOL_A_HI].clone();
-        let b_lo = sel[PCOL_B_LO].clone();
-        let b_hub = sel[PCOL_B_HUB].clone();
-        let c_lo = sel[PCOL_C_LO].clone();
-        let c_hub = sel[PCOL_C_HUB].clone();
-        let p_lo = sel[PCOL_P_LO].clone();
-        let k_hub = sel[PCOL_K_HUB].clone();
-        let cpos_lo = sel[PCOL_CPOS_LO].clone();
-        let cpos_hi = sel[PCOL_CPOS_HI].clone();
-        let cneg_lo = sel[PCOL_CNEG_LO].clone();
-        let cneg_hi = sel[PCOL_CNEG_HI].clone();
+        let a_sel = sel[PCOL_A].clone();
+        let b_sel = sel[PCOL_B].clone();
+        let c_sel = sel[PCOL_C].clone();
+        let p_sel = sel[PCOL_P].clone();
+        let cpos = sel[PCOL_CPOS].clone();
+        let cneg = sel[PCOL_CNEG].clone();
         let term_sel = sel[PCOL_TERM].clone();
 
         // β^0 .. β^7.
@@ -315,74 +283,45 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         }
         let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
-        // `id` register on aux col 1.
+        // `id` register on aux col 7.
         let id: AB::ExprEF =
             current_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
         let id_next: AB::ExprEF =
             next_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
 
-        // Weighted limb sums of a row's 4×32 limbs: the lo half (β⁰..β³)
-        // and the hi half (β⁴..β⁷) — over the local row, and the hi half
-        // over the *next* row (the hub rows fire their hi-half terms
-        // against the following row's limbs) — plus the per-half carry
-        // term Σⱼ limbⱼ·(β^{j+1} − t·βʲ) (lo: j=0..3, hi: j=4..6).
-        let lo_sum: AB::ExprEF =
-            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[k].clone() * AB::Expr::from(local[k]));
-        let hi_sum: AB::ExprEF =
-            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[4 + k].clone() * AB::Expr::from(local[k]));
-        let hi_sum_next: AB::ExprEF =
-            (0..4).fold(AB::ExprEF::ZERO, |s, k| s + bp[4 + k].clone() * AB::Expr::from(next[k]));
-        let carry_lo_term: AB::ExprEF = (0..4).fold(AB::ExprEF::ZERO, |s, j| {
+        // The full 8×32 value on this row: Σⱼ limbⱼ·βʲ (t = 2³² is the limb
+        // radix, so the 32-bit limbs recombine to the 256-bit value at β).
+        let full_sum: AB::ExprEF =
+            (0..8).fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[j]));
+        // The carry-row weight Σⱼ₌₀⁶ γⱼ·(β^{j+1} − t·βʲ) = (β − t)·Γ(β).
+        let carry_term: AB::ExprEF = (0..7).fold(AB::ExprEF::ZERO, |s, j| {
             let w = bp[j + 1].clone() - bp[j].clone() * t32.clone();
             s + w * AB::Expr::from(local[j])
         });
-        let carry_hi_term: AB::ExprEF = (0..3).fold(AB::ExprEF::ZERO, |s, m| {
-            let j = 4 + m;
-            let w = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            s + w * AB::Expr::from(local[m])
-        });
 
-        // −k·bound(β) − k, k read from the K-hub between the p halves: the
-        // p-lo row sees it as the next row's cell and the hub fires the hi
-        // half against the next row's limbs; the −k correction at β⁰ is
-        // p = bound + 1.
-        let k_next: AB::Expr = next[K_HUB_CELL_K].into();
-        let k_here: AB::Expr = local[K_HUB_CELL_K].into();
-        let p_lo_contrib = (lo_sum.clone() + bp[0].clone()) * k_next;
-        let p_hi_contrib = hi_sum_next.clone() * k_here.clone();
+        // Block scalars, read locally on their own rows.
+        let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].into();
+        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].into();
+        let k: AB::Expr = local[CELL_K].into();
+        let b_active: AB::Expr = AB::Expr::ONE - is_b_zero.clone();
+        let c_active: AB::Expr = AB::Expr::ONE - is_c_zero.clone();
 
-        // When is_c_zero (the C-hub cell between the c halves), c is the
-        // (unstored) zero: drop the −c(β) terms. Same window pattern: the
-        // c-lo row reads the flag as next, the hub fires the hi half.
-        // is_b_zero (the B-hub cell) mirrors it on the +b(β) side.
-        let czc_next: AB::Expr = next[C_HUB_CELL_IS_C_ZERO].into();
-        let czc_here: AB::Expr = local[C_HUB_CELL_IS_C_ZERO].into();
-        let c_active_next: AB::Expr = AB::Expr::ONE - czc_next;
-        let c_active_here: AB::Expr = AB::Expr::ONE - czc_here.clone();
-        let bzc_next: AB::Expr = next[B_HUB_CELL_IS_B_ZERO].into();
-        let bzc_here: AB::Expr = local[B_HUB_CELL_IS_B_ZERO].into();
-        let b_active_next: AB::Expr = AB::Expr::ONE - bzc_next;
-        let b_active_here: AB::Expr = AB::Expr::ONE - bzc_here.clone();
-
-        let contrib: AB::ExprEF = lo_sum.clone() * a_lo
-            + hi_sum * a_hi
-            + lo_sum.clone() * (b_lo * b_active_next)
-            + hi_sum_next.clone() * (b_hub.clone() * b_active_here)
-            - lo_sum * (c_lo * c_active_next)
-            - hi_sum_next * (c_hub.clone() * c_active_here)
-            - p_lo_contrib * p_lo
-            - p_hi_contrib * k_hub.clone()
-            + carry_lo_term.clone() * cpos_lo.clone()
-            + carry_hi_term.clone() * cpos_hi.clone()
-            - carry_lo_term * cneg_lo.clone()
-            - carry_hi_term * cneg_hi.clone();
+        // Per-row `id` contributions (one selector fires per row, so the
+        // cross terms vanish): +a, +b·(1−is_b_zero), −c·(1−is_c_zero),
+        // −k·(bound(β)+1), ±carries.
+        let contrib: AB::ExprEF = full_sum.clone() * a_sel.clone()
+            + full_sum.clone() * (b_sel.clone() * b_active)
+            - full_sum.clone() * (c_sel.clone() * c_active)
+            - (full_sum.clone() + bp[0].clone()) * (p_sel.clone() * k.clone())
+            + carry_term.clone() * cpos.clone()
+            - carry_term * cneg.clone();
 
         builder.when_first_row().assert_zero_ext(id.clone());
         builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
         builder.assert_zero_ext(id * term_sel.clone());
 
-        // k is the boolean reduction bit (a K-hub cell).
-        builder.assert_zero(k_hub * k_here.clone() * (AB::Expr::ONE - k_here));
+        // k is the boolean reduction bit (p-row scalar).
+        builder.assert_zero(p_sel.clone() * k.clone() * (AB::Expr::ONE - k));
 
         // act is the boolean block-active flag (cycle-constant).
         let act: AB::Expr = local[COL_ACT].into();
@@ -393,40 +332,35 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         // act-gated — so an `act = 0` block with zeroed limbs (the SZ closes
         // trivially) and a witnessed term-row `mult` would provide a *false*
         // relation onto the bus. Force the term-row mult to 0 when act = 0.
+        builder.assert_zero(
+            term_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
+        );
+
+        // is_c_zero (a c-row scalar) is boolean, and forces c_ptr = 0 — the
+        // zero result has no stored address, and the tuple's c_ptr = 0 reads
+        // as "≡ 0" to a consumer.
         builder
-            .assert_zero(term_sel.clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into());
-
-        // is_c_zero (a C-hub cell) is boolean, and forces c_ptr = 0 — the
-        // zero result has no stored address, and the tuple's c_ptr = 0
-        // reads as "≡ 0" to a consumer.
-        builder.assert_zero(c_hub.clone() * czc_here.clone() * (AB::Expr::ONE - czc_here.clone()));
+            .assert_zero(c_sel.clone() * is_c_zero.clone() * (AB::Expr::ONE - is_c_zero.clone()));
         let c_ptr_local: AB::Expr = local[COL_C_PTR].into();
-        builder.assert_zero(c_hub * czc_here * c_ptr_local);
+        builder.assert_zero(c_sel.clone() * is_c_zero.clone() * c_ptr_local);
 
-        // is_b_zero (a B-hub cell) likewise: boolean, and forces
-        // b_ptr = 0 so the tuple reads as the `a + 0 ≡ c` equality form.
-        builder.assert_zero(b_hub.clone() * bzc_here.clone() * (AB::Expr::ONE - bzc_here.clone()));
+        // is_b_zero (a b-row scalar) likewise: boolean, and forces b_ptr = 0
+        // so the tuple reads as the `a + 0 ≡ c` equality form.
+        builder
+            .assert_zero(b_sel.clone() * is_b_zero.clone() * (AB::Expr::ONE - is_b_zero.clone()));
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
-        builder.assert_zero(b_hub * bzc_here * b_ptr_local);
+        builder.assert_zero(b_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
-        // Carry booleanity: γ⁺ / γ⁻ ∈ {0, 1}. cpos_lo / cneg_lo carry 4
-        // limbs (γ·₀..₃), cpos_hi / cneg_hi carry 3 (γ·₄..₆).
-        for &cell in local.iter().take(4) {
+        // Carry booleanity: γ⁺ / γ⁻ ∈ {0, 1}, seven limbs each on their row.
+        for &cell in local.iter().take(7) {
             let lj: AB::Expr = cell.into();
             let boolean = lj.clone() * (AB::Expr::ONE - lj);
-            builder.assert_zero((cpos_lo.clone() + cneg_lo.clone()) * boolean);
-        }
-        for &cell in local.iter().take(3) {
-            let lm: AB::Expr = cell.into();
-            let boolean = lm.clone() * (AB::Expr::ONE - lm);
-            builder.assert_zero((cpos_hi.clone() + cneg_hi.clone()) * boolean);
+            builder.assert_zero((cpos.clone() + cneg.clone()) * boolean);
         }
 
-        // Cycle-constancy: the four ptrs need joint visibility at the
-        // term-row provide and at their consume rows; act gates eight
-        // rows. Constant within a block (every row but the terminal one,
-        // which the not_term gate drops at the block boundary — term sits
-        // on the last row of the period).
+        // Cycle-constancy: the four ptrs + act are constant within a block
+        // (every row but the terminal one, which the not_term gate drops at
+        // the block boundary — term sits on the last row of the period).
         let not_term: AB::Expr = AB::Expr::ONE - term_sel;
         for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT] {
             let here: AB::Expr = local[col].into();
@@ -512,7 +446,6 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
         let sel: [LB::Expr; NUM_PERIODIC] = {
             let p = builder.periodic_values();
@@ -526,21 +459,19 @@ where
         let act: LB::Expr = local[COL_ACT].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].into();
 
-        // The 4×32 limbs of the UintVal recombined view: a row's own, and
-        // the next row's (the C-hub emits the c-hi consume against the
-        // following row's limbs).
-        let limbs: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
-        let limbs_next: [LB::Expr; 4] = array::from_fn(|k| next[k].into());
+        // The two 4×32 `UintVal` halves of the value on this row: the lo
+        // half (cells 0..4, offset 0) and the hi half (cells 4..8, offset
+        // 1). Both operand halves consume from the same row now (a, b, c
+        // and p each take one row), so no next-row read is needed.
+        let lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
+        let hi: [LB::Expr; 4] = array::from_fn(|k| local[4 + k].into());
 
-        // When is_c_zero (the C-hub cell), c is the unstored zero:
-        // suppress its UintVal consumes (deg-3 multiplicities with the
-        // act gate — inside the budget). The c-lo row reads the flag as
-        // its next row; the hub reads it locally. is_b_zero (the B-hub
-        // cell) suppresses the b consumes the same way.
-        let c_active_next: LB::Expr = LB::Expr::ONE - next[C_HUB_CELL_IS_C_ZERO].into();
-        let c_active_here: LB::Expr = LB::Expr::ONE - local[C_HUB_CELL_IS_C_ZERO].into();
-        let b_active_next: LB::Expr = LB::Expr::ONE - next[B_HUB_CELL_IS_B_ZERO].into();
-        let b_active_here: LB::Expr = LB::Expr::ONE - local[B_HUB_CELL_IS_B_ZERO].into();
+        // When is_c_zero (this row's flag cell), c is the unstored zero:
+        // suppress its UintVal consumes (deg-3 multiplicities with the act
+        // gate — inside the budget). is_b_zero suppresses the b consumes
+        // the same way.
+        let c_active: LB::Expr = LB::Expr::ONE - local[CELL_IS_C_ZERO].into();
+        let b_active: LB::Expr = LB::Expr::ONE - local[CELL_IS_B_ZERO].into();
 
         let consume_deg = Deg { v: 2, u: 1 };
         let gated_consume_deg = Deg { v: 3, u: 1 };
@@ -549,67 +480,48 @@ where
         // is a 2-denominator batch (degree-3 numerator, degree-2 denominator).
         let cp_col_deg = Deg { v: 3, u: 2 };
 
-        // (consume flag, ptr, offset, limbs, deg) per operand half, split
-        // across two fraction columns so neither exceeds the degree
-        // budget. The b-hi / c-hi consumes fire on their hubs (flag local
-        // + limbs from the next row); every other half fires on its own
-        // limb row.
-        let ab_consumes: [(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 4], Deg); 4] = [
-            (
-                sel[PCOL_A_LO].clone(),
-                a_ptr.clone(),
-                LB::Expr::ZERO,
-                limbs.clone(),
-                consume_deg,
-            ),
-            (sel[PCOL_A_HI].clone(), a_ptr.clone(), LB::Expr::ONE, limbs.clone(), consume_deg),
-            (
-                sel[PCOL_B_LO].clone() * b_active_next,
-                b_ptr.clone(),
-                LB::Expr::ZERO,
-                limbs.clone(),
-                gated_consume_deg,
-            ),
-            (
-                sel[PCOL_B_HUB].clone() * b_active_here,
-                b_ptr.clone(),
-                LB::Expr::ONE,
-                limbs_next.clone(),
-                gated_consume_deg,
-            ),
-        ];
-        let cp_consumes: [(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 4], Deg); 4] = [
-            (
-                sel[PCOL_C_LO].clone() * c_active_next,
-                c_ptr.clone(),
-                LB::Expr::ZERO,
-                limbs.clone(),
-                gated_consume_deg,
-            ),
-            (
-                sel[PCOL_C_HUB].clone() * c_active_here,
-                c_ptr.clone(),
-                LB::Expr::ONE,
-                limbs_next,
-                gated_consume_deg,
-            ),
-            (
-                sel[PCOL_P_LO].clone(),
-                bound_ptr.clone(),
-                LB::Expr::ZERO,
-                limbs.clone(),
-                consume_deg,
-            ),
-            (sel[PCOL_P_HI].clone(), bound_ptr.clone(), LB::Expr::ONE, limbs, consume_deg),
-        ];
+        // Each operand consumes both `UintVal` halves from its own row. The
+        // a/p multiplicities are `sel·act`; the gated b/c halves carry
+        // `sel·(1−is_zero)·act` (degree 3). (flag, ptr, offset, limbs, deg).
+        let a_lo = (sel[PCOL_A].clone(), a_ptr.clone(), LB::Expr::ZERO, lo.clone(), consume_deg);
+        let a_hi = (sel[PCOL_A].clone(), a_ptr.clone(), LB::Expr::ONE, hi.clone(), consume_deg);
+        let b_lo = (
+            sel[PCOL_B].clone() * b_active.clone(),
+            b_ptr.clone(),
+            LB::Expr::ZERO,
+            lo.clone(),
+            gated_consume_deg,
+        );
+        let b_hi = (
+            sel[PCOL_B].clone() * b_active,
+            b_ptr.clone(),
+            LB::Expr::ONE,
+            hi.clone(),
+            gated_consume_deg,
+        );
+        let c_lo = (
+            sel[PCOL_C].clone() * c_active.clone(),
+            c_ptr.clone(),
+            LB::Expr::ZERO,
+            lo.clone(),
+            gated_consume_deg,
+        );
+        let c_hi = (
+            sel[PCOL_C].clone() * c_active,
+            c_ptr.clone(),
+            LB::Expr::ONE,
+            hi.clone(),
+            gated_consume_deg,
+        );
+        let p_lo = (sel[PCOL_P].clone(), bound_ptr.clone(), LB::Expr::ZERO, lo, consume_deg);
+        let p_hi = (sel[PCOL_P].clone(), bound_ptr.clone(), LB::Expr::ONE, hi, consume_deg);
 
         // Flattened LogUp (lqd 1), one/two fractions per column. The four
-        // gated b/c consumes carry degree-3 multiplicities (`flag·(1−is_zero)·act`)
-        // so each sits alone; the degree-2 a/p consumes pair; the UintAdd
-        // provide rides with p-hi; col 0 (the running sum) hosts a single
-        // degree-2 consume (the +1 gate forbids a degree-3 one there).
-        let [a_lo, a_hi, b_lo, b_hub] = ab_consumes;
-        let [c_lo, c_hub, p_lo, p_hi] = cp_consumes;
+        // gated b/c consumes carry degree-3 multiplicities
+        // (`flag·(1−is_zero)·act`) so each sits alone; the degree-2 a/p
+        // consumes pair; the UintAdd provide rides with p-hi; col 0 (the
+        // running sum) hosts a single degree-2 consume (the +1 gate forbids
+        // a degree-3 one there).
 
         // col 0: a-lo (running sum, one degree-2 consume).
         consume_column(builder, &bound_ptr, &act, vec![a_lo], consume_deg);
@@ -659,8 +571,8 @@ where
         );
         // cols 3..6: the gated b/c consumes, one per column (degree-3 mult).
         consume_column(builder, &bound_ptr, &act, vec![b_lo], gated_consume_deg);
-        consume_column(builder, &bound_ptr, &act, vec![b_hub], gated_consume_deg);
+        consume_column(builder, &bound_ptr, &act, vec![b_hi], gated_consume_deg);
         consume_column(builder, &bound_ptr, &act, vec![c_lo], gated_consume_deg);
-        consume_column(builder, &bound_ptr, &act, vec![c_hub], gated_consume_deg);
+        consume_column(builder, &bound_ptr, &act, vec![c_hi], gated_consume_deg);
     }
 }
