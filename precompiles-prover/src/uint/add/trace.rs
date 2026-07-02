@@ -1,11 +1,12 @@
 //! UintAdd trace generation + aux builder.
 //!
 //! [`generate_trace`] lays each add op out as a [`PERIOD`]-row block: the
-//! full 8×32 operand rows (pulled from the store over `UintVal`), the binary
-//! carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`), and a closing `term` row.
-//! `build_aux` drives the LogUp running sum and the Schwartz–Zippel `id`
-//! register, whose per-row accumulation mirrors [`super::UintAddAir`]'s
-//! `contrib` exactly.
+//! full 8×32 operand rows (pulled from the store over `UintVal`, one value
+//! per row) with the binary carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`)
+//! spread across their spare cells per [`GAMMA_POS_SLOTS`] /
+//! [`GAMMA_NEG_SLOTS`]. `build_aux` drives the LogUp running sum and the
+//! Schwartz–Zippel `id` register, whose per-row accumulation mirrors
+//! [`super::UintAddAir`]'s `contrib` exactly.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
@@ -16,8 +17,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_ACT, NUM_MAIN_COLS, PERIOD,
-    TERM_CELL_MULT, UintAddAir,
+    AUX_WIDTH, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_ACT, GAMMA_NEG_SLOTS,
+    GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, TERM_CELL_MULT, UintAddAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -173,7 +174,9 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
 /// The four ptrs + `act` repeat on every row (cycle-constant); each
 /// operand row hosts its own block scalar — `is_b_zero` on the `b` row,
 /// `is_c_zero` on the `c` row, `k` on the `p` row, the provide multiplicity
-/// on the term row. Padded to a power-of-two height.
+/// on the `p` row's closing cell — plus its share of the γ⁺ / γ⁻ carries
+/// per [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`]. Padded to a power-of-two
+/// height.
 ///
 /// The same pass routes each block's `UintVal` demand into the store
 /// (the `a` operand + the shared modulus, plus `b` / `c` unless they are
@@ -198,27 +201,29 @@ pub fn generate_trace(
         store.require_uintval(op.bound);
         let w = witness(op, store);
 
-        // Rows 0–7: a / b / c / p (each a full 8×32 value on cells 0–7,
-        // its scalar past the limbs), γ⁺ / γ⁻ (7 bits on cells 0–6), a
-        // spare row, then the term row.
+        // Rows 0–3: a / b / c / p, each a full 8×32 value on cells 0–7; the
+        // γ⁺ / γ⁻ carries and the closing-row provide mult ride the spare
+        // cells 8–12 per the placement tables.
         let mut block = [[Felt::ZERO; NUM_MAIN_COLS]; PERIOD];
         let put = |row: &mut [Felt; NUM_MAIN_COLS], v: &[u32; 8]| {
             for j in 0..8 {
                 row[j] = Felt::from(v[j]);
             }
         };
-        put(&mut block[0], &w.a); // a
-        put(&mut block[1], &w.b); // b
-        put(&mut block[2], &w.c); // c
-        put(&mut block[3], &w.bound); // p
-        block[1][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
-        block[2][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
-        block[3][CELL_K] = Felt::from(w.k);
-        for j in 0..7 {
-            block[4][j] = Felt::from(w.gamma_pos[j]); // cpos: γ⁺₀..₆
-            block[5][j] = Felt::from(w.gamma_neg[j]); // cneg: γ⁻₀..₆
+        put(&mut block[ROW_A], &w.a);
+        put(&mut block[ROW_B], &w.b);
+        put(&mut block[ROW_C], &w.c);
+        put(&mut block[ROW_P], &w.bound);
+        block[ROW_B][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
+        block[ROW_C][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
+        block[ROW_P][CELL_K] = Felt::from(w.k);
+        for (j, &(row, cell)) in GAMMA_POS_SLOTS.iter().enumerate() {
+            block[row][cell] = Felt::from(w.gamma_pos[j]);
         }
-        block[7][TERM_CELL_MULT] = Felt::from(*mult); // term
+        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
+            block[row][cell] = Felt::from(w.gamma_neg[j]);
+        }
+        block[ROW_P][TERM_CELL_MULT] = Felt::from(*mult);
 
         // Cycle-constant metadata (cols COL_A_PTR..=COL_ACT), identical on
         // every row of the block.
@@ -270,29 +275,34 @@ pub(crate) fn build_aux(
 
         let cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
         let full_sum = (0..8).fold(QuadFelt::ZERO, |s, j| s + bp[j] * QuadFelt::from(cell(j)));
-        let carry_term = (0..7)
-            .fold(QuadFelt::ZERO, |s, j| s + (bp[j + 1] - bp[j] * t32) * QuadFelt::from(cell(j)));
-        let contrib: QuadFelt = match r % PERIOD {
-            0 => full_sum, // a
-            // b: dropped when is_b_zero.
-            1 => {
-                let b_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_B_ZERO));
-                full_sum * b_active
-            },
-            // c: dropped when is_c_zero.
-            2 => {
-                let c_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_C_ZERO));
-                -(full_sum * c_active)
-            },
-            // p: −k·(bound(β) + 1).
-            3 => {
-                let k = QuadFelt::from(cell(CELL_K));
-                -(k * (full_sum + bp[0]))
-            },
-            4 => carry_term,     // cpos
-            5 => -carry_term,    // cneg
-            _ => QuadFelt::ZERO, // spare / term
+        let row_kind = r % PERIOD;
+
+        let mut contrib: QuadFelt = if row_kind == ROW_A {
+            full_sum
+        } else if row_kind == ROW_B {
+            let b_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_B_ZERO));
+            full_sum * b_active
+        } else if row_kind == ROW_C {
+            let c_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_C_ZERO));
+            -(full_sum * c_active)
+        } else {
+            debug_assert_eq!(row_kind, ROW_P);
+            let k = QuadFelt::from(cell(CELL_K));
+            -(k * (full_sum + bp[0]))
         };
+
+        for (j, &(row, gc)) in GAMMA_POS_SLOTS.iter().enumerate() {
+            if row == row_kind {
+                let w = bp[j + 1] - bp[j] * t32;
+                contrib += w * QuadFelt::from(cell(gc));
+            }
+        }
+        for (j, &(row, gc)) in GAMMA_NEG_SLOTS.iter().enumerate() {
+            if row == row_kind {
+                let w = bp[j + 1] - bp[j] * t32;
+                contrib -= w * QuadFelt::from(cell(gc));
+            }
+        }
         id += contrib;
     }
 

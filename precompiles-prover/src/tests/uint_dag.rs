@@ -113,7 +113,7 @@ fn horner_sign_alternation_full_stack() {
     // The add/mul relation counts are unchanged.
     let mains = traces.mains();
     assert_eq!(mains[7].height(), 32, "eval: 22 rows pad to 32");
-    assert_eq!(mains[9].height(), 64, "uint-add: 7 blocks pad to 8");
+    assert_eq!(mains[9].height(), 32, "uint-add: 7 blocks pad to 8");
     assert_eq!(mains[10].height(), 128, "uint-mul: 6 blocks pad to 8");
 
     traces.check();
@@ -153,7 +153,7 @@ fn op_dedup_collapses_repeated_nodes() {
 
     // Two recorded add ops (r once, w once), not three.
     let mains = traces.mains();
-    assert_eq!(mains[9].height(), 16, "uint-add: exactly two blocks");
+    assert_eq!(mains[9].height(), 8, "uint-add: exactly two blocks");
     // r's single row carries out_mult 2 (consumed twice by w).
     let eval = mains[7];
     let r_row = (0..eval.height())
