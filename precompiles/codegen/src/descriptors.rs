@@ -583,26 +583,29 @@ pub const SECP256R1_GENERATOR_Y: Limbs = [
     0x4fe3_42e2,
 ];
 
+/// Ed25519 base point mapped to the short-Weierstrass model `X = u + 486662/3`.
 pub const ED25519_GENERATOR_X: Limbs = [
-    0x8f25_d51a,
-    0xc956_2d60,
-    0x9525_a7b2,
-    0x692c_c760,
-    0xfdd6_dc5c,
-    0xc0a4_e231,
-    0xcd6e_53fe,
-    0x2169_36d3,
+    0xaaad_245a,
+    0xaaaa_aaaa,
+    0xaaaa_aaaa,
+    0xaaaa_aaaa,
+    0xaaaa_aaaa,
+    0xaaaa_aaaa,
+    0xaaaa_aaaa,
+    0x2aaa_aaaa,
 ];
 
+/// Ed25519 base point mapped to the short-Weierstrass model using the even square root of
+/// `-486664` in the Edwards-to-Montgomery map.
 pub const ED25519_GENERATOR_Y: Limbs = [
-    0x6666_6658,
-    0x6666_6666,
-    0x6666_6666,
-    0x6666_6666,
-    0x6666_6666,
-    0x6666_6666,
-    0x6666_6666,
-    0x6666_6666,
+    0x8131_2c14,
+    0xd616_3a5d,
+    0x9283_9e4d,
+    0x6dc2_b281,
+    0x88b7_2eb3,
+    0x1fe1_22d3,
+    0x475f_794b,
+    0x5f51_e65e,
 ];
 
 pub struct CurvePrecompileDescriptor;

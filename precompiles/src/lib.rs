@@ -21,9 +21,7 @@ mod math;
 
 pub use hash::{HashFunction, HashPrecompile, keccak256::Keccak256Precompile};
 pub use math::{
-    curve::{
-        CurveId, CurvePoint, CurvePrecompile, CurveSpec, ShortWeierstrassSpec, TwistedEdwardsSpec,
-    },
+    curve::{CurveId, CurvePoint, CurvePrecompile, CurveSpec, ShortWeierstrassSpec},
     ed25519_base::Ed25519Base,
     ed25519_scalar::Ed25519Scalar,
     k1_base::K1Base,

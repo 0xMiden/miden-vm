@@ -41,7 +41,6 @@ mod ed25519;
 mod secp256k1;
 mod secp256r1;
 mod short_weierstrass;
-mod twisted_edwards;
 
 use alloc::vec::Vec;
 use core::num::NonZeroU32;
@@ -200,13 +199,6 @@ pub trait ShortWeierstrassSpec: CurveSpec {
 
     /// Short-Weierstrass coefficient `B`.
     const B: Limbs;
-}
-
-/// Twisted-Edwards-specific parameters for curves of the form
-/// `-x^2 + y^2 = 1 + D*x^2*y^2`.
-pub trait TwistedEdwardsSpec: CurveSpec {
-    /// Twisted-Edwards coefficient `D`.
-    const D: Limbs;
 }
 
 /// Fixed curves supported by the native curve precompile.
