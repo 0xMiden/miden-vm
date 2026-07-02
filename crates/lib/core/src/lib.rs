@@ -25,6 +25,11 @@ use crate::handlers::{
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
+    readonly::{
+        READONLY_MIDEN_DEBUG_ASSERTION_FAILED, READONLY_MIDEN_DEBUG_FRAME_END,
+        READONLY_MIDEN_DEBUG_FRAME_START, READONLY_MIDEN_DEBUG_PRINTLN,
+        READONLY_MIDEN_DEBUG_UNKNOWN, readonly_noop_handler,
+    },
     sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
@@ -143,6 +148,11 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
+            (READONLY_MIDEN_DEBUG_FRAME_START, Arc::new(readonly_noop_handler)),
+            (READONLY_MIDEN_DEBUG_FRAME_END, Arc::new(readonly_noop_handler)),
+            (READONLY_MIDEN_DEBUG_ASSERTION_FAILED, Arc::new(readonly_noop_handler)),
+            (READONLY_MIDEN_DEBUG_UNKNOWN, Arc::new(readonly_noop_handler)),
+            (READONLY_MIDEN_DEBUG_PRINTLN, Arc::new(readonly_noop_handler)),
         ]
     }
 

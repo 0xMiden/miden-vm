@@ -14,6 +14,7 @@ pub mod ecdsa;
 pub mod eddsa_ed25519;
 pub mod falcon_div;
 pub mod keccak256;
+pub mod readonly;
 pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
