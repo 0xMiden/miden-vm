@@ -115,19 +115,21 @@ use crate::{
 // ================================================================================================
 
 /// LogUp message for the [`UintMul`](BusId::UintMul) relation: the
-/// 7-tuple `(κₐ, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` asserting
-/// `κₐ·a·b + κ_c·c ≡ r (mod p)` for stored uints sharing the modulus at
-/// `bound_ptr`. *Provided* by [`UintMulAir`] at the op's consumer count;
-/// consumed by the eval chip's mul `UintOp` nodes in the plain
-/// `κₐ = 1, κ_c = 0` arrangement (the scaled shapes await the ECC
-/// gadget).
+/// 8-tuple `(κₐ, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr, is_sub)`
+/// asserting `κₐ·a·b + κ_c·c ≡ r (mod p)` (or `κₐ·a·b − κ_c·c ≡ r` when
+/// `is_sub = 1`) for stored uints sharing the modulus at `bound_ptr`.
+/// *Provided* by [`UintMulAir`] at the op's consumer count; consumed by
+/// the eval chip's mul `UintOp` nodes in the plain `κₐ = 1, κ_c = 0`
+/// arrangement and by the EC group law's fused MAC certificates.
 ///
 /// The κ's ride the tuple so a consumer demands the exact scale it
 /// wants — sub-limb constants (2, 3, …) for fused ECC formulas, κ_c = 0
 /// to kill the addend (pure mul / div arrangements need no zero uint).
+/// `is_sub` is a distinct relation flag, so an additive provide can never
+/// satisfy a subtractive consume.
 ///
 /// Encoded as `bus_prefix[UintMul] + β⁰·κₐ + β¹·κ_c + β²·a_ptr +
-/// β³·b_ptr + β⁴·c_ptr + β⁵·r_ptr + β⁶·bound_ptr`.
+/// β³·b_ptr + β⁴·c_ptr + β⁵·r_ptr + β⁶·bound_ptr + β⁷·is_sub`.
 #[derive(Debug, Clone)]
 pub struct UintMulMsg<E> {
     pub kappa_a: E,
@@ -137,6 +139,10 @@ pub struct UintMulMsg<E> {
     pub c_ptr: E,
     pub r_ptr: E,
     pub bound_ptr: E,
+    /// `0` for the additive shape `κₐ·a·b + κ_c·c ≡ r`, `1` for the
+    /// subtractive `κₐ·a·b − κ_c·c ≡ r` — a distinct relation the consumer
+    /// demands exactly, so an add provide can never satisfy a sub consume.
+    pub is_sub: E,
 }
 
 impl<E, EF> LookupMessage<E, EF> for UintMulMsg<E>
@@ -155,6 +161,7 @@ where
                 self.c_ptr.clone(),
                 self.r_ptr.clone(),
                 self.bound_ptr.clone(),
+                self.is_sub.clone(),
             ],
         )
     }
@@ -178,7 +185,12 @@ pub const COL_KAPPA_A: usize = 14;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op
 /// blocks, 0 on padding; gates every bus flag + the γ offset constant.
 pub const COL_ACT: usize = 15;
-pub const NUM_MAIN_COLS: usize = 16;
+/// Subtractive-underflow borrow `∈ {0, 1}` (cycle-constant): the single
+/// modulus the canonical reduction adds back when `is_sub` and the product
+/// `< κ_c·c`. Read on the p-rows (where `bound(β)` is live) to contribute
+/// `borrow·(bound(β)+1)` to the SZ identity. Pinned to 0 unless `is_sub`.
+pub const COL_BORROW: usize = 16;
+pub const NUM_MAIN_COLS: usize = 17;
 
 /// Block period: one mul op = 16 rows, all live.
 pub const PERIOD: usize = 16;
@@ -212,6 +224,10 @@ const NUM_PERIODIC: usize = PERIOD + 1;
 pub const TERM_CELL_MULT: usize = 0;
 pub const TERM_CELL_C_PTR: usize = 1;
 pub const TERM_CELL_KAPPA_C: usize = 2;
+/// Term-row cell holding the subtractive-mode flag `is_sub ∈ {0, 1}` (read
+/// locally for the booleanity / borrow gate, and on the `c` row via next
+/// for the `(1 − 2·is_sub)` sign on the linear `c` term).
+pub const TERM_CELL_IS_SUB: usize = 3;
 
 /// Quotient limbs: `q ≤ κₐ·p + κ_c < 2²⁷²` needs 17.
 pub const NUM_Q_LIMBS: usize = 17;
@@ -386,8 +402,8 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // id contributions.
         // The product: S = κₐ·a(β) through the b-rows.
-        let product =
-            s.clone() * lo_sum * sel[ROW_B_LO].clone() + s.clone() * hi_sum * sel[ROW_B_HI].clone();
+        let product = s.clone() * lo_sum.clone() * sel[ROW_B_LO].clone()
+            + s.clone() * hi_sum.clone() * sel[ROW_B_HI].clone();
         // The quotient: S = bound(β) through the q-rows; q(β)·(bound(β)+1)
         // with q₀..q₉ on q_lo (all ten cells) and q₁₀..q₁₆ on q_hi.
         let q_lo_sum: AB::ExprEF = (0..NUM_CELLS)
@@ -401,8 +417,13 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // one row. κ_c is read from the term row (next).
         let val_sum: AB::ExprEF = (0..8)
             .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
-        let linear =
-            val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next) - val_sum * sel[ROW_R].clone();
+        // `is_sub` (term row, read via next on the c row) flips the c term:
+        // (1 − 2·is_sub) is +1 for `κₐ·a·b + κ_c·c`, −1 for the subtractive
+        // `κₐ·a·b − κ_c·c`. The result r stays on the −R side either way.
+        let is_sub_next: AB::Expr = next[TERM_CELL_IS_SUB].into();
+        let c_sign: AB::Expr = AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub_next;
+        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next * c_sign)
+            - val_sum * sel[ROW_R].clone();
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
         // the lo halves carry the −2³¹ offset correction, act-gated so
         // all-zero padding blocks contribute nothing.
@@ -420,13 +441,32 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
             carries += w * gated;
         }
 
-        let contrib: AB::ExprEF = product - quotient + linear + carries;
+        // The subtractive borrow: when `is_sub` and `κₐ·a·b < κ_c·c`, the
+        // canonical reduction wraps up by one p, so the identity carries
+        // `+borrow·(bound(β)+1)`. Contributed on the p-rows, where bound(β)
+        // is live as the limb sums (lo on p_lo, hi on p_hi); the +1 of
+        // `p = bound + 1` rides p_lo's β⁰.
+        let borrow: AB::Expr = local[COL_BORROW].into();
+        let borrow_contrib: AB::ExprEF = (lo_sum + AB::ExprEF::ONE)
+            * (sel[ROW_P_LO].clone() * borrow.clone())
+            + hi_sum * (sel[ROW_P_HI].clone() * borrow.clone());
+
+        let contrib: AB::ExprEF = product - quotient + linear + carries + borrow_contrib;
         builder.when_first_row().assert_zero_ext(id.clone());
         builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
         builder.assert_zero_ext(id * sel[ROW_TERM].clone());
 
         // act is the boolean block-active flag (cycle-constant).
         builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+
+        // `is_sub` (term-row cell) is boolean; `borrow` (cycle-constant) is
+        // boolean and only fires in the subtractive mode (`borrow ⟹ is_sub`),
+        // so an additive op cannot smuggle a +p shift onto its quotient.
+        let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
+        builder
+            .assert_zero(sel[ROW_TERM].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
+        builder.assert_zero(borrow.clone() * (AB::Expr::ONE - borrow.clone()));
+        builder.assert_zero(sel[ROW_TERM].clone() * borrow * (AB::Expr::ONE - is_sub));
 
         // A provide must come from an active block. The `UintMul` provide is
         // gated only by `sel[ROW_TERM]` (not `act`), and the operand consumes
@@ -441,7 +481,9 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // Cycle-constancy: ptrs / κₐ / act are constant within a block
         // (every row but the terminal one).
         let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_TERM].clone();
-        for col in [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT] {
+        for col in
+            [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT, COL_BORROW]
+        {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
             builder.assert_zero(not_term.clone() * (there - here));
@@ -537,6 +579,7 @@ where
                                         c_ptr: local[TERM_CELL_C_PTR].into(),
                                         r_ptr: r_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
+                                        is_sub: local[TERM_CELL_IS_SUB].into(),
                                     },
                                     provide_deg,
                                 );

@@ -410,11 +410,12 @@ impl<'a> EcRequire<'a> {
         (group, r, pai)
     }
 
-    /// The live cases' shared tail: `w = λ²`, `t = x₁ + x₂`,
-    /// `x₃ = w − t`, `e = x₁ − x₃`, `u = λ·e`, `y₃ = u − y₁`, with `R`
-    /// minted as a **closure-cert** point — its membership rides this
-    /// block's `EcOnCurveCert` (the group law is closed → on-curve
-    /// operands give an on-curve result), so it pays *no* MAC trio.
+    /// The live cases' shared tail: `t = x₁ + x₂`, `x₃ = λ² − t`,
+    /// `e = x₁ − x₃`, `y₃ = λ·e − y₁` — the two mul-subtracts fused (no `w`
+    /// / `u` intermediate store, no `x₃` / `y₃` sub op). `R` is minted as a
+    /// **closure-cert** point — its membership rides this block's
+    /// `EcOnCurveCert` (the group law is closed → on-curve operands give an
+    /// on-curve result), so it pays *no* MAC trio.
     /// Returns the block's transient ptr cells (in cell order), `R`'s
     /// handle, and whether `R` was freshly minted (`mints` — the op owns
     /// `R`'s cert iff so; a value-dedup hit reuses an already-certified row).
@@ -428,18 +429,16 @@ impl<'a> EcRequire<'a> {
         qx: UintPtr,
         group: EcGroupPtr,
     ) -> ([UintPtr; 9], EcPointPtr, bool) {
-        let (_, _, bound) = self.store.group_params(group);
-        let w = self.uint.mac(1, lambda, lambda, 0, bound);
         let t = self.uint.add(px, qx);
-        let x3 = self.uint.sub(w, t);
+        let x3 = self.uint.mac_sub(1, lambda, lambda, 1, t);
         let e = self.uint.sub(px, x3);
-        let u = self.uint.mac(1, lambda, e, 0, bound);
-        let y3 = self.uint.sub(u, py);
+        let y3 = self.uint.mac_sub(1, lambda, e, 1, py);
         // A fresh result (the value-dedup miss) mints — its ptr is the
         // maximum (> operands), satisfying the strict ordering the cert
         // rests on; a hit reuses its existing certified row and mints = false.
         let (r, mints) = self.store.add_point_cert(group, x3, y3);
-        ([slope_aux, lambda, inv, t, w, e, u, x3, y3], r, mints)
+        let null = UintPtr::from_addr(0);
+        ([slope_aux, lambda, inv, t, y3, e, null, x3, null], r, mints)
     }
 }
 

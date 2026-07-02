@@ -56,8 +56,9 @@
 //! and consumed here with exact κ's — `double`'s constants vanish into
 //! the MAC scales (`s ≡ 3·x² + a`; `2·λ·y ≡ s` with the shared
 //! `r_ptr = s`), `cancel`'s `y₁ + y₂ ≡ 0` is the `is_c_zero` `UintAdd`
-//! tuple, and the shared tail (`w = λ²`, `t`, `x₃`, `e`, `u`, `y₃`) is
-//! identical for both live cases. The result `R` is bound by consuming
+//! tuple, and the shared tail (`t = x₁+x₂`, the fused `x₃ = λ²−t` and
+//! `y₃ = λ·e−y₁` mul-subtracts, `e = x₁−x₃`) is identical for both live
+//! cases. The result `R` is bound by consuming
 //! its `EcPoint` tuple against the computed `(x₃, y₃)` (or the group's
 //! PAI row for `cancel`); `R` itself is an ordinary eager-membership
 //! store point.
@@ -72,8 +73,8 @@
 //! | row | cells 0–3 | emits |
 //! |---|---|---|
 //! | 0 `slope` | `(slope_aux, λ, inv, t)` | slope + predicate certs (local), tail certs (cells @ next) |
-//! | 1 `tail`  | `(w, e, u, x₃)` | `y₃`-sub + the live result consume (`r`/`y₃`/`group` @ next) |
-//! | 2 `res`   | `(y₃, r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
+//! | 1 `tail`  | `(y₃, e, —, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` @ next) |
+//! | 2 `res`   | `(—, r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
 //! | 3 `term`  | `(mult, p, q, —)` | — (hosts only; the constancy gate drops here) |
 //!
 //! Columns carry only what gates or names certificates on rows 0–2:
@@ -217,14 +218,15 @@ pub const CELL_SLOPE_AUX: usize = 0;
 pub const CELL_LAMBDA: usize = 1;
 pub const CELL_INV: usize = 2;
 pub const CELL_T: usize = 3;
-/// Row-1 cells.
-pub const CELL_W: usize = 0;
-pub const CELL_E: usize = 1;
-pub const CELL_U: usize = 2;
-pub const CELL_X3: usize = 3;
-/// Row-2 cells: the result's `y₃`, plus the hosted `r` / scalar-bound /
-/// group ptrs.
+/// Row-1 (tail) cells: the fused result `y₃`, the `x₁ − x₃` witness `e`,
+/// and `x₃` (cell 2 is dead — the mul-subtracts leave no `w` / `u`
+/// intermediate).
 pub const CELL_Y3: usize = 0;
+pub const CELL_E: usize = 1;
+pub const CELL_X3: usize = 3;
+/// Row-2 (res) cells: the hosted `r` / scalar-bound / group ptrs. Cell 0 is
+/// free — `y₃` moved to the tail row so the `λ·e − y₁` mul-subtract reads
+/// it in the slope-row window.
 pub const CELL_R: usize = 1;
 pub const CELL_SBOUND: usize = 2;
 pub const CELL_GROUP: usize = 3;
@@ -442,21 +444,20 @@ where
         let at_tail: LB::Expr = sel[PCOL_TAIL].clone();
         let at_res: LB::Expr = sel[PCOL_RES].clone();
 
-        // Row-0 window: the slope transients (local) + the tail
-        // transients (next).
+        // Row-0 (slope) window: the slope transients (local) + the tail
+        // transients (next). e / x₃ / y₃ all sit on the tail row, so both
+        // fused mul-subtracts read their result here in one window.
         let slope_aux: LB::Expr = local[CELL_SLOPE_AUX].into();
         let lambda: LB::Expr = local[CELL_LAMBDA].into();
         let inv: LB::Expr = local[CELL_INV].into();
         let t: LB::Expr = local[CELL_T].into();
-        let w: LB::Expr = next[CELL_W].into();
         let e: LB::Expr = next[CELL_E].into();
-        let u_next: LB::Expr = next[CELL_U].into();
         let x3_next: LB::Expr = next[CELL_X3].into();
-        // Row-1 window: the tail transients (local) + the result cells
-        // (next).
-        let u_local: LB::Expr = local[CELL_U].into();
+        let y3_next: LB::Expr = next[CELL_Y3].into();
+        // Row-1 (tail) window: the tail transients (local) + the result
+        // cells (next).
         let x3_local: LB::Expr = local[CELL_X3].into();
-        let y3: LB::Expr = next[CELL_Y3].into();
+        let y3_local: LB::Expr = local[CELL_Y3].into();
         let r_next: LB::Expr = next[CELL_R].into();
         let group_next: LB::Expr = next[CELL_GROUP].into();
         // Row-2 window: the result cells (local) + the term cells (next).
@@ -538,7 +539,7 @@ where
                                         point_ptr: r_next,
                                         group_ptr: group_next,
                                         x_ptr: x3_local,
-                                        y_ptr: y3.clone(),
+                                        y_ptr: y3_local,
                                         is_pai: zero.clone(),
                                     },
                                     f2,
@@ -627,6 +628,7 @@ where
                                         c_ptr: py.clone(),
                                         r_ptr: qy.clone(),
                                         bound_ptr: bound.clone(),
+                                        is_sub: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -644,6 +646,7 @@ where
                                         c_ptr: bound.clone(),
                                         r_ptr: b_ptr.clone(),
                                         bound_ptr: bound.clone(),
+                                        is_sub: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -661,6 +664,7 @@ where
                                         c_ptr: a_ptr,
                                         r_ptr: slope_aux.clone(),
                                         bound_ptr: bound.clone(),
+                                        is_sub: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -675,6 +679,7 @@ where
                                         c_ptr: bound.clone(),
                                         r_ptr: slope_aux,
                                         bound_ptr: bound.clone(),
+                                        is_sub: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -691,6 +696,7 @@ where
                                         c_ptr: bound.clone(),
                                         r_ptr: b_ptr,
                                         bound_ptr: bound.clone(),
+                                        is_sub: zero.clone(),
                                     },
                                     f2,
                                 );
@@ -717,9 +723,10 @@ where
             col_deg,
         );
 
-        // Col 2 (fractions): the shared tail, emitted from the slope-row
-        // window (tail cells via next) except y₃'s sub, which fires on
-        // the tail row (y₃ via next) — plus double's y-equality.
+        // Col 2 (fractions): the shared tail as two fused mul-subtracts (no
+        // `w` / `u` intermediate store, no `x₃` / `y₃` sub op) — all fire in
+        // the slope-row window, `e` / `x₃` / `y₃` read via next off the
+        // tail row — plus double's y-equality.
         builder.next_column(
             |col| {
                 col.group(
@@ -729,21 +736,6 @@ where
                             "tail",
                             LB::Expr::ONE,
                             |b| {
-                                // w = λ².
-                                b.insert(
-                                    "consume-w-mul",
-                                    tail.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: zero.clone(),
-                                        a_ptr: lambda.clone(),
-                                        b_ptr: lambda.clone(),
-                                        c_ptr: bound.clone(),
-                                        r_ptr: w.clone(),
-                                        bound_ptr: bound.clone(),
-                                    },
-                                    f2,
-                                );
                                 // t = x₁ + x₂ (2x via the same block when
                                 // doubling).
                                 b.insert(
@@ -757,15 +749,19 @@ where
                                     },
                                     f2,
                                 );
-                                // x₃ + t ≡ w  (x₃ = w − t).
+                                // the fused x₃ = λ² − t.
                                 b.insert(
-                                    "consume-x3-sub",
+                                    "consume-x3-macsub",
                                     tail.clone() * at_slope.clone(),
-                                    UintAddMsg {
+                                    UintMulMsg {
+                                        kappa_a: one.clone(),
+                                        kappa_c: one.clone(),
+                                        a_ptr: lambda.clone(),
+                                        b_ptr: lambda.clone(),
+                                        c_ptr: t,
+                                        r_ptr: x3_next.clone(),
                                         bound_ptr: bound.clone(),
-                                        a_ptr: t,
-                                        b_ptr: x3_next.clone(),
-                                        c_ptr: w,
+                                        is_sub: one.clone(),
                                     },
                                     f2,
                                 );
@@ -781,31 +777,19 @@ where
                                     },
                                     f2,
                                 );
-                                // u = λ·e.
+                                // the fused y₃ = λ·e − y₁.
                                 b.insert(
-                                    "consume-u-mul",
-                                    tail.clone() * at_slope,
+                                    "consume-y3-macsub",
+                                    tail * at_slope,
                                     UintMulMsg {
-                                        kappa_a: one,
-                                        kappa_c: zero.clone(),
+                                        kappa_a: one.clone(),
+                                        kappa_c: one.clone(),
                                         a_ptr: lambda,
                                         b_ptr: e,
-                                        c_ptr: bound.clone(),
-                                        r_ptr: u_next,
+                                        c_ptr: py.clone(),
+                                        r_ptr: y3_next,
                                         bound_ptr: bound.clone(),
-                                    },
-                                    f2,
-                                );
-                                // y₃ + y₁ ≡ u  (y₃ = u − y₁), on the tail
-                                // row where u is local and y₃ next.
-                                b.insert(
-                                    "consume-y3-sub",
-                                    tail * at_tail,
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: py.clone(),
-                                        b_ptr: y3,
-                                        c_ptr: u_local,
+                                        is_sub: one,
                                     },
                                     f2,
                                 );
