@@ -357,6 +357,7 @@ fn test_operation_encoded_size_push_varint_boundaries() {
 }
 
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
+    let forest = canonicalized_for_test(forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
 
@@ -374,6 +375,15 @@ fn assert_serialized_view_matches_forest(forest: &MastForest) {
         let actual = view.node_info_at(idx).unwrap();
         assert_eq!(expected.to_bytes(), actual.to_bytes());
     }
+}
+
+fn canonicalized_for_test(forest: &MastForest) -> MastForest {
+    MastForest::from_raw_parts(
+        forest.nodes.clone(),
+        forest.roots.clone(),
+        forest.advice_map.clone(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -555,6 +565,10 @@ fn read_word_at(bytes: &[u8], offset: usize) -> Word {
     Word::read_from(&mut reader).unwrap()
 }
 
+fn write_word_at(bytes: &mut [u8], offset: usize, word: Word) {
+    word.write_into(&mut &mut bytes[offset..offset + Word::min_serialized_size()]);
+}
+
 fn read_words_at(bytes: &[u8], offset: usize, count: usize) -> Vec<Word> {
     (0..count)
         .map(|index| read_word_at(bytes, offset + index * Word::min_serialized_size()))
@@ -624,7 +638,7 @@ fn test_mast_forest_wire_view_rejects_hashless_external_nodes() {
 }
 
 #[test]
-fn test_mast_forest_wire_view_external_digests_are_ordered_by_node_index() {
+fn test_mast_forest_wire_view_external_digests_are_ordered_by_prefix() {
     let mut forest = MastForest::new();
     let first = Word::new([
         Felt::new_unchecked(30),
@@ -651,28 +665,17 @@ fn test_mast_forest_wire_view_external_digests_are_ordered_by_node_index() {
     forest.make_root(first_id);
     forest.make_root(second_id);
     forest.make_root(third_id);
+    let forest = canonicalized_for_test(&forest);
 
     let bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
+    let sorted = [second, third, first];
 
-    assert_eq!(read_word_at(&bytes, view.external_digest_offset()), first);
-    assert_eq!(
-        read_word_at(&bytes, view.external_digest_offset() + Word::min_serialized_size()),
-        second
-    );
-    assert_eq!(
-        read_word_at(&bytes, view.external_digest_offset() + 2 * Word::min_serialized_size()),
-        third
-    );
-    assert_eq!(view.node_digest_at(first_id.to_usize()).unwrap(), first);
-    assert_eq!(view.node_digest_at(second_id.to_usize()).unwrap(), second);
-    assert_eq!(view.node_digest_at(third_id.to_usize()).unwrap(), third);
-    assert_eq!(read_word_at(&bytes, external_digest_offset(&view, first_id.to_usize())), first);
-    assert_eq!(
-        read_word_at(&bytes, external_digest_offset(&view, second_id.to_usize())),
-        second
-    );
-    assert_eq!(read_word_at(&bytes, external_digest_offset(&view, third_id.to_usize())), third);
+    assert_eq!(read_words_at(&bytes, view.external_digest_offset(), sorted.len()), sorted);
+    for (node_index, expected) in sorted.into_iter().enumerate() {
+        assert_eq!(view.node_digest_at(node_index).unwrap(), expected);
+        assert_eq!(read_word_at(&bytes, external_digest_offset(&view, node_index)), expected);
+    }
 }
 
 #[test]
@@ -703,6 +706,7 @@ fn test_mast_forest_wire_payload_includes_sorted_commitment_inputs() {
     forest.make_root(first_id);
     forest.make_root(second_id);
     forest.make_root(third_id);
+    let forest = canonicalized_for_test(&forest);
 
     let bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
@@ -724,16 +728,29 @@ fn test_mast_forest_readers_reject_duplicate_dependency_commitment_inputs() {
         .unwrap();
     forest.make_root(root_id);
 
-    let duplicate = Word::new([
+    let low = Word::new([
         Felt::new_unchecked(1),
         Felt::new_unchecked(0),
         Felt::new_unchecked(0),
         Felt::new_unchecked(0),
     ]);
-    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
-    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    let high = Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    ExternalNodeBuilder::new(low).add_to_forest(&mut forest).unwrap();
+    ExternalNodeBuilder::new(high).add_to_forest(&mut forest).unwrap();
+    let forest = canonicalized_for_test(&forest);
 
-    let bytes = forest.to_bytes();
+    let mut bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let second_external_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
+    let second_dependency_digest_offset =
+        view.dependency_digest_offset() + Word::min_serialized_size();
+    write_word_at(&mut bytes, second_external_digest_offset, low);
+    write_word_at(&mut bytes, second_dependency_digest_offset, low);
 
     let result = MastForest::read_from_bytes(&bytes);
     assert_matches!(
@@ -809,14 +826,20 @@ fn test_untrusted_hashless_keeps_external_digests_by_node_index() {
     let low_id = ExternalNodeBuilder::new(external_low).add_to_forest(&mut forest).unwrap();
     forest.make_root(high_id);
     forest.make_root(low_id);
+    let forest = canonicalized_for_test(&forest);
 
     let mut bytes = Vec::new();
     forest.write_hashless(&mut bytes);
     let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
     let restored = untrusted.validate().unwrap();
+    let external_digests = restored
+        .nodes()
+        .iter()
+        .take_while(|node| node.is_external())
+        .map(MastNodeExt::digest)
+        .collect::<Vec<_>>();
 
-    assert_eq!(restored[high_id].digest(), external_high);
-    assert_eq!(restored[low_id].digest(), external_low);
+    assert_eq!(external_digests, vec![external_low, external_high]);
 }
 
 fn sparse_split_fixture() -> (Arc<MastForest>, SparseMastForest, MastNodeId, MastNodeId, MastNodeId)
@@ -1937,6 +1960,7 @@ fn test_header_counts_match_node_kinds() {
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(join_id);
+    let forest = canonicalized_for_test(&forest);
 
     let (internal_node_count, external_node_count) = read_header_counts(&forest.to_bytes());
     assert_eq!(internal_node_count, 2);
@@ -1999,7 +2023,34 @@ fn test_deserialization_rejects_mismatched_header_counts() {
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg))
-            if msg.contains("header external node count 1 does not match 0 external node entries")
+            if msg.contains("node 0 is not external but is inside the external node prefix")
+    );
+}
+
+#[test]
+fn test_deserialization_rejects_basic_block_after_internal_node() {
+    let mut forest = MastForest::new();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
+
+    let mut bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let node_entry_offset = view.node_entry_offset();
+    MastNodeEntry::Join { left_child_id: 0, right_child_id: 0 }
+        .write_into(&mut &mut bytes[node_entry_offset + 8..node_entry_offset + 16]);
+    MastNodeEntry::Block { ops_offset: 0 }
+        .write_into(&mut &mut bytes[node_entry_offset + 16..node_entry_offset + 24]);
+
+    let result = MastForestWireView::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("node 2 has class BasicBlock after Internal")
     );
 }
 
@@ -2202,11 +2253,7 @@ fn test_mast_forest_serialization_round_trip_without_debug_metadata() {
 /// Test that untrusted forest validation rejects forward node references.
 #[test]
 fn test_untrusted_forest_detects_forward_reference() {
-    // Create a forest with forward references by swapping node order
     let mut forest = MastForest::new();
-    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div])
-        .add_to_forest(&mut forest)
-        .unwrap();
     let first = BasicBlockNodeBuilder::new(vec![Operation::U32add])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -2215,19 +2262,18 @@ fn test_untrusted_forest_detects_forward_reference() {
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
 
-    // Swap the Join node (index 3) with the first basic block (index 0)
-    // This creates a forest where Join(1, 2) is at index 0, referencing nodes 1 and 2
-    // which are forward references
-    forest.nodes.swap_remove(zero.to_usize());
+    let mut bytes = forest.to_bytes();
+    let view = MastForestWireView::new(&bytes).unwrap();
+    let node_entry_offset = view.node_entry_offset();
+    MastNodeEntry::Join { left_child_id: 1, right_child_id: 2 }
+        .write_into(&mut &mut bytes[node_entry_offset..node_entry_offset + 8]);
 
-    // Serialize the corrupted forest
-    let bytes = forest.to_bytes();
-
-    // Deserialize as untrusted and try to validate
-    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
-    let result = untrusted.validate();
-
-    assert_matches!(result, Err(MastForestError::ForwardReference(_, _)));
+    let result = UntrustedMastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("node 0 references child 1 which does not appear before it")
+    );
 }
 
 #[test]
@@ -2675,6 +2721,7 @@ fn test_untrusted_forest_validates_all_node_types() {
     forest.make_root(dyn_id);
     forest.make_root(dyncall_id);
     forest.make_root(external_id);
+    let forest = canonicalized_for_test(&forest);
 
     // Serialize
     let bytes = forest.to_bytes();
@@ -2683,7 +2730,7 @@ fn test_untrusted_forest_validates_all_node_types() {
     let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
     let validated = untrusted.validate().unwrap();
 
-    assert_eq!(forest, validated);
+    assert_eq!(canonicalized_for_test(&forest), validated);
 }
 
 /// Test that UntrustedMastForest::validate rejects excessive node counts before validation.

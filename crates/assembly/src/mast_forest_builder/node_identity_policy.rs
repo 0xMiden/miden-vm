@@ -65,7 +65,19 @@ impl FinalForestLayout {
         });
         external_node_refs.sort_by_key(|node_ref| (nodes[*node_ref].key, *node_ref));
 
+        let mut basic_block_node_refs = Vec::new();
+        live_node_refs.retain(|node_ref| {
+            if nodes[*node_ref].kind.is_basic_block() {
+                basic_block_node_refs.push(*node_ref);
+                false
+            } else {
+                true
+            }
+        });
+        basic_block_node_refs.sort();
+
         let mut final_order = external_node_refs;
+        final_order.extend(basic_block_node_refs);
         let mut emitted_node_refs = final_order.iter().copied().collect::<BTreeSet<_>>();
         let mut remaining_node_refs = live_node_refs.into_iter().collect::<BTreeSet<_>>();
 

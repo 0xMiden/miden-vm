@@ -9,7 +9,8 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
-        MastForest, MastForestContributor, MastNodeExt,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNodeExt,
+        MastNodeId,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},
@@ -182,6 +183,51 @@ fn mast_forest_commitment_separates_interface_and_dependencies() {
     assert_eq!(first.interface_commitment(), second.interface_commitment());
     assert_ne!(first.dependency_commitment(), second.dependency_commitment());
     assert_ne!(first.commitment(), second.commitment());
+}
+
+#[test]
+fn from_raw_parts_canonicalizes_dense_node_order() {
+    let mut forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let high = Word::new([Felt::new_unchecked(9), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let low = Word::new([Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let high_external = ExternalNodeBuilder::new(high).add_to_forest(&mut forest).unwrap();
+    let low_external = ExternalNodeBuilder::new(low).add_to_forest(&mut forest).unwrap();
+    let join = JoinNodeBuilder::new([block, high_external]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+    forest.make_root(low_external);
+
+    let finalized =
+        MastForest::from_raw_parts(forest.nodes, forest.roots, forest.advice_map).unwrap();
+
+    assert_eq!(finalized[MastNodeId::new_unchecked(0)].digest(), low);
+    assert_eq!(finalized[MastNodeId::new_unchecked(1)].digest(), high);
+    assert!(finalized[MastNodeId::new_unchecked(2)].is_basic_block());
+    let join = finalized[MastNodeId::new_unchecked(3)].unwrap_join();
+    assert_eq!(join.first(), MastNodeId::new_unchecked(2));
+    assert_eq!(join.second(), MastNodeId::new_unchecked(1));
+    assert_eq!(
+        finalized.procedure_roots(),
+        &[MastNodeId::new_unchecked(3), MastNodeId::new_unchecked(0)]
+    );
+}
+
+#[test]
+fn from_raw_parts_rejects_duplicate_external_digests() {
+    let mut forest = MastForest::new();
+    let duplicate = Word::new([Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let result = MastForest::from_raw_parts(forest.nodes, forest.roots, forest.advice_map);
+
+    assert!(matches!(
+        result,
+        Err(MastForestError::InvalidNodeOrder { reason, .. })
+            if reason.contains("external node digests must be strictly increasing")
+    ));
 }
 
 #[test]

@@ -68,7 +68,8 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Cached commitment to the original MAST forest's roots, external dependencies, and advice map.
+    /// Cached commitment to the original MAST forest's roots, external dependencies, and advice
+    /// map.
     commitment_cache: Word,
 
     /// Sorted source root digests used as the sparse forest commitment input.

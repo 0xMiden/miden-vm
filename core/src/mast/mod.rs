@@ -68,7 +68,7 @@ use crate::{
     Felt, WORD_SIZE, Word,
     advice::AdviceMap,
     serde::{ByteWriter, DeserializationError, Serializable},
-    utils::{Idx, IndexVec, hash_string_to_word},
+    utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
 
 mod serialization;
@@ -170,16 +170,8 @@ impl MastForest {
 
     /// Builds a [`MastForest`] from completed parts.
     pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
-        if parts.nodes.len() > Self::MAX_NODES {
-            return Err(MastForestError::TooManyNodes);
-        }
-
-        let node_count = parts.nodes.len();
-        for &root_id in &parts.roots {
-            if root_id.to_usize() >= node_count {
-                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
-            }
-        }
+        validate_mast_forest_parts_bounds(&parts)?;
+        let parts = canonicalize_dense_parts(parts)?;
 
         let forest = Self {
             commitment: compute_mast_forest_commitment(
@@ -192,6 +184,7 @@ impl MastForest {
             advice_map: parts.advice_map,
         };
 
+        forest.validate_dense_node_order()?;
         forest.validate()?;
         forest.validate_node_hashes()?;
         Ok(forest)
@@ -200,16 +193,10 @@ impl MastForest {
     pub(in crate::mast) fn from_trusted_deserialization_parts(
         parts: MastForestParts,
     ) -> Result<Self, MastForestError> {
-        if parts.nodes.len() > Self::MAX_NODES {
-            return Err(MastForestError::TooManyNodes);
-        }
-
-        let node_count = parts.nodes.len();
-        for &root_id in &parts.roots {
-            if root_id.to_usize() >= node_count {
-                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
-            }
-        }
+        validate_mast_forest_parts_bounds(&parts)?;
+        // Trusted dense serialization is expected to have checked this already. Re-check the
+        // cheap ordering invariant here as a precaution before accepting the finalized forest.
+        validate_dense_node_order(&parts.nodes)?;
         Ok(Self {
             commitment: compute_mast_forest_commitment(
                 &parts.nodes,
@@ -221,6 +208,145 @@ impl MastForest {
             advice_map: parts.advice_map,
         })
     }
+}
+
+fn validate_mast_forest_parts_bounds(parts: &MastForestParts) -> Result<(), MastForestError> {
+    if parts.nodes.len() > MastForest::MAX_NODES {
+        return Err(MastForestError::TooManyNodes);
+    }
+
+    let node_count = parts.nodes.len();
+    for &root_id in &parts.roots {
+        if root_id.to_usize() >= node_count {
+            return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+        }
+    }
+
+    Ok(())
+}
+
+fn canonicalize_dense_parts(parts: MastForestParts) -> Result<MastForestParts, MastForestError> {
+    let node_count = parts.nodes.len();
+    let mut ordered_ids = (0..node_count)
+        .map(|index| MastNodeId::new_unchecked(index as u32))
+        .collect::<Vec<_>>();
+
+    ordered_ids.sort_by(|&left, &right| {
+        let left_node = &parts.nodes[left];
+        let right_node = &parts.nodes[right];
+
+        mast_node_order_class(left_node)
+            .cmp(&mast_node_order_class(right_node))
+            .then_with(|| match (left_node, right_node) {
+                (MastNode::External(left), MastNode::External(right)) => {
+                    left.digest().cmp(&right.digest())
+                },
+                _ => left.0.cmp(&right.0),
+            })
+    });
+
+    let mut remapping = DenseIdMap::with_len(node_count);
+    for (new_index, old_id) in ordered_ids.iter().copied().enumerate() {
+        remapping.insert(old_id, MastNodeId::new_unchecked(new_index as u32));
+    }
+
+    if ordered_ids
+        .iter()
+        .enumerate()
+        .all(|(index, &old_id)| old_id == MastNodeId::new_unchecked(index as u32))
+    {
+        validate_dense_node_order(&parts.nodes)?;
+        return Ok(parts);
+    }
+
+    let mut nodes = IndexVec::with_capacity(node_count);
+    let empty_forest = MastForest::new();
+    for old_id in ordered_ids {
+        let node = parts.nodes[old_id].clone();
+        let remapped_node =
+            node.to_builder(&empty_forest).remap_children(&remapping).build_linked()?;
+        nodes.push(remapped_node).map_err(|_| MastForestError::TooManyNodes)?;
+    }
+
+    let roots = parts
+        .roots
+        .into_iter()
+        .map(|root_id| {
+            remapping
+                .get(root_id)
+                .ok_or(MastForestError::NodeIdOverflow(root_id, node_count))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    validate_dense_node_order(&nodes)?;
+
+    Ok(MastForestParts {
+        nodes,
+        roots,
+        advice_map: parts.advice_map,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum MastNodeOrderClass {
+    External,
+    BasicBlock,
+    Internal,
+}
+
+fn mast_node_order_class(node: &MastNode) -> MastNodeOrderClass {
+    if node.is_external() {
+        MastNodeOrderClass::External
+    } else if node.is_basic_block() {
+        MastNodeOrderClass::BasicBlock
+    } else {
+        MastNodeOrderClass::Internal
+    }
+}
+
+fn validate_dense_node_order(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+) -> Result<(), MastForestError> {
+    let mut previous_class = MastNodeOrderClass::External;
+    let mut previous_external_digest = None;
+
+    for (node_index, node) in nodes.iter().enumerate() {
+        let node_id = MastNodeId::new_unchecked(node_index as u32);
+        let node_class = mast_node_order_class(node);
+
+        if node_class < previous_class {
+            return Err(MastForestError::InvalidNodeOrder {
+                node_id,
+                reason: format!("node class {node_class:?} appears after {previous_class:?}"),
+            });
+        }
+        previous_class = node_class;
+
+        if let MastNode::External(external_node) = node {
+            let digest = external_node.digest();
+            if let Some(previous_digest) = previous_external_digest
+                && previous_digest >= digest
+            {
+                return Err(MastForestError::InvalidNodeOrder {
+                    node_id,
+                    reason: "external node digests must be strictly increasing".into(),
+                });
+            }
+            previous_external_digest = Some(digest);
+        }
+
+        let mut forward_child = None;
+        node.for_each_child(|child_id| {
+            if child_id.0 >= node_id.0 {
+                forward_child = Some(child_id);
+            }
+        });
+        if let Some(child_id) = forward_child {
+            return Err(MastForestError::ForwardReference(node_id, child_id));
+        }
+    }
+
+    Ok(())
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -485,12 +611,23 @@ fn compute_nodes_commitment(
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
-    let mut digests: Vec<Word> = nodes
-        .iter()
-        .filter(|node| node.is_external())
-        .map(MastNodeExt::digest)
-        .collect();
-    digests.sort_unstable();
+    let digests: Vec<Word> = if validate_dense_node_order(nodes).is_ok() {
+        nodes
+            .iter()
+            .take_while(|node| node.is_external())
+            .map(MastNodeExt::digest)
+            .collect()
+    } else {
+        // Construction-phase forests may still be append-ordered. Finalized dense forests are
+        // canonicalized by `from_parts()` or rejected by dense deserialization.
+        let mut digests: Vec<Word> = nodes
+            .iter()
+            .filter(|node| node.is_external())
+            .map(MastNodeExt::digest)
+            .collect();
+        digests.sort_unstable();
+        digests
+    };
     miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
 }
 
@@ -698,6 +835,10 @@ impl MastForest {
 
 /// Validation methods
 impl MastForest {
+    pub(in crate::mast) fn validate_dense_node_order(&self) -> Result<(), MastForestError> {
+        validate_dense_node_order(&self.nodes)
+    }
+
     fn validate_basic_block_invariants(&self) -> Result<(), MastForestError> {
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
@@ -1104,6 +1245,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("invalid node order at {node_id:?}: {reason}")]
+    InvalidNodeOrder { node_id: MastNodeId, reason: String },
     #[error(
         "node {0:?} references child {1:?} which comes after it in the forest (forward reference)"
     )]

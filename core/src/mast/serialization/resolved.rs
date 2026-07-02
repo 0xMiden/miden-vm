@@ -218,13 +218,11 @@ impl<'a> ResolvedSerializedForest<'a> {
         )?;
 
         let mut dependency_digests = Vec::with_capacity(self.layout.external_node_count);
-        for index in 0..self.node_count() {
+        for index in 0..self.layout.external_node_count {
             let entry = self.node_entry_at(index)?;
-            if matches!(entry, MastNodeEntry::External) {
-                dependency_digests.push(self.node_digest_for_entry(index, entry)?);
-            }
+            debug_assert!(matches!(entry, MastNodeEntry::External));
+            dependency_digests.push(self.node_digest_for_entry(index, entry)?);
         }
-        dependency_digests.sort_unstable();
         validate_digest_section(
             self.bytes,
             self.layout.dependency_commitment_digest_offset(),
