@@ -8,7 +8,7 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
     mast::{MastForest, MastForestError, MastNodeId},
@@ -154,6 +154,7 @@ impl ExternalNodeBuilder {
 }
 
 impl MastForestContributor for ExternalNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node_id = forest
             .nodes
@@ -165,7 +166,7 @@ impl MastForestContributor for ExternalNodeBuilder {
 
     fn fingerprint_for_node(
         &self,
-        _forest: &MastForest,
+        _context: &impl MastNodeContext,
         _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         Ok(self.digest)
@@ -179,29 +180,6 @@ impl MastForestContributor for ExternalNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = digest;
         self
-    }
-}
-
-impl ExternalNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        let node_id = forest
-            .nodes
-            .push(ExternalNode { digest: self.digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-        forest.commitment = forest.compute_mast_forest_commitment();
-        Ok(node_id)
     }
 }
 

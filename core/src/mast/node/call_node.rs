@@ -8,13 +8,17 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
+use super::{
+    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
+};
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::utils::Idx;
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // CALL NODE
@@ -227,16 +231,16 @@ impl CallNodeBuilder {
     }
 
     /// Builds the CallNode.
-    pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
-        if self.callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
-        }
+    pub fn build(self, context: &impl MastNodeContext) -> Result<CallNode, MastForestError> {
+        let callee = context
+            .get_node_by_id(self.callee)
+            .ok_or_else(|| MastForestError::NodeIdOverflow(self.callee, context.node_count()))?;
 
         // Use the forced digest if provided, otherwise compute the digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let callee_digest = mast_forest[self.callee].digest();
+            let callee_digest = callee.digest();
             let domain = if self.is_syscall {
                 CallNode::SYSCALL_DOMAIN
             } else {
@@ -263,6 +267,7 @@ impl CallNodeBuilder {
 }
 
 impl MastForestContributor for CallNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         if self.callee.to_usize() >= forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, forest.nodes.len()));
@@ -301,13 +306,16 @@ impl MastForestContributor for CallNodeBuilder {
 
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
+        context: &impl MastNodeContext,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let callee_digest = forest[self.callee].digest();
+            let callee_digest = context
+                .get_node_by_id(self.callee)
+                .ok_or_else(|| MastForestError::NodeIdOverflow(self.callee, context.node_count()))?
+                .digest();
             let domain = if self.is_syscall {
                 CallNode::SYSCALL_DOMAIN
             } else {
@@ -317,7 +325,7 @@ impl MastForestContributor for CallNodeBuilder {
             hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
         };
 
-        fingerprint_with_child_fingerprints(node_digest, &[self.callee], forest, hash_by_node_id)
+        fingerprint_with_child_fingerprints(node_digest, &[self.callee], context, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -331,44 +339,6 @@ impl MastForestContributor for CallNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-impl CallNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                CallNode {
-                    callee: self.callee,
-                    is_syscall: self.is_syscall,
-                    digest,
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 

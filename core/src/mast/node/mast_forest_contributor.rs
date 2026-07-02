@@ -10,7 +10,7 @@ use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNode, MastNodeId},
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 const CHILD_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
@@ -18,7 +18,7 @@ const CHILD_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 pub(crate) fn fingerprint_with_child_fingerprints(
     node_digest: Word,
     child_ids: &[MastNodeId],
-    forest: &MastForest,
+    context: &impl MastNodeContext,
     fingerprint_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
 ) -> Result<Word, MastForestError> {
     let mut has_non_digest_child = false;
@@ -27,14 +27,13 @@ pub(crate) fn fingerprint_with_child_fingerprints(
     elements.extend_from_slice(node_digest.as_elements());
 
     for &child_id in child_ids {
-        if child_id.to_usize() >= forest.nodes().len() {
-            return Err(MastForestError::NodeIdOverflow(child_id, forest.nodes().len()));
-        }
-
-        let child_digest = forest[child_id].digest();
+        let child = context
+            .get_node_by_id(child_id)
+            .ok_or_else(|| MastForestError::NodeIdOverflow(child_id, context.node_count()))?;
+        let child_digest = child.digest();
         let child_fingerprint = *fingerprint_by_node_id
             .get(child_id)
-            .ok_or(MastForestError::NodeIdOverflow(child_id, forest.nodes().len()))?;
+            .ok_or_else(|| MastForestError::NodeIdOverflow(child_id, context.node_count()))?;
         has_non_digest_child |= child_fingerprint != child_digest;
         elements.extend_from_slice(child_fingerprint.as_elements());
     }
@@ -46,7 +45,24 @@ pub(crate) fn fingerprint_with_child_fingerprints(
     }
 }
 
+pub trait MastNodeContext {
+    fn node_count(&self) -> usize;
+
+    fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode>;
+}
+
+impl MastNodeContext for MastForest {
+    fn node_count(&self) -> usize {
+        self.nodes().len()
+    }
+
+    fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode> {
+        self.get_node_by_id(node_id)
+    }
+}
+
 pub trait MastForestContributor {
+    #[cfg(any(test, feature = "arbitrary"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
 
     /// Returns the fingerprint for this builder without constructing a MastNode.
@@ -56,7 +72,7 @@ pub trait MastForestContributor {
     /// traditional fingerprint computation approach.
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
+        context: &impl MastNodeContext,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError>;
 
@@ -84,21 +100,63 @@ pub enum MastNodeBuilder {
     Split(SplitNodeBuilder),
 }
 
+impl From<BasicBlockNodeBuilder> for MastNodeBuilder {
+    fn from(builder: BasicBlockNodeBuilder) -> Self {
+        Self::BasicBlock(builder)
+    }
+}
+
+impl From<CallNodeBuilder> for MastNodeBuilder {
+    fn from(builder: CallNodeBuilder) -> Self {
+        Self::Call(builder)
+    }
+}
+
+impl From<DynNodeBuilder> for MastNodeBuilder {
+    fn from(builder: DynNodeBuilder) -> Self {
+        Self::Dyn(builder)
+    }
+}
+
+impl From<ExternalNodeBuilder> for MastNodeBuilder {
+    fn from(builder: ExternalNodeBuilder) -> Self {
+        Self::External(builder)
+    }
+}
+
+impl From<JoinNodeBuilder> for MastNodeBuilder {
+    fn from(builder: JoinNodeBuilder) -> Self {
+        Self::Join(builder)
+    }
+}
+
+impl From<LoopNodeBuilder> for MastNodeBuilder {
+    fn from(builder: LoopNodeBuilder) -> Self {
+        Self::Loop(builder)
+    }
+}
+
+impl From<SplitNodeBuilder> for MastNodeBuilder {
+    fn from(builder: SplitNodeBuilder) -> Self {
+        Self::Split(builder)
+    }
+}
+
 impl MastNodeBuilder {
     /// Build the node from this builder.
     ///
     /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
     /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is
     /// ignored.
-    pub fn build(self, mast_forest: &MastForest) -> Result<MastNode, MastForestError> {
+    pub fn build(self, context: &impl MastNodeContext) -> Result<MastNode, MastForestError> {
         match self {
             MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
-            MastNodeBuilder::Call(builder) => Ok(builder.build(mast_forest)?.into()),
+            MastNodeBuilder::Call(builder) => Ok(builder.build(context)?.into()),
             MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
             MastNodeBuilder::External(builder) => Ok(builder.build().into()),
-            MastNodeBuilder::Join(builder) => Ok(builder.build(mast_forest)?.into()),
-            MastNodeBuilder::Loop(builder) => Ok(builder.build(mast_forest)?.into()),
-            MastNodeBuilder::Split(builder) => Ok(builder.build(mast_forest)?.into()),
+            MastNodeBuilder::Join(builder) => Ok(builder.build(context)?.into()),
+            MastNodeBuilder::Loop(builder) => Ok(builder.build(context)?.into()),
+            MastNodeBuilder::Split(builder) => Ok(builder.build(context)?.into()),
         }
     }
 
@@ -116,26 +174,6 @@ impl MastNodeBuilder {
             MastNodeBuilder::Join(builder) => Ok(builder.build_linked()?.into()),
             MastNodeBuilder::Loop(builder) => Ok(builder.build_linked()?.into()),
             MastNodeBuilder::Split(builder) => Ok(builder.build_linked()?.into()),
-        }
-    }
-
-    /// Adds the node from this builder to the forest without validation, used during
-    /// deserialization.
-    ///
-    /// This method bypasses normal validation. It should only be used during deserialization where
-    /// the forest structure is being reconstructed.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        mast_forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        match self {
-            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Call(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Dyn(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::External(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Join(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Loop(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Split(builder) => builder.add_to_forest_relaxed(mast_forest),
         }
     }
 }
