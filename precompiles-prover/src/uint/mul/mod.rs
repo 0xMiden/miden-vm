@@ -227,8 +227,18 @@ pub const TERM_CELL_C_PTR: usize = 1;
 pub const TERM_CELL_KAPPA_C: usize = 2;
 /// Term-row cell holding the subtractive-mode flag `is_sub ∈ {0, 1}` (read
 /// locally for the booleanity / borrow gate, and on the `c` row via next
-/// for the `(1 − 2·is_sub)` sign on the linear `c` term).
+/// for the sign of [`TERM_CELL_KAPPA_C_SIGNED`]).
 pub const TERM_CELL_IS_SUB: usize = 3;
+/// Term-row cell holding the witnessed signed scale
+/// `κ_c_signed = κ_c·(1 − 2·is_sub)`, pinned locally by a degree-2
+/// constraint (`κ_c`, `is_sub` are both term-row-local cells, so the pin
+/// needs no `next` window). Hoists the `κ_c·(1 − 2·is_sub)` product out of
+/// the `id`-register `linear` contribution, which is read via `next` on
+/// the `c` row: without the hoist that contribution multiplies `val_sum`
+/// (deg 1) by two `next`-row witnesses (`κ_c`, `is_sub`, deg 1 each),
+/// landing the `id` transition constraint at degree 4 (lqd 2) instead of 3
+/// (lqd 1) once the `when_transition` selector's own +1 is counted.
+pub const TERM_CELL_KAPPA_C_SIGNED: usize = 4;
 
 /// Quotient limbs: `q ≤ κₐ·p + κ_c < 2²⁷²` needs 17.
 pub const NUM_Q_LIMBS: usize = 17;
@@ -371,7 +381,10 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
         let act: AB::Expr = local[COL_ACT].into();
-        let kappa_c_next: AB::Expr = next[TERM_CELL_KAPPA_C].into();
+        // The pinned signed scale (see `TERM_CELL_KAPPA_C_SIGNED`) — reads
+        // straight from the term row, no in-place `κ_c · (1 − 2·is_sub)`
+        // product on the `c` row's `next` window.
+        let kappa_c_signed_next: AB::Expr = next[TERM_CELL_KAPPA_C_SIGNED].into();
 
         // Registers.
         let id: AB::ExprEF =
@@ -418,12 +431,11 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // one row. κ_c is read from the term row (next).
         let val_sum: AB::ExprEF = (0..8)
             .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
-        // `is_sub` (term row, read via next on the c row) flips the c term:
-        // (1 − 2·is_sub) is +1 for `κₐ·a·b + κ_c·c`, −1 for the subtractive
-        // `κₐ·a·b − κ_c·c`. The result r stays on the −R side either way.
-        let is_sub_next: AB::Expr = next[TERM_CELL_IS_SUB].into();
-        let c_sign: AB::Expr = AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub_next;
-        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_next * c_sign)
+        // κ_c_signed (term row, read via next on the c row) is +κ_c for
+        // `κₐ·a·b + κ_c·c`, −κ_c for the subtractive `κₐ·a·b − κ_c·c` — pinned
+        // below to `κ_c · (1 − 2·is_sub)`. The result r stays on the −R side
+        // either way.
+        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_next)
             - val_sum * sel[ROW_R].clone();
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
         // the lo halves carry the −2³¹ offset correction, act-gated so
@@ -467,6 +479,20 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
         builder
             .assert_zero(sel[ROW_TERM].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
+
+        // κ_c_signed = κ_c · (1 − 2·is_sub), pinned term-row-local (no `next`
+        // window needed here — both operands live on this row), so `linear`
+        // above can read it via a single `next`-row witness instead of
+        // multiplying two `next`-row witnesses in place. Degree 2 (`κ_c` ×
+        // `is_sub`), well under the lqd-1 budget.
+        let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
+        let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
+        let c_sign_local: AB::Expr =
+            AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub.clone();
+        builder.assert_zero(
+            sel[ROW_TERM].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
+        );
+
         let two = AB::Expr::from(Felt::from(2u32));
         builder.assert_zero(
             borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),

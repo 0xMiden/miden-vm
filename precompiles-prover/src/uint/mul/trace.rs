@@ -22,7 +22,8 @@ use super::{
     AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BORROW, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR,
     GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A_HI,
     ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM,
-    S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_MULT, UintMulAir,
+    S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED,
+    TERM_CELL_MULT, UintMulAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -284,6 +285,14 @@ pub(crate) fn op_block(
     mult: ProvideMult,
 ) -> Vec<Felt> {
     let mut block = [[Felt::ZERO; NUM_MAIN_COLS]; PERIOD];
+    // κ_c_signed = κ_c · (1 − 2·is_sub) — the pinned witness
+    // `TERM_CELL_KAPPA_C_SIGNED`'s eval constraint mirror; written directly
+    // (ahead of `set`, which is u32-only and can't hold a field negation).
+    block[ROW_TERM][TERM_CELL_KAPPA_C_SIGNED] = if op.is_sub {
+        Felt::ZERO - Felt::from(op.kappa_c as u32)
+    } else {
+        Felt::from(op.kappa_c as u32)
+    };
     let mut set = |row: usize, col: usize, v: u32| {
         block[row][col] = Felt::from(v);
     };
@@ -461,10 +470,9 @@ pub(crate) fn build_aux(
             },
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
-                let kappa_c = main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_KAPPA_C];
-                let is_sub = main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_IS_SUB];
-                let signed = (Felt::ONE - Felt::from(2u32) * is_sub) * kappa_c;
-                QuadFelt::from(signed) * val_sum
+                let kappa_c_signed =
+                    main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_KAPPA_C_SIGNED];
+                QuadFelt::from(kappa_c_signed) * val_sum
             },
             _ => QuadFelt::ZERO,
         };
