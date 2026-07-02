@@ -22,7 +22,9 @@
 //!
 //! Exhaustive *because the store's eager on-curve invariant pins
 //! `y₂ = ±y₁` whenever `x₁ = x₂`*, and `double`/`cancel` are
-//! structurally disjoint (`2y ≡ 0 ∧ y ≠ 0` is impossible for odd `p`).
+//! structurally disjoint: a `y = 0` self-add cannot satisfy `double` (its
+//! slope pin `2λy ≡ 3x² + a` forces `s = 0`, impossible at a smooth curve's
+//! 2-torsion point), so it can only take `cancel` (`2·(2-torsion) = ∞`).
 //! The operand `is_pai` flags are not witnessed twice: **the case flags
 //! themselves ride the consumed `EcPoint` tuples** as the `is_pai`
 //! field, so a forged claim matches no store row. That wiring is also
@@ -36,19 +38,29 @@
 //! Equality (`double`/`cancel`'s `x₁ = x₂`, `double`'s `y₁ = y₂`) is
 //! the [`is_b_zero`](crate::uint::add) `UintAdd` form `x₁ + 0 ≡ x₂` —
 //! value-level (distinct ptrs binding equal coordinates still close),
-//! deterministic, no limbs. Disequality (`generic`'s `x₁ ≠ x₂`) and
-//! nonzero (`double`'s `y₁ ≠ 0`) are **inverse MACs against the
-//! group's `b`**: a stored witness `inv` with
+//! deterministic, no limbs. Disequality (`generic`'s `x₁ ≠ x₂`) is an
+//! **inverse MAC against the group's `b`**: a stored witness `inv` with
 //!
 //! ```text
 //! inv·d + 0 ≡ b      (generic: d = x₂ − x₁, the slope transient)
-//! inv·y₁ + 0 ≡ b     (double)
 //! ```
 //!
-//! `b ≠ 0` (the EcCreate guard, doing double duty) makes either MAC
-//! unsatisfiable when the factor is zero — the λ-float attack dies in
-//! the mul chiplet, deterministically, with no β-dependent fingerprint,
-//! no aux witness registers, and no completeness gap.
+//! `b ≠ 0` (the EcCreate guard, doing double duty) makes the MAC
+//! unsatisfiable when `d = 0` — the λ-float attack dies in the mul
+//! chiplet, deterministically, with no β-dependent fingerprint, no aux
+//! witness registers, and no completeness gap.
+//!
+//! `double` needs **no** analogous `y₁ ≠ 0` witness: its slope pin
+//! `2·λ·y₁ ≡ s` with `s = 3·x² + a` is itself the nonzero guard — at
+//! `y₁ = 0` it would force `s = 0`, which a **smooth** curve never permits
+//! (`3·x² + a ≠ 0` at a simple root of `x³ + ax + b`), so the λ-float
+//! attack dies the same way, for free. This rests on curve smoothness
+//! (`4a³ + 27b² ≠ 0`) — the same anchored-curve well-formedness premise as
+//! `b ≠ 0` (both trusted from the require layer / verifier curve anchoring,
+//! not proven in-circuit). For the cofactor-1 curves (secp256k1, P-256,
+//! bn254-G1) it is moot — prime order admits no 2-torsion, so no stored
+//! finite point ever has `y = 0`; it bites only for ed25519's cofactor-8
+//! image, whose smooth 2-torsion point routes through `cancel`.
 //!
 //! ## Certificates (consumed tuples)
 //!
@@ -212,8 +224,8 @@ pub const ROW_RES: usize = 2;
 pub const ROW_TERM: usize = 3;
 
 /// Row-0 cells: `slope_aux` is `d = x₂ − x₁` for `generic`, `s = 3x² + a`
-/// for `double`; `inv` is the disequality / nonzero witness
-/// (`b·d⁻¹` / `b·y₁⁻¹`).
+/// for `double`; `inv` is `generic`'s disequality witness `b·d⁻¹` (the null
+/// ptr on `double`, whose `y₁ ≠ 0` rides the slope pin instead).
 pub const CELL_SLOPE_AUX: usize = 0;
 pub const CELL_LAMBDA: usize = 1;
 pub const CELL_INV: usize = 2;
@@ -668,6 +680,18 @@ where
                                     },
                                     f2,
                                 );
+                                // double's slope pin `2λy ≡ s = 3x² + a`. No
+                                // `y₁ ≠ 0` witness is needed: at `y = 0` this
+                                // would force `s = 0`, which never holds at a
+                                // 2-torsion point of a **smooth** curve
+                                // (`3x² + a ≠ 0` at a simple cubic root). A
+                                // `y = 0` self-add thus cannot satisfy the
+                                // double case — it can only take `cancel`
+                                // (2·(2-torsion) = ∞). This leans on curve
+                                // smoothness (`4a³ + 27b² ≠ 0`), the same
+                                // anchored-curve well-formedness assumption as
+                                // the `b ≠ 0` guard the disequality MACs rest
+                                // on.
                                 b.insert(
                                     "consume-tangent-2ly",
                                     dbl.clone() * at_slope.clone(),
@@ -678,23 +702,6 @@ where
                                         b_ptr: py.clone(),
                                         c_ptr: bound.clone(),
                                         r_ptr: slope_aux,
-                                        bound_ptr: bound.clone(),
-                                        is_sub: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // double's nonzero witness: inv·y₁ ≡ b —
-                                // the 2y denominator's invertibility.
-                                b.insert(
-                                    "consume-inv-y",
-                                    dbl.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: zero.clone(),
-                                        a_ptr: inv,
-                                        b_ptr: py.clone(),
-                                        c_ptr: bound.clone(),
-                                        r_ptr: b_ptr,
                                         bound_ptr: bound.clone(),
                                         is_sub: zero.clone(),
                                     },
