@@ -15,7 +15,6 @@ use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 mod codec;
-mod dsa;
 mod hash;
 mod math;
 
