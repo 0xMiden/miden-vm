@@ -6,8 +6,7 @@ use crate::{
     advice::AdviceMap,
     mast::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
-        ExternalNodeBuilder, LoopNodeBuilder, OpBatch,
-        node::{MastForestContributor, MastNodeExt},
+        ExternalNodeBuilder, LoopNodeBuilder, OpBatch, node::MastNodeExt,
     },
     operations::Operation,
     utils::Idx,

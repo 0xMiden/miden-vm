@@ -825,44 +825,18 @@ impl BasicBlockNodeBuilder {
     }
 }
 
-impl MastForestContributor for BasicBlockNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Process based on operation data type
-        let (op_batches, digest) = match self.operation_data {
-            OperationData::Raw { operations } => {
-                if operations.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
-
-                // Use the forced digest if provided, otherwise use the computed digest
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                (op_batches, digest)
-            },
-            OperationData::Batched { op_batches } => {
-                if op_batches.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                (op_batches, digest)
-            },
-        };
-
-        // Create the node in the forest.
-        let node_id = forest
+#[cfg(any(test, feature = "arbitrary"))]
+impl BasicBlockNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build()?;
+        forest
             .nodes
-            .push(MastNode::Block(BasicBlockNode { op_batches, digest }))
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+            .push(MastNode::Block(node))
+            .map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for BasicBlockNodeBuilder {
     fn fingerprint_for_node(
         &self,
         _context: &impl MastNodeContext,

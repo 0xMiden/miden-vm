@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::utils::Idx;
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -227,37 +225,15 @@ impl SplitNodeBuilder {
     }
 }
 
-impl MastForestContributor for SplitNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Validate branch node IDs
-        let forest_len = forest.nodes.len();
-        if self.branches[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[0], forest_len));
-        } else if self.branches[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
-        }
-
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let true_branch_hash = forest[self.branches[0]].digest();
-            let false_branch_hash = forest[self.branches[1]].digest();
-
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(SplitNode { branches: self.branches, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl SplitNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build(forest)?;
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for SplitNodeBuilder {
     fn fingerprint_for_node(
         &self,
         context: &impl MastNodeContext,

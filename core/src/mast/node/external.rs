@@ -153,17 +153,19 @@ impl ExternalNodeBuilder {
     }
 }
 
-impl MastForestContributor for ExternalNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+#[cfg(any(test, feature = "arbitrary"))]
+impl ExternalNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node_id = forest
             .nodes
-            .push(ExternalNode { digest: self.digest }.into())
+            .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)?;
         forest.commitment = forest.compute_mast_forest_commitment();
         Ok(node_id)
     }
+}
 
+impl MastForestContributor for ExternalNodeBuilder {
     fn fingerprint_for_node(
         &self,
         _context: &impl MastNodeContext,

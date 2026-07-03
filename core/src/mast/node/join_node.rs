@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::utils::Idx;
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -229,37 +227,15 @@ impl JoinNodeBuilder {
     }
 }
 
-impl MastForestContributor for JoinNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Validate child node IDs
-        let forest_len = forest.nodes.len();
-        if self.children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
-        }
-
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let left_child_hash = forest[self.children[0]].digest();
-            let right_child_hash = forest[self.children[1]].digest();
-
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(JoinNode { children: self.children, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl JoinNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build(forest)?;
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for JoinNodeBuilder {
     fn fingerprint_for_node(
         &self,
         context: &impl MastNodeContext,

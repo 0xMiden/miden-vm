@@ -351,16 +351,15 @@ pub enum MastForestReadView<'a> {
 ///
 /// ```
 /// use miden_core::{
-///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
 ///     operations::Operation,
 ///     serde::Serializable,
 /// };
 ///
-/// let mut forest = MastForest::new();
-/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-///     .add_to_forest(&mut forest)
-///     .unwrap();
-/// forest.make_root(block_id);
+/// let mut builder = DenseMastForestBuilder::new();
+/// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
+/// builder.mark_root(block_id);
+/// let forest = builder.finish().unwrap();
 ///
 /// let mut bytes = Vec::new();
 /// forest.write_into(&mut bytes);
@@ -408,16 +407,15 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+    ///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
     ///     operations::Operation,
     ///     serde::Serializable,
     /// };
     ///
-    /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-    ///     .add_to_forest(&mut forest)
-    ///     .unwrap();
-    /// forest.make_root(block_id);
+    /// let mut builder = DenseMastForestBuilder::new();
+    /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
+    /// builder.mark_root(block_id);
+    /// let forest = builder.finish().unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);
@@ -466,16 +464,15 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+    ///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
     ///     operations::Operation,
     ///     serde::Serializable,
     /// };
     ///
-    /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-    ///     .add_to_forest(&mut forest)
-    ///     .unwrap();
-    /// forest.make_root(block_id);
+    /// let mut builder = DenseMastForestBuilder::new();
+    /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
+    /// builder.mark_root(block_id);
+    /// let forest = builder.finish().unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);
