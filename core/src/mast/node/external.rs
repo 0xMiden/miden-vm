@@ -187,13 +187,12 @@ impl MastForestContributor for ExternalNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
-    type Parameters = ExternalNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
                 Word::new([
@@ -207,8 +206,3 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
             .boxed()
     }
 }
-
-/// Parameters for generating ExternalNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct ExternalNodeBuilderParams {}

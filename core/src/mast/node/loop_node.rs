@@ -250,18 +250,12 @@ impl MastForestContributor for LoopNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for LoopNodeBuilder {
-    type Parameters = LoopNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<MastNodeId>().prop_map(Self::new).boxed()
     }
 }
-
-/// Parameters for generating LoopNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct LoopNodeBuilderParams {}
