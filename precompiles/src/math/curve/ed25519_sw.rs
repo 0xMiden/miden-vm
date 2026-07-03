@@ -14,7 +14,7 @@ use crate::math::{ed25519_base::Ed25519Base, ed25519_scalar::Ed25519Scalar, uint
 pub struct Ed25519Sw;
 
 impl CurveSpec for Ed25519Sw {
-    /// Stable local curve selector carried in curve precompile tags.
+    /// Stable local curve selector used by host-side metadata.
     const ID: miden_core::Felt = miden_precompiles_codegen::ED25519_SW_ID;
 
     type BaseField = Ed25519Base;

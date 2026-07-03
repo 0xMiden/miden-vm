@@ -18,9 +18,14 @@ mod codec;
 mod hash;
 mod math;
 
-pub use hash::{HashFunction, HashPrecompile, keccak256::Keccak256Precompile};
+pub use codec::{chunks_to_bytes_exact, n_chunks};
+pub use hash::{HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak256Precompile};
 pub use math::{
-    curve::{CurveId, CurvePoint, CurvePrecompile, CurveSpec, ShortWeierstrassSpec},
+    curve::{
+        CurveCoefficient, CurveId, CurveNodeRef, CurvePoint, CurvePrecompile, CurveSpec,
+        ED25519_SW_A_PTR, ED25519_SW_B_PTR, ED25519_SW_GROUP_PTR, K1_A_PTR, K1_B_PTR, K1_GROUP_PTR,
+        R1_A_PTR, R1_B_PTR, R1_GROUP_PTR, ShortWeierstrassSpec, curve_coefficients,
+    },
     ed25519_base::Ed25519Base,
     ed25519_scalar::Ed25519Scalar,
     k1_base::K1Base,
@@ -28,7 +33,11 @@ pub use math::{
     r1_base::R1Base,
     r1_scalar::R1Scalar,
     u256::U256,
-    uint::{Limbs, UintDomain, UintPrecompile, UintSpec},
+    uint::{
+        ED25519_BASE_BOUND_PTR, ED25519_SCALAR_BOUND_PTR, K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR,
+        Limbs, R1_BASE_BOUND_PTR, R1_SCALAR_BOUND_PTR, U256_BOUND_PTR, UintDomain, UintNodeRef,
+        UintPrecompile, UintSpec,
+    },
 };
 
 #[cfg(feature = "std")]

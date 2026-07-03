@@ -10,7 +10,7 @@ use crate::math::{r1_base::R1Base, r1_scalar::R1Scalar, uint::Limbs};
 pub struct Secp256r1;
 
 impl CurveSpec for Secp256r1 {
-    /// Stable local curve selector carried in curve precompile tags.
+    /// Stable local curve selector used by host-side metadata.
     const ID: miden_core::Felt = miden_precompiles_codegen::SECP256R1_ID;
 
     type BaseField = R1Base;
