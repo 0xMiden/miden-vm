@@ -6,10 +6,10 @@
 use alloc::vec::Vec;
 use core::num::NonZeroU32;
 
-use miden_core::{Felt, deferred::PrecompileError};
+use miden_core::deferred::{DataChunk, Node, PrecompileError};
 
 /// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
-pub const BYTES_PER_CHUNK: u32 = 32;
+pub const BYTES_PER_CHUNK: u32 = Node::PACKED_BYTES_PER_CHUNK as u32;
 
 /// Number of 8-felt chunks needed to encode `n_bytes` of u32-packed input.
 ///
@@ -25,7 +25,7 @@ pub fn n_chunks(n_bytes: u32) -> NonZeroU32 {
 /// The caller-supplied `n_bytes` may be shorter than `chunks.len() * BYTES_PER_CHUNK as usize`;
 /// the trailing bytes are zero-pad and are stripped from the output after validating they are
 /// zero.
-pub fn chunks_to_bytes(chunks: &[[Felt; 8]], n_bytes: usize) -> Result<Vec<u8>, PrecompileError> {
+pub fn chunks_to_bytes(chunks: &[DataChunk], n_bytes: usize) -> Result<Vec<u8>, PrecompileError> {
     let chunk_bytes = BYTES_PER_CHUNK as usize;
     if n_bytes > chunks.len() * chunk_bytes {
         return Err(PrecompileError::InvalidNode);
@@ -43,4 +43,20 @@ pub fn chunks_to_bytes(chunks: &[[Felt; 8]], n_bytes: usize) -> Result<Vec<u8>, 
     }
     bytes.truncate(n_bytes);
     Ok(bytes)
+}
+
+/// Unpack exactly `expected_chunks` u32-packed-LE chunks back to a `n_bytes`-length byte vector.
+///
+/// Returns [`PrecompileError::InvalidNode`] if the chunk count is not exact, if `n_bytes` is too
+/// large for the supplied chunks, if any felt is not a canonical `u32`, or if stripped padding
+/// bytes are non-zero.
+pub fn chunks_to_bytes_exact(
+    chunks: &[DataChunk],
+    expected_chunks: usize,
+    n_bytes: usize,
+) -> Result<Vec<u8>, PrecompileError> {
+    if chunks.len() != expected_chunks {
+        return Err(PrecompileError::InvalidNode);
+    }
+    chunks_to_bytes(chunks, n_bytes)
 }

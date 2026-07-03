@@ -16,7 +16,7 @@ use miden_core::{
     },
 };
 
-use crate::codec::{chunks_to_bytes, n_chunks};
+use crate::codec::{chunks_to_bytes_exact, n_chunks};
 
 pub(crate) mod handlers;
 pub mod keccak256;
@@ -38,6 +38,20 @@ pub trait HashFunction: Default + Send + Sync + 'static {
 // ================================================================================================
 
 const ASSERT_DISC: u32 = 0;
+
+/// A structural view of a hash assertion node owned by [`HashPrecompile`].
+///
+/// This exposes only the assertion tag immediate and join child digests; it does not evaluate the
+/// preimage or expected digest children.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HashAssertNode {
+    /// Declared preimage length in bytes.
+    pub n_bytes: u32,
+    /// Structural digest of the preimage chunk-list child.
+    pub preimage_digest: Digest,
+    /// Structural digest of the expected-digest chunk-list child.
+    pub expected_digest: Digest,
+}
 
 /// A hash assertion precompile parameterized by its [`HashFunction`].
 pub struct HashPrecompile<H>(PhantomData<H>);
@@ -66,6 +80,43 @@ impl<H: HashFunction> HashPrecompile<H> {
     pub fn assert_node(n_bytes: u32, preimage_digest: Digest, expected_digest: Digest) -> Node {
         Node::join(Self::assert_tag(n_bytes), preimage_digest, expected_digest)
             .expect("assert tag is precompile-owned")
+    }
+
+    /// Decodes a hash assertion tag owned by this precompile.
+    ///
+    /// Returns `Ok(None)` when `tag` belongs to another precompile. Tags with this precompile's id
+    /// but invalid assertion arguments return [`PrecompileError::InvalidNode`].
+    pub fn decode_assert_tag(tag: Tag) -> Result<Option<u32>, PrecompileError> {
+        if tag.id() != Self::id() {
+            return Ok(None);
+        }
+
+        let args = tag.args();
+        let disc =
+            u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
+        let n_bytes =
+            u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
+        if disc != ASSERT_DISC || args[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
+        }
+
+        Ok(Some(n_bytes))
+    }
+
+    /// Decodes a hash assertion node without evaluating its children.
+    ///
+    /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
+    /// structural join child digests directly from the payload.
+    pub fn decode_assert_node(node: &Node) -> Result<Option<HashAssertNode>, PrecompileError> {
+        let Some(n_bytes) = Self::decode_assert_tag(node.tag())? else {
+            return Ok(None);
+        };
+        let (preimage_digest, expected_digest) = node.payload().as_join()?;
+        Ok(Some(HashAssertNode {
+            n_bytes,
+            preimage_digest,
+            expected_digest,
+        }))
     }
 
     fn tag(args: [Felt; 3]) -> Tag {
@@ -142,10 +193,7 @@ fn chunks_child_to_bytes(
         return Err(PrecompileError::InvalidNode);
     }
     let chunks = canonical_node.payload().as_data()?;
-    if chunks.len() != expected_chunks {
-        return Err(PrecompileError::InvalidNode);
-    }
-    chunks_to_bytes(chunks, n_bytes)
+    chunks_to_bytes_exact(chunks, expected_chunks, n_bytes)
 }
 
 // TEST SUPPORT
@@ -157,15 +205,16 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::{
-        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, WireEntry},
+        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, Tag, WireEntry},
         utils::bytes_to_packed_u32_elements,
     };
 
-    fn pack_chunks(bytes: &[u8]) -> Vec<[Felt; 8]> {
-        let mut felts = bytes_to_packed_u32_elements(bytes);
-        let n = felts.len().div_ceil(8).max(1);
-        felts.resize(n * 8, ZERO);
-        felts.chunks_exact(8).map(|c| core::array::from_fn(|i| c[i])).collect()
+    fn chunks_from_bytes(bytes: &[u8]) -> Vec<[Felt; 8]> {
+        Node::chunks_from_bytes(bytes)
+            .payload()
+            .as_data()
+            .expect("chunks_from_bytes creates data payload")
+            .to_vec()
     }
 
     fn digest_chunks<H: HashFunction>(input: &[u8]) -> Vec<[Felt; 8]> {
@@ -222,12 +271,40 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
             .is_none()
     );
 
+    let assert_tag = HashPrecompile::<H>::assert_tag(65);
+    assert_eq!(HashPrecompile::<H>::decode_assert_tag(assert_tag).unwrap(), Some(65));
+    assert_eq!(HashPrecompile::<H>::decode_assert_tag(Tag::CHUNKS).unwrap(), None);
+    let invalid_assert_tag =
+        HashPrecompile::<H>::tag([Felt::from_u32(1), Felt::from_u32(65), ZERO]);
+    assert!(matches!(
+        HashPrecompile::<H>::decode_assert_tag(invalid_assert_tag),
+        Err(PrecompileError::InvalidNode)
+    ));
+
+    let assert_node = HashPrecompile::<H>::assert_node(65, TRUE_DIGEST, TRUE_DIGEST);
+    assert_eq!(HashPrecompile::<H>::decode_assert_node(&Node::TRUE).unwrap(), None);
+    assert_eq!(
+        HashPrecompile::<H>::decode_assert_node(&assert_node).unwrap(),
+        Some(HashAssertNode {
+            n_bytes: 65,
+            preimage_digest: TRUE_DIGEST,
+            expected_digest: TRUE_DIGEST,
+        })
+    );
+    let invalid_node = Node::join(invalid_assert_tag, TRUE_DIGEST, TRUE_DIGEST).unwrap();
+    assert!(matches!(
+        HashPrecompile::<H>::decode_assert_node(&invalid_node),
+        Err(PrecompileError::InvalidNode)
+    ));
+    let invalid_shape = Node::value(assert_tag, [ZERO; 8]).unwrap();
+    assert!(HashPrecompile::<H>::decode_assert_node(&invalid_shape).is_err());
+
     let input = b"hash assertions consume generic chunks";
     let mut state = fresh();
     let assertion = assert_registers(
         &mut state,
         input.len() as u32,
-        pack_chunks(input),
+        chunks_from_bytes(input),
         digest_chunks::<H>(input),
     )
     .expect("matching hash assertion should register");
@@ -237,8 +314,8 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let mut wrong = digest_chunks::<H>(input);
     wrong[0][0] = if wrong[0][0] == ZERO { Felt::from_u32(1) } else { ZERO };
     let mut state = fresh();
-    let err =
-        assert_registers(&mut state, input.len() as u32, pack_chunks(input), wrong).unwrap_err();
+    let err = assert_registers(&mut state, input.len() as u32, chunks_from_bytes(input), wrong)
+        .unwrap_err();
     assert_error(err, PrecompileError::AssertionFailed);
 
     let too_long: Vec<u8> = (0u8..33).collect();
@@ -246,20 +323,20 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let err = assert_registers(
         &mut state,
         too_long.len() as u32,
-        vec![pack_chunks(&too_long)[0]],
+        vec![chunks_from_bytes(&too_long)[0]],
         digest_chunks::<H>(&too_long),
     )
     .unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
-    let mut padded = pack_chunks(&[1, 2, 3]);
+    let mut padded = chunks_from_bytes(&[1, 2, 3]);
     padded[0][0] = Felt::from_u32(u32::from_le_bytes([1, 2, 3, 0xaa]));
     let mut state = fresh();
     let err = assert_registers(&mut state, 3, padded, digest_chunks::<H>(&[1, 2, 3])).unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
     let non_u32 = Felt::new_unchecked(u64::from(u32::MAX) + 1);
-    let mut preimage = pack_chunks(input);
+    let mut preimage = chunks_from_bytes(input);
     preimage[0][0] = non_u32;
     let mut state = fresh();
     let err = assert_registers(&mut state, input.len() as u32, preimage, digest_chunks::<H>(input))
@@ -269,13 +346,15 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let mut expected = digest_chunks::<H>(input);
     expected[0][0] = non_u32;
     let mut state = fresh();
-    let err =
-        assert_registers(&mut state, input.len() as u32, pack_chunks(input), expected).unwrap_err();
+    let err = assert_registers(&mut state, input.len() as u32, chunks_from_bytes(input), expected)
+        .unwrap_err();
     assert_error(err, PrecompileError::InvalidNode);
 
-    let precompile_owned_data =
-        Node::try_data(HashPrecompile::<H>::assert_tag(input.len() as u32), pack_chunks(input))
-            .expect("data node is syntactically constructible");
+    let precompile_owned_data = Node::try_data(
+        HashPrecompile::<H>::assert_tag(input.len() as u32),
+        chunks_from_bytes(input),
+    )
+    .expect("data node is syntactically constructible");
     let mut state = fresh();
     let preimage = state.register(precompile_owned_data).unwrap_err();
     assert_error(preimage, PrecompileError::InvalidNode);
@@ -286,7 +365,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     assert_eq!(state.evaluate_digest(zero).unwrap(), TRUE_DIGEST);
 
     let mut state = fresh();
-    let preimage_chunks = pack_chunks(input);
+    let preimage_chunks = chunks_from_bytes(input);
     let expected_chunks = digest_chunks::<H>(input);
     let preimage = state.register(Node::chunks(preimage_chunks).unwrap()).unwrap();
     let expected = state.register(Node::chunks(expected_chunks).unwrap()).unwrap();
