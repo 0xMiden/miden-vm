@@ -11,8 +11,8 @@ use miden_core::{
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestId, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestId,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     precompile::PrecompileRequest,

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
     program::Program,
 };

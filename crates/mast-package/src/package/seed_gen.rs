@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
     semver::Version,
 };
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
     operations::Operation,
     serde::Serializable,
 };
@@ -18,15 +18,11 @@ use super::{PackageId, TargetType};
 use crate::{Package, PackageExport, ProcedureExport};
 
 fn build_forest() -> (MastForest, MastNodeId) {
-    let mut builder = DenseMastForestBuilder::new();
-    let builder_node_id = builder
-        .push_node_builder(BasicBlockNodeBuilder::new(vec![Operation::Add]).into())
+    let mut forest = MastForest::new();
+    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
         .expect("failed to build basic block");
-    builder.mark_root(builder_node_id);
-    let (forest, id_remapping) = builder.finish_with_id_map().expect("seed forest should be valid");
-    let node_id = id_remapping
-        .get(builder_node_id)
-        .expect("seed root should map to a finalized node");
+    forest.make_root(node_id);
     (forest, node_id)
 }
 

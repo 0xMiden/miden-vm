@@ -235,8 +235,19 @@ impl MastForest {
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.
     fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
-        self.validate_dense_node_order()
-            .expect("dense MAST forest must be canonical before serialization");
+        if self.validate_dense_node_order().is_err() {
+            // Construction-phase forests may still be append-ordered. Finalized forests take the
+            // direct path below; this fallback prevents public serialization from panicking before
+            // callers have moved through a finalization path.
+            let canonical = MastForest::from_raw_parts(
+                self.nodes.clone(),
+                self.roots.clone(),
+                self.advice_map.clone(),
+            )
+            .expect("dense MAST forest must be valid before serialization");
+            canonical.write_into_with_options(target, hashless);
+            return;
+        }
 
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
@@ -351,15 +362,16 @@ pub enum MastForestReadView<'a> {
 ///
 /// ```
 /// use miden_core::{
-///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
+///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
 ///     operations::Operation,
 ///     serde::Serializable,
 /// };
 ///
-/// let mut builder = DenseMastForestBuilder::new();
-/// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
-/// builder.mark_root(block_id);
-/// let forest = builder.finish().unwrap();
+/// let mut forest = MastForest::new();
+/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+///     .add_to_forest(&mut forest)
+///     .unwrap();
+/// forest.make_root(block_id);
 ///
 /// let mut bytes = Vec::new();
 /// forest.write_into(&mut bytes);
@@ -407,15 +419,16 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
     ///     serde::Serializable,
     /// };
     ///
-    /// let mut builder = DenseMastForestBuilder::new();
-    /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
-    /// builder.mark_root(block_id);
-    /// let forest = builder.finish().unwrap();
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);
@@ -464,15 +477,16 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForestWireView},
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
     ///     serde::Serializable,
     /// };
     ///
-    /// let mut builder = DenseMastForestBuilder::new();
-    /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
-    /// builder.mark_root(block_id);
-    /// let forest = builder.finish().unwrap();
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);

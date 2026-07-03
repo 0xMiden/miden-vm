@@ -9,7 +9,8 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestError, MastNodeExt, MastNodeId,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNodeExt,
+        MastNodeId,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},
@@ -165,9 +166,6 @@ fn mast_forest_commitment_separates_interface_and_dependencies() {
     .add_to_forest(&mut first)
     .unwrap();
 
-    let (first, _) =
-        MastForest::from_raw_parts_with_id_map(first.nodes, first.roots, first.advice_map).unwrap();
-
     let mut second = MastForest::new();
     let second_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut second)
@@ -181,9 +179,6 @@ fn mast_forest_commitment_separates_interface_and_dependencies() {
     ]))
     .add_to_forest(&mut second)
     .unwrap();
-    let (second, _) =
-        MastForest::from_raw_parts_with_id_map(second.nodes, second.roots, second.advice_map)
-            .unwrap();
 
     assert_eq!(first.interface_commitment(), second.interface_commitment());
     assert_ne!(first.dependency_commitment(), second.dependency_commitment());

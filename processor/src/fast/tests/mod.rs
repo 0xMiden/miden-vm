@@ -10,8 +10,8 @@ use miden_core::{
     ONE, Word,
     events::SystemEvent,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
-        SplitNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+        MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
     operations::Operation,
     program::StackInputs,

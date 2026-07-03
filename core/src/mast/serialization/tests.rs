@@ -10,10 +10,11 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExecutableMastForest,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView,
-        MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SparseMastForest, SparseMastForestBuilder,
-        SparseMastForestReadOptions, SplitNodeBuilder, UntrustedMastForest,
-        UntrustedMastForestReadOptions, VisitKind, compute_mast_forest_commitment_from_parts,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor,
+        MastForestError, MastForestView, MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch,
+        SparseMastForest, SparseMastForestBuilder, SparseMastForestReadOptions, SplitNodeBuilder,
+        UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
+        compute_mast_forest_commitment_from_parts,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -900,11 +901,6 @@ fn sparse_mast_round_trip_preserves_external_full_node() {
     let external = ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
     forest.make_root(external);
 
-    let (forest, remapping) =
-        MastForest::from_raw_parts_with_id_map(forest.nodes, forest.roots, forest.advice_map)
-            .unwrap();
-    let unvisited = remapping.get(unvisited).unwrap();
-    let external = remapping.get(external).unwrap();
     let forest = Arc::new(forest);
     let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
     builder.record_visit(external, VisitKind::FullVisit);
@@ -998,12 +994,6 @@ fn sparse_mast_round_trip_preserves_sorted_commitment_inputs() {
     forest.make_root(low_id);
     forest.make_root(middle_id);
 
-    let (forest, remapping) =
-        MastForest::from_raw_parts_with_id_map(forest.nodes, forest.roots, forest.advice_map)
-            .unwrap();
-    let high_id = remapping.get(high_id).unwrap();
-    let low_id = remapping.get(low_id).unwrap();
-    let middle_id = remapping.get(middle_id).unwrap();
     let forest = Arc::new(forest);
     let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
     builder.record_visit(high_id, VisitKind::FullVisit);

@@ -28,7 +28,7 @@ use miden_air::{
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-    mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
 };

@@ -312,7 +312,7 @@ mod tests {
         Word,
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-            SplitNodeBuilder,
+            MastForestContributor, SplitNodeBuilder,
         },
         operations::Operation,
     };

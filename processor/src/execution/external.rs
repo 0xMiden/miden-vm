@@ -115,7 +115,7 @@ mod tests {
 
     use miden_core::{
         Felt,
-        mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest},
+        mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor},
         operations::Operation,
         program::Program,
     };

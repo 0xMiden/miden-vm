@@ -11,8 +11,8 @@ use crate::{
     Felt, Word,
     advice::AdviceMap,
     mast::{
-        CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
+        CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
+        SplitNodeBuilder,
     },
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
@@ -400,14 +400,14 @@ impl Arbitrary for MastForest {
                     syscall_indices,
                     external_digests,
                 )| {
-                    let mut forest = DenseMastForestBuilder::new();
-                    let empty_forest = MastForest::new();
+                    let mut forest = MastForest::new();
 
                     // 2) Add basic blocks and collect their IDs
                     let mut basic_block_ids = Vec::new();
                     for block in basic_blocks {
-                        let builder = block.to_builder(&empty_forest);
-                        let node_id = forest.push_node(builder).expect("Failed to add block");
+                        let builder = block.to_builder(&forest);
+                        let node_id =
+                            builder.add_to_forest(&mut forest).expect("Failed to add block");
                         basic_block_ids.push(node_id);
                     }
 
@@ -420,7 +420,7 @@ impl Arbitrary for MastForest {
                             let left_id = all_node_ids[left_idx];
                             let right_id = all_node_ids[right_idx];
                             if let Ok(join_id) =
-                                forest.push_node(JoinNodeBuilder::new([left_id, right_id]))
+                                JoinNodeBuilder::new([left_id, right_id]).add_to_forest(&mut forest)
                             {
                                 all_node_ids.push(join_id);
                             }
@@ -432,8 +432,8 @@ impl Arbitrary for MastForest {
                         if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
                             let true_id = all_node_ids[true_idx];
                             let false_id = all_node_ids[false_idx];
-                            if let Ok(split_id) =
-                                forest.push_node(SplitNodeBuilder::new([true_id, false_id]))
+                            if let Ok(split_id) = SplitNodeBuilder::new([true_id, false_id])
+                                .add_to_forest(&mut forest)
                             {
                                 all_node_ids.push(split_id);
                             }
@@ -444,7 +444,9 @@ impl Arbitrary for MastForest {
                     for &body_idx in &loop_indices {
                         if body_idx < all_node_ids.len() {
                             let body_id = all_node_ids[body_idx];
-                            if let Ok(loop_id) = forest.push_node(LoopNodeBuilder::new(body_id)) {
+                            if let Ok(loop_id) =
+                                LoopNodeBuilder::new(body_id).add_to_forest(&mut forest)
+                            {
                                 all_node_ids.push(loop_id);
                             }
                         }
@@ -455,7 +457,7 @@ impl Arbitrary for MastForest {
                         if callee_idx < all_node_ids.len() {
                             let callee_id = all_node_ids[callee_idx];
                             let call_id =
-                                forest.push_node(CallNodeBuilder::new(callee_id)).unwrap();
+                                CallNodeBuilder::new(callee_id).add_to_forest(&mut forest).unwrap();
                             all_node_ids.push(call_id);
                         }
                     }
@@ -466,8 +468,9 @@ impl Arbitrary for MastForest {
                     for &callee_idx in &syscall_indices {
                         if callee_idx < all_node_ids.len() {
                             let callee_id = all_node_ids[callee_idx];
-                            let syscall_id =
-                                forest.push_node(CallNodeBuilder::new_syscall(callee_id)).unwrap();
+                            let syscall_id = CallNodeBuilder::new_syscall(callee_id)
+                                .add_to_forest(&mut forest)
+                                .unwrap();
                             all_node_ids.push(syscall_id);
                         }
                     }
@@ -480,7 +483,8 @@ impl Arbitrary for MastForest {
                             continue;
                         }
 
-                        if let Ok(external_id) = forest.push_node(ExternalNodeBuilder::new(digest))
+                        if let Ok(external_id) =
+                            ExternalNodeBuilder::new(digest).add_to_forest(&mut forest)
                         {
                             all_node_ids.push(external_id);
                         }
@@ -490,9 +494,9 @@ impl Arbitrary for MastForest {
                     // WARNING: These leave junk on the stack and cannot execute properly
                     for i in 0..num_dyns {
                         let dyn_id = if i % 2 == 0 {
-                            forest.push_node(DynNodeBuilder::new_dyn()).unwrap()
+                            DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap()
                         } else {
-                            forest.push_node(DynNodeBuilder::new_dyncall()).unwrap()
+                            DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap()
                         };
                         all_node_ids.push(dyn_id);
                     }
@@ -502,14 +506,13 @@ impl Arbitrary for MastForest {
                     let mut root_digest_set = BTreeSet::new();
                     for (i, &node_id) in all_node_ids.iter().enumerate() {
                         if i % (all_node_ids.len() / num_roots.max(1)) == 0
-                            && root_digest_set
-                                .insert(forest.get_node_by_id(node_id).unwrap().digest())
+                            && root_digest_set.insert(forest[node_id].digest())
                         {
-                            forest.mark_root(node_id);
+                            forest.make_root(node_id);
                         }
                     }
 
-                    forest.finish().expect("generated MAST forest should be valid")
+                    forest
                 },
             )
             .boxed()
@@ -595,16 +598,25 @@ impl Arbitrary for Program {
         })
         .prop_map(|node| {
             // Create a new MastForest
-            let mut builder = DenseMastForestBuilder::new();
-            let empty_forest = MastForest::new();
+            let mut forest = MastForest::new();
 
             // Add the node to the forest using builder
-            let node_builder = node.to_builder(&empty_forest);
-            let node_id = builder.push_node(node_builder).expect("Failed to add node");
-            builder.mark_root(node_id);
-            let (forest, remapping) =
-                builder.finish_with_id_map().expect("generated program forest should be valid");
-            let entrypoint = remapping.get(node_id).expect("entrypoint should be retained");
+            let builder = node.to_builder(&forest);
+            let node_id = builder.add_to_forest(&mut forest).expect("Failed to add node");
+
+            // Since we added a node, it should be available as a procedure root
+            // If not, we need to make it a root manually
+            let entrypoint = if forest.num_procedures() > 0 {
+                forest.procedure_roots()[0]
+            } else {
+                // Make the node a root manually
+                forest.make_root(node_id);
+                // After making it a root, it should be a procedure
+                if forest.num_procedures() == 0 {
+                    panic!("Failed to create a valid procedure from node");
+                }
+                forest.procedure_roots()[0]
+            };
 
             Program::new(Arc::new(forest), entrypoint)
         })

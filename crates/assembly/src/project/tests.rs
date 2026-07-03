@@ -2,7 +2,7 @@ use std::{path::Path, process::Command, string::String, sync::Arc};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
     operations::{DebugVarInfo, DebugVarLocation, Operation},
     serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,

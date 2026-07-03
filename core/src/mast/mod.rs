@@ -60,8 +60,8 @@ pub(crate) use node::collect_immediate_placements;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DynNode, DynNodeBuilder,
     ExternalNode, ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeContext, MastNodeExt, OP_BATCH_SIZE,
-    OP_GROUP_SIZE, OpBatch, SplitNode, SplitNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
@@ -77,9 +77,6 @@ pub use serialization::{
     AdviceMapView, AdviceValueView, MastForestReadMode, MastForestReadView, MastForestView,
     MastForestWireView, MastNodeEntry, MastNodeInfo, SparseMastForestReadOptions,
 };
-
-mod dense_builder;
-pub use dense_builder::DenseMastForestBuilder;
 
 mod untrusted;
 pub use untrusted::{UntrustedMastForest, UntrustedMastForestReadOptions};
@@ -172,27 +169,10 @@ impl MastForest {
         Self::from_parts(MastForestParts { nodes, roots, advice_map })
     }
 
-    /// Builds a [`MastForest`] from raw parts and returns the node ID remapping applied during
-    /// canonicalization.
-    #[doc(hidden)]
-    pub fn from_raw_parts_with_id_map(
-        nodes: IndexVec<MastNodeId, MastNode>,
-        roots: Vec<MastNodeId>,
-        advice_map: AdviceMap,
-    ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
-        Self::from_parts_with_id_map(MastForestParts { nodes, roots, advice_map })
-    }
-
     /// Builds a [`MastForest`] from completed parts.
     pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
-        Self::from_parts_with_id_map(parts).map(|(forest, _remapping)| forest)
-    }
-
-    pub(crate) fn from_parts_with_id_map(
-        parts: MastForestParts,
-    ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
         validate_mast_forest_parts_bounds(&parts)?;
-        let (parts, id_remapping) = canonicalize_dense_parts(parts)?;
+        let parts = canonicalize_dense_parts(parts)?;
 
         let forest = Self {
             commitment: compute_mast_forest_commitment(
@@ -208,7 +188,7 @@ impl MastForest {
         forest.validate_dense_node_order()?;
         forest.validate()?;
         forest.validate_node_hashes()?;
-        Ok((forest, id_remapping))
+        Ok(forest)
     }
 
     pub(in crate::mast) fn from_trusted_deserialization_parts(
@@ -246,9 +226,7 @@ fn validate_mast_forest_parts_bounds(parts: &MastForestParts) -> Result<(), Mast
     Ok(())
 }
 
-fn canonicalize_dense_parts(
-    parts: MastForestParts,
-) -> Result<(MastForestParts, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
+fn canonicalize_dense_parts(parts: MastForestParts) -> Result<MastForestParts, MastForestError> {
     let node_count = parts.nodes.len();
     let mut ordered_ids = (0..node_count)
         .map(|index| MastNodeId::new_unchecked(index as u32))
@@ -279,7 +257,7 @@ fn canonicalize_dense_parts(
         .all(|(index, &old_id)| old_id == MastNodeId::new_unchecked(index as u32))
     {
         validate_dense_node_order(&parts.nodes)?;
-        return Ok((parts, remapping));
+        return Ok(parts);
     }
 
     let mut nodes = IndexVec::with_capacity(node_count);
@@ -303,14 +281,11 @@ fn canonicalize_dense_parts(
 
     validate_dense_node_order(&nodes)?;
 
-    Ok((
-        MastForestParts {
-            nodes,
-            roots,
-            advice_map: parts.advice_map,
-        },
-        remapping,
-    ))
+    Ok(MastForestParts {
+        nodes,
+        roots,
+        advice_map: parts.advice_map,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -393,6 +368,17 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
+    // Kept private so callers cannot mutate roots arbitrarily, but shared with the merger so it
+    // can rebuild the root set while remapping nodes into the merged forest.
+    fn mark_root(&mut self, new_root_id: MastNodeId) {
+        assert!(new_root_id.to_usize() < self.nodes.len());
+
+        if !self.roots.contains(&new_root_id) {
+            self.roots.push(new_root_id);
+            self.commitment = self.compute_mast_forest_commitment();
+        }
+    }
+
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -402,12 +388,7 @@ impl MastForest {
     ///   clearly doesn't belong to this MAST forest).
     #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
-        assert!(new_root_id.to_usize() < self.nodes.len());
-
-        if !self.roots.contains(&new_root_id) {
-            self.roots.push(new_root_id);
-            self.commitment = self.compute_mast_forest_commitment();
-        }
+        self.mark_root(new_root_id);
     }
 
     /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
@@ -581,7 +562,7 @@ impl MastForest {
 
         for old_root_id in old_root_ids {
             if let Some(new_root_id) = id_remappings.get(&old_root_id).copied() {
-                self.make_root(new_root_id);
+                self.mark_root(new_root_id);
             }
         }
     }
@@ -631,11 +612,23 @@ fn compute_nodes_commitment(
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
-    let digests: Vec<Word> = nodes
-        .iter()
-        .take_while(|node| node.is_external())
-        .map(MastNodeExt::digest)
-        .collect();
+    let digests: Vec<Word> = if validate_dense_node_order(nodes).is_ok() {
+        nodes
+            .iter()
+            .take_while(|node| node.is_external())
+            .map(MastNodeExt::digest)
+            .collect()
+    } else {
+        // Construction-phase forests may still be append-ordered. Finalized dense forests are
+        // canonicalized by `from_parts()` or rejected by dense deserialization.
+        let mut digests: Vec<Word> = nodes
+            .iter()
+            .filter(|node| node.is_external())
+            .map(MastNodeExt::digest)
+            .collect();
+        digests.sort_unstable();
+        digests
+    };
     Poseidon2::merge_many(&digests)
 }
 

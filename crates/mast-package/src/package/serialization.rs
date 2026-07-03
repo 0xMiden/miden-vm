@@ -1190,7 +1190,7 @@ mod tests {
         Felt, Word,
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNode, MastNodeExt,
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
             MastNodeId,
         },
         operations::Operation,
@@ -1214,24 +1214,13 @@ mod tests {
         },
     };
 
-    fn build_single_node_forest(
-        operations: Vec<Operation>,
-        make_root: bool,
-    ) -> (MastForest, MastNodeId) {
-        let mut builder = DenseMastForestBuilder::new();
-        let node_id = builder
-            .push_node(BasicBlockNodeBuilder::new(operations))
-            .expect("failed to build basic block");
-        if make_root {
-            builder.mark_root(node_id);
-        }
-        let (forest, remapping) = builder.finish_with_id_map().expect("forest should be valid");
-        let node_id = remapping.get(node_id).expect("node should be retained");
-        (forest, node_id)
-    }
-
     fn build_forest() -> (MastForest, MastNodeId) {
-        build_single_node_forest(vec![Operation::Add], true)
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        forest.make_root(node_id);
+        (forest, node_id)
     }
 
     fn absolute_path(name: &str) -> Arc<AstPath> {
@@ -1788,7 +1777,10 @@ mod tests {
     /// procedure root in the underlying MAST forest (issue #2831).
     #[test]
     fn package_rejects_non_root_export() {
-        let (forest, node_id) = build_single_node_forest(vec![Operation::Add], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("test::proc");
@@ -2029,8 +2021,10 @@ mod tests {
         // pub proc p
         //     push.1
         // end
-        let (forest, node_id) =
-            build_single_node_forest(vec![Operation::Push(Felt::from_u32(1))], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("lib::p");
@@ -2074,8 +2068,10 @@ mod tests {
         // pub proc p
         //     push.1
         // end
-        let (forest, node_id) =
-            build_single_node_forest(vec![Operation::Push(Felt::from_u32(1))], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("lib::p");
@@ -2116,8 +2112,10 @@ mod tests {
         // pub proc k1
         //     push.1
         // end
-        let (forest, node_id) =
-            build_single_node_forest(vec![Operation::Push(Felt::from_u32(1))], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("$kernel::k1");
@@ -2163,8 +2161,10 @@ mod tests {
         // pub proc k1
         //     push.1
         // end
-        let (forest, node_id) =
-            build_single_node_forest(vec![Operation::Push(Felt::from_u32(1))], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("$kernel::k1");
@@ -2217,8 +2217,10 @@ mod tests {
         // pub proc k1
         //     push.1
         // end
-        let (forest, node_id) =
-            build_single_node_forest(vec![Operation::Push(Felt::from_u32(1))], false);
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
         let digest = forest[node_id].digest();
 
         let path = absolute_path("$kernel::k1");

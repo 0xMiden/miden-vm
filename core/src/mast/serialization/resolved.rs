@@ -8,11 +8,11 @@ use crate::{
     Felt,
     chiplets::hasher,
     mast::{
-        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, MastNode, SplitNode,
+        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
-    utils::{Idx, IndexVec},
+    utils::Idx,
 };
 
 /// Digest sources for a parsed serialized forest.
@@ -137,7 +137,7 @@ impl<'a> ResolvedSerializedForest<'a> {
             self.layout.basic_block_offset(),
             self.layout.basic_block_len(),
         )?);
-        let mut nodes = IndexVec::<MastNodeId, MastNode>::with_capacity(self.node_count());
+        let mut mast_forest = MastForest::new();
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
@@ -148,15 +148,10 @@ impl<'a> ResolvedSerializedForest<'a> {
                 &basic_block_data_decoder,
                 digest,
             )?;
-            let node = mast_node_builder.build_linked().map_err(|e| {
+            mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
                 DeserializationError::InvalidValue(format!(
-                    "failed to build node while deserializing MAST forest: {e}",
+                    "failed to add node to MAST forest while deserializing: {e}",
                 ))
-            })?;
-            nodes.push(node).map_err(|_| {
-                DeserializationError::InvalidValue(
-                    "too many nodes while deserializing MAST forest".into(),
-                )
             })?;
         }
 
@@ -165,12 +160,16 @@ impl<'a> ResolvedSerializedForest<'a> {
             roots.push(self.procedure_root_at(index)?);
         }
 
-        MastForest::from_trusted_deserialization_parts(MastForestParts { nodes, roots, advice_map })
-            .map_err(|e| {
-                DeserializationError::InvalidValue(format!(
-                    "failed to construct trusted deserialized MAST forest: {e}",
-                ))
-            })
+        MastForest::from_trusted_deserialization_parts(MastForestParts {
+            nodes: mast_forest.nodes,
+            roots,
+            advice_map,
+        })
+        .map_err(|e| {
+            DeserializationError::InvalidValue(format!(
+                "failed to construct trusted deserialized MAST forest: {e}",
+            ))
+        })
     }
 
     pub(super) fn node_count(&self) -> usize {
@@ -472,12 +471,12 @@ fn checked_child_index(
 }
 
 pub(super) fn basic_block_offset_for_node_index(
-    nodes: &[MastNode],
+    nodes: &[super::MastNode],
     node_index: usize,
 ) -> Result<u32, DeserializationError> {
     let mut offset = 0usize;
     for node in nodes.iter().take(node_index) {
-        if let MastNode::Block(block) = node {
+        if let super::MastNode::Block(block) = node {
             offset = offset.checked_add(basic_block_data_len(block)).ok_or_else(|| {
                 DeserializationError::InvalidValue("basic-block data offset overflow".to_string())
             })?;

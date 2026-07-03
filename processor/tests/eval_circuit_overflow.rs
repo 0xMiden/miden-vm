@@ -1,6 +1,6 @@
 use miden_core::{
     field::PrimeField64,
-    mast::{BasicBlockNodeBuilder, MastForest},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_processor::{
     AceError, DefaultHost, ExecutionError, FastProcessor, Felt, Program, StackInputs,
