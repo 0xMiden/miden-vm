@@ -177,29 +177,25 @@ end
 #! - start_ptr, end_ptr are not word-aligned
 #! - `start_ptr > end_ptr`
 #! - any adjacent word pair is out of order.
-@locals(3)
+@locals(1)
 pub proc assert_sorted_words
     # locals:
-    # 0: start_ptr
-    # 1: end_ptr
-    # 2: current_ptr
-    dup loc_store.0
-    dup.1 loc_store.1
-    dup add.4 loc_store.2
+    # 0: current_ptr
+    dup add.4 loc_store.0
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.0 loc_load.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
-    u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
-    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
-    loc_load.1 u32mod.4 assertz.err="sorted_array invariant: end_ptr must be word-aligned"
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 u32mod.4 assertz.err="sorted_array invariant: end_ptr must be word-aligned"
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.2 loc_load.1 u32lt
+    loc_load.0 dup.2 u32lt
     while.true
-        loc_load.2 sub.4 padw movup.4 mem_loadw_le
+        loc_load.0 sub.4 padw movup.4 mem_loadw_le
         # => [PREVIOUS_WORD, start_ptr, end_ptr, ...]
 
-        loc_load.2 padw movup.4 mem_loadw_le
+        loc_load.0 padw movup.4 mem_loadw_le
         # => [CURRENT_WORD, PREVIOUS_WORD, start_ptr, end_ptr, ...]
 
         exec.word::gt
@@ -207,10 +203,10 @@ pub proc assert_sorted_words
         assert.err="sorted_array invariant: words must be sorted"
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 add.4 loc_store.2
+        loc_load.0 add.4 loc_store.0
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 loc_load.1 u32lt
+        loc_load.0 dup.2 u32lt
     end
 end
 
@@ -493,31 +489,27 @@ end
 #! - end_ptr is not double-word-aligned with start_ptr
 #! - `start_ptr > end_ptr`
 #! - any adjacent key pair is out of order.
-@locals(4)
+@locals(2)
 pub proc assert_sorted_keys
     # locals:
-    # 0: start_ptr
-    # 1: end_ptr
-    # 2: current_ptr
-    # 3: use_full_key
-    dup loc_store.0
-    dup.1 loc_store.1
-    dup add.8 loc_store.2
-    push.1 loc_store.3
+    # 0: current_ptr
+    # 1: use_full_key
+    dup add.8 loc_store.0
+    push.1 loc_store.1
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.0 loc_load.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
-    u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
-    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
-    loc_load.1 loc_load.0 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 dup.1 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.2 loc_load.1 u32lt
+    loc_load.0 dup.2 u32lt
     while.true
-        loc_load.2 sub.8 loc_load.3 exec.load_key
+        loc_load.0 sub.8 loc_load.1 exec.load_key
         # => [PREVIOUS_KEY, start_ptr, end_ptr, ...]
 
-        loc_load.2 loc_load.3 exec.load_key
+        loc_load.0 loc_load.1 exec.load_key
         # => [CURRENT_KEY, PREVIOUS_KEY, start_ptr, end_ptr, ...]
 
         exec.word::gt
@@ -525,10 +517,10 @@ pub proc assert_sorted_keys
         assert.err="sorted_array invariant: keys must be sorted"
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 add.8 loc_store.2
+        loc_load.0 add.8 loc_store.0
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 loc_load.1 u32lt
+        loc_load.0 dup.2 u32lt
     end
 end
 
@@ -551,31 +543,27 @@ end
 #! - end_ptr is not double-word-aligned with start_ptr
 #! - `start_ptr > end_ptr`
 #! - any adjacent half-key pair is out of order.
-@locals(4)
+@locals(2)
 pub proc assert_sorted_half_keys
     # locals:
-    # 0: start_ptr
-    # 1: end_ptr
-    # 2: current_ptr
-    # 3: use_full_key
-    dup loc_store.0
-    dup.1 loc_store.1
-    dup add.8 loc_store.2
-    push.0 loc_store.3
+    # 0: current_ptr
+    # 1: use_full_key
+    dup add.8 loc_store.0
+    push.0 loc_store.1
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.0 loc_load.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
-    u32lte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
-    loc_load.0 u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
-    loc_load.1 loc_load.0 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 dup.1 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.2 loc_load.1 u32lt
+    loc_load.0 dup.2 u32lt
     while.true
-        loc_load.2 sub.8 loc_load.3 exec.load_key
+        loc_load.0 sub.8 loc_load.1 exec.load_key
         # => [PREVIOUS_HALF_KEY, start_ptr, end_ptr, ...]
 
-        loc_load.2 loc_load.3 exec.load_key
+        loc_load.0 loc_load.1 exec.load_key
         # => [CURRENT_HALF_KEY, PREVIOUS_HALF_KEY, start_ptr, end_ptr, ...]
 
         exec.word::gt
@@ -583,10 +571,10 @@ pub proc assert_sorted_half_keys
         assert.err="sorted_array invariant: half-keys must be sorted"
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 add.8 loc_store.2
+        loc_load.0 add.8 loc_store.0
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.2 loc_load.1 u32lt
+        loc_load.0 dup.2 u32lt
     end
 end
 
