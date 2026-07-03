@@ -4,14 +4,16 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
+use super::{
+    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
+};
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     prettier::PrettyPrint,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // SPLIT NODE
@@ -194,20 +196,20 @@ impl SplitNodeBuilder {
     }
 
     /// Builds the SplitNode.
-    pub fn build(self, mast_forest: &MastForest) -> Result<SplitNode, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if self.branches[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[0], forest_len));
-        } else if self.branches[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
-        }
+    pub fn build(self, context: &impl MastNodeContext) -> Result<SplitNode, MastForestError> {
+        let true_branch = context.get_node_by_id(self.branches[0]).ok_or_else(|| {
+            MastForestError::NodeIdOverflow(self.branches[0], context.node_count())
+        })?;
+        let false_branch = context.get_node_by_id(self.branches[1]).ok_or_else(|| {
+            MastForestError::NodeIdOverflow(self.branches[1], context.node_count())
+        })?;
 
         // Use the forced digest if provided, otherwise compute the digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let true_branch_hash = mast_forest[self.branches[0]].digest();
-            let false_branch_hash = mast_forest[self.branches[1]].digest();
+            let true_branch_hash = true_branch.digest();
+            let false_branch_hash = false_branch.digest();
 
             hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
         };
@@ -223,51 +225,40 @@ impl SplitNodeBuilder {
     }
 }
 
-impl MastForestContributor for SplitNodeBuilder {
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Validate branch node IDs
-        let forest_len = forest.nodes.len();
-        if self.branches[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[0], forest_len));
-        } else if self.branches[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
-        }
-
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let true_branch_hash = forest[self.branches[0]].digest();
-            let false_branch_hash = forest[self.branches[1]].digest();
-
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(SplitNode { branches: self.branches, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl SplitNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build(forest)?;
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for SplitNodeBuilder {
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
+        context: &impl MastNodeContext,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let if_branch_hash = forest[self.branches[0]].digest();
-            let else_branch_hash = forest[self.branches[1]].digest();
+            let if_branch_hash = context
+                .get_node_by_id(self.branches[0])
+                .ok_or_else(|| {
+                    MastForestError::NodeIdOverflow(self.branches[0], context.node_count())
+                })?
+                .digest();
+            let else_branch_hash = context
+                .get_node_by_id(self.branches[1])
+                .ok_or_else(|| {
+                    MastForestError::NodeIdOverflow(self.branches[1], context.node_count())
+                })?
+                .digest();
 
             hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
         };
 
-        fingerprint_with_child_fingerprints(node_digest, &self.branches, forest, hash_by_node_id)
+        fingerprint_with_child_fingerprints(node_digest, &self.branches, context, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -286,51 +277,14 @@ impl MastForestContributor for SplitNodeBuilder {
     }
 }
 
-impl SplitNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(SplitNode { branches: self.branches, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
-}
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for SplitNodeBuilder {
-    type Parameters = SplitNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<[MastNodeId; 2]>().prop_map(Self::new).boxed()
     }
 }
-
-/// Parameters for generating SplitNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct SplitNodeBuilderParams {}

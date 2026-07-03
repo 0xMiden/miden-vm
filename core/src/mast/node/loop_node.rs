@@ -4,14 +4,16 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
+use super::{
+    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
+};
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     prettier::PrettyPrint,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // LOOP NODE
@@ -180,16 +182,16 @@ impl LoopNodeBuilder {
     }
 
     /// Builds the LoopNode.
-    pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
-        if self.body.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
-        }
+    pub fn build(self, context: &impl MastNodeContext) -> Result<LoopNode, MastForestError> {
+        let body = context
+            .get_node_by_id(self.body)
+            .ok_or_else(|| MastForestError::NodeIdOverflow(self.body, context.node_count()))?;
 
         // Use the forced digest if provided, otherwise compute the digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let body_hash = mast_forest[self.body].digest();
+            let body_hash = body.digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
@@ -205,31 +207,32 @@ impl LoopNodeBuilder {
     }
 }
 
-impl MastForestContributor for LoopNodeBuilder {
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+#[cfg(any(test, feature = "arbitrary"))]
+impl LoopNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node = self.build(forest)?;
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for LoopNodeBuilder {
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
+        context: &impl MastNodeContext,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let body_hash = forest[self.body].digest();
+            let body_hash = context
+                .get_node_by_id(self.body)
+                .ok_or_else(|| MastForestError::NodeIdOverflow(self.body, context.node_count()))?
+                .digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
-        fingerprint_with_child_fingerprints(node_digest, &[self.body], forest, hash_by_node_id)
+        fingerprint_with_child_fingerprints(node_digest, &[self.body], context, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -245,51 +248,14 @@ impl MastForestContributor for LoopNodeBuilder {
     }
 }
 
-impl LoopNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(LoopNode { body: self.body, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
-}
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for LoopNodeBuilder {
-    type Parameters = LoopNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<MastNodeId>().prop_map(Self::new).boxed()
     }
 }
-
-/// Parameters for generating LoopNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct LoopNodeBuilderParams {}

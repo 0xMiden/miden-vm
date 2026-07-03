@@ -6,8 +6,7 @@ use crate::{
     advice::AdviceMap,
     mast::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
-        ExternalNodeBuilder, LoopNodeBuilder, OpBatch,
-        node::{MastForestContributor, MastNodeExt},
+        ExternalNodeBuilder, LoopNodeBuilder, OpBatch, node::MastNodeExt,
     },
     operations::Operation,
     utils::Idx,
@@ -174,7 +173,7 @@ fn mast_node_partial_eq_is_structural_for_same_digest_blocks() {
 /// +
 /// [Block(bar), Call(bar)]
 /// =
-/// [Block(foo), Call(foo), Block(bar), Call(bar)]
+/// [Block(foo), Block(bar), Call(foo), Call(bar)]
 #[test]
 fn mast_forest_merge_remap() {
     let mut forest_a = MastForest::new();
@@ -195,17 +194,20 @@ fn mast_forest_merge_remap() {
     assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
         if merged_block == &expected_foo_block);
 
-    assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
-
     let expected_bar_block = block_bar().build().unwrap();
-    assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
+    assert_matches!(&merged.nodes()[1], MastNode::Block(merged_block)
         if merged_block == &expected_bar_block);
-    assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
-    assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
-    assert_eq!(u32::from(root_maps.map_root(1, &id_call_b).unwrap()), 3u32);
+    let mapped_call_a = root_maps.map_root(0, &id_call_a).unwrap();
+    let mapped_call_b = root_maps.map_root(1, &id_call_b).unwrap();
+
+    assert_matches!(&merged[mapped_call_a], MastNode::Call(call_node)
+        if 0u32 == u32::from(call_node.callee()));
+    assert_matches!(&merged[mapped_call_b], MastNode::Call(call_node)
+        if 1u32 == u32::from(call_node.callee()));
 
     assert_child_id_lt_parent_id(&merged);
+    merged.validate_dense_node_order().unwrap();
 }
 
 /// Tests that Forest_A + Forest_A = Forest_A (i.e. duplicates are removed).

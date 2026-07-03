@@ -1854,16 +1854,18 @@ mod tests {
     #[test]
     fn test_package_source_debug_merge_remaps_execution_nodes_without_collapsing_sources() {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+            mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest},
             operations::{DebugVarInfo, DebugVarLocation, Operation},
         };
 
         fn forest_with_add_block() -> (MastForest, MastNodeId) {
-            let mut forest = MastForest::new();
-            let block = BasicBlockNodeBuilder::new(alloc::vec![Operation::Add])
-                .add_to_forest(&mut forest)
+            let mut builder = DenseMastForestBuilder::new();
+            let block = builder
+                .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
                 .unwrap();
-            forest.make_root(block);
+            builder.mark_root(block);
+            let (forest, remapping) = builder.finish_with_id_map().unwrap();
+            let block = remapping.get(block).unwrap();
             (forest, block)
         }
 
@@ -1989,16 +1991,19 @@ mod tests {
     #[test]
     fn test_package_source_debug_merge_remaps_non_root_execution_nodes() {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor},
+            mast::{BasicBlockNodeBuilder, CallNodeBuilder, DenseMastForestBuilder, MastForest},
             operations::Operation,
         };
 
-        let mut forest = MastForest::new();
-        let callee = BasicBlockNodeBuilder::new(alloc::vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let callee = builder
+            .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
             .unwrap();
-        let call = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
-        forest.make_root(call);
+        let call = builder.push_node(CallNodeBuilder::new(callee)).unwrap();
+        builder.mark_root(call);
+        let (forest, remapping) = builder.finish_with_id_map().unwrap();
+        let callee = remapping.get(callee).unwrap();
+        let call = remapping.get(call).unwrap();
 
         let root_source = DebugSourceNodeId::from(0);
         let child_source = DebugSourceNodeId::from(1);
