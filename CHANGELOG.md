@@ -13,6 +13,7 @@
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 - [BREAKING] MAST forest payloads now include sorted root and dependency digests, so commitment inputs round trip ([#3294](https://github.com/0xMiden/miden-vm/pull/3294)).
 - [BREAKING] MAST forest and package code digests now commit to both public roots and external dependencies ([#3311](https://github.com/0xMiden/miden-vm/pull/3311)).
+- [BREAKING] Dense `MastForest`s are now finalized into canonical node order, and `MastForestContributor` no longer appends nodes directly ([#3329](https://github.com/0xMiden/miden-vm/pull/3329)).
 
 ## v0.24.0 (2026-06-24)
 
