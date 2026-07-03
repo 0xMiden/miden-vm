@@ -33,7 +33,7 @@ impl crate::serde::Serializable for MastForestId {
 impl crate::serde::Deserializable for MastForestId {
     fn read_from<R: crate::serde::ByteReader>(
         source: &mut R,
-    ) -> Result<Self, crate::serde::DeserializationError> {
+    ) -> Result<Self, DeserializationError> {
         Ok(Self::from(<u32 as crate::serde::Deserializable>::read_from(source)?))
     }
 
