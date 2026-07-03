@@ -3,19 +3,71 @@ use std::sync::Arc;
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_core::{
     Felt,
-    deferred::{DeferredState, Digest, Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST},
+    deferred::{
+        DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
+        TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
+    },
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 
 use crate::{
-    deferred::synthetic_keccak_state,
+    deferred::{DeferredSession, session_from_deferred_state},
     hash::keccak::sponge::trace::keccak_oracle,
     math::{U256, from_hex, to_limbs32},
     session::{Session, SessionTraces},
     transcript::poseidon2::P2Digest,
 };
+
+/// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
+#[derive(Debug)]
+struct SyntheticKeccakDeferredState {
+    state: DeferredState,
+    input_digest: Digest,
+    expected_digest: Digest,
+    assertion_digest: Digest,
+    vm_root: Digest,
+    root: P2Digest,
+}
+
+/// Builds the Keccak-only VM deferred state for `input`:
+/// `AND(TRUE_DIGEST, Keccak256Assert(chunks(input), chunks(keccak256(input))))`.
+fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredState {
+    let registry =
+        Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
+    let mut state = DeferredState::new(registry, usize::MAX)
+        .expect("Keccak-only VM deferred state should initialize");
+
+    let input_digest = state
+        .register(VmNode::chunks_from_bytes(input))
+        .expect("VM should register input chunks");
+    let expected_digest = state
+        .register(VmNode::chunks(keccak_digest_chunks(input)).expect("digest chunks are non-empty"))
+        .expect("VM should register expected digest chunks");
+    let assertion_digest = state
+        .register(Keccak256Precompile::assert_node(
+            len_bytes(input),
+            input_digest,
+            expected_digest,
+        ))
+        .expect("VM Keccak assertion should evaluate to TRUE");
+
+    let vm_root = state
+        .log_statement(assertion_digest)
+        .expect("true Keccak assertion should log into the deferred root");
+    debug_assert_eq!(vm_root, VmNode::and(VM_TRUE_DIGEST, assertion_digest).digest());
+    debug_assert_eq!(state.root(), vm_root);
+
+    SyntheticKeccakDeferredState {
+        state,
+        input_digest,
+        expected_digest,
+        assertion_digest,
+        vm_root,
+        root: P2Digest::from(vm_root),
+    }
+}
 
 fn keccak_session_traces(input: &[u8]) -> SessionTraces {
     let mut session = Session::new();
@@ -26,6 +78,10 @@ fn keccak_session_traces(input: &[u8]) -> SessionTraces {
 
 fn keccak_digest_chunks(input: &[u8]) -> Vec<[Felt; 8]> {
     vec![keccak_oracle(input).to_u32s().map(Felt::from_u32)]
+}
+
+fn len_bytes(input: &[u8]) -> u32 {
+    u32::try_from(input.len()).expect("Keccak MVP inputs fit in a VM u32 length tag")
 }
 
 fn register_keccak_assertion(state: &mut DeferredState, input: &[u8]) -> Digest {
@@ -70,6 +126,12 @@ fn register_curve_identity(state: &mut DeferredState, curve: CurveId) -> Digest 
         .expect("register curve identity node")
 }
 
+fn register_curve_generator(state: &mut DeferredState, curve: CurveId) -> Digest {
+    state
+        .register(CurvePrecompile::generator_node(curve))
+        .expect("register curve generator node")
+}
+
 fn register_curve_op(state: &mut DeferredState, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
     state
         .register(VmNode::join(CurvePrecompile::op_tag(op_id), lhs, rhs).expect("curve op tag"))
@@ -105,7 +167,7 @@ fn k1_points() -> [(U256, U256); 3] {
     [k256_coords(&g), k256_coords(&g2), k256_coords(&g3)]
 }
 
-fn all_node_vm_root() -> Digest {
+fn all_node_vm_state() -> DeferredState {
     let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
         .expect("full precompile registry initializes");
 
@@ -155,65 +217,21 @@ fn all_node_vm_root() -> Digest {
         state.log_statement(claim).expect("truthy synthetic claim logs");
     }
 
-    state.root()
+    state
 }
 
-fn all_node_session_traces() -> SessionTraces {
-    let curve = CurveId::Secp256k1;
-    let fp = curve.base_domain().bound_ptr();
-    let group_ptr = curve.group_ptr();
-    let sn = curve.scalar_domain().bound_ptr();
-    let [(gx, gy), (g2x, g2y), (g3x, g3y)] = k1_points();
+fn translated_traces_check(state: &DeferredState) {
+    let DeferredSession { session, root } = session_from_deferred_state(state).unwrap();
+    assert_eq!(root.hash(), P2Digest::from(state.root()));
+    let traces = session.finish(root);
+    traces.check();
+}
 
-    let mut session = Session::new();
-    let mut claims = Vec::new();
-
-    let (_, keccak_claim) = session.keccak(b"all-node synthetic dag");
-    claims.push(keccak_claim);
-
-    let u11 = session.uint_leaf(U256::from(11u8), fp);
-    let u7 = session.uint_leaf(U256::from(7u8), fp);
-
-    let add = session.uint_add(&u11, &u7);
-    let add_expected = session.uint_leaf(U256::from(18u8), fp);
-    claims.push(session.uint_is(&add, &add_expected));
-
-    let sub = session.uint_sub(&u11, &u7);
-    let sub_expected = session.uint_leaf(U256::from(4u8), fp);
-    claims.push(session.uint_is(&sub, &sub_expected));
-
-    let mul = session.uint_mul(&u11, &u7);
-    let mul_expected = session.uint_leaf(U256::from(77u8), fp);
-    claims.push(session.uint_is(&mul, &mul_expected));
-
-    let inf = session.ec_pai(group_ptr);
-    claims.push(session.ec_is(&inf, &inf));
-
-    let create = |session: &mut Session, x: U256, y: U256| {
-        let x_node = session.uint_leaf(x, fp);
-        let y_node = session.uint_leaf(y, fp);
-        session.ec_create(group_ptr, &x_node, &y_node)
-    };
-
-    let g_pt = create(&mut session, gx, gy);
-    let g2_pt = create(&mut session, g2x, g2y);
-    let g3_pt = create(&mut session, g3x, g3y);
-
-    let add_pt = session.ec_add(&g_pt, &g2_pt);
-    claims.push(session.ec_is(&add_pt, &g3_pt));
-
-    let sub_pt = session.ec_sub(&g3_pt, &g_pt);
-    claims.push(session.ec_is(&sub_pt, &g2_pt));
-
-    let g_expr = session.msm_intro(&g_pt);
-    let g2_expr = session.msm_intro(&g2_pt);
-    let expr = session.msm_combine(g_expr, g2_expr);
-    let one = session.uint_leaf(from_hex("1"), sn);
-    let msm_value = session.ec_msm(expr, &[(g_pt, one), (g2_pt, one)]);
-    claims.push(session.ec_is(&msm_value, &g3_pt));
-
-    let root = session.assert_and_fold(claims);
-    session.finish(root)
+fn uint_value_entry(domain: UintDomain, value: U256) -> WireEntry {
+    WireEntry::Data {
+        tag: UintPrecompile::value_tag(domain),
+        chunks: vec![to_limbs32(value).map(Felt::from_u32)],
+    }
 }
 
 #[test]
@@ -255,11 +273,92 @@ fn session_public_root_matches_synthetic_deferred_state_for_keccak_inputs() {
 
 #[test]
 fn session_public_root_matches_synthetic_deferred_state_for_all_supported_node_types() {
-    let vm_root = all_node_vm_root();
-    let traces = all_node_session_traces();
+    let state = all_node_vm_state();
+    let DeferredSession { session, root } = session_from_deferred_state(&state).unwrap();
 
-    assert_eq!(traces.public_root(), P2Digest::from(vm_root));
+    assert_eq!(root.hash(), P2Digest::from(state.root()));
+    let traces = session.finish(root);
     traces.check();
+}
+
+#[test]
+fn empty_deferred_state_translates_to_true_root() {
+    let state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+        .expect("full precompile registry initializes");
+
+    translated_traces_check(&state);
+}
+
+#[test]
+fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+        .expect("full precompile registry initializes");
+
+    for curve in CurveId::ALL {
+        let identity = register_curve_identity(&mut state, curve);
+        let generator = register_curve_generator(&mut state, curve);
+
+        let identity_eq =
+            register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, identity, identity);
+        state.log_statement(identity_eq).expect("identity equality logs");
+
+        let generator_eq =
+            register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, generator, generator);
+        state.log_statement(generator_eq).expect("generator equality logs");
+
+        let sum = register_curve_op(&mut state, CurvePrecompile::ADD_OP_ID, generator, identity);
+        let sum_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, sum, generator);
+        state.log_statement(sum_eq).expect("generator plus identity logs");
+    }
+
+    translated_traces_check(&state);
+}
+
+#[test]
+fn deferred_session_translates_arbitrary_non_log_spine_truthy_root() {
+    let wire = DeferredStateWire {
+        entries: vec![
+            WireEntry::Join {
+                tag: Tag::AND,
+                lhs: TRUE_INDEX,
+                rhs: TRUE_INDEX,
+            },
+            WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 1 },
+        ],
+    };
+    let state =
+        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire, usize::MAX)
+            .expect("AND-only wire state rehydrates");
+
+    translated_traces_check(&state);
+}
+
+#[test]
+fn deferred_session_translates_shared_uint_intermediate() {
+    let domain = UintDomain::U256;
+    let wire = DeferredStateWire {
+        entries: vec![
+            uint_value_entry(domain, U256::from(5u8)),
+            uint_value_entry(domain, U256::from(7u8)),
+            WireEntry::Join {
+                tag: UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
+                lhs: 1,
+                rhs: 2,
+            },
+            uint_value_entry(domain, U256::from(12u8)),
+            WireEntry::Join {
+                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
+                lhs: 3,
+                rhs: 4,
+            },
+            WireEntry::Join { tag: Tag::AND, lhs: 5, rhs: 5 },
+        ],
+    };
+    let state =
+        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire, usize::MAX)
+            .expect("shared uint wire state rehydrates");
+
+    translated_traces_check(&state);
 }
 
 #[test]
@@ -285,7 +384,9 @@ fn trailing_zero_input_changes_root() {
 fn keccak_deferred_state_root_proves_and_verifies() {
     let input = b"abc";
     let synthetic = synthetic_keccak_state(input);
-    let traces = keccak_session_traces(input);
+    let DeferredSession { session, root } = session_from_deferred_state(&synthetic.state).unwrap();
+    assert_eq!(root.hash(), synthetic.root);
+    let traces = session.finish(root);
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();

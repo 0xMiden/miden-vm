@@ -10,7 +10,6 @@ pub mod transcript;
 pub mod uint;
 pub mod utils;
 
-#[cfg(test)]
 pub(crate) mod deferred;
 
 #[cfg(test)]
