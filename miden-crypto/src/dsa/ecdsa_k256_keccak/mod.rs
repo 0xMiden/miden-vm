@@ -72,10 +72,7 @@ impl SecretKey {
 
     /// Signs a pre-hashed message with this secret key.
     fn sign_prehash(&self, message_digest: [u8; 32]) -> Signature {
-        let (signature_inner, recovery_id) = self
-            .inner
-            .sign_prehash_recoverable(&message_digest)
-            .expect("failed to generate signature");
+        let (signature_inner, recovery_id) = self.inner.sign_prehash_recoverable(&message_digest);
 
         let (r, s) = signature_inner.split_scalars();
 

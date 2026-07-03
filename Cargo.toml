@@ -63,14 +63,14 @@ assert_matches      = { default-features = false, version = "1.5" }
 blake3              = { default-features = false, version = "1.8" }
 cc                  = "1.2"
 chacha20poly1305    = { default-features = false, version = "0.11.0-rc.3" }
-curve25519-dalek    = { default-features = false, version = "5.0.0-rc.0" }
+curve25519-dalek    = { default-features = false, version = "5.0.0-rc.1" }
 der                 = { default-features = false, version = "0.8" }
-ed25519-dalek       = { default-features = false, version = "3.0.0-rc.0" }
+ed25519-dalek       = { default-features = false, version = "3.0.0-rc.1" }
 flume               = { default-features = false, version = "0.12.0" }
 hex                 = { default-features = false, version = "0.4" }
 hkdf                = { default-features = false, version = "0.13" }
 itertools           = "0.14"
-k256                = { default-features = false, version = "0.14.0-rc.10" }
+k256                = { default-features = false, version = "0.14.0-rc.15" }
 num                 = { default-features = false, version = "0.4" }
 num-complex         = { default-features = false, version = "0.4" }
 once_cell           = { default-features = false, version = "1.21" }
@@ -90,7 +90,7 @@ tempfile            = "3.20"
 wycheproof-ng-core  = { default-features = false, version = "0.1.1" }
 wycheproof-ng-dh    = { default-features = false, version = "0.1.1" }
 wycheproof-ng-eddsa = { default-features = false, version = "0.1.1" }
-x25519-dalek        = { default-features = false, version = "3.0.0-rc.0" }
+x25519-dalek        = { default-features = false, version = "3.0.0-rc.1" }
 
 # Shared third-party dependencies used by imported Miden STARK crates
 clap               = { features = ["derive"], version = "4" }
