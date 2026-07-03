@@ -15,8 +15,14 @@ use crate::{
     },
 };
 
+// CONSTANTS
+// ================================================================================================
+
 const SPARSE_MAGIC: &[u8; 4] = b"SMST";
 const SPARSE_VERSION: [u8; 3] = [0, 0, 0];
+
+// HELPERS
+// ================================================================================================
 
 fn sparse_mast_forest_min_serialized_size() -> usize {
     SPARSE_MAGIC.len()
@@ -26,13 +32,16 @@ fn sparse_mast_forest_min_serialized_size() -> usize {
         + usize::min_serialized_size()
 }
 
+// WRITER
+// ================================================================================================
+
 /// Serializes a [`SparseMastForest`] in trusted sparse replay form.
 ///
 /// This format carries the digest for each full node and accepts those digests on read. It is
 /// suitable for trusted remote proving inputs, not as an untrusted hashless validation path.
 ///
 /// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
-pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
+fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
     let mut basic_block_data_builder = BasicBlockDataBuilder::new();
     let mut full_ids = Vec::with_capacity(forest.nodes().len());
     let mut entries = Vec::with_capacity(forest.nodes().len());
@@ -94,6 +103,9 @@ pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target
     forest.advice_map().write_into(target);
 }
 
+// TRAIT IMPLS
+// ================================================================================================
+
 impl Serializable for SparseMastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         write_sparse_into(self, target);
@@ -119,11 +131,14 @@ impl Deserializable for SparseMastForest {
     }
 }
 
+// READER
+// ================================================================================================
+
 /// Reads a trusted sparse replay payload.
 ///
 /// The payload carries full-node digests and digest-only entries as replay data. It does not
 /// rebuild those hashes from node structure.
-pub(super) fn read_sparse_from<R: ByteReader>(
+fn read_sparse_from<R: ByteReader>(
     source: &mut R,
 ) -> Result<SparseMastForest, DeserializationError> {
     let mut reader = TrackingReader::new(source);
@@ -221,6 +236,9 @@ pub(super) fn read_sparse_from<R: ByteReader>(
         commitment,
     )
 }
+
+// HELPER FUNCTIONS
+// ================================================================================================
 
 fn read_and_validate_sparse_header<R: ByteReader>(
     source: &mut R,
