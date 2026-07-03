@@ -65,8 +65,9 @@ pub use node::{
 };
 
 use crate::{
-    Felt, WORD_SIZE, Word,
+    Felt, Word,
     advice::AdviceMap,
+    crypto::hash::Poseidon2,
     serde::{ByteWriter, DeserializationError, Serializable},
     utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
@@ -595,9 +596,9 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> MastForestCommitment {
-    let interface_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
-    let dependency_commitment = miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[]);
-    let advice_commitment = compute_advice_commitment(&AdviceMap::default());
+    let interface_commitment = Poseidon2::merge_many(&[]);
+    let dependency_commitment = Poseidon2::merge_many(&[]);
+    let advice_commitment = AdviceMap::default().commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
@@ -607,7 +608,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+    Poseidon2::merge_many(&digests)
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
@@ -628,24 +629,7 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
         digests.sort_unstable();
         digests
     };
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
-}
-
-pub(in crate::mast) fn compute_advice_commitment(advice_map: &AdviceMap) -> Word {
-    let entry_commitments = advice_map
-        .iter()
-        .map(|(key, values)| {
-            let mut elements = Vec::with_capacity(WORD_SIZE + 2 + values.len());
-            elements.extend_from_slice(key.as_elements());
-            let value_len = values.len() as u64;
-            elements.push(Felt::from_u32(value_len as u32));
-            elements.push(Felt::from_u32((value_len >> 32) as u32));
-            elements.extend_from_slice(values);
-            miden_crypto::hash::poseidon2::Poseidon2::hash_elements(&elements)
-        })
-        .collect::<Vec<_>>();
-
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&entry_commitments)
+    Poseidon2::merge_many(&digests)
 }
 
 impl MastForestCommitment {
@@ -673,11 +657,7 @@ pub(in crate::mast) fn compute_mast_forest_commitment_from_parts(
     dependency_commitment: Word,
     advice_commitment: Word,
 ) -> Word {
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[
-        interface_commitment,
-        dependency_commitment,
-        advice_commitment,
-    ])
+    Poseidon2::merge_many(&[interface_commitment, dependency_commitment, advice_commitment])
 }
 
 fn compute_mast_forest_commitment(
@@ -687,7 +667,7 @@ fn compute_mast_forest_commitment(
 ) -> MastForestCommitment {
     let interface_commitment = compute_nodes_commitment(nodes, roots);
     let dependency_commitment = compute_dependency_commitment(nodes);
-    let advice_commitment = compute_advice_commitment(advice_map);
+    let advice_commitment = advice_map.commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
