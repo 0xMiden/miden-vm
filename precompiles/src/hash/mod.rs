@@ -1,4 +1,4 @@
-//! Shared base for deferred hash precompiles.
+//! Shared base for hash precompiles.
 //!
 //! [`HashPrecompile<H>`] implements the generic hash assertion protocol. A hash assertion is one
 //! precompile-owned join node tagged `[hash_id, ASSERT_DISC, n_bytes, 0]` over two framework-owned
@@ -39,7 +39,7 @@ pub trait HashFunction: Default + Send + Sync + 'static {
 
 const ASSERT_DISC: u32 = 0;
 
-/// A deferred hash assertion precompile parameterized by its [`HashFunction`].
+/// A hash assertion precompile parameterized by its [`HashFunction`].
 pub struct HashPrecompile<H>(PhantomData<H>);
 
 impl<H> Default for HashPrecompile<H> {

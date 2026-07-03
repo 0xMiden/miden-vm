@@ -14,12 +14,12 @@ use miden::precompiles::math::field::k1_scalar
 # - sig_ptr[0..8]     = r, sig_ptr[8..16]     = s
 #
 # All input pointers are expected to be double-word aligned and to point at u32-range felts.
-# Deferred-precompile assumptions used by this verifier:
+# Deferred-state assumptions used by this verifier:
 # - public-key coordinates, prehash limbs, and signature limbs are registered as canonical
 #   VALUE digests by the k1 base/scalar and curve precompiles;
 # - raw prehash z is a 256-bit value, so z < 2^256 < 2n and one conditional subtraction reduces it;
 # - the verifier passes U1/U2 scalar digests to the curve scalar multiplication wrappers;
-# - scalar/curve equality constraints below are partly enforced by deferred precompile logging.
+# - scalar/curve equality constraints below are partly enforced by deferred statement logging.
 
 # SECP256K1 scalar modulus n, little-endian u32 limbs.
 const K1_N_LO = [0xd0364141, 0xbfd25e8c, 0xaf48a03b, 0xbaaedce6]
@@ -45,7 +45,7 @@ const K1_N_HI = [0xfffffffe, 0xffffffff, 0xffffffff, 0xffffffff]
 #! - raw z < 2^256 < 2n, so one subtraction is enough after loading the prehash;
 #! - SIG_R != 0 is checked here, and k1_scalar::inv traps/binds correctness for SIG_S != 0;
 #! - U1/U2 are passed as scalar digests to the curve scalar multiplication wrappers;
-#! - scalar/curve equality constraints are logged through deferred precompile machinery.
+#! - scalar/curve equality constraints are logged through deferred statement machinery.
 pub proc assert_verify_prehash
     exec.prepare_verify_prehash_inputs
     # => [pubkey_ptr, U1, U2, SIG_R, ...]

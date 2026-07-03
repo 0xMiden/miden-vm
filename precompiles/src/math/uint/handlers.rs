@@ -51,7 +51,7 @@ impl EventHandler for UintFieldInvHandler {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum UintFieldInvError {
-    #[error("expected uint deferred precompile")]
+    #[error("expected uint precompile tag")]
     ExpectedUintPrecompile,
     #[error("expected a canonical uint VALUE node")]
     ExpectedUintValue,

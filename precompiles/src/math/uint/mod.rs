@@ -1,4 +1,4 @@
-//! Fixed-domain 256-bit uint deferred precompile support.
+//! Fixed-domain 256-bit uint precompile support for deferred evaluation.
 
 mod domain;
 pub(crate) mod handlers;

@@ -1,4 +1,4 @@
-//! Trait and id scheme for deferred precompiles.
+//! Trait and id scheme for precompiles in the deferred framework.
 //!
 //! A [`Precompile`] owns a stable slice of tag space and supplies the semantics the framework
 //! cannot know: which tags are valid, what their bodies mean, and how nodes evaluate to canonical

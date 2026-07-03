@@ -1,4 +1,4 @@
-//! Arithmetic deferred precompiles.
+//! Arithmetic precompiles for deferred evaluation.
 
 pub mod curve;
 pub mod ed25519_base;

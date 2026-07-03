@@ -1,6 +1,6 @@
 #! Keccak256 hash procedures.
 #!
-#! These stack-returning core wrappers use bundled deferred-precompile support internally for event
+#! These stack-returning core wrappers use bundled precompile-backed support internally for event
 #! handling and deferred verification.
 
 use miden::precompiles::crypto::hashes::keccak256

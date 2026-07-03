@@ -1,4 +1,4 @@
-#! Arithmetic deferred precompile wrappers.
+#! Arithmetic precompile support wrappers.
 
 pub mod field
 pub mod curve

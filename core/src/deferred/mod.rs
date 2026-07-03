@@ -1,4 +1,4 @@
-//! Content-addressed deferred computation for precompile-backed VM hints.
+//! Content-addressed deferred computation for VM hints.
 //!
 //! Deferred events let programs commit opaque statements during execution and leave their
 //! semantic checks to installed [`Precompile`]s. The framework stores those commitments as a DAG

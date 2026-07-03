@@ -1,4 +1,4 @@
-//! Deferred precompile for fixed 256-bit uint arithmetic domains.
+//! Precompile for fixed 256-bit uint arithmetic domains in the deferred framework.
 
 use alloc::vec::Vec;
 
@@ -90,7 +90,7 @@ impl UintNode {
     }
 }
 
-/// Deferred precompile for 256-bit arithmetic over fixed uint domains.
+/// Precompile for 256-bit arithmetic over fixed uint domains.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UintPrecompile;
 

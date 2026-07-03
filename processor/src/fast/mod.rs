@@ -233,9 +233,9 @@ impl FastProcessor {
     ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
-    /// [`Self::with_advice`] or use [`Self::new_with_options`]. Installed deferred precompiles and
-    /// any accumulated deferred state are preserved; only the remaining deferred-state budget is
-    /// updated to match the new options.
+    /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
+    /// and any accumulated deferred state are preserved; only the remaining deferred-state
+    /// budget is updated to match the new options.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
         self.deferred_state.set_max_elements(options.max_deferred_elements());
@@ -307,18 +307,18 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
-    /// Low-level hook for installing deferred precompiles into this processor's deferred state.
+    /// Low-level hook for installing a precompile registry into this processor's deferred state.
     ///
     /// `FastProcessor` starts with the framework's empty registry because it is the raw processor
     /// layer. Use this hook for direct processor integration, custom registries, or tests.
     /// High-level VM/prover/CLI entry points install the official `miden-precompiles` registry
     /// automatically.
-    pub fn with_deferred_precompiles(
+    pub fn with_precompile_registry(
         mut self,
-        precompiles: PrecompileRegistry,
+        registry: PrecompileRegistry,
     ) -> Result<Self, ExecutionError> {
         self.deferred_state
-            .extend_precompiles(precompiles)
+            .extend_precompiles(registry)
             .map_err(ExecutionError::deferred_error_no_context)?;
         Ok(self)
     }

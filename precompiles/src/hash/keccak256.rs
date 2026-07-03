@@ -1,4 +1,4 @@
-//! Keccak-256 deferred precompile.
+//! Keccak-256 precompile for deferred evaluation.
 
 use alloc::vec::Vec;
 
@@ -19,7 +19,7 @@ impl HashFunction for Keccak256Hash {
     }
 }
 
-/// The Keccak-256 deferred precompile, installed by [`registry`](crate::registry).
+/// The Keccak-256 precompile, installed by [`registry`](crate::registry).
 pub type Keccak256Precompile = HashPrecompile<Keccak256Hash>;
 
 #[cfg(test)]

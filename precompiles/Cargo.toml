@@ -1,7 +1,7 @@
 [package]
 name = "miden-precompiles"
 version.workspace = true
-description = "Concrete deferred precompile implementations for the Miden VM"
+description = "Concrete precompile implementations for the Miden VM deferred framework"
 documentation = "https://docs.rs/miden-precompiles"
 readme = "README.md"
 categories = ["cryptography", "no-std"]

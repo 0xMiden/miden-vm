@@ -244,7 +244,7 @@ mod fast_parallel {
     ) -> TraceBuildInputs {
         FastProcessor::new_with_options(stack_inputs, advice_inputs, parallel_execution_options())
             .expect("processor advice inputs should fit advice map limits")
-            .with_deferred_precompiles(miden_precompiles::registry())
+            .with_precompile_registry(miden_precompiles::registry())
             .expect("official precompiles should install")
             .execute_trace_inputs_sync(program, host)
             .expect("Fast processor execution failed")

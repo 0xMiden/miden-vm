@@ -45,8 +45,8 @@ pub fn asm_source_dir() -> PathBuf {
 ///
 /// The package bundles MASM support procedures for hash wrappers, arithmetic wrappers, signature
 /// wrappers, and deferred-DAG helpers. These MASM modules are currently internal implementation
-/// detail for core-library facades and precompile tests, while the crate's deferred
-/// [`PrecompileRegistry`] is provided separately via [`registry`].
+/// detail for core-library facades and precompile tests, while the crate's
+/// [`PrecompileRegistry`] for deferred evaluation is provided separately via [`registry`].
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
@@ -108,7 +108,7 @@ pub mod event_handlers {
 // REGISTRY
 // ================================================================================================
 
-/// Returns a [`PrecompileRegistry`] containing the deferred precompiles provided by this crate.
+/// Returns a [`PrecompileRegistry`] containing the precompiles provided by this crate.
 pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())

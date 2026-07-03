@@ -76,8 +76,8 @@ impl DeferredState {
         Ok(())
     }
 
-    /// Adds deferred precompiles to this state without discarding existing nodes, evaluation memos,
-    /// root, or budget accounting.
+    /// Adds precompiles to this state without discarding existing nodes, evaluation memos, root, or
+    /// budget accounting.
     ///
     /// Registration is additive only: duplicate precompile ids panic via
     /// [`PrecompileRegistry::merge`], matching setup-time registry construction behavior. The

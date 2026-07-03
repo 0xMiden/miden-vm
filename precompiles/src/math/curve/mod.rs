@@ -1,4 +1,4 @@
-//! Fixed curve deferred precompile backed by fixed uint coordinate domains.
+//! Fixed-curve precompile backed by fixed uint coordinate domains.
 //!
 //! This crate API is internal to `miden-precompiles`; it is not a public curve library and does not
 //! promise stable external encodings or trait APIs.
@@ -419,7 +419,7 @@ impl CurveNode {
     }
 }
 
-/// Deferred precompile for point operations over the fixed supported curves.
+/// Precompile for point operations over the fixed supported curves.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CurvePrecompile;
 

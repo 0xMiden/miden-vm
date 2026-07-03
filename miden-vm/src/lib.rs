@@ -13,7 +13,7 @@ pub use miden_core::proof::{ExecutionProof, HashFunction};
 /// Low-level processor type for callers that need direct execution control.
 ///
 /// Prefer the high-level [`execute`] and [`execute_sync`] facade functions for default
-/// execution; they install the built-in deferred precompile registry automatically.
+/// execution; they install the built-in precompile registry automatically.
 pub use miden_processor::FastProcessor;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend,
@@ -32,7 +32,7 @@ pub use miden_verifier::VerificationError;
 #[cfg(feature = "internal")]
 pub mod internal;
 
-/// Executes the provided program with the built-in deferred precompile registry.
+/// Executes the provided program with the built-in precompile registry.
 ///
 /// The `host` parameter is used to provide the external environment to the program being executed,
 /// such as access to the advice provider and libraries that the program depends on.
@@ -49,7 +49,7 @@ pub async fn execute(
 ) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
         .map_err(ExecutionError::advice_error_no_context)?
-        .with_deferred_precompiles(miden_precompiles::registry())?;
+        .with_precompile_registry(miden_precompiles::registry())?;
 
     processor.execute(program, host).await
 }
@@ -73,7 +73,7 @@ pub fn execute_sync(
 ) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
         .map_err(ExecutionError::advice_error_no_context)?
-        .with_deferred_precompiles(miden_precompiles::registry())?;
+        .with_precompile_registry(miden_precompiles::registry())?;
 
     processor.execute_sync(program, host)
 }

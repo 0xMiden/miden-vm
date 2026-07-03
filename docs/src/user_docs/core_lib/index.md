@@ -24,7 +24,7 @@ Throughout this document, we use lower-case letters to refer to individual field
 ## Organization and usage
 Procedures in the Miden Core Library are organized into modules, each targeting a narrow set of functionality. Modules are grouped under higher-level namespaces, e.g. `miden::core::math`. These higher-level namespaces are structured to not contain any items directly - instead, procedures and other items are defined in submodules of these high-level namespaces, e.g. `miden::core::math::u64` which provides useful 64-bit unsigned integer arithmetic procedures and constants.
 
-For an example of how to invoke procedures from imported modules see [this section](../assembly/code_organization.md#importing-modules). Users should load `CoreLibrary` to access modules under the `miden::core` namespace. Core wrappers may use bundled deferred precompiles internally, but users should rely on the stable `miden::core::*` facades.
+For an example of how to invoke procedures from imported modules see [this section](../assembly/code_organization.md#importing-modules). Users should load `CoreLibrary` to access modules under the `miden::core` namespace. Core wrappers may use bundled precompile-backed verification internally, but users should rely on the stable `miden::core::*` facades.
 
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.

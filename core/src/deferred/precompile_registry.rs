@@ -11,7 +11,7 @@ use crate::{
 /// Installed set of precompiles for deferred-node validation and evaluation.
 ///
 /// Routing is entirely id-based. The empty registry is valid but rejects every precompile-owned
-/// tag, which is useful for programs that do not use deferred precompiles.
+/// tag, which is useful for programs that do not use precompile-backed deferred nodes.
 #[derive(Clone, Default)]
 pub struct PrecompileRegistry {
     precompiles: BTreeMap<Felt, Arc<dyn Precompile>>,
@@ -29,7 +29,7 @@ impl core::fmt::Debug for PrecompileRegistry {
 }
 
 impl PrecompileRegistry {
-    /// Creates an empty deferred precompile registry.
+    /// Creates an empty precompile registry.
     pub const fn new() -> Self {
         Self { precompiles: BTreeMap::new() }
     }

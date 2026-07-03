@@ -5,7 +5,7 @@
 use miden::precompiles
 use miden::precompiles::math::field::{{BASE_FIELD_MODULE}}
 
-# {{TITLE}} CURVE DEFERRED PRECOMPILE WRAPPERS
+# {{TITLE}} CURVE PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
 # User-facing curve values are deferred node digests. A canonical point is one join-shaped VALUE
 # node whose payload is `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]`:

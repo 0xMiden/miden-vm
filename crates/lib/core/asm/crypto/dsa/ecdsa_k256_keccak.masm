@@ -42,7 +42,8 @@ use miden::core::crypto::hashes::keccak256
 #! overlapped with the later prehash buffer so it does not require additional locals.
 #!
 #! Advice is untrusted. The wrapper binds QX/QY to `PK_COMM`, and the native verifier binds and
-#! validates the public key, reduced prehash, and signature scalars through deferred precompiles.
+#! validates the public key, reduced prehash, and signature scalars through precompile-backed
+#! deferred evaluation.
 @locals(40)
 pub proc verify
     # Load QX || QY || SIG_R || SIG_S from advice into the raw precompile memory ABI. `adv_pipe`

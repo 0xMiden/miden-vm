@@ -404,7 +404,7 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.trace_len_summary(),
     );
 
-    // Verify deferred precompile data match deterministically.
+    // Verify precompile-backed deferred data match deterministically.
 
     // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
     assert_eq!(

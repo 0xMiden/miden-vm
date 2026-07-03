@@ -1,4 +1,4 @@
-#! Curve deferred precompile wrappers.
+#! Curve precompile support wrappers.
 
 pub mod ed25519_sw
 pub mod secp256k1

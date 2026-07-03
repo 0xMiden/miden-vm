@@ -50,7 +50,7 @@ pub fn run_precompile_program_with_stack(
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_deferred_precompiles(registry())?
+    .with_precompile_registry(registry())?
     .execute_sync(&program, &mut host);
 
     if let Ok(output) = &output {

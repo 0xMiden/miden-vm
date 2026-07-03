@@ -9,7 +9,7 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
-`CoreLibrary` also bundles deferred precompile support used internally by core wrappers,
+`CoreLibrary` also bundles precompile-backed verification support used internally by core wrappers,
 so users do not need any separate precompile-package wiring for standard Miden programs. Users
 should call the stable facades under `miden::core::*`.
 

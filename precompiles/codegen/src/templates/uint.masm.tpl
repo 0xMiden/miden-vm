@@ -4,7 +4,7 @@
 
 use miden::precompiles
 
-# {{TITLE}} DEFERRED {{DOMAIN_KIND}} PRECOMPILE WRAPPERS
+# {{TITLE}} {{DOMAIN_KIND}} PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
 # User-facing values are deferred node digests. Canonical values are one data chunk of eight
 # little-endian u32 limbs. Arithmetic is selected by the fixed domain id (MODULUS_ID).

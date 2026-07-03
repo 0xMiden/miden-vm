@@ -304,7 +304,8 @@ impl Payload {
 // NODE
 // ================================================================================================
 
-/// A deferred DAG entry whose meaning is supplied by its tag's precompile.
+/// A deferred DAG entry whose meaning is supplied by a framework tag or owning
+/// [`super::Precompile`].
 ///
 /// The framework validates only the declared [`NodeType`]. Value semantics, producing ops, and
 /// predicates all live in the owning [`super::Precompile`]. A predicate succeeds by evaluating to
