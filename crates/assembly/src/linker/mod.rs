@@ -172,7 +172,7 @@ impl Linker {
                 reason: err.to_string(),
             })?;
 
-        match self.libraries.entry(library.interface_digest()) {
+        match self.libraries.entry(library.package.digest()) {
             Entry::Vacant(entry) => {
                 entry.insert(library);
                 self.link_assembled_modules(module_infos)

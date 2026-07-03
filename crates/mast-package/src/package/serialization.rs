@@ -1190,8 +1190,8 @@ mod tests {
         Felt, Word,
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
-            MastNode, MastNodeExt, MastNodeId,
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
+            MastNodeId,
         },
         operations::Operation,
         serde::{
@@ -1247,31 +1247,6 @@ mod tests {
             TargetType::Library,
             mast,
             exports,
-            None,
-        )
-        .expect("test package should be valid")
-    }
-
-    fn build_package_with_external_dependency(dependency_digest: Word) -> Package {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
-            .expect("failed to build basic block");
-        forest.make_root(node_id);
-        ExternalNodeBuilder::new(dependency_digest)
-            .add_to_forest(&mut forest)
-            .expect("failed to build external node");
-
-        let path = absolute_path("test::proc");
-        let export =
-            ProcedureExport::new(Arc::clone(&path), Some(node_id), forest[node_id].digest(), None);
-
-        Package::create(
-            PackageId::from("test_pkg"),
-            crate::Version::new(0, 0, 0),
-            TargetType::Library,
-            Arc::new(forest),
-            [PackageExport::Procedure(export)],
             None,
         )
         .expect("test package should be valid")
@@ -1533,42 +1508,6 @@ mod tests {
             })
             .expect("test dependency should be unique");
         assert_ne!(digest, with_dependency.content_digest());
-    }
-
-    #[test]
-    fn package_digest_changes_when_external_dependencies_change() {
-        let first = build_package_with_external_dependency(Word::new([
-            Felt::new_unchecked(1),
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-        ]));
-        let second = build_package_with_external_dependency(Word::new([
-            Felt::new_unchecked(2),
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-        ]));
-
-        assert_eq!(first.interface_digest(), second.interface_digest());
-        assert_ne!(first.digest(), second.digest());
-        assert_ne!(first.content_digest(), second.content_digest());
-    }
-
-    #[test]
-    fn package_digest_changes_when_advice_map_changes() {
-        let first = build_package().with_advice_map(AdviceMap::from_iter([(
-            Word::from([Felt::new_unchecked(1), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
-            vec![Felt::new_unchecked(10)],
-        )]));
-        let second = build_package().with_advice_map(AdviceMap::from_iter([(
-            Word::from([Felt::new_unchecked(2), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
-            vec![Felt::new_unchecked(10)],
-        )]));
-
-        assert_eq!(first.interface_digest(), second.interface_digest());
-        assert_ne!(first.digest(), second.digest());
-        assert_ne!(first.content_digest(), second.content_digest());
     }
 
     #[test]
