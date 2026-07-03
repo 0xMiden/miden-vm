@@ -68,10 +68,15 @@ pub struct SparseMastForest {
     /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
     commitment_cache: Word,
 
-    /// Sorted source root digests used as the forest commitment input.
+    /// Sorted source root digests used as the sparse forest commitment input.
+    ///
+    /// This is separate from [`Self::roots`], which stores source node IDs.
     commitment_root_digests: Vec<Word>,
 
-    /// Sorted full external node digests represented in this sparse forest.
+    /// Sorted external node digests used as the sparse dependency commitment input.
+    ///
+    /// This is separate from [`Self::digests`], which is keyed by source node ID for replay
+    /// lookup.
     dependency_digests: Vec<Word>,
 }
 
@@ -194,10 +199,7 @@ fn validate_counted_sorted_digests(
     validate_sorted_digests(digests, label)
 }
 
-fn validate_sorted_digests(
-    digests: &[Word],
-    label: &str,
-) -> Result<(), DeserializationError> {
+fn validate_sorted_digests(digests: &[Word], label: &str) -> Result<(), DeserializationError> {
     if !digests.windows(2).all(|pair| pair[0] < pair[1]) {
         return Err(DeserializationError::InvalidValue(format!(
             "{label} section is not strictly sorted"

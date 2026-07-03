@@ -688,10 +688,10 @@ fn test_mast_forest_wire_payload_includes_sorted_commitment_inputs() {
     let sorted = vec![second, third, first];
 
     assert_eq!(
-        read_words_at(&bytes, view.root_digest_offset(), view.procedure_root_count()),
+        read_words_at(&bytes, view.root_commitment_digest_offset(), view.procedure_root_count()),
         sorted
     );
-    assert_eq!(read_words_at(&bytes, view.dependency_digest_offset(), 3), sorted);
+    assert_eq!(read_words_at(&bytes, view.dependency_commitment_digest_offset(), 3), sorted);
     assert_eq!(
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(&sorted),
         forest.commitment()
@@ -747,9 +747,10 @@ fn test_mast_forest_readers_reject_mismatched_commitment_inputs() {
 
     let mut bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
-    let root_digest_offset = view.root_digest_offset();
+    let root_commitment_digest_offset = view.root_commitment_digest_offset();
     Word::default().write_into(
-        &mut &mut bytes[root_digest_offset..root_digest_offset + Word::min_serialized_size()],
+        &mut &mut bytes[root_commitment_digest_offset
+            ..root_commitment_digest_offset + Word::min_serialized_size()],
     );
 
     let result = MastForest::read_from_bytes(&bytes);
@@ -1908,7 +1909,8 @@ fn test_deserialization_rejects_mismatched_header_counts() {
 
     let mut bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
-    let original_advice_map_offset = view.root_digest_offset() + Word::min_serialized_size();
+    let original_advice_map_offset =
+        view.root_commitment_digest_offset() + Word::min_serialized_size();
     let mut offset = 8;
     let internal_count_offset = offset;
     let _internal_node_count = read_usize_at(&bytes, &mut offset).unwrap();

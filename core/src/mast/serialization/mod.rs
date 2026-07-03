@@ -60,7 +60,11 @@
 //!
 //! (Commitment input sections)
 //! - root node digests (`Vec<Word>`, sorted by digest)
+//!   - distinct from procedure roots: roots identify executable nodes by ID; this is the sorted
+//!     interface commitment input
 //! - external node digests (`Vec<Word>`, sorted by digest)
+//!   - distinct from the external digest section: that section is ordered by node index for lookup;
+//!     this is the sorted dependency commitment input
 //!
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
@@ -212,7 +216,7 @@ const FLAGS_RESERVED_MASK: u8 = 0xfd;
 ///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
 ///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
 ///   debug-presence flag.
-/// - [0, 0, 5]: Added sorted root digest and sorted external digest commitment input sections.
+/// - [0, 0, 5]: Added sorted root and dependency digest commitment input sections.
 ///
 /// Legacy wire versions (pre-#3192 decorator terminology):
 ///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
@@ -694,12 +698,12 @@ impl MastForestWireView<'_> {
         self.layout.node_hash_offset()
     }
 
-    fn root_digest_offset(&self) -> usize {
-        self.layout.root_digest_offset()
+    fn root_commitment_digest_offset(&self) -> usize {
+        self.layout.root_commitment_digest_offset()
     }
 
-    fn dependency_digest_offset(&self) -> usize {
-        self.layout.dependency_digest_offset()
+    fn dependency_commitment_digest_offset(&self) -> usize {
+        self.layout.dependency_commitment_digest_offset()
     }
 
     fn digest_slot_at(&self, index: usize) -> usize {

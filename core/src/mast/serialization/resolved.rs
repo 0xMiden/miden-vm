@@ -212,7 +212,7 @@ impl<'a> ResolvedSerializedForest<'a> {
         root_digests.sort_unstable();
         validate_digest_section(
             self.bytes,
-            self.layout.root_digest_offset(),
+            self.layout.root_commitment_digest_offset(),
             &root_digests,
             "root commitment digest",
         )?;
@@ -227,7 +227,7 @@ impl<'a> ResolvedSerializedForest<'a> {
         dependency_digests.sort_unstable();
         validate_digest_section(
             self.bytes,
-            self.layout.dependency_digest_offset(),
+            self.layout.dependency_commitment_digest_offset(),
             &dependency_digests,
             "dependency commitment digest",
         )
