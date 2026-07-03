@@ -1,9 +1,11 @@
 ## 0.28.0 (TBD)
-- [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
-- [BREAKING] Changed ECDSA-k256 public-key commitments to hash native affine-coordinate limbs (`qx || qy`, little-endian `u32` limbs) while keeping compressed SEC1 serialization unchanged ([#1075](https://github.com/0xMiden/crypto/issues/1075)).
+
 - Added a zeroizing read helper for deserializing sensitive material, fixing secret-key read buffers that were not wiped on error paths (ECDSA) or at all (Falcon, Poseidon2 AEAD) ([#1057](https://github.com/0xMiden/crypto/pull/1057)).
+- [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
 - Parallelize aux trace building for faster proving ([#1074](https://github.com/0xMiden/crypto/issues/1074)).
+- [BREAKING] Changed ECDSA-k256 public-key commitments to hash native affine-coordinate limbs (`qx || qy`, little-endian `u32` limbs) while keeping compressed SEC1 serialization unchanged ([#1075](https://github.com/0xMiden/crypto/issues/1075)).
 - Fixed SMT leaf advice decoding by rebuilding decoded entries through `SmtLeaf::new`, so decoded entries must match the supplied leaf index ([#1076](https://github.com/0xMiden/crypto/pull/1076)).
+- Made `Felt::from_{u8, u16, u32}` const and added `Felt::MAX` ([#1081](https://github.com/0xMiden/crypto/pull/1081)).
 
 ## 0.27.0 (2026-06-19)
 

@@ -319,3 +319,28 @@ fn felt_try_from_u64_fails_on_large_inputs() {
     Felt::try_from(u64::MAX).unwrap_err();
     Felt::try_from(Felt::ORDER).unwrap_err();
 }
+
+/// Ensures the `const` integer constructors produce the same element as the
+/// `PrimeCharacteristicRing` trait methods.
+#[test]
+fn const_constructors_match_trait() {
+    for value in [u8::MIN, 1, u8::MAX] {
+        assert_eq!(Felt::from_u8(value), <Felt as PrimeCharacteristicRing>::from_u8(value));
+    }
+
+    for value in [u16::MIN, 1, 12345, u16::MAX] {
+        assert_eq!(Felt::from_u16(value), <Felt as PrimeCharacteristicRing>::from_u16(value));
+    }
+
+    for value in [u32::MIN, 1, 12345, u32::MAX] {
+        assert_eq!(Felt::from_u32(value), <Felt as PrimeCharacteristicRing>::from_u32(value));
+    }
+}
+
+/// Ensures `Felt::MAX` is the largest canonical element, i.e. `ORDER - 1` (equivalently `-1`).
+#[test]
+fn felt_max() {
+    assert_eq!(Felt::MAX.as_canonical_u64(), Felt::ORDER - 1);
+    // The maximum element is `-1`, so adding one wraps around to zero.
+    assert_eq!(Felt::MAX + Felt::ONE, Felt::ZERO);
+}

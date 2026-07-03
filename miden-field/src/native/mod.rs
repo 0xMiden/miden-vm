@@ -63,6 +63,9 @@ impl Felt {
     pub const ZERO: Self = Self(Goldilocks::ZERO);
     pub const ONE: Self = Self(Goldilocks::ONE);
 
+    /// The largest valid field element, equal to `ORDER - 1`.
+    pub const MAX: Self = Self::new_unchecked(Self::ORDER - 1);
+
     /// The number of bytes which this field element occupies in memory.
     pub const NUM_BYTES: usize = Goldilocks::NUM_BYTES;
 
@@ -84,19 +87,22 @@ impl Felt {
         Self(Goldilocks::new(value))
     }
 
+    /// Constructs a field element from a `u8`.
     #[inline]
-    pub fn from_u8(value: u8) -> Self {
-        <Self as PrimeCharacteristicRing>::from_u8(value)
+    pub const fn from_u8(value: u8) -> Self {
+        Self::new_unchecked(value as u64)
     }
 
+    /// Constructs a field element from a `u16`.
     #[inline]
-    pub fn from_u16(value: u16) -> Self {
-        <Self as PrimeCharacteristicRing>::from_u16(value)
+    pub const fn from_u16(value: u16) -> Self {
+        Self::new_unchecked(value as u64)
     }
 
+    /// Constructs a field element from a `u32`.
     #[inline]
-    pub fn from_u32(value: u32) -> Self {
-        <Self as PrimeCharacteristicRing>::from_u32(value)
+    pub const fn from_u32(value: u32) -> Self {
+        Self::new_unchecked(value as u64)
     }
 
     /// The elementary function `double(a) = 2*a`.
