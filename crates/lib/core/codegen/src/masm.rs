@@ -7,25 +7,23 @@ use alloc::{
 use std::{fs, path::Path};
 
 use miden_core::Word;
-
-use crate::{
-    CodegenCurveId, CurvePrecompileDescriptor, Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain,
-    UintPrecompileDescriptor, ZERO_LIMBS,
+use miden_precompiles::{
+    CurveId, CurvePrecompile, Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, UintPrecompile, ZERO_LIMBS,
 };
 
-const UINT_TEMPLATE_PATH: &str = "precompiles/codegen/src/templates/uint.masm.tpl";
+const UINT_TEMPLATE_PATH: &str = "crates/lib/core/codegen/src/templates/uint.masm.tpl";
 const UINT_TEMPLATE: &str = include_str!("templates/uint.masm.tpl");
 const U256_CONSTANTS_TEMPLATE: &str = include_str!("templates/u256_constants.masm.tpl");
 const FIELD_CONSTANTS_TEMPLATE: &str = include_str!("templates/field_constants.masm.tpl");
 const FIELD_EXTRA_OPS_TEMPLATE: &str = include_str!("templates/field_extra_ops.masm.tpl");
-const CURVE_TEMPLATE_PATH: &str = "precompiles/codegen/src/templates/curve.masm.tpl";
+const CURVE_TEMPLATE_PATH: &str = "crates/lib/core/codegen/src/templates/curve.masm.tpl";
 const CURVE_TEMPLATE: &str = include_str!("templates/curve.masm.tpl");
 const REGENERATE_COMMAND: &str =
-    "cargo run -p miden-precompiles-codegen -- --out target/miden-precompiles-generated-asm";
+    "cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm";
 const ASM_PATH_PREFIX: &str = "asm/";
 
 fn generated_files() -> Result<Vec<GeneratedFile>, String> {
-    let mut generated = Vec::with_capacity(UintDomain::ALL.len() + CodegenCurveId::ALL.len());
+    let mut generated = Vec::with_capacity(UintDomain::ALL.len() + CurveId::ALL.len());
 
     for domain in UintDomain::ALL {
         let config = UintMasmConfig::new(domain);
@@ -35,7 +33,7 @@ fn generated_files() -> Result<Vec<GeneratedFile>, String> {
         });
     }
 
-    for curve in CodegenCurveId::ALL {
+    for curve in CurveId::ALL {
         let config = CurveMasmConfig::new(curve);
         generated.push(GeneratedFile {
             path: config.path,
@@ -53,7 +51,7 @@ fn render_uint(config: &UintMasmConfig) -> Result<String, String> {
     let two = constant(TWO_LIMBS, domain);
     let domain_constants = render_uint_constants(config)?;
     let domain_extra_procs = render_uint_extra_procs(config)?;
-    let op_tag = |op_id| word_literal(tag_word(UintPrecompileDescriptor::op_tag(op_id)));
+    let op_tag = |op_id| word_literal(tag_word(UintPrecompile::op_tag(op_id)));
 
     let replacements = vec![
         ("TEMPLATE_PATH", UINT_TEMPLATE_PATH.to_string()),
@@ -64,12 +62,12 @@ fn render_uint(config: &UintMasmConfig) -> Result<String, String> {
         ("ENCODED_MODULUS_NOTE", encoded_modulus_note(domain).to_string()),
         ("BOUND_PTR", domain.bound_ptr().to_string()),
         ("ENCODED_MODULUS_LIMBS", limbs_literal(domain.encoded_modulus())),
-        ("PRECOMPILE_ID", UintPrecompileDescriptor::id().as_canonical_u64().to_string()),
-        ("VALUE_TAG", word_literal(tag_word(UintPrecompileDescriptor::value_tag(domain)))),
-        ("ADD_TAG", op_tag(UintPrecompileDescriptor::ADD_OP_ID)),
-        ("SUB_TAG", op_tag(UintPrecompileDescriptor::SUB_OP_ID)),
-        ("MUL_TAG", op_tag(UintPrecompileDescriptor::MUL_OP_ID)),
-        ("EQ_TAG", op_tag(UintPrecompileDescriptor::EQ_OP_ID)),
+        ("PRECOMPILE_ID", UintPrecompile::id().as_canonical_u64().to_string()),
+        ("VALUE_TAG", word_literal(tag_word(UintPrecompile::value_tag(domain)))),
+        ("ADD_TAG", op_tag(UintPrecompile::ADD_OP_ID)),
+        ("SUB_TAG", op_tag(UintPrecompile::SUB_OP_ID)),
+        ("MUL_TAG", op_tag(UintPrecompile::MUL_OP_ID)),
+        ("EQ_TAG", op_tag(UintPrecompile::EQ_OP_ID)),
         ("ZERO_DIGEST", zero.digest),
         ("ZERO_LO_WORD", zero.lo_word),
         ("ZERO_HI_WORD", zero.hi_word),
@@ -140,7 +138,7 @@ fn render_uint_extra_procs(config: &UintMasmConfig) -> Result<String, String> {
 }
 
 fn constant(value: Limbs, domain: UintDomain) -> ConstantMasm {
-    let digest = UintPrecompileDescriptor::value_node(domain, value).digest();
+    let digest = UintPrecompile::value_node(domain, value).digest();
     let [lo, hi] = value_words(value);
     ConstantMasm {
         digest: word_literal(digest_word(digest)),
@@ -151,32 +149,32 @@ fn constant(value: Limbs, domain: UintDomain) -> ConstantMasm {
 
 fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
     let curve = config.curve;
-    let op_tag = |op_id| word_literal(tag_word(CurvePrecompileDescriptor::op_tag(op_id)));
+    let op_tag = |op_id| word_literal(tag_word(CurvePrecompile::op_tag(op_id)));
     let replacements = vec![
         ("TEMPLATE_PATH", CURVE_TEMPLATE_PATH.to_string()),
         ("REGENERATE_COMMAND", REGENERATE_COMMAND.to_string()),
         ("TITLE", config.title.to_string()),
         ("BASE_FIELD_MODULE", config.base_field_module.to_string()),
         ("BASE_FIELD_DESCRIPTION", config.base_field_description.to_string()),
-        ("PRECOMPILE_ID", CurvePrecompileDescriptor::id().as_canonical_u64().to_string()),
+        ("PRECOMPILE_ID", CurvePrecompile::id().as_canonical_u64().to_string()),
         ("GROUP_PTR", curve.group_ptr().to_string()),
-        ("VALUE_OP_ID", CurvePrecompileDescriptor::VALUE_OP_ID.to_string()),
-        ("ADD_OP_ID", CurvePrecompileDescriptor::ADD_OP_ID.to_string()),
-        ("SUB_OP_ID", CurvePrecompileDescriptor::SUB_OP_ID.to_string()),
-        ("EQ_OP_ID", CurvePrecompileDescriptor::EQ_OP_ID.to_string()),
-        ("MSM_OP_ID", CurvePrecompileDescriptor::MSM_OP_ID.to_string()),
-        ("VALUE_TAG", word_literal(tag_word(CurvePrecompileDescriptor::value_tag(curve)))),
-        ("ADD_TAG", op_tag(CurvePrecompileDescriptor::ADD_OP_ID)),
-        ("SUB_TAG", op_tag(CurvePrecompileDescriptor::SUB_OP_ID)),
-        ("EQ_TAG", op_tag(CurvePrecompileDescriptor::EQ_OP_ID)),
-        ("MSM_TAG", word_literal(tag_word(CurvePrecompileDescriptor::msm_tag()))),
+        ("VALUE_OP_ID", CurvePrecompile::VALUE_OP_ID.to_string()),
+        ("ADD_OP_ID", CurvePrecompile::ADD_OP_ID.to_string()),
+        ("SUB_OP_ID", CurvePrecompile::SUB_OP_ID.to_string()),
+        ("EQ_OP_ID", CurvePrecompile::EQ_OP_ID.to_string()),
+        ("MSM_OP_ID", CurvePrecompile::MSM_OP_ID.to_string()),
+        ("VALUE_TAG", word_literal(tag_word(CurvePrecompile::value_tag(curve)))),
+        ("ADD_TAG", op_tag(CurvePrecompile::ADD_OP_ID)),
+        ("SUB_TAG", op_tag(CurvePrecompile::SUB_OP_ID)),
+        ("EQ_TAG", op_tag(CurvePrecompile::EQ_OP_ID)),
+        ("MSM_TAG", word_literal(tag_word(CurvePrecompile::msm_tag()))),
         (
             "IDENTITY_DIGEST",
-            word_literal(digest_word(CurvePrecompileDescriptor::identity_node(curve).digest())),
+            word_literal(digest_word(CurvePrecompile::identity_node(curve).digest())),
         ),
         (
             "GENERATOR_DIGEST",
-            word_literal(digest_word(CurvePrecompileDescriptor::generator_node(curve).digest())),
+            word_literal(digest_word(CurvePrecompile::generator_node(curve).digest())),
         ),
     ];
 
@@ -356,13 +354,13 @@ struct CurveMasmConfig {
     title: &'static str,
     base_field_module: &'static str,
     base_field_description: &'static str,
-    curve: CodegenCurveId,
+    curve: CurveId,
 }
 
 impl CurveMasmConfig {
-    const fn new(curve: CodegenCurveId) -> Self {
+    const fn new(curve: CurveId) -> Self {
         match curve {
-            CodegenCurveId::Secp256k1 => Self {
+            CurveId::Secp256k1 => Self {
                 path: "asm/math/curve/secp256k1.masm",
                 title: "SECP256K1",
                 base_field_module: "k1_base",
@@ -385,7 +383,7 @@ mod tests {
 
     #[test]
     fn write_to_dir_preserves_unrelated_files() {
-        let out_dir = unique_temp_dir("miden-precompiles-codegen-write-to-dir");
+        let out_dir = unique_temp_dir("miden-core-lib-codegen-write-to-dir");
         let unrelated_file = out_dir.join("notes.txt");
         fs::create_dir_all(&out_dir).unwrap();
         fs::write(&unrelated_file, "keep me").unwrap();

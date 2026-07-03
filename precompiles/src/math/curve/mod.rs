@@ -45,14 +45,21 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag,
+        PrecompileError, TRUE_DIGEST, Tag, precompile_id,
     },
 };
-use miden_precompiles_codegen::{CodegenCurveId, CurvePrecompileDescriptor};
-pub use miden_precompiles_codegen::{K1_A_PTR, K1_B_PTR, K1_GROUP_PTR};
 
 use self::secp256k1::Secp256k1;
+pub use self::secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
+
+/// VM-owned store pointer for the secp256k1 curve coefficient `A`.
+pub const K1_A_PTR: u32 = 8;
+/// VM-owned store pointer for the secp256k1 curve coefficient `B`.
+pub const K1_B_PTR: u32 = 9;
+
+/// VM-owned store pointer for the secp256k1 group configuration.
+pub const K1_GROUP_PTR: u32 = 1;
 
 /// A fixed curve coefficient uint pinned at a VM-owned store pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,37 +258,37 @@ impl CurveId {
     /// Returns the stable local curve selector retained for dispatch metadata.
     pub fn id(self) -> Felt {
         match self {
-            Self::Secp256k1 => miden_precompiles_codegen::SECP256K1_ID,
-        }
-    }
-
-    const fn codegen_id(self) -> CodegenCurveId {
-        match self {
-            Self::Secp256k1 => CodegenCurveId::Secp256k1,
+            Self::Secp256k1 => SECP256K1_ID,
         }
     }
 
     /// Returns the VM-owned group configuration pointer used in curve VALUE tags.
     pub const fn group_ptr(self) -> u32 {
-        self.codegen_id().group_ptr()
+        match self {
+            Self::Secp256k1 => K1_GROUP_PTR,
+        }
     }
 
     /// Returns the supported curve for a VM-owned group configuration pointer.
     pub const fn from_group_ptr(ptr: u32) -> Option<Self> {
-        match CodegenCurveId::from_group_ptr(ptr) {
-            Some(CodegenCurveId::Secp256k1) => Some(Self::Secp256k1),
-            None => None,
+        match ptr {
+            K1_GROUP_PTR => Some(Self::Secp256k1),
+            _ => None,
         }
     }
 
     /// Returns the VM-owned pointer for this curve's first coefficient.
     pub const fn a_ptr(self) -> u32 {
-        self.codegen_id().a_ptr()
+        match self {
+            Self::Secp256k1 => K1_A_PTR,
+        }
     }
 
     /// Returns the VM-owned pointer for this curve's second coefficient.
     pub const fn b_ptr(self) -> u32 {
-        self.codegen_id().b_ptr()
+        match self {
+            Self::Secp256k1 => K1_B_PTR,
+        }
     }
 
     /// Returns the base-field domain used by affine point coordinates.
@@ -478,33 +485,37 @@ pub struct CurvePrecompile;
 
 impl CurvePrecompile {
     /// Stable precompile name used to derive this precompile's tag id.
-    pub const NAME: &'static str = CurvePrecompileDescriptor::NAME;
+    pub const NAME: &'static str = "curve";
 
     /// Operation discriminants owned by this precompile.
-    pub const VALUE_OP_ID: u64 = CurvePrecompileDescriptor::VALUE_OP_ID;
-    pub const ADD_OP_ID: u64 = CurvePrecompileDescriptor::ADD_OP_ID;
-    pub const SUB_OP_ID: u64 = CurvePrecompileDescriptor::SUB_OP_ID;
-    pub const EQ_OP_ID: u64 = CurvePrecompileDescriptor::EQ_OP_ID;
-    pub const MSM_OP_ID: u64 = CurvePrecompileDescriptor::MSM_OP_ID;
+    pub const VALUE_OP_ID: u64 = 0;
+    pub const ADD_OP_ID: u64 = 1;
+    pub const SUB_OP_ID: u64 = 2;
+    pub const EQ_OP_ID: u64 = 3;
+    pub const MSM_OP_ID: u64 = 4;
 
     /// Stable precompile id derived from [`Self::NAME`].
     pub fn id() -> Felt {
-        CurvePrecompileDescriptor::id()
+        precompile_id(Self::NAME)
     }
 
     /// Builds a canonical curve `VALUE` tag for `curve`.
     pub fn value_tag(curve: CurveId) -> Tag {
-        CurvePrecompileDescriptor::value_tag(curve.codegen_id())
+        let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
+        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr()), ZERO])
+            .expect("curve precompile id is not framework-reserved")
     }
 
     /// Builds a canonical curve operation tag for join operations.
     pub fn op_tag(op_id: u64) -> Tag {
-        CurvePrecompileDescriptor::op_tag(op_id)
+        let op_id = Felt::new(op_id).expect("curve op id must fit in a felt");
+        Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
+            .expect("curve precompile id is not framework-reserved")
     }
 
     /// Builds the canonical curve MSM tag.
     pub fn msm_tag() -> Tag {
-        CurvePrecompileDescriptor::msm_tag()
+        Self::op_tag(Self::MSM_OP_ID)
     }
 
     /// Builds a point VALUE node from a point value.
@@ -521,7 +532,8 @@ impl CurvePrecompile {
 
     /// Builds the canonical identity point value node for `curve`.
     pub fn identity_node(curve: CurveId) -> Node {
-        CurvePrecompileDescriptor::identity_node(curve.codegen_id())
+        Node::join(Self::value_tag(curve), TRUE_DIGEST, TRUE_DIGEST)
+            .expect("curve value tag is precompile-owned")
     }
 
     /// Builds the canonical generator value node for `curve`.

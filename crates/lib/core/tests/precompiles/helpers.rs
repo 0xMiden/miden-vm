@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, deferred::DeferredState};
-use miden_precompiles::{PrecompilesLibrary, registry};
+use miden_core_lib::CoreLibrary;
+use miden_precompiles::registry;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
     StackInputs, advice::AdviceInputs,
@@ -32,17 +33,17 @@ pub fn run_precompile_program_with_stack(
     stack: &[Felt],
 ) -> Result<ExecutionOutput, ExecutionError> {
     let stack_inputs = StackInputs::new(stack).expect("invalid precompile test stack inputs");
-    let library = PrecompilesLibrary::default();
+    let core_lib = CoreLibrary::default();
     let program = Assembler::default()
-        .with_package(library.package(), Linkage::Dynamic)
-        .expect("failed to link miden-precompiles")
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library")
         .assemble_program("precompile_test", source)
         .expect("failed to assemble precompile test program")
         .unwrap_program();
 
     let mut host = DefaultHost::default()
-        .with_library(&library)
-        .expect("failed to load PrecompilesLibrary into the host");
+        .with_library(&core_lib)
+        .expect("failed to load CoreLibrary into the host");
 
     let output = FastProcessor::new_with_options(
         stack_inputs,
@@ -50,7 +51,6 @@ pub fn run_precompile_program_with_stack(
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_precompile_registry(registry())?
     .execute_sync(&program, &mut host);
 
     if let Ok(output) = &output {

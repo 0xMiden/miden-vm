@@ -18,7 +18,6 @@ use miden_core::{
 
 use crate::codec::{chunks_to_bytes_exact, n_chunks};
 
-pub(crate) mod handlers;
 pub mod keccak256;
 
 // HASH FUNCTION

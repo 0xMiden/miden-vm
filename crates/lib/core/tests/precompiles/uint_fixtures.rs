@@ -4,7 +4,7 @@ use miden_core::Felt;
 use miden_precompiles::UintSpec;
 use miden_processor::ExecutionOutput;
 
-use crate::helpers::{
+use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_deferred_state_round_trips, assert_memory_u32x8,
     assert_stack_u32x8, expect_precompile_trap, masm_push_u32x8, masm_store_u32x8,
     read_memory_felts, run_precompile_program,

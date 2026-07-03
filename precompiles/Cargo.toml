@@ -19,29 +19,9 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-core/std", "miden-crypto/std", "miden-processor/std", "miden-utils-sync/std", "thiserror/std"]
+std = ["miden-core/std", "miden-crypto/std"]
 
 [dependencies]
 # Miden dependencies
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-mast-package.workspace = true
-miden-precompiles-codegen.workspace = true
-miden-processor.workspace = true
-miden-utils-sync.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
-miden-assembly.workspace = true
-miden-precompiles-codegen = { workspace = true, features = ["std"] }
-miden-processor = { workspace = true, features = ["testing"] }
-rand_chacha.workspace = true
-
-[build-dependencies]
-miden-assembly = { workspace = true, features = ["std"] }
-miden-package-registry = { workspace = true, features = ["resolver"] }
-miden-precompiles-codegen = { workspace = true, features = ["std"] }
-
-[[test]]
-name = "integration"
-path = "tests/integration/mod.rs"

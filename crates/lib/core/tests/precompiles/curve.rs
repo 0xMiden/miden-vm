@@ -1,7 +1,7 @@
 use miden_core::{Felt, Word};
 use miden_precompiles::{CurveId, CurvePrecompile};
 
-use crate::helpers::{
+use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, expect_precompile_trap,
     read_stack_felts, run_precompile_program,
 };

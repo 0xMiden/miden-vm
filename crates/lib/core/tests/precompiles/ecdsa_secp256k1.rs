@@ -4,7 +4,7 @@ use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, K1Base, K1Scalar, 
 use miden_processor::{ExecutionError, ExecutionOutput};
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-use crate::helpers::{
+use super::helpers::{
     assert_deferred_state_round_trips, masm_store_felts, read_stack_felts, run_precompile_program,
 };
 

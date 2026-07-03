@@ -8,8 +8,6 @@ pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
 
-use miden_precompiles::event_handlers as precompile_event_handlers;
-
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
@@ -23,6 +21,10 @@ use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     debug::default_debug_handlers,
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
+    precompiles::{
+        keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
+        uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
+    },
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -137,9 +139,10 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
+            (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
+            (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());
-        handlers.extend(precompile_event_handlers::default_event_handlers());
         handlers
     }
 }

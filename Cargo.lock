@@ -1422,11 +1422,11 @@ dependencies = [
  "miden-assembly",
  "miden-assembly-syntax",
  "miden-core",
+ "miden-core-lib-codegen",
  "miden-crypto",
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
- "miden-precompiles-codegen",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
@@ -1435,6 +1435,14 @@ dependencies = [
  "rand_chacha 0.10.0",
  "rstest",
  "thiserror",
+]
+
+[[package]]
+name = "miden-core-lib-codegen"
+version = "0.25.0"
+dependencies = [
+ "miden-core",
+ "miden-precompiles",
 ]
 
 [[package]]
@@ -1677,23 +1685,8 @@ dependencies = [
 name = "miden-precompiles"
 version = "0.25.0"
 dependencies = [
- "miden-assembly",
  "miden-core",
  "miden-crypto",
- "miden-mast-package",
- "miden-package-registry",
- "miden-precompiles-codegen",
- "miden-processor",
- "miden-utils-sync",
- "rand_chacha 0.10.0",
- "thiserror",
-]
-
-[[package]]
-name = "miden-precompiles-codegen"
-version = "0.25.0"
-dependencies = [
- "miden-core",
 ]
 
 [[package]]
