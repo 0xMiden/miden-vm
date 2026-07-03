@@ -12,8 +12,7 @@ use crate::{
 /// Construction surface for dense MAST forests.
 ///
 /// The builder may append nodes while a forest is under construction. The value returned by
-/// [`Self::finish`] is finalized through [`MastForest::from_parts`], which canonicalizes dense node
-/// order before exposing a `MastForest` to callers.
+/// [`Self::finish`] is a finalized [`MastForest`] with canonicalized dense node order.
 #[derive(Debug, Default)]
 pub struct DenseMastForestBuilder {
     nodes: IndexVec<MastNodeId, MastNode>,
