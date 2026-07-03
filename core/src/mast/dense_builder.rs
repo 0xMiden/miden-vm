@@ -38,7 +38,14 @@ impl DenseMastForestBuilder {
         self.push_linked_node(node)
     }
 
-    pub fn push_linked_node(&mut self, node: MastNode) -> Result<MastNodeId, MastForestError> {
+    pub fn push_node(
+        &mut self,
+        builder: impl Into<MastNodeBuilder>,
+    ) -> Result<MastNodeId, MastForestError> {
+        self.push_node_builder(builder.into())
+    }
+
+    fn push_linked_node(&mut self, node: MastNode) -> Result<MastNodeId, MastForestError> {
         self.nodes.push(node).map_err(|_| MastForestError::TooManyNodes)
     }
 

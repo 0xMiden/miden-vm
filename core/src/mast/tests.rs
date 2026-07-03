@@ -9,8 +9,7 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNodeExt,
-        MastNodeId,
+        JoinNodeBuilder, MastForest, MastForestError, MastNodeExt, MastNodeId,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},

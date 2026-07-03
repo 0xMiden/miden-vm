@@ -62,9 +62,6 @@ impl MastNodeContext for MastForest {
 }
 
 pub trait MastForestContributor {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
-
     /// Returns the fingerprint for this builder without constructing a MastNode.
     ///
     /// This method computes the fingerprint for a node directly from the builder data
@@ -143,6 +140,19 @@ impl From<SplitNodeBuilder> for MastNodeBuilder {
 }
 
 impl MastNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary"))]
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::Call(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::Dyn(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::External(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::Join(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::Loop(builder) => builder.add_to_forest(forest),
+            MastNodeBuilder::Split(builder) => builder.add_to_forest(forest),
+        }
+    }
+
     /// Build the node from this builder.
     ///
     /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
@@ -241,7 +251,7 @@ mod round_trip_tests {
     use crate::{
         Word,
         mast::{
-            BasicBlockNodeBuilder, MastForest, MastNodeBuilder, MastNodeExt,
+            BasicBlockNodeBuilder, DenseMastForestBuilder, MastNodeBuilder, MastNodeExt,
             node::mast_forest_contributor::MastForestContributor,
         },
         operations::Operation,
@@ -249,15 +259,13 @@ mod round_trip_tests {
 
     #[test]
     fn test_mast_node_builder_enum_digest_forcing() {
-        let mut forest = MastForest::new();
+        let mut forest = DenseMastForestBuilder::new();
 
         let mast_builder1 =
             MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Push(
                 Felt::new_unchecked(10),
             )]));
-        let mast_node_id1 = mast_builder1
-            .add_to_forest(&mut forest)
-            .expect("Failed to add mast node1 to forest");
+        let mast_node_id1 = forest.push_node(mast_builder1).expect("failed to add mast node1");
         let mast_node1 = forest.get_node_by_id(mast_node_id1).unwrap().unwrap_basic_block();
         let mast_normal_digest = mast_node1.digest();
 
@@ -271,9 +279,9 @@ mod round_trip_tests {
             BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))])
                 .with_digest(forced_mast_digest),
         );
-        let mast_node_id2 = mast_builder2
-            .add_to_forest(&mut forest)
-            .expect("Failed to add mast node with forced digest to forest");
+        let mast_node_id2 = forest
+            .push_node(mast_builder2)
+            .expect("failed to add mast node with forced digest");
         let mast_node2 = forest.get_node_by_id(mast_node_id2).unwrap().unwrap_basic_block();
 
         assert_ne!(

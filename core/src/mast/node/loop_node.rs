@@ -207,18 +207,15 @@ impl LoopNodeBuilder {
     }
 }
 
-impl MastForestContributor for LoopNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+#[cfg(any(test, feature = "arbitrary"))]
+impl LoopNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node = self.build(forest)?;
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for LoopNodeBuilder {
     fn fingerprint_for_node(
         &self,
         context: &impl MastNodeContext,

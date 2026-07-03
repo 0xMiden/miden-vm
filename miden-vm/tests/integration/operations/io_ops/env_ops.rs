@@ -1,9 +1,6 @@
 use miden_core::{
     FMP_INIT_VALUE,
-    mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
-        MastNodeExt,
-    },
+    mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastNode, MastNodeExt},
     operations::Operation,
 };
 use miden_utils_testing::{MIN_STACK_DEPTH, Word, build_op_test, build_test};

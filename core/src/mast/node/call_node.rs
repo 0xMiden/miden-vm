@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::utils::Idx;
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -266,44 +264,15 @@ impl CallNodeBuilder {
     }
 }
 
-impl MastForestContributor for CallNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        if self.callee.to_usize() >= forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.callee, forest.nodes.len()));
-        }
-
-        // Use the forced digest if provided, otherwise compute the digest directly
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let callee_digest = forest[self.callee].digest();
-            let domain = if self.is_syscall {
-                CallNode::SYSCALL_DOMAIN
-            } else {
-                CallNode::CALL_DOMAIN
-            };
-
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate Owned node creation
-        let node_id = forest
-            .nodes
-            .push(
-                CallNode {
-                    callee: self.callee,
-                    is_syscall: self.is_syscall,
-                    digest,
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl CallNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build(forest)?;
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for CallNodeBuilder {
     fn fingerprint_for_node(
         &self,
         context: &impl MastNodeContext,
