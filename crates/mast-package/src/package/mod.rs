@@ -80,8 +80,7 @@ pub struct Package {
     pub name: PackageId,
     /// An optional semantic version for the package
     pub version: Version,
-    /// The code commitment of this package, formed by hashing the package interface commitment
-    /// with the dependency commitment of the underlying MAST forest.
+    /// The digest of the exported procedure roots, sorted by digest.
     digest: Word,
     /// An optional description of the package
     pub description: Option<String>,
@@ -166,16 +165,6 @@ impl Package {
     }
 
     fn recompute_mast_commitment(&mut self) -> Result<(), ManifestValidationError> {
-        let interface_digest = self.compute_interface_digest()?;
-        self.digest = Poseidon2::merge_many(&[
-            interface_digest,
-            self.mast.dependency_commitment(),
-            self.mast.advice_commitment(),
-        ]);
-        Ok(())
-    }
-
-    fn compute_interface_digest(&self) -> Result<Word, ManifestValidationError> {
         let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
         for export in self.manifest.exports() {
             if let PackageExport::Procedure(export) = export {
@@ -192,7 +181,9 @@ impl Package {
             }
         }
 
-        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
+        let digest = self.mast.compute_nodes_commitment(node_ids.iter());
+        self.digest = digest;
+        Ok(())
     }
 
     /// Produces a new package with the existing [`MastForest`] and where all key/values in the
@@ -205,8 +196,6 @@ impl Package {
     /// Extends the advice map of this package.
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.recompute_mast_commitment()
-            .expect("package digest should be computable after extending advice map");
     }
 
     /// Removes all package-owned debug information from this package.
@@ -243,29 +232,18 @@ impl Package {
         &self.mast
     }
 
-    /// Returns the digest of the package's exported interface, external dependencies, and advice
-    /// map.
+    /// Returns the digest of the package's exported interface.
     #[inline]
     pub fn digest(&self) -> Word {
         self.digest
     }
 
-    /// Returns the digest of the package's exported procedure roots.
-    ///
-    /// This is the root-only interface digest. It does not commit to the package's external MAST
-    /// dependencies.
-    pub fn interface_digest(&self) -> Word {
-        self.compute_interface_digest()
-            .expect("package interface digest should be computable for a valid package")
-    }
-
     /// Returns a digest of the package content relevant to assembly and dependency resolution.
     ///
-    /// This is distinct from [`Self::digest`], which commits only to package code, external MAST
-    /// dependencies, and advice data. The content digest currently binds the package digest,
-    /// package name, semantic version, package kind, manifest, and any semantic package sections.
-    /// Package descriptions and opaque custom sections are intentionally excluded for now;
-    /// kernel-section binding is added separately.
+    /// This is distinct from [`Self::digest`], which only commits to exported procedure roots. The
+    /// content digest currently binds the package digest, package name, semantic version, package
+    /// kind, manifest, and any semantic package sections. Package descriptions and opaque custom
+    /// sections are intentionally excluded for now; kernel-section binding is added separately.
     pub fn content_digest(&self) -> Word {
         let mut bytes = Vec::new();
         self.write_content_digest_preimage(&mut bytes, None);
@@ -483,7 +461,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.interface_digest()),
+                        Some(self.digest()),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -577,7 +555,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.interface_digest()),
+                        Some(self.digest()),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
