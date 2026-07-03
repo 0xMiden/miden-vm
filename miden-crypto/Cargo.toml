@@ -80,7 +80,7 @@ name              = "transpose"
 required-features = ["std"]
 
 [features]
-concurrent        = ["dep:rayon", "miden-lifted-stark/parallel", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
+concurrent        = ["dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []

@@ -18,7 +18,7 @@ use p3_field::{
     TwoAdicField,
 };
 use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView};
-#[cfg(feature = "parallel")]
+#[cfg(feature = "concurrent")]
 use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
@@ -243,7 +243,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
         }
     };
 
-    #[cfg(feature = "parallel")]
+    #[cfg(feature = "concurrent")]
     output.par_chunks_mut(points_per_task).enumerate().for_each_init(
         || {
             (
@@ -258,7 +258,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
         },
     );
 
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(feature = "concurrent"))]
     {
         let mut main_buf = Vec::<P<F>>::new();
         let mut preproc_buf = Vec::<P<F>>::new();

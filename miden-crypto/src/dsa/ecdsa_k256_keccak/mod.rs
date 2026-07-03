@@ -5,10 +5,11 @@ use alloc::{string::ToString, vec::Vec};
 use core::fmt;
 
 use k256::{
+    AffinePoint,
     ecdh::diffie_hellman,
     ecdsa,
     ecdsa::{RecoveryId, VerifyingKey, signature::hazmat::PrehashVerifier},
-    elliptic_curve::{Generate, scalar::IsHigh},
+    elliptic_curve::{Generate, point::AffineCoordinates, scalar::IsHigh},
     pkcs8::DecodePublicKey,
 };
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
@@ -20,8 +21,7 @@ use crate::{
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_packed_u32_elements,
-        zeroize::{Zeroize, ZeroizeOnDrop},
+        read_sensitive_array, zeroize::ZeroizeOnDrop,
     },
 };
 
@@ -72,10 +72,7 @@ impl SecretKey {
 
     /// Signs a pre-hashed message with this secret key.
     fn sign_prehash(&self, message_digest: [u8; 32]) -> Signature {
-        let (signature_inner, recovery_id) = self
-            .inner
-            .sign_prehash_recoverable(&message_digest)
-            .expect("failed to generate signature");
+        let (signature_inner, recovery_id) = self.inner.sign_prehash_recoverable(&message_digest);
 
         let (r, s) = signature_inner.split_scalars();
 
@@ -238,10 +235,16 @@ pub struct PublicKey {
 impl PublicKey {
     /// Returns a commitment to the public key using the Poseidon2 hash function.
     ///
-    /// The commitment is computed by first converting the public key to field elements (4 bytes
-    /// per element), and then computing a sequential hash of the elements.
+    /// Public key serialization remains compressed SEC1. The commitment preimage is not the
+    /// compressed SEC1 encoding; it is `qx || qy`, where each secp256k1 affine coordinate is
+    /// represented as eight little-endian numeric `u32` limbs, one limb per [`Felt`].
     pub fn to_commitment(&self) -> Word {
         <Self as SequentialCommit>::to_commitment(self)
+    }
+
+    /// Returns a reference to this public key as an elliptic curve point in affine coordinates.
+    pub fn as_affine(&self) -> &AffinePoint {
+        self.inner.as_affine()
     }
 
     /// Verifies a signature against this public key and message.
@@ -292,7 +295,7 @@ impl SequentialCommit for PublicKey {
     type Commitment = Word;
 
     fn to_elements(&self) -> Vec<Felt> {
-        bytes_to_packed_u32_elements(&self.to_bytes())
+        affine_point_to_elements(self.as_affine()).to_vec()
     }
 }
 
@@ -455,11 +458,10 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mut bytes: [u8; SECRET_KEY_BYTES] = source.read_array()?;
+        let bytes = read_sensitive_array::<SECRET_KEY_BYTES, _>(source)?;
 
-        let signing_key = ecdsa::SigningKey::from_slice(&bytes)
+        let signing_key = ecdsa::SigningKey::from_slice(bytes.as_slice())
             .map_err(|_| DeserializationError::InvalidValue("Invalid secret key".to_string()))?;
-        bytes.zeroize();
 
         Ok(Self { inner: signing_key })
     }
@@ -467,9 +469,7 @@ impl Deserializable for SecretKey {
 
 impl Serializable for PublicKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Compressed format
         let encoded = self.inner.to_sec1_point(true);
-
         target.write_bytes(encoded.as_bytes());
     }
 }
@@ -523,6 +523,27 @@ impl fmt::Display for Signature {
 
 // HELPER
 // ================================================================================================
+
+fn affine_point_to_elements(point: &AffinePoint) -> [Felt; 16] {
+    let qx = be_bytes_to_le_u32_limbs(point.x().as_ref());
+    let qy = be_bytes_to_le_u32_limbs(point.y().as_ref());
+
+    core::array::from_fn(|idx| {
+        if idx < 8 {
+            Felt::from_u32(qx[idx])
+        } else {
+            Felt::from_u32(qy[idx - 8])
+        }
+    })
+}
+
+fn be_bytes_to_le_u32_limbs(bytes: &[u8]) -> [u32; 8] {
+    debug_assert_eq!(bytes.len(), SCALARS_SIZE_BYTES);
+    core::array::from_fn(|idx| {
+        let start = SCALARS_SIZE_BYTES - 4 * (idx + 1);
+        u32::from_be_bytes(bytes[start..start + 4].try_into().expect("chunk is exactly 4 bytes"))
+    })
+}
 
 /// Hashes a word message using Keccak.
 fn hash_message(message: Word) -> [u8; 32] {

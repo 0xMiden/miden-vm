@@ -42,8 +42,8 @@ tracing-forest               = { features = ["ansi", "smallvec"], workspace = tr
 tracing-subscriber.workspace = true
 
 [features]
-default  = []
-parallel = ["miden-lifted-stark/parallel"]
+concurrent = ["miden-lifted-stark/concurrent"]
+default    = []
 
 [lints]
 workspace = true

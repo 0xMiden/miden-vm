@@ -57,6 +57,24 @@ pub fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
 
 pub use miden_field::utils::{HexParseError, bytes_to_hex_string, hex_to_bytes};
 
+/// Reads a fixed-size byte array from `source`, wrapped in [`Zeroizing`](zeroize::Zeroizing) so
+/// the buffer is wiped on drop regardless of how the calling function exits, including `?` early
+/// returns on malformed input.
+///
+/// Deserialization of sensitive material (secret keys, seeds) should read its bytes through this
+/// helper instead of calling `read_array` and remembering a manual `zeroize()` before every
+/// return path.
+///
+/// Note: `ByteReader::read_array` returns the array by value, so the single move into the
+/// wrapper is not wiped. This is the same residual a manual `zeroize()` call has; the helper
+/// closes the error-path leak and removes the per-call-site cleanup, but a fully airtight read
+/// would require `ByteReader` to expose reading into a caller-provided `&mut [u8]`.
+pub(crate) fn read_sensitive_array<const N: usize, R: ByteReader>(
+    source: &mut R,
+) -> Result<zeroize::Zeroizing<[u8; N]>, DeserializationError> {
+    Ok(zeroize::Zeroizing::new(source.read_array()?))
+}
+
 // CONVERSIONS BETWEEN BYTES AND ELEMENTS
 // ================================================================================================
 

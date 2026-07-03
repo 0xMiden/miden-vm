@@ -177,7 +177,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Cyclic extension** — Cross-trace accumulation uses bitwise AND for
   modular indexing (power-of-two sizes).
 - **Parallel execution** — Rayon parallelism throughout constraint evaluation
-  and per-AIR quotient division (gated by `parallel` feature).
+  and per-AIR quotient division (gated by `concurrent` feature).
 
 ## Entry Points
 

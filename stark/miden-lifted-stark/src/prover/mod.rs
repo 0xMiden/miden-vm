@@ -84,6 +84,7 @@ use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_maybe_rayon::prelude::*;
 use periodic::PeriodicLde;
 use thiserror::Error;
 use tracing::{info_span, instrument};
@@ -350,29 +351,34 @@ where
     // Build aux traces in instance order. The output shapes are trusted (see
     // trust contract above); a malformed output is caught downstream by the
     // LDE/commit or by verification.
-    let (mut aux_traces_ef, mut all_aux_values) = info_span!("build aux traces").in_scope(|| {
-        let mut aux_traces = Vec::with_capacity(airs.len());
-        let mut aux_values = Vec::with_capacity(airs.len());
-        for (air, main) in airs.iter().zip(traces.iter()) {
-            let num_randomness = air.num_randomness();
-            debug_assert!(
-                randomness.len() >= num_randomness,
-                "AIR requested more aux randomness than the shared challenge pool contains",
-            );
-            let (trace, values) = air.build_aux_trace(
-                main,
-                air_inputs,
-                statement.aux_inputs(),
-                &randomness[..num_randomness],
-            );
-            debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
-            debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
-            debug_assert_eq!(values.len(), air.num_aux_values(), "aux values length mismatch");
-            aux_traces.push(trace);
-            aux_values.push(values);
-        }
-        (aux_traces, aux_values)
-    });
+    let aux_inputs = statement.aux_inputs();
+    let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = info_span!("build aux traces")
+        .in_scope(|| {
+            airs.par_iter()
+                .zip(traces.par_iter())
+                .map(|(air, main)| {
+                    let num_randomness = air.num_randomness();
+                    debug_assert!(
+                        randomness.len() >= num_randomness,
+                        "AIR requested more aux randomness than the shared challenge pool contains",
+                    );
+                    let (trace, values) = air.build_aux_trace(
+                        main,
+                        air_inputs,
+                        aux_inputs,
+                        &randomness[..num_randomness],
+                    );
+                    debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
+                    debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
+                    debug_assert_eq!(
+                        values.len(),
+                        air.num_aux_values(),
+                        "aux values length mismatch"
+                    );
+                    (trace, values)
+                })
+                .unzip()
+        });
 
     // Mirror the verifier's external assertion evaluation while aux values are
     // still in instance order. This is cheap and catches malformed statements

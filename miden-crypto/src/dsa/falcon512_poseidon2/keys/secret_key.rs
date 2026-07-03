@@ -20,7 +20,10 @@ use crate::{
         LOG_N, SK_LEN, hash_to_point::hash_to_point_poseidon2, math::ntru_gen,
     },
     hash::blake::Blake3_256,
-    utils::zeroize::{Zeroize, ZeroizeOnDrop},
+    utils::{
+        read_sensitive_array,
+        zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
+    },
 };
 
 // CONSTANTS
@@ -342,7 +345,7 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let byte_vector: [u8; SK_LEN] = source.read_array()?;
+        let byte_vector = read_sensitive_array::<SK_LEN, _>(source)?;
 
         // read fields
         let header = byte_vector[0];
@@ -367,20 +370,26 @@ impl Deserializable for SecretKey {
         let chunk_size_g = ((n * WIDTH_SMALL_POLY_COEFFICIENT) + 7) >> 3;
         let chunk_size_big_f = ((n * WIDTH_BIG_POLY_COEFFICIENT) + 7) >> 3;
 
-        let f = decode_i8(&byte_vector[1..chunk_size_f + 1], WIDTH_SMALL_POLY_COEFFICIENT).ok_or(
-            DeserializationError::InvalidValue("Failed to decode f coefficients".to_string()),
-        )?;
-        let g = decode_i8(
-            &byte_vector[chunk_size_f + 1..(chunk_size_f + chunk_size_g + 1)],
-            WIDTH_SMALL_POLY_COEFFICIENT,
-        )
-        .unwrap();
-        let big_f = decode_i8(
-            &byte_vector[(chunk_size_f + chunk_size_g + 1)
-                ..(chunk_size_f + chunk_size_g + chunk_size_big_f + 1)],
-            WIDTH_BIG_POLY_COEFFICIENT,
-        )
-        .unwrap();
+        let f = Zeroizing::new(
+            decode_i8(&byte_vector[1..chunk_size_f + 1], WIDTH_SMALL_POLY_COEFFICIENT).ok_or(
+                DeserializationError::InvalidValue("Failed to decode f coefficients".to_string()),
+            )?,
+        );
+        let g = Zeroizing::new(
+            decode_i8(
+                &byte_vector[chunk_size_f + 1..(chunk_size_f + chunk_size_g + 1)],
+                WIDTH_SMALL_POLY_COEFFICIENT,
+            )
+            .unwrap(),
+        );
+        let big_f = Zeroizing::new(
+            decode_i8(
+                &byte_vector[(chunk_size_f + chunk_size_g + 1)
+                    ..(chunk_size_f + chunk_size_g + chunk_size_big_f + 1)],
+                WIDTH_BIG_POLY_COEFFICIENT,
+            )
+            .unwrap(),
+        );
 
         let f = Polynomial::new(f.iter().map(|&c| FalconFelt::new(c.into())).collect());
         let g = Polynomial::new(g.iter().map(|&c| FalconFelt::new(c.into())).collect());

@@ -21,7 +21,7 @@ echo ""
 echo "Checking targeted multi-feature combinations..."
 
 # `cargo hack --each-feature` does not cover combinations like
-# `miden-lifted-stark/testing,parallel`.
-cargo check -p miden-lifted-stark --all-targets --features testing,parallel
+# `miden-lifted-stark/testing,concurrent`.
+cargo check -p miden-lifted-stark --all-targets --features testing,concurrent
 
 echo "All feature combinations compiled successfully!"

@@ -25,7 +25,7 @@ use crate::{
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
-        padded_elements_to_bytes,
+        padded_elements_to_bytes, read_sensitive_array,
         zeroize::{Zeroize, ZeroizeOnDrop},
     },
 };
@@ -629,9 +629,9 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let bytes: [u8; SK_SIZE_BYTES] = source.read_array()?;
+        let bytes = read_sensitive_array::<SK_SIZE_BYTES, _>(source)?;
 
-        match bytes_to_elements_exact(&bytes) {
+        match bytes_to_elements_exact(bytes.as_slice()) {
             Some(inner) => {
                 let inner: [Felt; 4] = inner.try_into().map_err(|_| {
                     DeserializationError::InvalidValue("malformed secret key".to_string())
