@@ -10,6 +10,7 @@ use crate::{
     Word,
     advice::AdviceMap,
     mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
+    serde::DeserializationError,
     utils::Idx,
 };
 
@@ -51,10 +52,10 @@ pub struct SparseMastForest {
     /// full-node entry implicitly carries its own digest via [`MastNodeExt::digest`].
     digests: BTreeMap<MastNodeId, Word>,
 
-    /// Total number of nodes in the source [`MastForest`] from which this sparse forest was
-    /// built. Note that this is *not* `nodes.len()` — it is the upper bound on the original
-    /// [`MastNodeId`] space, preserved so that callers materializing dense-shaped state (e.g.
-    /// allocating an `IndexVec` keyed by [`MastNodeId`]) know its required size.
+    /// Upper bound for [`MastNodeId`] values from the source [`MastForest`].
+    ///
+    /// This is not `nodes.len()`. The trusted reader uses it to reject IDs outside the source
+    /// forest's ID space, not as an independent proof of the source forest's size.
     num_nodes: usize,
 
     /// Roots of procedures defined within the original MAST forest.
@@ -113,7 +114,7 @@ impl SparseMastForest {
         roots: Vec<MastNodeId>,
         advice_map: AdviceMap,
         commitment_cache: Word,
-    ) -> Result<Self, crate::serde::DeserializationError> {
+    ) -> Result<Self, DeserializationError> {
         validate_sparse_node_bound(num_nodes)?;
 
         let nodes = collect_unique_nodes(nodes, num_nodes)?;
@@ -125,7 +126,7 @@ impl SparseMastForest {
 
         for node_id in nodes.keys() {
             if digests.contains_key(node_id) {
-                return Err(crate::serde::DeserializationError::InvalidValue(format!(
+                return Err(DeserializationError::InvalidValue(format!(
                     "sparse full-node id {} overlaps a digest-only entry",
                     node_id.0
                 )));
@@ -145,9 +146,9 @@ impl SparseMastForest {
     }
 }
 
-fn validate_sparse_node_bound(num_nodes: usize) -> Result<(), crate::serde::DeserializationError> {
+fn validate_sparse_node_bound(num_nodes: usize) -> Result<(), DeserializationError> {
     if num_nodes > MastForest::MAX_NODES {
-        return Err(crate::serde::DeserializationError::InvalidValue(format!(
+        return Err(DeserializationError::InvalidValue(format!(
             "sparse source node count {num_nodes} exceeds maximum allowed {}",
             MastForest::MAX_NODES
         )));
@@ -159,9 +160,9 @@ fn validate_sparse_id(
     id: MastNodeId,
     num_nodes: usize,
     label: &str,
-) -> Result<(), crate::serde::DeserializationError> {
+) -> Result<(), DeserializationError> {
     if id.to_usize() >= num_nodes {
-        return Err(crate::serde::DeserializationError::InvalidValue(format!(
+        return Err(DeserializationError::InvalidValue(format!(
             "{label} id {} is out of range for sparse source node count {num_nodes}",
             id.0
         )));
@@ -172,12 +173,12 @@ fn validate_sparse_id(
 fn collect_unique_nodes(
     nodes: Vec<(MastNodeId, MastNode)>,
     num_nodes: usize,
-) -> Result<BTreeMap<MastNodeId, MastNode>, crate::serde::DeserializationError> {
+) -> Result<BTreeMap<MastNodeId, MastNode>, DeserializationError> {
     let mut result = BTreeMap::new();
     for (id, node) in nodes {
         validate_sparse_id(id, num_nodes, "full node")?;
         if result.insert(id, node).is_some() {
-            return Err(crate::serde::DeserializationError::InvalidValue(format!(
+            return Err(DeserializationError::InvalidValue(format!(
                 "duplicate sparse full-node id {}",
                 id.0
             )));
@@ -189,12 +190,12 @@ fn collect_unique_nodes(
 fn collect_unique_digests(
     digests: Vec<(MastNodeId, Word)>,
     num_nodes: usize,
-) -> Result<BTreeMap<MastNodeId, Word>, crate::serde::DeserializationError> {
+) -> Result<BTreeMap<MastNodeId, Word>, DeserializationError> {
     let mut result = BTreeMap::new();
     for (id, digest) in digests {
         validate_sparse_id(id, num_nodes, "digest-only node")?;
         if result.insert(id, digest).is_some() {
-            return Err(crate::serde::DeserializationError::InvalidValue(format!(
+            return Err(DeserializationError::InvalidValue(format!(
                 "duplicate sparse digest-only id {}",
                 id.0
             )));
@@ -203,18 +204,20 @@ fn collect_unique_digests(
     Ok(result)
 }
 
+/// Checks that every child of a retained full node is available as either a full node or a
+/// digest-only entry.
 fn validate_full_node_child_digests(
     nodes: &BTreeMap<MastNodeId, MastNode>,
     digests: &BTreeMap<MastNodeId, Word>,
     num_nodes: usize,
-) -> Result<(), crate::serde::DeserializationError> {
+) -> Result<(), DeserializationError> {
     for (&node_id, node) in nodes {
         validate_sparse_id(node_id, num_nodes, "full node")?;
 
         match node {
             MastNode::Block(block) => {
                 block.validate_batch_invariants().map_err(|error_msg| {
-                    crate::serde::DeserializationError::InvalidValue(format!(
+                    DeserializationError::InvalidValue(format!(
                         "invalid sparse basic block {}: {error_msg}",
                         node_id.0
                     ))
@@ -246,10 +249,10 @@ fn require_child_digest(
     nodes: &BTreeMap<MastNodeId, MastNode>,
     digests: &BTreeMap<MastNodeId, Word>,
     num_nodes: usize,
-) -> Result<(), crate::serde::DeserializationError> {
+) -> Result<(), DeserializationError> {
     validate_sparse_id(child_id, num_nodes, "child")?;
     if !nodes.contains_key(&child_id) && !digests.contains_key(&child_id) {
-        return Err(crate::serde::DeserializationError::InvalidValue(format!(
+        return Err(DeserializationError::InvalidValue(format!(
             "sparse full node {} references child {} without a full node or digest-only entry",
             parent_id.0, child_id.0
         )));
