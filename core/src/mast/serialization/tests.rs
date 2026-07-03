@@ -13,7 +13,7 @@ use crate::{
         ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor,
         MastForestError, MastForestView, MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch,
         SparseMastForest, SparseMastForestBuilder, SparseMastForestReadOptions, SplitNodeBuilder,
-        UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind, compute_advice_commitment,
+        UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
         compute_mast_forest_commitment_from_parts,
     },
     operations::Operation,
@@ -591,7 +591,7 @@ fn forest_commitment_from_inputs_and_advice(
     compute_mast_forest_commitment_from_parts(
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(root_digests),
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(dependency_digests),
-        compute_advice_commitment(advice_map),
+        advice_map.commitment(),
     )
 }
 

@@ -204,31 +204,68 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 
     pub(super) fn validate_commitment_input_sections(&self) -> Result<(), DeserializationError> {
-        let mut root_digests = Vec::with_capacity(self.procedure_root_count());
+        self.validate_root_commitment_input_section()?;
+        self.validate_dependency_commitment_input_section()
+    }
+
+    fn validate_root_commitment_input_section(&self) -> Result<(), DeserializationError> {
+        let mut expected_root_digests = Vec::with_capacity(self.procedure_root_count());
         for index in 0..self.procedure_root_count() {
             let root_id = self.procedure_root_at(index)?;
-            root_digests.push(self.node_digest_at(root_id.to_usize())?);
+            expected_root_digests.push(self.node_digest_at(root_id.to_usize())?);
         }
-        root_digests.sort_unstable();
-        validate_digest_section(
-            self.bytes,
-            self.layout.root_commitment_digest_offset(),
-            &root_digests,
-            "root commitment digest",
-        )?;
+        expected_root_digests.sort_unstable();
 
-        let mut dependency_digests = Vec::with_capacity(self.layout.external_node_count);
+        let mut previous_root_digest = None;
+        for (index, expected_digest) in expected_root_digests.into_iter().enumerate() {
+            let actual_digest =
+                read_digest_entry(self.bytes, self.layout.root_commitment_digest_offset(), index)?;
+            validate_strictly_increasing_digest(
+                previous_root_digest,
+                actual_digest,
+                "root commitment digest",
+            )?;
+            if actual_digest != expected_digest {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "root commitment digest {index} does not match the serialized forest"
+                )));
+            }
+            previous_root_digest = Some(actual_digest);
+        }
+
+        Ok(())
+    }
+
+    fn validate_dependency_commitment_input_section(&self) -> Result<(), DeserializationError> {
+        let mut previous_dependency_digest = None;
         for index in 0..self.layout.external_node_count {
             let entry = self.node_entry_at(index)?;
             debug_assert!(matches!(entry, MastNodeEntry::External));
-            dependency_digests.push(self.node_digest_for_entry(index, entry)?);
+            let expected_digest = self.node_digest_for_entry(index, entry)?;
+            let actual_digest = read_digest_entry(
+                self.bytes,
+                self.layout.dependency_commitment_digest_offset(),
+                index,
+            )?;
+            validate_strictly_increasing_digest(
+                previous_dependency_digest,
+                actual_digest,
+                "dependency commitment digest",
+            )?;
+            if actual_digest != expected_digest {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "dependency commitment digest {index} does not match the serialized forest"
+                )));
+            }
+            previous_dependency_digest = Some(actual_digest);
         }
-        validate_digest_section(
-            self.bytes,
-            self.layout.dependency_commitment_digest_offset(),
-            &dependency_digests,
-            "dependency commitment digest",
-        )
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn digest_slot_at(&self, index: usize) -> usize {
+        self.digests.slot_by_node[index] as usize
     }
 
     /// Returns the digest for a node whose entry was already read and bounds-checked by the caller.
@@ -239,32 +276,19 @@ impl<'a> ResolvedSerializedForest<'a> {
     ) -> Result<crate::Word, DeserializationError> {
         self.digests.digest_at(self.bytes, &self.layout, index, entry)
     }
-
-    #[cfg(test)]
-    pub(super) fn digest_slot_at(&self, index: usize) -> usize {
-        self.digests.slot_by_node[index] as usize
-    }
 }
 
-fn validate_digest_section(
-    bytes: &[u8],
-    digest_section_offset: usize,
-    expected: &[crate::Word],
+fn validate_strictly_increasing_digest(
+    previous_digest: Option<crate::Word>,
+    actual_digest: crate::Word,
     section_name: &str,
 ) -> Result<(), DeserializationError> {
-    if !expected.windows(2).all(|pair| pair[0] < pair[1]) {
+    if let Some(previous_digest) = previous_digest
+        && previous_digest >= actual_digest
+    {
         return Err(DeserializationError::InvalidValue(format!(
             "{section_name} section is not strictly sorted"
         )));
-    }
-
-    for (index, expected_digest) in expected.iter().copied().enumerate() {
-        let actual = read_digest_entry(bytes, digest_section_offset, index)?;
-        if actual != expected_digest {
-            return Err(DeserializationError::InvalidValue(format!(
-                "{section_name} {index} does not match the serialized forest"
-            )));
-        }
     }
 
     Ok(())

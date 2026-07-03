@@ -12,7 +12,7 @@ use crate::{
     advice::AdviceMap,
     mast::{
         ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
-        compute_advice_commitment, compute_mast_forest_commitment_from_parts,
+        compute_mast_forest_commitment_from_parts,
     },
     serde::DeserializationError,
     utils::Idx,
@@ -125,7 +125,7 @@ impl SparseMastForest {
 
     /// Returns the commitment to this sparse forest's advice map.
     pub fn advice_commitment(&self) -> Word {
-        compute_advice_commitment(&self.advice_map)
+        self.advice_map.commitment()
     }
 
     /// Returns the commitment to this sparse forest.
@@ -243,7 +243,7 @@ fn validate_sparse_commitment(
     let computed = compute_mast_forest_commitment_from_parts(
         Poseidon2::merge_many(root_digests),
         Poseidon2::merge_many(dependency_digests),
-        compute_advice_commitment(advice_map),
+        advice_map.commitment(),
     );
     if computed != commitment {
         return Err(DeserializationError::InvalidValue(
