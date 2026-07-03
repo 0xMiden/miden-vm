@@ -246,11 +246,9 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Extract variant information
     let variants: Vec<_> = enum_data.variants.iter().collect();
     let variant_names: Vec<_> = variants.iter().map(|v| &v.ident).collect();
-    let variant_fields: Vec<_> = variants.iter().map(|v| extract_single_field(v)).collect();
 
     // Generate trait implementation by reading the trait definition
-    let trait_impl =
-        generate_mast_forest_contributor_impl(enum_name, generics, &variant_names, &variant_fields);
+    let trait_impl = generate_mast_forest_contributor_impl(enum_name, generics, &variant_names);
 
     TokenStream::from(trait_impl)
 }
@@ -260,7 +258,6 @@ fn generate_mast_forest_contributor_impl(
     enum_name: &Ident,
     generics: &syn::Generics,
     variant_names: &[&Ident],
-    _variant_fields: &[Ident],
 ) -> proc_macro2::TokenStream {
     quote! {
         impl #generics crate::mast::MastForestContributor for #enum_name #generics {

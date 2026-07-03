@@ -313,13 +313,12 @@ impl MastForestContributor for CallNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for CallNodeBuilder {
-    type Parameters = CallNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         (any::<MastNodeId>(), any::<bool>())
             .prop_map(|(callee, is_syscall)| {
                 if is_syscall {
@@ -331,8 +330,3 @@ impl proptest::prelude::Arbitrary for CallNodeBuilder {
             .boxed()
     }
 }
-
-/// Parameters for generating CallNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct CallNodeBuilderParams {}
