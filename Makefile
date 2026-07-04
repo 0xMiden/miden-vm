@@ -64,14 +64,18 @@ FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
+# Deny warnings locally so `make clippy`/`make lint` fail on the same warnings as CI,
+# which runs `make clippy` with RUSTFLAGS=-D warnings (see .github/workflows/lint.yml).
+DENY_WARNINGS := RUSTFLAGS="$(RUSTFLAGS) -D warnings"
+
 .PHONY: clippy
 clippy: ## Runs Clippy with configs (alias for xclippy)
-	cargo +stable xclippy
+	$(DENY_WARNINGS) cargo +stable xclippy
 
 
 .PHONY: xclippy
 xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
-	cargo +stable xclippy
+	$(DENY_WARNINGS) cargo +stable xclippy
 
 
 .PHONY: fix
