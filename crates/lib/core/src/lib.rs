@@ -189,6 +189,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn core_package_version_matches_crate_version() {
+        let core_lib = CoreLibrary::default();
+        let package = core_lib.package();
+        let crate_version = env!("CARGO_PKG_VERSION")
+            .parse::<miden_mast_package::Version>()
+            .expect("crate version should be a valid package version");
+
+        assert_eq!(
+            &package.version, &crate_version,
+            "embedded core package version should track the miden-core-lib crate version",
+        );
+    }
+
+    #[test]
     fn test_compile() {
         let core_lib = CoreLibrary::default();
         let exists = core_lib

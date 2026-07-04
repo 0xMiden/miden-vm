@@ -9,7 +9,17 @@ const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array
 
 #! Finds a value in a sorted array of words.
 #!
-#! **The input array must be sorted in non-decreasing lexicographic order.** The host event handler validates this and will return an error if the array is not sorted.
+#! **Proof-side contract:** the input array must already be sorted in non-decreasing
+#! lexicographic order before this procedure is called.
+#!
+#! This procedure does not prove that the full memory range is sorted. It uses host-provided
+#! lower-bound advice and verifies only that the returned lower-bound witness is locally consistent
+#! with the returned pointer. If malicious advice is used on an unsorted range, the local witness can
+#! be consistent while the global lookup result is false.
+#!
+#! Caller code must prove sortedness before relying on this result, unless the range was already
+#! authenticated by another proof-side invariant that implies sortedness. Use `assert_sorted_words`
+#! when caller code needs to establish this precondition directly.
 #!
 #! Input:  [VALUE, start_ptr, end_ptr]
 #! Output: [is_value_found, value_ptr, start_ptr, end_ptr]
@@ -154,11 +164,67 @@ pub proc find_word
     end
 end
 
+#! Asserts that an array of words is sorted in non-decreasing lexicographic order.
+#!
+#! This is a full linear proof-side check over the memory range. It does not use advice. Call this
+#! before `find_word` when sortedness is not already implied by another proof-side invariant.
+#!
+#! Input:  [start_ptr, end_ptr, ...]
+#! Output: [start_ptr, end_ptr, ...]
+#!
+#! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
+#! - start_ptr, end_ptr are not word-aligned
+#! - `start_ptr > end_ptr`
+#! - any adjacent word pair is out of order.
+@locals(1)
+pub proc assert_sorted_words
+    # locals:
+    # 0: current_ptr
+    dup add.4 loc_store.0
+    # => [start_ptr, end_ptr, ...]
+
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 u32mod.4 assertz.err="sorted_array invariant: end_ptr must be word-aligned"
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 dup.2 u32lt
+    while.true
+        loc_load.0 sub.4 padw movup.4 mem_loadw_le
+        # => [PREVIOUS_WORD, start_ptr, end_ptr, ...]
+
+        loc_load.0 padw movup.4 mem_loadw_le
+        # => [CURRENT_WORD, PREVIOUS_WORD, start_ptr, end_ptr, ...]
+
+        exec.word::gt
+        not
+        assert.err="sorted_array invariant: words must be sorted"
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 add.4 loc_store.0
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 dup.2 u32lt
+    end
+end
+
 # ===== KEY-VALUE UTILITIES ============================================================================
 
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
-#! **The keys in the array must be sorted in non-decreasing lexicographic order.** The host event handler validates this and will return an error if the keys are not sorted.
+#! **Proof-side contract:** the keys in the array must already be sorted in non-decreasing
+#! lexicographic order before this procedure is called.
+#!
+#! This procedure does not prove that the full memory range is sorted. It uses host-provided
+#! lower-bound advice and verifies only that the returned lower-bound witness is locally consistent
+#! with the returned pointer. If malicious advice is used on an unsorted range, the local witness can
+#! be consistent while the global lookup result is false.
+#!
+#! Caller code must prove key sortedness before relying on this result, unless the range was already
+#! authenticated by another proof-side invariant that implies sortedness. Use `assert_sorted_keys`
+#! when caller code needs to establish this precondition directly.
 #!
 #! Inputs:  [KEY, start_ptr, end_ptr]
 #! Outputs: [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -186,7 +252,17 @@ end
 #! Half-key means that, out of the keys in the array, only half of the key - the most significant
 #! element (prefix) and the second most significant element (suffix) - need to match.
 #!
-#! **The half-keys in the array must be sorted in non-decreasing lexicographic order.** The host event handler validates this and will return an error if the half-keys are not sorted.
+#! **Proof-side contract:** the half-keys in the array must already be sorted in non-decreasing
+#! lexicographic order before this procedure is called.
+#!
+#! This procedure does not prove that the full memory range is sorted. It uses host-provided
+#! lower-bound advice and verifies only that the returned lower-bound witness is locally consistent
+#! with the returned pointer. If malicious advice is used on an unsorted range, the local witness can
+#! be consistent while the global lookup result is false.
+#!
+#! Caller code must prove half-key sortedness before relying on this result, unless the range was
+#! already authenticated by another proof-side invariant that implies sortedness. Use
+#! `assert_sorted_half_keys` when caller code needs to establish this precondition directly.
 #!
 #! Inputs: [key_suffix, key_prefix, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -222,7 +298,13 @@ end
 #!   upon loading the key for comparison, its two least significant elements are zeroized.
 #!   This effectively means that only a match on the two most significant elements is required.
 #!
-#! **The keys in the array must be sorted in non-decreasing lexicographic order.** The host event handler validates this and will return an error if the keys are not sorted.
+#! **Proof-side contract:** the relevant keys in the array must already be sorted in
+#! non-decreasing lexicographic order before this procedure is called.
+#!
+#! This procedure does not prove that the full memory range is sorted. It uses host-provided
+#! lower-bound advice and verifies only that the returned lower-bound witness is locally consistent
+#! with the returned pointer. If malicious advice is used on an unsorted range, the local witness can
+#! be consistent while the global lookup result is false.
 #!
 #! Input:  [KEY, start_ptr, end_ptr, use_full_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -389,6 +471,110 @@ proc find_partial_key_value
                 #=> [is_key_found = 0, maybe_key_ptr, start_ptr, end_ptr]
             end
         end
+    end
+end
+
+#! Asserts that keys in an array of (key, value) word tuples are sorted in non-decreasing
+#! lexicographic order.
+#!
+#! This is a full linear proof-side check over the memory range. It does not use advice. Call this
+#! before `find_key_value` when key sortedness is not already implied by another proof-side invariant.
+#!
+#! Input:  [start_ptr, end_ptr, ...]
+#! Output: [start_ptr, end_ptr, ...]
+#!
+#! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with start_ptr
+#! - `start_ptr > end_ptr`
+#! - any adjacent key pair is out of order.
+@locals(2)
+pub proc assert_sorted_keys
+    # locals:
+    # 0: current_ptr
+    # 1: use_full_key
+    dup add.8 loc_store.0
+    push.1 loc_store.1
+    # => [start_ptr, end_ptr, ...]
+
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 dup.1 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 dup.2 u32lt
+    while.true
+        loc_load.0 sub.8 loc_load.1 exec.load_key
+        # => [PREVIOUS_KEY, start_ptr, end_ptr, ...]
+
+        loc_load.0 loc_load.1 exec.load_key
+        # => [CURRENT_KEY, PREVIOUS_KEY, start_ptr, end_ptr, ...]
+
+        exec.word::gt
+        not
+        assert.err="sorted_array invariant: keys must be sorted"
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 add.8 loc_store.0
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 dup.2 u32lt
+    end
+end
+
+#! Asserts that half-keys in an array of (key, value) word tuples are sorted in non-decreasing
+#! lexicographic order.
+#!
+#! A half-key comparison ignores the two least significant key elements, matching
+#! `find_half_key_value`.
+#!
+#! This is a full linear proof-side check over the memory range. It does not use advice. Call this
+#! before `find_half_key_value` when half-key sortedness is not already implied by another proof-side
+#! invariant.
+#!
+#! Input:  [start_ptr, end_ptr, ...]
+#! Output: [start_ptr, end_ptr, ...]
+#!
+#! Panics if:
+#! - start_ptr or end_ptr is not a u32 value.
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with start_ptr
+#! - `start_ptr > end_ptr`
+#! - any adjacent half-key pair is out of order.
+@locals(2)
+pub proc assert_sorted_half_keys
+    # locals:
+    # 0: current_ptr
+    # 1: use_full_key
+    dup add.8 loc_store.0
+    push.0 loc_store.1
+    # => [start_ptr, end_ptr, ...]
+
+    dup.1 dup.1 u32assert2.err="sorted_array invariant: range pointers must be u32"
+    u32gte assert.err="sorted_array invariant: start_ptr must be <= end_ptr"
+    dup u32mod.4 assertz.err="sorted_array invariant: start_ptr must be word-aligned"
+    dup.1 dup.1 sub u32mod.8 assertz.err="sorted_array invariant: key-value range must be double-word aligned"
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.0 dup.2 u32lt
+    while.true
+        loc_load.0 sub.8 loc_load.1 exec.load_key
+        # => [PREVIOUS_HALF_KEY, start_ptr, end_ptr, ...]
+
+        loc_load.0 loc_load.1 exec.load_key
+        # => [CURRENT_HALF_KEY, PREVIOUS_HALF_KEY, start_ptr, end_ptr, ...]
+
+        exec.word::gt
+        not
+        assert.err="sorted_array invariant: half-keys must be sorted"
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 add.8 loc_store.0
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.0 dup.2 u32lt
     end
 end
 
