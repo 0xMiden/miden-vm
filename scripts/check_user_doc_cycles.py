@@ -37,7 +37,7 @@ def extract_cycles_from_description(description: str) -> str:
     block = re.sub(r"\*\*", "", block)
     block = re.sub(r"\$([^$]+)\$", r"\1", block)
     block = block.replace("~", "")
-    block = re.sub(r"\s*-\s+", " ", block)
+    block = re.sub(r"(?m)^\s*-\s+", "", block)
     block = re.sub(r"where:\s*", "where ", block, flags=re.IGNORECASE)
     block = re.sub(r"[,.\:;]", " ", block)
     block = re.sub(r"\s+", " ", block.lower()).strip()
