@@ -1,15 +1,7 @@
 //! Generic LogUp aux-trace construction.
 //!
-//! Prover collection writes `(multiplicity, encoded_denominator)` pairs into a
-//! [`LookupFractions`] buffer (one flat `Vec<(F, EF)>` plus one flat `Vec<usize>` of per-row
-//! per-column counts). The fused [`accumulate`] pass batch-inverts denominators and walks
-//! rows in order with a running accumulator column, writing out the complete aux trace as a
-//! [`RowMajorMatrix<EF>`]. [`accumulate_slow`] is the reference oracle that does the same
-//! computation naively (one `try_inverse()` per fraction).
-//!
-//! [`build_logup_aux_trace`] sources challenges and periodic columns from the AIR,
-//! runs [`build_lookup_fractions`] and [`accumulate`], and returns `(aux_trace,
-//! acc_final)`.
+//! [`build_logup_aux_trace`] builds lookup fractions for an AIR and returns
+//! `(aux_trace, acc_final)`.
 //!
 //! ## Aux trace shape
 //!
@@ -27,19 +19,6 @@
 //!   does **not** appear in the aux trace.
 //! - `committed_finals` is `[acc_final]`: the single accumulator terminal read out of row
 //!   `num_rows`.
-//!
-//! ## Fraction buffer layout
-//!
-//! - `fractions` holds every `(multiplicity, encoded_denominator)` pair every row pushes, in the
-//!   exact order the builder produces them. Across one row, column 0's fractions come first, then
-//!   column 1's, …, then column `num_cols - 1`'s. Across rows, row 0's block comes before row 1's.
-//! - `counts` has exactly `num_rows * num_cols` entries, laid out row-major: `counts[r * num_cols +
-//!   c]` is the number of fractions row `r` pushed into column `c`. Equivalently,
-//!   `counts.chunks(num_cols).nth(r)` is row `r`'s per-column tally.
-//!
-//! Both vecs are sized up front from [`LookupAir::column_shape`] so the hot row loop can
-//! push into `Vec::with_capacity`-backed storage without re-allocating.
-
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
@@ -122,10 +101,10 @@ where
 ///
 /// ```text
 ///   fractions (flat, row-major by write order):
-///     | row 0, col 0 |  row 0, col 1 | ... | row 0, col C-1 || row 1, col 0 | ... |
+///     | r0,c0 | r0,c1 | ... | r0,C-1 || r1,c0 | ... |
 ///
 ///   counts (flat, row-major, length = num_rows * num_cols):
-///     | r0c0 | r0c1 | ... | r0c(C-1) | r1c0 | r1c1 | ... | r1c(C-1) | ... |
+///     | r0,c0 | r0,c1 | ... | r0,C-1 | r1,c0 | r1,c1 | ... | r1,C-1 | ... |
 /// ```
 ///
 /// Row `r`'s contribution to column `c` is the slice
@@ -140,19 +119,15 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Flat fraction buffer, packed in builder write order (see the module doc).
+    /// Flat fraction buffer in builder write order.
     pub(super) fractions: Vec<(F, EF)>,
-    /// Flat count buffer, length `num_rows * num_cols` after a complete collection pass,
-    /// laid out row-major so `counts[r * num_cols + c]` is the number of fractions row
-    /// `r` pushed into column `c`.
+    /// Per-row, per-column fraction counts in row-major order.
     pub(super) counts: Vec<usize>,
-    /// Per-column upper bound on fractions a single row can push. Used as the capacity
-    /// hint (`num_rows * Σ shape`) when allocating `fractions`, and as the reference for
-    /// the debug-mode overflow check in the prover builder.
+    /// Per-column upper bound on fractions emitted by one row.
     pub(super) shape: Vec<usize>,
-    /// Number of main-trace rows this buffer is sized for.
+    /// Number of main-trace rows.
     num_rows: usize,
-    /// Cached `shape.len()` — the permutation column count.
+    /// Number of lookup columns.
     num_cols: usize,
 }
 

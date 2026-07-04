@@ -1,4 +1,6 @@
-use super::{InputCounts, InputLayout, InputRegion, LayoutRegions, StarkVarIndices};
+use super::{
+    InputCounts, InputLayout, InputRegion, LayoutRegions, StarkVarIndices, plan::MultiAirVarIndices,
+};
 use crate::{EXT_DEGREE, randomness};
 
 #[derive(Clone, Copy)]
@@ -12,8 +14,6 @@ enum Alignment {
 #[derive(Clone, Copy)]
 struct LayoutPolicy {
     public_values: Alignment,
-    vlpi: Alignment,
-    vlpi_stride: usize,
     randomness: Alignment,
     main: Alignment,
     aux: Alignment,
@@ -27,8 +27,6 @@ impl LayoutPolicy {
     fn native() -> Self {
         Self {
             public_values: Alignment::Unaligned,
-            vlpi: Alignment::Unaligned,
-            vlpi_stride: 1,
             randomness: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
@@ -42,8 +40,6 @@ impl LayoutPolicy {
     fn masm() -> Self {
         Self {
             public_values: Alignment::QuadWord,
-            vlpi: Alignment::Word,
-            vlpi_stride: 2,
             randomness: Alignment::Word,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
@@ -79,37 +75,40 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout (no alignment/padding).
     pub fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), false)
+        Self::build_with_policy(counts, LayoutPolicy::native(), 1)
     }
 
     /// Build a MASM-compatible layout (alignment/padding enforced).
     pub fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), false)
+        Self::build_with_policy(counts, LayoutPolicy::masm(), 1)
     }
 
-    /// Build a native layout with the multi-AIR flag set.
-    pub fn new_multi_air(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), true)
+    /// Build a native multi-AIR layout for a combined circuit over `num_airs` traces.
+    pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::native(), num_airs)
     }
 
     /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves
-    /// extra stark-vars slots for the multi-AIR β coefficients and per-AIR selectors).
-    pub fn new_masm_multi_air(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), true)
+    /// extra stark-vars slots for the per-AIR β coefficients and lifted selectors).
+    pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::masm(), num_airs)
     }
 
-    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, is_multi_air: bool) -> Self {
+    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, num_airs: usize) -> Self {
+        assert!(num_airs >= 1, "layout requires at least one AIR");
+
         // Number of EF slots in the stark-vars block. Every ACE input slot is an
         // extension-field element (QuadFelt). Some stark vars are base-field values
         // embedded as (val, 0); see the slot table below for which is which.
-        // Multi-AIR appends 8 more: 2 β coefficients + 6 per-AIR selectors (3 per AIR).
+        // A multi-AIR layout (num_airs >= 2) appends 4 more per AIR: one β coefficient
+        // and a (is_first, is_last, is_transition) lifted-selector triple.
         const NUM_STARK_VARS_BASE: usize = 10;
-        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 8 } else { 0 };
+        let is_multi_air = num_airs >= 2;
+        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 4 * num_airs } else { 0 };
 
         let mut builder = LayoutBuilder::new();
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
-        let vlpi_reductions = builder.alloc(counts.num_vlpi, policy.vlpi);
         /// Number of randomness inputs (alpha + beta).
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
@@ -138,7 +137,7 @@ impl InputLayout {
         //   3    is_first            EF      Precomputed: (z^N - 1) / (z - 1)
         //   4    is_last             EF      Precomputed: (z^N - 1) / (z - g^{-1})
         //   5    is_transition       EF      Precomputed: z - g^{-1}
-        //   6    gamma               EF      Batching challenge
+        //   6    reserved            EF      Alignment padding (zero)
         //   7    weight0             base    First barycentric weight
         //   8    f                   base    Chunk shift ratio h^N
         //   9    s0                  base    First coset shift offset^N
@@ -149,18 +148,14 @@ impl InputLayout {
         let is_first = b + 3;
         let is_last = b + 4;
         let is_transition = b + 5;
-        let gamma = b + 6;
+        let reserved = b + 6;
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
-        let multi_air_beta_core = is_multi_air.then_some(b + 10);
-        let multi_air_beta_chip = is_multi_air.then_some(b + 11);
-        let is_first_core = is_multi_air.then_some(b + 12);
-        let is_last_core = is_multi_air.then_some(b + 13);
-        let is_transition_core = is_multi_air.then_some(b + 14);
-        let is_first_chip = is_multi_air.then_some(b + 15);
-        let is_last_chip = is_multi_air.then_some(b + 16);
-        let is_transition_chip = is_multi_air.then_some(b + 17);
+        // Multi-AIR block: β coefficients at b+10..b+10+num_airs, then one selector
+        // triple per AIR. For num_airs = 2 this is slots 10-11 (betas) and 12-17
+        // (selectors), matching `set_up_auxiliary_inputs_ace` in MASM.
+        let multi_air = is_multi_air.then_some(MultiAirVarIndices { base: b + 10, num_airs });
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -169,7 +164,6 @@ impl InputLayout {
         Self {
             regions: LayoutRegions {
                 public_values,
-                vlpi_reductions,
                 randomness,
                 main_curr,
                 aux_curr,
@@ -182,7 +176,6 @@ impl InputLayout {
             },
             aux_rand_alpha,
             aux_rand_beta,
-            vlpi_stride: policy.vlpi_stride,
             stark: StarkVarIndices {
                 alpha,
                 z_pow_n,
@@ -190,18 +183,11 @@ impl InputLayout {
                 is_first,
                 is_last,
                 is_transition,
-                gamma,
+                reserved,
                 weight0,
                 f,
                 s0,
-                multi_air_beta_core,
-                multi_air_beta_chip,
-                is_first_core,
-                is_last_core,
-                is_transition_core,
-                is_first_chip,
-                is_last_chip,
-                is_transition_chip,
+                multi_air,
             },
             total_inputs: builder.offset,
             counts,
@@ -214,49 +200,32 @@ mod tests {
     use super::super::{InputCounts, InputKey, InputLayout};
 
     #[test]
-    fn masm_layout_vlpi_groups_use_word_stride() {
+    fn multi_air_layout_generalizes_over_num_airs() {
         let counts = InputCounts {
             width: 1,
             aux_width: 1,
-            num_aux_boundary: 1,
+            num_aux_boundary: 3,
             num_public: 8,
-            // Two logical VLPI groups in MASM occupy four EF slots total:
-            // [group0, pad0, group1, pad1].
-            num_vlpi: 4,
             num_randomness: 2,
             num_periodic: 0,
             num_quotient_chunks: 1,
         };
-        let layout = InputLayout::new_masm(counts);
 
-        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
-        assert_eq!(layout.index(InputKey::VlpiReduction(0)), Some(vlpi_base));
-        assert_eq!(
-            layout.index(InputKey::VlpiReduction(1)),
-            Some(vlpi_base + 2),
-            "MASM VLPI groups should advance by a word-aligned stride"
-        );
-    }
+        // 3-AIR layout: betas first (instance order), then one selector triple per AIR.
+        let layout = InputLayout::new_multi_air(counts, 3);
+        let base = layout.index(InputKey::MultiAirBeta(0)).unwrap();
+        assert_eq!(layout.index(InputKey::MultiAirBeta(2)), Some(base + 2));
+        assert_eq!(layout.index(InputKey::IsFirstAir(0)), Some(base + 3));
+        assert_eq!(layout.index(InputKey::IsTransitionAir(2)), Some(base + 3 + 3 * 2 + 2));
+        assert_eq!(layout.index(InputKey::MultiAirBeta(3)), None, "AIR index out of range");
+        assert_eq!(layout.index(InputKey::IsFirstAir(3)), None, "AIR index out of range");
 
-    #[test]
-    fn native_layout_vlpi_groups_use_unit_stride() {
-        let counts = InputCounts {
-            width: 1,
-            aux_width: 1,
-            num_aux_boundary: 1,
-            num_public: 8,
-            num_vlpi: 2,
-            num_randomness: 2,
-            num_periodic: 0,
-            num_quotient_chunks: 1,
-        };
-        let layout = InputLayout::new(counts);
-
-        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
-        assert_eq!(
-            layout.index(InputKey::VlpiReduction(1)),
-            Some(vlpi_base + 1),
-            "Native VLPI groups should advance by unit stride"
-        );
+        // 2-AIR layout keeps the slot positions the MASM verifier writes:
+        // betas at base..base+1, selector triples at base+2..base+7.
+        let layout2 = InputLayout::new_multi_air(counts, 2);
+        let base2 = layout2.index(InputKey::MultiAirBeta(0)).unwrap();
+        assert_eq!(layout2.index(InputKey::MultiAirBeta(1)), Some(base2 + 1));
+        assert_eq!(layout2.index(InputKey::IsFirstAir(0)), Some(base2 + 2));
+        assert_eq!(layout2.index(InputKey::IsTransitionAir(1)), Some(base2 + 7));
     }
 }

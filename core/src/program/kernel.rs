@@ -1,10 +1,13 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::Word;
+use miden_crypto::{Felt, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use crate::{
+    chiplets::hasher,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // KERNEL
 // ================================================================================================
@@ -89,6 +92,16 @@ impl Kernel {
     pub fn proc_hashes(&self) -> &[Word] {
         &self.0
     }
+
+    /// Returns the canonical commitment to this kernel: the Poseidon2 linear hash of the
+    /// flattened procedure digests.
+    ///
+    /// This matches the kernel commitment computed by the protocol and is the fixed-size
+    /// identifier observed by the recursive verifier in place of the raw digest list.
+    pub fn commitment(&self) -> Word {
+        let elements: Vec<Felt> = self.0.iter().flat_map(Word::as_elements).copied().collect();
+        hasher::hash_elements(&elements)
+    }
 }
 
 // this is required by AIR as public inputs will be serialized with the proof
@@ -139,6 +152,38 @@ mod tests {
         Felt, Word,
         serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
+
+    #[test]
+    fn empty_kernel_commitment_matches_hash_of_no_elements() {
+        // The empty kernel is the common case; its commitment must equal the canonical hash of
+        // zero elements, which the recursive verifier mirrors via `hash_elements(ptr, 0)`.
+        let empty = Kernel::default();
+        assert_eq!(empty.commitment(), crate::chiplets::hasher::hash_elements(&[]));
+    }
+
+    #[test]
+    fn kernel_commitment_is_independent_of_procedure_order() {
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let b: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
+
+        // The kernel canonicalizes procedure order, so the commitment binds the set of
+        // procedures, not the order in which they were supplied.
+        let in_order = Kernel::new(&[a, b]).unwrap();
+        let reversed = Kernel::new(&[b, a]).unwrap();
+        assert_eq!(in_order.commitment(), reversed.commitment());
+    }
 
     #[test]
     fn kernel_read_from_rejects_duplicate_procedure_hashes() {
