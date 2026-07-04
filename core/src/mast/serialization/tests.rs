@@ -748,7 +748,7 @@ fn test_mast_forest_readers_reject_duplicate_dependency_commitment_inputs() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let second_external_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
     let second_dependency_digest_offset =
-        view.dependency_digest_offset() + Word::min_serialized_size();
+        view.dependency_commitment_digest_offset() + Word::min_serialized_size();
     write_word_at(&mut bytes, second_external_digest_offset, low);
     write_word_at(&mut bytes, second_dependency_digest_offset, low);
 
