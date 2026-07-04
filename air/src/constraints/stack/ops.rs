@@ -111,9 +111,6 @@ pub fn enforce_main<AB>(
     let is_caller = op_flags.caller();
     let is_sdepth = op_flags.sdepth();
 
-    // All constraints are gated by op flags which vanish on the last row.
-    let builder = &mut builder.when_transition();
-
     // PAD
     builder.when(is_pad).assert_zero(s0_next);
 
