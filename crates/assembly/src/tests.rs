@@ -7630,15 +7630,15 @@ fn test_num_locals_above_max_is_rejected() -> TestResult {
     }
 
     // Assembly must reject this gracefully (return Err), not overflow or panic.
-    Assembler::new(context.source_manager())
+    let err = Assembler::new(context.source_manager())
         .assemble_library("test", module, None::<Box<Module>>)
         .expect_err("assembling a procedure with 65535 locals should fail, not panic");
-
+    assert_diagnostic!(&err, "number of procedure locals 65535 exceeds the maximum of 65532");
     Ok(())
 }
 
 #[test]
-fn test_num_locals_below_max_is_accepted() -> TestResult {
+fn test_num_locals_at_max_is_accepted() -> TestResult {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -7658,7 +7658,7 @@ fn test_num_locals_below_max_is_accepted() -> TestResult {
         proc.set_num_locals(MAX_PROC_LOCALS);
     }
 
-    // Assembly must succeed (return Ok) as long as the number of locals is below the maximum.
+    // Assembly must succeed (return Ok) as long as the number of locals is up to the maximum.
     Assembler::new(context.source_manager())
         .assemble_library("test", module, None::<Box<Module>>)
         .expect("assembling a procedure with MAX_PROC_LOCALS locals should succeed");
@@ -7688,9 +7688,11 @@ fn test_num_locals_one_above_max_is_rejected() -> TestResult {
         proc.set_num_locals(MAX_PROC_LOCALS + 1);
     }
 
-    Assembler::new(context.source_manager())
+    let err = Assembler::new(context.source_manager())
         .assemble_library("test", module, None::<Box<Module>>)
-        .expect_err("assembling a procedure with 65536 locals should fail, not panic");
-
+        .expect_err(
+            "assembling a procedure with MAX_PROC_LOCALS + 1 locals should fail, not panic",
+        );
+    assert_diagnostic!(&err, "number of procedure locals 65533 exceeds the maximum of 65532");
     Ok(())
 }

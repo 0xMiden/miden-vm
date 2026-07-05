@@ -22,7 +22,7 @@ use miden_assembly_syntax::{
     module::ItemInfo,
 };
 use miden_core::{
-    Word,
+    WORD_SIZE, Word,
     mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     program::Kernel,
@@ -60,10 +60,10 @@ pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
 /// Maximum number of locals a single procedure may allocate.
 ///
 /// When emitting the frame-pointer sequence, the local count is rounded up to the nearest multiple
-/// of word size, which is 4. To keep that rounding from overflowing the u16 frame counter, the
-/// maximum must itself be a multiple of 4. This mirrors the limit the assembly parser enforces on
-/// the @locals(..) attribute.
-pub(crate) const MAX_PROC_LOCALS: u16 = (u16::MAX / 4) * 4;
+/// of word size. To keep that rounding from overflowing the u16 frame counter, the
+/// maximum must itself be a multiple of word size. This mirrors the limit the assembly parser
+/// enforces on the @locals(..) attribute.
+pub(crate) const MAX_PROC_LOCALS: u16 = (u16::MAX / WORD_SIZE as u16) * WORD_SIZE as u16;
 
 #[derive(Debug)]
 enum PendingPackageExport {
@@ -1345,6 +1345,7 @@ impl Assembler {
                 span,
                 source_file,
                 max_locals: MAX_PROC_LOCALS,
+                num_locals,
             }));
         }
 

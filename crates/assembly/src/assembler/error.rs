@@ -20,13 +20,16 @@ pub(super) enum AssemblerError {
     #[error("duplicate definition found for export path '{path}'")]
     #[diagnostic()]
     DuplicateExportPath { path: Arc<Path> },
-    #[error("number of procedure locals exceeds the maximum")]
-    #[diagnostic(help("number of procedure locals exceeds the maximum of {max_locals}"))]
+    #[error("number of procedure locals {num_locals} exceeds the maximum {max_locals}")]
+    #[diagnostic(help(
+        "number of procedure locals {num_locals} exceeds the maximum of {max_locals}"
+    ))]
     TooManyProcedureLocals {
         #[label("this procedure declares more locals than are allowed")]
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_locals: u16,
+        num_locals: u16,
     },
 }
