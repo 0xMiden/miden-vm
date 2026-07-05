@@ -29,7 +29,7 @@ use miden_project::Linkage;
 
 use crate::{
     Assembler, PathBuf,
-    assembler::MAX_CONTROL_FLOW_NESTING,
+    assembler::{MAX_CONTROL_FLOW_NESTING, MAX_PROC_LOCALS},
     ast::{Module, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
     fmp::fmp_initialization_sequence,
@@ -7600,6 +7600,97 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 
     let assembler = Assembler::new(context.source_manager());
     let _ = assembler.assemble_library("lib", a_lib, [b_lib])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_num_locals_above_max_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    // a valid library module: one exported procedure that uses a local, so codegen emits
+    // the frame-pointer sequence.
+    let source = source_file!(
+        &context,
+        "  namespace test::repro
+          @locals(1)
+          pub proc foo
+              loc_load.0
+              drop
+          end
+          "
+    );
+
+    let mut module = context.parse_module(source)?;
+
+    // Bump the local count past the 65532 maximum via the public AST API.
+    // The text parser rejects this, but the programmatic path currently does not.
+    for proc in module.procedures_mut() {
+        proc.set_num_locals(65535);
+    }
+
+    // Assembly must reject this gracefully (return Err), not overflow or panic.
+    Assembler::new(context.source_manager())
+        .assemble_library("test", module, None::<Box<Module>>)
+        .expect_err("assembling a procedure with 65535 locals should fail, not panic");
+
+    Ok(())
+}
+
+#[test]
+fn test_num_locals_below_max_is_accepted() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "
+          namespace test::repro
+          @locals(1)
+          pub proc foo
+              loc_load.0
+              drop
+          end
+          "
+    );
+
+    let mut module = context.parse_module(source)?;
+    for proc in module.procedures_mut() {
+        proc.set_num_locals(MAX_PROC_LOCALS);
+    }
+
+    // Assembly must succeed (return Ok) as long as the number of locals is below the maximum.
+    Assembler::new(context.source_manager())
+        .assemble_library("test", module, None::<Box<Module>>)
+        .expect("assembling a procedure with MAX_PROC_LOCALS locals should succeed");
+
+    Ok(())
+}
+
+#[test]
+fn test_num_locals_one_above_max_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "
+          namespace test::repro
+          @locals(1)
+          pub proc foo
+              loc_load.0
+              drop
+          end
+          "
+    );
+
+    let mut module = context.parse_module(source)?;
+
+    for proc in module.procedures_mut() {
+        proc.set_num_locals(MAX_PROC_LOCALS + 1);
+    }
+
+    Assembler::new(context.source_manager())
+        .assemble_library("test", module, None::<Box<Module>>)
+        .expect_err("assembling a procedure with 65536 locals should fail, not panic");
 
     Ok(())
 }

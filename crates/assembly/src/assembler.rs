@@ -57,6 +57,14 @@ use crate::{
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
 
+/// Maximum number of locals a single procedure may allocate.
+///
+/// When emitting the frame-pointer sequence, the local count is rounded up to the nearest multiple
+/// of word size, which is 4. To keep that rounding from overflowing the u16 frame counter, the
+/// maximum must itself be a multiple of 4. This mirrors the limit the assembly parser enforces on
+/// the @locals(..) attribute.
+pub(crate) const MAX_PROC_LOCALS: u16 = (u16::MAX / 4) * 4;
+
 #[derive(Debug)]
 enum PendingPackageExport {
     Procedure(PendingProcedureExport),
@@ -1326,6 +1334,19 @@ impl Assembler {
         let gid = proc_ctx.id();
 
         let num_locals = proc_ctx.num_locals();
+
+        // Reject procedures that declare more locals than can be represented once the count is
+        // rounded up to a word boundary during frame-pointer codegen. The text parser enforces this
+        // on `@locals(..)`, but procedures built directly via the AST bypass this check.
+        if num_locals > MAX_PROC_LOCALS {
+            let span = proc_ctx.span();
+            let source_file = proc_ctx.source_manager().get(span.source_id()).ok();
+            return Err(Report::new(AssemblerError::TooManyProcedureLocals {
+                span,
+                source_file,
+                max_locals: MAX_PROC_LOCALS,
+            }));
+        }
 
         let proc = match self.linker[gid].item() {
             SymbolItem::Procedure(proc) => proc.borrow(),
