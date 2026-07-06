@@ -286,7 +286,9 @@ mod tests {
 
     use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
+        mast::{
+            BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId,
+        },
         operations::Operation,
     };
     use miden_mast_package::{Package, PackageExport, ProcedureExport, TargetType};
@@ -294,11 +296,13 @@ mod tests {
     use super::*;
 
     fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let node_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build basic block");
-        forest.make_root(node_id);
+        builder.mark_root(node_id);
+        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let node_id = remapping.get(node_id).expect("root node should be retained");
         (forest, node_id)
     }
 

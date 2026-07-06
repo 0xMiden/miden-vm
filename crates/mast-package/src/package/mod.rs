@@ -1323,8 +1323,8 @@ mod tests {
         Felt, Word,
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastNode, MastNodeExt,
-            MastNodeId, SplitNodeBuilder,
+            BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
+            MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
         },
         operations::Operation,
         serde::Serializable,
@@ -1343,26 +1343,32 @@ mod tests {
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let node_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build basic block");
-        forest.make_root(node_id);
+        builder.mark_root(node_id);
+        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let node_id = remapping.get(node_id).expect("root node should be retained");
         (forest, node_id)
     }
 
     fn build_split_forest() -> (MastForest, MastNodeId, MastNodeId, MastNodeId) {
-        let mut forest = MastForest::new();
-        let left_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let left_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build left basic block");
-        let right_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
-            .add_to_forest(&mut forest)
+        let right_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Mul]))
             .expect("failed to build right basic block");
-        let root_id = SplitNodeBuilder::new([left_id, right_id])
-            .add_to_forest(&mut forest)
+        let root_id = builder
+            .push_node(SplitNodeBuilder::new([left_id, right_id]))
             .expect("failed to build split node");
-        forest.make_root(root_id);
+        builder.mark_root(root_id);
+        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let root_id = remapping.get(root_id).expect("root node should be retained");
+        let left_id = remapping.get(left_id).expect("left node should be retained");
+        let right_id = remapping.get(right_id).expect("right node should be retained");
         (forest, root_id, left_id, right_id)
     }
 
@@ -2125,18 +2131,23 @@ mod tests {
             }
         }
 
-        let mut concrete_forest = MastForest::new();
-        let concrete_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut concrete_forest)
+        let mut concrete_builder = DenseMastForestBuilder::new();
+        let concrete_root = concrete_builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .unwrap();
-        concrete_forest.make_root(concrete_root);
+        concrete_builder.mark_root(concrete_root);
+        let (concrete_forest, concrete_remapping) = concrete_builder.finish_with_id_map().unwrap();
+        let concrete_root = concrete_remapping.get(concrete_root).unwrap();
         let concrete_digest = concrete_forest[concrete_root].digest();
 
-        let mut placeholder_forest = MastForest::new();
-        let placeholder_root = ExternalNodeBuilder::new(concrete_digest)
-            .add_to_forest(&mut placeholder_forest)
+        let mut placeholder_builder = DenseMastForestBuilder::new();
+        let placeholder_root = placeholder_builder
+            .push_node(ExternalNodeBuilder::new(concrete_digest))
             .unwrap();
-        placeholder_forest.make_root(placeholder_root);
+        placeholder_builder.mark_root(placeholder_root);
+        let (placeholder_forest, placeholder_remapping) =
+            placeholder_builder.finish_with_id_map().unwrap();
+        let placeholder_root = placeholder_remapping.get(placeholder_root).unwrap();
 
         let placeholder_debug = debug_info_for_root(placeholder_root, "placeholder");
         let concrete_debug = debug_info_for_root(concrete_root, "concrete");

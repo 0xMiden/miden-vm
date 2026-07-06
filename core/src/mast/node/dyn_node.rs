@@ -275,18 +275,14 @@ mod tests {
     #[test]
     pub fn test_dyn_node_digest() {
         let mut forest = crate::mast::DenseMastForestBuilder::new();
-        let dyn_node_id = forest
-            .push_node_builder(crate::mast::MastNodeBuilder::Dyn(DynNodeBuilder::new_dyn()))
-            .unwrap();
+        let dyn_node_id = forest.push_node(DynNodeBuilder::new_dyn()).unwrap();
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
             Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
-        let dyncall_node_id = forest
-            .push_node_builder(crate::mast::MastNodeBuilder::Dyn(DynNodeBuilder::new_dyncall()))
-            .unwrap();
+        let dyncall_node_id = forest.push_node(DynNodeBuilder::new_dyncall()).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
