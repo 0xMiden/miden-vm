@@ -55,6 +55,7 @@ use miden_precompiles_prover::{
     session::{
         ChipletAir, EcNode, Session, Truthy, UintNode,
         strategies::{WnafTable, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table},
+        verify_deferred,
     },
 };
 use p3_matrix::Matrix;
@@ -647,11 +648,11 @@ fn main() {
     println!("prove_multi      : {prove_elapsed:?}");
 
     let verify_start = Instant::now();
-    let verify_result = proof.verify();
+    let verify_result = verify_deferred(&proof);
     let verify_elapsed = verify_start.elapsed();
     println!();
     match verify_result {
-        Ok(()) => {
+        Ok(_) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify OK — proved {n} × 2-base MSM ({}) on secp256k1", strat.name(),);
         },

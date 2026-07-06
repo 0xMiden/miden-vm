@@ -19,9 +19,9 @@ owns the data model, the root commitment, and the wire format; individual *preco
 meaning of the nodes.
 
 > **Status.** This page describes the current proof-bound precompile model: the VM accumulates
-> the DAG during execution, `ExecutionProof` carries its canonical `DeferredStateWire`, and the
-> verifier rehydrates that wire with the built-in precompile registry before checking the STARK
-> proof. See [Status and scope](#status-and-scope).
+> precompile claims into a deferred root, and `ExecutionProof` carries a `DeferredProof` for that
+> root: empty, wire-backed for partial proofs, or STARK-backed for final proofs. See
+> [Status and scope](#status-and-scope).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
@@ -43,6 +43,18 @@ The DAG is also intended to match the draft Precompile VM model. In that design,
 operations and constraints are described as a graph of canonical values, payloads, and joins — so
 modelling deferred computation the same way lets a precompile's native host implementation mirror
 its eventual constraint implementation. This direction is developed in GitHub discussion #3005.
+
+## Precompile proof shape
+
+The VM STARK proves execution and the deferred root accumulated for precompile claims; it does not
+prove those claims itself. `DeferredProof` supplies the proof material for that root:
+
+- `Empty`: no precompile claims.
+- `Wire`: partial proof; carries canonical `DeferredStateWire` so another prover can prove it later.
+- `Stark`: final proof; carries a precompile VM STARK proof for the same deferred root.
+
+Verification resolves a trusted root from `DeferredProof` and uses it as the VM STARK public input.
+The root is not supplied separately.
 
 ## The model
 
@@ -191,14 +203,14 @@ implicit root and evaluates that root directly. The digest is structural: even `
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-The verifier's deferred obligation collapses to a single fixed point: **rehydrate the proof-carried
-wire, compare its root to the public deferred root, evaluate that root to `TRUE`, and every logged
-statement holds.** There is no separate finalization step.
+For wire-backed proofs, the deferred check collapses to a single fixed point: **rehydrate the
+proof-carried wire, evaluate its implicit root to `TRUE`, and return that root for VM STARK
+verification.** There is no separate finalization step.
 
 ## Wire format and verification
 
-The proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`. `to_wire`
-lowers state to a passive, canonical, topologically ordered entry stream:
+The partial/delegation witness format is `DeferredStateWire`, not the in-memory `DeferredState`.
+`to_wire` lowers state to a passive, canonical, topologically ordered entry stream:
 
 - wire index `0` is the implicit `TRUE_DIGEST`;
 - `entries[i]` has wire index `i + 1`;
@@ -213,8 +225,8 @@ orphans are dropped.
 
 `DeferredState::from_wire(registry, wire, max_elements)` is the only trusted path from wire bytes
 back to a validated state. It runs as a structural decode, a canonicality check, and a root
-evaluation. This validates the wire's own implicit root; proof verification compares the returned
-`state.root()` against the public deferred root committed by the VM trace.
+evaluation. This validates the wire's own implicit root; deferred-proof verification returns the
+resulting `state.root()` as the trusted root for VM STARK verification.
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
    entry (translating structural child indices back to digests), decode its tag, check that the entry
@@ -238,10 +250,14 @@ This framework is now the proof-bound precompile substrate. In its current form:
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
 - `log_deferred` advances the deferred root by folding registered statements with `Tag::AND`;
 - the final deferred root is threaded into the STARK public inputs;
-- `ExecutionProof` carries a canonical `DeferredStateWire`, which the verifier rehydrates under the
-  built-in precompile registry before checking the STARK proof;
-- the `miden-precompiles` crate provides concrete hash, arithmetic, and curve precompile
-  implementations used by core-library facades and built-in verification.
+- `ExecutionProof` carries a `DeferredProof` envelope: `Empty` resolves to `TRUE_DIGEST`, `Wire`
+  carries canonical `DeferredStateWire` for partial/delegable proofs, and `Stark` carries a
+  precompile VM STARK proof for the exact deferred root;
+- verification resolves the trusted deferred root before VM STARK verification: final verification
+  accepts `Empty` or verified `Stark`, while explicit partial verification rehydrates `Wire` under
+  the built-in `miden_precompiles::registry()`;
+- the `miden-precompiles` crate provides concrete hash, arithmetic, curve, and native signature
+  precompile implementations used by core-library facades and built-in verification.
 
 The proof format binds the final deferred root, not a registry name or version. For that reason,
 execution, trace generation, proof generation, and verification all use the built-in

@@ -19,7 +19,7 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use crate::{
     math::{U256, from_hex},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces},
+    session::{Session, SessionTraces, verify_deferred},
     tests::bus_balance::session_stack_residual,
     transcript::eval::{
         COL_A_PTR, COL_B_PTR, COL_BOUND_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
@@ -95,7 +95,7 @@ fn ec_dag_add_matches_k256() {
 fn ec_dag_add_proves() {
     let traces = ec_dag_3g_traces();
     let proof = traces.prove();
-    proof.verify().expect("EC DAG round-trip must verify");
+    verify_deferred(&proof).expect("EC DAG round-trip must verify");
 }
 
 /// Create `G`; then `−G` via `ec_sub(∞, G)` and `3G − G = 2G` via
@@ -144,9 +144,7 @@ fn ec_dag_sub_from_pai_matches_k256() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn ec_dag_sub_from_pai_proves() {
-    ec_dag_sub_from_pai_traces()
-        .prove()
-        .verify()
+    verify_deferred(&ec_dag_sub_from_pai_traces().prove())
         .expect("EC DAG sub-from-PAI/sub round-trip must verify");
 }
 
@@ -191,7 +189,7 @@ fn ec_dag_pai_passthroughs_hold() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn ec_dag_pai_proves() {
-    ec_dag_pai_traces().prove().verify().expect("EC DAG PAI round-trip must verify");
+    verify_deferred(&ec_dag_pai_traces().prove()).expect("EC DAG PAI round-trip must verify");
 }
 
 /// `G + G = 2G` through the DAG — the tangent (double) arm, `ec_add(P, P)`,
@@ -227,10 +225,7 @@ fn ec_dag_double_matches_k256() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn ec_dag_double_proves() {
-    ec_dag_double_traces()
-        .prove()
-        .verify()
-        .expect("EC DAG double round-trip must verify");
+    verify_deferred(&ec_dag_double_traces().prove()).expect("EC DAG double round-trip must verify");
 }
 
 // ============================================================================

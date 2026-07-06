@@ -12,7 +12,7 @@ use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{Kernel, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction},
+    proof::{DeferredProof, ExecutionProof, HashFunction},
     serde::{ByteWriter, Serializable},
 };
 
@@ -259,8 +259,8 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Deferred-state wire seeds. ExecutionProof carries this compact wire witness for verifier
-    // rehydration under the supplied precompile registry.
+    // Deferred-state wire seeds. Partial ExecutionProofs can carry this compact witness so
+    // delegated provers can later produce a precompile VM STARK proof for the same root.
     {
         let empty = DeferredStateWire::default();
         write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
@@ -311,7 +311,7 @@ fn generate_fuzz_seeds() {
     // Execution proof seed (minimal)
     {
         let proof =
-            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
+            ExecutionProof::from_parts(Vec::new(), HashFunction::Rpo256, DeferredProof::empty());
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
 
@@ -324,6 +324,7 @@ fn generate_fuzz_seeds() {
         let mut oversized_deferred_wire_entries_len = Vec::new();
         oversized_deferred_wire_entries_len.write_usize(0);
         oversized_deferred_wire_entries_len.write_u8(HashFunction::Blake3_256 as u8);
+        oversized_deferred_wire_entries_len.write_u8(DeferredProof::WIRE_TAG);
         oversized_deferred_wire_entries_len.write_usize(usize::MAX);
         write_seed(
             "execution_proof_deserialize",
@@ -343,7 +344,8 @@ fn generate_fuzz_seeds() {
                 })
                 .collect(),
         };
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
+        let proof =
+            ExecutionProof::from_parts(vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
         write_seed(
             "execution_proof_deserialize",
             "many_minimal_deferred_wire_entries.bin",

@@ -1,15 +1,16 @@
 //! Compact wire format for deferred-state witnesses.
 //!
-//! Proofs carry a canonical, topologically ordered stream of the explicit DAG entries needed to
-//! open an externally committed deferred root. Wire index 0 is reserved for the implicit TRUE node;
-//! entry `i` has wire index `i + 1`, and structural child references may only point to TRUE or
-//! earlier entries. Empty wire opens [`TRUE_DIGEST`]; otherwise the root is the digest of the final
-//! entry.
+//! Partial proofs carry a canonical, topologically ordered stream of the explicit DAG entries
+//! needed to justify a deferred root before a precompile VM STARK proof is produced. Wire index 0
+//! is reserved for the implicit TRUE node; entry `i` has wire index `i + 1`, and structural child
+//! references may only point to TRUE or earlier entries. Empty wire opens [`TRUE_DIGEST`];
+//! otherwise the root is the digest of the final entry.
 //!
 //! Rehydration decodes the untrusted stream into ordinary [`DeferredState`] nodes, rejects
 //! non-canonical/dangling wire by comparing with [`DeferredState::to_wire`], and finally evaluates
-//! the implicit root to repopulate evaluation memos. Binding that root to execution is a caller
-//! responsibility: compare the returned state's root to the externally committed root.
+//! the implicit root to repopulate evaluation memos. This supports explicit partial verification:
+//! public final verification rejects `DeferredProof::Wire`, while the partial verifier rehydrates
+//! it and verifies the VM proof against the resulting root.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -65,8 +66,9 @@ pub enum WireEntry {
 ///
 /// The root is implicit: empty `entries` opens [`TRUE_DIGEST`], otherwise the root is the digest of
 /// the last entry. Accepted wire must be topologically ordered, root-last, duplicate-free,
-/// canonical, and semantically valid under the installed [`PrecompileRegistry`]. Callers bind the
-/// wire to execution by comparing the returned state's root to an externally committed root.
+/// canonical, and semantically valid under the installed [`PrecompileRegistry`]. Wire-backed
+/// deferred proofs are partial material: public final verification rejects them, and explicit
+/// partial verification rehydrates them before checking the VM proof.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {

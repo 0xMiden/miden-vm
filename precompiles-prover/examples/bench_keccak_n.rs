@@ -14,7 +14,7 @@
 //!
 //! [`Session`] hides the cross-chiplet plumbing: each keccak yields a claim
 //! handle, folded into one transcript root, and `SessionTraces::prove` /
-//! `SessionProof::verify` run the whole round-trip.
+//! `verify_deferred` run the whole round-trip.
 //!
 //! Reports trace heights, prove + verify wall-time, and the resulting
 //! public root.
@@ -28,7 +28,7 @@
 use std::time::Instant;
 
 use miden_lifted_air::LiftedAir;
-use miden_precompiles_prover::session::{ChipletAir, Session};
+use miden_precompiles_prover::session::{ChipletAir, Session, verify_deferred};
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -137,7 +137,7 @@ fn main() {
 
     // ------ verify -----------------------------------------------------
     let verify_start = Instant::now();
-    let verify_result = proof.verify();
+    let verify_result = verify_deferred(&proof);
     let verify_elapsed = verify_start.elapsed();
 
     println!();
@@ -145,7 +145,7 @@ fn main() {
     println!();
 
     match verify_result {
-        Ok(()) => {
+        Ok(_) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify roundtrip OK");
         },

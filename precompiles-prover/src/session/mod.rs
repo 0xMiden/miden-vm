@@ -33,6 +33,7 @@
 //! generic lifted-stark usage, not chiplet wiring.
 
 use miden_core::Felt;
+pub use miden_core::proof::{DeferredProof, StarkProof};
 use p3_matrix::dense::RowMajorMatrix;
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -81,7 +82,7 @@ mod prove;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
-pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
+pub use prove::{ChipletAir, ChipletMultiAir, VerifyError, verify_deferred, verify_stark};
 
 /// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
 pub const NUM_CHIPLETS: usize = 15;

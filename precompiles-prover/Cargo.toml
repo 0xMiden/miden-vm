@@ -27,7 +27,10 @@ p3-matrix = "0.6.1"
 p3-symmetric = "0.6.1"
 rand = "0.9"
 ruint = "1.18"
+serde.workspace = true
+serde-wincode.workspace = true
 thiserror.workspace = true
+wincode.workspace = true
 
 [dev-dependencies]
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit

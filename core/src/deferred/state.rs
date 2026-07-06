@@ -9,10 +9,10 @@ use super::{
 ///
 /// The state keeps registered nodes, host-side evaluation memos, and the current deferred root.
 /// Evaluation memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
-/// them. The state is intentionally not serialized directly: proofs carry [`DeferredStateWire`],
-/// and [`Self::from_wire`] rebuilds this state only after registry checks, canonical wire checks,
-/// and root evaluation. Callers that need proof binding compare the returned root to the externally
-/// committed deferred root.
+/// them. The state is intentionally not serialized directly: partial proofs carry
+/// [`DeferredStateWire`], and [`Self::from_wire`] rebuilds this state only after registry checks,
+/// canonical wire checks, and root evaluation. Final non-empty proofs can instead carry a
+/// precompile VM STARK proof for the same deferred root.
 #[derive(Debug, Clone)]
 pub struct DeferredState {
     registry: Arc<PrecompileRegistry>,
@@ -272,9 +272,9 @@ impl DeferredState {
     ///
     /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
     /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
-    /// evaluates the implicit root to TRUE under the installed precompiles. Callers that need
-    /// proof binding should compare the returned [`Self::root`] against the externally
-    /// committed root.
+    /// evaluates the implicit root to TRUE under the installed precompiles. This is the basis for
+    /// explicit partial verification: final verification rejects `DeferredProof::Wire`, while the
+    /// partial verifier rehydrates it and verifies the VM proof against the resulting root.
     pub fn from_wire(
         registry: Arc<PrecompileRegistry>,
         wire: &DeferredStateWire,
