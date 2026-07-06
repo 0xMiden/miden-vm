@@ -223,6 +223,9 @@ impl MastForest {
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.
     fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
+        self.validate_dense_node_order()
+            .expect("dense MAST forest must be in final dense order before serialization");
+
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
@@ -235,7 +238,7 @@ impl MastForest {
 
         // header counts
         let node_count = self.nodes.len();
-        let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
+        let external_node_count = self.nodes.iter().take_while(|node| node.is_external()).count();
         let internal_node_count = node_count - external_node_count;
         target.write_usize(internal_node_count);
         target.write_usize(external_node_count);
@@ -401,6 +404,7 @@ impl<'a> MastForestWireView<'a> {
         let (_flags, layout) = read_header_and_scan_layout(&mut scanner, false)?;
         let advice_map = WireAdviceMapView::new(bytes, layout.advice_map_offset())?;
         check_no_trailing_payload(bytes, advice_map.end_offset())?;
+        ResolvedSerializedForest::new(bytes, layout)?.validate_dense_node_order()?;
 
         Ok(Self {
             bytes,

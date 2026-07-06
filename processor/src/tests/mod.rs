@@ -7,7 +7,7 @@ use miden_assembly::{
 };
 use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
+    mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
 };
 use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};

@@ -1854,7 +1854,7 @@ mod tests {
     #[test]
     fn test_package_source_debug_merge_remaps_execution_nodes_without_collapsing_sources() {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+            mast::{BasicBlockNodeBuilder, MastForest},
             operations::{DebugVarInfo, DebugVarLocation, Operation},
         };
 
@@ -1989,7 +1989,7 @@ mod tests {
     #[test]
     fn test_package_source_debug_merge_remaps_non_root_execution_nodes() {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor},
+            mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest},
             operations::Operation,
         };
 

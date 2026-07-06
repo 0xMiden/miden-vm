@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
     semver::Version,
 };
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
     operations::Operation,
     serde::Serializable,
 };

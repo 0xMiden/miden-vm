@@ -49,7 +49,7 @@ impl proptest::arbitrary::Arbitrary for Package {
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastForestContributor, MastNodeExt},
+            mast::{BasicBlockNodeBuilder, MastNodeExt},
             operations::Operation,
         };
         use proptest::prelude::*;

@@ -8,7 +8,7 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
     mast::{MastForest, MastForestError, MastNodeId},
@@ -153,21 +153,22 @@ impl ExternalNodeBuilder {
     }
 }
 
-impl MastForestContributor for ExternalNodeBuilder {
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
+#[cfg(any(test, feature = "arbitrary"))]
+impl ExternalNodeBuilder {
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node_id = forest
             .nodes
-            .push(ExternalNode { digest: self.digest }.into())
+            .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)?;
-
+        forest.commitment = forest.compute_mast_forest_commitment();
         Ok(node_id)
     }
+}
 
+impl MastForestContributor for ExternalNodeBuilder {
     fn fingerprint_for_node(
         &self,
-        _forest: &MastForest,
+        _context: &impl MastNodeContext,
         _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         Ok(self.digest)
@@ -184,40 +185,14 @@ impl MastForestContributor for ExternalNodeBuilder {
     }
 }
 
-impl ExternalNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(ExternalNode { digest: self.digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
-}
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
-    type Parameters = ExternalNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
                 Word::new([
@@ -231,8 +206,3 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
             .boxed()
     }
 }
-
-/// Parameters for generating ExternalNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct ExternalNodeBuilderParams {}

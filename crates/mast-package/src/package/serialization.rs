@@ -834,10 +834,7 @@ mod tests {
     use miden_core::{
         Felt, Word,
         advice::AdviceMap,
-        mast::{
-            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
-            MastNodeId,
-        },
+        mast::{BasicBlockNodeBuilder, MastForest, MastNode, MastNodeExt, MastNodeId},
         operations::Operation,
         serde::{
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, WORD_SIZE, Word,
+    crypto::hash::Poseidon2,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -85,6 +86,26 @@ impl AdviceMap {
                 .checked_add(values.len())
                 .and_then(|entry_elements| total.checked_add(entry_elements))
         })
+    }
+
+    /// Returns a commitment to this advice map.
+    ///
+    /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
+    /// value elements. [`Poseidon2::hash_elements`] binds the entry length, and
+    /// [`Poseidon2::merge_many`] folds the ordered entry commitments into the final map
+    /// commitment.
+    pub fn commitment(&self) -> Word {
+        let entry_commitments = self
+            .iter()
+            .map(|(key, values)| {
+                let mut elements = Vec::with_capacity(WORD_SIZE + values.len());
+                elements.extend_from_slice(key.as_elements());
+                elements.extend_from_slice(values);
+                Poseidon2::hash_elements(&elements)
+            })
+            .collect::<Vec<_>>();
+
+        Poseidon2::merge_many(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.

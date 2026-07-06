@@ -463,7 +463,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.mast.commitment()),
+                        Some(self.digest()),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -557,7 +557,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.mast.commitment()),
+                        Some(self.digest()),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -1325,8 +1325,8 @@ mod tests {
     use miden_core::{
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
-            MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
+            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastNode, MastNodeExt,
+            MastNodeId, SplitNodeBuilder,
         },
         operations::Operation,
         serde::Serializable,

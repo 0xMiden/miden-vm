@@ -3,8 +3,8 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use crate::{
     Word,
     mast::{
-        MastForest, MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeId,
-        MultiMastForestIteratorItem, MultiMastForestNodeIter,
+        DenseMastForestBuilder, MastForest, MastForestContributor, MastForestError, MastNode,
+        MastNodeBuilder, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     utils::{DenseIdMap, IndexVec},
 };
@@ -16,7 +16,7 @@ mod tests;
 ///
 /// This functionality is exposed via [`MastForest::merge`]. See its documentation for more details.
 pub(crate) struct MastForestMerger {
-    mast_forest: MastForest,
+    mast_forest: DenseMastForestBuilder,
     // Internal indices needed for efficient duplicate checking.
     //
     // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
@@ -55,13 +55,16 @@ impl MastForestMerger {
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
             hash_by_node_id: IndexVec::new(),
-            mast_forest: MastForest::new(),
+            mast_forest: DenseMastForestBuilder::new(),
             node_id_mappings,
         };
 
         merger.merge_inner(forests.clone())?;
 
         let Self { mast_forest, node_id_mappings, .. } = merger;
+        let (mast_forest, final_id_remapping) = mast_forest.finish_with_id_map()?;
+        let node_id_mappings =
+            Self::remap_finalized_node_ids(node_id_mappings, &final_id_remapping);
 
         let root_maps = MastForestRootMap::from_node_id_map(node_id_mappings, forests);
 
@@ -143,10 +146,7 @@ impl MastForestMerger {
     }
 
     fn merge_advice_map(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        self.mast_forest
-            .advice_map
-            .merge(&other_forest.advice_map)
-            .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
+        self.mast_forest.merge_advice_map(other_forest.advice_map())
     }
 
     fn merge_node(
@@ -182,7 +182,7 @@ impl MastForestMerger {
             None => {
                 // If no node with a matching fingerprint exists, then the merging node is
                 // unique and we can add it to the merged forest using builders.
-                let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
+                let new_node_id = self.mast_forest.push_node_builder(remapped_builder)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
@@ -231,6 +231,27 @@ impl MastForestMerger {
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap)
+    }
+
+    fn remap_finalized_node_ids(
+        mut node_id_mappings: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
+        final_id_remapping: &DenseIdMap<MastNodeId, MastNodeId>,
+    ) -> Vec<DenseIdMap<MastNodeId, MastNodeId>> {
+        for node_id_mapping in &mut node_id_mappings {
+            for source_index in 0..node_id_mapping.len() {
+                let source_id = MastNodeId::new_unchecked(
+                    source_index.try_into().expect("source node index exceeds u32"),
+                );
+                if let Some(builder_id) = node_id_mapping.get(source_id) {
+                    let finalized_id = final_id_remapping
+                        .get(builder_id)
+                        .expect("every builder node id should map to a finalized node id");
+                    node_id_mapping.insert(source_id, finalized_id);
+                }
+            }
+        }
+
+        node_id_mappings
     }
 }
 
