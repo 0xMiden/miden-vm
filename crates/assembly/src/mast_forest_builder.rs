@@ -118,6 +118,10 @@ impl<'a> StaticLibrary<'a> {
         Self {
             mast,
             debug_info,
+            // TODO(#3067): revisit this default now that `MastForest::commitment()` binds
+            // dependencies and advice. Package-backed static libraries should use
+            // `Package::digest()`; direct forest-backed libraries may need an explicit source
+            // library identity instead of the interface commitment.
             source_library_commitment: mast.interface_commitment(),
         }
     }
