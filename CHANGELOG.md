@@ -9,6 +9,7 @@
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
 - Tightened LogUp lookup AIR docs and comments, removed unused operation-flag accessors, and added block-hash/op-group selector coverage ([#3309](https://github.com/0xMiden/miden-vm/pull/3309)).
 - [BREAKING] Optimize constraint evaluation step by dropping redundant transition guards on op-flag-gated constraints ([#3319](https://github.com/0xMiden/miden-vm/pull/3319)).
+- [BREAKING] Bound dense `MastForest` and package digests to stored roots, external dependencies, and advice, and rejected non-canonical dense forest payloads ([#3334](https://github.com/0xMiden/miden-vm/pull/3334)).
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
 
