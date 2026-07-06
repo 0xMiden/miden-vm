@@ -1,3 +1,5 @@
+use std::vec::Vec;
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, batch_multiplicative_inverse},

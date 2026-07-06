@@ -66,7 +66,7 @@ pub enum NodeTag {
 /// `Add`/`Sub`/`Mul` bind `(h, Uint, r_ptr, bound_ptr)`; `Is` binds
 /// `(h, True)` — the predicate that folds uint values into the spine.
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UintOpId {
     Add = 1,
     Sub = 2,
@@ -95,7 +95,7 @@ pub enum UintOpId {
 /// interned, then the add relation re-derives and certifies `R + Q = P`
 /// (deduping the result onto `P`).
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EcOpId {
     Add = 1,
     Sub = 2,

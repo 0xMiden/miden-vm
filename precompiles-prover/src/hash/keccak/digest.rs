@@ -12,7 +12,7 @@ use miden_core::Felt;
 use crate::utils::split_u64;
 
 /// 256-bit Keccak digest as four 64-bit lanes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct KeccakDigest(pub [u64; 4]);
 
 impl KeccakDigest {

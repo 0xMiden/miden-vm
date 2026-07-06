@@ -6,6 +6,8 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption.
 
+use std::{vec, vec::Vec};
+
 use miden_air::BaseAir;
 use miden_core::{
     Felt,

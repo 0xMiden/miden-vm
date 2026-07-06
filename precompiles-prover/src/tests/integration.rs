@@ -4,6 +4,8 @@
 //! constraint at every row of the trace, catching any mismatch between
 //! witness generation and constraint definitions.
 
+use std::{eprintln, string::String, vec, vec::Vec};
+
 use miden_core::{Felt, deferred::Node, field::QuadFelt};
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};

@@ -10,8 +10,8 @@
 //! consume) and the Schwartz–Zippel `id` register, whose per-row
 //! accumulation mirrors [`super::UintStoreAir`]'s `contrib` exactly.
 
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::array;
-use std::collections::{BTreeMap, HashMap};
 
 use miden_core::{
     Felt,
@@ -131,7 +131,7 @@ pub struct UintStoreRequires {
     /// ptr → uint; BTreeMap so trace-gen walks blocks in ptr order.
     uints: BTreeMap<UintPtr, Uint>,
     /// `(value, bound_ptr)` → ptr — the canonical-dedup reverse index.
-    by_value: HashMap<(U256, UintPtr), UintPtr>,
+    by_value: BTreeMap<(U256, UintPtr), UintPtr>,
     /// Next free ptr of the transient namespace `[2^16, …)`.
     next_transient: u32,
     demand: UintValRequires,
@@ -142,7 +142,7 @@ impl UintStoreRequires {
     pub fn new() -> Self {
         Self {
             uints: BTreeMap::new(),
-            by_value: HashMap::new(),
+            by_value: BTreeMap::new(),
             next_transient: PIN_NAMESPACE_END,
             demand: UintValRequires::new(),
             limbs_demand: UintValRequires::new(),

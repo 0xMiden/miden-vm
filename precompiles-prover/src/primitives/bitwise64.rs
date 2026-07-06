@@ -55,8 +55,8 @@
 //! algorithm, the +2^32 offset trick's full derivation, and
 //! known soundness gaps.
 
-use core::array;
-use std::collections::HashMap;
+use alloc::{collections::BTreeMap, vec, vec::Vec};
+use core::{array, ops::Range};
 
 use miden_core::{
     Felt,
@@ -79,13 +79,13 @@ use crate::{
 // COLUMN LAYOUT
 // ================================================================================================
 
-pub const A_BYTES_RANGE: std::ops::Range<usize> = 0..8;
+pub const A_BYTES_RANGE: Range<usize> = 0..8;
 /// 8 columns dual-purpose: 8-bit `b` operand bytes on LOGIC rows
 /// (range-checked via byte requires); 16-bit limbs of `(lo·k, hi·k)`
 /// on ROL rows (range-checked via Range16 requires). On ROL the
 /// first 4 are limbs of `lo·k` LSB-first, the next 4 are limbs of
 /// `hi·k`.
-pub const B_LIMBS_RANGE: std::ops::Range<usize> = 8..16;
+pub const B_LIMBS_RANGE: Range<usize> = 8..16;
 /// LOGIC: op tag (0 = AndNot, 1 = Xor). ROL: `k`, the multiplier
 /// (a power of two `< 2^31`). Disabled: 0.
 pub const COL_OP_OR_K: usize = 16;
@@ -426,7 +426,7 @@ fn build_chains(requests: &[Request]) -> Vec<Chain> {
     let n = requests.len();
 
     // value -> indices of LOGIC requests producing it, in issue order.
-    let mut producers: HashMap<u64, Vec<usize>> = HashMap::new();
+    let mut producers: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
     for (i, r) in requests.iter().enumerate() {
         if let Request::Logic { op, a, b } = *r {
             producers.entry(op.apply(a, b)).or_default().push(i);
@@ -496,7 +496,7 @@ fn build_chains(requests: &[Request]) -> Vec<Chain> {
 fn claim_producer(
     v: u64,
     before: usize,
-    producers: &HashMap<u64, Vec<usize>>,
+    producers: &BTreeMap<u64, Vec<usize>>,
     claimed: &mut [bool],
 ) -> Option<usize> {
     let ps = producers.get(&v)?;

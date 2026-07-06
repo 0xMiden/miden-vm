@@ -16,6 +16,7 @@
 //! private upstream so we cannot reuse them, but the bodies are
 //! mechanical and don't depend on the closing form.
 
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::field::PrimeCharacteristicRing;

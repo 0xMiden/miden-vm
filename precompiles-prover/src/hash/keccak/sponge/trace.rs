@@ -17,6 +17,8 @@
 //! allocation order, stamping the 27-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
+use alloc::vec::Vec;
+
 use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -632,6 +634,8 @@ pub(crate) fn build_aux(
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     #[test]

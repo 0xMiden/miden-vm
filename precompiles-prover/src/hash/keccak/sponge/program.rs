@@ -29,6 +29,8 @@
 //! - `rc_val_lo`, `rc_val_hi` — the u32 halves of `RC[p_idx]` on `p_rc_active` rows, `0` elsewhere.
 //!   Provided to Memory64 at the round chiplet's RC slot IP.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::Felt;
 
 /// Length of one sponge period (= 32 rows / 1 Keccak permutation).

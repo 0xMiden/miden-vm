@@ -31,6 +31,8 @@
 pub mod require;
 pub mod trace;
 
+use alloc::vec::Vec;
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

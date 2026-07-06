@@ -6,6 +6,8 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
+use std::{vec, vec::Vec};
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

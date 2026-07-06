@@ -17,7 +17,7 @@
 //! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the two one-shot P2 absorptions
 //!   this layer drives.
 
-use std::collections::HashMap;
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -210,7 +210,7 @@ struct NodeRecord {
 pub struct KeccakNodeRequires {
     records: Vec<NodeRecord>,
     /// `keccak_digest → index of its record` (each hit bumps `out_mult`).
-    by_keccak: HashMap<KeccakDigest, usize>,
+    by_keccak: BTreeMap<KeccakDigest, usize>,
     next_row: u32,
 }
 

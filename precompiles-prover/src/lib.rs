@@ -1,3 +1,11 @@
+#![no_std]
+
+extern crate alloc;
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
+use alloc::string::{String, ToString};
+
 use miden_core::deferred::{DeferredState, TRUE_DIGEST};
 pub use miden_core::proof::{DeferredProof, HashFunction, StarkProof};
 

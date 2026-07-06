@@ -23,6 +23,8 @@
 //! - rows 12..14: `ARK_EXT_TERMINAL[1..4]`
 //! - row 15:     all zero.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{Felt, chiplets::hasher::Hasher};
 
 use crate::transcript::poseidon2::math::STATE_WIDTH;

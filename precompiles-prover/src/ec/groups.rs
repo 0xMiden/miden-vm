@@ -34,6 +34,8 @@
 //! by consumers (membership MACs route `a` / `b` through the mul
 //! chiplet's views).
 
+use alloc::vec::Vec;
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

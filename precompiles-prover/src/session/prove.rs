@@ -8,6 +8,8 @@
 //! [`StarkProof`](miden_core::proof::StarkProof), while [`SessionTraces::prove`]
 //! returns the core deferred-proof envelope used by VM proof composition.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
