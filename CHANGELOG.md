@@ -11,6 +11,7 @@
 - [BREAKING] Optimize constraint evaluation step by dropping redundant transition guards on op-flag-gated constraints ([#3319](https://github.com/0xMiden/miden-vm/pull/3319)).
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
+- [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#333](https://github.com/0xMiden/miden-vm/issues/3333)).
 
 ## v0.24.0 (2026-06-24)
 
