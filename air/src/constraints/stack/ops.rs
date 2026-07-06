@@ -381,26 +381,413 @@ mod tests {
         builder.evaluations
     }
 
-    #[test]
-    fn stream_word_ops_constrain_cursor_increment() {
-        for opcode in [opcodes::MSTREAM, opcodes::PIPE] {
-            let mut local = generate_test_row(opcode.into());
-            let mut next = generate_test_row(0);
-            local.stack.top[12] = Felt::new_unchecked(19);
+    /// Distinct sentinel value for stack position `i`, so a misrouted source position is
+    /// always detectable.
+    fn sentinel(i: usize) -> Felt {
+        Felt::new_unchecked(100 + i as u64)
+    }
 
-            next.stack.top[12] = Felt::new_unchecked(27);
+    fn base_setup(local: &mut CoreCols<Felt>) {
+        for i in 0..16 {
+            local.stack.top[i] = sentinel(i);
+        }
+    }
+
+    fn setup_clk(local: &mut CoreCols<Felt>) {
+        base_setup(local);
+        local.system.clk = Felt::new_unchecked(555);
+    }
+
+    fn setup_caller(local: &mut CoreCols<Felt>) {
+        base_setup(local);
+        local.system.fn_hash = [
+            Felt::new_unchecked(31),
+            Felt::new_unchecked(32),
+            Felt::new_unchecked(33),
+            Felt::new_unchecked(34),
+        ];
+    }
+
+    fn setup_sdepth(local: &mut CoreCols<Felt>) {
+        base_setup(local);
+        local.stack.b0 = Felt::new_unchecked(7);
+    }
+
+    fn setup_cswap_false(local: &mut CoreCols<Felt>) {
+        base_setup(local);
+        local.stack.top[0] = Felt::ZERO;
+    }
+
+    fn setup_cswap_true(local: &mut CoreCols<Felt>) {
+        base_setup(local);
+        local.stack.top[0] = Felt::ONE;
+    }
+
+    /// One test case for the position-folded stack op constraints: an opcode, how to
+    /// populate the local row, and the next-row `(position, value)` pairs dictated by the
+    /// op's ISA semantics (see `processor::execution::operations::stack_ops` /
+    /// `sys_ops`) — independent of the folded constraint's own arithmetic in
+    /// `enforce_main`.
+    struct StackOpCase {
+        name: &'static str,
+        opcode: u8,
+        setup: fn(&mut CoreCols<Felt>),
+        expected: Vec<(usize, Felt)>,
+    }
+
+    fn stack_op_cases() -> Vec<StackOpCase> {
+        let s = sentinel;
+        Vec::from([
+            StackOpCase {
+                name: "PAD",
+                opcode: opcodes::PAD,
+                setup: base_setup,
+                expected: Vec::from([(0, Felt::ZERO)]),
+            },
+            StackOpCase {
+                name: "DUP0",
+                opcode: opcodes::DUP0,
+                setup: base_setup,
+                expected: Vec::from([(0, s(0))]),
+            },
+            StackOpCase {
+                name: "DUP1",
+                opcode: opcodes::DUP1,
+                setup: base_setup,
+                expected: Vec::from([(0, s(1))]),
+            },
+            StackOpCase {
+                name: "DUP2",
+                opcode: opcodes::DUP2,
+                setup: base_setup,
+                expected: Vec::from([(0, s(2))]),
+            },
+            StackOpCase {
+                name: "DUP3",
+                opcode: opcodes::DUP3,
+                setup: base_setup,
+                expected: Vec::from([(0, s(3))]),
+            },
+            StackOpCase {
+                name: "DUP4",
+                opcode: opcodes::DUP4,
+                setup: base_setup,
+                expected: Vec::from([(0, s(4))]),
+            },
+            StackOpCase {
+                name: "DUP5",
+                opcode: opcodes::DUP5,
+                setup: base_setup,
+                expected: Vec::from([(0, s(5))]),
+            },
+            StackOpCase {
+                name: "DUP6",
+                opcode: opcodes::DUP6,
+                setup: base_setup,
+                expected: Vec::from([(0, s(6))]),
+            },
+            StackOpCase {
+                name: "DUP7",
+                opcode: opcodes::DUP7,
+                setup: base_setup,
+                expected: Vec::from([(0, s(7))]),
+            },
+            StackOpCase {
+                name: "DUP9",
+                opcode: opcodes::DUP9,
+                setup: base_setup,
+                expected: Vec::from([(0, s(9))]),
+            },
+            StackOpCase {
+                name: "DUP11",
+                opcode: opcodes::DUP11,
+                setup: base_setup,
+                expected: Vec::from([(0, s(11))]),
+            },
+            StackOpCase {
+                name: "DUP13",
+                opcode: opcodes::DUP13,
+                setup: base_setup,
+                expected: Vec::from([(0, s(13))]),
+            },
+            StackOpCase {
+                name: "DUP15",
+                opcode: opcodes::DUP15,
+                setup: base_setup,
+                expected: Vec::from([(0, s(15))]),
+            },
+            StackOpCase {
+                name: "CLK",
+                opcode: opcodes::CLK,
+                setup: setup_clk,
+                expected: Vec::from([(0, Felt::new_unchecked(555))]),
+            },
+            StackOpCase {
+                name: "SWAP",
+                opcode: opcodes::SWAP,
+                setup: base_setup,
+                expected: Vec::from([(0, s(1)), (1, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVUP2",
+                opcode: opcodes::MOVUP2,
+                setup: base_setup,
+                expected: Vec::from([(0, s(2))]),
+            },
+            StackOpCase {
+                name: "MOVUP3",
+                opcode: opcodes::MOVUP3,
+                setup: base_setup,
+                expected: Vec::from([(0, s(3))]),
+            },
+            StackOpCase {
+                name: "MOVUP4",
+                opcode: opcodes::MOVUP4,
+                setup: base_setup,
+                expected: Vec::from([(0, s(4))]),
+            },
+            StackOpCase {
+                name: "MOVUP5",
+                opcode: opcodes::MOVUP5,
+                setup: base_setup,
+                expected: Vec::from([(0, s(5))]),
+            },
+            StackOpCase {
+                name: "MOVUP6",
+                opcode: opcodes::MOVUP6,
+                setup: base_setup,
+                expected: Vec::from([(0, s(6))]),
+            },
+            StackOpCase {
+                name: "MOVUP7",
+                opcode: opcodes::MOVUP7,
+                setup: base_setup,
+                expected: Vec::from([(0, s(7))]),
+            },
+            StackOpCase {
+                name: "MOVUP8",
+                opcode: opcodes::MOVUP8,
+                setup: base_setup,
+                expected: Vec::from([(0, s(8))]),
+            },
+            StackOpCase {
+                name: "MOVDN2",
+                opcode: opcodes::MOVDN2,
+                setup: base_setup,
+                expected: Vec::from([(2, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN3",
+                opcode: opcodes::MOVDN3,
+                setup: base_setup,
+                expected: Vec::from([(3, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN4",
+                opcode: opcodes::MOVDN4,
+                setup: base_setup,
+                expected: Vec::from([(4, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN5",
+                opcode: opcodes::MOVDN5,
+                setup: base_setup,
+                expected: Vec::from([(5, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN6",
+                opcode: opcodes::MOVDN6,
+                setup: base_setup,
+                expected: Vec::from([(6, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN7",
+                opcode: opcodes::MOVDN7,
+                setup: base_setup,
+                expected: Vec::from([(7, s(0))]),
+            },
+            StackOpCase {
+                name: "MOVDN8",
+                opcode: opcodes::MOVDN8,
+                setup: base_setup,
+                expected: Vec::from([(8, s(0))]),
+            },
+            StackOpCase {
+                name: "SWAPW",
+                opcode: opcodes::SWAPW,
+                setup: base_setup,
+                expected: Vec::from([
+                    (0, s(4)),
+                    (1, s(5)),
+                    (2, s(6)),
+                    (3, s(7)),
+                    (4, s(0)),
+                    (5, s(1)),
+                    (6, s(2)),
+                    (7, s(3)),
+                ]),
+            },
+            StackOpCase {
+                name: "SWAPW2",
+                opcode: opcodes::SWAPW2,
+                setup: base_setup,
+                expected: Vec::from([
+                    (0, s(8)),
+                    (1, s(9)),
+                    (2, s(10)),
+                    (3, s(11)),
+                    (8, s(0)),
+                    (9, s(1)),
+                    (10, s(2)),
+                    (11, s(3)),
+                ]),
+            },
+            StackOpCase {
+                name: "SWAPW3",
+                opcode: opcodes::SWAPW3,
+                setup: base_setup,
+                expected: Vec::from([
+                    (0, s(12)),
+                    (1, s(13)),
+                    (2, s(14)),
+                    (3, s(15)),
+                    (12, s(0)),
+                    (13, s(1)),
+                    (14, s(2)),
+                    (15, s(3)),
+                ]),
+            },
+            StackOpCase {
+                name: "SWAPDW",
+                opcode: opcodes::SWAPDW,
+                setup: base_setup,
+                expected: Vec::from([
+                    (0, s(8)),
+                    (1, s(9)),
+                    (2, s(10)),
+                    (3, s(11)),
+                    (4, s(12)),
+                    (5, s(13)),
+                    (6, s(14)),
+                    (7, s(15)),
+                    (8, s(0)),
+                    (9, s(1)),
+                    (10, s(2)),
+                    (11, s(3)),
+                    (12, s(4)),
+                    (13, s(5)),
+                    (14, s(6)),
+                    (15, s(7)),
+                ]),
+            },
+            StackOpCase {
+                name: "CSWAP (selector = 0)",
+                opcode: opcodes::CSWAP,
+                setup: setup_cswap_false,
+                expected: Vec::from([(0, s(1)), (1, s(2))]),
+            },
+            StackOpCase {
+                name: "CSWAP (selector = 1)",
+                opcode: opcodes::CSWAP,
+                setup: setup_cswap_true,
+                expected: Vec::from([(0, s(2)), (1, s(1))]),
+            },
+            StackOpCase {
+                name: "CSWAPW (selector = 0)",
+                opcode: opcodes::CSWAPW,
+                setup: setup_cswap_false,
+                expected: Vec::from([
+                    (0, s(1)),
+                    (1, s(2)),
+                    (2, s(3)),
+                    (3, s(4)),
+                    (4, s(5)),
+                    (5, s(6)),
+                    (6, s(7)),
+                    (7, s(8)),
+                ]),
+            },
+            StackOpCase {
+                name: "CSWAPW (selector = 1)",
+                opcode: opcodes::CSWAPW,
+                setup: setup_cswap_true,
+                expected: Vec::from([
+                    (0, s(5)),
+                    (1, s(6)),
+                    (2, s(7)),
+                    (3, s(8)),
+                    (4, s(1)),
+                    (5, s(2)),
+                    (6, s(3)),
+                    (7, s(4)),
+                ]),
+            },
+            StackOpCase {
+                name: "CALLER",
+                opcode: opcodes::CALLER,
+                setup: setup_caller,
+                expected: Vec::from([
+                    (0, Felt::new_unchecked(31)),
+                    (1, Felt::new_unchecked(32)),
+                    (2, Felt::new_unchecked(33)),
+                    (3, Felt::new_unchecked(34)),
+                ]),
+            },
+            StackOpCase {
+                name: "SDEPTH",
+                opcode: opcodes::SDEPTH,
+                setup: setup_sdepth,
+                expected: Vec::from([(0, Felt::new_unchecked(7))]),
+            },
+            StackOpCase {
+                name: "MSTREAM",
+                opcode: opcodes::MSTREAM,
+                setup: base_setup,
+                expected: Vec::from([(12, s(12) + Felt::new_unchecked(8))]),
+            },
+            StackOpCase {
+                name: "PIPE",
+                opcode: opcodes::PIPE,
+                setup: base_setup,
+                expected: Vec::from([(12, s(12) + Felt::new_unchecked(8))]),
+            },
+        ])
+    }
+
+    /// For every opcode folded into the shared per-position constraints in `enforce_main`,
+    /// builds the next-stack row its ISA semantics dictate and verifies the folded
+    /// constraint (a) accepts that row and (b) rejects a one-off mutation of each position
+    /// the opcode is expected to rewrite.
+    #[test]
+    fn stack_ops_fold_accepts_and_rejects_each_written_position() {
+        for case in stack_op_cases() {
+            let mut local = generate_test_row(case.opcode.into());
+            (case.setup)(&mut local);
+
+            let mut next = generate_test_row(0);
+            for &(pos, value) in &case.expected {
+                next.stack.top[pos] = value;
+            }
+
             let evaluations = eval_stack_ops(&local, &next);
             assert!(
                 evaluations.iter().all(|value| *value == QuadFelt::ZERO),
-                "opcode {opcode} should accept the +8 cursor update"
+                "{}: correct next-row rewrite should be accepted",
+                case.name
             );
 
-            next.stack.top[12] = Felt::new_unchecked(28);
-            let evaluations = eval_stack_ops(&local, &next);
-            assert!(
-                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-                "opcode {opcode} should reject a forged cursor update"
-            );
+            for &(pos, _) in &case.expected {
+                let mut mutated = next.clone();
+                mutated.stack.top[pos] += Felt::ONE;
+
+                let evaluations = eval_stack_ops(&local, &mutated);
+                assert!(
+                    evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                    "{}: mutating written position {} should be rejected",
+                    case.name,
+                    pos
+                );
+            }
         }
     }
 }
