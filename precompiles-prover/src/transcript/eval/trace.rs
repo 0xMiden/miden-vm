@@ -63,20 +63,21 @@ use crate::{
     relations::ProvideMult,
     transcript::{
         eval::{
-            COL_A_PTR, COL_ABSORB_CAP_BEGIN, COL_ABSORB_CAP_END, COL_ACT, COL_B_PTR, COL_BOUND_PTR,
-            COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_H_BEGIN,
-            COL_H_END, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP,
-            COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB,
-            COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_LHS_END,
-            COL_MSM_EXPR, COL_MSM_IDX, COL_OUT_MULT, COL_PERM_SEQ_ID, COL_PIN_CLAIM_BOUND_PTR,
+            COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CONTEXT_GROUP_PTR,
+            COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR, COL_EC_CREATE_POINT_PTR,
+            COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_H_BEGIN, COL_H_END, COL_IS_ADD,
+            COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS,
+            COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF,
+            COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX,
+            COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PERM_SEQ_ID, COL_PIN_CLAIM_BOUND_PTR,
             COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_TAG_ARG0,
             COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::{EcOpId, UintOpId},
         poseidon2::{
             P2Cap, P2Digest,
-            trace::{PermSeqId, Poseidon2Requires},
+            math::STATE_WIDTH,
+            trace::{PermSeqId, Poseidon2Requires, apply_permutation},
         },
     },
     uint::{
@@ -128,8 +129,8 @@ impl UintNode {
 /// created by `EcCreate` or produced by an `EcBinOp`. Shared-use like
 /// [`UintNode`]: ops take `&EcNode` and each use bumps the node's consumer
 /// count. The point handle is crate-private — at the DAG level a point is
-/// its hash; the group selector and coordinates are committed in that hash,
-/// while the point ptr is bus glue.
+/// its hash; for point VALUE nodes the group selector and coordinates are
+/// committed in that hash, while the point ptr is bus glue.
 #[derive(Debug, Clone, Copy)]
 pub struct EcNode {
     pub(crate) id: u32,
@@ -168,17 +169,16 @@ struct Absorbed {
 }
 
 /// One absorb row of an [`NodeKind::EcMsm`] run — term `(Pᵢ, sᵢ)` folded
-/// into the sponge. `cap = stateᵢ` (the IV on the first row, the prior
-/// row's `digest` after) feeds the perm; `digest = stateᵢ₊₁` is the row's
-/// committed `h`.
+/// into one multi-block Poseidon2 absorption. `perm_seq_id` is the span head
+/// plus this term's position. `digest` is this cycle's rate0 output for the
+/// row's `h`; only the run's tail digest is consumed as the claim hash.
 #[derive(Debug, Clone, Copy)]
 struct MsmAbsorb {
     base_hash: P2Digest,
     scalar_hash: P2Digest,
     base_ptr: u32,
     scalar_ptr: u32,
-    perm_seq_id: PermSeqId,
-    cap: P2Digest,
+    perm_seq_id: u32,
     digest: P2Digest,
 }
 
@@ -250,10 +250,11 @@ enum NodeKind {
         group_ptr: u32,
     },
     /// EcMsm — the claim `R = Σ sᵢ·Pᵢ`, laid as a **run** of absorb rows
-    /// (one per `absorbs` entry, the last the boundary). Each row hashes
-    /// `(Pᵢ.hash, sᵢ.hash)` under `cap = stateᵢ` and consumes the term's
-    /// child `Group`/`Uint` bindings + `MsmTerm`; the boundary consumes
-    /// `MsmExpr(expr, group, val, k)` and binds `(h_claim, Group, val)`.
+    /// (one per `absorbs` entry, the last the boundary) backed by one
+    /// Poseidon2 absorption span. Each row consumes the term's child
+    /// `Group`/`Uint` bindings + `MsmClaimTerm`; only the boundary consumes
+    /// the tail digest via `MsmExpr(expr, group, val, k)` and binds
+    /// `(h_claim, Group, val)`.
     EcMsm {
         absorbs: Vec<MsmAbsorb>,
         expr: u32,
@@ -741,15 +742,15 @@ impl TranscriptEvalRequires {
         out
     }
 
-    /// Record an EcMsm claim node `R = Σ sᵢ·Pᵢ` — the chaining sponge over
-    /// `terms = [(Pᵢ, sᵢ)]` (in `idx` order, matching the chiplet's
-    /// `expr_ptr` term list). Each term folds into the sponge under
-    /// `cap = stateᵢ` (the VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group, 0]`
-    /// first, the prior digest after); the node's hash is `state_k` and it binds
-    /// `(h_claim, Group, val)`. Consumes each term's child `Group`/`Uint`
-    /// binding (their `out_mult`); the absorb rows additionally consume
-    /// `MsmTerm` and the boundary `MsmExpr` over the bus (laid by the AIR).
-    /// Dedups by `expr`. Returns the value's shared-use [`EcNode`].
+    /// Record an EcMsm claim node `R = Σ sᵢ·Pᵢ` — the VM PairList sponge over
+    /// caller-declared `terms = [(Pᵢ, sᵢ)]`. The whole term list is one
+    /// Poseidon2 absorption under the VM curve MSM IV
+    /// `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`; the returned absorption
+    /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
+    /// term's child `Group`/`Uint` binding (their `out_mult`);
+    /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
+    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `expr`. Returns
+    /// the value's shared-use [`EcNode`].
     pub fn record_ec_msm(
         &mut self,
         expr: u32,
@@ -763,33 +764,48 @@ impl TranscriptEvalRequires {
             return node;
         }
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
+        let blocks: Vec<_> = terms
+            .iter()
+            .map(|(base, scalar)| {
+                assert_eq!(
+                    scalar.bound_ptr.addr(),
+                    bound,
+                    "term scalar must be stored under the claim's scalar bound",
+                );
+                (base.hash.as_array(), scalar.hash.as_array())
+            })
+            .collect();
+
+        let initial_cap = P2Cap::ec_msm_iv();
+        let absorption = p2.require_absorption(initial_cap, blocks.iter().copied());
+        let _ = p2.require_digest(absorption.digest);
+        let h_claim = absorption.digest;
+
         let mut absorbs = Vec::with_capacity(terms.len());
-        // state₀ = IV; stateᵢ₊₁ = Poseidon2(Pᵢ.hash ‖ sᵢ.hash, capᵢ = stateᵢ).
-        let mut state = P2Cap::ec_msm_iv(group);
-        for (base, scalar) in terms {
-            assert_eq!(
-                scalar.bound_ptr.addr(),
-                bound,
-                "term scalar must be stored under the claim's scalar bound",
-            );
-            let cap = P2Digest(state.as_array());
-            let absorption =
-                p2.require_one_shot(state, base.hash.as_array(), scalar.hash.as_array());
-            let _ = p2.require_digest(absorption.digest);
+        let mut cap = initial_cap.as_array();
+        let span_head = absorption.head().seq();
+        for (idx, ((base, scalar), &(rate0, rate1))) in terms.iter().zip(blocks.iter()).enumerate()
+        {
+            let mut state = [Felt::ZERO; STATE_WIDTH];
+            state[0..4].copy_from_slice(&rate0);
+            state[4..8].copy_from_slice(&rate1);
+            state[8..12].copy_from_slice(&cap);
+            let state_out = apply_permutation(state);
+            let digest = P2Digest([state_out[0], state_out[1], state_out[2], state_out[3]]);
+            cap = [state_out[8], state_out[9], state_out[10], state_out[11]];
+
             absorbs.push(MsmAbsorb {
                 base_hash: base.hash,
                 scalar_hash: scalar.hash,
                 base_ptr: base.point.addr(),
                 scalar_ptr: scalar.ptr.addr(),
-                perm_seq_id: absorption.head(),
-                cap,
-                digest: absorption.digest,
+                perm_seq_id: span_head + idx as u32,
+                digest,
             });
             self.consume_ec(base);
             self.consume_uint(scalar);
-            state = P2Cap(absorption.digest.as_array());
         }
-        let h_claim = P2Digest(state.as_array());
+        debug_assert_eq!(absorbs.last().expect("non-empty MSM").digest, h_claim);
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
@@ -998,9 +1014,9 @@ fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &P2Digest, rhs: &P2Diges
 /// `mod.rs` is the single source of truth. Each kind sets its family / op
 /// flags + reused ptr columns; everything else stays 0.
 fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) {
-    // EcMsm is the one multi-row node: lay its absorb run (one row per term,
-    // the last the boundary). The capacity cells thread `stateᵢ`; only the
-    // boundary carries the value ptr + the Group-binding `out_mult`.
+    // EcMsm is the one multi-row node: lay its absorb run (one row per term;
+    // the head consumes the IV cap, and the last row consumes the final digest /
+    // carries the value ptr + Group-binding `out_mult`).
     if let NodeKind::EcMsm { absorbs, expr, group, val, bound } = &node.kind {
         let k = absorbs.len();
         for (idx, a) in absorbs.iter().enumerate() {
@@ -1009,15 +1025,14 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_ACT] = Felt::ONE;
             row[COL_IS_EC_MSM] = Felt::ONE;
             row[COL_IS_MSM_LAST] = Felt::from(is_last as u8);
-            row[COL_PERM_SEQ_ID] = Felt::from(a.perm_seq_id.seq());
+            row[COL_MSM_IS_HEAD] = Felt::from((idx == 0) as u8);
+            row[COL_PERM_SEQ_ID] = Felt::from(a.perm_seq_id);
             let base_hash = a.base_hash.as_array();
             let scalar_hash = a.scalar_hash.as_array();
             let digest = a.digest.as_array();
-            let cap = a.cap.as_array();
             row[COL_LHS_BEGIN..COL_LHS_END].copy_from_slice(&base_hash);
             row[COL_RHS_BEGIN..COL_RHS_END].copy_from_slice(&scalar_hash);
             row[COL_H_BEGIN..COL_H_END].copy_from_slice(&digest);
-            row[COL_ABSORB_CAP_BEGIN..COL_ABSORB_CAP_END].copy_from_slice(&cap);
             row[COL_A_PTR] = Felt::from(a.base_ptr);
             row[COL_B_PTR] = Felt::from(a.scalar_ptr);
             row[COL_MSM_IDX] = Felt::from(idx as u32);

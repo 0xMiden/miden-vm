@@ -144,8 +144,7 @@ impl Default for EcStoreRequires {
             pai_rows: BTreeMap::new(),
         };
 
-        // Preseed VM-owned group slots. This keeps prover-side dense rows aligned with public
-        // curve-MSM tags. Unused rows simply carry mult = 0 in the group trace.
+        // Preseed VM-owned group slots. Unused rows simply carry mult = 0 in the group trace.
         for curve in CurveId::ALL {
             let ptr = EcGroupPtr(curve.group_ptr());
             debug_assert_eq!(ptr.0 as usize, store.groups.len() + 1);

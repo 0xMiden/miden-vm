@@ -342,8 +342,8 @@ impl Session {
     /// **nodes** (both are absorbed by hash), in this order — and **not** of
     /// the chiplet's internal `idx` storage order (hence not of the
     /// addition-chain strategy). The caller's pairing is validated against the
-    /// expression by the bus; each scalar node must be stored under the
-    /// group's scalar bound. Bumps the resolve use count.
+    /// expression by the bus; each scalar node must be stored under the group's
+    /// scalar bound. Bumps the resolve use count.
     ///
     /// Panics unless the claim is **fully merged** — distinct bases, exactly
     /// one pair per term — the canonical form that makes the root well-defined
@@ -449,8 +449,7 @@ impl Session {
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
-        // Eval no longer needs to read EC group metadata directly: EcCreate
-        // rows hash the group pointer and bind it through their EcPoint consume.
+        // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = eval_trace(self.eval, root);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);

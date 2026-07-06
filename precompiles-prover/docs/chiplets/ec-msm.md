@@ -100,12 +100,11 @@ the walk needs **no sortedness and no canonical order** — `take_both` is sound
 wherever the prover claims it (the base-equality tie polices it). One combine
 discipline replaces a constraint for free (pure completeness): operands share a
 consistent term order, else equal bases fail to align and duplicates
-accumulate. The **claim**, by contrast, no longer rests on discipline: the seam
-(§6) matches the claim's terms as a positionless **set** (`MsmClaimTerm`, no
-`idx`), so the absorb order is the *caller's* — decoupled from the chiplet's
-storage order — and "fully merged" (distinct bases) is **enforced at the
-resolve** (`Session::ec_msm`), the canonical form that keeps the root a
-function of the claim's term set, not of the addition chain. **Exhaustiveness**
+accumulate. The **claim** seam (§6) matches terms as a positionless **set**
+(`MsmClaimTerm`, no `idx`), so the absorb order is the *caller's* — decoupled
+from the chiplet's storage order — and "fully merged" (distinct bases) is
+enforced at resolve (`Session::ec_msm`), the canonical form that keeps the root
+a function of the claim's term set, not of the addition chain. **Exhaustiveness**
 is structural: the boundary consumes the operand heads `MsmExpr(a, g, val_a,
 k_a)` with `k_a` *being the final cursor* — every input term consumed exactly
 once, by construction.
@@ -129,9 +128,9 @@ to an `intro`, and a claim can only ever be *about explicitly mentioned bases*
 `ψP` table for free by applying the endomorphism" cannot be expressed — `ψP`
 must be its own mentioned base, and its table rebuilt from scratch. This is
 deliberate: the seam (§6) commits each claim term as a DAG `Group` node, so a
-base with no mention has nothing to bind to; and the algebra stays
-curve-agnostic (only `EcGroupAdd`). Curve structure enters *one layer down* —
-`ψP = (β·x_P, y_P)` is certified by a single mod-`p` MAC when the point is
+base with no mention has nothing to bind to; and the algebra uses only
+`EcGroupAdd`. Curve structure enters *one layer down* — `ψP = (β·x_P, y_P)` is
+certified by a single mod-`p` MAC when the point is
 *created*, after which `ψP` is an ordinary mentioned base. So GLV still pays
 off (half-length scalars ⇒ ~half the doublings, cheap ψ-image creation); it
 just doesn't share precomputed tables across the endomorphism.
@@ -292,56 +291,59 @@ Today every active eval row is one node = one Poseidon2 perm. Column 1 emits
 (no cross-row state). A `k`-term MSM claim needs a multi-perm sponge:
 
 ```
-state₀ = IV
-stateᵢ = Poseidon2(rate ← Pᵢ.hash ‖ sᵢ.hash,  cap ← stateᵢ₋₁)[0..4]
-h_claim = state_k
+cap₀ = IV
+outᵢ = Poseidon2(rate ← Pᵢ.hash ‖ sᵢ.hash,  cap ← capᵢ₋₁)
+capᵢ = outᵢ[8..12]
+h_claim = out_k[0..4]
 ```
 
 ### 6.2 Chaining sponge — the eval-AIR extension (recommended)
 
-> **Status: implemented.** Curve MSM uses the VM
-> `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` IV in the eval chip — a
-> run of `is_ec_msm` absorb rows (last `is_msm_last`), the capacity threaded by
-> row adjacency (the chip's first cross-row constraint), and a dynamic cap
-> lookup against `absorb_cap`. `group_ptr` is the VM-owned group configuration
-> pointer from `CurveId::ALL` (K1 = 1, R1 = 2, Ed25519 = 3 today). Driven by
-> `Session::ec_msm`; proven end-to-end in
-> `src/tests/ec_msm.rs` and the `ec_msm_ecdsa` example. The `ℓ → #E` retype is
-> deferred (identity for cofactor-1 k1; required for the ed25519 `8ℓ` bound —
-> see §7 step 5).
+Curve MSM uses the VM `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` PairList IV
+in the eval chip: a run of `is_ec_msm` absorb rows (head `is_msm_head`, last
+`is_msm_last`) backed by one contiguous Poseidon2 absorption span. Eval consumes
+the IV cap only on the head row; continuation capacity is private to the
+Poseidon2 chiplet, matching VM `Node::digest()` PairList hashing.
 
-Lay the claim as a run of `is_absorb` rows (one per term), capacity-threaded.
-The AND-tree links its folds through the hash-keyed Binding bus (each fold
-consumes the previous node's `True` binding — one binding per intermediate);
-the sponge instead threads the capacity by **row adjacency**, which frees
-*both* rate slots for the `(P, s)` pair — 8 felts/perm vs the fold's 4 — and
-needs no intermediate bindings, at the cost of one new cross-row constraint.
+Lay the claim as a run of `is_absorb` rows (one per term), backed by one
+multi-block Poseidon2 absorption span. The sponge uses the Poseidon2 chiplet's
+native capacity carry, which leaves both rate slots available for the `(P, s)`
+pair and needs no intermediate bindings.
 
-- **Reuse column 1 unchanged**: `rate0 = Pᵢ.hash`, `rate1 = sᵢ.hash`,
-  `cap = stateᵢ₋₁`. The Poseidon2 chiplet is untouched — the cap is just an
-  input quarter (it currently carries the tag; here the chaining value).
-- **Capacity threading** (the new constraint — the eval's first row-adjacency
-  hash link; today nodes couple only through the bus): on an absorb→absorb
-  transition, `cap(row) = h(row − 1)`. A flag-gated **cap-source mux**:
-  one-shot rows feed `(tag, tag_arg0, tag_arg1, 0)`; absorb rows feed the
-  previous digest.
+- **Reuse column 1 unchanged for rate**: `rate0 = Pᵢ.hash`, `rate1 = sᵢ.hash`.
+  The Poseidon2 chiplet is untouched; continuation rows are ordinary
+  `is_absorb = 1` cycles in one contiguous P2 absorption span.
+- **Capacity threading lives in Poseidon2**: eval consumes `InCap` only on the
+  run head. Continuation capacity is the P2 chiplet's private row-15
+  `state[8..12]`, matching VM `Node::digest()` / PairList semantics. Eval
+  constrains row adjacency by `perm_seq_id_next = perm_seq_id + 1` inside the
+  run and consumes `Poseidon2Out` only on the boundary.
 - **IV** (first absorb row): `cap = IV`, the VM curve MSM tag
-  `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` — distinct from every
-  one-shot cap, so MSM hashes cannot collide with AND/leaf/op hashes. For fixed
-  curves, `group_ptr` is the canonical VM-owned constant from `CurveId::ALL`
-  (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`, `ED25519_SW_GROUP_PTR = 3` today).
+  `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` — distinct from every one-shot cap,
+  so MSM hashes cannot collide with AND/leaf/op hashes.
 - **Per absorb**: consume `Binding(Pᵢ.hash, Group, Pᵢ_ptr)` and
   `Binding(sᵢ.hash, Uint, sᵢ_ptr)` (tying the rate to real child nodes) and
   `MsmClaimTerm(claim_expr, Pᵢ_ptr, sᵢ_ptr)` — the **positionless** seam term,
-  tying the absorbed pair to a chiplet term *as a set* (no `idx`). `idx` is now
-  a pure **position counter** (0 at the run start, `+1` each row), used only for
-  the boundary's `k = idx + 1`; it no longer tags a chiplet term, so the absorb
-  order is the caller's, decoupled from the chiplet's storage `idx`. The `ℓ →
-  #E` retype on `sᵢ` rides here — the only place protocol scalars meet the `#E`
-  bound.
+  tying the absorbed pair to a chiplet term *as a set* (no `idx`). `idx` is a pure
+  **position counter** (0 at the run start, `+1` each row), used only for the
+  boundary's `k = idx + 1`; the absorb order is the caller's, decoupled from the
+  chiplet's storage `idx`. The `ℓ → #E` retype on `sᵢ` rides here — the only
+  place protocol scalars meet the `#E` bound.
 - **Boundary row**: `h = h_claim`; consume `MsmExpr(claim_expr, group, val_ptr,
   k)` with `k = idx + 1` (every term named — no hidden `+ ε·P`); provide
   `Binding(h_claim, Group, val_ptr)`. The `EcMsm` node *is* its value point.
+
+#### Curve context at the DAG seam
+
+The MSM node hash is a PairList over `(Pᵢ.hash, sᵢ.hash)` terms under the curve
+MSM tag `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`. Each absorbed point hash
+resolves through the `Binding` bus as a `Group` value, and each scalar hash
+resolves as a `Uint` value under the expression's scalar bound. The boundary
+consumes `MsmExpr(expr, group, val, k)`, tying the absorbed term set to the
+symbolic expression and its value point.
+
+The transcript commits the statement through typed child digests; the relation
+layer carries the group pointer required by the arithmetic proof.
 
 **Length** is committed twice over: `state_k` depends on all `k` absorptions
 (the hash), and `k` ties to `MsmExpr` (the chiplet count) — no truncation or
@@ -349,18 +351,19 @@ extension. **Distinctness**: the claim must be fully merged (one term per base);
 enforced at the resolve (`Session::ec_msm`), so the `MsmClaimTerm` set is a true
 set and the root is a function of the term set, not of an unmerged split.
 
-AIR delta: one family flag (`is_absorb`) + the boundary flag, the cap-source
-mux, and one `when_transition` capacity-threading constraint. No
+AIR delta: one head selector (`is_msm_head`) + the boundary flag and run
+continuity constraints (`perm_seq_id` +1, constant expression/group). No
 Poseidon2-chiplet change, no new perm shape. It generalizes — any future
 variable-length EC node reuses it. Soundness notes:
 
-- the chaining value is the 4-felt digest (≈256-bit → 128-bit collision
-  resistance) — the same security the AND-tree spine already relies on;
+- the chain uses Poseidon2's full private capacity lanes, matching VM PairList
+  hashing; the public node hash is still the tail `rate0` digest;
 - the IV must be injective vs one-shot caps (the VM curve MSM tag
-  `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` domain-separates), and
-  finalization must bind `k` (the chain does, plus `MsmExpr.k`);
+  `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` domain-separates), and finalization
+  must bind `k` (the chain does, plus `MsmExpr.k`);
 - intermediate absorb rows provide **no** binding (sponge steps; state threads
-  by constraint, not bus) — the run adds `k` rows but exactly one binding.
+  inside Poseidon2, not via Binding) — the run adds `k` rows but exactly one
+  binding.
 
 ### 6.3 Pair-and-fold — the zero-extension fallback
 

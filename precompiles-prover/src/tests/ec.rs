@@ -20,8 +20,8 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
     ec::{
-        COL_GROUP_PTR, COL_IS_PAI, COL_PTR, COL_SBOUND_PTR, COL_X_PTR, COL_Y_PTR, EcPointStoreAir,
-        EcRequire, NUM_MAIN_COLS,
+        COL_ECPOINT_MULT, COL_GROUP_PTR, COL_IS_PAI, COL_PTR, COL_SBOUND_PTR, COL_X_PTR, COL_Y_PTR,
+        EcPointStoreAir, EcRequire, NUM_MAIN_COLS,
         add::trace::EcAddRequires,
         groups::{
             COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
@@ -382,5 +382,16 @@ fn empty_stores_hold() {
     assert_eq!(points_main.height(), 2);
     assert_eq!(groups_main.values.len(), groups_main.height() * G_NUM_MAIN_COLS);
     check_groups(&groups_main);
+    check_points(&points_main);
+}
+
+#[test]
+#[should_panic]
+fn inactive_point_row_cannot_provide() {
+    // A pad row with nonzero EcPoint multiplicity would provide a point
+    // without paying its EcGroup / membership obligations.
+    let (_, mut points_main) = ec_store_traces(EcStoreRequires::new());
+    points_main.values[COL_ECPOINT_MULT] = Felt::ONE;
+
     check_points(&points_main);
 }

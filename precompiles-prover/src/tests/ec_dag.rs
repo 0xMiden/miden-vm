@@ -22,7 +22,8 @@ use crate::{
     session::{Session, SessionTraces},
     tests::bus_balance::session_stack_residual,
     transcript::eval::{
-        COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB, COL_PTR,
+        COL_A_PTR, COL_B_PTR, COL_BOUND_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
+        COL_IS_SUB, COL_LHS_BEGIN, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
         NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
     },
 };
@@ -309,28 +310,43 @@ fn eval_locally_holds(traces: &SessionTraces, eval_main: &RowMajorMatrix<Felt>) 
 }
 
 #[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn dag_pai_payload_must_be_true_true() {
+    // A PAI VALUE node has no coordinate children. Its canonical payload is
+    // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both rate halves.
+    let traces = ec_dag_pai_traces();
+    let eval = traces.mains()[7];
+    let row = first_row_with_flag(eval, COL_IS_EC_PAI);
+    let forged = tamper(eval, row, &[(COL_LHS_BEGIN, Felt::ONE)]);
+
+    eval_locally_holds(&traces, &forged);
+}
+
+#[test]
 fn dag_finite_forged_as_pai_unbalances() {
     // Claim a finite point is ∞: flip a EcCreate row to the PAI mode
-    // (is_ec_create→0, is_ec_pai→1) and zero its coords, so the row
-    // stays locally valid. The bus catches it — the finite point's EcPoint
-    // provide (is_pai = 0) loses its consumer, and the coord children's
-    // Uint bindings dangle.
+    // (is_ec_create→0, is_ec_pai→1), zero its coord fields, and zero its
+    // canonical PAI payload so the row stays locally valid. The bus catches
+    // it — the finite point's EcPoint provide (is_pai = 0) loses its
+    // consumer, and the coord children / Poseidon2 messages dangle.
     let traces = ec_dag_3g_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f01);
     let eval = traces.mains()[7];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
     let row = first_row_with_flag(eval, COL_IS_EC_CREATE);
-    let forged = tamper(
-        eval,
-        row,
-        &[
-            (COL_IS_EC_CREATE, Felt::ZERO),
-            (COL_IS_EC_PAI, Felt::ONE),
-            (COL_A_PTR, Felt::ZERO),
-            (COL_B_PTR, Felt::ZERO),
-        ],
-    );
+    let mut cells = vec![
+        (COL_IS_EC_CREATE, Felt::ZERO),
+        (COL_IS_EC_PAI, Felt::ONE),
+        (COL_BOUND_PTR, Felt::ZERO),
+        (COL_A_PTR, Felt::ZERO),
+        (COL_B_PTR, Felt::ZERO),
+    ];
+    for i in 0..DIGEST_WIDTH {
+        cells.push((COL_LHS_BEGIN + i, Felt::ZERO));
+        cells.push((COL_RHS_BEGIN + i, Felt::ZERO));
+    }
+    let forged = tamper(eval, row, &cells);
     eval_locally_holds(&traces, &forged);
     assert_ne!(
         dag_residual(&traces, &forged, &mut rng),

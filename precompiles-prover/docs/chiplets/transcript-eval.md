@@ -20,9 +20,9 @@ rate). Runtime uint leaves use `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr,
 and bind `Binding(h, True)`. Default fixed uint domains, fixed curve
 coefficients, and fixed curve group tuples do not create eval rows; their
 `UintVal` / `EcGroup` requirements are verifier-loaded LogUp boundary consumes.
-EC create / PAI rows hash coordinate child hashes under
-`[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, consume the point store's
-`EcPoint(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)`, and bind `Group`; they do
+EC create / PAI rows hash coordinate child hashes (or the canonical zero / zero
+PAI payload) under `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, consume
+the point store's `EcPoint(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)`, and bind `Group`; they do
 not consume `EcGroup` directly. The **uint ops** (`Add` / `Sub` / `Mul` /
 `Is`, selected by `is_add` / `is_sub` / `is_mul` / `is_is` under `is_uint_op`)
 hash two child hashes under
@@ -65,12 +65,12 @@ the uint / EC op rows.
 | 30 | `a_ptr` | lhs operand ptr, finite EC x-coordinate ptr, or EcMsm base ptr; `0` else |
 | 31 | `b_ptr` | rhs operand ptr, finite EC y-coordinate ptr, or EcMsm scalar ptr; `= a_ptr` on `Is`; `0` else |
 | 32 | `tag_arg0` | physical tag arg[0] / cap slot 1: `bound_ptr` on explicit pin rows, `0` on VM uint value and EC create rows, op id on op rows |
-| 33 | `group_ptr` | witnessed EC-store group handle on value-producing EC ops / EcMsm rows; MSM cap selector; create/PAI rows instead carry `group_ptr` in `EC_CREATE_GROUP_PTR_COL` (`tag_arg1` physically); `0` else |
+| 33 | `group_ptr` | witnessed EC-store group handle on value-producing EC ops / EcMsm rows; for MSM this is relation context; create/PAI rows carry `group_ptr` in `EC_CREATE_GROUP_PTR_COL` (`tag_arg1` physically); `0` else |
 | 34 | `is_ec_msm` | EcMsm family flag, set on every absorb row |
 | 35 | `is_msm_last` | EcMsm boundary flag, set on the run's final absorb row |
 | 36 | `msm_idx` | EcMsm absorb position counter |
 | 37 | `msm_expr` | EcMsm claim expression ptr |
-| 38–41 | `absorb_cap[4]` | threaded EcMsm capacity state; first row uses VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` |
+| 38 | `is_msm_head` | EcMsm run-head selector; consumes the VM curve MSM IV `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` on the head row |
 
 Public values: `root_hash[0..4]` — just the transcript root
 (`PUBLIC_ROOT_BEGIN = 0`). Fixed boundary consumes are relation seam data,
@@ -87,7 +87,7 @@ col 3 = the uint op-children `Binding` consumes (lhs / rhs `Uint` at
 `a_ptr` / `b_ptr`); col 4 = the uint relation consumes — one role-mixed
 `UintAdd` (add / sub) + one `UintMul` (κ slots the constants 1 / 0, the
 modulus as dummy `c_ptr`); col 5 = the Group-path `Binding`; col 6 =
-the EC point/add relation consumes; col 7 = the EcMsm dynamic Poseidon2 cap;
+the EC point/add relation consumes; col 7 = the EcMsm head Poseidon2 cap;
 col 8 = the EcMsm absorb-run consumes.
 
 ## Row kinds
@@ -121,7 +121,8 @@ col 8 = the EcMsm absorb-run consumes.
   hashes `lhs||rhs` → `h` under the VM curve VALUE cap
   `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`; finite create consumes
   `Binding(lhs, Uint, x_ptr, bound_ptr)` and
-  `Binding(rhs, Uint, y_ptr, bound_ptr)`, while PAI uses the point store's
+  `Binding(rhs, Uint, y_ptr, bound_ptr)`, while PAI forces `lhs = rhs = 0`
+  (the canonical `TRUE_DIGEST` / `TRUE_DIGEST` payload) and uses the point store's
   infinity flag. Both modes consume
   `EcPoint(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` and provide
   `Binding(h, Group, point_ptr)`. The row does not consume `EcGroup` directly;
@@ -139,6 +140,12 @@ col 8 = the EcMsm absorb-run consumes.
   `True` identity, usable as either child of any node. `Binding(0, True)`
   has a single provider, so all (non-root) zero leaves in a transcript
   collapse to **one** row whose `out_mult` is their count.
+- **EcMsm** (`is_ec_msm = 1`): one row per claimed `(Pᵢ, sᵢ)` term. The
+  rows form one VM-style multi-block Poseidon2 absorption: the head row
+  (`is_msm_head = 1`) consumes the MSM IV cap, continuation rows inherit
+  capacity inside the Poseidon2 chiplet, and only the boundary row
+  (`is_msm_last = 1`) consumes `Poseidon2Out` / provides
+  `Binding(h_claim, Group, val_ptr)`.
 - **padding** (`act = 0`): `out_mult = 0`; contributes nothing.
 
 The empty transcript is the degenerate root: row 0 with `is_zero = 1`,
@@ -154,6 +161,9 @@ which forces `root_hash = 0`.
   gate deg-1).
 - `is_zero · h[i] = 0` (zero leaf ⇒ `h = 0`); `is_pinned` boolean.
 - `when_first_row · (h[i] − root_hash[i]) = 0` (root pin).
+- `when_first_row · (is_zero + is_and + is_is + is_pinned − 1) = 0`, so
+  row 0 is a True-binding assertion root, not a value row or EcMsm interior
+  absorb.
 - `(1 − act) · out_mult = 0` (padding provides nothing).
 - zero-pins scoping the per-kind columns: `is_pinned` to leaf rows,
   `ptr` to leaf + value-op + create / EcMsm-boundary rows, `bound_ptr`
@@ -163,7 +173,9 @@ which forces `root_hash = 0`.
   `pin_ptr = ptr` on explicit pin rows / `group_ptr` on EcCreate / PAI rows /
   `0` elsewhere. `tag_arg0` = `bound_ptr` on explicit pin rows / the
   family-gated VM uint or curve op id on op rows / `0` elsewhere. EC-create
-  VALUE caps use `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
+  VALUE caps use `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`; PAI rows
+  additionally force both rate halves to zero. EcMsm caps are provided only by
+  the run-head selector; continuations are private Poseidon2 absorptions.
 
 ## Bus balance
 
@@ -186,8 +198,8 @@ valid assertions" reduces to bus σ = 0 plus the first-row pin.
 The deg-2 `−out_mult` provides top cols 0 / 2 / 5 / 8 at constraint
 deg 5 (col 1 at 4, cols 3 / 4 / 6 lower, col 7 trivial); the uniform
 one-hot keeps every bus mult ≤ deg-2, and the materialized cap-slot columns
-(`tag_arg1` / `tag_arg0`, plus `group_ptr` for MSM caps) keep one-shot caps
-deg-1. So `log_quotient_degree = 2`
+(`tag_arg1` / `tag_arg0`) keep one-shot caps deg-1. EcMsm's head IV is fixed
+by selector; `group_ptr` is relation context only. So `log_quotient_degree = 2`
 (`tests::uint_dag::eval_chip_stays_at_lqd_2` pins it).
 
 ## Construction
@@ -212,11 +224,8 @@ lays the rows (root at row 0). Zero
 leaves merge into one row (see Row kinds), so a wide tree pays for its
 `ZERO_HASH` identity exactly once.
 
-## Relation to the retired spine
+## Assertion folding
 
-The spine was the left-leaning *chain* special case: it threaded the
-running root locally (`lhs_next = h`) and bus-consumed only the leaf
-assertions. The eval chip consumes *both* children over the bus, so row
-order is free and the tree shape is the caller's — `assert_and_fold`
-reproduces the spine's left-leaning chain byte-for-byte, the root pinned
-at row 0.
+The eval chip consumes both children of each AND node over the bus, so row order
+is free and the tree shape is the caller's. `assert_and_fold` builds a
+left-leaning chain and pins the resulting root at row 0.

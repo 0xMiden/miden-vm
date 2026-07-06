@@ -33,13 +33,20 @@ consumes. EC nodes use VM curve precompile caps:
 
 ```text
 [CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]
-[CurvePrecompile::id(), op_id,       0,         0]
-[CurvePrecompile::id(), MSM_OP_ID,   group_ptr, 0]   # MSM IV
+[CurvePrecompile::id(), ADD_OP_ID,   0,         0]
+[CurvePrecompile::id(), SUB_OP_ID,   0,         0]
+[CurvePrecompile::id(), EQ_OP_ID,    0,         0]
+[CurvePrecompile::id(), MSM_OP_ID,   0,         0]   # PairList IV
 ```
+
+### Curve context
 
 `group_ptr` is the VM-owned curve group configuration pointer from
 `CurveId::ALL` (`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`,
-`ED25519_SW_GROUP_PTR = 3` today).
+`ED25519_SW_GROUP_PTR = 3` today). Curve `VALUE` nodes carry `group_ptr` in the
+capacity word. Operation nodes consume typed child point digests; the relation
+layer carries the witnessed group pointer for arithmetic lookups such as
+`EcGroupAdd` and `MsmExpr`.
 
 ## Hash preimage — Miden-native 12-felt state
 
@@ -81,7 +88,7 @@ VM-owned caps come directly from `miden_core::deferred::Tag` and
 `miden_precompiles::{Keccak256Precompile, UintPrecompile, CurvePrecompile}`.
 The remaining local cap is the explicit uint pin-claim tag registered in
 [`src/transcript/nodes.rs`](../src/transcript/nodes.rs). Live EC rows use VM
-curve caps; the old EC `NodeTag` variants are reserved aliases only.
+curve caps.
 
 | Capacity word | Name | `val[8]` |
 |---|---|---|
@@ -92,8 +99,8 @@ curve caps; the old EC `NodeTag` variants are reserved aliases only.
 | `[UintPrecompile::id(), op_id, 0, 0]` | VM uint op | `lhs_hash[4] \|\| rhs_hash[4]` |
 | `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]` | explicit uint pin claim | the pinned uint's 8×u32-LE value |
 | `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]` | VM curve VALUE / PAI | `x_hash[4] \|\| y_hash[4]` (`0 \|\| 0` for PAI) |
-| `[CurvePrecompile::id(), op_id, 0, 0]` | VM curve op | `P_hash[4] \|\| Q_hash[4]` |
-| `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` | VM curve MSM IV | first MSM absorb; later absorbs use the prior digest as cap |
+| `[CurvePrecompile::id(), ADD_OP_ID/SUB_OP_ID/EQ_OP_ID, 0, 0]` | VM curve binary/equality op | `P_hash[4] \|\| Q_hash[4]` |
+| `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` | VM curve MSM PairList IV | first MSM absorb; later absorbs use the prior capacity as cap |
 
 ### Parameter constraints
 

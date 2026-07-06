@@ -298,12 +298,9 @@ expression `expr_ptr` at position `idx`.
 
 - **Provider** — [EcMsm](ec-msm.md): every term row at `−mult` (the
   expression's **op** use count, `COL_MULT`).
-- **Consumer** — [EcMsm](ec-msm.md): an operand expression's terms,
-  re-read by `idx` during a combine / neg walk — self-referential, operand
-  `expr_ptr` strictly below the result's. (The eval `EcMsm` resolve seam
-  used to ride here too; it now consumes the positionless
-  [MsmClaimTerm](#20--msmclaimterm) instead, so the absorb order — hence
-  the transcript root — no longer tracks this `idx` storage order.)
+- **Consumer** — [EcMsm](ec-msm.md): operand expression terms, re-read by
+  `idx` during combine / neg walks — self-referential, operand `expr_ptr`
+  strictly below the result's.
 
 ## 19 — MsmExpr
 
@@ -323,17 +320,10 @@ summing to the point `val_ptr`.
 ## 20 — MsmClaimTerm
 
 `(expr_ptr, base_ptr, scalar_ptr)` — a **positionless** resolve-seam term
-of MSM expression `expr_ptr`: the twin of [MsmTerm](#18--msmterm) without
-the `idx` field. The resolve-seam counterpart of the by-`idx`
-[MsmTerm](#18--msmterm), kept on its own bus because the two have disjoint
-consumers (combine's term walk vs the DAG resolve) and so distinct
-multiplicities.
+of MSM expression `expr_ptr`.
 
-- **Provider** — [EcMsm](ec-msm.md): every term row at `−claim_mult` (the
-  expression's **resolve** use count, `COL_CLAIM_MULT`).
-- **Consumer** — [TranscriptEval](transcript-eval.md): the eval `EcMsm`
-  node's per-term absorption. The seam matches the claim's terms as an
-  **unordered set** (no `idx`), so the absorb order — and therefore the
-  transcript root — is the *caller's* declared term order, decoupled from
-  the chiplet's storage `idx` (and thus from the addition-chain strategy).
-  Not self-referential: provided by EcMsm, consumed only here.
+- **Provider** — [EcMsm](ec-msm.md): every claim expression term row at
+  `−claim_mult` (`COL_CLAIM_MULT`).
+- **Consumer** — [TranscriptEval](transcript-eval.md): EcMsm absorb rows,
+  matched positionlessly so the absorb order follows the caller's declared
+  term sequence.
