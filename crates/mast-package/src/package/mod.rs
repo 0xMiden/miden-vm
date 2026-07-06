@@ -166,24 +166,20 @@ impl Package {
     }
 
     fn recompute_mast_commitment(&mut self) -> Result<(), ManifestValidationError> {
-        let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
         for export in self.manifest.exports() {
-            if let PackageExport::Procedure(export) = export {
-                if let Some(node_id) = export.node {
-                    node_ids.push(node_id);
-                } else {
-                    node_ids.push(self.mast.find_procedure_root(export.digest).ok_or_else(
-                        || ManifestValidationError::MissingProcedureMast {
-                            path: export.path.clone(),
-                            digest: export.digest,
-                        },
-                    )?);
-                }
+            if let PackageExport::Procedure(export) = export
+                && export.node.is_none()
+            {
+                self.mast.find_procedure_root(export.digest).ok_or_else(|| {
+                    ManifestValidationError::MissingProcedureMast {
+                        path: export.path.clone(),
+                        digest: export.digest,
+                    }
+                })?;
             }
         }
 
-        let digest = self.mast.compute_nodes_commitment(node_ids.iter());
-        self.digest = digest;
+        self.digest = self.mast.commitment();
         Ok(())
     }
 
@@ -197,6 +193,7 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
+        self.digest = self.mast.commitment();
     }
 
     /// Removes all package-owned debug information from this package.
@@ -1323,6 +1320,7 @@ mod tests {
         Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
+        Felt, Word,
         advice::AdviceMap,
         mast::{
             BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastNode, MastNodeExt,
@@ -1482,6 +1480,22 @@ mod tests {
 
     fn build_kernel_package(name: &str) -> Package {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    #[test]
+    fn package_digest_changes_when_advice_map_changes() {
+        let package = build_kernel_package("kernel");
+        let package_digest = package.digest();
+        let content_digest = package.content_digest();
+
+        let advice_map = AdviceMap::from_iter([(
+            Word::from([1_u32, 2, 3, 4]),
+            vec![Felt::from_u32(5), Felt::from_u32(6)],
+        )]);
+        let with_advice = package.with_advice_map(advice_map);
+
+        assert_ne!(package_digest, with_advice.digest());
+        assert_ne!(content_digest, with_advice.content_digest());
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
