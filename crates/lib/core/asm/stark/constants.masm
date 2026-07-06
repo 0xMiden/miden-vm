@@ -170,6 +170,10 @@ const SWAP_SCRATCH_PTR = 3223322764
 ### verifier region rather than the OOD-derived ACE READ region.
 const REDUCED_INPUTS_PTR = 3223322836
 
+### Scratch cell used by `pcs::fri::frie2f4::verify_query_layer` to carry the FRI-fold
+### domain-segment quotient (`p / d_size`) across the Merkle-path and leaf-unhashing section.
+const FRI_FOLD_SEGMENT_PTR = 3223322852
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
@@ -531,6 +535,10 @@ end
 
 pub proc tmp4
     push.TMP4
+end
+
+pub proc fri_fold_segment_ptr
+    push.FRI_FOLD_SEGMENT_PTR
 end
 
 pub proc swap_scratch_ptr
