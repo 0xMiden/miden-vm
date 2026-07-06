@@ -1,26 +1,36 @@
-//! Multi-AIR proving for the chiplet stack (miden-lifted-stark 0.26).
+//! Multi-AIR proving for the chiplet stack.
 //!
 //! [`ChipletAir`] wraps the fifteen heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
-//! [`SessionTraces::prove`] / [`SessionProof::verify`] run the full
-//! round-trip under the test config, so a program never re-declares the
-//! harness.
+//! [`SessionTraces::prove_stark`] produces a core-compatible serialized
+//! [`StarkProof`](miden_core::proof::StarkProof), while [`SessionTraces::prove`]
+//! returns the core deferred-proof envelope used by VM proof composition.
 
 use miden_core::{
     Felt,
+    deferred::DeferredRoot,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
+    proof::{DeferredProof, HashFunction, StarkProof},
 };
 use miden_lifted_air::{
     BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, ReductionError, Statement,
 };
 use miden_lifted_stark::{
-    Preprocessed, ProverInstance, VerifierError, VerifierInstance, check_constraints,
+    Preprocessed, PreprocessedValidationError, ProverInstance, StarkConfig, VerifierError,
+    VerifierInstance, check_constraints,
+    lmcs::Lmcs as LmcsTrait,
+    proof::{StarkOutput, StarkProofData},
 };
 use p3_matrix::dense::RowMajorMatrix;
+use serde::{Serialize, de::DeserializeOwned};
+use serde_wincode::SerdeCompat;
+
+const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 use crate::{
+    ProveError,
     ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
     hash::{
         chunk::ChunkAir,
@@ -29,7 +39,10 @@ use crate::{
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
-    stark_config::{TestDigest, TestProof, test_challenger, test_config},
+    stark_config::{
+        DEFAULT_HASH_FUNCTION, blake3_256_config, keccak_config, observe_protocol_params,
+        pcs_params, poseidon2_config, rpo_config, rpx_config, test_challenger,
+    },
     transcript::{
         eval::TranscriptEvalAir,
         poseidon2::{P2Digest, Poseidon2Air},
@@ -254,7 +267,7 @@ impl SessionTraces {
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
-    /// Per-AIR `check_constraints` under a fresh challenger — a cheap
+    /// Per-AIR `check_constraints` under the legacy fast test config — a cheap
     /// local-constraint sanity pass (catches AIR regressions before the more
     /// opaque `prove` failure; no cross-chiplet bus balance, which only the
     /// full prove/verify closes via `eval_external`).
@@ -262,77 +275,197 @@ impl SessionTraces {
         check_constraints(&self.prover_statement(), test_challenger());
     }
 
-    /// Prove the whole stack under the test config, bundling the proof with
-    /// the inputs needed to [`verify`](SessionProof::verify) it.
-    pub fn prove(&self) -> SessionProof {
+    /// Prove the precompile session with the default production-style hash function,
+    /// returning a STARK-backed deferred proof for the session's exact deferred root.
+    pub fn prove(&self) -> DeferredProof {
+        self.prove_deferred(DEFAULT_HASH_FUNCTION)
+            .expect("prove precompile session with default hash function")
+    }
+
+    /// Prove the whole stack and return a core-compatible serialized STARK
+    /// proof envelope using the requested hash function.
+    ///
+    /// The proof bytes are the `serde_wincode` serialization of
+    /// `StarkProofData<Felt, QuadFelt, SC>` with `wincode`'s default
+    /// configuration, matching the VM prover's proof-byte surface.
+    pub fn prove_stark(&self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
+        let params = pcs_params();
+        match hash_fn {
+            HashFunction::Blake3_256 => {
+                let config = blake3_256_config(params);
+                self.prove_stark_with_config(&config, hash_fn)
+            },
+            HashFunction::Rpo256 => {
+                let config = rpo_config(params);
+                self.prove_stark_with_config(&config, hash_fn)
+            },
+            HashFunction::Rpx256 => {
+                let config = rpx_config(params);
+                self.prove_stark_with_config(&config, hash_fn)
+            },
+            HashFunction::Poseidon2 => {
+                let config = poseidon2_config(params);
+                self.prove_stark_with_config(&config, hash_fn)
+            },
+            HashFunction::Keccak => {
+                let config = keccak_config(params);
+                self.prove_stark_with_config(&config, hash_fn)
+            },
+        }
+    }
+
+    /// Prove the precompile session and wrap the serialized STARK proof in the core
+    /// deferred-proof envelope together with the exact deferred root it proves.
+    pub fn prove_deferred(&self, hash_fn: HashFunction) -> Result<DeferredProof, ProveError> {
+        let proof = self.prove_stark(hash_fn)?;
+        let public_root: DeferredRoot = self.public_root().as_array().into();
+        Ok(DeferredProof::stark(proof, public_root))
+    }
+
+    fn prove_stark_with_config<SC>(
+        &self,
+        config: &SC,
+        hash_fn: HashFunction,
+    ) -> Result<StarkProof, ProveError>
+    where
+        SC: StarkConfig<Felt, QuadFelt>,
+        <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
+    {
         let prover_statement = self.prover_statement();
-        let config = test_config();
+
         // BytePairLut declares preprocessed columns (its fixed `(a,b,c)`
-        // table), so the bundle is `Some`; built deterministically from the
-        // AIR list and borrowed by the prover instance.
-        let preprocessed = Preprocessed::build(prover_statement.statement(), &config);
-        let output = ProverInstance::new(&config, &prover_statement, preprocessed.as_ref())
-            .expect("preprocessed bundle matches the declared columns")
-            .prove(test_challenger())
-            .expect("prove");
-        SessionProof {
-            proof: output.proof,
-            prover_digest: output.digest,
-            public_root: self.public_root(),
-        }
+        // table), so this must be `Some`; built deterministically from the AIR
+        // list and borrowed by the prover instance.
+        let preprocessed = Preprocessed::build(prover_statement.statement(), config)
+            .ok_or(ProveError::MissingPreprocessed)?;
+
+        let mut challenger = config.challenger();
+        observe_protocol_params(&mut challenger);
+
+        let output: StarkOutput<Felt, QuadFelt, SC> =
+            ProverInstance::new(config, &prover_statement, Some(&preprocessed))?
+                .prove(challenger)?;
+
+        let proof_encoding_config = wincode::config::Configuration::default();
+        let proof_bytes = <SerdeCompat<
+            StarkProofData<Felt, QuadFelt, SC>,
+        > as wincode::config::Serialize<_>>::serialize(
+            &output.proof,
+            proof_encoding_config,
+        )?;
+        Ok(StarkProof::new(proof_bytes, hash_fn))
     }
 }
 
-/// A proof of the full chiplet stack plus the public inputs needed to
-/// verify it.
-pub struct SessionProof {
-    proof: TestProof,
-    prover_digest: TestDigest,
+/// Verify a STARK-backed deferred proof produced by [`SessionTraces::prove`] or
+/// [`SessionTraces::prove_deferred`] and return the verified deferred root.
+///
+/// The proof must be a [`DeferredProof::Stark`] variant. Its `public_root` is used as the
+/// precompile STARK public input; only after that proof verifies is the root returned to callers.
+pub fn verify_deferred(proof: &DeferredProof) -> Result<DeferredRoot, VerifyError> {
+    match proof {
+        DeferredProof::Stark { proof, public_root } => {
+            verify_stark(proof, P2Digest::from(*public_root))?;
+            Ok(*public_root)
+        },
+        DeferredProof::Empty | DeferredProof::Wire(_) => Err(VerifyError::InvalidDeferredProof),
+    }
+}
+
+/// Verify a core serialized STARK proof envelope against a public root.
+///
+/// `Ok(())` iff the verifier accepts, including the `Σ σ = 0`
+/// cross-chiplet identity via `eval_external`.
+pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), VerifyError> {
+    let params = pcs_params();
+    match proof.hash_fn() {
+        HashFunction::Blake3_256 => {
+            let config = blake3_256_config(params);
+            verify_stark_with_config(&config, proof.bytes(), public_root)
+        },
+        HashFunction::Rpo256 => {
+            let config = rpo_config(params);
+            verify_stark_with_config(&config, proof.bytes(), public_root)
+        },
+        HashFunction::Rpx256 => {
+            let config = rpx_config(params);
+            verify_stark_with_config(&config, proof.bytes(), public_root)
+        },
+        HashFunction::Poseidon2 => {
+            let config = poseidon2_config(params);
+            verify_stark_with_config(&config, proof.bytes(), public_root)
+        },
+        HashFunction::Keccak => {
+            let config = keccak_config(params);
+            verify_stark_with_config(&config, proof.bytes(), public_root)
+        },
+    }
+}
+
+fn verify_stark_with_config<SC>(
+    config: &SC,
+    proof_bytes: &[u8],
     public_root: P2Digest,
-}
-
-impl SessionProof {
-    /// The transcript root this proof commits to.
-    pub fn public_root(&self) -> P2Digest {
-        self.public_root
+) -> Result<(), VerifyError>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+    <SC::Lmcs as LmcsTrait>::Commitment: DeserializeOwned,
+{
+    if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
+        return Err(VerifyError::ProofTooLarge {
+            size: proof_bytes.len(),
+            max: MAX_STARK_PROOF_BYTES,
+        });
     }
 
-    /// Re-verify the proof under the test config. `Ok(())` iff the verifier
-    /// accepts (incl. the `Σ σ = 0` cross-chiplet identity via
-    /// `eval_external`) and its digest matches the prover's.
-    pub fn verify(&self) -> Result<(), VerifyError> {
-        let statement = Statement::new(
-            ChipletMultiAir::new(),
-            self.public_root.as_array().to_vec(),
-            Vec::new(),
-        )
-        .expect("chiplet statement inputs are valid");
-        let config = test_config();
-        // Rebuild the preprocessed bundle (fixed circuit data, deterministic
-        // from the AIR list) to recover its commitment — the verifier trusts
-        // it like the AIR list itself.
-        let preprocessed = Preprocessed::build(&statement, &config);
-        let verifier_digest = VerifierInstance::new(
-            &config,
-            &statement,
-            preprocessed.as_ref().map(Preprocessed::commitment),
-        )
-        .expect("preprocessed commitment matches the declared columns")
-        .verify(&self.proof, test_challenger())
-        .map_err(VerifyError::Verifier)?;
-        if verifier_digest != self.prover_digest {
-            return Err(VerifyError::DigestMismatch);
-        }
-        Ok(())
-    }
+    let proof_encoding_config = wincode::config::Configuration::default()
+        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+    let proof: StarkProofData<Felt, QuadFelt, SC> = <SerdeCompat<
+        StarkProofData<Felt, QuadFelt, SC>,
+    > as wincode::config::Deserialize<_>>::deserialize(
+        proof_bytes, proof_encoding_config
+    )?;
+
+    let statement =
+        Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
+            .expect("chiplet statement inputs are valid");
+
+    // Rebuild the preprocessed bundle (fixed circuit data, deterministic from
+    // the AIR list) to recover its commitment — the verifier trusts it like the
+    // AIR list itself.
+    let preprocessed =
+        Preprocessed::build(&statement, config).ok_or(VerifyError::MissingPreprocessed)?;
+
+    let mut challenger = config.challenger();
+    observe_protocol_params(&mut challenger);
+
+    VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
+        .verify(&proof, challenger)?;
+    Ok(())
 }
 
-/// Why [`SessionProof::verify`] rejected a proof.
-#[derive(Debug)]
+/// Why precompile STARK verification rejected a proof.
+#[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
+    /// The chiplet stack declares preprocessed columns, but no preprocessed
+    /// bundle was produced. This should not happen for the full session AIR set.
+    #[error("chiplet stack declares preprocessed columns, but no preprocessed bundle was built")]
+    MissingPreprocessed,
+    /// The serialized STARK proof bytes could not be decoded for the selected
+    /// hash-function config.
+    #[error("failed to deserialize STARK proof: {0}")]
+    Deserialization(#[from] wincode::error::ReadError),
+    /// The serialized STARK proof exceeds the verifier's byte-size limit.
+    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
+    ProofTooLarge { size: usize, max: usize },
+    /// The preprocessed commitment did not match the declared AIR columns/config.
+    #[error(transparent)]
+    Preprocessed(#[from] PreprocessedValidationError),
     /// The verifier rejected the proof (e.g. the cross-chiplet `Σ σ = 0`
     /// identity didn't close).
-    Verifier(VerifierError),
-    /// The proof verified, but its digest differs from the prover's.
-    DigestMismatch,
+    #[error(transparent)]
+    Verifier(#[from] VerifierError),
+    /// The deferred proof variant is not STARK-backed.
+    #[error("deferred proof is not STARK-backed")]
+    InvalidDeferredProof,
 }

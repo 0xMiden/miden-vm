@@ -20,6 +20,7 @@ use crate::{
     session::{
         EcNode, Session,
         strategies::{joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table},
+        verify_deferred,
     },
     tests::check_local_inputs,
     transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
@@ -83,9 +84,7 @@ fn msm_two_intro_combine_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_two_intro_combine_proves() {
-    msm_two_intro_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_two_intro_traces().prove())
         .expect("EcMsm intro+combine round-trip must verify");
 }
 
@@ -130,9 +129,7 @@ fn msm_scalar_bound_n_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_scalar_bound_n_proves() {
-    msm_scalar_bound_n_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_scalar_bound_n_traces().prove())
         .expect("MSM under scalar bound n ≠ p must verify");
 }
 
@@ -165,9 +162,7 @@ fn msm_intro_neg_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_intro_neg_proves() {
-    msm_intro_neg_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_intro_neg_traces().prove())
         .expect("EcMsm intro+neg round-trip must verify");
 }
 
@@ -202,9 +197,7 @@ fn msm_resolve_one_term_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_resolve_one_term_proves() {
-    msm_resolve_one_term_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_resolve_one_term_traces().prove())
         .expect("EcMsm 1-term resolve round-trip must verify");
 }
 
@@ -244,9 +237,7 @@ fn msm_resolve_two_term_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_resolve_two_term_proves() {
-    msm_resolve_two_term_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_resolve_two_term_traces().prove())
         .expect("EcMsm 2-term resolve round-trip must verify");
 }
 
@@ -287,10 +278,7 @@ fn msm_straus_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_straus_proves() {
-    msm_straus_traces()
-        .prove()
-        .verify()
-        .expect("Straus strategy round-trip must verify");
+    verify_deferred(&msm_straus_traces().prove()).expect("Straus strategy round-trip must verify");
 }
 
 /// The **separate wNAF** strategy on the same claim `3·G + 5·Q = 13G` — two
@@ -336,9 +324,7 @@ fn msm_wnaf_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_wnaf_proves() {
-    msm_wnaf_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_wnaf_traces().prove())
         .expect("separate-wNAF strategy round-trip must verify");
 }
 
@@ -378,9 +364,7 @@ fn msm_joint_naf_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_joint_naf_proves() {
-    msm_joint_naf_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_joint_naf_traces().prove())
         .expect("joint_naf strategy round-trip must verify");
 }
 
@@ -422,9 +406,7 @@ fn msm_joint_wnaf_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_joint_wnaf_proves() {
-    msm_joint_wnaf_traces()
-        .prove()
-        .verify()
+    verify_deferred(&msm_joint_wnaf_traces().prove())
         .expect("joint_wnaf strategy round-trip must verify");
 }
 
@@ -472,7 +454,7 @@ fn msm_dedup_checks() {
 #[test]
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_dedup_proves() {
-    msm_dedup_traces().prove().verify().expect("deduped MSM round-trip must verify");
+    verify_deferred(&msm_dedup_traces().prove()).expect("deduped MSM round-trip must verify");
 }
 
 /// The claim `⟨G×1, Q×1⟩` (value `G + Q`) resolved with the two `(base,

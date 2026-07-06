@@ -27,7 +27,7 @@ use miden_lifted_air::LiftedAir;
 use miden_precompiles::K1_BASE_BOUND_PTR;
 use miden_precompiles_prover::{
     math::{U256, from_hex},
-    session::{ChipletAir, Session, statements::horner_sign_paths},
+    session::{ChipletAir, Session, statements::horner_sign_paths, verify_deferred},
 };
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -142,7 +142,7 @@ fn main() {
 
     // ------ verify -----------------------------------------------------
     let verify_start = Instant::now();
-    let verify_result = proof.verify();
+    let verify_result = verify_deferred(&proof);
     let verify_elapsed = verify_start.elapsed();
 
     println!();
@@ -150,7 +150,7 @@ fn main() {
     println!();
 
     match verify_result {
-        Ok(()) => {
+        Ok(_) => {
             println!("verify_multi     : {verify_elapsed:?}");
             println!("✓ prove+verify roundtrip OK");
         },
