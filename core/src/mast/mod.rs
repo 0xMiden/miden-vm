@@ -323,16 +323,14 @@ fn final_dense_node_order(
     let node_count = nodes.len();
     let mut external_ids = Vec::new();
     let mut basic_block_ids = Vec::new();
-    let mut internal_ids = BTreeSet::new();
+    let mut internal_ids = Vec::new();
 
     for (index, node) in nodes.iter().enumerate() {
         let node_id = MastNodeId::new_unchecked(index as u32);
         match mast_node_order_class(node) {
             MastNodeOrderClass::External => external_ids.push(node_id),
             MastNodeOrderClass::BasicBlock => basic_block_ids.push(node_id),
-            MastNodeOrderClass::Internal => {
-                internal_ids.insert(node_id);
-            },
+            MastNodeOrderClass::Internal => internal_ids.push(node_id),
         }
     }
 
@@ -345,58 +343,59 @@ fn final_dense_node_order(
 
     let mut ordered_ids = external_ids;
     ordered_ids.extend(basic_block_ids);
-    let mut emitted_ids = ordered_ids.iter().copied().collect::<BTreeSet<_>>();
+    let mut ready_internal_ids = BTreeSet::new();
+    let mut pending_child_counts = vec![0_usize; node_count];
+    let mut parent_ids_by_child = vec![Vec::new(); node_count];
 
-    while !internal_ids.is_empty() {
-        let ready_ids = internal_ids
-            .iter()
-            .copied()
-            .filter_map(|node_id| {
-                internal_node_is_ready(nodes, node_id, &emitted_ids, node_count).transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+    for &node_id in &internal_ids {
+        let mut invalid_child = None;
+        nodes[node_id].for_each_child(|child_id| {
+            if child_id.to_usize() >= node_count {
+                invalid_child = Some(child_id);
+            } else if mast_node_order_class(&nodes[child_id]) == MastNodeOrderClass::Internal {
+                pending_child_counts[node_id.to_usize()] += 1;
+                parent_ids_by_child[child_id.to_usize()].push(node_id);
+            }
+        });
 
-        if ready_ids.is_empty() {
-            let node_id = *internal_ids
-                .first()
-                .expect("non-empty internal node set must have a first entry");
-            return Err(MastForestError::InvalidNodeOrder {
-                node_id,
-                reason: "internal nodes must form an acyclic child-before-parent graph".into(),
-            });
+        if let Some(child_id) = invalid_child {
+            return Err(MastForestError::NodeIdOverflow(child_id, node_count));
         }
 
-        for node_id in ready_ids {
-            internal_ids.remove(&node_id);
-            emitted_ids.insert(node_id);
-            ordered_ids.push(node_id);
+        if pending_child_counts[node_id.to_usize()] == 0 {
+            ready_internal_ids.insert(node_id);
         }
+    }
+
+    let internal_node_count = internal_ids.len();
+    let mut emitted_internal_node_count = 0;
+
+    while let Some(node_id) = ready_internal_ids.first().copied() {
+        ready_internal_ids.remove(&node_id);
+        ordered_ids.push(node_id);
+        emitted_internal_node_count += 1;
+
+        for &parent_id in &parent_ids_by_child[node_id.to_usize()] {
+            let pending_count = &mut pending_child_counts[parent_id.to_usize()];
+            *pending_count -= 1;
+            if *pending_count == 0 {
+                ready_internal_ids.insert(parent_id);
+            }
+        }
+    }
+
+    if emitted_internal_node_count != internal_node_count {
+        let node_id = internal_ids
+            .into_iter()
+            .find(|&node_id| pending_child_counts[node_id.to_usize()] > 0)
+            .expect("non-empty internal cycle must contain a pending node");
+        return Err(MastForestError::InvalidNodeOrder {
+            node_id,
+            reason: "internal nodes must form an acyclic child-before-parent graph".into(),
+        });
     }
 
     Ok(ordered_ids)
-}
-
-fn internal_node_is_ready(
-    nodes: &IndexVec<MastNodeId, MastNode>,
-    node_id: MastNodeId,
-    emitted_ids: &BTreeSet<MastNodeId>,
-    node_count: usize,
-) -> Result<Option<MastNodeId>, MastForestError> {
-    let mut invalid_child = None;
-    let mut is_ready = true;
-    nodes[node_id].for_each_child(|child_id| {
-        if child_id.to_usize() >= node_count {
-            invalid_child = Some(child_id);
-        } else if !emitted_ids.contains(&child_id) {
-            is_ready = false;
-        }
-    });
-
-    if let Some(child_id) = invalid_child {
-        return Err(MastForestError::NodeIdOverflow(child_id, node_count));
-    }
-
-    Ok(is_ready.then_some(node_id))
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
