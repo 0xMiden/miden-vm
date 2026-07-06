@@ -222,6 +222,8 @@ impl MastForest {
     /// Internal serialization with options.
     ///
     /// Current writers encode normal execution payloads or hashless validation payloads.
+    /// Both forms use the finalized dense node order already stored in the `MastForest`; writers
+    /// validate that order but do not sort nodes while writing.
     fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
         self.validate_dense_node_order()
             .expect("dense MAST forest must be in final dense order before serialization");

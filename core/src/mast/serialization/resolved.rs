@@ -205,6 +205,9 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 
     pub(super) fn validate_dense_node_order(&self) -> Result<(), DeserializationError> {
+        // Serialized dense payloads use the same final dense order as in-memory forests:
+        // external nodes first, with strictly increasing digests, then basic blocks, then
+        // internal nodes. Child IDs must point backward so children appear before parents.
         let mut previous_class = serialized_node_order_class(MastNodeEntry::External);
         let mut previous_external_digest = None;
 

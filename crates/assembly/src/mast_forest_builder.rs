@@ -118,11 +118,10 @@ impl<'a> StaticLibrary<'a> {
         Self {
             mast,
             debug_info,
-            // TODO(#3067): revisit this default now that `MastForest::commitment()` binds
-            // dependencies and advice. Package-backed static libraries should use
-            // `Package::digest()`; direct forest-backed libraries may need an explicit source
-            // library identity instead of the interface commitment.
-            source_library_commitment: mast.interface_commitment(),
+            // Direct forest-backed static libraries do not have a package digest, so their source
+            // identity is the full forest commitment. This keeps provenance hints scoped to the
+            // same roots, external dependencies, and advice as package-backed static libraries.
+            source_library_commitment: mast.commitment(),
         }
     }
 
@@ -2120,7 +2119,7 @@ mod tests {
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
-                Some(static_forest.interface_commitment()),
+                Some(static_forest.commitment()),
                 Some(final_static_block),
                 Some(DebugSourceNodeId::from(u32::from(static_source_root))),
             )
@@ -2195,7 +2194,7 @@ mod tests {
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
-                Some(static_forest.interface_commitment()),
+                Some(static_forest.commitment()),
                 Some(final_static_block),
                 Some(package_source_root),
             )
@@ -2259,7 +2258,7 @@ mod tests {
         let error = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_split].digest(),
-                Some(static_forest.interface_commitment()),
+                Some(static_forest.commitment()),
                 Some(final_split),
                 Some(package_source_root),
             )
@@ -2478,7 +2477,7 @@ mod tests {
         let linked_ref = builder
             .ensure_external_link_with_source_ref(
                 source_a_forest[source_a_root].digest(),
-                Some(source_a_forest.interface_commitment()),
+                Some(source_a_forest.commitment()),
                 Some(source_a_root),
                 None,
             )
@@ -2496,6 +2495,73 @@ mod tests {
             source_asm_contexts(&source_graph, final_linked).is_empty(),
             "ambiguous same-commitment provenance should import execution without source metadata"
         );
+    }
+
+    #[test]
+    fn test_static_link_direct_forest_identity_uses_full_commitment() {
+        let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_a_asm_op = add_test_asm_op(
+            &mut source_a_builder,
+            AssemblyOp::new(None, "source_a".into(), 1, "add".into()),
+        );
+        let source_a_ref = source_a_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_a_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_a_builder, source_a_ref);
+        let (source_a_forest, source_a_remapping, source_a_graph, _) =
+            source_a_builder.build().unwrap().into_parts_with_source_graph();
+        let source_a_root = source_a_remapping[&source_a_ref];
+
+        let mut source_b_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_b_asm_op = add_test_asm_op(
+            &mut source_b_builder,
+            AssemblyOp::new(None, "source_b".into(), 1, "add".into()),
+        );
+        let source_b_ref = source_b_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_b_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_b_builder, source_b_ref);
+        let (source_b_forest, source_b_remapping, source_b_graph, _) =
+            source_b_builder.build().unwrap().into_parts_with_source_graph();
+        let source_b_root = source_b_remapping[&source_b_ref];
+        let source_b_forest = source_b_forest.with_advice_map(AdviceMap::from_iter([(
+            Word::from([Felt::new_unchecked(9), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
+            vec![Felt::new_unchecked(1)],
+        )]));
+
+        assert_eq!(source_a_forest.interface_commitment(), source_b_forest.interface_commitment());
+        assert_ne!(source_a_forest.commitment(), source_b_forest.commitment());
+        assert_eq!(
+            source_a_forest[source_a_root].digest(),
+            source_b_forest[source_b_root].digest()
+        );
+
+        let source_b_debug_root = source_b_graph.roots()[0];
+        let mut builder = MastForestBuilder::new_with_static_libraries([
+            StaticLibrary::new(
+                &source_a_forest,
+                Some(package_debug_info_from_source_graph(&source_a_graph)),
+            ),
+            StaticLibrary::new(
+                &source_b_forest,
+                Some(package_debug_info_from_source_graph(&source_b_graph)),
+            ),
+        ])
+        .unwrap();
+        let linked_ref = builder
+            .ensure_external_link_with_source_ref(
+                source_b_forest[source_b_root].digest(),
+                Some(source_b_forest.commitment()),
+                Some(source_b_root),
+                Some(DebugSourceNodeId::from(u32::from(source_b_debug_root))),
+            )
+            .unwrap();
+        record_test_root(&mut builder, linked_ref);
+        let (_forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_linked = remapping[&linked_ref];
+
+        assert_eq!(source_asm_contexts(&source_graph, final_linked), vec!["source_b"]);
     }
 
     /// Provenance-aware static linking imports package-owned source metadata for the selected root.
@@ -2537,7 +2603,7 @@ mod tests {
         let linked_alias_b_ref = provenance_builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_alias_b].digest(),
-                Some(static_forest.interface_commitment()),
+                Some(static_forest.commitment()),
                 Some(final_alias_b),
                 Some(DebugSourceNodeId::from(u32::from(alias_b_source_root))),
             )

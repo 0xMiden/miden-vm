@@ -107,6 +107,14 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
 /// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
+///
+/// Finalized dense forests keep nodes in final dense order:
+/// - external nodes first, sorted by digest, with no duplicate external digests;
+/// - basic blocks next, in the input order seen by finalization;
+/// - internal nodes last, with every child before its parent and finalization input order as the
+///   tie-breaker.
+///
+/// Serialization expects this in-memory order and validates it before writing.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
@@ -254,6 +262,9 @@ fn canonicalize_dense_parts(
         .map(|index| MastNodeId::new_unchecked(index as u32))
         .collect::<Vec<_>>();
 
+    // Preserve old dense node-id order within basic blocks and internal nodes. This constructor
+    // only moves nodes across the external/basic-block/internal partitions; callers must already
+    // provide internal nodes in child-before-parent order.
     ordered_ids.sort_by(|&left, &right| {
         let left_node = &parts.nodes[left];
         let right_node = &parts.nodes[right];

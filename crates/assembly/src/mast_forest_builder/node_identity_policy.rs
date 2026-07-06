@@ -47,6 +47,9 @@ impl FinalForestLayout {
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
         node_refs_to_remove: &BTreeSet<MastNodeRef>,
     ) -> Vec<MastNodeRef> {
+        // Match the finalized dense `MastForest` order:
+        // external nodes by digest, basic blocks by construction order, then internal nodes once
+        // all live children have been emitted, using construction order as the tie-breaker.
         let mut live_node_refs = (0..nodes.len())
             .map(|index| MastNodeRef::from(index as u32))
             .filter(|node_ref| !node_refs_to_remove.contains(node_ref))
