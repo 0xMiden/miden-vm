@@ -10,7 +10,7 @@
 //! is unrecordable at d = 0) while the honest case's recorded
 //! certificates dangle.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 
 use k256::elliptic_curve::sec1::ToEncodedPoint; // to_encoded_point()
 use k256::{ProjectivePoint, Scalar};

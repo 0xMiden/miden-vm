@@ -12,6 +12,8 @@
 //! `assert_zero_ext`, yet excluded from σ — which must come out **0**
 //! here, since the single LogUp column emits nothing.
 
+use std::{vec, vec::Vec};
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

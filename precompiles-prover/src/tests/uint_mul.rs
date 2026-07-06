@@ -3,7 +3,7 @@
 //! `UintLimbs`/`UintVal`/`Range16` buses balanced against the store and
 //! the byte-pair LUT, and the act-gated padding.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, vec::Vec};
 
 use miden_air::lookup::{
     Challenges, LookupAir,

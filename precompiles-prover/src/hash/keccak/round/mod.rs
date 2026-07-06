@@ -12,6 +12,8 @@
 
 pub mod program;
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

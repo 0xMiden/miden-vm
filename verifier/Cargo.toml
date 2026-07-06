@@ -24,6 +24,7 @@ std = [
     "miden-air/std",
     "miden-core/std",
     "miden-precompiles/std",
+    "miden-precompiles-prover/std",
     "thiserror/std",
 ]
 

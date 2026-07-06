@@ -21,6 +21,7 @@
 //! `perm_seq_id` continuing `+1` to satisfy the relaxed chain on dead
 //! rows.
 
+use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_core::{Felt, deferred::Node, field::QuadFelt};

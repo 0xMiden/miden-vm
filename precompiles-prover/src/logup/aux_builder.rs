@@ -12,6 +12,8 @@
 //!   the last row (`when_last: D₀·(σ − Σ acc) − N₀ = 0`, see `constraint.rs`), so no `σ/n` drift
 //!   correction and no reserved dead row are needed.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{
     field::{ExtensionField, Field},
     utils::{Matrix, RowMajorMatrix},

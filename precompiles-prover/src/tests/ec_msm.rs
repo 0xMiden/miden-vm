@@ -10,6 +10,8 @@
 //! in-circuit resolve through the eval `EcMsm` seam — the positionless
 //! `MsmClaimTerm` set match, so the absorb (root) order is the caller's.
 
+use std::{format, string::String};
+
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_core::Felt;
 use miden_precompiles::CurveId;

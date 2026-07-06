@@ -13,6 +13,8 @@ pub mod message;
 pub mod program;
 pub mod trace;
 
+use alloc::vec::Vec;
+
 pub use message::KeccakSpongeMsg;
 use miden_core::{
     Felt,

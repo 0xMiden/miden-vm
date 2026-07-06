@@ -14,6 +14,7 @@
 pub mod message;
 pub mod trace;
 
+use alloc::vec::Vec;
 use core::array;
 
 pub use message::ChunkChainMsg;

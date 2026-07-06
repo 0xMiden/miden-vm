@@ -4,6 +4,8 @@
 //! the public DAG surface, shared between the test suite and the
 //! `src/bin/` benches so a construction is written (and audited) once.
 
+use alloc::vec::Vec;
+
 use crate::{
     math::U256,
     session::{Session, UintNode},

@@ -10,6 +10,8 @@
 //! constructs the lower-layer `require` views as needed (mirroring how the
 //! `Session` itself wired them).
 
+use alloc::vec::Vec;
+
 use crate::{
     ec::{
         EcStores,

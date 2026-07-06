@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
 use miden_precompiles::{
     CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,

@@ -7,6 +7,8 @@
 //! to the same primitive type — the compiler can't catch a
 //! digest accidentally fed in as a cap (or vice versa).
 
+use core::cmp::Ordering;
+
 use miden_core::{
     Felt,
     deferred::{Digest, Tag},
@@ -23,6 +25,20 @@ pub struct P2Digest(pub [Felt; 4]);
 impl P2Digest {
     pub fn as_array(&self) -> [Felt; 4] {
         self.0
+    }
+}
+
+impl PartialOrd for P2Digest {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for P2Digest {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0
+            .map(|felt| felt.as_canonical_u64())
+            .cmp(&other.0.map(|felt| felt.as_canonical_u64()))
     }
 }
 

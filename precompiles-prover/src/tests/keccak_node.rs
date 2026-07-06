@@ -6,6 +6,8 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption of the activity flag, boundary, and continuity edges.
 
+use std::vec;
+
 use miden_core::{
     Felt,
     deferred::{Digest, Node},

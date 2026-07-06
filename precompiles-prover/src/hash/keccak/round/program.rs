@@ -42,6 +42,8 @@
 //! See `docs/chiplets/keccak.md` for the address-space layout
 //! and sponge contract.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::Felt;
 
 use crate::relations::ProvideMult;

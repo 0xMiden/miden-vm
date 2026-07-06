@@ -7,7 +7,7 @@
 //! AIR. Pad rows continue the allocator with `is_boundary = 0` (so
 //! `expr_ptr` freezes and the cursors simply count up), touching no bus.
 
-use std::collections::HashMap;
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
@@ -30,7 +30,7 @@ use crate::{
 
 /// Handle to a recorded MSM expression — its allocator-assigned
 /// `expr_ptr` (consecutive from 1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EcExprPtr(pub u32);
 
 impl EcExprPtr {
@@ -131,7 +131,7 @@ struct ExprRecord {
 /// strict pointer order (operand `<` result) keeps this sound — a dedup hit
 /// returns an *earlier* expr, only ever referenced by *later* ones, so it
 /// can never close a cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum DedupKey {
     /// `⟨base × 1⟩` — keyed by the base point (which fixes group + bound).
     Intro(u32),
@@ -148,7 +148,7 @@ pub struct EcMsmRequires {
     exprs: Vec<ExprRecord>,
     /// Relation identity → the expression it produced; a repeated derivation
     /// reuses the stored handle (see [`lookup_intro`](Self::lookup_intro)).
-    dedup: HashMap<DedupKey, EcExprPtr>,
+    dedup: BTreeMap<DedupKey, EcExprPtr>,
 }
 
 impl EcMsmRequires {
@@ -511,6 +511,8 @@ pub(crate) fn build_aux(
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use p3_matrix::Matrix;
 
     use super::*;

@@ -74,6 +74,7 @@
 
 pub mod trace;
 
+use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{

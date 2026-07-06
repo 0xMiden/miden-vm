@@ -44,7 +44,10 @@
 //! leaves all share **one** row (`Binding(0, True)` is a single
 //! provider): `out_mult` = the number of non-root zero leaves.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use miden_core::{
     Felt,
@@ -267,7 +270,7 @@ enum NodeKind {
 /// Interning key for a uint value node ([`UintNode`]): a transient `Leaf`
 /// by its (canonical) ptr, an `Op` by `(op, lhs hash, rhs hash)` — the
 /// structural DAG identity, so a re-request collapses onto the existing row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum UintKey {
     Leaf(UintPtr),
     Op(UintOpId, P2Digest, P2Digest),
@@ -278,7 +281,7 @@ enum UintKey {
 /// identical coords on distinct groups stay distinct; ∞ uses the zero coord
 /// hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim by its
 /// `expr_ptr` (one node per expression; its hash chains the whole term run).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EcKey {
     Create(u32, P2Digest, P2Digest),
     Op(EcOpId, P2Digest, P2Digest),
@@ -301,10 +304,10 @@ pub struct TranscriptEvalRequires {
     /// Uint value-node interning (leaf + op), keyed by [`UintKey`] —
     /// mirroring keccak's input-keyed dedup (a re-requested node collapses
     /// onto one row; sharing rides `out_mult`).
-    uint_dedup: HashMap<UintKey, UintNode>,
+    uint_dedup: BTreeMap<UintKey, UintNode>,
     /// EC value-node interning (create + binop + MSM claim), keyed by
     /// [`EcKey`].
-    ec_dedup: HashMap<EcKey, EcNode>,
+    ec_dedup: BTreeMap<EcKey, EcNode>,
 }
 
 impl TranscriptEvalRequires {

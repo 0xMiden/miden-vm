@@ -12,6 +12,7 @@ pub mod messages;
 pub mod program;
 pub mod trace;
 
+use alloc::vec::Vec;
 use core::array;
 
 pub use digest::{P2Cap, P2Digest};

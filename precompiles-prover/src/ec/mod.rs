@@ -55,6 +55,8 @@ pub mod msm;
 pub mod require;
 pub mod trace;
 
+use alloc::vec::Vec;
+
 use add::EcOnCurveCertMsg;
 use miden_core::{
     Felt,

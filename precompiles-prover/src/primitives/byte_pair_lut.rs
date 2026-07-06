@@ -34,6 +34,8 @@
 //! (range-unchecked under the fixed-consume invariant — see
 //! `docs/lookup-argument.md`).
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},

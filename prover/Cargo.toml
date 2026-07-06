@@ -15,11 +15,18 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-concurrent = ["std", "miden-air/concurrent", "miden-crypto/concurrent", "miden-processor/concurrent"]
+concurrent = [
+    "std",
+    "miden-air/concurrent",
+    "miden-crypto/concurrent",
+    "miden-precompiles-prover/concurrent",
+    "miden-processor/concurrent",
+]
 std = [
     "dep:miden-precompiles-prover",
     "miden-air/std",
     "miden-debug-types/std",
+    "miden-precompiles-prover/std",
     "miden-processor/std",
 ]
 

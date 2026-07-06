@@ -88,6 +88,7 @@
 
 pub mod trace;
 
+use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -303,7 +304,7 @@ impl BaseAir<Felt> for UintMulAir {
                 col[row] = Felt::ONE;
                 col
             })
-            .chain(std::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
+            .chain(core::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
             .collect()
     }
 }
