@@ -260,6 +260,11 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
             let cell: AB::Expr = local[col].into();
             builder.assert_zero(is_cert.clone() * cell);
         }
+        // Inactive rows cannot provide phantom EcPoint tuples: their group and
+        // membership consumes are act-gated, while the provide self-gates via
+        // this multiplicity cell.
+        let point_mult: AB::Expr = local[COL_ECPOINT_MULT].into();
+        builder.assert_zero((AB::Expr::ONE - act.clone()) * point_mult);
 
         // act is monotone (pads only at the tail; the wrap is dropped so
         // the cyclic last → first edge stays free)…

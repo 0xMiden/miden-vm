@@ -13,7 +13,7 @@ thinnest chiplets in the stack — one row per entity, zero periodic
 columns, a single aux column each:
 
 - **EcGroups** (the group table): 6 main columns, one provide fraction;
-- **EcPointStore**: 13 main columns, five act-/role-gated fractions.
+- **EcPointStore**: 14 main columns, six fractions.
 
 Recording rides [`EcRequire`](../../src/ec/require.rs):
 `create_group(a, b, bound_ptr)` asserts `b ≠ 0`, interns/dedups the params,
@@ -104,7 +104,8 @@ the constraint `ptr' = ptr + 1` — no gap column, no `Range16`, injectivity for
 free. The group table takes this to its limit with the ungated chain above;
 the point store keeps an `act` flag because its **consumes** (the `EcGroup`
 tuple, the membership trio) are constraint-side multiplicities that must vanish
-on pad rows.
+on pad rows, and it pins `mult = 0` when inactive so pad rows cannot provide
+phantom `EcPoint` tuples.
 
 ## Point-at-infinity: a flag, not magic coordinates
 
@@ -316,13 +317,14 @@ both rows to cross blocks) would save no absorption while doubling
 the distinct prefixes at the very front of the absorption order —
 strictly worse than doing nothing.
 
-**EcPointStore (13 main, 1 aux):** `ptr`, `group_ptr`, `a_ptr`,
+**EcPointStore (14 main, 1 aux):** `ptr`, `group_ptr`, `a_ptr`,
 `b_ptr`, `bound_ptr`, `scalar_bound_ptr`, `x_ptr`, `y_ptr`, `u_ptr`,
-`w_ptr`, `is_pai`, `mult`, `act`. Constraints: booleanity (`is_pai`,
-`act`), act monotonicity, the ptr chain, and the PAI none-sentinel ties
-`is_pai · {x, y, u, w}_ptr = 0`. Five fractions: the `EcPoint` provide,
-the `EcGroup` consume, the membership MAC trio (gated
-`act · (1 − is_pai)`).
+`w_ptr`, `is_pai`, `mult`, `act`, `is_cert`. Constraints: booleanity
+(`is_pai`, `is_cert`, `act`), inactive `mult = 0`, act monotonicity, the ptr
+chain, the PAI none-sentinel ties `is_pai · {x, y, u, w}_ptr = 0`, and the
+cert none-sentinel ties `is_cert · {u, w}_ptr = 0`. Six fractions: the
+`EcPoint` provide, the `EcGroup` consume, the membership MAC trio, and the
+closure-certificate consume.
 
 ## Open questions
 

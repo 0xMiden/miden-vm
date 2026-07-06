@@ -14,7 +14,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::LiftedAir;
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 use p3_matrix::dense::RowMajorMatrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -126,6 +126,15 @@ fn p2_caps_match_vm_sources() {
     assert_eq!(
         P2Cap::keccak256_assertion(len_bytes).as_array(),
         Keccak256Precompile::assert_tag(len_bytes).as_word(),
+    );
+    assert_eq!(
+        P2Cap::ec_msm_iv().as_array(),
+        [
+            CurvePrecompile::id(),
+            Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
+            Felt::ZERO,
+            Felt::ZERO,
+        ],
     );
 }
 

@@ -44,11 +44,10 @@ pub enum NodeTag {
     EcBinOp = 6,
     Keccak = 7,
     /// Reserved local tag id for the multi-scalar-multiplication claim shape.
-    /// Current curve MSM transcript caps use the VM curve MSM tag
-    /// `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]`; the eval chip still
-    /// lays MSM as a capacity-threaded variable-length run where
-    /// `capᵢ = stateᵢ₋₁`. The node *is* its value point (binds `Group`); see
-    /// `docs/chiplets/ec-msm.md §6.2`.
+    /// Curve MSM transcript caps use `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`;
+    /// the eval chip lays MSM as a variable-length VM PairList absorption. The
+    /// node *is* its value point (binds `Group`); see `docs/chiplets/ec-msm.md
+    /// §6.2`.
     EcMsm = 8,
 }
 
