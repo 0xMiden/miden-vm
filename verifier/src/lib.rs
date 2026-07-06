@@ -23,7 +23,7 @@ const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_D
 mod exports {
     pub use miden_core::{
         Word,
-        deferred::{DeferredState, IntegrityError},
+        deferred::{DeferredState, IntegrityError, PrecompileRegistry},
         program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
@@ -63,11 +63,40 @@ pub fn verify(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    verify_with_max_deferred_elements(
+    verify_with_precompile_registry_and_max_deferred_elements(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
+        miden_precompiles::registry(),
+        DEFAULT_MAX_DEFERRED_ELEMENTS,
+    )
+}
+
+/// Returns the security level of the proof if the specified program was executed correctly against
+/// the specified inputs and outputs, using an explicit precompile registry.
+///
+/// Use this when verifying proofs produced by direct processor integrations that installed a
+/// custom precompile registry.
+///
+/// # Errors
+/// Returns an error if:
+/// - The provided proof does not prove a correct execution of the program.
+/// - The proof's deferred wire does not rehydrate under `precompile_registry` within the default
+///   deferred-state verifier budget.
+pub fn verify_with_precompile_registry(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    precompile_registry: PrecompileRegistry,
+) -> Result<u32, VerificationError> {
+    verify_with_precompile_registry_and_max_deferred_elements(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        precompile_registry,
         DEFAULT_MAX_DEFERRED_ELEMENTS,
     )
 }
@@ -89,11 +118,41 @@ pub fn verify_with_max_deferred_elements(
     proof: ExecutionProof,
     max_deferred_elements: usize,
 ) -> Result<u32, VerificationError> {
+    verify_with_precompile_registry_and_max_deferred_elements(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        miden_precompiles::registry(),
+        max_deferred_elements,
+    )
+}
+
+/// Returns the security level of the proof if the specified program was executed correctly against
+/// the specified inputs and outputs, using an explicit precompile registry and deferred-state
+/// verifier budget.
+///
+/// Use this when verifying proofs produced by direct processor integrations that installed a
+/// custom precompile registry or used a non-default deferred-state execution budget.
+///
+/// # Errors
+/// Returns an error if:
+/// - The provided proof does not prove a correct execution of the program.
+/// - The proof's deferred wire does not rehydrate under `precompile_registry` within
+///   `max_deferred_elements`.
+pub fn verify_with_precompile_registry_and_max_deferred_elements(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    precompile_registry: PrecompileRegistry,
+    max_deferred_elements: usize,
+) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
     let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
     let state = DeferredState::from_wire(
-        Arc::new(miden_precompiles::registry()),
+        Arc::new(precompile_registry),
         &deferred_wire,
         max_deferred_elements,
     )?;
