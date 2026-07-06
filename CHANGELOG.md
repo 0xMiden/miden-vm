@@ -45,7 +45,7 @@
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 - [BREAKING] Migrated proof-bound precompiles to the deferred-DAG proof wire: `ExecutionProof` carries `DeferredStateWire`, and verifiers rehydrate it with a supplied `PrecompileRegistry`.
 - Added the content-addressed deferred-DAG framework (`miden_core::deferred`): structured `Tag { id, args }` nodes, canonical wire format, the `Precompile` trait + `PrecompileRegistry`, `adv.*_deferred` system events, MASM grammar, and `log_deferred` root accumulation ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
-- Added the `miden-precompiles` crate as the home for concrete deferred precompile implementations, including `keccak256` and `sha512` MASM wrappers under `miden::precompiles::crypto::hashes`.
+- Added the `miden-precompiles` crate as the home for concrete deferred precompile implementations, including the `keccak256` MASM wrapper under `miden::precompiles::crypto::hashes`.
 - [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
 - Moved `proptest` test support behind optional features so `rand` 0.9 is not in the default dependency tree ([#3241](https://github.com/0xMiden/miden-vm/pull/3241)).
 - Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).

@@ -53,11 +53,12 @@ content yields an identical digest, so equal subterms are shared automatically (
 - A **tag** is a node's identity and constructor: externally, precompile tags are built with
   `Tag::precompile(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
   selects the owning precompile; the three immediate felts (`args`) are entirely the precompile's
-  to interpret (a discriminant, a data length, a small constant, …). The framework reserves ids `0`
-  and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
-  `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes. No precompile may claim either id.
-  Deferred statement accumulation uses the same semantic `AND` constructor as a restricted
-  right-spined chain.
+  to interpret (a discriminant, a data length, a small constant, …). The framework reserves ids `0`,
+  `1`, and `2` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node,
+  `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes, and
+  `Tag::CHUNKS = [2, 0, 0, 0]` tags framework-owned opaque byte chunks. No precompile may claim
+  these ids. Deferred statement accumulation uses the same semantic `AND` constructor as a
+  restricted right-spined chain.
 - A **payload** is the node's body, in one of four shapes:
   - the framework `TRUE` sentinel, carrying no data; it is the only zero-payload node;
   - a data payload: one or more 8-felt rate-sized chunks, linearly hashed under the tag. An empty
@@ -243,6 +244,11 @@ This framework is now the proof-bound precompile substrate. In its current form:
   caller-supplied `PrecompileRegistry` before checking the STARK proof;
 - the `miden-precompiles` crate provides concrete hash, arithmetic, curve, and native signature
   precompile implementations used by core-library facades and registry-based verification.
+
+The proof format binds the final deferred root, not a registry name or version. A verifier must use
+the same registry semantics that were used to create the deferred wire. The built-in verifier path
+uses `miden_precompiles::registry()`. Direct processor integrations that install custom
+precompiles must pass the matching registry through `VerificationOptions`.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

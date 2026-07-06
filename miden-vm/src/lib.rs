@@ -24,7 +24,7 @@ pub use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_from_trace_sync;
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word};
-pub use miden_verifier::{PrecompileRegistry, VerificationError};
+pub use miden_verifier::{PrecompileRegistry, VerificationError, VerificationOptions};
 
 // (private) exports
 // ================================================================================================
@@ -128,6 +128,19 @@ pub fn verify(
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
     miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
+}
+
+/// Verifies a Miden proof using explicit verification options.
+///
+/// See [miden_verifier::verify_with_options] for more details.
+pub fn verify_with_options(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    options: VerificationOptions,
+) -> Result<u32, VerificationError> {
+    miden_verifier::verify_with_options(program_info, stack_inputs, stack_outputs, proof, options)
 }
 
 /// Verifies a Miden proof using an explicit precompile registry.

@@ -3,12 +3,15 @@ This crate is the home for concrete precompile implementations used by Miden VM'
 
 The generic deferred-computation framework stays in [`miden-core`](../core), under `miden_core::deferred`: the node/DAG data model, the `Precompile` trait, the `PrecompileRegistry`, deferred state, and wire validation. This crate builds on that framework and provides the concrete precompiles that programs can defer their semantic checks to, exposing them through a single `registry()` constructor.
 
+Proofs do not name the registry that was used to create their deferred wire. Verifiers that use a custom registry must pass the same registry when checking the proof.
+
 ## Usage
 This crate exposes a `registry()` function that returns a `miden_core::deferred::PrecompileRegistry` — the registry that routes deferred tags to their owning precompile — populated with the precompiles this crate provides.
 
 ## Provided precompiles
 - **Hashes** (`keccak256`): a `preimage` → `digest` reduction plus an `eq` predicate, used by bundled MASM support code for core hash facades.
 - **Math-native secp256k1 ECDSA** (`ecdsa_secp256k1`): a trapping prehashed verifier used by bundled MASM support code. It verifies raw affine secp256k1 public keys, prehashes, and `(r, s)` signatures stored as little-endian `u32` limbs. It uses the UInt and curve precompiles, applying the signature equation's scalar multiplications with a two-pair curve MSM.
+- **UInt and curve helpers**: `U256`, secp256k1 base field, secp256k1 scalar field, and secp256k1 curve operations used by the bundled ECDSA wrapper.
 
 ## secp256k1 ECDSA trapping verifier ABI
 

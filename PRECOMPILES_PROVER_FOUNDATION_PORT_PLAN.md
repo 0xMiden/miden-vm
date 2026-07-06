@@ -6,6 +6,11 @@ Port the lower-crate semantic foundations that were discovered on `precompiles/v
 
 This is a living orchestration document. Agents should update this document indirectly by reporting findings to the coordinator, who consolidates status here. Do **not** let multiple agents edit this file concurrently.
 
+Current status: this plan has been applied and then narrowed. The current `precompiles/crate`
+branch supports `U256`, secp256k1 base field, secp256k1 scalar field, and secp256k1 curve
+precompiles. Ed25519, Ed25519-SW, and secp256r1 material below is historical context only, not a
+current requirement.
+
 ## Branches and safety refs
 
 Current known branches:
@@ -106,10 +111,6 @@ Expected constants:
 U256_BOUND_PTR = 1
 K1_BASE_BOUND_PTR = 2
 K1_SCALAR_BOUND_PTR = 3
-R1_BASE_BOUND_PTR = 4
-R1_SCALAR_BOUND_PTR = 5
-ED25519_BASE_BOUND_PTR = 6
-ED25519_SCALAR_BOUND_PTR = 7
 ```
 
 Expected APIs:
@@ -157,11 +158,9 @@ Expected constants:
 
 ```rust
 K1_GROUP_PTR = 1
-R1_GROUP_PTR = 2
-ED25519_SW_GROUP_PTR = 3
 ```
 
-Use names consistent with the current branch. This branch uses `Ed25519Sw`; do not copy stale twisted-Edwards `Ed25519` assumptions.
+The earlier secp256r1 and Ed25519-SW constants are out of scope for the current branch.
 
 Expected APIs:
 
@@ -208,11 +207,7 @@ Expected additions/adaptations:
 
 ```rust
 impl CodegenCurveId {
-    pub const ALL: [Self; 3] = [
-        Self::Secp256k1,
-        Self::Secp256r1,
-        Self::Ed25519Sw,
-    ];
+    pub const ALL: [Self; 1] = [Self::Secp256k1];
 }
 ```
 
@@ -426,7 +421,7 @@ Implementation notes:
 
 Tests:
 
-- descriptor test: `UintDomain::ALL` maps to pointers `1..=7`; reject `0` and `8`.
+- descriptor test: `UintDomain::ALL` maps to pointers `1..=3`; reject `0` and `4`.
 - uint precompile decode test: exact value/op tag words; reject unknown bound ptr, nonzero reserved slot, op tags with bound ptr, oversized ptr.
 - run uint/field integration tests; curve integration is also recommended because coordinate/scalar digests change.
 
@@ -448,7 +443,7 @@ Findings:
 
 Implementation notes:
 
-- Add `K1_GROUP_PTR`, `R1_GROUP_PTR`, `ED25519_SW_GROUP_PTR`.
+- Add `K1_GROUP_PTR`.
 - Add `CodegenCurveId::{group_ptr, from_group_ptr}` and `CurveId::{group_ptr, from_group_ptr}`.
 - Change curve `VALUE` decode to parse `args[1]` via `from_group_ptr` and require `args[2] == ZERO`.
 - Change `CurvePrecompileDescriptor::msm_tag()` / `CurvePrecompile::msm_tag()` to take no curve/count and return the generic MSM op tag.
@@ -479,7 +474,7 @@ Findings:
 
 Implementation notes:
 
-- Add `CodegenCurveId::ALL = [Secp256k1, Secp256r1, Ed25519Sw]`.
+- Add `CodegenCurveId::ALL = [Secp256k1]`.
 - Add `UintMasmConfig::new(domain)` and `CurveMasmConfig::new(curve)` if this keeps code readable.
 - Generate configs from `UintDomain::ALL` and `CodegenCurveId::ALL`, preserving current paths:
   - `asm/math/u256.masm`
@@ -564,7 +559,7 @@ Acceptance criteria:
 
 ## Current implementation status
 
-Status: lower-branch foundation port implemented in the current `precompiles/crate` worktree. No commits have been created yet.
+Status: lower-branch foundation port has been committed on `precompiles/crate`.
 
 Implemented lower-crate changes:
 
@@ -577,7 +572,7 @@ Implemented lower-crate changes:
   - added `HashAssertNode`, `HashPrecompile::decode_assert_tag`, and `HashPrecompile::decode_assert_node` for session/lowering consumers;
   - added structural decoder tests to the shared hash test harness.
 - `precompiles/codegen/src/descriptors.rs` and uint precompile files
-  - added fixed uint bound pointer constants `1..=7`;
+  - added fixed uint bound pointer constants `1..=3`;
   - switched uint `VALUE` tags to `[UINT_PRECOMPILE_ID, VALUE_OP_ID, BOUND_PTR, 0]`;
   - switched uint decoding and field inverse handling to `UintDomain::from_bound_ptr`;
   - removed obsolete uint domain-id metadata APIs after confirming they were unused and absent from the prover branch;
@@ -588,7 +583,7 @@ Implemented lower-crate changes:
   - switched curve `MSM` to generic zero-immediate `[CURVE_PRECOMPILE_ID, MSM_OP_ID, 0, 0]`;
   - switched MSM pair-list order to `(point_digest, scalar_digest)` and infer/validate curve from point values;
   - added `CurveNodeRef` / `CurvePrecompile::decode_node` and coefficient metadata helpers;
-  - preserved `Ed25519Sw` short-Weierstrass coefficient sourcing via `ShortWeierstrassSpec::{A, B}`.
+  - narrowed the fixed curve set to secp256k1.
 - `precompiles/codegen/src/masm.rs`
   - derives generated uint/curve MASM configs from `UintDomain::ALL` and `CodegenCurveId::ALL`.
 - `precompiles/tests/integration/ecdsa_secp256k1.rs`
