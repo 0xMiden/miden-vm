@@ -6,8 +6,9 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption of the activity flag, boundary, and continuity edges.
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, deferred::Tag, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_precompiles::Keccak256Precompile;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -29,12 +30,9 @@ use crate::{
         },
     },
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    transcript::{
-        deferred_tags,
-        poseidon2::{
-            P2Cap,
-            trace::{PermSeqId, Poseidon2Requires},
-        },
+    transcript::poseidon2::{
+        P2Cap,
+        trace::{PermSeqId, Poseidon2Requires},
     },
 };
 
@@ -149,7 +147,7 @@ fn hash_digest_chunks_uses_vm_chunks_cap() {
     let rate0 = [d[0], d[1], d[2], d[3]];
     let rate1 = [d[4], d[5], d[6], d[7]];
     let expected =
-        Poseidon2Requires::digest_of(P2Cap(deferred_tags::chunks()), &[(rate0, rate1)]).as_array();
+        Poseidon2Requires::digest_of(P2Cap(Tag::CHUNKS.as_word()), &[(rate0, rate1)]).as_array();
 
     assert_eq!(hash_digest_chunks(&d), expected);
 }
@@ -160,7 +158,7 @@ fn hash_keccak_node_uses_vm_keccak_assertion_cap() {
     let h_digest_chunks: [Felt; 4] = core::array::from_fn(|i| Felt::from((20 + i) as u32));
     let len_bytes = 200u32;
     let expected = Poseidon2Requires::digest_of(
-        P2Cap(deferred_tags::keccak_assert(len_bytes)),
+        P2Cap(Keccak256Precompile::assert_tag(len_bytes).as_word()),
         &[(h_input_chunks, h_digest_chunks)],
     )
     .as_array();

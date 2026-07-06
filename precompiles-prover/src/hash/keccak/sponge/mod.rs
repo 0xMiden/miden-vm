@@ -382,7 +382,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // sticky-down constraint above; the linear form costs one
         // fewer witness multiplication.
         builder.when_transition().assert_zero(
-            (act.clone() - act_next.clone()) * (AB::Expr::ONE - p_last.clone() * b_sum.clone()),
+            (act.clone() - act_next) * (AB::Expr::ONE - p_last.clone() * b_sum.clone()),
         );
 
         // Row counter -------------------------------------------
@@ -391,7 +391,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // sponge_seq_id_0 = N) unconstrained.
         builder
             .when_transition()
-            .assert_zero(sponge_seq_id_next.clone() - sponge_seq_id.clone() - AB::Expr::ONE);
+            .assert_zero(sponge_seq_id_next - sponge_seq_id - AB::Expr::ONE);
 
         // `is_first_block_of_invocation` structure --------------
         builder.assert_bool(local[COL_IS_FIRST_BLOCK_OF_INVOCATION]);
@@ -426,7 +426,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
             act.clone()
                 * (AB::Expr::ONE - enters_new_invocation.clone())
                 * (AB::Expr::ONE - p_rate_block.clone())
-                * (bytes_left_next.clone() - bytes_left.clone()),
+                * (bytes_left_next - bytes_left.clone()),
         );
 
         // `chunk_ptr` increment chain ---------------------------
@@ -444,11 +444,10 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // not by the chain. `when_transition` also keeps the cyclic
         // wrap unconstrained.
         builder.when_transition().assert_zero(
-            (AB::Expr::ONE - enters_new_invocation.clone())
-                * (chunk_ptr_next.clone()
-                    - chunk_ptr.clone()
-                    - (p_rate_block.clone() + p_extra.clone() * b_sum.clone())
-                        * is_chunk_avail.clone()),
+            (AB::Expr::ONE - enters_new_invocation)
+                * (chunk_ptr_next
+                    - chunk_ptr
+                    - (p_rate_block.clone() + p_extra * b_sum.clone()) * is_chunk_avail.clone()),
         );
 
         // Chunk zero-fill on `is_chunk_avail = 0` --------------
@@ -483,11 +482,11 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // `is_chunk_avail` non-increasing within period.
         builder.assert_zero(
             (AB::Expr::ONE - p_last.clone())
-                * (AB::Expr::ONE - is_chunk_avail.clone())
-                * is_chunk_avail_next.clone(),
+                * (AB::Expr::ONE - is_chunk_avail)
+                * is_chunk_avail_next,
         );
         // Period boundary: pad hasn't fired yet at slot 0.
-        builder.assert_zero(p_first.clone() * is_zero.clone());
+        builder.assert_zero(p_first * is_zero.clone());
         // Selector bits constant within period.
         for col in COL_B_RANGE {
             let b_j: AB::Expr = local[col].into();
@@ -512,12 +511,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // total block count isn't a power of two — padded out with dead
         // rows — is admissible. Without the gate the wrap would demand
         // `is_zero = 1` on the final dead row.
-        builder.assert_zero(
-            act.clone()
-                * p_last.clone()
-                * is_first_block_next.clone()
-                * (AB::Expr::ONE - is_zero.clone()),
-        );
+        builder.assert_zero(act * p_last * is_first_block_next * (AB::Expr::ONE - is_zero.clone()));
 
         // Pad-lane tie-down -------------------------------------
         // On the unique pad transition row (`p_rate_block = 1`,
@@ -525,24 +519,23 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // everywhere else. The `p_rate_block` gate also absorbs
         // the period-wrap `is_pad = −1` case, which always lands
         // on `p_idx = 31` where `p_rate_block = 0`.
-        let is_pad: AB::Expr = is_zero_next.clone() - is_zero.clone();
-        builder.assert_zero(p_rate_block.clone() * is_pad * (b_weighted - bytes_left.clone()));
+        let is_pad: AB::Expr = is_zero_next - is_zero.clone();
+        builder.assert_zero(p_rate_block.clone() * is_pad * (b_weighted - bytes_left));
 
         // state_prev = 0 on first-block state-lane rows ---------
         builder.assert_zero(p_state_lane.clone() * is_first_block.clone() * state_prev_lo.clone());
-        builder.assert_zero(p_state_lane.clone() * is_first_block.clone() * state_prev_hi.clone());
+        builder.assert_zero(p_state_lane * is_first_block * state_prev_hi.clone());
 
         // State propagation (no Bitwise64 fires) ----------------
         // Past-pad rate XORin rows: `state_new = state_prev`.
         builder.assert_zero(
             p_rate_block.clone() * is_zero.clone() * (state_new_lo.clone() - state_prev_lo.clone()),
         );
-        builder.assert_zero(
-            p_rate_block.clone() * is_zero.clone() * (state_new_hi.clone() - state_prev_hi.clone()),
-        );
+        builder
+            .assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
         // Capacity rows: identity passthrough.
-        builder.assert_zero(p_capacity.clone() * (state_new_lo.clone() - state_prev_lo.clone()));
-        builder.assert_zero(p_capacity.clone() * (state_new_hi.clone() - state_prev_hi.clone()));
+        builder.assert_zero(p_capacity.clone() * (state_new_lo - state_prev_lo));
+        builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =
@@ -598,7 +591,7 @@ where
         let p_idx: LB::Expr = periodic[PCOL_IDX].into();
         let rc_lo: LB::Expr = periodic[PCOL_RC_LO].into();
         let rc_hi: LB::Expr = periodic[PCOL_RC_HI].into();
-        let p_state_lane: LB::Expr = p_rate_block.clone() + p_capacity.clone();
+        let p_state_lane: LB::Expr = p_rate_block.clone() + p_capacity;
 
         let act: LB::Expr = local[COL_ACT].into();
         let sponge_seq_id: LB::Expr = local[COL_SPONGE_SEQ_ID].into();
@@ -640,9 +633,9 @@ where
         // Derived signals (see `docs/chiplets/keccak-sponge.md`
         // §"Derived multiplicity signals").
         let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
-        let is_first_row_of_invocation: LB::Expr = p_first.clone() * is_first_block.clone();
-        let is_pad: LB::Expr = is_zero_next.clone() - is_zero.clone();
-        let is_verbatim: LB::Expr = LB::Expr::ONE - is_zero_next.clone();
+        let is_first_row_of_invocation: LB::Expr = p_first * is_first_block;
+        let is_pad: LB::Expr = is_zero_next.clone() - is_zero;
+        let is_verbatim: LB::Expr = LB::Expr::ONE - is_zero_next;
 
         // Per-row address expressions.
         let hundred_seq = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id.clone();
@@ -651,26 +644,23 @@ where
             hundred_seq.clone() - ninety_nine_idx.clone() - LB::Expr::from(Felt::from(128u8));
         let addr_state_lane_new = hundred_seq.clone() - ninety_nine_idx.clone();
         let addr_rc = hundred_seq.clone()
-            + LB::Expr::from(Felt::from(28u8)) * p_idx.clone()
+            + LB::Expr::from(Felt::from(28u8)) * p_idx
             + LB::Expr::from(Felt::from(25u8));
         let addr_squeeze =
-            hundred_seq.clone() - ninety_nine_idx.clone() + LB::Expr::from(Felt::from(3072u32));
-        let addr_lane16 = hundred_seq.clone() - LB::Expr::from(Felt::from(2484u32));
+            hundred_seq.clone() - ninety_nine_idx + LB::Expr::from(Felt::from(3072u32));
+        let addr_lane16 = hundred_seq - LB::Expr::from(Felt::from(2484u32));
         let chunk_addr_base =
             Felt::new(CHUNK_ADDR_BASE).expect("CHUNK_ADDR_BASE fits in canonical Goldilocks");
         let addr_chunk = LB::Expr::from(chunk_addr_base) + chunk_ptr.clone();
 
         // Per-message multiplicity factors, all gated by `act`.
-        let mult_prev_perm: LB::Expr =
-            LB::Expr::from(Felt::from(2u8)) * act.clone() * is_intra.clone();
+        let mult_prev_perm: LB::Expr = LB::Expr::from(Felt::from(2u8)) * act.clone() * is_intra;
         let mult_new_state: LB::Expr =
             LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone();
         let mult_rc: LB::Expr =
-            LB::Expr::ZERO - LB::Expr::from(Felt::from(3u8)) * act.clone() * p_rc_active.clone();
-        let mult_squeeze: LB::Expr = LB::Expr::from(Felt::from(2u8))
-            * act.clone()
-            * p_squeeze_active.clone()
-            * b_sum.clone();
+            LB::Expr::ZERO - LB::Expr::from(Felt::from(3u8)) * act.clone() * p_rc_active;
+        let mult_squeeze: LB::Expr =
+            LB::Expr::from(Felt::from(2u8)) * act.clone() * p_squeeze_active * b_sum.clone();
         let mult_lane16_consume: LB::Expr =
             LB::Expr::from(Felt::from(2u8)) * act.clone() * b_sum.clone();
         let mult_lane16_provide: LB::Expr =

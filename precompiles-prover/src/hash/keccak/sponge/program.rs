@@ -183,8 +183,8 @@ mod tests {
     #[test]
     fn p_idx_enumerates_0_to_period() {
         let cols = sponge_program();
-        for slot in 0..SPONGE_PERIOD {
-            assert_eq!(cols[COL_IDX][slot], Felt::from(slot as u32));
+        for (slot, value) in cols[COL_IDX].iter().enumerate().take(SPONGE_PERIOD) {
+            assert_eq!(*value, Felt::from(slot as u32));
         }
     }
 
@@ -193,7 +193,7 @@ mod tests {
         // p_rate_block, p_capacity, p_pad_0x80, p_extra, and the
         // NOP-slack implicit "off" mask must partition `[0, 32)`.
         let cols = sponge_program();
-        for slot in 0..SPONGE_PERIOD {
+        for (slot, _) in cols[COL_IDX].iter().enumerate().take(SPONGE_PERIOD) {
             let rb = u32_at(&cols[COL_RATE_BLOCK], slot);
             let cap = u32_at(&cols[COL_CAPACITY], slot);
             let pad80 = u32_at(&cols[COL_PAD_0X80], slot);
@@ -210,13 +210,13 @@ mod tests {
     #[test]
     fn p_extra_fires_on_slots_26_through_28() {
         let cols = sponge_program();
-        for slot in 0..SPONGE_PERIOD {
+        for (slot, value) in cols[COL_EXTRA].iter().enumerate().take(SPONGE_PERIOD) {
             let expected = if (EXTRA_BLOCK_BEGIN..NOP_SLACK_BEGIN).contains(&slot) {
                 Felt::ONE
             } else {
                 Felt::ZERO
             };
-            assert_eq!(cols[COL_EXTRA][slot], expected, "slot {slot}");
+            assert_eq!(*value, expected, "slot {slot}");
         }
     }
 
@@ -224,16 +224,16 @@ mod tests {
     fn p_first_fires_only_at_slot_0() {
         let cols = sponge_program();
         assert_eq!(cols[COL_FIRST][0], Felt::ONE);
-        for slot in 1..SPONGE_PERIOD {
-            assert_eq!(cols[COL_FIRST][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_FIRST].iter().enumerate().take(SPONGE_PERIOD).skip(1) {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
         }
     }
 
     #[test]
     fn p_last_fires_only_at_last_slot() {
         let cols = sponge_program();
-        for slot in 0..SPONGE_PERIOD - 1 {
-            assert_eq!(cols[COL_LAST][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_LAST].iter().enumerate().take(SPONGE_PERIOD - 1) {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
         }
         assert_eq!(cols[COL_LAST][SPONGE_PERIOD - 1], Felt::ONE);
     }
@@ -241,51 +241,58 @@ mod tests {
     #[test]
     fn p_rc_active_covers_first_24_slots() {
         let cols = sponge_program();
-        for slot in 0..NUM_RC {
-            assert_eq!(cols[COL_RC_ACTIVE][slot], Felt::ONE, "slot {slot}");
+        for (slot, value) in cols[COL_RC_ACTIVE].iter().enumerate().take(NUM_RC) {
+            assert_eq!(*value, Felt::ONE, "slot {slot}");
         }
-        for slot in NUM_RC..SPONGE_PERIOD {
-            assert_eq!(cols[COL_RC_ACTIVE][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_RC_ACTIVE].iter().enumerate().take(SPONGE_PERIOD).skip(NUM_RC)
+        {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
         }
     }
 
     #[test]
     fn p_squeeze_active_covers_slots_4_through_24() {
         let cols = sponge_program();
-        for slot in 0..4 {
-            assert_eq!(cols[COL_SQUEEZE_ACTIVE][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_SQUEEZE_ACTIVE].iter().enumerate().take(4) {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
         }
-        for slot in 4..LANE_16_0X80_SLOT {
-            assert_eq!(cols[COL_SQUEEZE_ACTIVE][slot], Felt::ONE, "slot {slot}");
+        for (slot, value) in
+            cols[COL_SQUEEZE_ACTIVE].iter().enumerate().take(LANE_16_0X80_SLOT).skip(4)
+        {
+            assert_eq!(*value, Felt::ONE, "slot {slot}");
         }
-        for slot in LANE_16_0X80_SLOT..SPONGE_PERIOD {
-            assert_eq!(cols[COL_SQUEEZE_ACTIVE][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_SQUEEZE_ACTIVE]
+            .iter()
+            .enumerate()
+            .take(SPONGE_PERIOD)
+            .skip(LANE_16_0X80_SLOT)
+        {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
         }
     }
 
     #[test]
     fn p_pad_0x80_fires_only_at_slot_25() {
         let cols = sponge_program();
-        for slot in 0..SPONGE_PERIOD {
+        for (slot, value) in cols[COL_PAD_0X80].iter().enumerate().take(SPONGE_PERIOD) {
             let expected = if slot == LANE_16_0X80_SLOT {
                 Felt::ONE
             } else {
                 Felt::ZERO
             };
-            assert_eq!(cols[COL_PAD_0X80][slot], expected, "slot {slot}");
+            assert_eq!(*value, expected, "slot {slot}");
         }
     }
 
     #[test]
     fn rc_values_match_keccak_constants_on_active_rows() {
         let cols = sponge_program();
-        for slot in 0..NUM_RC {
-            let rc = KECCAK_RC[slot];
+        for (slot, &rc) in KECCAK_RC.iter().enumerate().take(NUM_RC) {
             assert_eq!(cols[COL_RC_LO][slot], Felt::from(rc as u32));
             assert_eq!(cols[COL_RC_HI][slot], Felt::from((rc >> 32) as u32));
         }
-        for slot in NUM_RC..SPONGE_PERIOD {
-            assert_eq!(cols[COL_RC_LO][slot], Felt::ZERO, "slot {slot}");
+        for (slot, value) in cols[COL_RC_LO].iter().enumerate().take(SPONGE_PERIOD).skip(NUM_RC) {
+            assert_eq!(*value, Felt::ZERO, "slot {slot}");
             assert_eq!(cols[COL_RC_HI][slot], Felt::ZERO, "slot {slot}");
         }
     }

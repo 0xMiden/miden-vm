@@ -265,7 +265,7 @@ fn chunk_and_p2_traces_verify_with_shared_challenges() {
 fn identical_chunk_invocations_share_p2_but_duplicate_chunks() {
     let bytes: Vec<u8> = (0..96).map(|i| (i ^ 0x5a) as u8).collect(); // 3 chunks
     let inv_a = Invocation { input: bytes.clone() };
-    let inv_b = Invocation { input: bytes.clone() };
+    let inv_b = Invocation { input: bytes };
 
     let mut p2 = Poseidon2Requires::new();
     let mut chunk_req = ChunkRequires::new();
@@ -507,10 +507,10 @@ pub(crate) fn fold_balance<A>(
     for u in report.unmatched {
         let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
         entry.0 += u.net_multiplicity;
-        if entry.1.is_empty() {
-            if let Some(c) = u.contributions.first() {
-                entry.1 = c.msg_repr.clone();
-            }
+        if entry.1.is_empty()
+            && let Some(c) = u.contributions.first()
+        {
+            entry.1 = c.msg_repr.clone();
         }
     }
 }
@@ -641,10 +641,8 @@ fn uint_leaf_binds_against_uint_store() {
     let mut bpl = BytePairLutRequires::new();
     let mut eval_req = TranscriptEvalRequires::new();
 
-    // The eval chip hashes the uint at ptr 5: the leaf entry drives its
-    // own Poseidon2 perm over lo ‖ hi ‖ (UintLeaf, bound_ptr=1,
-    // pin_ptr=0 transient, V) and routes its UintVal demand into the
-    // store's ledger.
+    // The eval chip hashes the uint at ptr 5 under the VM uint value cap and routes
+    // its UintVal demand into the store's ledger.
     let root = eval_req.zero();
     eval_req.uint_leaf(v_ptr, fp, v_u32, &mut store, &mut p2);
     let eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
@@ -697,9 +695,8 @@ fn pinned_uint_leaf_folds_into_spine() {
     let mut bpl = BytePairLutRequires::new();
     let mut eval_req = TranscriptEvalRequires::new();
 
-    // Pin the modulus — the pin entry hashes it under (UintLeaf,
-    // bound_ptr=1, pin_ptr=1, V) and routes its UintVal demand — then
-    // fold it with a ZERO_HASH leaf into the root.
+    // Pin the modulus, route its UintVal demand, then fold it with a ZERO_HASH leaf
+    // into the root.
     let zero = eval_req.zero();
     let modulus = eval_req.pin_uint(fp, fp, mod_v_u32, &mut store, &mut p2);
     let root = eval_req.record_and(zero, modulus, &mut p2);
@@ -792,16 +789,9 @@ fn full_stack_pins_uints() {
 /// the protocol's modulus address 1 (self-ref) and the real `p − 1`
 /// relocated to ptr 7 (typed under 1, in range since `p − 1 ≤ X`); the
 /// spine carries the honest "pinned at address 1" leaf, but the laid row
-/// is tampered to dereference ptr 7. Before `pin_ptr`, the leaf's cap
-/// committed only `bound_ptr` and the eval row's `ptr` was a free
-/// witness — this attack balanced every bus, so the transcript
-/// "anchored" a modulus the store didn't hold at its address (and
-/// `store[1] = p − 1` was only a `≥`, never an equality). With `pin_ptr`
-/// committed in the cap and tied to `ptr` (the requires now derives the
-/// cap from the handle, so the mismatch is only expressible as a trace
-/// forgery), the tampered row's materialized cap `(UintLeaf, 1, 7, V)`
-/// no longer matches the honestly absorbed `(UintLeaf, 1, 1, V)`, and
-/// the Poseidon2In bus must leave a residual.
+/// is tampered to dereference ptr 7. The forged pin-claim cap
+/// `(UINT_PIN_CLAIM_TAG, 1, 7, 0)` mismatches the absorbed cap
+/// `(UINT_PIN_CLAIM_TAG, 1, 1, 0)`, so the Poseidon2In bus leaves a residual.
 #[test]
 fn relocated_modulus_pin_unbalances() {
     use crate::transcript::eval::{COL_IS_PINNED, COL_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS};

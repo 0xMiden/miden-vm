@@ -139,11 +139,10 @@ chiplet-level `UintAddRequires::record` / `record_to_zero` stay pure
 ptr recorders (values resolve at trace-gen; explicit mult, 0 =
 dormant) that **intern by relation identity**: a duplicate of an
 already-recorded arrangement collapses onto its block, the mults
-adding. Sub needs no negative anything — the
-arrangement swaps the result slot. The public DAG-level `uint_add` /
-`uint_sub` / `uint_neg` ([uint.md](uint.md#the-dag-surface)) drive the
-layer from the Session — sub and neg are pure arrangement re-wirings
-of the same consume ([transcript-eval](transcript-eval.md)).
+adding. Sub needs no negative anything — the arrangement swaps the result
+slot. The public DAG-level `uint_add` / `uint_sub`
+([uint.md](uint.md#the-dag-surface)) drive the layer from the Session;
+callers express negation as `uint_sub(0, x)` with a typed zero leaf.
 
 ## Negation: the `is_c_zero` mode
 

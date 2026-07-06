@@ -85,11 +85,11 @@ so padding rows touch no bus.
 | Input chunks digest | `Poseidon2Out` | req | `+act` | `(perm_seq_id_chunks + n_chunks − 1, H_input_chunks)` |
 | Digest chunks rate0 | `Poseidon2In` | req | `+act` | `(perm_seq_id_digest_chunks, 0, D[0..4])` |
 | Digest chunks rate1 | `Poseidon2In` | req | `+act` | `(perm_seq_id_digest_chunks, 1, D[4..8])` |
-| Digest chunks cap | `Poseidon2In` | req | `+act` | `(perm_seq_id_digest_chunks, 2, 1, 0, 0, V)` |
+| Digest chunks cap | `Poseidon2In` | req | `+act` | `(perm_seq_id_digest_chunks, 2, 2, 0, 0, 0)` |
 | Digest chunks digest | `Poseidon2Out` | req | `+act` | `(perm_seq_id_digest_chunks, H_digest_chunks)` |
 | Keccak rate0 | `Poseidon2In` | req | `+act` | `(perm_seq_id_keccak, 0, H_input_chunks)` |
 | Keccak rate1 | `Poseidon2In` | req | `+act` | `(perm_seq_id_keccak, 1, H_digest_chunks)` |
-| Keccak cap | `Poseidon2In` | req | `+act` | `(perm_seq_id_keccak, 2, 7, len_bytes, 0, V)` |
+| Keccak cap | `Poseidon2In` | req | `+act` | `(perm_seq_id_keccak, 2, Keccak256Precompile::id(), 0, len_bytes, 0)` |
 | Keccak digest | `Poseidon2Out` | req | `+act` | `(perm_seq_id_keccak, H_keccak)` |
 
 `addr_base = 100·sponge_seq_id_head + 3200·n_sponge_perms − 128` —

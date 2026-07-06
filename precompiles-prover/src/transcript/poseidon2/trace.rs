@@ -234,7 +234,7 @@ impl Poseidon2Requires {
     /// One-shot (single-block) absorption — the 2-to-1 / leaf shape
     /// transcript node hashing leans on. `rate0 || rate1` is the
     /// 8-felt preimage; `cap` is the capacity (e.g. `(tag, param_a,
-    /// param_b, version)` for transcript nodes).
+    /// param_b, 0)` for transcript nodes).
     pub fn require_one_shot(
         &mut self,
         cap: P2Cap,

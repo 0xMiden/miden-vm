@@ -25,24 +25,24 @@ pub type U576 = ruint::Uint<576, 9>;
 /// From the store's canonical view: 16 LE 16-bit limbs.
 pub fn from_limbs16(v: &[u16; 16]) -> U256 {
     U256::from_limbs(array::from_fn(|w| {
-        (0..4).fold(0u64, |acc, i| acc | u64::from(v[4 * w + i]) << 16 * i)
+        (0..4).fold(0u64, |acc, i| acc | (u64::from(v[4 * w + i]) << (16 * i)))
     }))
 }
 
 /// The store's canonical view: 16 LE 16-bit limbs.
 pub fn to_limbs16(v: U256) -> [u16; 16] {
-    array::from_fn(|i| (v.as_limbs()[i / 4] >> 16 * (i % 4)) as u16)
+    array::from_fn(|i| (v.as_limbs()[i / 4] >> (16 * (i % 4))) as u16)
 }
 
 /// From the 4×32 view: 8 LE 32-bit limbs.
 pub fn from_limbs32(v: &[u32; 8]) -> U256 {
-    U256::from_limbs(array::from_fn(|w| u64::from(v[2 * w]) | u64::from(v[2 * w + 1]) << 32))
+    U256::from_limbs(array::from_fn(|w| u64::from(v[2 * w]) | (u64::from(v[2 * w + 1]) << 32)))
 }
 
 /// The 4×32 view (the eval chip's Poseidon2-rate halves): 8 LE 32-bit
 /// limbs.
 pub fn to_limbs32(v: U256) -> [u32; 8] {
-    array::from_fn(|i| (v.as_limbs()[i / 2] >> 32 * (i % 2)) as u32)
+    array::from_fn(|i| (v.as_limbs()[i / 2] >> (32 * (i % 2))) as u32)
 }
 
 /// Big-endian hex, the KAT-fixture format (no `0x` prefix, ≤ 64 nibbles).

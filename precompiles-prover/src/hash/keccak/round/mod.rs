@@ -179,13 +179,13 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         // sponge bus forces `act = 1` at row 0 by providing RC[0] which
         // the chiplet's slot 1 must consume, so no `when_first_row`
         // boundary is needed either.
-        builder.assert_zero((AB::Expr::ONE - p_last) * (AB::Expr::from(next_act) - act.clone()));
+        builder.assert_zero((AB::Expr::ONE - p_last) * (AB::Expr::from(next_act) - act));
 
         // r = a when neither logic flag is set. Pins r so the Rol64
         // message — which reads `r` as input — sees the right value on
         // pure-ROL rows. Vacuous on NOP rows (any r works; nothing
         // downstream reads it).
-        let no_logic = AB::Expr::ONE - is_xor.clone() - is_andnot.clone();
+        let no_logic = AB::Expr::ONE - is_xor - is_andnot;
         builder.assert_zero(
             no_logic.clone() * (AB::Expr::from(local[COL_R_LO]) - AB::Expr::from(local[COL_A_LO])),
         );
@@ -196,7 +196,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         // c = r when the row has no ROL. Pins c on pure-logic rows so
         // the memory provide sees the logic output (Rol64 gated off
         // would otherwise leave c unconstrained).
-        let no_rol = AB::Expr::ONE - is_rol.clone();
+        let no_rol = AB::Expr::ONE - is_rol;
         builder.assert_zero(
             no_rol.clone() * (AB::Expr::from(local[COL_C_LO]) - AB::Expr::from(local[COL_R_LO])),
         );
@@ -280,14 +280,14 @@ where
         // bare selector sum double-counts it; subtracting the one-hot
         // `is_xorrol` recovers the one-read-per-row count at degree 1.
         let is_active =
-            act.clone() * (is_xor.clone() + is_andnot.clone() + is_rol.clone() - is_xorrol.clone());
+            act.clone() * (is_xor.clone() + is_andnot.clone() + is_rol.clone() - is_xorrol);
         // `is_logic`: row has a logic op (XOR or ANDNOT). Mutex with NOP
         // / pure-ROL rows. Gates Logic64 message and src_b memory read.
-        let is_logic = act.clone() * (is_xor.clone() + is_andnot.clone());
+        let is_logic = act.clone() * (is_xor.clone() + is_andnot);
         // `is_rol_act` and `dst_mult_act`: ROL gate and provide mult,
         // both gated by `act`.
-        let is_rol_act = act.clone() * is_rol.clone();
-        let dst_mult_act = act.clone() * dst_mult.clone();
+        let is_rol_act = act.clone() * is_rol;
+        let dst_mult_act = act * dst_mult;
 
         // Per-emission and per-column degree annotations. Framework
         // metadata — production adapters ignore these; the names keep
@@ -625,13 +625,13 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
         let perm_base = (n * PERM_CYCLE) as u64;
         let last_round_base = IP_BOUNDARY + perm_base + (23 * ROUND_PERIOD) as u64;
         let mut out = [0u64; 25];
-        for idx in 0..25 {
+        for (idx, out_limb) in out.iter_mut().enumerate() {
             let slot = if idx == 0 {
                 program::SLOT_IOTA
             } else {
                 program::SLOT_CHI_XOR_BEGIN + (idx - 1)
             };
-            out[idx] = memory[(last_round_base + slot as u64) as usize];
+            *out_limb = memory[(last_round_base + slot as u64) as usize];
         }
         outputs.push(out);
     }
@@ -720,7 +720,7 @@ pub fn generate_trace(
     bpl_req: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
     assert!(
-        requires.rounds.len() % NUM_ROUNDS == 0,
+        requires.rounds.len().is_multiple_of(NUM_ROUNDS),
         "RoundRequires must hold a multiple of {NUM_ROUNDS} rounds (got {})",
         requires.rounds.len(),
     );

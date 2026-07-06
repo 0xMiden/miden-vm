@@ -257,7 +257,7 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 /// Straus's `15/16` columns while the `2ᵂ⁻²·m`-entry tables stay small.
 ///
 /// `terms` pairs each base with its **non-negative** scalar (GLV signs ride
-/// the base via [`ec_neg`](Session::ec_neg) upstream, so the magnitudes land
+/// the base via transcript `ec_sub(∞, P)` upstream, so the magnitudes land
 /// here); each base's [`WnafTable`] is built per call. Returns the combined
 /// MSM expression. Panics if `terms` is empty or every scalar is zero.
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
