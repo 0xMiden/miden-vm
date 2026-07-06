@@ -1,0 +1,213 @@
+//! EcMsm recording layer — building MSM expressions (`intro` / `combine` /
+//! `neg`) is *chiplet mechanism*: it walks term lists, merges scalars via
+//! `UintAdd`, and records value group-ops via `EcGroupAdd`. That belongs
+//! here, beside the chiplet, not in the DAG-only
+//! [`Session`](crate::session), which just delegates (`msm_intro` etc.).
+//!
+//! Each function borrows the MSM accumulator
+//! ([`EcMsmRequires`](crate::ec::msm::trace::EcMsmRequires)) plus the EC and
+//! uint stores below it — the same three the `Session` holds — and
+//! constructs the lower-layer `require` views as needed (mirroring how the
+//! `Session` itself wired them).
+
+use crate::ec::EcStores;
+use crate::ec::msm::trace::{CombineRow, EcExprPtr, EcMsmRequires, NegRow};
+use crate::ec::trace::EcPointPtr;
+use crate::math::from_hex;
+use crate::uint::UintRequire;
+use crate::uint::UintStores;
+use crate::uint::trace::UintPtr;
+
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × 1⟩`
+/// (value `= P`) — the base of any addition chain. The scalar `1` is
+/// interned under the group's scalar bound. Returns the expression handle.
+pub fn intro(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro(base) {
+        return e; // a prior ⟨base × 1⟩ — reuse it
+    }
+    let group = ec.store.point_params(base).0;
+    let sbound = ec.store.group_sbound(group);
+    let one = uint.require().intern(from_hex("1"), sbound);
+    msm.intro(group, sbound, base, one)
+}
+
+/// Combine two MSM expressions: union their term multisets (scalars on a
+/// shared base merge `mod` the scalar bound) and add their values. The
+/// merge walks both base-ordered term lists ([`merge_terms`]); the value is
+/// one `EcGroupAdd` (provided at mult 1). The operands' use counts are
+/// bumped. Returns the combined expression handle.
+pub fn combine(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_combine(a, b) {
+        return e; // identical combine already laid — reuse it (no second
+        // merge walk, value `EcGroupAdd`, or operand consume)
+    }
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let b_terms = msm.terms(b);
+    let val_a = msm.value(a);
+    let val_b = msm.value(b);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+
+    let rows = merge_terms(&a_terms, &b_terms, &mut uint.require());
+
+    let val = ec.require(uint.require()).add(val_a, val_b, 1);
+    ec.store.require_ecgroup(group);
+
+    let c = msm.combine(
+        group, sbound, a_ptr, b_ptr, bound_ptr, a, b, val_a, val_b, val, rows,
+    );
+    msm.consume_op(a, 1);
+    msm.consume_op(b, 1);
+    c
+}
+
+/// Negate an MSM expression: every term's scalar negated (the base kept),
+/// the value negated. Each term's `out = −s` is an `is_c_zero` `UintAdd`
+/// (`s + out ≡ 0`); the value is the cancel `EcGroupAdd` `val_a + val = ∞`
+/// (so `val = −val_a`, the ∞ result slot pinned by `EcRequire::neg`). The
+/// operand's use count is bumped. Returns the negated expression handle.
+pub fn neg(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_neg(a) {
+        return e; // a prior neg(a) — reuse it
+    }
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let val_a = msm.value(a);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+
+    // Per term: keep the base, negate the scalar (one UintAdd each).
+    let mut rows = Vec::with_capacity(a_terms.len());
+    for (i, (base, s)) in a_terms.iter().enumerate() {
+        let out_scalar = uint.require().neg(*s);
+        rows.push(NegRow {
+            i: i as u32,
+            base: *base,
+            s_a: *s,
+            out_scalar,
+        });
+    }
+
+    // Value: −val_a as a TRIO-FREE on-curve cert point R = (x_a, −y_a) — no
+    // group law. The boundary pins it: an is_c_zero `UintAdd(y_a, y_R ≡ 0)`
+    // (the y-flip), `x` shared (so `x_R = x_a` for free), and R's membership
+    // rides the `EcOnCurveCert` the boundary provides when it freshly mints R
+    // (R is on-curve because val_a is). The `−y_a` value is interned by the
+    // store's `neg`; the boundary consumes the resulting `UintAdd`.
+    let (px, py) = ec
+        .store
+        .point_params(val_a)
+        .1
+        .expect("neg of the point at infinity");
+    let neg_py = uint.require().neg(py);
+    let (val, minted) = ec.store.add_point_cert(group, px, neg_py);
+    ec.store.require_ecpoint(val_a); // the boundary reads val_a's coords …
+    ec.store.require_ecpoint(val); //  … and R's
+    ec.store.require_ecgroup(group);
+
+    let c = msm.neg(
+        group, sbound, a_ptr, b_ptr, bound_ptr, a, val_a, val, px, py, neg_py, minted, rows,
+    );
+    msm.consume_op(a, 1);
+    c
+}
+
+/// The combine merge walk: a base-ordered two-pointer merge of two
+/// expressions' term lists into [`CombineRow`]s. Disjoint bases copy
+/// through one operand (`take_a` / `take_b`); a base shared by both merges
+/// its two scalars into one — recorded as a `UintAdd` (mod the scalar
+/// bound) via `uint`, the `take_both` row. Both cursors advance on
+/// `take_both`, one on a single take.
+///
+/// Term lists are read in their stored (`idx`) order; the AIR re-checks
+/// each row, so faithfulness rests on the prover's discipline of laying
+/// operands in a consistent base order (equal bases must align to merge) —
+/// it is *completeness*, not soundness (see `docs/chiplets/ec-msm.md §3`).
+pub fn merge_terms(
+    a_terms: &[(EcPointPtr, UintPtr)],
+    b_terms: &[(EcPointPtr, UintPtr)],
+    uint: &mut UintRequire<'_>,
+) -> Vec<CombineRow> {
+    let zero_pt = EcPointPtr::from_addr(0);
+    let zero_u = UintPtr::from_addr(0);
+    let (mut i, mut j) = (0usize, 0usize);
+    let mut rows = Vec::new();
+    while i < a_terms.len() || j < b_terms.len() {
+        let (ci, cj) = (i as u32, j as u32);
+        let a_first =
+            j >= b_terms.len() || (i < a_terms.len() && a_terms[i].0.addr() < b_terms[j].0.addr());
+        let b_first =
+            i >= a_terms.len() || (j < b_terms.len() && b_terms[j].0.addr() < a_terms[i].0.addr());
+        if a_first {
+            let (base, s) = a_terms[i];
+            rows.push(CombineRow {
+                take_a: true,
+                take_b: false,
+                take_both: false,
+                i: ci,
+                j: cj,
+                base_a: base,
+                s_a: s,
+                base_b: zero_pt,
+                s_b: zero_u,
+                out_base: base,
+                out_scalar: s,
+            });
+            i += 1;
+        } else if b_first {
+            let (base, s) = b_terms[j];
+            rows.push(CombineRow {
+                take_a: false,
+                take_b: true,
+                take_both: false,
+                i: ci,
+                j: cj,
+                base_a: zero_pt,
+                s_a: zero_u,
+                base_b: base,
+                s_b: s,
+                out_base: base,
+                out_scalar: s,
+            });
+            j += 1;
+        } else {
+            // Shared base: merge the two scalars mod the scalar bound.
+            let (base, sa) = a_terms[i];
+            let (_, sb) = b_terms[j];
+            let s_out = uint.add(sa, sb);
+            rows.push(CombineRow {
+                take_a: false,
+                take_b: false,
+                take_both: true,
+                i: ci,
+                j: cj,
+                base_a: base,
+                s_a: sa,
+                base_b: base,
+                s_b: sb,
+                out_base: base,
+                out_scalar: s_out,
+            });
+            i += 1;
+            j += 1;
+        }
+    }
+    rows
+}
