@@ -141,7 +141,7 @@ where
 /// two messages sharing `(ptr, bound_ptr)`. This view sets
 /// [`MAX_MESSAGE_WIDTH`].
 ///
-/// Encoded as `bus_prefix[UintLimbs] + β⁰·ptr + β¹·bound_ptr + β²·offset
+/// Encoded as `bus_prefix\[UintLimbs] + β⁰·ptr + β¹·bound_ptr + β²·offset
 /// + β³·l0 + … + β¹⁰·l7`.
 #[derive(Debug, Clone)]
 pub struct UintLimbsMsg<E> {

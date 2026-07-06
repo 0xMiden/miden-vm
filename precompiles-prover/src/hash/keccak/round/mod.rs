@@ -1,6 +1,6 @@
 //! Keccak-round chiplet (TAM-style miniVM).
 //!
-//! Orchestrates a single Keccak-f[1600] round via a three-address
+//! Orchestrates a single Keccak-f\[1600] round via a three-address
 //! machine over the [`Memory64`](crate::hash::memory64) bus. Repeats
 //! 24 times to cover a full permutation; multiple permutations stack
 //! cleanly in one trace (and the sponge AIR uses the bus's multiset
@@ -60,7 +60,7 @@ pub const COL_C_HI: usize = 8;
 /// is multiplied by `act`, so dead rounds and padding rows contribute
 /// nothing to either Memory64 or Bitwise64 buses. The sponge AIR
 /// σ-matches the chiplet's active-rows-only residue; it also forces
-/// `act = 1` at row 0 by providing RC[0], which the chiplet's slot 1
+/// `act = 1` at row 0 by providing `RC[0]`, which the chiplet's slot 1
 /// must consume.
 pub const COL_ACT: usize = 9;
 pub const NUM_MAIN_COLS: usize = 10;
@@ -432,7 +432,7 @@ pub const NUM_ROUNDS: usize = 24;
 /// Rows per perm cycle: 24 active rounds + 1 dead round.
 pub const PERM_CYCLE: usize = (NUM_ROUNDS + 1) * ROUND_PERIOD;
 
-/// Build the main trace for `states.len()` stacked Keccak-f[1600]
+/// Build the main trace for `states.len()` stacked Keccak-f\[1600]
 /// permutations, each starting from its own initial state. All perms
 /// share the same 24-round constant schedule.
 ///

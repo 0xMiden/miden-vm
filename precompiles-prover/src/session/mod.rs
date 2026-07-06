@@ -19,8 +19,8 @@
 //!
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
-//! explicit bootstrap/fixed-pin helpers, `pin_uint`, the [`UintNode`] value ops (`uint_leaf`,
-//! `uint_add` / `uint_sub` / `uint_mul`, the `uint_is` predicate), and the `Truthy`
+//! explicit `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
+//! `uint_mul`, the `uint_is` predicate), and the `Truthy`
 //! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
 //! intern with canonical `(value, modulus)` dedup, so equal values share
@@ -33,7 +33,6 @@
 //! generic lifted-stark usage, not chiplet wiring.
 
 use miden_core::Felt;
-use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -45,7 +44,7 @@ use crate::{
             require,
             trace::{EcExprPtr, EcMsmRequires, generate_trace as msm_trace},
         },
-        trace::generate_traces as ec_store_traces,
+        trace::{EcGroupPtr, generate_traces as ec_store_traces},
     },
     hash::{
         chunk::trace::{ChunkRequires, generate_trace as chunk_trace},
@@ -77,7 +76,9 @@ use crate::{
     },
 };
 
+mod fixed;
 mod prove;
+pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 pub use prove::{ChipletAir, ChipletMultiAir, SessionProof, VerifyError};
@@ -107,7 +108,7 @@ pub struct Session {
 
 impl Session {
     pub fn new() -> Self {
-        Self {
+        let mut session = Self {
             p2: Poseidon2Requires::new(),
             chunk: ChunkRequires::new(),
             round: RoundRequires::new(),
@@ -119,18 +120,23 @@ impl Session {
             uint: UintStores::new(),
             ec: EcStores::new(),
             msm: EcMsmRequires::new(),
-        }
+        };
+        session.install_fixed_uints();
+        session.ec.store.require_fixed_groups();
+        session
     }
 
-    /// Install the VM-owned uint bound self-pins and record their bootstrap pin claims.
-    pub fn bootstrap_fixed_pins(&mut self) -> Vec<Truthy> {
-        UintDomain::ALL
-            .into_iter()
-            .map(|domain| {
-                let ptr = domain.bound_ptr();
-                self.pin_uint(ptr, from_limbs32(&domain.minus_one()), ptr)
-            })
-            .collect()
+    fn install_fixed_uints(&mut self) {
+        for (addr, bound_addr, limbs) in fixed::fixed_uints() {
+            let value = from_limbs32(&limbs);
+            let ptr = if addr == bound_addr {
+                self.uint.store.pin_modulus(addr, value)
+            } else {
+                let bound = self.uint.store.pinned(bound_addr);
+                self.uint.store.intern_fixed_pinned(addr, value, bound)
+            };
+            self.uint.store.require_uintval(ptr);
+        }
     }
 
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
@@ -162,13 +168,12 @@ impl Session {
     /// Record an explicit uint pin claim at protocol address `ptr ∈ [1, 2^16)` under the modulus
     /// pinned at `bound_ptr`.
     ///
-    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the bootstrap
+    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
     /// pin-claim cap `(UINT_PIN_CLAIM_TAG, bound_ptr, ptr, 0)`, consumes both `UintVal` halves at
-    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. The fixed bootstrap
-    /// manifest uses this for bound self-pins via
-    /// [`bootstrap_fixed_pins`](Self::bootstrap_fixed_pins); ordinary runtime constants should
-    /// use [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
-    /// (`bound_ptr == ptr`).
+    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. Default fixed domains
+    /// and curve coefficients are already installed by [`Session::new`] and should not be pinned
+    /// manually; ordinary runtime constants should use [`uint_leaf`](Self::uint_leaf) instead. The
+    /// modulus itself is a self-referential pin (`bound_ptr == ptr`).
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
@@ -234,15 +239,24 @@ impl Session {
         self.eval.record_is(a, b, &mut self.p2)
     }
 
-    /// Create a curve point `(x, y)` on the short-Weierstrass curve
-    /// `y² = x³ + ax + b` whose pinned coefficients live at `a_ptr` /
-    /// `b_ptr` — the curve enters the DAG only here, committed in the
-    /// node's cap. Proves on-curve membership and binds `(h, Group,
-    /// point_ptr)`. Returns the shared-use [`EcNode`]. Panics if `(x, y)`
-    /// is not on the curve.
-    pub fn ec_create(&mut self, a_ptr: u32, b_ptr: u32, x: &UintNode, y: &UintNode) -> EcNode {
+    /// Create a curve point `(x, y)` on the fixed short-Weierstrass group
+    /// selected by `group_ptr`. The group row is preseeded in the EC store;
+    /// its `(a, b, bound)` metadata supplies the curve parameters and
+    /// coordinate field, while `group_ptr` is the curve cap selector. Proves
+    /// on-curve membership and binds `(h, Group, point_ptr)`.
+    /// Returns the shared-use [`EcNode`]. Panics if `(x, y)` is not on the
+    /// group or if the coordinate nodes are not stored under the group's base
+    /// field bound.
+    pub fn ec_create(&mut self, group_ptr: u32, x: &UintNode, y: &UintNode) -> EcNode {
+        let group = EcGroupPtr::from_addr(group_ptr);
+        let (_, _, bound) = self.ec.store.group_params(group);
+        assert_eq!(x.bound_ptr, y.bound_ptr, "coordinates must share a modulus");
+        assert_eq!(
+            x.bound_ptr, bound,
+            "coordinates must be stored under the group's base-field modulus",
+        );
         self.eval
-            .ec_create(a_ptr, b_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
+            .ec_create(group_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// Declare the **scalar field** of `point`'s group: from here its MSM
@@ -258,17 +272,12 @@ impl Session {
         self.ec.store.set_scalar_bound(group, UintPtr::from_addr(sbound_ptr));
     }
 
-    /// Create the group's point-at-infinity on the pinned curve
-    /// `(a_ptr, b_ptr)` over the field at `bound_ptr` — binds `(h, Group,
+    /// Create the selected group's point-at-infinity — binds `(h, Group,
     /// pai_ptr)`, the identity for `ec_add` pass-throughs (∞+Q, P+∞, ∞+∞).
-    pub fn ec_pai(&mut self, a_ptr: u32, b_ptr: u32, bound_ptr: u32) -> EcNode {
-        self.eval.ec_pai(
-            a_ptr,
-            b_ptr,
-            bound_ptr,
-            self.ec.require(self.uint.require()),
-            &mut self.p2,
-        )
+    pub fn ec_pai(&mut self, group_ptr: u32) -> EcNode {
+        let group = EcGroupPtr::from_addr(group_ptr);
+        let _ = self.ec.store.group_params(group);
+        self.eval.ec_pai(group_ptr, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// The DAG node `R = P + Q`: consumes one
@@ -379,7 +388,7 @@ impl Session {
 
     /// Number of MSM expressions laid so far (intros + combines + negs) — a
     /// chain-cost diagnostic, e.g. to compare addition-chain
-    /// [`strategies`](crate::session::strategies). Not a DAG quantity.
+    /// [`strategies`]. Not a DAG quantity.
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
@@ -440,10 +449,9 @@ impl Session {
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
-        // The eval chip reads each EcCreate row's scalar bound from the EC
-        // store (the curve order `n` for an MSM-exercised group, else the
-        // coord bound) — `&` so the store survives for `ec_store_traces`.
-        let eval = eval_trace(self.eval, root, &self.ec.store);
+        // Eval no longer needs to read EC group metadata directly: EcCreate
+        // rows hash the group pointer and bind it through their EcPoint consume.
+        let eval = eval_trace(self.eval, root);
         let chunk = chunk_trace(self.chunk);
         let p2 = p2_trace(self.p2);
         let sponge = sponge_trace(self.sponge);

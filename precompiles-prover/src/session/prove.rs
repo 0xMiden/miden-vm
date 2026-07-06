@@ -8,7 +8,10 @@
 //! round-trip under the test config, so a program never re-declares the
 //! harness.
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+};
 use miden_lifted_air::{
     BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, ReductionError, Statement,
 };
@@ -23,9 +26,9 @@ use crate::{
         chunk::ChunkAir,
         keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
-    logup::sigma_sum,
+    logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
-    session::{NUM_CHIPLETS, SessionTraces},
+    session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{TestDigest, TestProof, test_challenger, test_config},
     transcript::{
         eval::TranscriptEvalAir,
@@ -76,6 +79,14 @@ macro_rules! delegate {
             ChipletAir::EcMsm => EcMsmAir.$method($($arg),*),
         }
     };
+}
+
+fn eval_lifted<A, AB>(air: &A, builder: &mut AB)
+where
+    A: LiftedAir<Felt, QuadFelt>,
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder);
 }
 
 impl ChipletAir {
@@ -139,7 +150,23 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
         delegate!(self, build_aux_trace, main, air_inputs, aux_inputs, challenges)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        delegate!(self, eval, builder);
+        match self {
+            ChipletAir::Chunk => eval_lifted(&ChunkAir, builder),
+            ChipletAir::Poseidon2 => eval_lifted(&Poseidon2Air, builder),
+            ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
+            ChipletAir::Bitwise64 => eval_lifted(&Bitwise64Air, builder),
+            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
+            ChipletAir::KeccakSponge => eval_lifted(&KeccakSpongeAir, builder),
+            ChipletAir::KeccakNode => eval_lifted(&KeccakNodeAir, builder),
+            ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
+            ChipletAir::UintStore => eval_lifted(&UintStoreAir, builder),
+            ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
+            ChipletAir::UintMul => eval_lifted(&UintMulAir, builder),
+            ChipletAir::EcGroups => eval_lifted(&EcGroupsAir, builder),
+            ChipletAir::EcPointStore => eval_lifted(&EcPointStoreAir, builder),
+            ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
+            ChipletAir::EcMsm => eval_lifted(&EcMsmAir, builder),
+        }
     }
 }
 
@@ -163,6 +190,37 @@ impl Default for ChipletMultiAir {
     }
 }
 
+fn fixed_boundary_correction(challenges: &[QuadFelt]) -> Result<QuadFelt, ReductionError> {
+    let lookup_challenges = lookup_challenges_from_slice(challenges);
+    Ok(boundary_correction(
+        &lookup_challenges,
+        fixed_uintval_msgs(),
+        "fixed UintVal boundary denominator was zero",
+    )? + boundary_correction(
+        &lookup_challenges,
+        fixed_ecgroup_msgs(),
+        "fixed EcGroup boundary denominator was zero",
+    )?)
+}
+
+fn boundary_correction<M>(
+    challenges: &Challenges<QuadFelt>,
+    messages: impl IntoIterator<Item = M>,
+    zero_denominator: &'static str,
+) -> Result<QuadFelt, ReductionError>
+where
+    M: LookupMessage<Felt, QuadFelt>,
+{
+    let mut correction = QuadFelt::ZERO;
+    for msg in messages {
+        let Some(inv) = msg.encode(challenges).try_inverse() else {
+            return Err(zero_denominator.into());
+        };
+        correction += inv;
+    }
+    Ok(correction)
+}
+
 impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     type Air = ChipletAir;
 
@@ -175,13 +233,13 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
     /// `i`'s exposed permutation values — exactly one, its σ.
     fn eval_external(
         &self,
-        _challenges: &[QuadFelt],
+        challenges: &[QuadFelt],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         _log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values)])
+        Ok(vec![sigma_sum(aux_values) + fixed_boundary_correction(challenges)?])
     }
 }
 

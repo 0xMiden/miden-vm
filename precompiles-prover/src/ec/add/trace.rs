@@ -102,7 +102,7 @@ pub(crate) struct EcAddOp {
 /// collapses onto its block, the mults adding (e.g. an MSM table combine
 /// reused across windows). `(group, p, q)` determines the result and
 /// every certificate, so the [`EcRequire`](crate::ec::require::EcRequire)
-/// dedup-check on [`consume`](Self::consume) lets a repeat skip the
+/// dedup-check on `consume` lets a repeat skip the
 /// certificate recording entirely, mirroring the uint relations.
 #[derive(Debug, Default)]
 pub struct EcAddRequires {

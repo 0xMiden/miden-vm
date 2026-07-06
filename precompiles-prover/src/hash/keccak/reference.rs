@@ -1,4 +1,4 @@
-//! Reference Keccak-f[1600] permutation, FIPS 202 §3.2.
+//! Reference Keccak-f\[1600] permutation, FIPS 202 §3.2.
 //!
 //! Straightforward `u64` implementation, used as an oracle in tests and
 //! by the sponge chiplet's [`crate::hash::keccak::sponge`] trace generation
@@ -60,7 +60,7 @@ pub fn keccak_round(state: &mut [u64; 25], rc: u64) {
     state[0] ^= rc;
 }
 
-/// Run all 24 rounds of Keccak-f[1600] on the input state, returning the
+/// Run all 24 rounds of Keccak-f\[1600] on the input state, returning the
 /// permutation output.
 pub fn keccak_f1600(state: [u64; 25]) -> [u64; 25] {
     let mut s = state;

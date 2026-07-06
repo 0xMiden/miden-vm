@@ -33,9 +33,7 @@ fn build_chunk_requires(invocations: &[Invocation]) -> (ChunkRequires, Poseidon2
     let mut p2 = Poseidon2Requires::new();
     let mut chunk = ChunkRequires::new();
     for inv in invocations {
-        if inv.num_chunks() > 0 {
-            chunk.require(inv, &mut p2);
-        }
+        chunk.require(inv, &mut p2);
     }
     (chunk, p2)
 }

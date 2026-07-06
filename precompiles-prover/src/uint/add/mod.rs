@@ -38,7 +38,7 @@
 //!
 //! ## Layout (narrow, period-16)
 //!
-//! 4×32 per row (one [`UintVal`] half), mirroring the store's bound rows.
+//! 4×32 per row (one `UintVal` half), mirroring the store's bound rows.
 //! a occupies two rows; b, c and p occupy two rows *plus a hub between
 //! their halves* hosting the block scalar each family reads
 //! (`is_b_zero` / `is_c_zero` / `k`) — the hub serves both halves

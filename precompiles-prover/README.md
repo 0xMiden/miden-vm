@@ -23,7 +23,11 @@ across the whole set, so the global `Σ σ = 0` cross-AIR identity closes.
 A [`Session`](src/session/) facade orchestrates the stack: callers see a
 DAG-level API — hash inputs, pin / leaf uints, run value ops, build curve
 points and MSMs, fold claims into a root — and never touch the cross-chiplet
-plumbing.
+plumbing. VM-owned fixed uint domains and curve coefficients are installed by
+`Session::new()` and verifier-constrained as external `UintVal` boundary
+consumes; fixed curve group tuples are likewise verifier-required over
+`EcGroup`. These fixed-environment anchors are not folded into the public
+root unless a caller explicitly creates a manual `pin_uint` claim.
 
 **Shared primitives** (`primitives/`):
 

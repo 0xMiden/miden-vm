@@ -3,9 +3,8 @@
 use std::sync::Arc;
 
 use miden_core::{
-    Felt, ZERO,
+    Felt,
     deferred::{DeferredState, Digest, Node, PrecompileRegistry, TRUE_DIGEST},
-    utils::bytes_to_packed_u32_elements,
 };
 use miden_precompiles::Keccak256Precompile;
 
@@ -31,7 +30,7 @@ pub(crate) fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredSta
         .expect("Keccak-only VM deferred state should initialize");
 
     let input_digest = state
-        .register(Node::chunks(pack_input_chunks(input)).expect("input chunks are non-empty"))
+        .register(Node::chunks_from_bytes(input))
         .expect("VM should register input chunks");
     let expected_digest = state
         .register(Node::chunks(keccak_digest_chunks(input)).expect("digest chunks are non-empty"))
@@ -58,13 +57,6 @@ pub(crate) fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredSta
         vm_root,
         root: P2Digest::from(vm_root),
     }
-}
-
-fn pack_input_chunks(input: &[u8]) -> Vec<[Felt; 8]> {
-    let mut felts = bytes_to_packed_u32_elements(input);
-    let n_chunks = felts.len().div_ceil(8).max(1);
-    felts.resize(n_chunks * 8, ZERO);
-    felts.chunks_exact(8).map(|chunk| core::array::from_fn(|i| chunk[i])).collect()
 }
 
 fn keccak_digest_chunks(input: &[u8]) -> Vec<[Felt; 8]> {

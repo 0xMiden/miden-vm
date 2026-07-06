@@ -16,11 +16,17 @@ columns, a single aux column each:
 - **EcPointStore**: 13 main columns, five act-/role-gated fractions.
 
 Recording rides [`EcRequire`](../../src/ec/require.rs):
-`create_group(a, b, bound_ptr)` (asserts `b ≠ 0`, interns the params,
-allocates the group + its canonical PAI row; the scalar bound starts
-vacuous), `constrain_scalar_bound(group, fs)` (names the scalar-field
-modulus once something needs it), and `add_point(group, x, y)` (interns
-the coordinates, records + requires the membership trio).
+`create_group(a, b, bound_ptr)` asserts `b ≠ 0`, interns/dedups the params,
+hits preseeded VM-owned fixed-curve group rows when applicable, establishes the
+group's canonical PAI row via the store, and returns `(group, pai)`;
+`constrain_scalar_bound(group, fs)` names the scalar-field modulus once something
+needs it for ad-hoc groups, and `add_point(group, x, y)` interns the coordinates
+and records + requires the membership trio. The fixed uints behind VM-owned
+curve coefficients, base-field domains, and scalar-field domains are loaded by
+the verifier as external `UintVal` boundary consumes by default, not as
+transcript pin claims. The fixed curve group rows are also verifier-required
+as external `EcGroup` boundary consumes, while this table remains their
+provider.
 
 ## The model
 
@@ -45,8 +51,13 @@ ptr injectivity, and the membership demand.
 
 ## Rows + ptr discipline
 
-One row role per store, **separate ptr namespaces** (each
-allocator-consecutive from 1):
+One row role per store, **separate ptr namespaces**. Group rows are dense from
+1, with VM-owned fixed slots generated from `CurveId::ALL` (currently
+`K1_GROUP_PTR = 1`, `R1_GROUP_PTR = 2`, `ED25519_SW_GROUP_PTR = 3`); the
+coefficient/domain uint values those rows name are verifier-loaded through
+`UintVal` boundary consumes, and
+the group tuples themselves are verifier-required once through external
+`EcGroup` boundary consumes. Point rows remain allocator-consecutive from 1:
 
 | store | binds | provides |
 |---|---|---|
@@ -63,14 +74,16 @@ tie to a real group.
 **The scalar bound.** The group tuple bundles a second modulus handle:
 `scalar_bound_ptr`, the stored `n − 1` of the group order — the modulus
 that scalar arithmetic (nondeterministic addition-chain constraints,
-ladder exponents) will run under once a point-and-scalar layer exists.
-Mathematically `(a, b, p)` determines `F_s`, so the cell only ever
-*names* a value, never chooses one: session-side it is `None` until
-something constrains it (`constrain_scalar_bound`), and while vacuous
-it resolves at trace-gen to the group's own `F_p` handle — a
-well-formed stored uint consumed by nothing scalar, keeping the tuple
-total with no none-sentinel special case. Consumers that pre-date the
-scalar layer carry the cell only to close the consume.
+ladder exponents) runs under. VM-owned fixed-curve group rows are preseeded
+with their canonical scalar-field bound pointers from `miden-precompiles`,
+whose values are boundary-loaded like the curve coefficients; the row's
+`EcGroup` tuple is also boundary-required once, so the preseeded pointer
+binding is itself anchored. For ad-hoc
+groups, session-side it is `None` until something constrains it
+(`constrain_scalar_bound`), and while vacuous it resolves at trace-gen to
+the group's own `F_p` handle — a well-formed stored uint consumed by nothing
+scalar, keeping the tuple total with no none-sentinel special case. Consumers
+that pre-date the scalar layer carry the cell only to close the consume.
 
 **Honest-prover dedup.** `add_point` interns finite points
 canonically by `(group, x_ptr, y_ptr)` — the EC analogue of the uint
@@ -84,15 +97,13 @@ share rows with externally-stored points without unbalancing the
 membership bus.
 
 **Injectivity without gaps.** `ptr → entity` must still be a function
-(consumers dereference by ptr), but unlike the uint store there is no
-caller-chosen namespace: every ptr is allocator-assigned. Consecutive
-allocation turns the store's witnessed-gap chain into the constraint
-`ptr' = ptr + 1` — no gap column, no `Range16`, injectivity for free.
-(The uint store's gap machinery existed to allow *sparse, caller-fixed*
-pin addresses; nothing here is pinned by address.) The group table
-takes this to its limit with the ungated chain above; the point store
-keeps an `act` flag because its **consumes** (the `EcGroup` tuple, the
-membership trio) are constraint-side multiplicities that must vanish
+(consumers dereference by ptr). Group pointers are fixed only for the VM-owned
+curve slots and otherwise allocated densely after them; point pointers are
+allocator-assigned. Consecutive rows turn the store's witnessed-gap chain into
+the constraint `ptr' = ptr + 1` — no gap column, no `Range16`, injectivity for
+free. The group table takes this to its limit with the ungated chain above;
+the point store keeps an `act` flag because its **consumes** (the `EcGroup`
+tuple, the membership trio) are constraint-side multiplicities that must vanish
 on pad rows.
 
 ## Point-at-infinity: a flag, not magic coordinates
@@ -109,10 +120,11 @@ is_pai · x_ptr = 0      is_pai · y_ptr = 0
 
 — the same freed-address convention as `UintAdd`'s `c_ptr = 0`
 ("address 0 is never stored ⟹ reads as none on the bus"). Flagged
-rows skip the membership demand and consume nothing. Crucially the
-flag **rides the `EcPoint` tuple**, so every future consumer (the add
-relation, ladder gadgets) gets the PAI distinction for free instead of
-re-deriving it — which they need anyway (see
+rows skip the membership demand, but still consume the row's `EcGroup`
+context; that context consume is the PAI row's only tie to a real group.
+Crucially the flag **rides the `EcPoint` tuple**, so every future consumer
+(the add relation, ladder gadgets) gets the PAI distinction for free instead
+of re-deriving it — which they need anyway (see
 [`ec-group-add.md`](ec-group-add.md)).
 
 **The DAG may still say `(0, 0)`.** Are `b = 0` curves practically
@@ -121,10 +133,10 @@ interesting? No: `b = 0` puts `(0, 0)` *on* the curve as a rational
 ever has `b = 0`** (the only `b = 0` curves are the j-invariant-1728
 CM family, pairing-exotica, not precompile material), and none of our
 targets (7, 3, NIST's `b`, the ed25519 image's `b`) come close. So the
-wire/DAG encoding of PAI as coordinate values `(0, 0)` under a
-`(tag, a, b, 0)` cap is safe given a `b ≠ 0` assertion at
-`EcCreate` (a value check at recording — `EcRequire::create_group`
-asserts it). Encoding and representation then split
+wire/DAG encoding of PAI as coordinate values `(0, 0)` under the curve
+VALUE cap `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]` is safe
+given the group's `b ≠ 0` assertion (a value check at recording —
+`EcRequire::create_group` asserts it). Encoding and representation then split
 cleanly at the seam: the runner maps DAG-`(0,0)` ↔ store-`is_pai` in
 both directions, unambiguous precisely because `b ≠ 0` keeps `(0,0)`
 off the curve.
@@ -258,18 +270,21 @@ affine-complete chiplet (path 1) when ladders need adversarial-input
 completeness; keep RCB (path 2) as the fallback if the case-flag
 soundness review stalls.
 
-**What group pinning buys** (the `EcCreate` row): same-curve-ness of
-an op's operands is one `group_ptr` equality instead of three ptr
-equalities; the doubling formula's `a` resolves through the `EcGroup`
-tuple in the same lookup; and `b` — which no add/double formula uses —
-stays a membership-only concern. It is the `bound_ptr` trick one level
-up: indirection making "same context" a single column.
+**What group pinning buys**: same-curve-ness of an op's operands is one
+`group_ptr` equality instead of three ptr equalities; the doubling formula's
+`a` resolves through the `EcGroup` tuple in the same lookup; and `b` — which
+no add/double formula uses — stays a membership-only concern. TranscriptEval
+EcCreate rows now select the curve by putting `group_ptr` in the VALUE cap and
+consume only `EcPoint(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)`; they rely on
+the point store (and other relation chiplets) to close the unchanged `EcGroup`
+metadata relation. It is the `bound_ptr` trick one level up: indirection making
+"same context" a single column.
 
 ## Buses
 
 | Bus | Tuple | Provider |
 |---|---|---|
-| `EcGroup` (14) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups, mult = consumer count (every point of the group + every live-case add op) |
+| `EcGroup` (14) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups, mult = consumer count (points, group-law/MSM rows, and fixed boundary consumers; TranscriptEval create rows do not consume this bus directly) |
 | `EcPoint` (15) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | EcPointStore, mult = consumer count |
 
 Point rows consume: `EcGroup` ×1 (context certification — the PAI rows'
