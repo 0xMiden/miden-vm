@@ -346,16 +346,6 @@ impl UintMasmConfig {
                 title: "SECP256K1 SCALAR-FIELD",
                 domain,
             },
-            UintDomain::R1Base => Self {
-                path: "asm/math/field/r1_base.masm",
-                title: "SECP256R1 BASE-FIELD",
-                domain,
-            },
-            UintDomain::R1Scalar => Self {
-                path: "asm/math/field/r1_scalar.masm",
-                title: "SECP256R1 SCALAR-FIELD",
-                domain,
-            },
         }
     }
 }
@@ -377,13 +367,6 @@ impl CurveMasmConfig {
                 title: "SECP256K1",
                 base_field_module: "k1_base",
                 base_field_description: "secp256k1 base-field",
-                curve,
-            },
-            CodegenCurveId::Secp256r1 => Self {
-                path: "asm/math/curve/secp256r1.masm",
-                title: "SECP256R1",
-                base_field_module: "r1_base",
-                base_field_description: "secp256r1 base-field",
                 curve,
             },
         }

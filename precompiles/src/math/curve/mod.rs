@@ -37,7 +37,6 @@
 //! semantics, or public API stability guarantees beyond this internal precompile contract.
 
 mod secp256k1;
-mod secp256r1;
 mod short_weierstrass;
 
 use alloc::vec::Vec;
@@ -50,11 +49,9 @@ use miden_core::{
     },
 };
 use miden_precompiles_codegen::{CodegenCurveId, CurvePrecompileDescriptor};
-pub use miden_precompiles_codegen::{
-    K1_A_PTR, K1_B_PTR, K1_GROUP_PTR, R1_A_PTR, R1_B_PTR, R1_GROUP_PTR,
-};
+pub use miden_precompiles_codegen::{K1_A_PTR, K1_B_PTR, K1_GROUP_PTR};
 
-use self::{secp256k1::Secp256k1, secp256r1::Secp256r1};
+use self::secp256k1::Secp256k1;
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
 /// A fixed curve coefficient uint pinned at a VM-owned store pointer.
@@ -70,8 +67,8 @@ pub struct CurveCoefficient {
 
 /// Returns all fixed curve coefficients in VM pointer order.
 ///
-/// The order is secp256k1 `A`/`B`, then secp256r1 `A`/`B`.
-pub fn curve_coefficients() -> [CurveCoefficient; 4] {
+/// The order is secp256k1 `A`/`B`.
+pub fn curve_coefficients() -> [CurveCoefficient; 2] {
     [
         CurveCoefficient {
             ptr: CurveId::Secp256k1.a_ptr(),
@@ -82,16 +79,6 @@ pub fn curve_coefficients() -> [CurveCoefficient; 4] {
             ptr: CurveId::Secp256k1.b_ptr(),
             bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
             value: <Secp256k1 as ShortWeierstrassSpec>::B,
-        },
-        CurveCoefficient {
-            ptr: CurveId::Secp256r1.a_ptr(),
-            bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
-            value: <Secp256r1 as ShortWeierstrassSpec>::A,
-        },
-        CurveCoefficient {
-            ptr: CurveId::Secp256r1.b_ptr(),
-            bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
-            value: <Secp256r1 as ShortWeierstrassSpec>::B,
         },
     ]
 }
@@ -247,18 +234,16 @@ pub trait ShortWeierstrassSpec: CurveSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurveId {
     Secp256k1,
-    Secp256r1,
 }
 
 impl CurveId {
     /// All fixed curves in deterministic precompile initialization order.
-    pub const ALL: [Self; 2] = [Self::Secp256k1, Self::Secp256r1];
+    pub const ALL: [Self; 1] = [Self::Secp256k1];
 
     /// Returns the supported curve for an internal curve selector.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <Secp256k1 as CurveSpec>::ID => Some(Self::Secp256k1),
-            id if id == <Secp256r1 as CurveSpec>::ID => Some(Self::Secp256r1),
             _ => None,
         }
     }
@@ -267,14 +252,12 @@ impl CurveId {
     pub fn id(self) -> Felt {
         match self {
             Self::Secp256k1 => miden_precompiles_codegen::SECP256K1_ID,
-            Self::Secp256r1 => miden_precompiles_codegen::SECP256R1_ID,
         }
     }
 
     const fn codegen_id(self) -> CodegenCurveId {
         match self {
             Self::Secp256k1 => CodegenCurveId::Secp256k1,
-            Self::Secp256r1 => CodegenCurveId::Secp256r1,
         }
     }
 
@@ -287,7 +270,6 @@ impl CurveId {
     pub const fn from_group_ptr(ptr: u32) -> Option<Self> {
         match CodegenCurveId::from_group_ptr(ptr) {
             Some(CodegenCurveId::Secp256k1) => Some(Self::Secp256k1),
-            Some(CodegenCurveId::Secp256r1) => Some(Self::Secp256r1),
             None => None,
         }
     }
@@ -306,7 +288,6 @@ impl CurveId {
     pub const fn base_domain(self) -> UintDomain {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
-            Self::Secp256r1 => UintDomain::R1Base,
         }
     }
 
@@ -314,7 +295,6 @@ impl CurveId {
     pub fn a_value(self) -> Limbs {
         match self {
             Self::Secp256k1 => <Secp256k1 as ShortWeierstrassSpec>::A,
-            Self::Secp256r1 => <Secp256r1 as ShortWeierstrassSpec>::A,
         }
     }
 
@@ -322,7 +302,6 @@ impl CurveId {
     pub fn b_value(self) -> Limbs {
         match self {
             Self::Secp256k1 => <Secp256k1 as ShortWeierstrassSpec>::B,
-            Self::Secp256r1 => <Secp256r1 as ShortWeierstrassSpec>::B,
         }
     }
 
@@ -330,7 +309,6 @@ impl CurveId {
     pub const fn scalar_domain(self) -> UintDomain {
         match self {
             Self::Secp256k1 => UintDomain::K1Scalar,
-            Self::Secp256r1 => UintDomain::R1Scalar,
         }
     }
 
@@ -338,7 +316,6 @@ impl CurveId {
     pub fn generator(self) -> CurvePoint {
         match self {
             Self::Secp256k1 => Secp256k1::generator(),
-            Self::Secp256r1 => Secp256r1::generator(),
         }
     }
 
@@ -347,7 +324,6 @@ impl CurveId {
     pub fn point_from_affine(self, x: Limbs, y: Limbs) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::point_from_affine(x, y),
-            Self::Secp256r1 => Secp256r1::point_from_affine(x, y),
         }
     }
 
@@ -355,7 +331,6 @@ impl CurveId {
     pub fn is_on_curve(self, point: &CurvePoint) -> bool {
         match self {
             Self::Secp256k1 => Secp256k1::is_on_curve(point),
-            Self::Secp256r1 => Secp256r1::is_on_curve(point),
         }
     }
 
@@ -363,7 +338,6 @@ impl CurveId {
     pub fn add(self, lhs: CurvePoint, rhs: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::add(lhs, rhs),
-            Self::Secp256r1 => Secp256r1::add(lhs, rhs),
         }
     }
 
@@ -371,7 +345,6 @@ impl CurveId {
     pub fn neg(self, point: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::neg(point),
-            Self::Secp256r1 => Secp256r1::neg(point),
         }
     }
 
@@ -379,7 +352,6 @@ impl CurveId {
     pub fn sub(self, lhs: CurvePoint, rhs: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::sub(lhs, rhs),
-            Self::Secp256r1 => Secp256r1::sub(lhs, rhs),
         }
     }
 
@@ -392,7 +364,6 @@ impl CurveId {
     ) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::mul_scalar(point, scalar),
-            Self::Secp256r1 => Secp256r1::mul_scalar(point, scalar),
         }
     }
 }
@@ -966,24 +937,9 @@ mod tests {
     }
 
     #[test]
-    fn mixed_curve_add_fails() {
-        let mut state = state();
-        let lhs = CurvePrecompile::generator_node(CurveId::Secp256k1);
-        let rhs = CurvePrecompile::identity_node(CurveId::Secp256r1);
-        let node = Node::join(
-            CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
-            lhs.digest(),
-            rhs.digest(),
-        )
-        .expect("tag is curve-owned");
-
-        assert_invalid_payload(evaluate(&mut state, node));
-    }
-
-    #[test]
     fn msm_one_pair_evaluates_point_and_scalar_operands() {
         let mut state = state();
-        let curve = CurveId::Secp256r1;
+        let curve = CurveId::Secp256k1;
         let generator = CurvePrecompile::generator_node(curve);
         let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
         state.register(scalar.clone()).expect("scalar must register");
@@ -1040,44 +996,6 @@ mod tests {
         let node = Node::try_pair_list(
             CurvePrecompile::msm_tag(),
             vec![(generator.digest(), scalar.digest())],
-        )
-        .expect("tag is curve-owned");
-
-        assert_invalid_payload(evaluate(&mut state, node));
-    }
-
-    #[test]
-    fn msm_rejects_scalar_not_in_inferred_curve_domain() {
-        let mut state = state();
-        let scalar_curve = CurveId::Secp256k1;
-        let point_curve = CurveId::Secp256r1;
-        let scalar =
-            UintPrecompile::value_node(scalar_curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
-        let point = CurvePrecompile::generator_node(point_curve);
-        state.register(scalar.clone()).expect("scalar must register");
-        let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
-            vec![(point.digest(), scalar.digest())],
-        )
-        .expect("tag is curve-owned");
-
-        assert_invalid_payload(evaluate(&mut state, node));
-    }
-
-    #[test]
-    fn msm_rejects_mixed_point_curves() {
-        let mut state = state();
-        let k1 = CurveId::Secp256k1;
-        let r1 = CurveId::Secp256r1;
-        let k1_point = CurvePrecompile::generator_node(k1);
-        let r1_point = CurvePrecompile::generator_node(r1);
-        let k1_scalar = UintPrecompile::value_node(k1.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
-        let r1_scalar = UintPrecompile::value_node(r1.scalar_domain(), [3, 0, 0, 0, 0, 0, 0, 0]);
-        state.register(k1_scalar.clone()).expect("scalar must register");
-        state.register(r1_scalar.clone()).expect("scalar must register");
-        let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
-            vec![(k1_point.digest(), k1_scalar.digest()), (r1_point.digest(), r1_scalar.digest())],
         )
         .expect("tag is curve-owned");
 
@@ -1162,36 +1080,10 @@ mod tests {
             0xa63d_c339,
             0x1ae1_68fe,
         ];
-        const R1_2G_X: Limbs = [
-            0x4766_9978,
-            0xa60b_48fc,
-            0x77f2_1b35,
-            0xc089_69e2,
-            0x04b5_1ac3,
-            0x8a52_3803,
-            0x8d03_4f7e,
-            0x7cf2_7b18,
-        ];
-        const R1_2G_Y: Limbs = [
-            0x2278_73d1,
-            0x9e04_b79d,
-            0x3ce9_8229,
-            0xba7d_ade6,
-            0x9f74_30db,
-            0x293d_9ac6,
-            0xdb8e_d040,
-            0x0777_5510,
-        ];
-
-        for (curve, expected) in [
-            (CurveId::Secp256k1, (K1_2G_X, K1_2G_Y)),
-            (CurveId::Secp256r1, (R1_2G_X, R1_2G_Y)),
-        ] {
-            let (x, y) = affine_limbs(
-                curve.mul_scalar(curve.generator(), [2, 0, 0, 0, 0, 0, 0, 0]).unwrap(),
-            );
-            assert_eq!((x, y), expected);
-        }
+        let curve = CurveId::Secp256k1;
+        let (x, y) =
+            affine_limbs(curve.mul_scalar(curve.generator(), [2, 0, 0, 0, 0, 0, 0, 0]).unwrap());
+        assert_eq!((x, y), (K1_2G_X, K1_2G_Y));
     }
 
     #[test]
@@ -1217,24 +1109,12 @@ mod tests {
                     bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
                     value: CurveId::Secp256k1.b_value(),
                 },
-                CurveCoefficient {
-                    ptr: CurveId::Secp256r1.a_ptr(),
-                    bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
-                    value: CurveId::Secp256r1.a_value(),
-                },
-                CurveCoefficient {
-                    ptr: CurveId::Secp256r1.b_ptr(),
-                    bound_ptr: CurveId::Secp256r1.base_domain().bound_ptr(),
-                    value: CurveId::Secp256r1.b_value(),
-                },
             ],
         );
     }
 
     #[test]
     fn mul_scalar_matches_affine_double_and_add_reference() {
-        use crate::math::r1_scalar::R1Scalar;
-
         // Faithful affine double-and-add reference, built only from the affine point addition law.
         // This is the pre-optimization algorithm and is independent of the projective code path.
         fn affine_mul_scalar(curve: CurveId, point: CurvePoint, scalar: Limbs) -> CurvePoint {
@@ -1268,11 +1148,9 @@ mod tests {
         for curve in CurveId::ALL {
             let modulus = match curve {
                 CurveId::Secp256k1 => K1Scalar::MODULUS,
-                CurveId::Secp256r1 => R1Scalar::MODULUS,
             };
             let minus_one = match curve {
                 CurveId::Secp256k1 => K1Scalar::minus_one(),
-                CurveId::Secp256r1 => R1Scalar::minus_one(),
             };
 
             // Valid on-curve base points: generator, [2^128]generator, and their sum. The

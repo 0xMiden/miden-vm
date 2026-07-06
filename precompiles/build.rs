@@ -13,11 +13,8 @@ const ASSETS_DIR_PATH: &str = "assets";
 const GENERATED_ASM_DIR_PATH: &str = "asm";
 const GENERATED_MATH_FILES: &[&str] = &[
     "math/curve/secp256k1.masm",
-    "math/curve/secp256r1.masm",
     "math/field/k1_base.masm",
     "math/field/k1_scalar.masm",
-    "math/field/r1_base.masm",
-    "math/field/r1_scalar.masm",
     "math/u256.masm",
 ];
 

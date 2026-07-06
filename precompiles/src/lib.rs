@@ -23,17 +23,14 @@ pub use hash::{HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak25
 pub use math::{
     curve::{
         CurveCoefficient, CurveId, CurveNodeRef, CurvePoint, CurvePrecompile, CurveSpec, K1_A_PTR,
-        K1_B_PTR, K1_GROUP_PTR, R1_A_PTR, R1_B_PTR, R1_GROUP_PTR, ShortWeierstrassSpec,
-        curve_coefficients,
+        K1_B_PTR, K1_GROUP_PTR, ShortWeierstrassSpec, curve_coefficients,
     },
     k1_base::K1Base,
     k1_scalar::K1Scalar,
-    r1_base::R1Base,
-    r1_scalar::R1Scalar,
     u256::U256,
     uint::{
-        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, R1_BASE_BOUND_PTR, R1_SCALAR_BOUND_PTR,
-        U256_BOUND_PTR, UintDomain, UintNodeRef, UintPrecompile, UintSpec,
+        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, U256_BOUND_PTR, UintDomain, UintNodeRef,
+        UintPrecompile, UintSpec,
     },
 };
 
