@@ -4,9 +4,9 @@ use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{DeferredState, PrecompileRegistry},
+    deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    proof::HashFunction,
+    proof::{DeferredProof, HashFunction},
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
@@ -306,18 +306,25 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // These programs are deferred-free, so an empty registry is intentional; still rehydrate the
-    // proof-carried deferred wire instead of assuming TRUE.
-    let deferred_state = DeferredState::from_wire(
-        Arc::new(PrecompileRegistry::new()),
-        proof.deferred_state(),
-        usize::MAX,
-    )
-    .unwrap();
+    // These programs are deferred-free, so an empty registry is intentional; still resolve the
+    // proof-carried deferred root instead of assuming TRUE.
+    let stark_proof = proof.miden_proof();
+    let deferred_proof = proof.deferred_proof();
+    let final_deferred_root = match deferred_proof {
+        DeferredProof::Empty => TRUE_DIGEST,
+        DeferredProof::Wire(wire) => {
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), wire, usize::MAX)
+                .unwrap()
+                .root()
+        },
+        DeferredProof::Stark { .. } => {
+            panic!("recursive verifier does not support deferred STARK proofs")
+        },
+    };
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
 
-    generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
+    generate_advice_inputs(stark_proof.bytes(), pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

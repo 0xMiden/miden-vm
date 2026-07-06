@@ -7,6 +7,7 @@ use miden_core::{
         DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
         TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
     },
+    proof::{DeferredProof, HashFunction},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
@@ -16,7 +17,8 @@ use crate::{
     deferred::{DeferredSession, session_from_deferred_state},
     hash::keccak::sponge::trace::keccak_oracle,
     math::{U256, from_hex, to_limbs32},
-    session::{Session, SessionTraces},
+    prove_deferred_state,
+    session::{Session, SessionTraces, verify_deferred},
     transcript::poseidon2::P2Digest,
 };
 
@@ -290,6 +292,16 @@ fn empty_deferred_state_translates_to_true_root() {
 }
 
 #[test]
+fn prove_deferred_state_returns_empty_for_true_root() {
+    let state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+        .expect("full precompile registry initializes");
+
+    let proof = prove_deferred_state(&state, HashFunction::Blake3_256).unwrap();
+
+    assert_eq!(proof, DeferredProof::Empty);
+}
+
+#[test]
 fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
     let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
         .expect("full precompile registry initializes");
@@ -390,6 +402,23 @@ fn keccak_deferred_state_root_proves_and_verifies() {
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
-    assert_eq!(proof.public_root(), synthetic.root);
-    proof.verify().expect("Keccak deferred-state proof should verify");
+    let Some((_, public_root)) = proof.as_stark() else {
+        panic!("precompile session should produce a deferred STARK proof");
+    };
+    assert_eq!(P2Digest::from(public_root), synthetic.root);
+    verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
+}
+
+#[test]
+fn prove_deferred_state_proves_non_empty_root() {
+    let synthetic = synthetic_keccak_state(b"abc");
+
+    let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+        .expect("Keccak deferred state should prove");
+    let Some((_, public_root)) = proof.as_stark() else {
+        panic!("non-empty deferred state should produce a STARK-backed proof");
+    };
+
+    assert_eq!(P2Digest::from(public_root), synthetic.root);
+    verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
 }

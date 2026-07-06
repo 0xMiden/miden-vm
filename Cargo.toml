@@ -94,6 +94,7 @@ miden-lifted-stark      = { path = "./crates/lifted-stark", version = "0.28", de
 miden-mast-package      = { path = "./crates/mast-package", version = "0.28", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "0.28", default-features = false }
 miden-precompiles       = { path = "./precompiles", version = "0.28", default-features = false }
+miden-precompiles-prover = { path = "./precompiles-prover", version = "0.28", default-features = false }
 miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.28", default-features = false }
 miden-processor         = { path = "./processor", version = "0.28", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }

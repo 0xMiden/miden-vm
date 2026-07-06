@@ -19,7 +19,7 @@ use super::uint::random_uint_below;
 use crate::{
     math::{U256, add_reduce, from_limbs32, mac_reduce},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, statements::horner_sign_paths},
+    session::{Session, SessionTraces, statements::horner_sign_paths, verify_deferred},
     tests::bus_balance::session_stack_residual,
     transcript::{
         eval::{
@@ -339,5 +339,5 @@ fn horner_sign_alternation_proves() {
 
     let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
-    traces.prove().verify().expect("the uint-DAG stack must verify");
+    verify_deferred(&traces.prove()).expect("the uint-DAG stack must verify");
 }

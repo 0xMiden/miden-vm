@@ -5,10 +5,14 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    deferred::{DEFAULT_MAX_DEFERRED_ELEMENTS, TRUE_DIGEST},
+    field::QuadFelt,
+};
 use miden_crypto::stark::{
     StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
 };
@@ -16,7 +20,6 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_DEFERRED_ELEMENTS;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -25,7 +28,7 @@ mod exports {
         Word,
         deferred::{DeferredState, IntegrityError},
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{ExecutionProof, HashFunction},
+        proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof},
     };
     pub mod math {
         pub use miden_core::Felt;
@@ -36,8 +39,128 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs.
+/// Configurable verifier for Miden execution proofs.
+///
+/// [`Verifier::verify`] performs final verification and rejects wire-backed partial proofs.
+/// [`Verifier::verify_partial`] accepts wire-backed partial proofs, rehydrates their deferred
+/// state using the standard precompile registry, verifies the VM proof against the hydrated root,
+/// and returns the hydrated state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Verifier {
+    max_deferred_elements: Option<usize>,
+}
+
+impl Verifier {
+    /// Creates a verifier with default configuration.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the deferred-state element budget used by [`Self::verify_partial`].
+    pub const fn max_deferred_elements(&self) -> usize {
+        self.effective_max_deferred_elements()
+    }
+
+    /// Updates the deferred-state element budget used by [`Self::verify_partial`].
+    pub const fn with_max_deferred_elements(mut self, max_deferred_elements: usize) -> Self {
+        self.max_deferred_elements = Some(max_deferred_elements);
+        self
+    }
+
+    const fn effective_max_deferred_elements(&self) -> usize {
+        match self.max_deferred_elements {
+            Some(max_deferred_elements) => max_deferred_elements,
+            None => DEFAULT_MAX_DEFERRED_ELEMENTS,
+        }
+    }
+
+    /// Returns the security level of the final proof if the specified program was executed
+    /// correctly against the specified inputs and outputs.
+    ///
+    /// Specifically, verifies that if a program with the specified `program_hash` is executed
+    /// against the provided `stack_inputs` and some secret inputs, the result is equal to the
+    /// `stack_outputs`.
+    ///
+    /// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by
+    /// one. Thus, their expected order on the stack will be the reverse of the order in which
+    /// they are provided, and the last value in the `stack_inputs` slice is expected to be the
+    /// value at the top of the stack.
+    ///
+    /// Stack outputs are expected to be ordered as if they would be popped off the stack one by
+    /// one. Thus, the value at the top of the stack is expected to be in the first position of
+    /// the `stack_outputs` slice, and the order of the rest of the output elements will also
+    /// match the order on the stack. This is the reverse of the order of the `stack_inputs`
+    /// slice.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The provided proof does not prove a correct execution of the program.
+    /// - The proof carries wire-backed deferred proof material, which is a partial/delegable form.
+    /// - The proof's STARK-backed deferred proof, if present, does not verify against its public
+    ///   root.
+    /// - The proof carries deferred proof material unsupported by this verifier build.
+    pub fn verify(
+        &self,
+        program_info: ProgramInfo,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        proof: ExecutionProof,
+    ) -> Result<u32, VerificationError> {
+        let security_level = proof.security_level();
+        let final_deferred_root = resolve_final_deferred_root(proof.deferred_proof())?;
+
+        verify_stark(
+            program_info,
+            stack_inputs,
+            stack_outputs,
+            final_deferred_root,
+            proof.miden_proof(),
+        )?;
+
+        Ok(security_level)
+    }
+
+    /// Verifies a partial proof and returns its hydrated deferred state.
+    ///
+    /// Partial verification accepts only wire-backed deferred proof material. The wire is hydrated
+    /// using the standard precompile registry and this verifier's deferred-element budget, then the
+    /// outer VM STARK proof is verified against the hydrated state's root.
+    ///
+    /// If no budget override was configured with [`Self::with_max_deferred_elements`], partial
+    /// verification uses [`DEFAULT_MAX_DEFERRED_ELEMENTS`].
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The proof is not wire-backed partial proof material.
+    /// - The wire cannot be hydrated under the standard precompile registry and configured budget.
+    /// - The provided proof does not prove a correct execution of the program against the hydrated
+    ///   deferred root.
+    pub fn verify_partial(
+        &self,
+        program_info: ProgramInfo,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        proof: ExecutionProof,
+    ) -> Result<DeferredState, VerificationError> {
+        let deferred_state =
+            hydrate_deferred_state(proof.deferred_proof(), self.effective_max_deferred_elements())?;
+
+        verify_stark(
+            program_info,
+            stack_inputs,
+            stack_outputs,
+            deferred_state.root(),
+            proof.miden_proof(),
+        )?;
+
+        Ok(deferred_state)
+    }
+}
+
+/// Returns the security level of the final proof if the specified program was executed correctly
+/// against the specified inputs and outputs.
+///
+/// This is a compatibility shim for `Verifier::default().verify(...)`.
 ///
 /// Specifically, verifies that if a program with the specified `program_hash` is executed against
 /// the provided `stack_inputs` and some secret inputs, the result is equal to the `stack_outputs`.
@@ -55,64 +178,62 @@ pub use exports::*;
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within the
-///   default deferred-state verifier budget.
+/// - The proof carries wire-backed deferred proof material, which is a partial/delegable form.
+/// - The proof's STARK-backed deferred proof, if present, does not verify against its public root.
+/// - The proof carries deferred proof material unsupported by this verifier build.
+#[deprecated(since = "0.25.0", note = "use Verifier::new().verify(...) instead")]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    verify_with_max_deferred_elements(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        DEFAULT_MAX_DEFERRED_ELEMENTS,
-    )
-}
-
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs, using an explicit deferred-state verifier budget.
-///
-/// Use this when verifying proofs produced with a non-default deferred-state execution budget.
-///
-/// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within
-///   `max_deferred_elements`.
-pub fn verify_with_max_deferred_elements(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    max_deferred_elements: usize,
-) -> Result<u32, VerificationError> {
-    let security_level = proof.security_level();
-    let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
-
-    let state = DeferredState::from_wire(
-        Arc::new(miden_precompiles::registry()),
-        &deferred_wire,
-        max_deferred_elements,
-    )?;
-
-    verify_stark(program_info, stack_inputs, stack_outputs, state.root(), hash_fn, proof_bytes)?;
-
-    Ok(security_level)
+    Verifier::default().verify(program_info, stack_inputs, stack_outputs, proof)
 }
 
 // HELPER FUNCTIONS
 // ================================================================================================
+
+fn resolve_final_deferred_root(deferred_proof: &DeferredProof) -> Result<Word, VerificationError> {
+    match deferred_proof {
+        DeferredProof::Empty => Ok(TRUE_DIGEST),
+        DeferredProof::Wire(_) => Err(VerificationError::UnsupportedDeferredProof),
+        DeferredProof::Stark { .. } => verify_deferred_stark(deferred_proof),
+    }
+}
+
+fn hydrate_deferred_state(
+    deferred_proof: &DeferredProof,
+    max_deferred_elements: usize,
+) -> Result<DeferredState, VerificationError> {
+    match deferred_proof {
+        DeferredProof::Wire(wire) => Ok(DeferredState::from_wire(
+            Arc::new(miden_precompiles::registry()),
+            wire,
+            max_deferred_elements,
+        )?),
+        DeferredProof::Empty | DeferredProof::Stark { .. } => {
+            Err(VerificationError::UnsupportedDeferredProof)
+        },
+    }
+}
+
+#[cfg(feature = "std")]
+fn verify_deferred_stark(deferred_proof: &DeferredProof) -> Result<Word, VerificationError> {
+    Ok(miden_precompiles_prover::session::verify_deferred(deferred_proof)?)
+}
+
+#[cfg(not(feature = "std"))]
+fn verify_deferred_stark(_deferred_proof: &DeferredProof) -> Result<Word, VerificationError> {
+    Err(VerificationError::UnsupportedDeferredProof)
+}
 
 fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     final_deferred_root: Word,
-    hash_fn: HashFunction,
-    proof_bytes: Vec<u8>,
+    stark_proof: &StarkProof,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
 
@@ -120,27 +241,29 @@ fn verify_stark(
         PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
 
+    let hash_fn = stark_proof.hash_fn();
+    let proof_bytes = stark_proof.bytes();
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -158,6 +281,11 @@ pub enum VerificationError {
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("deferred-DAG integrity check failed: {0}")]
     DeferredIntegrity(#[from] IntegrityError),
+    #[cfg(feature = "std")]
+    #[error("failed to verify STARK-backed deferred proof: {0}")]
+    DeferredStarkVerification(#[from] miden_precompiles_prover::session::VerifyError),
+    #[error("deferred proof form is not supported by this verifier")]
+    UnsupportedDeferredProof,
 }
 
 // STARK PROOF VERIFICATION
@@ -226,7 +354,85 @@ where
 mod tests {
     use alloc::vec::Vec;
 
+    use miden_core::deferred::DeferredStateWire;
+
     use super::*;
+
+    #[test]
+    fn verifier_builder_records_deferred_budget() {
+        assert_eq!(Verifier::new().max_deferred_elements(), DEFAULT_MAX_DEFERRED_ELEMENTS);
+
+        let verifier = Verifier::new().with_max_deferred_elements(17);
+
+        assert_eq!(verifier.max_deferred_elements(), 17);
+    }
+
+    #[test]
+    fn wire_deferred_proof_is_rejected_by_final_root_resolution() {
+        let deferred_proof = DeferredProof::wire(DeferredStateWire::default());
+
+        let err = resolve_final_deferred_root(&deferred_proof).unwrap_err();
+
+        assert!(
+            matches!(err, VerificationError::UnsupportedDeferredProof),
+            "expected wire-backed partial proof to be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn wire_deferred_proof_hydrates_for_partial_verification() {
+        let wire = DeferredStateWire::default();
+        let deferred_proof = DeferredProof::wire(wire.clone());
+
+        let deferred_state = hydrate_deferred_state(&deferred_proof, DEFAULT_MAX_DEFERRED_ELEMENTS)
+            .expect("empty wire should hydrate under the standard precompile registry");
+
+        assert_eq!(deferred_state.root(), TRUE_DIGEST);
+        assert_eq!(deferred_state.to_wire().unwrap(), wire);
+    }
+
+    #[test]
+    fn empty_deferred_proof_is_rejected_by_partial_hydration() {
+        let err = hydrate_deferred_state(&DeferredProof::Empty, DEFAULT_MAX_DEFERRED_ELEMENTS)
+            .unwrap_err();
+
+        assert!(
+            matches!(err, VerificationError::UnsupportedDeferredProof),
+            "expected empty final proof material to be rejected by partial hydration, got {err:?}"
+        );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn nested_deferred_stark_is_verified_before_root_resolution() {
+        let deferred_proof = DeferredProof::stark(
+            StarkProof::new(Vec::from([0_u8]), HashFunction::Poseidon2),
+            TRUE_DIGEST,
+        );
+
+        let err = resolve_final_deferred_root(&deferred_proof).unwrap_err();
+
+        assert!(
+            matches!(err, VerificationError::DeferredStarkVerification(_)),
+            "expected invalid STARK-backed deferred proof to be verified and rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn stark_deferred_proof_is_rejected_by_partial_hydration_without_verification() {
+        let deferred_proof = DeferredProof::stark(
+            StarkProof::new(Vec::from([0_u8]), HashFunction::Poseidon2),
+            TRUE_DIGEST,
+        );
+
+        let err =
+            hydrate_deferred_state(&deferred_proof, DEFAULT_MAX_DEFERRED_ELEMENTS).unwrap_err();
+
+        assert!(
+            matches!(err, VerificationError::UnsupportedDeferredProof),
+            "expected STARK-backed final proof material to be rejected by partial hydration, got {err:?}"
+        );
+    }
 
     #[test]
     fn proof_encoding_config_rejects_oversized_native_vec_preallocation() {

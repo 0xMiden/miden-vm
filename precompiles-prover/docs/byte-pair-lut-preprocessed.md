@@ -78,7 +78,7 @@ Both paths therefore read identical column indices: `PRE_*` for the data,
 `Preprocessed::build(statement, config)` builds the per-AIR preprocessed
 bundle (auto from each AIR's `preprocessed_trace()`, observed into
 Fiat-Shamir). `ChipletAir` delegates `preprocessed_trace` /
-`preprocessed_width`; `SessionTraces::prove` / `SessionProof::verify`
+`preprocessed_width`; `SessionTraces::prove` / `verify_deferred`
 (and the EcStack subset tests) build it and pass `Some(&preprocessed)` /
 `Some(commitment)` — both deterministic from the AIR list, so the
 verifier rebuilds the commitment it trusts. The per-chiplet test harness
