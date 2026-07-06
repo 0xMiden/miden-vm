@@ -7,43 +7,86 @@ use miden::core::crypto::hashes::poseidon2
 # =================================================================================================
 #
 # This module handles the Miden VM-specific public input processing for the recursive verifier.
-# It populates the FLPI and VLPI portions of the ACE READ section (see `stark/constants.masm`
-# for the full layout diagram).
+# It (a) computes `kernel_H`, the Poseidon2 hash (`hash_elements`) of all kernel-procedure
+# digests, (b) materializes the kernel digests and populates the caller-facing reduced-inputs
+# block and the FLPI section of the ACE READ region, and (c) absorbs every public input into the
+# Fiat-Shamir transcript in a rate-aligned schedule mirroring `MidenMultiAir::observe` on the Rust
+# side. The outer-LogUp boundary correction `c_total` is computed later, in step II
+# (`observe_aux_trace`), once the aux randomness has been sampled from the transcript.
 #
-# Memory layout populated by this module (growing backward from AUX_RAND_ELEM_PTR):
+# Memory layout populated (low -> high addresses):
 #
-#   pi_ptr -->  [ FLPI: 40 base felts as 40 EF slots  ]   load_public_inputs
-#               [ VLPI: reduced kernel value (1 word) ]   reduce_variable_length_public_inputs
-#   anchor -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   (loaded ND here, verified in random_coin)
+#   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]   caller-facing reduced-inputs
+#                           [ program_digest    (4 felts) ]   block (16 felts). The trailing
+#                           [ transcript_state  (4 felts) ]   pad keeps the FS observation
+#                           [ zero pad          (4 felts) ]   rate-aligned (two 8-felt chunks).
 #
-# The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
-# The VLPI reduction is the LogUp kernel ROM boundary correction
-#     kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)
-# (chiplet-side INIT removes; boundary adds).
+#   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
 #
-# Advice stack consumption order:
-#   1. fixed-length PI (40 base felts)         -- load_public_inputs
-#   2. num_kernel_proc_digests (1 felt)        -- reduce_variable_length_public_inputs
-#   3. kernel digests (8 * N base felts)       -- reduce_variable_length_public_inputs
-#   4. aux randomness (4 base felts)           -- reduce_variable_length_public_inputs
+#   anchor             -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   AUX_RAND_ELEM_PTR (sampled
+#                                                                     from the transcript in step II)
+#
+# The trailing pad slot is written to zero before the reduced-inputs window is absorbed, so the FS
+# observation does not depend on the scratch region being zero-initialized.
+#
+# The outer-LogUp boundary correction accumulated at `C_TOTAL_PTR` is the signed sum of one
+# inverted bus term per boundary interaction:
+#
+#     c_total = Σ_i 1 / d(KernelRomInit,           kernel_digest_i)   (request,  +1)
+#             +     1 / d(BlockHashTable,           program_digest)   (request,  +1)
+#             +     1 / d(LogPrecompileTranscript,  <empty>)          (request,  +1)
+#             −     1 / d(LogPrecompileTranscript,  transcript_state) (response, −1)
+#
+# where the bus-message denominator is `d(bus, w) = (α + (bus + 1)·γ) + msg(w)`, the prefix
+# scale `bus + 1` is the matching `BUS_ID_*_PLUS_ONE` constant, `γ = β^MAX_MESSAGE_WIDTH`, and
+# `msg(w) = Σ_{j<4} w_j·β^j` (the empty message of the init term gives `msg = 0`). It is
+# computed in step II (`observe_aux_trace`) from the FS-sampled `α, β`, over the kernel digests,
+# program digest and transcript state materialized in step I; `observe_aux_trace` then asserts
+# the boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals.
+# Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
+# is accumulated as `requests − response`.
+#
+# Fiat-Shamir absorption order (rate-aligned, 6 permutes total, mirrors
+# `MidenMultiAir::observe`):
+#   1. kernel_H + program_digest                      (4 + 4 = 8 felts)
+#   2. transcript_state + zero pad                    (4 + 4 = 8 felts)
+#   3. stack_inputs[0..8]                             (8 felts)
+#   4. stack_inputs[8..16]                            (8 felts)
+#   5. stack_outputs[0..8]                            (8 felts)
+#   6. stack_outputs[8..16]                           (8 felts)
+#
+# Data sources:
+#   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed for
+#     kernel_H and re-read for the step-II boundary fold.
+#   - program_digest: operand word.
+#   - transcript_state (DEFERRED): advice (4 canonical felts), loaded by `verify_proof`.
+#   - stack i/o (FLPI): caller memory at `stack_io_ptr` (operand), 32 base felts.
+#
+# `verify_proof` stages kernel_H, program_digest and transcript_state into the reduced-inputs
+# block before the transcript starts; `process_public_inputs` then only absorbs into FS.
 #
 # CONSTANTS
 # =================================================================================================
 
-# Number of fixed length public inputs (in field elements).
-# This is composed of the input/output operand stacks (16 * 2), the program digest (4), and the
-# precompile transcript state (4). Note that the fixed length public inputs are stored as extension
-# field elements and are double-word aligned.
-const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
+# Number of fixed length public inputs (in field elements): stack inputs (16) + stack
+# outputs (16). These are the only public values referenced by the ACE circuit; the program
+# digest and transcript state live in the caller-facing reduced-inputs block instead.
+const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
-# Number of variable length public input groups.
-# The reduced kernel value occupies 1 word (4 base felts) in the ACE READ section.
-const NUM_VAR_LEN_PI_GROUPS = 1
-
-# Upper bound on the kernel-digest statement inputs (`MultiAir::max_aux_inputs`), in field
-# elements: `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. Absorbed into the transcript by
-# `MultiAir::observe`, so the MASM must observe the same value.
+# Upper bound on the kernel-digest portion of the statement `aux_inputs`, in field elements:
+# `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. The fixed program hash and transcript
+# state occupy the rest of `aux_inputs` and are bounded separately.
 const MAX_AUX_INPUTS = 1020
+
+# Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
+const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
+const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
+const BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE = 3   # LogPrecompileTranscript (2) + 1
+
+# Word offsets into the 16-felt reduced-inputs block at `reduced_inputs_ptr`:
+#   [ kernel_H (+0) | program_digest (+4) | transcript_state (+8) | zero pad (+12) ].
+const REDUCED_INPUTS_PROGRAM_OFFSET    = 4
+const REDUCED_INPUTS_TRANSCRIPT_OFFSET = 8
 
 
 # CONSTANTS GETTERS
@@ -56,436 +99,342 @@ end
 # MAIN PROCEDURE
 # =================================================================================================
 
-#! Processes the public inputs.
+#! Processes the public inputs (step I of the verifier).
 #!
-#! This involves:
+#! See module banner for the memory layout, the canonical FS schedule and the advice tape
+#! order.
 #!
-#! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
-#!    starting from the address pointed to by `public_inputs_address_ptr`.
-#! 2. Loading kernel procedure digests from the advice stack into memory at
-#!    `variable_length_public_inputs_address_ptr`.
-#! 3. Absorbing the statement-owned public inputs into the Fiat-Shamir transcript, matching
-#!    `MultiAir::observe`: the element stream
-#!        [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ]
-#!    is absorbed in 8-element blocks, with the trailing partial block buffered via
-#!    `random_coin::observe_felt`.
-#! 4. Loading the auxiliary randomness from the advice stack and reducing the kernel digests; the
-#!    reduced result overwrites the start of the kernel-digest region (in the ACE READ section).
+#! Precondition:  random coin input_len=0 (guaranteed by `init_seed`, which absorbs the
+#!                protocol parameters as one full rate block).
+#! Postcondition: random coin input_len=0, output_len=8.
 #!
-#! Note that the fixed length public inputs are stored as extension field elements, while the
-#! kernel digests are stored as base field elements (each padded to 8 felts and reversed for the
-#! reduction). Absorption reads back the natural-order elements from memory so it is decoupled
-#! from those storage layouts.
-#!
-#! POSTCONDITION: the transcript input buffer holds the unflushed tail of the absorbed stream;
-#! the generic verifier observes the instance shape and main-trace commitment next (continuing the
-#! same buffered duplex) and flushes before the first sample.
-#!
-#! Input:
-#!      - Operand stack: [...]
-#!      - Advice stack: [fixed_len_PI..., num_kernel_proc_digests,
-#!                       kernel_digest_elements..., beta0, beta1, alpha0, alpha1, ...]
+#! Input:  [...]
 #! Output: [...]
 pub proc process_public_inputs
-    # 1) Compute the address where the public inputs will be stored and store it.
-    #    This also computes the address where the reduced variable-length public inputs will be stored.
-    exec.get_num_fixed_len_public_inputs push.NUM_VAR_LEN_PI_GROUPS
-    # => [NUM_VAR_LEN_PI_GROUPS, NUM_FIXED_LEN_PUBLIC_INPUTS, ...]
+    # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="process_public_inputs: input buffer must be empty"
 
+    # 1) Compute and store `pi_ptr` (the reduced-inputs block lives at its fixed standalone
+    #    address, already populated by `verify_proof` before the transcript started).
+    exec.get_num_fixed_len_public_inputs
     exec.public_inputs::compute_and_store_public_inputs_address
     # => [...]
 
-    # 2) Load the fixed-length public inputs from the advice tape (stored as EF elements).
+    # 2) Observe the 16-felt reduced-inputs window into FS as two rate-aligned chunks.
+    exec.absorb_reduced_inputs_window_into_fs
+    # => [...]
+
+    # 3) Load FLPI (stack i/o) from caller memory into the FLPI region and absorb into FS.
     exec.load_public_inputs
     # => [...]
+end
 
-    # 3) Load kernel digests from the advice tape into memory (stored for reduction).
-    exec.load_kernel_digests
+#! Stages the reduced-inputs block at the fixed standalone `REDUCED_INPUTS_PTR` before the
+#! transcript starts (called by `verify_proof`).
+#!
+#! Writes, in order:
+#!   reduced_inputs+0  : kernel_H = hash_elements(kernel_ptr, 4·N), the kernel commitment over the
+#!                       caller-owned digest region.
+#!   reduced_inputs+4  : program_digest, taken from the operand word.
+#!   reduced_inputs+8  : transcript_state (DEFERRED), loaded from advice.
+#!
+#! Also persists the caller pointers `kernel_ptr` and `stack_io_ptr` and the digest count `N` into
+#! their fixed cells so the step-I FLPI load and the step-II boundary fold can re-read the same
+#! caller-owned regions. The trailing pad word is zeroed when the window is absorbed in step I.
+#!
+#! Input:  [kernel_ptr, N, stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
+#! Output: [...]
+pub proc stage_reduced_inputs
+    # Persist N (bounded by Kernel::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
+    dup.1
+    u32assert.err="number of kernel procedure digests must fit in a u32"
+    dup u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
+    exec.constants::num_kernel_digests_ptr mem_store
+    # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
+    dup exec.constants::kernel_digests_address_ptr mem_store
+    # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
+
+    # kernel_H = hash_elements(kernel_ptr, 4·N) -> reduced_inputs+0.
+    swap mul.4 swap
+    # => [kernel_ptr, 4·N, stack_io_ptr, PROG..., ...]
+    exec.poseidon2::hash_elements
+    # => [kH0, kH1, kH2, kH3, stack_io_ptr, PROG..., ...]
+    exec.constants::reduced_inputs_ptr mem_storew_le dropw
+    # => [stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
+
+    # Persist `stack_io_ptr` for the step-I FLPI load.
+    exec.constants::stack_io_address_ptr mem_store
+    # => [PROG0, PROG1, PROG2, PROG3, ...]
+
+    # program_digest (operand) -> reduced_inputs + REDUCED_INPUTS_PROGRAM_OFFSET.
+    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_PROGRAM_OFFSET mem_storew_le dropw
     # => [...]
 
-    # 4) Absorb the statement public inputs into the transcript.
-    exec.absorb_public_inputs
-    # => [...]
-
-    # 5) Load auxiliary randomness and reduce the kernel digests.
-    exec.finalize_kernel_reduction
+    # transcript_state (DEFERRED) from advice -> reduced_inputs + REDUCED_INPUTS_TRANSCRIPT_OFFSET.
+    padw adv_loadw
+    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_TRANSCRIPT_OFFSET mem_storew_le dropw
     # => [...]
 end
 
 # HELPER PROCEDURES
 # =================================================================================================
 
-#! Loads from the advice stack the fixed-length public inputs and stores them in memory as
-#! extension field elements, starting from the address pointed to by `public_inputs_address_ptr`.
+#! Computes `γ = β^MAX_MESSAGE_WIDTH` for per-bus domain separation and stores it at
+#! BUS_GAMMA_PTR as `[γ0, γ1, 0, 0]`.
 #!
-#! No transcript absorption happens here; `absorb_public_inputs` later reads the stored elements
-#! back and feeds them through the buffered duplex in `MultiAir::observe` order.
-#!
-#! Inputs:  [...]
-#! Outputs: [...]
-proc load_public_inputs
-    # Set up [Y, Y, C, pi_ptr] for load_base_store_extension_double_word. The Y/C words are dummy
-    # placeholders here (no permutation is performed); only the EF stores are kept.
-    exec.constants::public_inputs_address_ptr mem_load
-    padw padw padw
-    # => [0, 0, C=0, pi_ptr, ...]   (three zero words above pi_ptr)
-
-    # 5 iterations * 8 = 40 = NUM_FIXED_LEN_PUBLIC_INPUTS. Each call loads 8 base elements from
-    # advice and stores them as 8 EF elements in memory, returning the loaded words (discarded).
-    repeat.5
-        exec.public_inputs::load_base_store_extension_double_word
-        # => [A0, A1, C, pi_ptr + 16, ...]
-        dropw dropw
-        # => [C, pi_ptr + 16, ...]
-        padw padw
-        # => [Y, Y, C, pi_ptr + 16, ...]
-    end
-    # => [Y, Y, C, pi_ptr + 80, ...]
-
-    dropw dropw dropw drop
-end
-
-#! Loads the kernel procedure digests from the advice stack into memory at
-#! `variable_length_public_inputs_address_ptr`, without absorbing them into the transcript
-#! (absorption happens in `absorb_public_inputs`).
-#!
-#! Reads `num_kernel_proc_digests` from advice into `tmp3`, then loads each digest as 8 base
-#! elements (2 words) via `adv_pipe`. Each digest is padded to 8 elements and reversed
-#! (`[0,0,0,0, d3,d2,d1,d0]`) so the downstream `reduce_kernel_digests` Horner pass — which reads
-#! 8-felt chunks — yields `d0 + d1*β + d2*β^2 + d3*β^3`.
-#!
-#! Input:
-#!      - Advice stack: [num_kernel_proc_digests, kernel_digest_elements..., ...]
-#! Output: [...]
-proc load_kernel_digests
-    # Read num_kernel_proc_digests and store for later use (tmp3 survives reduce_kernel_digests,
-    # which clobbers tmp1/tmp2).
-    adv_push
-    exec.constants::tmp3 mem_store
-
-    # Mirror Statement::new's `aux_inputs.len() <= max_aux_inputs()` bound: at most
-    # MAX_AUX_INPUTS / WORD_SIZE = 255 kernel digests. (u32assert also bounds the load loop below.)
-    exec.constants::tmp3 mem_load
-    u32assert.err="number of kernel procedure digests must fit in a u32"
-    u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
-
-    # Set up dummy state words with the destination pointer at position 12 for adv_pipe,
-    # and the absorb-scratch cursor below it.
-    padw padw padw
-    exec.constants::variable_length_public_inputs_address_ptr mem_load
-    movdn.12
-    exec.constants::absorb_scratch_ptr add.43
-    movdn.13
-    # => [Y, Y, Y, var_len_ptr, dst, ...]
-
-    exec.constants::tmp3 mem_load
-    # => [num_iter, Y, Y, Y, var_len_ptr, dst, ...]
-
-    dup push.0 neq
-    while.true
-        sub.1 movdn.14
-        # => [Y, Y, Y, ptr, dst, remaining, ...]
-        adv_pipe
-        # => [ZERO_PAD, D, Y, ptr+8, dst, remaining, ...]
-        dropw
-        # => [d3, d2, d1, d0, Y, ptr+8, dst, remaining, ...]
-        # Write the digest in natural order to the absorb scratch: d_i at dst + i. Element
-        # stores, since the scratch stream offset (43 + 4d) is not word-aligned.
-        movup.9 dup add.4 movdn.10
-        # => [dst, d3, d2, d1, d0, Y, ptr+8, dst+4, remaining, ...]
-        swap dup.1 add.3 mem_store
-        swap dup.1 add.2 mem_store
-        swap dup.1 add.1 mem_store
-        mem_store
-        # => [Y, ptr+8, dst+4, remaining, ...]
-        padw padw
-        # => [P, P, Y, ptr+8, dst+4, remaining, ...]
-        movup.14
-        # => [remaining, P, P, Y, ptr+8, dst+4, ...]
-        dup push.0 neq
-    end
-    # => [0, P, P, Y, ptr_final, dst_final, ...]
-    drop dropw dropw dropw drop drop
-end
-
-#! Absorb the statement public inputs into the Fiat-Shamir transcript, matching
-#! `MultiAir::observe`'s element stream:
-#!     [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ].
-#!
-#! Completes the scratch copy of the stream (lengths and FLPI; the kernel-felt section was written
-#! by `load_kernel_digests`), then absorbs it in 8-element blocks via `mem_stream` with the sponge
-#! state on the stack, leaving the trailing partial block (< 8) buffered via `observe_felt` so the
-#! verifier continues the same stream with the instance shape and main-trace commitment.
+#! The four squarings below reach `β^16`; `MAX_MESSAGE_WIDTH` is hardcoded as 16 here, guarded
+#! by the `MIDEN_MAX_MESSAGE_WIDTH` tripwire in `air/src/constraints/lookup/messages.rs`.
 #!
 #! Input:  [...]
 #! Output: [...]
-proc absorb_public_inputs
-    # ---- Gather the observe stream contiguously into scratch ----
+proc compute_bus_gamma
+    exec.push_beta
+    # => [β0, β1, ...]
+    dup.1 dup.1 ext2mul   # β^2
+    dup.1 dup.1 ext2mul   # β^4
+    dup.1 dup.1 ext2mul   # β^8
+    dup.1 dup.1 ext2mul   # β^16 = γ
+    push.0.0 movup.3 movup.3
+    exec.constants::bus_gamma_ptr mem_storew_le
+    dropw
+end
 
-    # scratch[0] = len(FLPI).
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS exec.constants::absorb_scratch_ptr mem_store
+#! Pushes the auxiliary randomness β onto the stack.
+#!
+#! Input:  [...]
+#! Output: [β0, β1, ...]
+proc push_beta
+    exec.constants::aux_rand_elem_ptr add.1 mem_load
+    exec.constants::aux_rand_elem_ptr mem_load
+end
 
-    # scratch[1..41] = FLPI (base coordinate of each EF slot, stride 2).
-    exec.constants::public_inputs_address_ptr mem_load
-    exec.constants::absorb_scratch_ptr add.1
-    # => [dst, pi_ptr]
-    repeat.40
-        dup.1 mem_load
-        dup.1 mem_store
-        add.1
-        swap add.2 swap
-    end
-    drop drop
+#! Computes the bus prefix `α + i·γ` for bus scale factor `i = bus_id + 1`.
+#!
+#! Input:  [i, ...]
+#! Output: [p0, p1, ...]
+proc push_alpha_plus_i_gamma
+    dup
+    exec.constants::bus_gamma_ptr add.1 mem_load mul
+    # => [i·γ1, i, ...]
+    swap
+    exec.constants::bus_gamma_ptr mem_load mul
+    # => [i·γ0, i·γ1, ...]
+    exec.constants::aux_rand_elem_ptr add.3 mem_load
+    exec.constants::aux_rand_elem_ptr add.2 mem_load
+    # => [α0, α1, i·γ0, i·γ1, ...]
+    ext2add
+    # => [p0, p1, ...]
+end
 
-    # scratch[41] = MAX_AUX_INPUTS, scratch[42] = len(kernel_felts) = 4 * num_kernel_proc_digests.
-    # (scratch[43..43+4K] was already filled in natural order by `load_kernel_digests`.)
-    push.MAX_AUX_INPUTS exec.constants::absorb_scratch_ptr add.41 mem_store
-    exec.constants::tmp3 mem_load mul.4 exec.constants::absorb_scratch_ptr add.42 mem_store
+#! Folds a 4-felt message word into `msg = m0 + m1·β + m2·β^2 + m3·β^3` via Horner
+#! evaluation, consuming the word from the stack.
+#!
+#! Input:  [m0, m1, m2, m3, ...]
+#! Output: [msg0, msg1, ...]
+proc fold_digest_word
+    movup.3 push.0 swap
+    # => [m3, 0, m0, m1, m2, ...]
+    exec.push_beta ext2mul
+    movup.4 add
+    # => [acc0, acc1, m0, m1, ...]
+    exec.push_beta ext2mul
+    movup.3 add
+    # => [acc0, acc1, m0, ...]
+    exec.push_beta ext2mul
+    movup.2 add
+    # => [msg0, msg1, ...]
+end
 
-    # ---- Block-absorb scratch[0..L], L = 43 + 4 * num_kernel_proc_digests ----
-
-    # scratch_end = scratch + L (tmp1); nfb = L / 8 full blocks (kept on the stack).
-    push.43 exec.constants::tmp3 mem_load mul.4 add
-    # => [L]
-    dup exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
-    u32divmod.8 drop
-    # => [nfb]
-
-    # Load the sponge state once; it stays on the stack across every block permutation.
-    exec.random_coin::load_random_coin_state
-    exec.constants::absorb_scratch_ptr movdn.12
-    # => [R1, R2, C, ptr, nfb]
-    movup.13 dup push.0 neq
+#! Folds each kernel digest into the running boundary-correction accumulator on the stack.
+#!
+#! Each digest in `[base, base + 4·N)` contributes `1 / ((α + γ) + msg(d))` (KernelRomInit, a
+#! request) via Horner evaluation. The accumulator is kept on the stack across the loop (no
+#! per-term memory round-trip).
+#!
+#! Input:  [acc0, acc1, base, N, ...]
+#! Output: [acc0, acc1, ...]   (acc += Σ_i 1 / ((α + γ) + msg(digest_i)))
+proc fold_kernel_digests_into_acc
+    dup.3 push.0 neq
     while.true
-        sub.1 movdn.13
-        # => [R1, R2, C, ptr, nfb-1]
+        # Loop entry: [acc0, acc1, base, N, ...]
+        padw dup.6 mem_loadw_le
+        # => [d0, d1, d2, d3, acc0, acc1, base, N, ...]
+        exec.fold_digest_word
+        # => [msg0, msg1, acc0, acc1, base, N, ...]
+        push.BUS_ID_KERNEL_ROM_INIT_PLUS_ONE
+        exec.push_alpha_plus_i_gamma
+        # => [p0, p1, msg0, msg1, acc0, acc1, base, N, ...]
+        ext2add ext2inv
+        # => [t0, t1, acc0, acc1, base, N, ...]
+        ext2add
+        # => [acc0, acc1, base, N, ...]   (acc += t)
+        movup.2 add.4 movdn.2
+        # => [acc0, acc1, base+4, N, ...]
+        movup.3 sub.1 movdn.3
+        # => [acc0, acc1, base+4, N-1, ...]
+        dup.3 push.0 neq
+        # => [N-1 != 0, acc0, acc1, base+4, N-1, ...]
+    end
+    movup.3 drop movup.2 drop
+    # => [acc0, acc1, ...]
+end
+
+#! Reads the canonical word `[d0, d1, d2, d3]` at `reduced_inputs_ptr + offset` (written in step I)
+#! and computes the inverted bus term
+#!     inv_term = 1 / ((α + i·γ) + msg(d))
+#! where `i = bus_id_plus_one` and `msg(d) = Σ_{j<4} d_j·β^j`. The caller adds (request) or
+#! subtracts (response) the result from the boundary accumulator.
+#!
+#! Input:  [bus_id_plus_one, offset, ...]
+#! Output: [inv_term0, inv_term1, ...]
+proc fold_reduced_word_inv_term
+    padw
+    # => [0, 0, 0, 0, bus_id, offset, ...]
+    exec.constants::reduced_inputs_address_ptr mem_load
+    dup.6 add
+    # => [target, 0, 0, 0, 0, bus_id, offset, ...]
+    mem_loadw_le
+    # => [d0, d1, d2, d3, bus_id, offset, ...]
+
+    exec.fold_digest_word
+    # => [msg0, msg1, bus_id, offset, ...]
+
+    movup.2
+    # => [bus_id, msg0, msg1, offset, ...]
+    exec.push_alpha_plus_i_gamma
+    # => [p0, p1, msg0, msg1, offset, ...]
+    ext2add ext2inv
+    # => [inv_term0, inv_term1, offset, ...]
+
+    movup.2 drop
+    # => [inv_term0, inv_term1, ...]
+end
+
+#! Computes the outer-LogUp boundary correction `c_total` and stores it at `C_TOTAL_PTR`
+#! (step II). Requires the aux randomness to have been sampled into `AUX_RAND_ELEM_PTR` by
+#! `generate_aux_randomness` first.
+#!
+#! Derives `γ = β^16`, then folds the request/response terms over the caller-owned kernel digests
+#! at `KERNEL_DIGESTS_ADDRESS_PTR` (count at `NUM_KERNEL_DIGESTS_PTR`) and the program digest /
+#! transcript state in the reduced-inputs block, all staged in `verify_proof`. Mirrors the module
+#! banner's `c_total` definition and `MidenMultiAir::eval_external`.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc compute_outer_logup_correction
+    # γ = β^16 into BUS_GAMMA_PTR.
+    exec.compute_bus_gamma
+    # => [...]
+
+    # acc = 0; build [acc0, acc1, base, N] for the kernel fold.
+    push.0.0
+    exec.constants::kernel_digests_address_ptr mem_load movdn.2
+    exec.constants::num_kernel_digests_ptr mem_load movdn.3
+    # => [acc0, acc1, base, N, ...]   (acc = 0)
+
+    #    Request a) kernel digests: Σ_i 1 / ((α + γ) + msg(digest_i)).
+    exec.fold_kernel_digests_into_acc
+    # => [acc0, acc1, ...]
+
+    #    Request b) program digest: + 1 / ((α + 2γ) + msg(program)) from reduced_inputs+4.
+    push.REDUCED_INPUTS_PROGRAM_OFFSET push.BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE
+    exec.fold_reduced_word_inv_term
+    ext2add
+    # => [acc0, acc1, ...]
+
+    #    Request c) log-precompile init: + 1 / (α + 3γ) (the init message is all zeros).
+    push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
+    exec.push_alpha_plus_i_gamma
+    ext2inv
+    ext2add
+    # => [acc0, acc1, ...]
+
+    #    Response) transcript state: − 1 / ((α + 3γ) + msg(transcript)) from reduced_inputs+8.
+    push.REDUCED_INPUTS_TRANSCRIPT_OFFSET push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
+    exec.fold_reduced_word_inv_term
+    neg swap neg swap
+    ext2add
+    # => [acc0, acc1, ...]   (acc = requests − response)
+
+    #    Store c_total once.
+    exec.constants::c_total_ptr mem_store
+    exec.constants::c_total_ptr add.1 mem_store
+    # => [...]
+end
+
+#! Observes the 16-felt reduced-inputs window at `reduced_inputs_ptr + 0..+15` into the FS
+#! transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
+#!   Chunk 1: `[kernel_H | program_digest]`   at reduced_inputs+0..+7.
+#!   Chunk 2: `[transcript_state | zero_pad]` at reduced_inputs+8..+15.
+#! The trailing pad word is written to zero here so the absorption does not depend on the scratch
+#! region being zero-initialized.
+#!
+#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc absorb_reduced_inputs_window_into_fs
+    # Explicitly zero the trailing pad word at reduced_inputs+12 before absorbing the window.
+    padw exec.constants::reduced_inputs_address_ptr mem_load add.12 mem_storew_le dropw
+
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    exec.random_coin::load_random_coin_state
+    # => [R1, R2, C, ...]
+
+    # `mem_stream` consumes its pointer from stack[12].
+    exec.constants::reduced_inputs_address_ptr mem_load
+    movdn.12
+    # => [R1, R2, C, base, ...]
+
+    repeat.2
         mem_stream
         # Bind the absorbed length (8) into the capacity before each absorb permutation.
         movup.8 add.8 movdn.8
         exec.poseidon2::permute
-        movup.13 dup push.0 neq
     end
-    drop
-    # => [R1, R2, C, ptr_final]
+    # => [R1', R2', C', base+16, ...]
 
-    # Store the permuted state; stash ptr_final; reset input_len so the partial buffers from 0.
-    movup.12 exec.constants::tmp4 mem_store
     exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    # => [base+16, ...]
 
-    # ---- Absorb the trailing partial block (< 8 elements) via the buffered duplex ----
-    exec.constants::tmp4 mem_load
-    exec.constants::tmp1 mem_load
-    swap
-    # => [src, scratch_end]
-    dup.1 dup.1 neq
-    while.true
-        dup mem_load exec.random_coin::observe_felt
-        add.1
-        dup.1 dup.1 neq
-    end
-    drop drop
-end
-
-#! Loads the auxiliary randomness from the advice stack and reduces the kernel digests.
-#!
-#! Loads `[beta0, beta1, alpha0, alpha1]` (word-aligned for `horner_eval_ext`), precomputes
-#! `gamma = beta^16` for per-bus domain separation, then reduces the kernel digests; the reduced
-#! value overwrites the start of the kernel-digest region (in the ACE READ section).
-#!
-#! Input:
-#!      - Advice stack: [beta0, beta1, alpha0, alpha1, ...]
-#! Output: [...]
-proc finalize_kernel_reduction
-    # Load the auxiliary randomness (alpha and beta) from advice.
-    padw adv_loadw
-    exec.constants::aux_rand_nd_ptr mem_storew_le
-    dropw
-
-    # Compute gamma = beta^16 for per-bus domain separation, stored at BUS_GAMMA_PTR.
-    exec.constants::aux_rand_nd_ptr mem_load
-    exec.constants::aux_rand_nd_ptr push.1 add mem_load
-    # => [beta1, beta0, ...]
-    swap
-    # => [beta0, beta1, ...]
-    dup.1 dup.1 ext2mul   # beta^2
-    dup.1 dup.1 ext2mul   # beta^4
-    dup.1 dup.1 ext2mul   # beta^8
-    dup.1 dup.1 ext2mul   # beta^16 = gamma
-    push.0.0 movup.3 movup.3
-    exec.constants::bus_gamma_ptr mem_storew_le
-    dropw
-
-    # Reduce the kernel digests; the reduced value is stored at var_len_ptr.
-    exec.constants::variable_length_public_inputs_address_ptr mem_load
-    exec.constants::tmp3 mem_load
-    exec.reduce_kernel_digests
-end
-
-#! Reduces the kernel procedures digests using auxiliary randomness.
-#!
-#! Inputs:  [num_ker_procedures, digests_ptr, ...]
-#! Outputs: [...]
-#!
-#! where `digests_ptr` is a pointer to the kernel procedures digests. The reduced value
-#! `kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)` is stored as
-#! [kernel_corr0, kernel_corr1, 0, 0] at the original `digests_ptr`.
-proc reduce_kernel_digests
-    # Assert that the number of kernel procedures is at most 1023
-    dup u32lt.1024 assert.err="number of kernel procedures must be less than 1024"
-
-    # Save the original digests_ptr in TMP2 so we can store the result there later.
-    # (mem_stream will advance digests_ptr during the Horner loop.)
-    dup.1 exec.constants::tmp2 mem_store
-
-    # Store number of kernel procedures digests at TMP1 as [num_ker, 0, 0, num_ker].
-    # We keep only digests_ptr on the stack (dropping the counter word since we read
-    # it back from TMP1 later).
-    push.0.0 dup.2
-    exec.constants::tmp1 mem_storew_le
-    dropw
-    # => [digests_ptr, ...]
-
-    # Load alpha and beta. Pad with 4 zeros (padw) so mem_loadw_le overwrites the
-    # padding word instead of digests_ptr (which sits at position 4 after padding).
-    padw
-    exec.constants::aux_rand_nd_ptr mem_loadw_le
-    # => [beta0, beta1, alpha0, alpha1, digests_ptr, ...]
-
-    # Compute bus_prefix = alpha + gamma for per-bus domain separation.
-    # gamma = beta^16 was precomputed and stored at BUS_GAMMA_PTR.
-    # KERNEL_ROM_INIT = 0, so bus_prefix = alpha + (0+1)*gamma = alpha + gamma.
-    movup.3 movup.3
-    # => [alpha0, alpha1, beta0, beta1, digests_ptr, ...]
-    exec.constants::bus_gamma_ptr mem_load
-    # => [gamma0, alpha0, alpha1, beta0, beta1, digests_ptr, ...]
-    exec.constants::bus_gamma_ptr push.1 add mem_load
-    # => [gamma1, gamma0, alpha0, alpha1, beta0, beta1, digests_ptr, ...]
-    swap
-    # => [gamma0, gamma1, alpha0, alpha1, beta0, beta1, digests_ptr, ...]
-    ext2add
-    # => [prefix0, prefix1, beta0, beta1, digests_ptr, ...]
-
-    # Push the `horner_eval_ext` accumulator
-    push.0.0
-    # => [acc0, acc1, prefix0, prefix1, beta0, beta1, digests_ptr, ...]
-
-    # Push the pointer to the evaluation point beta
-    exec.constants::aux_rand_nd_ptr
-    # => [beta_ptr, acc0, acc1, prefix0, prefix1, beta0, beta1, digests_ptr, ...]
-
-    # Get the pointer to kernel procedures digests
-    movup.7
-    # => [digests_ptr, beta_ptr, acc0, acc1, prefix0, prefix1, beta0, beta1, ...]
-
-    # Set up the stack for `mem_stream` + `horner_eval_ext`
-    swapw
-    padw padw
-    # => [Y, Y, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, acc0, acc1, ...]
-    # where `Y` is a garbage word.
-
-    # Build a boolean flag for the expression `num_ker_procedures > 0`.
-    # Use mem_load (not mem_loadw_le) to read only the counter without polluting the stack.
-    exec.constants::tmp1 mem_load
-    # => [num_ker, Y, Y, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, acc0, acc1, ...]
-    push.0
-    neq
-
-    while.true
-        # Compute `acc = sum {0<=i<4} digest[i] * beta^i` via Horner evaluation.
-        # The stored 8-felt digest is [0,0,0,0, d3,d2,d1,d0]: the 4 leading zeros are
-        # Horner no-ops (contribute 0*β^4..0*β^7), so the result is just d0 + d1*β +
-        # d2*β^2 + d3*β^3 — exactly the β^0..β^3 payload we want. One mem_stream pass.
-        repeat.1
-            mem_stream
-            horner_eval_base
-        end
-        # => [Y, Y, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, acc0, acc1, ...]
-
-        swapdw
-        # => [prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, acc0, acc1, Y, Y, ...]
-
-        movup.7 movup.7
-        # => [acc0, acc1, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, Y, Y, ...]
-
-        # Compute `term = prefix + acc = bus_prefix + sum{i = 0..4} digest[i] * beta^i`
-        dup.3 dup.3
-        ext2add
-        # => [term0, term1, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, Y, Y, ...]
-
-        movdn.15
-        movdn.15
-        # => [prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, Y, Y, term0, term1, ...]
-
-        push.0 movdn.6
-        push.0 movdn.6
-        # => [prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, 0, 0, Y, Y, term0, term1, ...]
-
-        swapdw
-        # => [Y, Y, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, 0, 0, term0, term1, ...]
-
-        # Subtract 1 from num_ker_digests and check > 0.
-        exec.constants::tmp1 mem_load sub.1
-        # => [counter-1, D, D, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, 0, 0, ...]
-        dup exec.constants::tmp1 mem_store
-        # => [counter-1, D, D, ...]
-        push.0 neq
-        # => [flag, D, D, ...]
-    end
-    # => [Y, Y, prefix0, prefix1, beta0, beta1, digests_ptr, beta_ptr, 0, 0, term0, term1, ...]
-
-    dropw dropw dropw
-    # => [digests_ptr_advanced, beta_ptr, 0, 0, termN_0, termN_1, ..., term1_0, term1_1, ...]
-    drop drop drop drop
-    # => [termN_0, termN_1, ..., term1_0, term1_1, ...]
-
-    # Read the original num_ker_procedures from TMP1+3 (preserved from initial mem_storew_le).
-    # TMP1 word was [num_ker, 0, 0, num_ker]; TMP1+3 still holds the original value.
-    exec.constants::tmp1 push.3 add mem_load
-    # => [N, termN_0, termN_1, ..., term1_0, term1_1, ...]
-
-    # Accumulate the sum of reciprocals: acc = Σ 1/term_i.
-    # We push the additive identity element, the number of elements to accumulate, and a boolean
-    # flag to enter or not the loop.
-    push.0
-    push.0
-    movup.2
-    dup
-    push.0
-    neq
-    # => [loop, n, acc0, acc1, term1_0, term1_1, ..., termn_0, termn_1, ...]
-
-    while.true
-        sub.1 movdn.4
-        # => [acc0, acc1, term1_0, term1_1, n - 1, ..., termn_0, termn_1, ...]
-        movup.3 movup.3
-        # => [term1_0, term1_1, acc0, acc1, n - 1, ...]
-        ext2inv
-        # => [inv_t0, inv_t1, acc0, acc1, n - 1, ...]
-        ext2add
-        # => [acc0', acc1', n - 1, ..., termn_0, termn_1, ...]
-        movup.2
-        dup
-        push.0
-        neq
-        # => [loop, n - 1, acc0', acc1', term1_0, term1_1, ..., termn_0, termn_1, ...]
-    end
-    # => [0, sum0, sum1, ...] where sum = Σ 1/term_i
-
-    # kernel_corr = Σ 1/term_i (no negation: chiplet removes, boundary adds).
     drop
-    # => [kernel_corr0, kernel_corr1, ...]
+end
 
-    # Store the result at `digests_ptr` as `[kernel_corr0, kernel_corr1, 0, 0]`
-    # Note that `digests_ptr` points to the group that we just reduced above and hence it is safe
-    # to overwrite it with the result.
-    push.0.0
-    movup.3
-    movup.3
-    # => [prod0, prod1, 0, 0, ...]
-    exec.constants::tmp2 mem_load
-    # => [original_digests_ptr, prod0, prod1, 0, 0, ...]
-    mem_storew_le
-    dropw
-    # => [...]
+#! Phase 3b — loads the fixed-length public inputs (stack i/o) from caller memory at
+#! `STACK_IO_ADDRESS_PTR`, stores them at `pi_ptr` as extension field elements (each base felt at
+#! offset `2*i`, zero in the high coordinate), and absorbs them into the FS transcript. Each
+#! `load_base_store_extension_double_word_from_mem + permute` iteration absorbs 8 base felts via
+#! direct sponge permutation.
+#!
+#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc load_public_inputs
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    exec.random_coin::load_random_coin_state
+    # => [R1, R2, C, ...]
+
+    exec.constants::stack_io_address_ptr mem_load
+    movdn.12
+    exec.constants::public_inputs_address_ptr mem_load
+    movdn.12
+    # => [R1, R2, C, pi_ptr, stack_io_ptr, ...]
+
+    # 4 iterations × 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
+    repeat.4
+        exec.public_inputs::load_base_store_extension_double_word_from_mem
+        # Bind the absorbed length (8) into the capacity before each absorb permutation.
+        movup.8 add.8 movdn.8
+        exec.poseidon2::permute
+    end
+    # => [R1', R2', C', pi_ptr + 64, stack_io_ptr + 32, ...]
+
+    exec.random_coin::store_random_coin_state
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    # => [pi_ptr + 64, stack_io_ptr + 32, ...]
+
+    drop drop
 end

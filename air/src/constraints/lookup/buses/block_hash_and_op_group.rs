@@ -1,22 +1,15 @@
-//! Merged block-hash + op-group column: block-hash queue (G_block_hash) + op-group table
-//! (G_op_group) as one mutually-exclusive group.
+//! Block-hash table and op-group table interactions in one lookup column.
 //!
-//! - **G_block_hash** (block-hash queue) fires only on control-flow opcodes: JOIN, SPLIT,
-//!   LOOP/REPEAT, DYN/DYNCALL/CALL/SYSCALL, END.
-//! - **G_op_group** (op-group table) fires only on SPAN/RESPAN (insertion side) or in-span decode
-//!   rows (removal side).
+//! - Block-hash table rows come from control-flow opcodes: JOIN, SPLIT, LOOP/REPEAT,
+//!   DYN/DYNCALL/CALL/SYSCALL, and END.
+//! - Op-group table rows come from SPAN/RESPAN batch setup rows and in-span decode rows.
 //!
-//! Control-flow opcodes are never in-span, and SPAN/RESPAN are not in G_block_hash's
-//! variant list, so no row fires both buses. The merged group's
-//! `(deg(V_g), deg(U_g))` is the elementwise max of the two individual buses:
-//! `(max(6, 7), max(8, 8)) = (7, 8)`, giving a column transition of
-//! `max(1 + 8, 7) = 9` — the same saturated cost the two original columns had
-//! individually, but using **one** column instead of two, saving one accumulator column in
-//! `CoreAir`'s LogUp column count.
+//! These row sets are disjoint. Control-flow opcodes are never in-span, and SPAN/RESPAN
+//! are not block-hash table variants. Block-hash contributes `(V_g, U_g) = (6, 8)`.
+//! Op-group contributes `(7, 8)`. The shared column uses the max, `(7, 8)`.
 //!
-//! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
-//! merged group's degree is unchanged under either mode. The cached-encoding optimization
-//! can be reintroduced later if symbolic expression growth becomes a bottleneck.
+//! The emitter uses plain `col.group` for both buses. Cached encoding does not change the
+//! merged group degree.
 
 use core::array;
 
@@ -35,17 +28,13 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// G_block_hash (control-flow opcodes): largest branch is JOIN's 2-add batch.
-/// G_op_group (SPAN/RESPAN insertions + in-span decode removal): largest branch is g8's
-/// 7-add batch. Insertions (batch-setup rows) and the removal (in-span decode rows) are
-/// mutually exclusive by construction.
-/// The module header establishes G_block_hash and G_op_group are row-disjoint — control-flow
-/// opcodes are never in-span, and SPAN/RESPAN aren't control-flow. So the per-row max is
-/// `max(2, 7) = 7`.
+/// - Block-hash table: JOIN emits the largest batch, with 2 fractions.
+/// - Op-group table: g8 emits the largest batch, with 7 fractions.
+///
+/// The two row sets are disjoint, so the per-row max is `max(2, 7) = 7`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 7;
 
-/// Emit the merged block-hash queue (G_block_hash) + op-group table (G_op_group) column as a
-/// single mutually-exclusive group.
+/// Emit the shared block-hash table and op-group table column.
 pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -69,8 +58,6 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let h_1: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[4 + i]);
     let s0 = stk.get(0);
 
-    // G_block_hash per-row-type flags. `f_loop_body` / `f_child` are sums of single-use
-    // op flags, bound locally since each is consumed once inside its `.add(...)` call.
     let f_join = op_flags.join();
     let f_split = op_flags.split();
     // LOOP unconditionally enqueues the body (do-while semantics) and REPEAT enqueues each
@@ -80,19 +67,14 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let f_end = op_flags.end();
     let f_push = op_flags.push();
 
-    // G_op_group per-batch-size selectors — `c0` is used in three places (g8 gate, g4's
-    // `(1 - c0)`, g2's `(1 - c0)`), `c1`/`c2` in two places each. Kept as named `LB::Expr`
-    // bindings per the style rule (used 2+ times).
+    // Op-group batch-size selectors.
     let c0: LB::Expr = dec.batch_flags[0].into();
     let c1: LB::Expr = dec.batch_flags[1].into();
     let c2: LB::Expr = dec.batch_flags[2].into();
 
-    // `group_count` is consumed by the 3 insertion batches AND the removal, so 4+ places.
     let gc: LB::Expr = dec.group_count.into();
 
-    // G_op_group removal flag: `in_span · (gc - gc_next)`. Computed once outside the
-    // removal closure because it's the `flag` argument of `g.remove`, not part of the
-    // message construction.
+    // Op-group removal flag: `in_span * (gc - gc_next)`.
     let in_span: LB::Expr = dec.in_span.into();
     let gc_next: LB::Expr = dec_next.group_count.into();
     let f_rem = in_span * (gc.clone() - gc_next);
@@ -102,9 +84,9 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
             col.group(
                 "merged_interactions",
                 |g| {
-                    // =================== G_block_hash BLOCK HASH QUEUE ===================
+                    // =================== BLOCK HASH TABLE ===================
 
-                    // JOIN: two children — `h_0` first, `h_1` second.
+                    // JOIN: two children. `h_0` is first, `h_1` is second.
                     g.batch(
                         "join",
                         f_join,
@@ -169,9 +151,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // END: pop the queue entry. `is_first_child` distinguishes the head-of-queue
-                    // case via the next-row control-flow flags, and `is_loop_body` comes from the
-                    // typed END overlay on the current row.
+                    // END: remove the current child from the block-hash table.
                     g.remove(
                         "end",
                         f_end,
@@ -198,7 +178,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         Deg { v: 4, u: 8 },
                     );
 
-                    // =================== G_op_group OP GROUP TABLE ===================
+                    // =================== OP GROUP TABLE ===================
 
                     // g8: c0 triggers a 7-add batch (groups 1..=7). Groups 1..=3 come from `h_0`
                     // and groups 4..=7 from `h_1`.

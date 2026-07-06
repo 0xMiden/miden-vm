@@ -77,8 +77,7 @@ fn enforce_cryptostream_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let gate = builder.is_transition() * op_flags.cryptostream();
-    let builder = &mut builder.when(gate);
+    let builder = &mut builder.when(op_flags.cryptostream());
 
     let s = &local.stack.top;
     let s_next = &next.stack.top;
@@ -137,12 +136,9 @@ fn enforce_hornerbase_constraints<AB>(
     let s_next = &next.stack.top;
     let helpers = local.decoder.user_op_helpers();
 
-    // Stack registers preserved during transition.
-    {
-        let builder = &mut horner_builder.when_transition();
-        for i in 0..14 {
-            builder.assert_eq(s_next[i], s[i]);
-        }
+    // Stack registers preserved.
+    for i in 0..14 {
+        horner_builder.assert_eq(s_next[i], s[i]);
     }
 
     // Extension element alpha and its powers.
@@ -172,8 +168,8 @@ fn enforce_hornerbase_constraints<AB>(
     // Intermediate temporaries match expected polynomial evaluations.
     horner_builder.assert_eq_quad(tmp0, tmp0_expected);
     horner_builder.assert_eq_quad(tmp1, tmp1_expected);
-    // Accumulator updated to next Horner step during transition.
-    horner_builder.when_transition().assert_eq_quad(acc_next, acc_expected);
+    // Accumulator updated to next Horner step.
+    horner_builder.assert_eq_quad(acc_next, acc_expected);
 }
 
 /// HORNEREXT: degree-3 polynomial evaluation over the quadratic extension field.
@@ -214,12 +210,9 @@ fn enforce_hornerext_constraints<AB>(
     let s_next = &next.stack.top;
     let helpers = local.decoder.user_op_helpers();
 
-    // Stack registers preserved during transition.
-    {
-        let builder = &mut horner_builder.when_transition();
-        for i in 0..14 {
-            builder.assert_eq(s_next[i], s[i]);
-        }
+    // Stack registers preserved.
+    for i in 0..14 {
+        horner_builder.assert_eq(s_next[i], s[i]);
     }
 
     // Extension element alpha and its square.
@@ -246,8 +239,8 @@ fn enforce_hornerext_constraints<AB>(
 
     // Intermediate temporary matches expected polynomial evaluation.
     horner_builder.assert_eq_quad(tmp, tmp_expected);
-    // Accumulator updated to next Horner step during transition.
-    horner_builder.when_transition().assert_eq_quad(acc_next, acc_expected);
+    // Accumulator updated to next Horner step.
+    horner_builder.assert_eq_quad(acc_next, acc_expected);
 }
 
 /// FRIE2F4: FRI layer folding — folds 4 extension-field query evaluations into 1.

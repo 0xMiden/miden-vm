@@ -77,34 +77,25 @@ pub fn enforce_main<AB>(
     // -------------------------------------------------------------------------
 
     // ADD: s0' = s0 + s1
-    builder
-        .when_transition()
-        .when(is_add)
-        .assert_eq(s0_next.clone(), s0.clone() + s1.clone());
+    builder.when(is_add).assert_eq(s0_next.clone(), s0.clone() + s1.clone());
 
     // NEG: s0' = -s0
-    builder.when_transition().when(is_neg).assert_zero(s0_next.clone() + s0.clone());
+    builder.when(is_neg).assert_zero(s0_next.clone() + s0.clone());
 
     // MUL: s0' = s0 * s1
-    builder
-        .when_transition()
-        .when(is_mul)
-        .assert_eq(s0_next.clone(), s0.clone() * s1.clone());
+    builder.when(is_mul).assert_eq(s0_next.clone(), s0.clone() * s1.clone());
 
     // INV: s0' * s0 = 1
-    builder.when_transition().when(is_inv).assert_one(s0_next.clone() * s0.clone());
+    builder.when(is_inv).assert_one(s0_next.clone() * s0.clone());
 
     // INCR: s0' = s0 + 1
-    builder
-        .when_transition()
-        .when(is_incr)
-        .assert_eq(s0_next.clone(), s0.clone() + F_1);
+    builder.when(is_incr).assert_eq(s0_next.clone(), s0.clone() + F_1);
 
     // NOT: s0 is boolean, s0 + s0' = 1.
     {
         let builder = &mut builder.when(is_not);
         builder.assert_bool(s0.clone());
-        builder.when_transition().assert_eq(s0.clone() + s0_next.clone(), F_1);
+        builder.assert_eq(s0.clone() + s0_next.clone(), F_1);
     }
 
     // AND: s0, s1 are boolean, s0' = s0 * s1.
@@ -112,7 +103,7 @@ pub fn enforce_main<AB>(
         let builder = &mut builder.when(is_and);
         builder.assert_bool(s0.clone());
         builder.assert_bool(s1.clone());
-        builder.when_transition().assert_eq(s0_next.clone(), s0.clone() * s1.clone());
+        builder.assert_eq(s0_next.clone(), s0.clone() * s1.clone());
     }
 
     // OR: s0, s1 are boolean, s0' = s0 + s1 - s0 * s1.
@@ -120,17 +111,14 @@ pub fn enforce_main<AB>(
         let builder = &mut builder.when(is_or);
         builder.assert_bool(s0.clone());
         builder.assert_bool(s1.clone());
-        builder
-            .when_transition()
-            .assert_eq(s0_next.clone(), s0.clone() + s1.clone() - s0.clone() * s1.clone());
+        builder.assert_eq(s0_next.clone(), s0.clone() + s1.clone() - s0.clone() * s1.clone());
     }
 
     // EQ: if s0 != s1, h0 acts as 1/(s0 - s1) and forces s0' = 0; if equal, s0' = 1.
     // eq_diff * s0_next and the inverse witness constraint are intrinsic (conditional inverse).
     let eq_diff: AB::Expr = s0.clone() - s1.clone();
     {
-        let gate = builder.is_transition() * is_eq;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_eq);
         builder.assert_zero(eq_diff.clone() * s0_next.clone());
         builder.assert_eq(s0_next.clone(), AB::Expr::ONE - eq_diff * uop_h0.clone());
     }
@@ -138,8 +126,7 @@ pub fn enforce_main<AB>(
     // EQZ: if s0 != 0, h0 acts as 1/s0 and forces s0' = 0; if zero, s0' = 1.
     // s0 * s0_next and the inverse witness constraint are intrinsic (conditional inverse).
     {
-        let gate = builder.is_transition() * is_eqz;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_eqz);
         builder.assert_zero(s0.clone() * s0_next.clone());
         builder.assert_eq(s0_next.clone(), AB::Expr::ONE - s0.clone() * uop_h0.clone());
     }
@@ -156,8 +143,7 @@ pub fn enforce_main<AB>(
     // EXPACC transition: squaring, exp_val witness, accumulation, bit decomposition, and boolean
     // check.
     {
-        let gate = builder.is_transition() * is_expacc;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_expacc);
         builder.assert_eq(exp_next, exp.clone() * exp.clone());
         builder.assert_eq(exp_val.clone(), (exp - F_1) * exp_bit.clone() + F_1);
         builder.assert_eq(acc_next, acc * exp_val);
@@ -179,8 +165,7 @@ pub fn enforce_main<AB>(
 
     // EXT2MUL transition: quadratic extension multiplication producing (c0, c1) from (a, b).
     {
-        let gate = builder.is_transition() * is_ext2mul;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_ext2mul);
         builder.assert_eq(ext_d0, ext_b0.clone());
         builder.assert_eq(ext_d1, ext_b1.clone());
         builder.assert_eq(ext_c0, ext_a0_b0.clone() + ext_a1_b1.clone() * F_7);
@@ -211,8 +196,7 @@ pub fn enforce_main<AB>(
         + is_u32mul.clone()
         + is_u32madd.clone();
     {
-        let gate = builder.is_transition() * u32_two_outputs;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(u32_two_outputs);
         builder.assert_eq(s0_next.clone(), u32_v_lo.clone());
         builder.assert_eq(s1_next.clone(), u32_v_hi.clone());
     }
@@ -228,8 +212,7 @@ pub fn enforce_main<AB>(
 
     // U32SUB: s1 = s0 + s1' - s0' * 2^32, s0' is boolean (borrow), s1' = v_lo.
     {
-        let gate = builder.is_transition() * is_u32sub;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_u32sub);
         builder.assert_eq(s1.clone(), s0.clone() + s1_next.clone() - s0_next.clone() * TWO_POW_32);
         builder.assert_bool(s0_next.clone());
         builder.assert_eq(s1_next.clone(), u32_v_lo.clone());
@@ -240,8 +223,7 @@ pub fn enforce_main<AB>(
 
     // U32DIV: s1 = s0 * s1' + s0', range checks on remainder and quotient bounds.
     {
-        let gate = builder.is_transition() * is_u32div;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_u32div);
         builder.assert_eq(s1.clone(), s0.clone() * s1_next.clone() + s0_next.clone());
         builder.assert_eq(s1 - s1_next.clone(), u32_v_lo.clone());
         builder.assert_eq(s0 - s0_next.clone(), u32_v_hi.clone() + F_1);
@@ -249,8 +231,7 @@ pub fn enforce_main<AB>(
 
     // U32ASSERT2: verifies both stack elements are valid u32 values.
     {
-        let gate = builder.is_transition() * is_u32assert2;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_u32assert2);
         builder.assert_eq(s0_next, u32_v_hi);
         builder.assert_eq(s1_next, u32_v_lo);
     }

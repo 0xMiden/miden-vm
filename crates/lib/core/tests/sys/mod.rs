@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, WORD_SIZE, Word,
+    Felt, Word,
     events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
@@ -32,47 +32,22 @@ fn truncate_stack() {
 
 #[test]
 fn reduce_kernel_digests_upper_bound() {
-    // init_seed contract:
-    //   Stack: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
-    //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
+    // `stage_reduced_inputs` takes the digest count `N` as an operand and asserts `N < 256`
+    // (mirroring `MultiAir::max_aux_inputs`). The bound is its first check, so no caller memory or
+    // advice is required.
     //
-    // process_public_inputs advice stack (consumed in order):
-    //   1. load_public_inputs: 40 fixed-length PI felts (5 iterations of 8)
-    //   2. reduce_variable_length_public_inputs:
-    //        - 1 felt (num_kernel_proc_digests)
-    //        - num_kernel_proc_digests * 8 felts (digests via adv_pipe)
-    //        - 4 felts (aux randomness via adv_loadw)
-    //   3. reduce_kernel_digests asserts num_kernel_proc_digests < 1024
+    // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3].
     let source = "
-        use miden::core::stark::random_coin
-        use miden::core::stark::constants
         use miden::core::sys::vm::public_inputs
         begin
-            push.27 exec.constants::set_number_queries
-            push.0  exec.constants::set_query_pow_bits
-            push.0  exec.constants::set_deep_pow_bits
-            push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10 push.10
-            exec.random_coin::init_seed
-            exec.public_inputs::process_public_inputs
+            exec.public_inputs::stage_reduced_inputs
         end
     ";
 
-    let num_kernel_proc_digests = 1024_usize;
-    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
-    let fixed_length_public_inputs = vec![0_u64; 40];
-    let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
-    let auxiliary_rand_values = [0_u64; 4];
+    let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
+    let initial_stack = vec![0_u64, num_kernel_proc_digests, 4096, 1, 2, 3, 4];
 
-    // Advice layout (consumed top-to-bottom):
-    //   40 fixed-len PI, 1 num_kernel_proc_digests, 8192 digest felts, 4 aux rand
-    let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(&fixed_length_public_inputs);
-    advice_stack.push(num_kernel_proc_digests as u64);
-    advice_stack.extend_from_slice(&kernel_procedures_digests);
-    advice_stack.extend_from_slice(&auxiliary_rand_values);
-
-    let test = build_test!(source, &[], &advice_stack);
+    let test = build_test!(source, &initial_stack);
     expect_assert_error_message!(test);
 }
 

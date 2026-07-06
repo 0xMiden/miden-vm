@@ -574,12 +574,8 @@ end
 #! More specifically, we draw two challenges, alpha and beta. This means that our multi-set hash function
 #! has the form `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` for a message `m`.
 #!
-#! As these random challenges have already been used non-deterministically in prior computations, we
-#! also check that the generated challenges match the non-deterministically provided one.
-#!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 20
 pub proc generate_aux_randomness
 
     exec.sample_ext
@@ -587,21 +583,8 @@ pub proc generate_aux_randomness
     # => [beta0, beta1, alpha0, alpha1, ...]
 
     exec.constants::aux_rand_elem_ptr mem_storew_le
-    # => [beta0, beta1, alpha0, alpha1, ...]
-
-    # Pad with zeros, load with mem_loadw_le overwriting the padding so that we can compare
-    padw
-    # => [0, 0, 0, 0, beta0, beta1, alpha0, alpha1, ...]
-    exec.constants::aux_rand_nd_ptr mem_loadw_le
-    # => [nd_beta0, nd_beta1, nd_alpha0, nd_alpha1, beta0, beta1, alpha0, alpha1, ...]
-
-    # Assert sampled values match the non-deterministically provided ones.
-    # Comparison order: beta0, beta1, alpha0, alpha1 (memory offset 0, 1, 2, 3).
-    movup.4 assert_eq.err="aux randomness mismatch at element 0 (beta0)"
-    movup.3 assert_eq.err="aux randomness mismatch at element 1 (beta1)"
-    movup.2 assert_eq.err="aux randomness mismatch at element 2 (alpha0)"
-    assert_eq.err="aux randomness mismatch at element 3 (alpha1)"
-    #=> [...]
+    dropw
+    # => [...]
 end
 
 #! Draw constraint composition random coefficient and save it at `compos_coef_ptr`.
