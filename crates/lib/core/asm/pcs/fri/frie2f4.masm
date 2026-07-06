@@ -7,12 +7,9 @@ use miden::core::pcs::fri::helper
 #!
 #! Input:  [layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
-#!
-#! Cycles: 99
-@locals(12)
 pub proc verify_query_layer
 
-    # load layer commitment C as well as [d_size, t_depth, a0, a1] (7 cycles)
+    # Load layer commitment C and layer metadata.
     swapdw
     movup.8
     add.4
@@ -22,28 +19,26 @@ pub proc verify_query_layer
     mem_loadw_le   # load C from layer_ptr
     # => [C, d_size, t_depth, a0, a1, poe, p, e0, e1, layer_ptr, rem_ptr, ...]
 
-    # verify Merkle auth path for (index = f_pos, depth = t_depth, Root = C) (19 cycles)
+    # Verify the Merkle auth path for (index = f_pos, depth = t_depth, root = C).
     swapw.2             # [poe, p, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     swap                # [p, poe, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.4             # [d_size, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
-    
-    sub.1               # mask = d_size - 1
-    dup.1
-    u32and              # [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
-    dup.5 loc_store.0
-    # => [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
+
+    # Split the query position into the Merkle leaf position and the fold-4 coset.
+    u32divmod           # [f_pos, coset, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
+    # => [f_pos, coset, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.5
     movupw.2
     dup.5
 
-    movup.5             # [t_depth, f_pos, C, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
-    mtree_get           # [V, C, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    movup.5             # [t_depth, f_pos, C, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    mtree_get           # [V, C, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     adv.push_mapval
     swapw
-    # => [C, V, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [C, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # unhash V and save the pre-image in locaddr.0 and locaddr.4; we don't clear values of C
-    # because adv_pipe overwrites the first 8 elements of the stack (15 cycles)
+    # Hash the opened row. `adv_pipe` caches the row in tmp3/tmp4 and overwrites the
+    # first 8 stack elements.
     exec.constants::tmp3
     movdn.4
     padw
@@ -51,9 +46,9 @@ pub proc verify_query_layer
     padw
     adv_pipe
     exec.poseidon2::permute
-    # => [T0, T1, T2, ptr, V, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
+    # => [T0, T1, T2, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
 
-    # assert T0 == V (16 cycles)
+    # Assert that the opened row hashes to the committed leaf.
     swapw
     swapw.3
     drop
@@ -65,39 +60,39 @@ pub proc verify_query_layer
     movup.9
     assert_eq
 
-    # load (v0, ..v7) from memory (8 cycles)
+    # Load the opened row from memory.
     exec.constants::tmp4
     mem_loadw_le
     swapw
     exec.constants::tmp3
     mem_loadw_le
-    # => [v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # the FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low
+    # The FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low
     # two bits select the bit-reversed position inside the four-element folded row. Build that
-    # synthetic index as (4 * f_pos) + rev_2(p >> t_depth).
-    dup.9 loc_load.0 u32shr
-    # => [p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # synthetic index as (4 * f_pos) + rev_2(coset).
+    dup.9
+    # => [coset, v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     dup push.1 u32and u32shl.1
-    # => [2 * bit0, p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [2 * bit0, coset, v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     swap push.2 u32and u32shr.1
-    # => [bit1, 2 * bit0, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [bit1, 2 * bit0, v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     add
-    # => [rev_2(p >> t_depth), v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [rev_2(coset), v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     dup.9 mul.4 add
-    # => [p_for_fold, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [p_for_fold, v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     movdn.9
-    # => [v0, ..., v7, f_pos, p_for_fold, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [v0, ..., v7, f_pos, p_for_fold, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     movup.10
-    # => [p, v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    # => [coset, v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     drop
     # => [v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # fold by 4 (1 cycle)
+    # Fold by 4.
     fri_ext2fold4
     # => [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne0, ne1, rem_ptr, ...]
 
-    # prepare for next iteration (10 cycles)
+    # Prepare for the next layer.
     swapdw
     # => [x, x, layer_ptr + 8, poe^4, f_pos, ne0, ne1, rem_ptr, x, x, x, x, x, x, x, x, ...]
     dup.2     # [layer_ptr+8, x, x, layer_ptr+8, poe^4, f_pos, ne0, ne1, rem_ptr, ]
@@ -121,18 +116,16 @@ end
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
 #! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
 #!
-#! - poe is g^rev(p).
+#! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.
 #! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
 #!
-#! Cycles: 107 + num_layers * 80
 pub proc verify_query_64
 
-    # prepare stack to be in a form that leverages the fri_ext2fold4 instruction output stack state
-    # (16 cycles)
+    # Prepare the stack to match the shape expected by `verify_query_layer`.
     dup.5
     dup.5
     padw
@@ -180,18 +173,16 @@ end
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
 #! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
 #!
-#! - poe is g^rev(p).
+#! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.
 #! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
 #!
-#! Cycles: 140 + num_layers * 80
 pub proc verify_query_128
 
-    # prepare stack to be in a form that leverages the fri_ext2fold4 instruction output stack state
-    # (16 cycles)
+    # Prepare the stack to match the shape expected by `verify_query_layer`.
     dup.5
     dup.5
     padw
@@ -249,7 +240,7 @@ end
 #!   this procedure is undefined.
 #! - rem_ptr is a pointer to the first tuple of two consecutive degree 2 extension field
 #!   elements making up the remainder polynomial. This procedure is specialized to the case when
-#!   the the degree of the latter is less than 64.
+#!   the degree of the latter is less than 64.
 #!
 #! The memory referenced above is used contiguously, as follows:
 #!
@@ -259,16 +250,13 @@ end
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
 #!
-#! Cycles: 24 + num_queries * (107 + num_layers * 80)
 @locals(4)
 proc verify_64
 
-    # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
-    # (3 cycles)
+    # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     loc_storew_le.0
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
-    # (4 cycles)
     dup
     dup.2
     neq
@@ -281,15 +269,15 @@ proc verify_64
     movup.4
 
     while.true
-        # load [poe, p, e0, e1] from memory i.e. next query data (7 cycles)
+        # Load [poe, p, e0, e1] for the next query.
         movup.4
         mem_loadw_le
         # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
 
-        # we now have everything to verify query p
+        # Verify query p.
         exec.verify_query_64
 
-        # prepare for next iteration (18 cycles)
+        # Prepare for the next query.
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
@@ -301,9 +289,9 @@ proc verify_64
         dup.5
         dup.5
         neq
-        #=> [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+        # => [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
     end
-    #=> [x, x, x, x, x, x, x, x, ...]
+    # => [x, x, x, x, x, x, x, x, ...]
 
     dropw dropw
 end
@@ -328,7 +316,7 @@ end
 #!   this procedure is undefined.
 #! - rem_ptr is a pointer to the first tuple of two consecutive degree 2 extension field
 #!   elements making up the remainder polynomial. This procedure is specialized to the case when
-#!   the the degree of the latter is less than 128.
+#!   the degree of the latter is less than 128.
 #!
 #! The memory referenced above is used contiguously, as follows:
 #!
@@ -338,16 +326,13 @@ end
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
 #!
-#! Cycles: 24 + num_queries * (140 + num_layers * 80)
 @locals(4)
 proc verify_128
 
-    # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
-    # (3 cycles)
+    # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     loc_storew_le.0
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
-    # (4 cycles)
     dup
     dup.2
     neq
@@ -360,15 +345,15 @@ proc verify_128
     movup.4
 
     while.true
-        # load [poe, p, e0, e1] from memory i.e. next query data (7 cycles)
+        # Load [poe, p, e0, e1] for the next query.
         movup.4
         mem_loadw_le
         # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
 
-        # we now have everything to verify query p
+        # Verify query p.
         exec.verify_query_128
 
-        # prepare for next iteration (18 cycles)
+        # Prepare for the next query.
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
@@ -380,9 +365,9 @@ proc verify_128
         dup.5
         dup.5
         neq
-        #=> [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+        # => [?, x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
     end
-    #=> [x, x, x, x, x, x, x, x, ...]
+    # => [x, x, x, x, x, x, x, x, ...]
 
     dropw dropw
 end
@@ -393,24 +378,17 @@ end
 #! Input:  [...]
 #! Output: [...]
 #!
-#! Cycles:
-#!
-#!  Polynomial degree less than 64: 24 + num_queries * (107 + num_layers * 80)
-#!  Polynomial degree less than 128: 24 + num_queries * (140 + num_layers * 80)
 pub proc verify
-    # Get domain generator and pointer to the remainder codeword
-    # (4 cycles)
+    # Get domain generator and pointer to the remainder codeword.
     exec.constants::get_lde_domain_generator
     exec.constants::get_remainder_poly_address
     # => [remainder_poly_ptr, g, ...]
 
-    # Get the pointer to the first layer commitment
-    # (1 cycles)
+    # Get the pointer to the first layer commitment.
     exec.constants::fri_com_ptr
     # => [fri_layer_ptr, remainder_poly_ptr, g, ...]
 
-    # Get the pointer to the first FRI query to the top
-    # (2 cycles)
+    # Get the pointer to the first FRI query.
     exec.constants::get_fri_queries_address
     # => [query_ptr, fri_layer_ptr, remainder_poly_ptr, g, ...]
 
