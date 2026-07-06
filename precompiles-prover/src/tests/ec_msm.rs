@@ -12,6 +12,7 @@
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_core::Felt;
+use miden_precompiles::CurveId;
 use p3_matrix::Matrix;
 
 use crate::{
@@ -24,16 +25,10 @@ use crate::{
     transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
 };
 
-const P_MINUS_1: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E";
-/// secp256k1 group order minus one (`n − 1`) — the *scalar* field's bound,
-/// distinct from the coordinate field's `p − 1` ([`P_MINUS_1`]).
-const N_MINUS_1: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364140";
-const FP: u32 = 1;
-const A_PTR: u32 = 2;
-const B_PTR: u32 = 3;
-/// The pinned scalar-field modulus slot (`n`), distinct from the coord
-/// field at [`FP`].
-const SN_PTR: u32 = 4;
+/// secp256k1 VM-owned uint/group pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
+const SN_PTR: u32 = CurveId::Secp256k1.scalar_domain().bound_ptr();
 
 fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
     let hex: String = bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect();
@@ -51,7 +46,7 @@ fn k256_coords(p: &ProjectivePoint) -> (U256, U256) {
 fn create(s: &mut Session, x: U256, y: U256) -> EcNode {
     let xn = s.uint_leaf(x, FP);
     let yn = s.uint_leaf(y, FP);
-    s.ec_create(A_PTR, B_PTR, &xn, &yn)
+    s.ec_create(GROUP_PTR, &xn, &yn)
 }
 
 /// `⟨G×1⟩ ⊕ ⟨2G×1⟩` (disjoint bases — a pure-copy walk, value `G + 2G =
@@ -63,9 +58,6 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, g2x, g2y);
@@ -78,7 +70,7 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
     // bindings close (the real consumer is the future resolve seam).
     let claim_g = s.ec_is(&g_pt, &g_pt);
     let claim_q = s.ec_is(&q_pt, &q_pt);
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim_g, claim_q]);
+    let root = s.assert_and_fold([claim_g, claim_q]);
     s.finish(root)
 }
 
@@ -102,21 +94,16 @@ fn msm_two_intro_combine_proves() {
 /// ([`Session::constrain_scalar_bound`]) *before* the intros — so their
 /// literal-1 scalars (and the group's `EcGroup` tuple) ride `n` while the
 /// coordinates stay under `p`. This is the regression for the eval
-/// [`COL_SBOUND_PTR`](crate::transcript::eval::COL_SBOUND_PTR) path: every
-/// EcCreate row must consume `EcGroup` under `n` to match the EC store's
-/// provide. The old `scalar_bound = coord_bound` hardcode dangled the
-/// `EcGroup` bus here (provide `n`, consume `p`), so `check` tripped.
+/// scalar-bound plumbing: point-store rows and MSM consumes must read the
+/// group's canonical scalar bound `n`, not fall back to the coordinate bound
+/// `p`. The old `scalar_bound = coord_bound` hardcode dangled the `EcGroup`
+/// bus here (provide `n`, consume `p`), so `check` tripped.
 fn msm_scalar_bound_n_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
-    // The scalar field: a self-referential modulus holding `n − 1` at SN_PTR.
-    let scalar_mod = s.pin_uint(SN_PTR, from_hex(N_MINUS_1), SN_PTR);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, g2x, g2y);
@@ -130,7 +117,7 @@ fn msm_scalar_bound_n_traces() -> crate::session::SessionTraces {
 
     let claim_g = s.ec_is(&g_pt, &g_pt);
     let claim_q = s.ec_is(&q_pt, &q_pt);
-    let root = s.assert_and_fold([modulus, a_t, b_t, scalar_mod, claim_g, claim_q]);
+    let root = s.assert_and_fold([claim_g, claim_q]);
     s.finish(root)
 }
 
@@ -158,9 +145,6 @@ fn msm_intro_neg_traces() -> crate::session::SessionTraces {
     let (gx, gy) = k256_coords(&g);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
 
@@ -168,7 +152,7 @@ fn msm_intro_neg_traces() -> crate::session::SessionTraces {
     let _n = s.msm_neg(ga);
 
     let claim_g = s.ec_is(&g_pt, &g_pt);
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim_g]);
+    let root = s.assert_and_fold([claim_g]);
     s.finish(root)
 }
 
@@ -196,19 +180,16 @@ fn msm_resolve_one_term_traces() -> crate::session::SessionTraces {
     let (gx, gy) = k256_coords(&g);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let expr = s.msm_intro(&g_pt);
-    // The scalar `1`, leafed under the group's scalar bound (= FP here).
-    let one = s.uint_leaf(from_hex("1"), FP);
+    // The scalar `1`, leafed under the group's scalar-domain bound.
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
     // R = 1·G = G.
     let value = s.ec_msm(expr, &[(g_pt, one)]);
     let claim = s.ec_is(&value, &g_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -238,9 +219,6 @@ fn msm_resolve_two_term_traces() -> crate::session::SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, g2x, g2y); // Q = 2G, a distinct base
@@ -248,12 +226,12 @@ fn msm_resolve_two_term_traces() -> crate::session::SessionTraces {
     let qb = s.msm_intro(&q_pt);
     let expr = s.msm_combine(ga, qb); // ⟨G×1, Q×1⟩, value G + Q
 
-    let one = s.uint_leaf(from_hex("1"), FP);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
     let r_pt = s.ec_add(&g_pt, &q_pt); // R = G + Q
     let value = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -284,9 +262,6 @@ fn msm_straus_traces() -> crate::session::SessionTraces {
     let (rx, ry) = k256_coords(&r);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, qx, qy);
@@ -294,12 +269,12 @@ fn msm_straus_traces() -> crate::session::SessionTraces {
 
     // Straus over the 2-base table {∞, G, Q, G+Q} (scan length inferred).
     let acc = straus(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))]);
-    let s3 = s.uint_leaf(from_hex("3"), FP);
-    let s5 = s.uint_leaf(from_hex("5"), FP);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
     let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -332,9 +307,6 @@ fn msm_wnaf_traces() -> crate::session::SessionTraces {
     let (rx, ry) = k256_coords(&r);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, qx, qy);
@@ -346,12 +318,12 @@ fn msm_wnaf_traces() -> crate::session::SessionTraces {
     // Stage 2: separate scalar-muls over the tables, then combine.
     let acc = wnaf_msm(&mut s, &[(&g_table, from_hex("3")), (&q_table, from_hex("5"))]);
 
-    let s3 = s.uint_leaf(from_hex("3"), FP);
-    let s5 = s.uint_leaf(from_hex("5"), FP);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
     let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -382,21 +354,18 @@ fn msm_joint_naf_traces() -> crate::session::SessionTraces {
     let (rx, ry) = k256_coords(&r);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, qx, qy);
     let r_pt = create(&mut s, rx, ry);
 
     let acc = joint_naf(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))]);
-    let s3 = s.uint_leaf(from_hex("3"), FP);
-    let s5 = s.uint_leaf(from_hex("5"), FP);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
     let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -429,21 +398,18 @@ fn msm_joint_wnaf_traces() -> crate::session::SessionTraces {
     let (rx, ry) = k256_coords(&r);
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, qx, qy);
     let r_pt = create(&mut s, rx, ry);
 
     let acc = joint_wnaf(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))], 4);
-    let s3 = s.uint_leaf(from_hex("3"), FP);
-    let s5 = s.uint_leaf(from_hex("5"), FP);
+    let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
+    let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
     let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -474,9 +440,6 @@ fn msm_dedup_traces() -> crate::session::SessionTraces {
     let (rx, ry) = k256_coords(&(g + q)); // R = G + Q
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, qx, qy);
@@ -491,12 +454,12 @@ fn msm_dedup_traces() -> crate::session::SessionTraces {
     assert_eq!(c1, c2, "combine(G, Q) must dedup");
     assert_eq!(s.msm_expr_count(), 3, "only ⟨G⟩, ⟨Q⟩, ⟨G,Q⟩ laid — the repeats collapsed",);
 
-    let one = s.uint_leaf(from_hex("1"), FP);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
     let r_pt = create(&mut s, rx, ry);
     let value = s.ec_msm(c1, &[(g_pt, one), (q_pt, one)]);
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -522,9 +485,6 @@ fn msm_two_term_ordered(swap: bool) -> crate::session::SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, g2x, g2y);
@@ -532,7 +492,7 @@ fn msm_two_term_ordered(swap: bool) -> crate::session::SessionTraces {
     let qb = s.msm_intro(&q_pt);
     let expr = s.msm_combine(ga, qb);
 
-    let one = s.uint_leaf(from_hex("1"), FP);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
     let r_pt = s.ec_add(&g_pt, &q_pt);
     let value = if swap {
         s.ec_msm(expr, &[(q_pt, one), (g_pt, one)])
@@ -541,7 +501,7 @@ fn msm_two_term_ordered(swap: bool) -> crate::session::SessionTraces {
     };
     let claim = s.ec_is(&value, &r_pt);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -581,9 +541,6 @@ fn msm_resolve_duplicate_base_rejected() {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    s.pin_uint(A_PTR, from_hex("0"), FP);
-    s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let g_pt = create(&mut s, gx, gy);
     let q_pt = create(&mut s, g2x, g2y);
@@ -591,7 +548,7 @@ fn msm_resolve_duplicate_base_rejected() {
     let qb = s.msm_intro(&q_pt);
     let expr = s.msm_combine(ga, qb);
 
-    let one = s.uint_leaf(from_hex("1"), FP);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
     // Two G slots, no Q — a non-canonical (unmerged-shaped) base list.
     let _ = s.ec_msm(expr, &[(g_pt, one), (g_pt, one)]);
 }

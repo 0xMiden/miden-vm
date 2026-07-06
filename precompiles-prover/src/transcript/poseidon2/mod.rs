@@ -1,6 +1,6 @@
 //! Poseidon2 permutation chiplet.
 //!
-//! Standalone Poseidon2-f[12] permutation exposed over the
+//! Standalone Poseidon2-f\[12] permutation exposed over the
 //! [`BusId::Poseidon2In`](crate::relations::BusId::Poseidon2In) and
 //! [`BusId::Poseidon2Out`](crate::relations::BusId::Poseidon2Out) buses.
 //! See [`docs/chiplets/poseidon2.md`](../../../docs/chiplets/poseidon2.md)

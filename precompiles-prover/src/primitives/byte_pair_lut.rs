@@ -23,7 +23,7 @@
 //! # Soundness
 //!
 //! The data columns `a`, `b`, `c_andnot`, `c_xor` are the fixed,
-//! verifier-known [`preprocessed_table`] — committed once, enumerating
+//! verifier-known `preprocessed_table` — committed once, enumerating
 //! every `(a, b) ∈ [0, 256)²` in lex order with the correct bytewise
 //! results. They are not witness, so a prover cannot forge them:
 //! `a, b ∈ [0, 256)` and `c_andnot = (!a) & b`, `c_xor = a ^ b` hold by
@@ -95,11 +95,11 @@ pub const COL_MULT_RANGE16: usize = 2;
 pub const NUM_MAIN_COLS: usize = 3;
 pub const NUM_AUX_COLS: usize = 1;
 /// Width of the preprocessed (verifier-known) data table: `a`, `b`,
-/// `c_andnot`, `c_xor`. See [`preprocessed_table`].
+/// `c_andnot`, `c_xor`. See `preprocessed_table`.
 pub const NUM_PREPROCESSED_COLS: usize = 4;
 
 /// Column indices into the preprocessed data table (see
-/// [`preprocessed_table`]). These are also the lookup eval's indices into
+/// `preprocessed_table`). These are also the lookup eval's indices into
 /// the combined `[preprocessed ++ main]` window, which places the
 /// preprocessed columns first.
 pub const PRE_A: usize = 0;
@@ -120,7 +120,7 @@ pub const NUM_LOOKUP_COLS: usize = NUM_PREPROCESSED_COLS + NUM_MAIN_COLS;
 
 /// Fixed trace height: every `(a, b) ∈ [0, 256)²` gets a row, in lex
 /// order (`idx = (a << 8) | b`). The preprocessed data table
-/// ([`preprocessed_table`]) is pinned to this lex enumeration on these
+/// (`preprocessed_table`) is pinned to this lex enumeration on these
 /// `2^16` rows; the three witness multiplicity columns are committed in
 /// lockstep at the same height.
 pub const TRACE_HEIGHT: usize = 1 << 16;
@@ -253,7 +253,7 @@ pub(crate) fn preprocessed_table() -> RowMajorMatrix<Felt> {
 /// Witness main trace: the three multiplicity columns, fixed at
 /// [`TRACE_HEIGHT`] = `2^16` rows — one per `(a, b) ∈ [0, 256)²` in lex
 /// order (`idx = (a << 8) | b`). Row `r` lines up with row `r` of the
-/// preprocessed [`preprocessed_table`], so the data and multiplicities
+/// preprocessed `preprocessed_table`, so the data and multiplicities
 /// share an index. Multiplicities are pulled from `requires` and are zero
 /// on untouched rows.
 ///

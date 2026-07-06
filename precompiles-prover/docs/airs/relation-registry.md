@@ -62,11 +62,11 @@ powers of `β`; encoding stays linear.
 | 7 | [Poseidon2Out](#7--poseidon2out) | `(perm_seq_id, d0..d3)` | Poseidon2 | KeccakNode, TranscriptEval |
 | 8 | [Binding](#8--binding) | `(h0..h3, value_tag, ptr, bound_ptr)` | TranscriptEval, KeccakNode | TranscriptEval |
 | 9 | [ChunkChain](#9--chunkchain) | `(chunk_seq_id_head, perm_seq_id_head)` | Chunk | KeccakNode |
-| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm |
+| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm, verifier boundary |
 | 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
 | 12 | [UintMul](#12--uintmul) | `(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` | UintMul | EcPointStore, EcGroupAdd, TranscriptEval |
 | 13 | [UintLimbs](#13--uintlimbs) | `(ptr, bound_ptr, offset, l0..l7)` | UintStore | UintMul |
-| 14 | [EcGroup](#14--ecgroup) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups | EcPointStore, EcGroupAdd, EcMsm, TranscriptEval |
+| 14 | [EcGroup](#14--ecgroup) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups | EcPointStore, EcGroupAdd, EcMsm, verifier boundary |
 | 15 | [EcPoint](#15--ecpoint) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | EcPointStore | EcGroupAdd, EcMsm, TranscriptEval |
 | 16 | [EcGroupAdd](#16--ecgroupadd) | `(group_ptr, p_ptr, q_ptr, r_ptr)` | EcGroupAdd | EcMsm, TranscriptEval |
 | 17 | [EcOnCurveCert](#17--econcurvecert) | `(group_ptr, r_ptr)` | EcGroupAdd, EcMsm | EcPointStore |
@@ -197,9 +197,16 @@ in the chunk chiplet's native sequence namespace.
 - **Provider** — [UintStore](uint-store.md): each stored uint's two halves.
 - **Consumers** — [UintAdd](uint-add.md) (a / b / c / modulus halves),
   [UintMul](uint-mul.md) (the linear c / r operands),
-  [TranscriptEval](transcript-eval.md) (uint-leaf nodes),
-  [EcMsm](ec-msm.md) (the literal-`1` scalar of an intro), and
-  [UintStore](uint-store.md) itself (a padding block's self bound-ref).
+  [TranscriptEval](transcript-eval.md) (runtime uint leaves and explicit
+  transcript pin claims), [EcMsm](ec-msm.md) (the literal-`1` scalar of an
+  intro), [UintStore](uint-store.md) itself (a padding block's self
+  bound-ref), and verifier-loaded boundary consumes for fixed uint domains
+  and fixed curve coefficient values.
+
+Verifier boundary consumes are not AIR rows and do not create
+[`Binding`](#8--binding) traffic. They simply add fixed public `UintVal`
+requirements at the LogUp seam, so the store must provide the expected
+halves at the named `(ptr, bound_ptr)`.
 
 ## 11 — UintAdd
 
@@ -237,13 +244,18 @@ MAC `κ_a·a·b + κ_c·c ≡ r (mod p)`.
 
 `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — a
 short-Weierstrass group's curve context (params + base-field modulus +
-scalar-field modulus; the latter equals `bound_ptr` until constrained).
+scalar-field modulus; VM-owned fixed groups carry their canonical scalar
+bound, ad-hoc groups equal `bound_ptr` until constrained).
 
-- **Provider** — [EcGroups](ec-groups.md): one per group row.
+- **Provider** — [EcGroups](ec-groups.md): one per group row, with
+  fixed VM-owned group rows carrying one extra multiplicity for the
+  verifier boundary requirement.
 - **Consumers** — [EcPointStore](ec-points.md) (binds a point's curve),
   [EcGroupAdd](ec-group-add.md) (the group-law context),
-  [EcMsm](ec-msm.md) (the scalar-bound pin),
-  [TranscriptEval](transcript-eval.md) (EcCreate / point-binding context).
+  [EcMsm](ec-msm.md) (the scalar-bound pin), and the verifier boundary for
+  fixed curve group tuples. TranscriptEval create rows do not consume
+  `EcGroup` directly; they carry `group_ptr` in the curve VALUE cap and consume
+  `EcPoint`.
 
 ## 15 — EcPoint
 
@@ -253,8 +265,8 @@ or the group's ∞ when `is_pai = 1`.
 - **Provider** — [EcPointStore](ec-points.md): one per point row.
 - **Consumers** — [EcGroupAdd](ec-group-add.md) (P, Q, R, and the ∞
   result of the cancel case), [EcMsm](ec-msm.md) (the ∞-pin of a neg's
-  value), [TranscriptEval](transcript-eval.md) (EcCreate / EcBinOp
-  operands and results).
+  value), [TranscriptEval](transcript-eval.md) (EcCreate / PAI point-binding
+  rows).
 
 ## 16 — EcGroupAdd
 

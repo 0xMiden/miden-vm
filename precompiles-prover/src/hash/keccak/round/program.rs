@@ -34,9 +34,9 @@
 //! ```
 //!
 //! Post-ι row-major arrangement of the next-round inputs lets the
-//! sponge map state[i] to address i directly: state[0] = lane (0,0)
-//! at sponge addr 0, …, state[24] = lane (4,4) at sponge addr 24.
-//! RC[r] sits at addr 25 (= IP of slot 0 in each round); zero[r] at
+//! sponge map `state[i]` to address `i` directly: `state[0]` = lane (0,0)
+//! at sponge addr 0, …, `state[24]` = lane (4,4) at sponge addr 24.
+//! `RC[r]` sits at addr 25 (= IP of slot 0 in each round); `zero[r]` at
 //! addr 26 (= IP of slot 1).
 //!
 //! See `docs/chiplets/keccak.md` for the address-space layout

@@ -1,14 +1,14 @@
-//! Transcript eval chiplet — the Transcript AND-tree, uint leaves, and
-//! uint-op nodes.
+//! Transcript eval chiplet — the Transcript AND-tree plus uint and EC value
+//! nodes.
 //!
 //! The narrow, central hasher + binder for the transcript DAG. Each
 //! active row evaluates one node: it hashes the node's preimage on
 //! Poseidon2 and settles the node's `Binding`-bus tuple. The eval chip is
-//! the sole provider of the `Binding` bus, except [`KeccakNodeAir`], which
+//! the sole provider of the `Binding` bus, except `KeccakNodeAir`, which
 //! fuses its own terminal keccak `True` (there is no transient Keccak —
 //! see `docs/transcript-eval.md`). Domain chiplets (the `UintStore`,
-//! `UintAdd` / `UintMul`, future group) stay ptr-only and never touch
-//! `Binding`; this chip hashes their DAG nodes and ptr-references their
+//! `UintAdd` / `UintMul`, EC store/add/MSM chiplets) stay ptr-only and never
+//! touch `Binding`; this chip hashes their DAG nodes and ptr-references their
 //! relations.
 //!
 //! Node kinds are dispatched by a uniform one-hot `is_and + is_zero +
@@ -20,9 +20,10 @@
 //! (`is_add` / `is_sub` / `is_mul` / `is_is`), which hash two child hashes under
 //! `[UintPrecompile::id(), op_id, 0, 0]` and tie the children's `Uint` bindings
 //! to a [`UintAdd`](crate::uint::add) / [`UintMul`](crate::uint::mul) relation
-//! tuple by ptr and bound. Group and full tag dispatch stay deferred. This
-//! chip replaced the left-leaning spine (now retired); the spine was its
-//! degenerate chain instance.
+//! tuple by ptr and bound; and the **EC rows**, including `EcCreate` / PAI under
+//! `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, EC binops, and EcMsm
+//! absorb runs. This chip replaced the left-leaning spine (now retired); the
+//! spine was its degenerate chain instance.
 //!
 //! Per active row (one node):
 //!
@@ -41,7 +42,11 @@
 //!   those ptrs to the witnessed result `ptr`; provide `Binding(h, Uint, ptr, bound_ptr)` — or
 //!   `Binding(h, True)` for `Is`, the predicate folding uint values into the spine. All value
 //!   soundness lives at the relation chiplets + store; this row is pure ptr wiring. Ptrs never
-//!   enter the hash — the result is nondeterministic, memoized on the binding.
+//!   enter uint-op hashes — the result is nondeterministic, memoized on the binding.
+//! - **EC create / PAI**: unhash coordinate child hashes (or zeroes for PAI) under the curve VALUE
+//!   cap `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`; finite create consumes the
+//!   coordinate `Uint` child bindings, both modes consume `EcPoint(point_ptr, group_ptr, x_ptr,
+//!   y_ptr, is_pai)`, and both provide `Binding(h, Group, point_ptr)`.
 //! - **ZERO_HASH leaf** (`is_zero = 1`): no unhash, no consumes; `h = 0` pinned; provides
 //!   `Binding(0, True)` with multiplicity `out_mult`. The `True` base case / AND identity, usable
 //!   as any node's child.
@@ -64,12 +69,12 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use miden_precompiles::UintPrecompile;
+use miden_precompiles::{CurvePrecompile, UintPrecompile};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::{
-        EcGroupMsg, EcPointMsg,
+        EcPointMsg,
         add::EcGroupAddMsg,
         msm::{MsmClaimTermMsg, MsmExprMsg},
     },
@@ -80,7 +85,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        nodes::{EcOpId, NodeTag, UintOpId},
+        nodes::UintOpId,
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
@@ -90,7 +95,7 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 44 main witness columns:
+// 42 main witness columns:
 //
 // - Structural (2): act, perm_seq_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
@@ -108,27 +113,27 @@ pub const COL_PERM_SEQ_ID: usize = 1;
 /// First felt of the left child hash. Bus-pinned by the
 /// `Binding(lhs, True)` consume and fed as `rate0` of the unhash perm.
 pub const COL_LHS_BEGIN: usize = 2;
-/// Felts per 4-felt hash.
-pub const NUM_HASH: usize = 4;
-pub const COL_LHS_END: usize = COL_LHS_BEGIN + NUM_HASH;
+/// Number of field elements in each Poseidon2 digest / transcript node hash.
+pub const DIGEST_WIDTH: usize = 4;
+pub const COL_LHS_END: usize = COL_LHS_BEGIN + DIGEST_WIDTH;
 
 /// First felt of the right child hash. Bus-pinned by the
 /// `Binding(rhs, True)` consume and fed as `rate1` of the unhash perm.
 pub const COL_RHS_BEGIN: usize = COL_LHS_END;
-pub const COL_RHS_END: usize = COL_RHS_BEGIN + NUM_HASH;
+pub const COL_RHS_END: usize = COL_RHS_BEGIN + DIGEST_WIDTH;
 
 /// First felt of this node's hash. Bus-pinned by `Poseidon2Out` on
 /// internal / root rows; pinned to `0` on ZERO_HASH leaves; pinned to
 /// `public_root` on the first (root) row.
 pub const COL_H_BEGIN: usize = COL_RHS_END;
-pub const COL_H_END: usize = COL_H_BEGIN + NUM_HASH;
+pub const COL_H_END: usize = COL_H_BEGIN + DIGEST_WIDTH;
 
 /// ZERO_HASH-leaf flag. When 1: `h = 0` (pinned), no unhash, no child
 /// consumes — the row provides `Binding(0, True)` only. Boolean.
 pub const COL_IS_ZERO: usize = COL_H_END;
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
 /// parents that consume it (DAG sharing / dedup, mirroring
-/// [`KeccakNodeAir`]'s `out_mult`). A plain count pinned to the
+/// `KeccakNodeAir`'s `out_mult`). A plain count pinned to the
 /// consumer count by `Binding` bus balance — not range-checked (see
 /// `docs/lookup-argument.md`); `0` on the root (no parent) and on
 /// inactive rows.
@@ -150,16 +155,16 @@ pub const COL_IS_UINT_LEAF: usize = COL_IS_AND + 1;
 /// Uint-op family flag — set on every uint arithmetic / equality node
 /// (add/sub/mul/is). The op itself rides the shared op one-hot; this bit
 /// gates the `UintAdd`/`UintMul` wiring and, id-weighted against the op
-/// flags, materializes the cap's `param_a`.
+/// flags, materializes the cap's `tag_arg0`.
 pub const COL_IS_UINT_OP: usize = COL_IS_UINT_LEAF + 1;
-/// EcCreate flag (tag 5, finite) — hashes two uint coords `(x, y)` into a
-/// curve point.
+/// EcCreate flag (finite) — hashes two uint coords `(x, y)` into a curve
+/// point under the VM curve VALUE cap.
 pub const COL_IS_EC_CREATE: usize = COL_IS_UINT_OP + 1;
-/// EcCreate/PAI flag (tag 5, the ∞ mode) — binds the group's
-/// point-at-infinity (no coord children). A distinct family bit from
-/// finite create so the `EcPoint` consume's `is_pai` field is degree-1.
+/// EcCreate/PAI flag (the ∞ mode) — binds the group's point-at-infinity
+/// (no coord children). A distinct family bit from finite create so the
+/// `EcPoint` consume's `is_pai` field is degree-1.
 pub const COL_IS_EC_PAI: usize = COL_IS_EC_CREATE + 1;
-/// EcBinOp family flag (tag 6) — set on every EC binary node (add/sub/is).
+/// EcBinOp family flag — set on every EC binary node (add/sub/is).
 /// Like the uint-op bit it gates the `EcGroupAdd` wiring while the op rides
 /// the shared one-hot below; the two op families are mutually exclusive, so
 /// those flags are shared.
@@ -171,7 +176,7 @@ pub const COL_IS_EC_OP: usize = COL_IS_EC_PAI + 1;
 // flag-column analogue of the reused ptr columns below). Sums to
 // `is_uint_op + is_ec_op`. `is_mul` is uint-only (EC has no multiply).
 // Op ids differ per family (uint Is=4, EC Is=3), so the cap op id is the
-// family-gated id-weighted sum — see `param_a`.
+// family-gated id-weighted sum — see `tag_arg0`.
 // ================================================================
 
 /// `Add` — `r = a + b` (uint) / `R = P + Q` (EC).
@@ -184,44 +189,80 @@ pub const COL_IS_MUL: usize = COL_IS_SUB + 1;
 pub const COL_IS_IS: usize = COL_IS_MUL + 1;
 
 // ================================================================
-// Modifiers + reused data columns. The ptr columns already double
-// across modes (ptr = leaf uint / op result / created-or-result point;
-// a_ptr / b_ptr = operands / coords; bound_ptr = modulus; param_a =
-// cap slot 1; cap_param_b = row-kind-aware cap slot 2; group_ptr / curve_b = EC handles).
+// Modifiers + reused data columns. These cells are deliberately role-polymorphic:
+// ptr = leaf uint / op result / created-or-result point / MSM boundary value;
+// bound_ptr = uint modulus / create coord modulus / MSM scalar bound;
+// a_ptr / b_ptr = operands / create coords / MSM base+scalar ptrs;
+// tag_arg0 / tag_arg1 = physical VM tag args; ec_context_group_ptr = EC op/MSM group.
+//
+// Note the physical order: tag_arg1 appears before tag_arg0 because it reuses the
+// heavily shared bound/pin/create-group slot.
+//
+// Row-kind map for the polymorphic data cells:
+// - uint VALUE:       ptr=value, bound_ptr=modulus, tag_arg1=bound_ptr.
+// - uint PIN claim:   ptr=pin,   bound_ptr=modulus, tag_arg0=bound_ptr, tag_arg1=pin.
+// - uint/EC op:       ptr=result, a_ptr/b_ptr=operands, tag_arg0=op_id.
+// - EcCreate / PAI:   ptr=point, bound_ptr=coord modulus, a_ptr/b_ptr=x/y, tag_arg1=group; PAI
+//   zeros bound/x/y.
+// - EcMsm absorb:     a_ptr=base, b_ptr=scalar, bound_ptr=scalar bound, ec_context_group_ptr=group;
+//   the boundary also sets ptr=value.
 // ================================================================
 
-/// Pin-claim flag for a uint leaf row: 1 = bootstrap pin claim, 0 = runtime
+/// Pin-claim flag for a uint leaf row: 1 = explicit pin claim, 0 = runtime
 /// VM value row. Locally gates the True / Uint binding fork.
 pub const COL_IS_PINNED: usize = COL_IS_IS + 1;
-/// The pointer the row's binding carries: the stored uint on uint-leaf
-/// rows, the witnessed *result* on value-op rows, the created / result
-/// point on EC rows (0 on `Is` — binds `True`, names no result).
+/// The pointer the row's binding carries: stored uint on uint-leaf rows,
+/// value-op result ptr, created / result point ptr, or the EcMsm boundary's
+/// value point. `Is` rows set this to 0 because they bind `True`, not a value.
 pub const COL_PTR: usize = COL_IS_PINNED + 1;
-/// The uint's modulus pointer — carried on every `Uint`-typed bus message
-/// (uint-leaf and uint-op rows; 0 otherwise). VM uint value caps also commit it in cap slot 2.
+/// The bound pointer read by `Uint`-typed bus messages: uint modulus on
+/// uint-leaf / uint-op rows, coordinate-field modulus on finite EcCreate rows,
+/// and scalar-field bound on EcMsm absorb rows. VM uint value caps also commit
+/// it in tag argument 1.
 pub const COL_BOUND_PTR: usize = COL_PTR + 1;
-/// Physical column for the row-kind-aware uint cap slot 2.
-pub const COL_PIN_PTR: usize = COL_BOUND_PTR + 1;
-/// Semantic alias for [`COL_PIN_PTR`]. VM uint value rows put `bound_ptr` here;
-/// bootstrap pin rows put `pin_ptr = ptr` here.
-pub const COL_CAP_PARAM_B: usize = COL_PIN_PTR;
-/// The lhs operand ptr — uint-op / ec-op lhs, or the x-coord on EcCreate
-/// (0 elsewhere). On `Is` rows `b_ptr = a_ptr` *is* the equality.
-pub const COL_A_PTR: usize = COL_PIN_PTR + 1;
-/// The rhs operand ptr — binary ops' rhs, or the y-coord on EcCreate
-/// (0 on non-op rows).
+/// Physical tag argument 1 (`Tag::args()[1]`, capacity word 2). Runtime uint
+/// VALUE rows put `bound_ptr` here, explicit pin rows put `pin_ptr = ptr`, and
+/// EcCreate / PAI rows put the curve `group_ptr` here.
+pub const COL_TAG_ARG1: usize = COL_BOUND_PTR + 1;
+/// The lhs-style ptr: uint / EC op lhs operand, finite EcCreate x-coordinate,
+/// or EcMsm absorb base point. On `Is` rows `b_ptr = a_ptr` *is* the equality.
+pub const COL_A_PTR: usize = COL_TAG_ARG1 + 1;
+/// The rhs-style ptr: binary-op rhs operand, finite EcCreate y-coordinate, or
+/// EcMsm absorb scalar. It is 0 on non-op rows and PAI rows.
 pub const COL_B_PTR: usize = COL_A_PTR + 1;
-/// The cap's `param_a` slot, materialized to keep the cap degree-1:
-/// `bound_ptr` on bootstrap pin rows, the op id on op rows, the curve's `a_ptr`
-/// on EcCreate, 0 elsewhere. VM uint value rows use `VALUE_OP_ID = 0`.
-pub const COL_PARAM_A: usize = COL_B_PTR + 1;
-/// Witnessed EC-store group handle, fed to the `EcGroup` / `EcPoint` /
-/// `EcGroupAdd` consumes and pinned by their provides. Nonzero only on
-/// Ec-create / pai / op rows.
-pub const COL_GROUP_PTR: usize = COL_PARAM_A + 1;
-/// Cap slot 2 (`param_b`) on an EcCreate row = the curve's `b_ptr`;
-/// 0 elsewhere. Free on create (the `EcGroup` consume pins it).
-pub const COL_CURVE_B: usize = COL_GROUP_PTR + 1;
+/// Physical tag argument 0 (`Tag::args()[0]`, capacity word 1). Explicit pin
+/// rows put `bound_ptr` here, op rows put the op id here, and runtime VM uint
+/// VALUE / EcCreate / PAI rows use `VALUE_OP_ID = 0`.
+pub const COL_TAG_ARG0: usize = COL_B_PTR + 1;
+/// Witnessed EC-store group handle for EC value-producing binops and EcMsm
+/// absorb runs. Create / PAI rows commit their group selector through
+/// [`COL_TAG_ARG1`] instead, so the hash cap and `EcPoint` consume share one
+/// physical cell.
+pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_TAG_ARG0 + 1;
+
+// ================================================================
+// ROW-KIND ALIASES — semantic names for reused physical columns. Use these
+// where the row family is already known (trace row writers and row-specific
+// relation messages); use the physical COL_* names in generic constraints.
+// ================================================================
+
+/// Runtime VM uint VALUE row: `bound_ptr` committed in tag argument 1.
+pub const COL_UINT_VALUE_BOUND_PTR: usize = COL_TAG_ARG1;
+/// Explicit pin-claim row: `bound_ptr` committed in tag argument 0.
+pub const COL_PIN_CLAIM_BOUND_PTR: usize = COL_TAG_ARG0;
+/// Explicit pin-claim row: `pin_ptr = ptr` committed in tag argument 1.
+pub const COL_PIN_CLAIM_PIN_PTR: usize = COL_TAG_ARG1;
+/// EcCreate / PAI row: created point pointer.
+pub const COL_EC_CREATE_POINT_PTR: usize = COL_PTR;
+/// EcCreate / PAI row: curve group selector committed in the VALUE tag and
+/// consumed by `EcPoint`.
+pub const COL_EC_CREATE_GROUP_PTR: usize = COL_TAG_ARG1;
+/// Finite EcCreate row: coordinate-field modulus for x/y child bindings.
+pub const COL_EC_CREATE_COORD_BOUND_PTR: usize = COL_BOUND_PTR;
+/// Finite EcCreate row: x-coordinate uint pointer.
+pub const COL_EC_CREATE_X_PTR: usize = COL_A_PTR;
+/// Finite EcCreate row: y-coordinate uint pointer.
+pub const COL_EC_CREATE_Y_PTR: usize = COL_B_PTR;
 
 // ================================================================
 // EcMsm node (tag 8) — the chip's only *multi-row* node: a run of
@@ -236,7 +277,7 @@ pub const COL_CURVE_B: usize = COL_GROUP_PTR + 1;
 /// EcMsm family flag — set on every absorb row of an MSM-claim run. In
 /// the activity one-hot like the other families; the perm fires here,
 /// rate = `(Pᵢ.hash, sᵢ.hash)`, cap = the threaded `stateᵢ`.
-pub const COL_IS_EC_MSM: usize = COL_CURVE_B + 1;
+pub const COL_IS_EC_MSM: usize = COL_EC_CONTEXT_GROUP_PTR + 1;
 /// Marks the run's last absorb (the boundary): `h = h_claim`, it consumes
 /// `MsmExpr` and provides the claim's `Group` binding. A 1-term claim has
 /// `is_msm_last = 1` on its single row.
@@ -251,31 +292,21 @@ pub const COL_MSM_IDX: usize = COL_IS_MSM_LAST + 1;
 /// The claim expression's `expr_ptr` in the EcMsm chiplet — the
 /// `MsmClaimTerm` / `MsmExpr` consume key tying the absorb run to the
 /// symbolic MSM expression. **Pinned constant within a run** (with
-/// `COL_GROUP_PTR`) by a `continues`-gated transition constraint, so every
+/// `COL_EC_CONTEXT_GROUP_PTR`) by a `continues`-gated transition constraint, so every
 /// row attributes its term to the same expression the boundary binds the
 /// value to — see the run-constancy constraints below.
 pub const COL_MSM_EXPR: usize = COL_MSM_IDX + 1;
 /// First felt of the threaded capacity `stateᵢ` fed to this absorb's
-/// perm. The first row's = the IV `(EcMsm, group_ptr, 0, 0)`; each
-/// later row's = the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
+/// perm. The first row's = the VM curve MSM IV
+/// `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]`; each later row's =
+/// the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
 /// only cross-row hash link. Pinned 0 off absorb rows; the Poseidon2 cap
 /// lookup for EcMsm rows is supplied by the dynamic-cap aux column.
 pub const COL_ABSORB_CAP_BEGIN: usize = COL_MSM_EXPR + 1;
-pub const COL_ABSORB_CAP_END: usize = COL_ABSORB_CAP_BEGIN + NUM_HASH;
-
-/// The **scalar-field** modulus pointer for the group an EcCreate / PAI
-/// row pins — the `scalar_bound_ptr` cell of its `EcGroup` consume.
-/// Distinct from [`COL_BOUND_PTR`] (the *coordinate* field `p`): a group
-/// the MSM chip exercises constrains its scalar field to the curve order
-/// `n` (with `n ≠ p` in general), and the `EcGroup` provide lays *that*
-/// handle. Resolves at trace-gen to the group's constrained `F_s` handle
-/// if an MSM fixed it, else (vacuously) the coord bound — so the consume
-/// balances the provide under either field. Nonzero only on create / pai
-/// rows.
-pub const COL_SBOUND_PTR: usize = COL_ABSORB_CAP_END;
+pub const COL_ABSORB_CAP_END: usize = COL_ABSORB_CAP_BEGIN + DIGEST_WIDTH;
 
 /// Total number of main witness columns.
-pub const NUM_MAIN_COLS: usize = COL_SBOUND_PTR + 1;
+pub const NUM_MAIN_COLS: usize = COL_ABSORB_CAP_END;
 
 // PUBLIC VALUES LAYOUT
 // ================================================================================================
@@ -287,7 +318,7 @@ pub const NUM_MAIN_COLS: usize = COL_SBOUND_PTR + 1;
 /// the *whole* shared public-input vector (`air_inputs`); the old `inv_n`
 /// slot is gone (see `crate::logup`), so it starts at 0.
 pub const PUBLIC_ROOT_BEGIN: usize = 0;
-pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + NUM_HASH;
+pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + DIGEST_WIDTH;
 /// Total public-values count: the 4-felt `public_root`. Equals
 /// `logup::NUM_PUBLIC_VALUES` — the shared count every AIR agrees on.
 pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
@@ -295,10 +326,10 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// Five aux columns:
+// Nine aux columns:
 //
-// - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND rows), provide `h` as `True`
-//   (AND / zero / `Is` rows) + `Range16(out_mult)` (1 fraction, ungated).
+// - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND rows), and provide `h` as
+//   `True` (AND / zero / `Is` rows).
 // - col 1: the unhash Poseidon2 perm's static-cap path — `In{rate0, rate1, cap}` + `Out` (4
 //   fractions). EcMsm's threaded cap rides col 7.
 // - col 2: Binding bus, value path — consume both `UintVal` halves on uint-leaf rows (the 4×32 view
@@ -310,8 +341,8 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 //   `UintMul` (mul; κ slots are the constants 1 / 0).
 // - col 5: Binding bus, Group path — consume the P / Q operand `Group` bindings (group add / sub /
 //   is) + provide the created / result / MSM boundary point's `Group` binding.
-// - col 6: the EC relation consumes — `EcGroup` + `EcPoint` (group create) and `EcGroupAdd` (group
-//   add / sub); raw degree-1 fields, gated.
+// - col 6: the EC relation consumes — `EcPoint` (create / PAI) and `EcGroupAdd` (group add / sub);
+//   raw degree-1 fields for `EcPoint`, role-mixed fields for `EcGroupAdd`.
 // - col 7: the EcMsm dynamic Poseidon2 cap fraction.
 // - col 8: the EcMsm absorb-run consumes. Per absorb row: `Binding(Pᵢ.hash, Group, Pᵢ_ptr)`,
 //   `Binding(sᵢ.hash, Uint, sᵢ_ptr)`, `MsmClaimTerm(expr, Pᵢ_ptr, sᵢ_ptr)`; at the boundary,
@@ -322,7 +353,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // `log_quotient_degree` stays 2 — width, not blowup.
 
 pub const NUM_AUX_COLS: usize = 9;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 4, 3, 2, 2, 3, 3, 1, 4];
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 4, 3, 2, 2, 3, 2, 1, 4];
 
 // AIR
 // ================================================================================================
@@ -375,9 +406,9 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let act_next: AB::Expr = next[COL_ACT].into();
         let is_zero: AB::Expr = local[COL_IS_ZERO].into();
         let out_mult: AB::Expr = local[COL_OUT_MULT].into();
-        let h: [AB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
+        let h: [AB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
 
-        let public_root: [AB::Expr; NUM_HASH] =
+        let public_root: [AB::Expr; DIGEST_WIDTH] =
             array::from_fn(|i| builder.public_values()[PUBLIC_ROOT_BEGIN + i].into());
 
         // Activity: binary, sticky-downward.
@@ -394,7 +425,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // Root pin: the first row is the root; its `h` is the public
         // transcript root. (Empty transcript: row 0 is a ZERO_HASH leaf,
         // so `h = 0` forces `public_root = 0`.)
-        for i in 0..NUM_HASH {
+        for i in 0..DIGEST_WIDTH {
             builder.when_first_row().assert_zero(h[i].clone() - public_root[i].clone());
         }
 
@@ -454,12 +485,10 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // EC has no multiply — is_mul only ever rides a uint-op row.
         builder.assert_zero(is_ec_op.clone() * is_mul.clone());
 
-        // Both create modes (finite + PAI) carry the curve in the cap and
-        // consume EcGroup / EcPoint.
+        // Both create modes (finite + PAI) carry the group in cap slot 2 and
+        // consume EcPoint. They do not use COL_EC_CONTEXT_GROUP_PTR.
         let is_create = is_ec_create.clone() + is_ec_pai.clone();
-        let group_ptr: AB::Expr = local[COL_GROUP_PTR].into();
-        let curve_b: AB::Expr = local[COL_CURVE_B].into();
-        let sbound_ptr: AB::Expr = local[COL_SBOUND_PTR].into();
+        let group_ptr: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
         // Result-binding op rows (all ops but `Is`, which binds True) —
         // degree-1, since `is_is` is one shared flag pulled out of the op
         // sum; spans both families' value-producing ops.
@@ -478,8 +507,9 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         );
         // is_pinned is a leaf-only flag; ptr carries a binding ptr only on
         // uint-leaf / result-op / Ec-create / Ec-pai rows; bound_ptr only
-        // where a Uint-typed message reads it (leaf / uint-op / create) —
-        // zero elsewhere, so an AND node's cap stays [1, 0, 0, 0].
+        // where a Uint-typed message reads it (leaf / uint-op / finite create)
+        // or on EcMsm scalar consumes — zero elsewhere, so an AND node's cap
+        // stays [1, 0, 0, 0].
         let not_uint_leaf: AB::Expr = AB::Expr::ONE - is_uint_leaf.clone();
         let is_pinned: AB::Expr = local[COL_IS_PINNED].into();
         let ptr: AB::Expr = local[COL_PTR].into();
@@ -499,18 +529,21 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // bound_ptr also carries the scalar bound on every EcMsm absorb row
         // (the sᵢ `Uint` binding consume).
         builder.assert_zero(
-            (not_uint_leaf - is_uint_op.clone() - is_create.clone() - is_ec_msm.clone())
+            (not_uint_leaf - is_uint_op.clone() - is_ec_create.clone() - is_ec_msm.clone())
                 * bound_ptr.clone(),
         );
-        // Materialize cap slot 2 without a deg-2 Poseidon2 cap component:
-        // VM uint value rows use `bound_ptr`; bootstrap pin rows use `ptr`.
-        let cap_param_b: AB::Expr = local[COL_CAP_PARAM_B].into();
-        let expected_cap_param_b =
+        // Materialize tag arg[1] without a deg-2 Poseidon2 cap component:
+        // VM uint value rows use `bound_ptr`, explicit pin rows use `ptr`, and
+        // EcCreate / PAI rows use this physical cell as the VALUE tag's `group_ptr`.
+        // On create rows the `EcPoint` consume reads the same cell, tying the
+        // hashed group selector to the point's group with no extra constraint.
+        let tag_arg1: AB::Expr = local[COL_TAG_ARG1].into();
+        let expected_tag_arg1 =
             is_uint_leaf * bound_ptr.clone() + is_pinned.clone() * (ptr - bound_ptr.clone());
-        builder.assert_zero(cap_param_b - expected_cap_param_b);
+        builder.assert_zero((AB::Expr::ONE - is_create) * (tag_arg1 - expected_tag_arg1));
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
-        // Ec create. On `Is` (either family) b_ptr = a_ptr *is* the equality.
+        // finite EcCreate. On `Is` (either family) b_ptr = a_ptr *is* the equality.
         // a_ptr / b_ptr also carry the absorb's (Pᵢ_ptr, sᵢ_ptr) on EcMsm
         // rows — the MsmTerm base/scalar and the child binding consumes.
         let a_ptr: AB::Expr = local[COL_A_PTR].into();
@@ -524,55 +557,44 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         );
         builder.assert_zero(is_is.clone() * (b_ptr - a_ptr));
 
-        // Materialize cap slot 1: bootstrap pin rows use `bound_ptr`, VM uint
-        // value rows use `VALUE_OP_ID = 0`, and op rows use their family op id.
-        let param_a: AB::Expr = local[COL_PARAM_A].into();
+        // Materialize tag arg[0] / cap slot 1: explicit pin rows use
+        // `bound_ptr`, runtime VM uint value and EcCreate rows use
+        // `VALUE_OP_ID = 0`, and op rows use their family op id.
+        let tag_arg0: AB::Expr = local[COL_TAG_ARG0].into();
         let uint_op_id: AB::Expr = is_add.clone()
             + is_sub.clone() * AB::Expr::from(Felt::from(UintOpId::Sub as u8))
             + is_mul * AB::Expr::from(Felt::from(UintOpId::Mul as u8))
             + is_is.clone() * AB::Expr::from(Felt::from(UintOpId::Is as u8));
         let ec_op_id: AB::Expr = is_add
-            + is_sub * AB::Expr::from(Felt::from(EcOpId::Sub as u8))
-            + is_is.clone() * AB::Expr::from(Felt::from(EcOpId::Is as u8));
-        let tag_param =
+            * AB::Expr::from(Felt::from_u32(CurvePrecompile::ADD_OP_ID as u32))
+            + is_sub * AB::Expr::from(Felt::from_u32(CurvePrecompile::SUB_OP_ID as u32))
+            + is_is.clone() * AB::Expr::from(Felt::from_u32(CurvePrecompile::EQ_OP_ID as u32));
+        let expected_tag_arg0 =
             is_pinned * bound_ptr + is_uint_op * uint_op_id + is_ec_op.clone() * ec_op_id;
-        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * (param_a - tag_param));
+        builder.assert_zero(tag_arg0 - expected_tag_arg0);
 
-        // group_ptr: the witnessed EC-store handle, nonzero only on Ec
-        // create / pai and the result-binding ec ops (add/sub, not Is) — the
-        // EcGroup / EcPoint / EcGroupAdd consumes read it; pinned by those
-        // provides, never a binding / hash entity.
-        // group_ptr also carries the EcMsm group (the IV's param_a and the
+        // group_ptr: the witnessed EC-store handle for result-binding ec ops
+        // (add/sub, not Is) and EcMsm absorb runs. Create / PAI rows use the
+        // VALUE tag `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, with
+        // that group selector carried in COL_EC_CREATE_GROUP_PTR (the physical
+        // COL_TAG_ARG1 cell) so the hash cap and EcPoint consume share one cell.
+        // group_ptr also carries the EcMsm group (the IV's third slot and the
         // boundary's MsmExpr / Group binding) on every absorb row.
         builder.assert_zero(
-            (AB::Expr::ONE
-                - is_create.clone()
-                - is_ec_op * (AB::Expr::ONE - is_is)
-                - is_ec_msm.clone())
+            (AB::Expr::ONE - is_ec_op * (AB::Expr::ONE - is_is) - is_ec_msm.clone())
                 * group_ptr.clone(),
         );
-        // curve_b (cap slot 2 on both create modes = the curve's b_ptr):
-        // zero off create rows (free there — the EcGroup consume pins it).
-        // On absorb rows curve_b = 0 too (is_create = 0); their Poseidon2 cap
-        // is supplied separately from `absorb_cap`.
-        builder.assert_zero((AB::Expr::ONE - is_create.clone()) * curve_b);
-
-        // sbound_ptr (the group's scalar-field bound): read only by the
-        // create rows' EcGroup consume, so zero off create rows. Witnessed,
-        // not cap-committed — pinned to the group's scalar bound by that
-        // consume's provide (like group_ptr), so a wrong value can't balance.
-        builder.assert_zero((AB::Expr::ONE - is_create) * sbound_ptr);
 
         // ---- EcMsm capacity threading (the chip's first cross-row hash
         //      link). The absorb cap cells hold `stateᵢ`: 0 off absorb
         //      rows, the IV on a run's first absorb, the previous row's
         //      digest on every later absorb (`capᵢ = stateᵢ₋₁`). The dynamic
         //      Poseidon2 cap lookup consumes these cells for EcMsm rows.
-        let absorb_cap_local: [AB::Expr; NUM_HASH] =
+        let absorb_cap_local: [AB::Expr; DIGEST_WIDTH] =
             array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
-        let absorb_cap_next: [AB::Expr; NUM_HASH] =
+        let absorb_cap_next: [AB::Expr; DIGEST_WIDTH] =
             array::from_fn(|i| next[COL_ABSORB_CAP_BEGIN + i].into());
-        let group_next: AB::Expr = next[COL_GROUP_PTR].into();
+        let group_next: AB::Expr = next[COL_EC_CONTEXT_GROUP_PTR].into();
         let is_ec_msm_next: AB::Expr = next[COL_IS_EC_MSM].into();
         // Off absorb rows the cap cells are 0 (so non-absorb perms see the
         // one-shot expr alone).
@@ -584,15 +606,16 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         let continues = is_ec_msm.clone() * (AB::Expr::ONE - is_msm_last.clone());
         // The next row *starts* a run iff it is an absorb and this row is not
         // a continuation source (non-absorb, or the prior run's last). Then
-        // its cap = the IV `(EcMsm, group_next, 0, 0)`.
+        // its cap = the VM curve MSM IV
+        // `[CurvePrecompile::id(), MSM_OP_ID, group_next, 0]`.
         let starts = is_ec_msm_next * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last);
-        let iv: [AB::Expr; NUM_HASH] = [
-            AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
+        let iv: [AB::Expr; DIGEST_WIDTH] = [
+            AB::Expr::from(CurvePrecompile::id()),
+            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
             group_next,
             AB::Expr::ZERO,
-            AB::Expr::ZERO,
         ];
-        for i in 0..NUM_HASH {
+        for i in 0..DIGEST_WIDTH {
             builder
                 .when_transition()
                 .assert_zero(continues.clone() * (absorb_cap_next[i].clone() - h[i].clone()));
@@ -603,14 +626,15 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // Row 0 can itself be an MSM run start — the `starts` transition never
         // fires *into* row 0 — so its IV is pinned here. Without this the
         // row-0 `absorb_cap` is a free capacity IV, leaving the
-        // `(EcMsm, group_ptr)` domain separator unenforced for a row-0 run.
-        let iv_local: [AB::Expr; NUM_HASH] = [
-            AB::Expr::from(Felt::from(NodeTag::EcMsm as u8)),
+        // `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` domain separator
+        // unenforced for a row-0 run.
+        let iv_local: [AB::Expr; DIGEST_WIDTH] = [
+            AB::Expr::from(CurvePrecompile::id()),
+            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
             group_ptr,
             AB::Expr::ZERO,
-            AB::Expr::ZERO,
         ];
-        for i in 0..NUM_HASH {
+        for i in 0..DIGEST_WIDTH {
             builder.when_first_row().assert_zero(
                 is_ec_msm.clone() * (absorb_cap_local[i].clone() - iv_local[i].clone()),
             );
@@ -639,11 +663,11 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // hash) while binding the node to *another* expression's value — a
         // forged value under a correct hash, which root-comparison cannot
         // catch. Holding `group_ptr` constant likewise keeps the run-start IV
-        // `(EcMsm, group, …)` on the claim's own group.
+        // `[CurvePrecompile::id(), MSM_OP_ID, group, 0]` on the claim's own group.
         let msm_expr: AB::Expr = local[COL_MSM_EXPR].into();
         let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].into();
-        let group_local: AB::Expr = local[COL_GROUP_PTR].into();
-        let group_next_const: AB::Expr = next[COL_GROUP_PTR].into();
+        let group_local: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
+        let group_next_const: AB::Expr = next[COL_EC_CONTEXT_GROUP_PTR].into();
         builder
             .when_transition()
             .assert_zero(continues.clone() * (msm_expr_next - msm_expr));
@@ -696,25 +720,24 @@ where
         let out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let ptr: LB::Expr = local[COL_PTR].into();
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        let cap_param_b: LB::Expr = local[COL_CAP_PARAM_B].into();
+        let tag_arg1: LB::Expr = local[COL_TAG_ARG1].into();
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let param_a: LB::Expr = local[COL_PARAM_A].into();
+        let tag_arg0: LB::Expr = local[COL_TAG_ARG0].into();
         let is_uint_op: LB::Expr = local[COL_IS_UINT_OP].into();
         let is_ec_create: LB::Expr = local[COL_IS_EC_CREATE].into();
         let is_ec_pai: LB::Expr = local[COL_IS_EC_PAI].into();
         let is_ec_op: LB::Expr = local[COL_IS_EC_OP].into();
         let is_create = is_ec_create.clone() + is_ec_pai;
-        let curve_b: LB::Expr = local[COL_CURVE_B].into();
         // EcMsm: the family bit feeds the perm `node` gate; the threaded
         // capacity feeds the perm cap. (The boundary flag, idx, expr, and
         // ptr fields are re-read fresh for the EcMsm consume column below,
         // like the EC columns, so the uint columns can move their copies.)
         let is_ec_msm: LB::Expr = local[COL_IS_EC_MSM].into();
 
-        let lhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
-        let rhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
-        let h: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
+        let lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
+        let rhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
+        let h: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
 
         // Uint value ops (bind Uint, not True). Shared `is_is` spans both
         // families, so gate to uint — degree-2, within col 2's budget.
@@ -749,8 +772,9 @@ where
 
         // Node-perm capacity, every slot degree-1. Runtime uint values use
         // `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`; uint ops use
-        // `[UintPrecompile::id(), op_id, 0, 0]`; bootstrap pins use
-        // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+        // `[UintPrecompile::id(), op_id, 0, 0]`; explicit pins use
+        // `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`; EcCreate / PAI rows use
+        // `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
         let and_cap = Tag::AND.as_word();
         let static_node = is_and
             + is_uint_leaf.clone()
@@ -758,28 +782,28 @@ where
             + is_create.clone()
             + is_ec_op.clone();
         let uint_precompile_id = LB::Expr::from(UintPrecompile::id());
+        let curve_precompile_id = LB::Expr::from(CurvePrecompile::id());
         let pin_claim_tag =
             LB::Expr::from(Felt::from(crate::transcript::nodes::UINT_PIN_CLAIM_TAG));
         let cap = [
             and_gate.clone() * LB::Expr::from(and_cap[0])
                 + (is_uint_leaf + op_lhs_gate.clone()) * uint_precompile_id.clone()
                 + is_pinned * (pin_claim_tag - uint_precompile_id)
-                + is_create.clone() * LB::Expr::from(Felt::from(NodeTag::EcCreate as u8))
-                + is_ec_op.clone() * LB::Expr::from(Felt::from(NodeTag::EcBinOp as u8)),
-            and_gate.clone() * LB::Expr::from(and_cap[1]) + param_a,
-            and_gate.clone() * LB::Expr::from(and_cap[2]) + cap_param_b + curve_b,
-            LB::Expr::ZERO,
+                + (is_create.clone() + is_ec_op.clone()) * curve_precompile_id,
+            and_gate.clone() * LB::Expr::from(and_cap[1]) + tag_arg0,
+            and_gate.clone() * LB::Expr::from(and_cap[2]) + tag_arg1,
+            and_gate.clone() * LB::Expr::from(and_cap[3]),
         ];
 
         // Per-insert mult degrees: the one-hot gates (perm `node`, AND / op
-        // consumes, `Range16`) are deg 1; the `−out_mult` provides are deg 2.
+        // consumes) are deg 1; the `−out_mult` provides are deg 2.
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
         // Per-insert message degrees beyond 1: the value provide's
         // `transient`-scaled fields and the role-mixed UintAdd consume are
         // deg 2 (denominator 2).
         let mixed_deg = Deg { v: 1, u: 2 };
-        // col 0: the deg-2 True provide dominates the 4-fraction batch ⇒
+        // col 0: the deg-2 True provide dominates the 3-fraction batch ⇒
         // numerator 5. col 1: all perm mults deg 1 ⇒ 4. col 2: the forked
         // Binding provide carries a deg-2 message (transient·ptr) ⇒ denom 4.
         // cols 3/4: two fractions each, raw / role-mixed fields.
@@ -789,15 +813,15 @@ where
         let col3_deg = Deg { v: 2, u: 2 };
         let col4_deg = Deg { v: 3, u: 3 };
         // col 5 (Group binding) mirrors col 0: two deg-1 consumes + a deg-2
-        // provide. col 6 (EC relations): EcGroup + EcPoint (deg-1) + the
-        // role-mixed EcGroupAdd (deg-2 message), like col 4.
+        // provide. col 6 (EC relations): EcPoint (deg-1) + the role-mixed
+        // EcGroupAdd (deg-2 message), like col 4.
         let col5_deg = Deg { v: 5, u: 4 };
-        let col6_deg = Deg { v: 4, u: 4 };
+        let col6_deg = Deg { v: 3, u: 3 };
         // col 7 (EcMsm dynamic P2 cap): the threaded cap is degree-1.
         let col7_deg = Deg { v: 1, u: 1 };
 
         // ---- col 0: Binding bus, True path (consume lhs/rhs on AND rows;
-        //             provide h as True on AND / zero / Is rows) + Range16
+        //             provide h as True on AND / zero / Is rows)
         builder.next_column(
             |col| {
                 col.group(
@@ -1037,20 +1061,21 @@ where
 
         // The EC columns read their fields fresh from `local` (cheap Copy
         // reads), so the uint columns above are free to move their copies.
-        let g_lhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
-        let g_rhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
-        let g_h: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
-        let g_ptr: LB::Expr = local[COL_PTR].into();
-        let g_a: LB::Expr = local[COL_A_PTR].into();
-        let g_b: LB::Expr = local[COL_B_PTR].into();
-        let g_bound: LB::Expr = local[COL_BOUND_PTR].into();
-        // The scalar-field bound, carried separately from the coord bound so
-        // an MSM-exercised group consumes its `EcGroup` under `n`, not `p`.
-        let g_sbound: LB::Expr = local[COL_SBOUND_PTR].into();
-        let g_param_a: LB::Expr = local[COL_PARAM_A].into();
-        let g_curve_b: LB::Expr = local[COL_CURVE_B].into();
-        let g_group: LB::Expr = local[COL_GROUP_PTR].into();
-        let g_pai: LB::Expr = local[COL_IS_EC_PAI].into();
+        let g_lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
+        let g_rhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
+        let g_h: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
+        let ec_value_ptr: LB::Expr = local[COL_PTR].into();
+        let ec_op_lhs_ptr: LB::Expr = local[COL_A_PTR].into();
+        let ec_op_rhs_ptr: LB::Expr = local[COL_B_PTR].into();
+        let create_point_ptr: LB::Expr = local[COL_EC_CREATE_POINT_PTR].into();
+        let create_x_ptr: LB::Expr = local[COL_EC_CREATE_X_PTR].into();
+        let create_y_ptr: LB::Expr = local[COL_EC_CREATE_Y_PTR].into();
+        // Create / PAI rows commit the group selector in the curve VALUE tag;
+        // EcPoint consumes the same physical cell so the hash cap and point
+        // group agree.
+        let create_group_ptr: LB::Expr = local[COL_EC_CREATE_GROUP_PTR].into();
+        let ec_context_group_ptr: LB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
+        let create_is_pai: LB::Expr = local[COL_IS_EC_PAI].into();
         // An EcMsm boundary binds its value point as a `Group` node — it
         // rides the same Group provide as create / result ops.
         let g_is_msm_last: LB::Expr = local[COL_IS_MSM_LAST].into();
@@ -1081,14 +1106,14 @@ where
                                     // Every ec op consumes its P operand binding.
                                     "consume-p",
                                     is_ec_op.clone(),
-                                    BindingMsg::group(g_lhs.clone(), g_a.clone()),
+                                    BindingMsg::group(g_lhs.clone(), ec_op_lhs_ptr.clone()),
                                     one_deg,
                                 );
                                 b.insert(
                                     // Binary ec ops (add / sub / is) consume Q.
                                     "consume-q",
                                     ec_binary.clone(),
-                                    BindingMsg::group(g_rhs.clone(), g_b.clone()),
+                                    BindingMsg::group(g_rhs.clone(), ec_op_rhs_ptr.clone()),
                                     one_deg,
                                 );
                                 b.insert(
@@ -1099,7 +1124,7 @@ where
                                         * (is_create.clone()
                                             + ec_result.clone()
                                             + g_is_msm_last.clone()),
-                                    BindingMsg::group(g_h.clone(), g_ptr.clone()),
+                                    BindingMsg::group(g_h.clone(), ec_value_ptr.clone()),
                                     two_deg,
                                 );
                             },
@@ -1112,11 +1137,10 @@ where
             col5_deg,
         );
 
-        // ---- col 6: EC relation consumes — EcGroup + EcPoint pin a
-        //             EcCreate's point on its curve (cap a/b ↔ group ↔
-        //             coords); EcGroupAdd ties an EcBinOp Add/Sub's operands
-        //             and result. group_ptr is witnessed, forced by these
-        //             provides. is_pai = 0 (the slice lays finite points).
+        // ---- col 6: EC relation consumes — EcPoint pins an EcCreate / PAI
+        //             point to the group committed in cap slot 2, and
+        //             EcGroupAdd ties an EcBinOp Add/Sub's operands and result.
+        //             COL_EC_CONTEXT_GROUP_PTR is only live for the binop/MSM paths.
         builder.next_column(
             |col| {
                 col.group(
@@ -1127,30 +1151,17 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "consume-ecgroup",
-                                    is_create.clone(),
-                                    EcGroupMsg {
-                                        group_ptr: g_group.clone(),
-                                        a_ptr: g_param_a.clone(),
-                                        b_ptr: g_curve_b.clone(),
-                                        bound_ptr: g_bound.clone(),
-                                        scalar_bound_ptr: g_sbound.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
                                     "consume-ecpoint",
                                     is_create.clone(),
                                     EcPointMsg {
                                         // Finite create: (pt, group, x, y, 0).
-                                        // PAI: (pai, group, 0, 0, 1) — a_ptr /
-                                        // b_ptr are 0 on PAI rows, is_pai = the
-                                        // flag (so the field stays degree-1).
-                                        point_ptr: g_ptr.clone(),
-                                        group_ptr: g_group.clone(),
-                                        x_ptr: g_a.clone(),
-                                        y_ptr: g_b.clone(),
-                                        is_pai: g_pai.clone(),
+                                        // PAI: (pai, group, 0, 0, 1). The group
+                                        // is the same physical cell as cap slot 2.
+                                        point_ptr: create_point_ptr.clone(),
+                                        group_ptr: create_group_ptr.clone(),
+                                        x_ptr: create_x_ptr.clone(),
+                                        y_ptr: create_y_ptr.clone(),
+                                        is_pai: create_is_pai.clone(),
                                     },
                                     one_deg,
                                 );
@@ -1158,17 +1169,18 @@ where
                                     "consume-ecgroupadd",
                                     ec_result.clone(),
                                     EcGroupAddMsg {
-                                        group_ptr: g_group.clone(),
+                                        group_ptr: ec_context_group_ptr.clone(),
                                         // The consume's `ec_result` gate already pins
                                         // an add/sub row, so the slot perm rides the bare
                                         // op flags (degree-1). Add: (P, Q, R) — P + Q = R.
                                         // Sub: (R, Q, P) — R + Q = P, R (ptr) the first
                                         // operand, P (a_ptr) the result.
-                                        p_ptr: is_add.clone() * g_a.clone()
-                                            + is_sub.clone() * g_ptr.clone(),
-                                        q_ptr: (is_add.clone() + is_sub.clone()) * g_b.clone(),
-                                        r_ptr: is_add.clone() * g_ptr.clone()
-                                            + is_sub.clone() * g_a.clone(),
+                                        p_ptr: is_add.clone() * ec_op_lhs_ptr.clone()
+                                            + is_sub.clone() * ec_value_ptr.clone(),
+                                        q_ptr: (is_add.clone() + is_sub.clone())
+                                            * ec_op_rhs_ptr.clone(),
+                                        r_ptr: is_add.clone() * ec_value_ptr.clone()
+                                            + is_sub.clone() * ec_op_lhs_ptr.clone(),
                                     },
                                     mixed_deg,
                                 );
@@ -1186,7 +1198,7 @@ where
         //             threaded state as the cap; all one-shot node caps ride
         //             col 1.
         let d_perm_seq_id: LB::Expr = local[COL_PERM_SEQ_ID].into();
-        let d_absorb_cap: [LB::Expr; NUM_HASH] =
+        let d_absorb_cap: [LB::Expr; DIGEST_WIDTH] =
             array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
         builder.next_column(
             |col| {
@@ -1223,12 +1235,12 @@ where
         //             fresh from `local`.
         let m_msm: LB::Expr = local[COL_IS_EC_MSM].into();
         let m_last: LB::Expr = local[COL_IS_MSM_LAST].into();
-        let m_lhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
-        let m_rhs: [LB::Expr; NUM_HASH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
+        let m_lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
+        let m_rhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
         let m_a: LB::Expr = local[COL_A_PTR].into();
         let m_b: LB::Expr = local[COL_B_PTR].into();
         let m_bound: LB::Expr = local[COL_BOUND_PTR].into();
-        let m_group: LB::Expr = local[COL_GROUP_PTR].into();
+        let m_group: LB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
         let m_val: LB::Expr = local[COL_PTR].into();
         let m_idx: LB::Expr = local[COL_MSM_IDX].into();
         let m_expr: LB::Expr = local[COL_MSM_EXPR].into();

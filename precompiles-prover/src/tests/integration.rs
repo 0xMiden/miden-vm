@@ -4,7 +4,7 @@
 //! constraint at every row of the trace, catching any mismatch between
 //! witness generation and constraint definitions.
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, deferred::Node, field::QuadFelt};
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -241,7 +241,16 @@ fn chunk_and_p2_traces_verify_with_shared_challenges() {
     }
     // All invocations are distinct → no interning hits; both sides
     // lay one cycle per chunk across all invocations.
-    let total_chunks: u32 = invs.iter().map(|i| i.num_chunks() as u32).sum();
+    let total_chunks: u32 = invs
+        .iter()
+        .map(|i| {
+            Node::chunks_from_bytes(&i.input)
+                .payload()
+                .as_data()
+                .expect("chunks_from_bytes creates data payload")
+                .len() as u32
+        })
+        .sum();
     assert_eq!(chunk_req.total_chunks(), total_chunks);
     assert_eq!(p2.total_cycles(), total_chunks);
 
@@ -475,45 +484,14 @@ fn full_stack_chiplets_validate_under_shared_challenges() {
 
 use std::collections::HashMap;
 
-use miden_air::lookup::{
-    Challenges, LookupAir,
-    debug::{check_trace_balance, trace::DebugTraceBuilder},
-};
-use miden_lifted_air::LiftedAir;
-use p3_matrix::dense::RowMajorMatrix;
+use miden_air::lookup::Challenges;
 
 use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
+    tests::bus_balance::{fold_balance, session_stack_residual},
     transcript::eval::TranscriptEvalAir,
 };
-
-/// Fold one chiplet's per-denom balance into the cross-chiplet accumulator.
-/// `net[denom] = (multiplicity summed across chiplets, a sample message repr
-/// for the failure diagnostic)`.
-pub(crate) fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) where
-    A: LiftedAir<Felt, QuadFelt>,
-    for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
-{
-    let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
-    for u in report.unmatched {
-        let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
-        entry.0 += u.net_multiplicity;
-        if entry.1.is_empty()
-            && let Some(c) = u.contributions.first()
-        {
-            entry.1 = c.msg_repr.clone();
-        }
-    }
-}
 
 #[test]
 fn full_stack_bus_balance_closes() {
@@ -543,26 +521,8 @@ fn full_stack_bus_balance_closes() {
     let mut rng = StdRng::seed_from_u64(0x9a11);
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-
-    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
-    assert!(
-        residual.is_empty(),
-        "cross-chiplet bus imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
-        residual.len(),
-        residual.first().map(|(_, (m, _))| *m),
-        residual.first().map(|(_, (_, s))| s.as_str()).unwrap_or(""),
-    );
+    let residual = session_stack_residual(&mains, &[], &challenges);
+    assert!(residual.is_empty());
 }
 
 #[test]
@@ -587,30 +547,12 @@ fn full_stack_bus_balance_closes_with_empty_input() {
 
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-
-    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
-    assert!(
-        residual.is_empty(),
-        "empty-input bus imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
-        residual.len(),
-        residual.first().map(|(_, (m, _))| *m),
-        residual.first().map(|(_, (_, s))| s.as_str()).unwrap_or(""),
-    );
+    let residual = session_stack_residual(&mains, &[], &challenges);
+    assert!(residual.is_empty());
 }
 
 use super::uint::{random_modulus, random_uint_below};
 use crate::{
-    ec::trace::EcStoreRequires,
     math::{from_hex, to_limbs32},
     transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
     uint::{
@@ -645,7 +587,7 @@ fn uint_leaf_binds_against_uint_store() {
     // its UintVal demand into the store's ledger.
     let root = eval_req.zero();
     eval_req.uint_leaf(v_ptr, fp, v_u32, &mut store, &mut p2);
-    let eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let eval_main = eval_trace(eval_req, root);
 
     // The store provides each UintVal with multiplicity = its demand: the
     // bound-refs (recorded on intern) + the eval leaf's consume of the
@@ -701,7 +643,7 @@ fn pinned_uint_leaf_folds_into_spine() {
     let modulus = eval_req.pin_uint(fp, fp, mod_v_u32, &mut store, &mut p2);
     let root = eval_req.record_and(zero, modulus, &mut p2);
     let public_root = root.hash();
-    let eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let eval_main = eval_trace(eval_req, root);
 
     // Store provides UintVal(1) (the modulus) with multiplicity = its self
     // bound-ref + the eval pin consume.
@@ -751,12 +693,13 @@ fn full_stack_pins_uints() {
     let input: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (_, keccak) = session.keccak(&input);
 
-    // A random modulus (self-referential) at ptr 1, and a value under it at
-    // ptr 2.
+    // A random modulus (self-referential) at a non-fixed ptr, and a value under it.
+    const MOD_PTR: u32 = 1000;
+    const VALUE_PTR: u32 = 1001;
     let bound = random_modulus(&mut rng);
-    let modulus = session.pin_uint(1, bound, 1);
+    let modulus = session.pin_uint(MOD_PTR, bound, MOD_PTR);
     let value = random_uint_below(&mut rng, bound);
-    let val = session.pin_uint(2, value, 1);
+    let val = session.pin_uint(VALUE_PTR, value, MOD_PTR);
     let root = session.assert_and_fold([keccak, modulus, val]);
 
     let traces = session.finish(root);
@@ -764,25 +707,8 @@ fn full_stack_pins_uints() {
 
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-
-    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
-    assert!(
-        residual.is_empty(),
-        "uint-pinning stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
-        residual.len(),
-        residual.first().map(|(_, (m, _))| *m),
-        residual.first().map(|(_, (_, s))| s.as_str()).unwrap_or(""),
-    );
+    let residual = session_stack_residual(&mains, &[], &challenges);
+    assert!(residual.is_empty());
 }
 
 /// The pin-anchoring tamper case: the store holds a *larger* value X at
@@ -814,7 +740,7 @@ fn relocated_modulus_pin_unbalances() {
     let zero = eval_req.zero();
     let modulus = eval_req.pin_uint(fp, fp, to_limbs32(x), &mut store, &mut p2);
     let root = eval_req.record_and(zero, modulus, &mut p2);
-    let mut eval_main = eval_trace(eval_req, root, &EcStoreRequires::new());
+    let mut eval_main = eval_trace(eval_req, root);
 
     // … with the laid row's dereference forged onto the relocated block.
     let pin_row = (0..eval_main.height())
@@ -849,11 +775,16 @@ fn relocated_modulus_pin_unbalances() {
 /// constant's leaf hash commits (value, FP, own ptr), so the root anchors
 /// `store[ptr] = value ∧ value < p` for all four — with `a = 0` doubling
 /// as the *typed* zero (a pin of 0 under FP's bound, the role the old
-/// untyped sentinel could never fill). Five pins auto-pad to eight store
-/// blocks; every bus closes across the nine-chiplet stack.
+/// untyped sentinel could never fill). These explicit transcript pins use
+/// non-fixed addresses because `Session::new` already installs VM-owned fixed values;
+/// every bus closes once the verifier-side fixed-boundary correction is included.
 #[test]
 fn full_stack_pins_k1_constants() {
-    const FP: u32 = 1;
+    const FP: u32 = 1000;
+    const GX_PTR: u32 = 1001;
+    const GY_PTR: u32 = 1002;
+    const A_PTR: u32 = 1003;
+    const B_PTR: u32 = 1004;
 
     let p_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E");
     let gx = from_hex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798");
@@ -866,39 +797,20 @@ fn full_stack_pins_k1_constants() {
     let handles = [
         keccak,
         session.pin_uint(FP, p_minus_1, FP),
-        session.pin_uint(2, gx, FP),
-        session.pin_uint(3, gy, FP),
-        session.pin_uint(4, a, FP),
-        session.pin_uint(5, b, FP),
+        session.pin_uint(GX_PTR, gx, FP),
+        session.pin_uint(GY_PTR, gy, FP),
+        session.pin_uint(A_PTR, a, FP),
+        session.pin_uint(B_PTR, b, FP),
     ];
     let root = session.assert_and_fold(handles);
     let traces = session.finish(root);
     let mains = traces.mains();
 
-    assert_eq!(mains[8].height(), 64, "5 pins + 3 padding blocks × 8 rows");
-
     let mut rng = StdRng::seed_from_u64(0x5ec9_2561);
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-
-    let residual: Vec<_> = net.into_iter().filter(|(_, (m, _))| *m != Felt::ZERO).collect();
-    assert!(
-        residual.is_empty(),
-        "k1-constants stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
-        residual.len(),
-        residual.first().map(|(_, (m, _))| *m),
-        residual.first().map(|(_, (_, s))| s.as_str()).unwrap_or(""),
-    );
+    let residual = session_stack_residual(&mains, &[], &challenges);
+    assert!(residual.is_empty());
 }
 
 /// Every chiplet must fit the test config's blowup (lqd ≤ 3 at

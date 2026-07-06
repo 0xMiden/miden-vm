@@ -1,64 +1,81 @@
-//! Fixed-pin bootstrap tests.
+//! Fixed-boundary tests.
 
-use miden_core::Felt;
-use miden_precompiles::UintDomain;
+use std::collections::HashMap;
+
+use miden_air::lookup::Challenges;
+use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles::{CurveId, UintDomain};
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
-    math::{U256, from_limbs32, to_limbs32},
-    session::Session,
-    transcript::{
-        eval::trace::transcript_node_hash,
-        poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
+    ec::groups::{
+        COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
     },
+    math::U256,
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::{Session, SessionTraces},
+    tests::bus_balance::{fold_balance, fold_fixed_group_external_balance},
+    transcript::poseidon2::P2Digest,
     uint::trace::PIN_NAMESPACE_END,
 };
 
-fn fold_truthy_hashes(hashes: impl IntoIterator<Item = P2Digest>) -> P2Digest {
-    let mut acc = P2Digest::default();
-    for hash in hashes {
-        acc = transcript_node_hash(acc, hash);
-    }
-    acc
+fn empty_root_traces() -> SessionTraces {
+    let mut session = Session::new();
+    let root = session.zero();
+    session.finish(root)
 }
 
-fn bound_value(domain: UintDomain) -> U256 {
-    from_limbs32(&domain.minus_one())
+fn fixed_group_residual(groups: &RowMajorMatrix<Felt>) -> usize {
+    let challenges = Challenges::new(
+        QuadFelt::new([Felt::from(17u32), Felt::from(23u32)]),
+        QuadFelt::new([Felt::from(31u32), Felt::from(43u32)]),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
+    fold_balance(&EcGroupsAir, groups, &challenges, &mut net);
+    fold_fixed_group_external_balance(&challenges, &mut net);
+    net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
 }
 
-fn bound_pin_claim_digest(domain: UintDomain) -> P2Digest {
-    let ptr = domain.bound_ptr();
-    let limbs = to_limbs32(bound_value(domain));
-    let lo = core::array::from_fn(|i| Felt::from(limbs[i]));
-    let hi = core::array::from_fn(|i| Felt::from(limbs[4 + i]));
-    Poseidon2Requires::digest_of(P2Cap::uint_pin_claim(ptr, ptr), &[(lo, hi)])
+fn fixed_group_row(curve: CurveId) -> usize {
+    CurveId::ALL
+        .into_iter()
+        .position(|fixed| fixed == curve)
+        .expect("fixed curve is in CurveId::ALL")
+        * G_NUM_MAIN_COLS
 }
 
 #[test]
-fn bootstrap_root_folds_fixed_bound_pin_claims() {
-    let expected = fold_truthy_hashes(UintDomain::ALL.into_iter().map(bound_pin_claim_digest));
-
-    let mut session = Session::new();
-    let claims = session.bootstrap_fixed_pins();
-    let root = session.assert_and_fold(claims);
-    assert_eq!(root.hash(), expected);
-
-    let traces = session.finish(root);
-    assert_eq!(traces.public_root(), expected);
+fn fixed_environment_emits_no_default_transcript_claims() {
+    let traces = empty_root_traces();
+    assert_eq!(traces.public_root(), P2Digest::default());
     traces.check();
 }
 
 #[test]
-fn bootstrap_keeps_common_runtime_constants_dynamic() {
+fn tampered_fixed_group_scalar_bound_ptr_unbalances() {
+    let curve = CurveId::ALL[0];
+    let traces = empty_root_traces();
+    let mut forged = traces.mains()[11].clone();
+    forged.values[fixed_group_row(curve) + G_COL_SBOUND_PTR] =
+        Felt::from(curve.base_domain().bound_ptr());
+
+    crate::tests::check_local(EcGroupsAir, &forged);
+    assert_ne!(fixed_group_residual(&forged), 0);
+}
+
+#[test]
+fn non_fixed_runtime_constants_allocate_transient_ptrs() {
     let mut session = Session::new();
-    let _claims = session.bootstrap_fixed_pins();
 
     for domain in UintDomain::ALL {
         let bound_ptr = domain.bound_ptr();
-        for value in [U256::ZERO, U256::ONE, U256::from(2u8)] {
+        for value in [U256::from(42u8), U256::from(123u8)] {
             let node = session.uint_leaf(value, bound_ptr);
             assert!(
                 node.ptr.addr() >= PIN_NAMESPACE_END,
-                "ordinary constant {value} under {domain:?} reused a fixed pin ptr {}",
+                "ordinary constant {value} under {domain:?} reused a fixed ptr {}",
                 node.ptr.addr(),
             );
             assert_ne!(node.ptr.addr(), bound_ptr);

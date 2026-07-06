@@ -316,7 +316,7 @@ enum Request {
 /// Records the `(op, a, b)` LOGIC triples and `(a, k)` rotations
 /// [`Bitwise64Air`] must provide, in issue order. The layout — which
 /// result chains into which consumer's `a` slot — is deferred to
-/// [`build_chains`], which packs the stream into [`Chain`]s.
+/// `build_chains`, which packs the stream into `Chain`s.
 ///
 /// Recording (rather than laying rows eagerly) is what lets a consumer's
 /// `a` sit right after the LOGIC that produced it regardless of issue
@@ -338,7 +338,7 @@ impl Bitwise64Requires {
     /// Record one `(op, a, b)` LOGIC triple; returns `op(a, b)`.
     ///
     /// Records the request only — the row layout (which result chains into
-    /// which consumer's `a`) is deferred to [`build_chains`]. Drives the 8
+    /// which consumer's `a`) is deferred to `build_chains`. Drives the 8
     /// byte-wise `BytePairLut` requires the LOGIC row's bus consume expects
     /// (order-invariant, so eager is correct).
     pub fn require(
@@ -359,11 +359,11 @@ impl Bitwise64Requires {
 
     /// Record one `(a, k)` ROL operation; returns `rol_64(a, log2(k))`.
     ///
-    /// Records the request only. [`build_chains`] caps the chain whose tail
+    /// Records the request only. `build_chains` caps the chain whose tail
     /// is `a` with this ROL — claiming its producer *before* any LOGIC, so
     /// the AIR's "ROL must follow LOGIC" constraint
     /// (`is_rol_next · (1 − is_logic) = 0`) is met. Every ROL input must be
-    /// a prior LOGIC result; if none exists, [`build_chains`] panics
+    /// a prior LOGIC result; if none exists, `build_chains` panics
     /// (callers can issue `require(Xor, a, 0)` to materialize one).
     ///
     /// `k` must be a power of two with `k < 2^31` (checked here). See
@@ -511,7 +511,7 @@ fn claim_producer(
 
 /// Row-major trace.
 ///
-/// Lowers the recorded requests into chains ([`build_chains`]) and walks
+/// Lowers the recorded requests into chains (`build_chains`) and walks
 /// each: its LOGIC links as `Real` rows — every link's `a` is the prior
 /// link's `c`, so the AIR's c-in-next-row holds by construction — then
 /// either the ROL cap or one trailing dead `Carrier` holding the uncapped

@@ -6,10 +6,11 @@ How the transcript DAG is *evaluated*. Companion to
 (the chiplet spec). **Implemented** in
 [`src/transcript/eval`](../src/transcript/eval/): the VM `AND` tree —
 the live transcript root, which replaced the spine — uint storage + the
-bootstrap pin seam ([`chiplets/uint.md`](chiplets/uint.md)), and **uint
-arithmetic + the `is` predicate** (`UintOp` nodes consuming the
+runtime-value / explicit-pin seam ([`chiplets/uint.md`](chiplets/uint.md)),
+**uint arithmetic + the `is` predicate** (`UintOp` nodes consuming the
 [UintAdd](chiplets/uint-add.md) / [UintMul](chiplets/uint-mul.md)
-relations by ptr). Group is the roadmap.
+relations by ptr), and EC create / binop / MSM nodes consuming the EC
+relations by ptr.
 
 ## What the transcript is
 
@@ -20,9 +21,12 @@ hash. Proving the root "evaluates to `True`" means every assertion in
 the DAG holds. The verifier trusts the root; the proof shows the root
 is a well-formed transcript of valid assertions.
 
-Bootstrap uint pin claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
-and fold deterministically into the initial root. Program VM graph claims fold
-from that root.
+Fixed uint domains, fixed curve coefficients, and fixed curve group tuples are
+not implicit transcript leaves. By default the verifier loads their relation
+boundary consumes (`UintVal` for uint values, `EcGroup` for group metadata)
+without changing the public root. `Session::pin_uint` remains available when a
+statement explicitly wants `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
+folded into the root as a `True` claim.
 
 ## Two orthogonal relations
 
@@ -89,7 +93,7 @@ a `True` binding, recursively.
 Binding is a LogUp **multiset that must net to zero** — pure dataflow,
 nothing persists (contrast the uint *store*
 ([`chiplets/uint.md`](chiplets/uint.md)), a real table of `ptr ↦ limbs`
-looked up many times). The MVP anchors at **one external
+looked up many times). The Binding DAG anchors at **one external
 end** — the root's first-row pin — with everything below, including the
 `ZERO_HASH` base case, balancing internally:
 
@@ -104,8 +108,8 @@ end** — the root's first-row pin — with everything below, including the
 - **Root.** The root node consumes its two children but **provides
   nothing** — `out_mult = 0`, since it has no parent — so it *absorbs*
   the Binding σ; there is no public-root bus consume. Its hash is pinned
-  to the public `root_hash` by a **first-row local constraint**, the one
-  external anchor. (An empty transcript is the degenerate case: the first
+  to the public `root_hash` by a **first-row local constraint**, the
+  transcript-root anchor. (An empty transcript is the degenerate case: the first
   row is itself a `ZERO_HASH` leaf, forcing `root_hash = 0`.)
 
 Everything else (every node's provide + its children's consumes) nets to
@@ -150,8 +154,9 @@ values may sit on different rows. What landed makes the honest prover
 **eagerly canonical**: the uint store's interning
 (`UintStoreRequires::intern`) dedups every leaf and op result by
 `(value, modulus)`, so to-be-equated values — including a result that
-happens to coincide with a bootstrap pin — always share a ptr and `Is` stays
-complete across arbitrarily different DAG shapes. This is
+happens to coincide with an explicit pin or verifier-loaded fixed uint —
+always share a ptr and `Is` stays complete across arbitrarily different DAG
+shapes. This is
 prover-side completeness machinery only; soundness still rests solely
 on `ptr → value` functional. The *constraint-level* eager direction
 that `NotIs` needs remains a stronger, separate construction; defer
@@ -214,8 +219,9 @@ value-binding and the fusion would no longer apply.
   Binding, the one exception being KeccakNode, which fuses (below).
 - **Eval chip** → the transcript chiplet,
   [`src/transcript/eval`](../src/transcript/eval/). Live arms: the VM
-  `Tag::AND` tree, uint leaves (bootstrap pin claims + runtime VM values), uint ops (`Add` / `Sub` /
-  `Mul` / `Is`), EC create/PAI, EC binops, and EcMsm absorb runs — a uniform
+  `Tag::AND` tree, uint leaves (explicit pin claims + runtime VM values),
+  uint ops (`Add` / `Sub` / `Mul` / `Is`), EC create/PAI, EC binops, and
+  EcMsm absorb runs — a uniform
   role-polymorphic dispatch.
 - **Keccak path** (live, fused): the sponge emits its digest to
   `Memory64` and the chunk chiplet content-commits the input;

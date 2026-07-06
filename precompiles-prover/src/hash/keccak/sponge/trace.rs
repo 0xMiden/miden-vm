@@ -255,7 +255,7 @@ impl SpongeRequires {
 
 /// Compute the Keccak digest of `input` without recording anything —
 /// a thin wrapper around the FIPS 202 multi-rate-10*1 pad + Keccak-f
-/// sponge construction. Used by [`KeccakNodeRequires`] to pre-check
+/// sponge construction. Used by `KeccakNodeRequires` to pre-check
 /// dedup before calling [`SpongeRequires::require`] (which would
 /// otherwise lay sponge rows that the node-layer dedup hit then
 /// discards).

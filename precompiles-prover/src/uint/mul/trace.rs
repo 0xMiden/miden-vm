@@ -3,8 +3,8 @@
 //! [`generate_trace`] lays each MAC op out as a [`PERIOD`]-row block per
 //! the liquid layout (operand limb rows + the `q` / `Γ` witnesses placed
 //! by [`GAMMA_SLOTS`]); the quotient comes from the exact division in
-//! [`math`](crate::math), the carries from the synthetic division here.
-//! [`build_aux`] drives
+//! [`math`], the carries from the synthetic division here.
+//! `build_aux` drives
 //! the LogUp running sums and the two Schwartz–Zippel registers (`id`,
 //! `S`), whose per-row accumulation mirrors [`super::UintMulAir`]'s
 //! expressions exactly — both sides read the same placement table.
