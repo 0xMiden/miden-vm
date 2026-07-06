@@ -2,7 +2,7 @@
 //! Schwartz–Zippel over the [`UintStore`](crate::uint), with the binary
 //! carry / borrow chains and the `UintVal` bus balanced against the store.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, vec::Vec};
 
 use miden_air::lookup::{
     Challenges, LookupAir,

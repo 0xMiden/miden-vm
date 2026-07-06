@@ -32,6 +32,8 @@
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
 //! generic lifted-stark usage, not chiplet wiring.
 
+use alloc::vec::Vec;
+
 use miden_core::Felt;
 pub use miden_core::proof::{DeferredProof, StarkProof};
 use p3_matrix::dense::RowMajorMatrix;

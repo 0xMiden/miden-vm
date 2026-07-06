@@ -23,6 +23,8 @@
 //! Each returns the combined [`EcExprPtr`]; tie it to a claimed point with
 //! [`Session::ec_msm`].
 
+use alloc::{vec, vec::Vec};
+
 use crate::{
     ec::msm::trace::EcExprPtr,
     math::U256,

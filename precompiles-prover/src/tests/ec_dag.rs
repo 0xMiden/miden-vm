@@ -9,6 +9,8 @@
 //! every bus (the EC node family activated: `EcGroupAdd` live at mult 1,
 //! create rows consuming `EcPoint`, and add/sub rows consuming `EcGroupAdd`).
 
+use std::{format, string::String, vec};
+
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};

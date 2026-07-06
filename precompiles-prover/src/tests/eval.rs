@@ -11,6 +11,8 @@
 //! the eval chip's local constraints + its internal σ recurrence, not
 //! cross-chiplet bus balance — that's the full-stack integration test.
 
+use std::vec::Vec;
+
 use miden_core::{
     Felt,
     deferred::{Digest, fold_deferred_root},

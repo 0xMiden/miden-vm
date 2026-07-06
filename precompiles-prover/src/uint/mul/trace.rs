@@ -9,8 +9,8 @@
 //! `S`), whose per-row accumulation mirrors [`super::UintMulAir`]'s
 //! expressions exactly — both sides read the same placement table.
 
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::array;
-use std::collections::HashMap;
 
 use miden_core::{
     Felt,
@@ -37,7 +37,7 @@ use crate::{
 /// the derived quotient + carries) are resolved from the store at
 /// trace-gen. `r` is **caller-assigned** (a nondeterministic witness —
 /// supporting `div` as `y·z + 0 = x`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct MulOp {
     pub kappa_a: u16,
     pub kappa_c: u16,
@@ -159,7 +159,7 @@ pub struct UintMulRequires {
     /// `(op, provide mult)` in first-recorded order; mult 0 = dormant.
     pub(crate) ops: Vec<(MulOp, ProvideMult)>,
     /// Relation identity → index into `ops`.
-    dedup: HashMap<MulOp, usize>,
+    dedup: BTreeMap<MulOp, usize>,
 }
 
 impl UintMulRequires {

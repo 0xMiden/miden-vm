@@ -29,6 +29,8 @@ mod uint_mul;
 mod utils;
 mod vm_uint;
 
+use std::{vec, vec::Vec};
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;

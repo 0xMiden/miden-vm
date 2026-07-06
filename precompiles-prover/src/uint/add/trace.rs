@@ -7,7 +7,8 @@
 //! register, whose per-row accumulation mirrors [`super::UintAddAir`]'s
 //! `contrib` exactly.
 
-use std::collections::HashMap;
+use alloc::{collections::BTreeMap, vec::Vec};
+use core::array;
 
 use miden_core::{
     Felt,
@@ -35,7 +36,7 @@ use crate::{
 /// (the `a + b ≡ 0` negation primitive, laid as the `c_ptr = 0`
 /// sentinel). `b = None` is the mirror `is_b_zero` mode: `a + 0 ≡ c`,
 /// the stored-value **equality certificate** `a = c`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct AddOp {
     a: UintPtr,
     b: Option<UintPtr>,
@@ -72,7 +73,7 @@ pub struct UintAddRequires {
     /// `(op, provide mult)` in first-recorded order; mult 0 = dormant.
     ops: Vec<(AddOp, ProvideMult)>,
     /// Relation identity → index into `ops`.
-    dedup: HashMap<AddOp, usize>,
+    dedup: BTreeMap<AddOp, usize>,
 }
 
 impl UintAddRequires {
@@ -200,10 +201,10 @@ pub fn generate_trace(
         // Limb rows: the 4×32 halves of a / b / c / bound (hubs between
         // the b / c / p halves), then γ⁺ / γ⁻ and the term row.
         let half = |v: &[u32; 8], hi: bool| -> [Felt; 4] {
-            std::array::from_fn(|k| Felt::from(v[if hi { 4 + k } else { k }]))
+            array::from_fn(|k| Felt::from(v[if hi { 4 + k } else { k }]))
         };
         let carry_row = |g: &[u16; 7], from: usize, count: usize| -> [Felt; 4] {
-            std::array::from_fn(|k| if k < count { Felt::from(g[from + k]) } else { Felt::ZERO })
+            array::from_fn(|k| if k < count { Felt::from(g[from + k]) } else { Felt::ZERO })
         };
         let scalar_row = |s: Felt| -> [Felt; 4] { [s, Felt::ZERO, Felt::ZERO, Felt::ZERO] };
         let rows: [[Felt; 4]; PERIOD] = [

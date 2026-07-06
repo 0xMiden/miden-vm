@@ -4,6 +4,8 @@
 //! Keccak-f[1600] implementation, and runs `check_constraints` on the
 //! resulting AIR/witness pair.
 
+use std::{vec, vec::Vec};
+
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 

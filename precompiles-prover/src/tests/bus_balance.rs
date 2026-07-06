@@ -1,6 +1,6 @@
 //! Cross-chiplet bus-balance helpers shared by integration and DAG tests.
 
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
 use miden_air::lookup::{
     Challenges, LookupAir,

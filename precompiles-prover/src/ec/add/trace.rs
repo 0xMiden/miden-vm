@@ -8,7 +8,7 @@
 //! coordinate limbs never enter this trace — the aux is exactly the
 //! LogUp columns, no witness registers.
 
-use std::collections::HashMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
@@ -110,7 +110,7 @@ pub struct EcAddRequires {
     /// (no `EcGroupAdd` consumer yet — until the MSM / DAG layer lands).
     pub(crate) ops: Vec<(EcAddOp, ProvideMult)>,
     /// Relation identity `(group, p, q)` → index into `ops`.
-    dedup: HashMap<(EcGroupPtr, EcPointPtr, EcPointPtr), usize>,
+    dedup: BTreeMap<(EcGroupPtr, EcPointPtr, EcPointPtr), usize>,
 }
 
 impl EcAddRequires {

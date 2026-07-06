@@ -1,6 +1,6 @@
 //! Fixed-boundary tests.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, string::String};
 
 use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};

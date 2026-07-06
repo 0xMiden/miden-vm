@@ -23,8 +23,8 @@
 //! recorded absorptions in cycle-allocation order, emitting one
 //! 16-row Poseidon2 cycle per block.
 
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::ops::Range;
-use std::collections::HashMap;
 
 use miden_core::{Felt, chiplets::hasher::Hasher, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
@@ -189,7 +189,7 @@ pub struct Poseidon2Requires {
     /// trace.
     absorptions: Vec<RecordedAbsorption>,
     /// `digest → index` of its record (the one each intern hit bumps).
-    by_digest: HashMap<P2Digest, usize>,
+    by_digest: BTreeMap<P2Digest, usize>,
     /// Running `perm_seq_id` allocator = total cycles laid so far.
     next_seq: u32,
 }

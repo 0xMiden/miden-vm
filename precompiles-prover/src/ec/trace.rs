@@ -16,7 +16,7 @@
 //! the resolved handle through [`EcStoreRequires::group_sbound`], so
 //! the tuple is identical across the group row and all its consumes.
 
-use std::collections::{BTreeMap, HashMap};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_precompiles::CurveId;
@@ -117,14 +117,14 @@ pub struct EcStoreRequires {
     /// `by_value` (honest-prover dedup — a value-dedup'd add result
     /// lands on its existing certified row, demanding no fresh
     /// membership).
-    by_coords: HashMap<(EcGroupPtr, UintPtr, UintPtr), EcPointPtr>,
+    by_coords: BTreeMap<(EcGroupPtr, UintPtr, UintPtr), EcPointPtr>,
     /// Canonical-dedup reverse index for groups: an equal curve
     /// `(a, b, bound)` shares one group row. The DAG layer creates a
     /// point's group per `EcCreate` node, so identical curves must
     /// collapse to one `group_ptr` (else operands land on distinct
     /// groups and the add's same-group assertion fails); bare callers
     /// that create each group once are unaffected.
-    by_curve: HashMap<(UintPtr, UintPtr, UintPtr), EcGroupPtr>,
+    by_curve: BTreeMap<(UintPtr, UintPtr, UintPtr), EcGroupPtr>,
     group_demand: BTreeMap<EcGroupPtr, ProvideMult>,
     point_demand: BTreeMap<EcPointPtr, ProvideMult>,
     /// Each group's canonical PAI row (deduped per group) — the
@@ -137,8 +137,8 @@ impl Default for EcStoreRequires {
         let mut store = Self {
             groups: Vec::new(),
             points: Vec::new(),
-            by_coords: HashMap::new(),
-            by_curve: HashMap::new(),
+            by_coords: BTreeMap::new(),
+            by_curve: BTreeMap::new(),
             group_demand: BTreeMap::new(),
             point_demand: BTreeMap::new(),
             pai_rows: BTreeMap::new(),
