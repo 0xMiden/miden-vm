@@ -115,9 +115,10 @@ All main-trace (Phase 1) constraints below are degree ≤ 2
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 7 | `when_transition: (1 − act) · act_next = 0` | 2 | `act` is monotone — pads only at the tail; the cyclic last→first wrap is dropped so that edge stays free (`src/ec/mod.rs:277-279`) |
-| 8 | `when_transition: act_next · (ptr_next − ptr − 1) = 0` | 2 | ptrs are consecutive along the active prefix; consecutive allocation makes `ptr → entity` injective for free — no gap column, no `Range16` (`src/ec/mod.rs:281-284`) |
-| 9 | `when_first_row: ptr − act = 0` | 1 | the chain starts at `1` for any non-empty trace; an all-pad trace starts at `0` (`src/ec/mod.rs:285`) |
+| 7 | `(1 − act) · ecpoint_mult = 0` | 2 | inactive rows cannot provide phantom `EcPoint` tuples while skipping the act-gated `EcGroup` / membership consumes |
+| 8 | `when_transition: (1 − act) · act_next = 0` | 2 | `act` is monotone — pads only at the tail; the cyclic last→first wrap is dropped so that edge stays free (`src/ec/mod.rs:277-279`) |
+| 9 | `when_transition: act_next · (ptr_next − ptr − 1) = 0` | 2 | ptrs are consecutive along the active prefix; consecutive allocation makes `ptr → entity` injective for free — no gap column, no `Range16` (`src/ec/mod.rs:281-284`) |
+| 10 | `when_first_row: ptr − act = 0` | 1 | the chain starts at `1` for any non-empty trace; an all-pad trace starts at `0` (`src/ec/mod.rs:285`) |
 
 ## Buses & lookups
 
@@ -129,12 +130,13 @@ batching 6 mutually-exclusive fractions: the `EcPoint` provide, the
 
 | Bus | Tuple | Multiplicity | Fires on |
 |-----|-------|--------------|----------|
-| [`EcPoint`](relation-registry.md#15--ecpoint) (15) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | `−mult` | every row |
+| [`EcPoint`](relation-registry.md#15--ecpoint) (15) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | `−mult` | rows with nonzero `mult` |
 
 The provide multiplicity is the stored consumer-count cell
-`COL_ECPOINT_MULT`, negated; pads zero it, so the provide self-gates and
-needs no `act` factor (`src/ec/mod.rs:337, 351-372`). It is pinned to
-actual demand by bus balance (no range check).
+`COL_ECPOINT_MULT`, negated. The main AIR forces pads / inactive rows to carry
+`mult = 0`, so the provide self-gates without an `act` factor
+(`src/ec/mod.rs:337, 351-372`). It is pinned to actual demand by bus balance
+(no range check).
 
 ### Consumes
 

@@ -113,16 +113,15 @@ impl P2Cap {
         Self([CurvePrecompile::id(), Felt::from_u32(op_id as u32), Felt::ZERO, Felt::ZERO])
     }
 
-    /// VM curve MSM capacity: `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` —
-    /// the **IV** of an MSM-claim chaining sponge, fed to the *first* absorb
-    /// (`stateₒ`). Subsequent absorbs thread `capᵢ = stateᵢ₋₁` (the prior
-    /// digest). The group pointer binds the claim to its group. See
-    /// `docs/chiplets/ec-msm.md §6.2`.
-    pub fn ec_msm_iv(group_ptr: u32) -> Self {
+    /// VM curve MSM capacity: `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` —
+    /// the **IV** of an MSM-claim chaining sponge, fed to the *first* absorb.
+    /// Subsequent absorbs thread the VM PairList capacity lanes `out[8..12]`,
+    /// not the digest lanes `out[0..4]`. See `docs/chiplets/ec-msm.md §6.2`.
+    pub fn ec_msm_iv() -> Self {
         Self([
             CurvePrecompile::id(),
             Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
-            Felt::from(group_ptr),
+            Felt::ZERO,
             Felt::ZERO,
         ])
     }

@@ -22,8 +22,7 @@
 //! to a [`UintAdd`](crate::uint::add) / [`UintMul`](crate::uint::mul) relation
 //! tuple by ptr and bound; and the **EC rows**, including `EcCreate` / PAI under
 //! `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, EC binops, and EcMsm
-//! absorb runs. This chip replaced the left-leaning spine (now retired); the
-//! spine was its degenerate chain instance.
+//! absorb runs.
 //!
 //! Per active row (one node):
 //!
@@ -47,6 +46,8 @@
 //!   cap `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`; finite create consumes the
 //!   coordinate `Uint` child bindings, both modes consume `EcPoint(point_ptr, group_ptr, x_ptr,
 //!   y_ptr, is_pai)`, and both provide `Binding(h, Group, point_ptr)`.
+//! - **EC MSM**: hash absorbed `(point, scalar)` child digests under `[CurvePrecompile::id(),
+//!   MSM_OP_ID, 0, 0]`.
 //! - **ZERO_HASH leaf** (`is_zero = 1`): no unhash, no consumes; `h = 0` pinned; provides
 //!   `Binding(0, True)` with multiplicity `out_mult`. The `True` base case / AND identity, usable
 //!   as any node's child.
@@ -101,7 +102,7 @@ use crate::{
 // - Hashes (12): lhs[4], rhs[4], h[4].
 // - Node-family and op flags.
 // - Reused pointer/context cells for uint leaves/ops, EC points, and MSM runs.
-// - Row-kind-aware cap parameter cells and EcMsm threaded capacity cells.
+// - Row-kind-aware cap parameter cells and MSM run controls.
 
 /// Sticky-downward activity flag. Gates the consume / unhash mults; the
 /// `out_mult`-pin keeps padding-row provides at zero.
@@ -236,8 +237,8 @@ pub const COL_B_PTR: usize = COL_A_PTR + 1;
 pub const COL_TAG_ARG0: usize = COL_B_PTR + 1;
 /// Witnessed EC-store group handle for EC value-producing binops and EcMsm
 /// absorb runs. Create / PAI rows commit their group selector through
-/// [`COL_TAG_ARG1`] instead, so the hash cap and `EcPoint` consume share one
-/// physical cell.
+/// [`COL_TAG_ARG1`], so the hash cap and `EcPoint` consume share one physical
+/// cell.
 pub const COL_EC_CONTEXT_GROUP_PTR: usize = COL_TAG_ARG0 + 1;
 
 // ================================================================
@@ -268,15 +269,15 @@ pub const COL_EC_CREATE_Y_PTR: usize = COL_B_PTR;
 // EcMsm node (tag 8) — the chip's only *multi-row* node: a run of
 // `is_ec_msm` absorb rows (one per claim term), the last marked
 // `is_msm_last` (the boundary). Reuses lhs/rhs = (Pᵢ.hash, sᵢ.hash),
-// h = stateᵢ₊₁, a_ptr/b_ptr = (Pᵢ_ptr, sᵢ_ptr), ptr = val_ptr (the
-// claim's value point), group_ptr = the group, bound_ptr = the scalar
-// bound. The capacity threads by row adjacency (`docs/chiplets/ec-msm.md
-// §6.2`): see [`COL_ABSORB_CAP_BEGIN`].
+// h = this term's Poseidon2 rate0 output, a_ptr/b_ptr = (Pᵢ_ptr, sᵢ_ptr),
+// ptr = val_ptr (the claim's value point), group_ptr = the group, bound_ptr =
+// the scalar bound. The run is one contiguous VM-style Poseidon2 absorption span
+// (`docs/chiplets/ec-msm.md §6.2`): see [`COL_MSM_IS_HEAD`].
 // ================================================================
 
 /// EcMsm family flag — set on every absorb row of an MSM-claim run. In
-/// the activity one-hot like the other families; the perm fires here,
-/// rate = `(Pᵢ.hash, sᵢ.hash)`, cap = the threaded `stateᵢ`.
+/// the activity one-hot like the other families; the perm rate is
+/// `(Pᵢ.hash, sᵢ.hash)`.
 pub const COL_IS_EC_MSM: usize = COL_EC_CONTEXT_GROUP_PTR + 1;
 /// Marks the run's last absorb (the boundary): `h = h_claim`, it consumes
 /// `MsmExpr` and provides the claim's `Group` binding. A 1-term claim has
@@ -296,23 +297,18 @@ pub const COL_MSM_IDX: usize = COL_IS_MSM_LAST + 1;
 /// row attributes its term to the same expression the boundary binds the
 /// value to — see the run-constancy constraints below.
 pub const COL_MSM_EXPR: usize = COL_MSM_IDX + 1;
-/// First felt of the threaded capacity `stateᵢ` fed to this absorb's
-/// perm. The first row's = the VM curve MSM IV
-/// `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]`; each later row's =
-/// the previous row's `h` (`capᵢ = stateᵢ₋₁`) — the eval's
-/// only cross-row hash link. Pinned 0 off absorb rows; the Poseidon2 cap
-/// lookup for EcMsm rows is supplied by the dynamic-cap aux column.
-pub const COL_ABSORB_CAP_BEGIN: usize = COL_MSM_EXPR + 1;
-pub const COL_ABSORB_CAP_END: usize = COL_ABSORB_CAP_BEGIN + DIGEST_WIDTH;
+/// Head selector for an EcMsm absorption run. The head row consumes the VM
+/// curve MSM IV; continuation rows inherit capacity inside Poseidon2.
+pub const COL_MSM_IS_HEAD: usize = COL_MSM_EXPR + 1;
 
 /// Total number of main witness columns.
-pub const NUM_MAIN_COLS: usize = COL_ABSORB_CAP_END;
+pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
 
 // PUBLIC VALUES LAYOUT
 // ================================================================================================
 //
 // `[public_root[0], …, public_root[3]]` — just the transcript's target root
-// (`PUBLIC_ROOT_BEGIN = 0`); there is no longer any leading slot.
+// (`PUBLIC_ROOT_BEGIN = 0`).
 
 /// Index of the first `public_root` felt. Under 0.26 the transcript root is
 /// the *whole* shared public-input vector (`air_inputs`); the old `inv_n`
@@ -343,7 +339,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 //   is) + provide the created / result / MSM boundary point's `Group` binding.
 // - col 6: the EC relation consumes — `EcPoint` (create / PAI) and `EcGroupAdd` (group add / sub);
 //   raw degree-1 fields for `EcPoint`, role-mixed fields for `EcGroupAdd`.
-// - col 7: the EcMsm dynamic Poseidon2 cap fraction.
+// - col 7: the EcMsm head Poseidon2 cap fraction.
 // - col 8: the EcMsm absorb-run consumes. Per absorb row: `Binding(Pᵢ.hash, Group, Pᵢ_ptr)`,
 //   `Binding(sᵢ.hash, Uint, sᵢ_ptr)`, `MsmClaimTerm(expr, Pᵢ_ptr, sᵢ_ptr)`; at the boundary,
 //   `MsmExpr(expr, group, val, k = idx + 1)`.
@@ -454,6 +450,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // absorb). is_msm_last is a sub-flag, not in the activity one-hot.
         let is_ec_msm: AB::Expr = local[COL_IS_EC_MSM].into();
         let is_msm_last: AB::Expr = local[COL_IS_MSM_LAST].into();
+        let is_pinned: AB::Expr = local[COL_IS_PINNED].into();
         for col in [
             COL_IS_AND,
             COL_IS_UINT_LEAF,
@@ -485,9 +482,23 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // EC has no multiply — is_mul only ever rides a uint-op row.
         builder.assert_zero(is_ec_op.clone() * is_mul.clone());
 
+        // Row 0 is the public transcript root and must be a True-binding node.
+        // This excludes value rows and EcMsm interior absorbs, whose `h` is not
+        // a public assertion digest.
+        let root_truthy = is_zero.clone() + is_and.clone() + is_is.clone() + is_pinned.clone();
+        builder.when_first_row().assert_zero(root_truthy - AB::Expr::ONE);
+
         // Both create modes (finite + PAI) carry the group in cap slot 2 and
-        // consume EcPoint. They do not use COL_EC_CONTEXT_GROUP_PTR.
+        // consume EcPoint. They do not use COL_EC_CONTEXT_GROUP_PTR. PAI has
+        // no coordinate children, so its VALUE payload is the canonical
+        // `(TRUE_DIGEST, TRUE_DIGEST)` pair (zero digest in both rate halves).
         let is_create = is_ec_create.clone() + is_ec_pai.clone();
+        for i in 0..DIGEST_WIDTH {
+            let lhs_i: AB::Expr = local[COL_LHS_BEGIN + i].into();
+            let rhs_i: AB::Expr = local[COL_RHS_BEGIN + i].into();
+            builder.assert_zero(is_ec_pai.clone() * lhs_i);
+            builder.assert_zero(is_ec_pai.clone() * rhs_i);
+        }
         let group_ptr: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
         // Result-binding op rows (all ops but `Is`, which binds True) —
         // degree-1, since `is_is` is one shared flag pulled out of the op
@@ -511,7 +522,6 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // or on EcMsm scalar consumes — zero elsewhere, so an AND node's cap
         // stays [1, 0, 0, 0].
         let not_uint_leaf: AB::Expr = AB::Expr::ONE - is_uint_leaf.clone();
-        let is_pinned: AB::Expr = local[COL_IS_PINNED].into();
         let ptr: AB::Expr = local[COL_PTR].into();
         let bound_ptr: AB::Expr = local[COL_BOUND_PTR].into();
         builder.assert_zero(not_uint_leaf.clone() * is_pinned.clone());
@@ -578,74 +588,48 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // VALUE tag `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, with
         // that group selector carried in COL_EC_CREATE_GROUP_PTR (the physical
         // COL_TAG_ARG1 cell) so the hash cap and EcPoint consume share one cell.
-        // group_ptr also carries the EcMsm group (the IV's third slot and the
-        // boundary's MsmExpr / Group binding) on every absorb row.
+        // For EcMsm, group_ptr is not in the public IV; it remains live as the
+        // boundary's MsmExpr / Group-binding context on every absorb row.
         builder.assert_zero(
-            (AB::Expr::ONE - is_ec_op * (AB::Expr::ONE - is_is) - is_ec_msm.clone())
-                * group_ptr.clone(),
+            (AB::Expr::ONE - is_ec_op * (AB::Expr::ONE - is_is) - is_ec_msm.clone()) * group_ptr,
         );
 
-        // ---- EcMsm capacity threading (the chip's first cross-row hash
-        //      link). The absorb cap cells hold `stateᵢ`: 0 off absorb
-        //      rows, the IV on a run's first absorb, the previous row's
-        //      digest on every later absorb (`capᵢ = stateᵢ₋₁`). The dynamic
-        //      Poseidon2 cap lookup consumes these cells for EcMsm rows.
-        let absorb_cap_local: [AB::Expr; DIGEST_WIDTH] =
-            array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
-        let absorb_cap_next: [AB::Expr; DIGEST_WIDTH] =
-            array::from_fn(|i| next[COL_ABSORB_CAP_BEGIN + i].into());
-        let group_next: AB::Expr = next[COL_EC_CONTEXT_GROUP_PTR].into();
+        // ---- EcMsm absorption run: head consumes IV cap, continuations are
+        //      private Poseidon2 `is_absorb` cycles, tail consumes `OutRate0`.
         let is_ec_msm_next: AB::Expr = next[COL_IS_EC_MSM].into();
-        // Off absorb rows the cap cells are 0 (so non-absorb perms see the
-        // one-shot expr alone).
-        for cell in absorb_cap_local.iter() {
-            builder.assert_zero((AB::Expr::ONE - is_ec_msm.clone()) * cell.clone());
-        }
-        // Continuation: this row is a non-last absorb, so the *next* row's
-        // cap = this row's digest `h` (`stateᵢ₊₁` feeds `capᵢ₊₁`).
+        let is_msm_head: AB::Expr = local[COL_MSM_IS_HEAD].into();
+        let is_msm_head_next: AB::Expr = next[COL_MSM_IS_HEAD].into();
+        builder.assert_bool(local[COL_MSM_IS_HEAD]);
+        builder.assert_zero(is_msm_head.clone() * (AB::Expr::ONE - is_ec_msm.clone()));
+
         let continues = is_ec_msm.clone() * (AB::Expr::ONE - is_msm_last.clone());
-        // The next row *starts* a run iff it is an absorb and this row is not
-        // a continuation source (non-absorb, or the prior run's last). Then
-        // its cap = the VM curve MSM IV
-        // `[CurvePrecompile::id(), MSM_OP_ID, group_next, 0]`.
-        let starts = is_ec_msm_next * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last);
-        let iv: [AB::Expr; DIGEST_WIDTH] = [
-            AB::Expr::from(CurvePrecompile::id()),
-            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
-            group_next,
-            AB::Expr::ZERO,
-        ];
-        for i in 0..DIGEST_WIDTH {
-            builder
-                .when_transition()
-                .assert_zero(continues.clone() * (absorb_cap_next[i].clone() - h[i].clone()));
-            builder
-                .when_transition()
-                .assert_zero(starts.clone() * (absorb_cap_next[i].clone() - iv[i].clone()));
-        }
-        // Row 0 can itself be an MSM run start — the `starts` transition never
-        // fires *into* row 0 — so its IV is pinned here. Without this the
-        // row-0 `absorb_cap` is a free capacity IV, leaving the
-        // `[CurvePrecompile::id(), MSM_OP_ID, group_ptr, 0]` domain separator
-        // unenforced for a row-0 run.
-        let iv_local: [AB::Expr; DIGEST_WIDTH] = [
-            AB::Expr::from(CurvePrecompile::id()),
-            AB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
-            group_ptr,
-            AB::Expr::ZERO,
-        ];
-        for i in 0..DIGEST_WIDTH {
-            builder.when_first_row().assert_zero(
-                is_ec_msm.clone() * (absorb_cap_local[i].clone() - iv_local[i].clone()),
-            );
-        }
+        let starts = is_ec_msm_next.clone() * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last);
+        builder
+            .when_first_row()
+            .assert_zero(is_ec_msm.clone() * (is_msm_head - AB::Expr::ONE));
+        builder
+            .when_transition()
+            .assert_zero(continues.clone() * (AB::Expr::ONE - is_ec_msm_next));
+        builder
+            .when_transition()
+            .assert_zero(continues.clone() * is_msm_head_next.clone());
+        builder
+            .when_transition()
+            .assert_zero(starts.clone() * (is_msm_head_next - AB::Expr::ONE));
+
+        let perm_seq_id_local_for_msm: AB::Expr = local[COL_PERM_SEQ_ID].into();
+        let perm_seq_id_next_for_msm: AB::Expr = next[COL_PERM_SEQ_ID].into();
+        builder.when_transition().assert_zero(
+            continues.clone()
+                * (perm_seq_id_next_for_msm - perm_seq_id_local_for_msm - AB::Expr::ONE),
+        );
 
         // `msm_idx` is a pure **position counter** within an absorb run (0 at
         // the run start, +1 per continuation), so the boundary's `k =
         // msm_idx + 1` (consumed in `MsmExpr`) is the term count regardless of
-        // which terms the run absorbed. It no longer tags a chiplet term — the
-        // seam matches the *positionless* `MsmClaimTerm` — so the absorb order
-        // (hence the root) is the caller's, decoupled from the chiplet's `idx`.
+        // which terms the run absorbed. The seam matches the *positionless*
+        // `MsmClaimTerm`, so the absorb order (hence the root) is the caller's,
+        // decoupled from the chiplet's `idx`.
         let msm_idx: AB::Expr = local[COL_MSM_IDX].into();
         let msm_idx_next: AB::Expr = next[COL_MSM_IDX].into();
         builder.when_first_row().assert_zero(is_ec_msm * msm_idx.clone());
@@ -658,12 +642,12 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // absorb run**: every row of a claim names the same expression. This
         // is load-bearing, not cosmetic — each absorb row attributes its term
         // via `MsmClaimTerm(msm_expr, …)`, while the boundary binds the node's
-        // value via `MsmExpr(msm_expr, …)`. If `msm_expr` could vary mid-run a
-        // prover could hash one expression's terms (a correct, root-matching
-        // hash) while binding the node to *another* expression's value — a
-        // forged value under a correct hash, which root-comparison cannot
-        // catch. Holding `group_ptr` constant likewise keeps the run-start IV
-        // `[CurvePrecompile::id(), MSM_OP_ID, group, 0]` on the claim's own group.
+        // value and witnessed group via `MsmExpr(msm_expr, group, val, k)`. If
+        // `msm_expr` could vary mid-run a prover could hash one expression's
+        // terms (a correct, root-matching hash) while binding the node to
+        // *another* expression's value — a forged value under a correct hash,
+        // which root-comparison cannot catch. Holding `group_ptr` constant
+        // aligns the boundary `MsmExpr` with the whole run.
         let msm_expr: AB::Expr = local[COL_MSM_EXPR].into();
         let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].into();
         let group_local: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
@@ -729,10 +713,8 @@ where
         let is_ec_pai: LB::Expr = local[COL_IS_EC_PAI].into();
         let is_ec_op: LB::Expr = local[COL_IS_EC_OP].into();
         let is_create = is_ec_create.clone() + is_ec_pai;
-        // EcMsm: the family bit feeds the perm `node` gate; the threaded
-        // capacity feeds the perm cap. (The boundary flag, idx, expr, and
-        // ptr fields are re-read fresh for the EcMsm consume column below,
-        // like the EC columns, so the uint columns can move their copies.)
+        // EcMsm: the family bit feeds the perm rate; the head flag feeds the
+        // IV cap. Boundary/idx/expr fields are re-read for the MSM column.
         let is_ec_msm: LB::Expr = local[COL_IS_EC_MSM].into();
 
         let lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
@@ -817,7 +799,7 @@ where
         // EcGroupAdd (deg-2 message), like col 4.
         let col5_deg = Deg { v: 5, u: 4 };
         let col6_deg = Deg { v: 3, u: 3 };
-        // col 7 (EcMsm dynamic P2 cap): the threaded cap is degree-1.
+        // col 7 (EcMsm head P2 cap): the IV cap is degree-1.
         let col7_deg = Deg { v: 1, u: 1 };
 
         // ---- col 0: Binding bus, True path (consume lhs/rhs on AND rows;
@@ -890,7 +872,8 @@ where
                                 );
                                 b.insert(
                                     "p2out",
-                                    node,
+                                    node.clone() - is_ec_msm.clone()
+                                        + local[COL_IS_MSM_LAST].into(),
                                     Poseidon2OutMsg { perm_seq_id, digest: h.clone() },
                                     one_deg,
                                 );
@@ -1194,25 +1177,29 @@ where
             col6_deg,
         );
 
-        // ---- col 7: EcMsm dynamic Poseidon2 cap. EcMsm rows use their
-        //             threaded state as the cap; all one-shot node caps ride
-        //             col 1.
+        // ---- col 7: EcMsm head Poseidon2 cap. Continuation capacity is private
+        //             to the P2 chiplet's absorption chain.
         let d_perm_seq_id: LB::Expr = local[COL_PERM_SEQ_ID].into();
-        let d_absorb_cap: [LB::Expr; DIGEST_WIDTH] =
-            array::from_fn(|i| local[COL_ABSORB_CAP_BEGIN + i].into());
+        let d_is_msm_head: LB::Expr = local[COL_MSM_IS_HEAD].into();
+        let d_msm_iv = [
+            LB::Expr::from(CurvePrecompile::id()),
+            LB::Expr::from(Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32)),
+            LB::Expr::ZERO,
+            LB::Expr::ZERO,
+        ];
         builder.next_column(
             |col| {
                 col.group(
-                    "dynamic-cap",
+                    "msm-head-cap",
                     |g| {
                         g.batch(
                             "fractions",
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "p2in-cap-dynamic",
-                                    is_ec_msm,
-                                    Poseidon2InMsg::cap(d_perm_seq_id, d_absorb_cap),
+                                    "p2in-cap-msm-head",
+                                    d_is_msm_head,
+                                    Poseidon2InMsg::cap(d_perm_seq_id, d_msm_iv),
                                     one_deg,
                                 );
                             },
