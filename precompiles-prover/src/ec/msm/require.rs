@@ -5,7 +5,7 @@
 //! [`Session`](crate::session), which just delegates (`msm_intro` etc.).
 //!
 //! Each function borrows the MSM accumulator
-//! ([`EcMsmRequires`](crate::ec::msm::trace::EcMsmRequires)) plus the EC and
+//! ([`EcMsmRequires`]) plus the EC and
 //! uint stores below it — the same three the `Session` holds — and
 //! constructs the lower-layer `require` views as needed (mirroring how the
 //! `Session` itself wired them).

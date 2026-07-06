@@ -73,8 +73,8 @@ fn sample_store(rng: &mut impl Rng) -> UintStoreRequires {
 }
 
 /// Accumulate one chiplet's net per-denom LogUp multiplicity (a balanced
-/// system leaves zero residual). Mirrors the cross-chiplet guard in
-/// `tests::integration`.
+/// system leaves zero residual). Mirrors the shared cross-chiplet guard in
+/// `tests::bus_balance`.
 fn fold_balance<A>(
     air: &A,
     main: &RowMajorMatrix<Felt>,

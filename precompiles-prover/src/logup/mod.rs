@@ -80,7 +80,7 @@ use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 pub const NUM_RANDOMNESS: usize = 2;
 
 /// Build a `Challenges<QuadFelt>` from the flat `[α, β]` slice handed to
-/// [`AuxBuilder::build_aux_trace`](miden_lifted_air::AuxBuilder::build_aux_trace).
+/// `LiftedAir::build_aux_trace`.
 ///
 /// Sizes the precomputed tables to [`MAX_MESSAGE_WIDTH`] /
 /// [`NUM_BUS_IDS`] so prover and verifier see identical prefixes.

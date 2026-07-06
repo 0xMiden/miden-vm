@@ -21,9 +21,9 @@
 //! `perm_seq_id` continuing `+1` to satisfy the relaxed chain on dead
 //! rows.
 
-use core::{array, ops::Range};
+use core::ops::Range;
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, deferred::Node, field::QuadFelt};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -35,41 +35,12 @@ use crate::{
     },
 };
 
-/// Chunk granularity in bytes (256 bits = 8 u32 felts).
-const CHUNK_BYTES: usize = 32;
-
 /// One hash invocation: the byte sequence whose chunks this chiplet
 /// emits. The chunk chiplet doesn't apply hasher-specific padding —
 /// it just tiles the raw input into 32-byte chunks.
 #[derive(Debug, Clone)]
 pub struct Invocation {
     pub input: Vec<u8>,
-}
-
-impl Invocation {
-    /// Number of 32-byte chunks (one chunk-chiplet row each). Empty
-    /// input yields one canonical all-zero chunk so the chunk-content P2
-    /// chain — and the keccak-node `H_input_chunks` read at its tail — always
-    /// has a row; the sponge absorbs none of it (it lands entirely past
-    /// the pad, which fires at byte 0 for a zero-length message).
-    pub fn num_chunks(&self) -> usize {
-        self.input.len().div_ceil(CHUNK_BYTES).max(1)
-    }
-
-    /// Pack this invocation's bytes into per-chunk 8-felt rows
-    /// (`f[0..8]`, LE u32, zero-padded past `input.len()`).
-    fn pack_chunks(&self) -> Vec<[Felt; NUM_F]> {
-        (0..self.num_chunks())
-            .map(|c| {
-                array::from_fn(|i| {
-                    let start = c * CHUNK_BYTES + i * 4;
-                    let bytes: [u8; 4] =
-                        array::from_fn(|k| self.input.get(start + k).copied().unwrap_or(0));
-                    Felt::from(u32::from_le_bytes(bytes))
-                })
-            })
-            .collect()
-    }
 }
 
 // REQUIRES ACCUMULATOR
@@ -148,11 +119,15 @@ impl ChunkRequires {
 
     /// Register an invocation; lays a fresh chunk-row span and calls
     /// `p2.require_absorption` to claim its P2 cycle range. Empty input
-    /// lays one canonical all-zero chunk (see [`Invocation::num_chunks`]),
+    /// lays one canonical all-zero chunk (see `Invocation::num_chunks`),
     /// so the span is always non-empty.
     pub fn require(&mut self, inv: &Invocation, p2: &mut Poseidon2Requires) -> ChunkOutput {
-        let f_per_chunk = inv.pack_chunks();
-        debug_assert!(!f_per_chunk.is_empty(), "num_chunks().max(1) guarantees ≥1 chunk",);
+        let f_per_chunk = Node::chunks_from_bytes(&inv.input)
+            .payload()
+            .as_data()
+            .expect("chunks_from_bytes creates data payload")
+            .to_vec();
+        debug_assert!(!f_per_chunk.is_empty(), "chunks_from_bytes guarantees ≥1 chunk",);
         let rate_pairs: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
             .iter()
             .map(|f| {

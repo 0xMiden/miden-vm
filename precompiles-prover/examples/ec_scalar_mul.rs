@@ -30,6 +30,7 @@ use k256::{
     elliptic_curve::{PrimeField, sec1::ToEncodedPoint},
 };
 use miden_lifted_air::LiftedAir;
+use miden_precompiles::CurveId;
 use miden_precompiles_prover::{
     math::{U256, from_hex},
     session::{ChipletAir, EcNode, Session},
@@ -37,10 +38,9 @@ use miden_precompiles_prover::{
 use p3_matrix::Matrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-/// Protocol pin addresses: modulus, curve `a`, curve `b`.
-const FP: u32 = 1;
-const A_PTR: u32 = 2;
-const B_PTR: u32 = 3;
+/// secp256k1 VM-owned uint/group pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
 
 /// Big-endian field bytes → our `U256` (the KAT hex path).
 fn be(bytes: impl AsRef<[u8]>) -> U256 {
@@ -89,7 +89,6 @@ fn main() {
     assert!(n >= 1, "need at least one instance");
 
     // secp256k1: y² = x³ + 7 over Fp, base point G, group order `order`.
-    let p_minus_1 = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E");
     let order = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = coords(&g);
@@ -113,16 +112,12 @@ fn main() {
     let gen_start = Instant::now();
 
     let mut session = Session::new();
-    let mut claims = vec![
-        session.pin_uint(FP, p_minus_1, FP),
-        session.pin_uint(A_PTR, from_hex("0"), FP),
-        session.pin_uint(B_PTR, from_hex("7"), FP),
-    ];
+    let mut claims = Vec::with_capacity(n);
 
     // G as a shared EC-DAG node (the base, reused across all instances).
     let gx_n = session.uint_leaf(gx, FP);
     let gy_n = session.uint_leaf(gy, FP);
-    let g_pt = session.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
+    let g_pt = session.ec_create(GROUP_PTR, &gx_n, &gy_n);
 
     for &k in &scalars {
         let acc = scalar_mul(&mut session, &g_pt, k);
@@ -133,7 +128,7 @@ fn main() {
         let (kgx, kgy) = coords(&(g * scalar));
         let kgx_n = session.uint_leaf(kgx, FP);
         let kgy_n = session.uint_leaf(kgy, FP);
-        let expected = session.ec_create(A_PTR, B_PTR, &kgx_n, &kgy_n);
+        let expected = session.ec_create(GROUP_PTR, &kgx_n, &kgy_n);
         claims.push(session.ec_is(&acc, &expected)); // panics if k·G ≠ k256
     }
 

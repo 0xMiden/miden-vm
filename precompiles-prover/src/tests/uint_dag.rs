@@ -9,40 +9,42 @@
 //! relations must catch (a forged result ptr; a re-encoded op id that
 //! passes every local constraint and dies on the Poseidon2 cap bus).
 
-use std::collections::HashMap;
-
-use miden_air::lookup::{
-    Challenges, LookupAir,
-    debug::{check_trace_balance, trace::DebugTraceBuilder},
-};
+use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_air::LiftedAir;
+use miden_precompiles::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, UintDomain};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use super::uint::{random_modulus, random_uint_below};
+use super::uint::random_uint_below;
 use crate::{
-    hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
-    },
-    math::{U256, add_reduce, mac_reduce},
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    math::{U256, add_reduce, from_limbs32, mac_reduce},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{NUM_CHIPLETS, Session, SessionTraces, statements::horner_sign_paths},
+    session::{Session, SessionTraces, statements::horner_sign_paths},
+    tests::bus_balance::session_stack_residual,
     transcript::{
         eval::{
-            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PARAM_A, COL_PTR,
+            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
             NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::UintOpId,
-        poseidon2::Poseidon2Air,
     },
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
 
-/// The modulus pin's protocol address in these tests.
-const FP: u32 = 1;
+/// VM-owned fixed domains used by these DAG tests.
+const FP: u32 = K1_BASE_BOUND_PTR;
+const FQ: u32 = K1_SCALAR_BOUND_PTR;
+
+fn domain_bound(domain: UintDomain) -> U256 {
+    from_limbs32(&domain.minus_one())
+}
+
+fn fp_bound() -> U256 {
+    domain_bound(UintDomain::K1Base)
+}
+
+fn fq_bound() -> U256 {
+    domain_bound(UintDomain::K1Scalar)
+}
 
 fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
     core::array::from_fn(|_| {
@@ -50,61 +52,11 @@ fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
     })
 }
 
-/// Fold one chiplet's per-denom balance into the cross-chiplet
-/// accumulator. `net[denom] = (multiplicity summed across chiplets, a
-/// sample message repr for the failure diagnostic)`. Local copy of the
-/// `integration.rs` helper, on the 0.26 signature: bus balance ignores
-/// public values, so the `pv` slot is `&[]` (the σ/n `inv_n` input is
-/// gone) and the `A` bound resolves to `miden_lifted_air::LiftedAir`.
-fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) where
-    A: LiftedAir<Felt, QuadFelt>,
-    for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
-{
-    let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
-    for u in report.unmatched {
-        let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
-        entry.0 += u.net_multiplicity;
-        if entry.1.is_empty()
-            && let Some(c) = u.contributions.first()
-        {
-            entry.1 = c.msg_repr.clone();
-        }
-    }
-}
-
-/// Net the whole eleven-chiplet stack over every bus and return the
-/// unbalanced denominators (empty ⟺ the multiset closes).
-fn stack_residual(
-    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
-    challenges: &Challenges<QuadFelt>,
-) -> Vec<(Felt, String)> {
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, mains[7], challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], challenges, &mut net);
-    fold_balance(&UintAddAir, mains[9], challenges, &mut net);
-    fold_balance(&UintMulAir, mains[10], challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).collect()
-}
-
 fn assert_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
     let [alpha, beta] = random_challenges(rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&traces.mains(), &challenges);
+    let mains = traces.mains();
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(
         residual.is_empty(),
         "uint-DAG stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
@@ -124,7 +76,7 @@ fn find_op_row(eval: &RowMajorMatrix<Felt>, flag_col: usize) -> usize {
 // THE STATEMENT
 // ================================================================================================
 
-/// `P(−x)` two ways under a pinned random modulus, via the shared
+/// `P(−x)` two ways under the fixed secp256k1 base field, via the shared
 /// [`horner_sign_paths`] construction: path A negates the point and
 /// Horners with the original coefficients; path B sign-flips the odd
 /// coefficients, absorbing every negation into a subtraction —
@@ -137,12 +89,11 @@ fn find_op_row(eval: &RowMajorMatrix<Felt>, flag_col: usize) -> usize {
 #[test]
 fn horner_sign_alternation_full_stack() {
     let mut rng = StdRng::seed_from_u64(0x0da6_4011);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let x_v = random_uint_below(&mut rng, bound);
     let c_v: [U256; 4] = core::array::from_fn(|_| random_uint_below(&mut rng, bound));
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let (acc_a, acc_b) = horner_sign_paths(&mut session, x_v, &c_v, FP);
 
     // Equal values, equal ptrs — across paths, down to the shared
@@ -151,18 +102,16 @@ fn horner_sign_alternation_full_stack() {
     assert_ne!(acc_a.hash(), acc_b.hash(), "but the DAG shapes differ");
     let claim = session.uint_is(&acc_a, &acc_b);
 
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
-    // 24 eval rows (2 ANDs + zero + pin + 6 leaves + 13 value ops + Is);
-    // 7 add-family blocks (4 from A's adds/sub, 3 from B), 6 muls; the store
-    // holds 1 pin + 6 leaf values + 10 distinct intermediates (3 of B's 6
-    // dedup onto A's).
+    // 22 eval rows (AND + zero + 6 leaves + 13 value ops + Is) pad to 32; fixed
+    // uints live only in the store and verifier boundary correction, not eval rows.
+    // The add/mul relation counts are unchanged.
     let mains = traces.mains();
-    assert_eq!(mains[7].height(), 32, "eval: 23 rows pad to 32");
+    assert_eq!(mains[7].height(), 32, "eval: 22 rows pad to 32");
     assert_eq!(mains[9].height(), 128, "uint-add: 7 blocks pad to 8");
     assert_eq!(mains[10].height(), 128, "uint-mul: 6 blocks pad to 8");
-    assert_eq!(mains[8].height(), 256, "store: 17 blocks pad to 32");
 
     traces.check();
     assert_balanced(&traces, &mut rng);
@@ -178,12 +127,11 @@ fn horner_sign_alternation_full_stack() {
 #[test]
 fn op_dedup_collapses_repeated_nodes() {
     let mut rng = StdRng::seed_from_u64(0x0ded_0001);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let x_v = random_uint_below(&mut rng, bound);
     let y_v = random_uint_below(&mut rng, bound);
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let x = session.uint_leaf(x_v, FP);
     let y = session.uint_leaf(y_v, FP);
 
@@ -197,7 +145,7 @@ fn op_dedup_collapses_repeated_nodes() {
     assert_eq!(w.ptr, expected.ptr, "the expected leaf dedups onto w");
     let claim = session.uint_is(&w, &expected);
 
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
     // Two recorded add ops (r once, w once), not three.
@@ -230,13 +178,12 @@ fn op_dedup_collapses_repeated_nodes() {
 #[should_panic(expected = "stray uint value node")]
 fn stray_value_node_panics_at_finish() {
     let mut rng = StdRng::seed_from_u64(0x057a_0001);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let v = random_uint_below(&mut rng, bound);
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let _dangling = session.uint_leaf(v, FP);
-    let root = session.assert_and_fold([modulus]);
+    let root = session.assert_and_fold(core::iter::empty());
     let _ = session.finish(root);
 }
 
@@ -247,12 +194,11 @@ fn stray_value_node_panics_at_finish() {
 #[should_panic(expected = "unprovable")]
 fn unequal_is_panics() {
     let mut rng = StdRng::seed_from_u64(0x057a_0002);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let v = random_uint_below(&mut rng, bound);
     let w = v ^ U256::ONE;
 
     let mut session = Session::new();
-    let _modulus = session.pin_uint(FP, bound, FP);
     let a = session.uint_leaf(v, FP);
     let b = session.uint_leaf(w, FP);
     let _ = session.uint_is(&a, &b);
@@ -263,14 +209,12 @@ fn unequal_is_panics() {
 #[should_panic(expected = "share a modulus")]
 fn cross_modulus_op_panics() {
     let mut rng = StdRng::seed_from_u64(0x057a_0003);
-    let bound_p = random_modulus(&mut rng);
-    let bound_q = random_modulus(&mut rng);
+    let bound_p = fp_bound();
+    let bound_q = fq_bound();
 
     let mut session = Session::new();
-    let _p = session.pin_uint(1, bound_p, 1);
-    let _q = session.pin_uint(2, bound_q, 2);
-    let a = session.uint_leaf(random_uint_below(&mut rng, bound_p), 1);
-    let b = session.uint_leaf(random_uint_below(&mut rng, bound_q), 2);
+    let a = session.uint_leaf(random_uint_below(&mut rng, bound_p), FP);
+    let b = session.uint_leaf(random_uint_below(&mut rng, bound_q), FQ);
     let _ = session.uint_add(&a, &b);
 }
 
@@ -278,12 +222,10 @@ fn cross_modulus_op_panics() {
 #[test]
 #[should_panic(expected = "exceeds its modulus bound")]
 fn out_of_range_leaf_panics() {
-    let mut rng = StdRng::seed_from_u64(0x057a_0004);
-    let bound = random_modulus(&mut rng);
-    let v = bound + U256::ONE; // random_modulus keeps the bound below 2²⁵⁵
+    let bound = fp_bound();
+    let v = bound + U256::ONE;
 
     let mut session = Session::new();
-    let _modulus = session.pin_uint(FP, bound, FP);
     let _ = session.uint_leaf(v, FP);
 }
 
@@ -293,18 +235,17 @@ fn out_of_range_leaf_panics() {
 /// A small honest stack with one mul node closed by `uint_is`, for the
 /// tamper tests to corrupt.
 fn mul_statement(rng: &mut impl Rng) -> SessionTraces {
-    let bound = random_modulus(rng);
+    let bound = fp_bound();
     let x_v = random_uint_below(rng, bound);
     let y_v = random_uint_below(rng, bound);
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let x = session.uint_leaf(x_v, FP);
     let y = session.uint_leaf(y_v, FP);
     let r = session.uint_mul(&x, &y);
     let expected = session.uint_leaf(mac_reduce(1, x_v, y_v, 0, U256::ZERO, bound), FP);
     let claim = session.uint_is(&r, &expected);
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
     session.finish(root)
 }
 
@@ -325,11 +266,11 @@ fn forged_result_ptr_unbalances() {
     mains[7] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&mains, &challenges);
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* `param_a` swapped
+/// Re-encoding an op's discriminant — flag *and* `tag_arg0` swapped
 /// consistently from `Add` to `Sub` — passes every local constraint
 /// (the one-hot, the cap materialization, the ptr pins). What rejects it
 /// is the bus: the row's cap message no longer matches the Poseidon2
@@ -339,25 +280,24 @@ fn forged_result_ptr_unbalances() {
 #[test]
 fn reencoded_op_id_passes_constraints_but_unbalances() {
     let mut rng = StdRng::seed_from_u64(0xf043_0002);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let x_v = random_uint_below(&mut rng, bound);
     let y_v = random_uint_below(&mut rng, bound);
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let x = session.uint_leaf(x_v, FP);
     let y = session.uint_leaf(y_v, FP);
     let r = session.uint_add(&x, &y);
     let expected = session.uint_leaf(add_reduce(x_v, y_v, bound), FP);
     let claim = session.uint_is(&r, &expected);
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
     let mut tampered = traces.mains()[7].clone();
     let row = find_op_row(&tampered, COL_IS_ADD);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_PARAM_A] = Felt::from(UintOpId::Sub as u8);
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_TAG_ARG0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).
@@ -368,7 +308,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     mains[7] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let residual = stack_residual(&mains, &challenges);
+    let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(!residual.is_empty(), "a re-encoded op id must unbalance");
 }
 
@@ -389,16 +329,15 @@ fn eval_chip_stays_at_lqd_2() {
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn horner_sign_alternation_proves() {
     let mut rng = StdRng::seed_from_u64(0x0da6_4012);
-    let bound = random_modulus(&mut rng);
+    let bound = fp_bound();
     let x_v = random_uint_below(&mut rng, bound);
     let c_v: [U256; 4] = core::array::from_fn(|_| random_uint_below(&mut rng, bound));
 
     let mut session = Session::new();
-    let modulus = session.pin_uint(FP, bound, FP);
     let (acc_a, acc_b) = horner_sign_paths(&mut session, x_v, &c_v, FP);
     let claim = session.uint_is(&acc_a, &acc_b);
 
-    let root = session.assert_and_fold([modulus, claim]);
+    let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
     traces.prove().verify().expect("the uint-DAG stack must verify");
 }

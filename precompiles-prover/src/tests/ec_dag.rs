@@ -7,43 +7,29 @@
 //! k256's — so the `ec_is` assert is both the k256 cross-check and the
 //! two-chain dedup showcase. The prove/verify round-trip then closes
 //! every bus (the EC node family activated: `EcGroupAdd` live at mult 1,
-//! the eval chip consuming `EcGroup` / `EcPoint` / `EcGroupAdd`).
-
-use std::collections::HashMap;
+//! create rows consuming `EcPoint`, and add/sub rows consuming `EcGroupAdd`).
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
 use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles::CurveId;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
-    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir},
-    hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
-    },
     math::{U256, from_hex},
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces},
-    tests::integration::fold_balance,
-    transcript::{
-        eval::{
-            COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB,
-            COL_PTR, NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
-        },
-        poseidon2::Poseidon2Air,
+    tests::bus_balance::session_stack_residual,
+    transcript::eval::{
+        COL_A_PTR, COL_B_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_SUB, COL_PTR,
+        NUM_MAIN_COLS as EVAL_COLS, TranscriptEvalAir,
     },
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
 };
 
-/// secp256k1: `p − 1`, curve `y² = x³ + 7` (a = 0, b = 7), pinned at the
-/// protocol addresses below.
-const P_MINUS_1: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2E";
-const FP: u32 = 1;
-const A_PTR: u32 = 2;
-const B_PTR: u32 = 3;
+/// secp256k1 VM-owned uint/group pointers.
+const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();
+const GROUP_PTR: u32 = CurveId::Secp256k1.group_ptr();
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
@@ -74,26 +60,23 @@ fn ec_dag_3g_traces() -> SessionTraces {
     let (g3x, g3y) = k256_coords(&(g + g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let gx_n = s.uint_leaf(gx, FP);
     let gy_n = s.uint_leaf(gy, FP);
     let g2x_n = s.uint_leaf(g2x, FP);
     let g2y_n = s.uint_leaf(g2y, FP);
-    let g_pt = s.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
-    let g2_pt = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
+    let g_pt = s.ec_create(GROUP_PTR, &gx_n, &gy_n);
+    let g2_pt = s.ec_create(GROUP_PTR, &g2x_n, &g2y_n);
     let r = s.ec_add(&g_pt, &g2_pt); // chord: G + 2G = 3G
 
     let g3x_n = s.uint_leaf(g3x, FP);
     let g3y_n = s.uint_leaf(g3y, FP);
-    let expected = s.ec_create(A_PTR, B_PTR, &g3x_n, &g3y_n);
+    let expected = s.ec_create(GROUP_PTR, &g3x_n, &g3y_n);
 
     // k256 cross-check + two-chain dedup: `r` (add result) and `expected`
     // (k256 KAT) are distinct DAG nodes that must share one point ptr.
     let claim = s.ec_is(&r, &expected);
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -126,20 +109,17 @@ fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let (ngx, ngy) = k256_coords(&(-g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
         let yn = s.uint_leaf(y, FP);
-        s.ec_create(A_PTR, B_PTR, &xn, &yn)
+        s.ec_create(GROUP_PTR, &xn, &yn)
     };
 
     let g_pt = create(&mut s, gx, gy);
 
     // −G via Sub from the group's point-at-infinity, checked vs k256.
-    let inf = s.ec_pai(A_PTR, B_PTR, FP);
+    let inf = s.ec_pai(GROUP_PTR);
     let neg_g = s.ec_sub(&inf, &g_pt);
     let neg_kat = create(&mut s, ngx, ngy);
     let neg_claim = s.ec_is(&neg_g, &neg_kat);
@@ -150,7 +130,7 @@ fn ec_dag_sub_from_pai_traces() -> SessionTraces {
     let g2_kat = create(&mut s, g2x, g2y);
     let sub_claim = s.ec_is(&diff, &g2_kat);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, neg_claim, sub_claim]);
+    let root = s.assert_and_fold([neg_claim, sub_claim]);
     s.finish(root)
 }
 
@@ -178,17 +158,14 @@ fn ec_dag_pai_traces() -> SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let create = |s: &mut Session, x: U256, y: U256| {
         let xn = s.uint_leaf(x, FP);
         let yn = s.uint_leaf(y, FP);
-        s.ec_create(A_PTR, B_PTR, &xn, &yn)
+        s.ec_create(GROUP_PTR, &xn, &yn)
     };
 
-    let inf = s.ec_pai(A_PTR, B_PTR, FP);
+    let inf = s.ec_pai(GROUP_PTR);
     let g_pt = create(&mut s, gx, gy);
     let g2_pt = create(&mut s, g2x, g2y);
 
@@ -200,7 +177,7 @@ fn ec_dag_pai_traces() -> SessionTraces {
     let c2 = s.ec_is(&pq, &g2_pt);
     let c3 = s.ec_is(&bb, &inf);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, c1, c2, c3]);
+    let root = s.assert_and_fold([c1, c2, c3]);
     s.finish(root)
 }
 
@@ -225,21 +202,18 @@ fn ec_dag_double_traces() -> SessionTraces {
     let (g2x, g2y) = k256_coords(&(g + g));
 
     let mut s = Session::new();
-    let modulus = s.pin_uint(FP, from_hex(P_MINUS_1), FP);
-    let a_t = s.pin_uint(A_PTR, from_hex("0"), FP);
-    let b_t = s.pin_uint(B_PTR, from_hex("7"), FP);
 
     let gx_n = s.uint_leaf(gx, FP);
     let gy_n = s.uint_leaf(gy, FP);
-    let g_pt = s.ec_create(A_PTR, B_PTR, &gx_n, &gy_n);
+    let g_pt = s.ec_create(GROUP_PTR, &gx_n, &gy_n);
     let dbl = s.ec_add(&g_pt, &g_pt); // tangent: G + G = 2G
 
     let g2x_n = s.uint_leaf(g2x, FP);
     let g2y_n = s.uint_leaf(g2y, FP);
-    let g2_kat = s.ec_create(A_PTR, B_PTR, &g2x_n, &g2y_n);
+    let g2_kat = s.ec_create(GROUP_PTR, &g2x_n, &g2y_n);
     let claim = s.ec_is(&dbl, &g2_kat);
 
-    let root = s.assert_and_fold([modulus, a_t, b_t, claim]);
+    let root = s.assert_and_fold([claim]);
     s.finish(root)
 }
 
@@ -264,7 +238,7 @@ fn ec_dag_double_proves() {
 // the cross-chiplet bus: a mismatched or dangling provide.
 // ============================================================================
 
-/// Net unmatched LogUp denominators across the full 14-chiplet stack
+/// Net unmatched LogUp denominators across the full 15-chiplet stack
 /// (0 ⟺ every bus closes), with the `eval` main replaced by `eval_main`.
 fn dag_residual(
     traces: &SessionTraces,
@@ -284,26 +258,8 @@ fn dag_residual_with(
     rng: &mut impl Rng,
 ) -> usize {
     let mains = traces.mains();
-    // 0.26 dropped per-chiplet public values; rebuild the σ/n `inv_n` slot
-    // `fold_balance` (whose `pv` param is unchanged on this branch) still
-    // reads, mirroring `tests::ec_add::stack_residual`.
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&ChunkAir, mains[0], &challenges, &mut net);
-    fold_balance(&Poseidon2Air, mains[1], &challenges, &mut net);
-    fold_balance(&KeccakRoundAir, mains[2], &challenges, &mut net);
-    fold_balance(&Bitwise64Air, mains[3], &challenges, &mut net);
-    fold_balance(&BytePairLutAir, mains[4], &challenges, &mut net);
-    fold_balance(&KeccakSpongeAir, mains[5], &challenges, &mut net);
-    fold_balance(&KeccakNodeAir, mains[6], &challenges, &mut net);
-    fold_balance(&TranscriptEvalAir, eval_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[8], &challenges, &mut net);
-    fold_balance(&UintAddAir, mains[9], &challenges, &mut net);
-    fold_balance(&UintMulAir, mains[10], &challenges, &mut net);
-    fold_balance(&EcGroupsAir, mains[11], &challenges, &mut net);
-    fold_balance(&EcPointStoreAir, mains[12], &challenges, &mut net);
-    fold_balance(&EcGroupAddAir, add_main, &challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
+    session_stack_residual(&mains, &[(7, eval_main), (13, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this
