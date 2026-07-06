@@ -288,7 +288,7 @@ natural last-row σ-closing gates its recurrence with the degree-1
 - rate0, rate1: mult `+act` (every active row).
 - cap: mult `+act · is_head` (chain heads only). Tuple
   `(perm_seq_id, 2, 2, 0, 0, 0)` — the payload is VM
-  `Tag::CHUNKS.as_word()`, sourced through `src/transcript/deferred_tags.rs`.
+  `Tag::CHUNKS.as_word()`.
 
 `d = ∏₃` deg 3; `n` deg 4 (cap mult deg 2 × 2 siblings). Fraction
 column chained into col 0; constraint deg `max(1 + 3, 4) = 4` →

@@ -19,7 +19,7 @@
 //! ~128-bit** joint MSM — ~half the doublings of the 256-bit form, the
 //! doubling floor a joint 2-base ladder otherwise hits. The halves come from
 //! a real lattice reduction, so they are **signed**: each sign rides its base
-//! via `ec_neg` (`|k|·(−P) = (−|k|)·P`), keeping the four MSM scalars
+//! via `ec_sub(∞, P)` (`|k|·(−P) = (−|k|)·P`), keeping the four MSM scalars
 //! non-negative ~128-bit magnitudes — which is what actually caps the ladder
 //! near 128 (a non-negative-only split would need the 256-bit `mod n`
 //! representative, no win). `glv` is sound, not a shortcut: each `φ(P)` is
@@ -154,8 +154,8 @@ enum Strategy {
     Wnaf,
     /// **GLV**: decompose each `uᵢ·Pᵢ` via the endomorphism into
     /// `kᵢₐ·Pᵢ + kᵢᵦ·φ(Pᵢ)` with **signed** `~128-bit` halves (a real lattice
-    /// reduction), routing each sign onto its base with `ec_neg` so the four
-    /// scalars are non-negative ~128-bit magnitudes; then lay the resulting
+    /// reduction), routing each sign onto its base with `ec_sub(∞, P)` so the
+    /// four scalars are non-negative ~128-bit magnitudes; then lay the resulting
     /// **4-base** MSM by joint Straus — ~half the doublings of the 256-bit
     /// 2-base form (the four bases share each doubling). `φ(G)` is fixed, so it
     /// (like `G`) is created once and shared across the batch.
@@ -338,11 +338,32 @@ fn rand_scalar(rng: &mut impl Rng, n: U256) -> U256 {
     U256::from_limbs(limbs) % n
 }
 
-/// `âⱼ = ±|halfⱼ| (mod n)` for a split term: `uint_neg(|half|)` when the half
-/// is negative, mirroring its `ec_neg`'d MSM base; the magnitude node itself
+/// `âⱼ = ±|halfⱼ| (mod n)` for a split term: `0 − |half|` when the half is
+/// negative, mirroring its `ec_sub(∞, P)` MSM base; the magnitude node itself
 /// otherwise. Same node the MSM consumed, so the signed split binds the chain.
 fn signed_hat(s: &mut Session, neg: bool, mag: &UintNode) -> UintNode {
-    if neg { s.uint_neg(mag) } else { *mag }
+    if neg {
+        let zero = s.uint_leaf(U256::ZERO, SN_PTR);
+        s.uint_sub(&zero, mag)
+    } else {
+        *mag
+    }
+}
+
+fn signed_base(s: &mut Session, pai: &mut Option<EcNode>, neg: bool, base: &EcNode) -> EcNode {
+    if neg {
+        let inf = match *pai {
+            Some(inf) => inf,
+            None => {
+                let inf = s.ec_pai(A_PTR, B_PTR, FP);
+                *pai = Some(inf);
+                inf
+            },
+        };
+        s.ec_sub(&inf, base)
+    } else {
+        *base
+    }
 }
 
 /// Build + resolve one ECDSA-shape verification via **GLV**, *fully
@@ -359,12 +380,12 @@ fn signed_hat(s: &mut Session, neg: bool, mag: &UintNode) -> UintNode {
 ///
 /// Unlike a generated split, the halves come from a real [`glv_decompose`]
 /// of each full `uᵢ`, so they are **signed**. The sign rides the *base* via
-/// [`ec_neg`](Session::ec_neg) — `|k|·(−P) = (−|k|)·P` — leaving the four MSM
-/// scalars as non-negative ~128-bit magnitudes, which is what actually caps
-/// the joint ladder near 128 doublings (a non-negative-only split would need
-/// the full 256-bit `mod n` representative). The split cert mirrors each
-/// negated base with a `uint_neg` on its `âⱼ`. All scalars route under the
-/// group's scalar bound `n` (set in `main`). `g_pt` / `phi_g_pt` + `β`/`λ` are
+/// `ec_sub(∞, P)` — `|k|·(−P) = (−|k|)·P` — leaving the four MSM scalars as
+/// non-negative ~128-bit magnitudes, which is what actually caps the joint
+/// ladder near 128 doublings (a non-negative-only split would need the full
+/// 256-bit `mod n` representative). The split cert mirrors each negated base
+/// with a `uint_sub(0, |k|)` on its `âⱼ`. All scalars route under the group's
+/// scalar bound `n` (set in `main`). `g_pt` / `phi_g_pt` + `β`/`λ` are
 /// shared; only `Q` / `φ(Q)` are per-signature. Returns the MSM claim plus the
 /// two split certs (all folded into the root).
 fn verify_signature_glv(
@@ -405,10 +426,11 @@ fn verify_signature_glv(
     );
     let bound = U256::from(1u64) << (GLV_BITS + 2); // √n basis is ≤ ~129 bits
     for (_, m) in [k1a, k1b, k2a, k2b] {
-        assert!(m < bound, "GLV half exceeds the ~{}-bit ladder bound", GLV_BITS);
+        assert!(m < bound, "GLV half exceeds the ~{GLV_BITS}-bit ladder bound");
     }
-    // Show the signed ~128-bit halves — the `−` ones are routed through ec_neg;
-    // the max bit-width is the joint ladder's doubling count (vs 256 unsplit).
+    // Show the signed ~128-bit halves — the `−` ones are routed through
+    // ec_sub(∞, P); the max bit-width is the joint ladder's doubling count
+    // (vs 256 unsplit).
     let bits = |(_, m): (bool, U256)| 256 - m.leading_zeros();
     let sign = |(neg, _): (bool, U256)| if neg { '−' } else { '+' };
     println!(
@@ -424,14 +446,15 @@ fn verify_signature_glv(
         [k1a, k1b, k2a, k2b].iter().map(|&h| bits(h)).max().unwrap(),
     );
 
-    // The sign of each half rides the BASE via ec_neg (`|k|·(−P) = (−|k|)·P`),
-    // so the four MSM scalars are non-negative ~128-bit magnitudes — this is
-    // what caps the doublings near 128. The negated bases are distinct points,
-    // so the 4-base claim stays canonical.
-    let base_g = if k1a.0 { s.ec_neg(g_pt) } else { *g_pt };
-    let base_pg = if k1b.0 { s.ec_neg(phi_g_pt) } else { *phi_g_pt };
-    let base_q = if k2a.0 { s.ec_neg(&q_pt) } else { q_pt };
-    let base_pq = if k2b.0 { s.ec_neg(&phi_q_pt) } else { phi_q_pt };
+    // The sign of each half rides the BASE via ec_sub(∞, P)
+    // (`|k|·(−P) = (−|k|)·P`), so the four MSM scalars are non-negative
+    // ~128-bit magnitudes — this is what caps the doublings near 128. The
+    // negated bases are distinct points, so the 4-base claim stays canonical.
+    let mut pai = None;
+    let base_g = signed_base(s, &mut pai, k1a.0, g_pt);
+    let base_pg = signed_base(s, &mut pai, k1b.0, phi_g_pt);
+    let base_q = signed_base(s, &mut pai, k2a.0, &q_pt);
+    let base_pq = signed_base(s, &mut pai, k2b.0, &phi_q_pt);
 
     // r_ref = u₁·G + u₂·Q — the real verification target.
     let r_ref = g * to_scalar(u1) + q * to_scalar(u2);
@@ -458,9 +481,9 @@ fn verify_signature_glv(
     let value = s.ec_msm(acc, &[(base_g, m1a), (base_pg, m1b), (base_q, m2a), (base_pq, m2b)]);
     let msm_claim = s.ec_is(&value, &r_pt);
 
-    // Split certs: uᵢ ≡ âₐ + âᵦ·λ (mod n), âⱼ = ±|kⱼ| (uint_neg for a negative
-    // half, mirroring its ec_neg'd base), on the SAME magnitude nodes the MSM
-    // consumed — tying the signed split to the chain.
+    // Split certs: uᵢ ≡ âₐ + âᵦ·λ (mod n), âⱼ = ±|kⱼ| (uint_sub from zero for
+    // a negative half, mirroring its ec_sub-from-PAI base), on the SAME
+    // magnitude nodes the MSM consumed — tying the signed split to the chain.
     let u1_n = s.uint_leaf(u1, SN_PTR);
     let u2_n = s.uint_leaf(u2, SN_PTR);
     let split1 = {

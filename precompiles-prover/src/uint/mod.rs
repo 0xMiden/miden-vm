@@ -360,8 +360,8 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
 
         // contrib: v/comp add (β-weighted recombine), bound rows subtract
         // (direct) and add their carry cells — gated by role.
-        let contrib: AB::ExprEF = lo_recomb * (v_lo.clone() + comp_lo.clone())
-            + hi_recomb * (v_hi.clone() + comp_hi.clone())
+        let contrib: AB::ExprEF = lo_recomb * (v_lo + comp_lo)
+            + hi_recomb * (v_hi + comp_hi)
             + (carry_lo_term - lo_direct) * bound_lo.clone()
             + (carry_hi_term - hi_direct) * bound_hi.clone();
 
@@ -373,18 +373,17 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
         // (steps of gap + 1 ∈ [1, 2¹⁶] can't lap the field within any real
         // trace), and every consume names its ptr explicitly, so absolute
         // addresses need no pinning. Honest traces start at the smallest
-        // interned pin (ptr ≥ 1); a rogue block at address 0 is inert — a
-        // pinned leaf dereferencing it hashes under the transient-marked
-        // cap (pin_ptr = 0), a node shape no honest DAG contains.
+        // interned pin (ptr ≥ 1); a rogue block at address 0 is inert because ptr 0 is never
+        // provided as a real `UintVal` address.
 
         // Carry booleanity (the no-wrap bound needs binary carries):
         // γ₀..γ₃ on the bound-lo row, γ₄..γ₆ on the bound-hi row.
-        for j in CARRY_CELLS_BEGIN..NUM_LIMBS {
-            let lj: AB::Expr = local[j].into();
+        for &cell in local.iter().take(NUM_LIMBS).skip(CARRY_CELLS_BEGIN) {
+            let lj: AB::Expr = cell.into();
             builder.assert_zero(bound_lo.clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
-        for j in CARRY_CELLS_BEGIN..NUM_LIMBS - 1 {
-            let lj: AB::Expr = local[j].into();
+        for &cell in local.iter().take(NUM_LIMBS - 1).skip(CARRY_CELLS_BEGIN) {
+            let lj: AB::Expr = cell.into();
             builder.assert_zero(bound_hi.clone() * lj.clone() * (AB::Expr::ONE - lj));
         }
 
@@ -496,7 +495,7 @@ where
         // consumes, the ptr-gap and per-limb Range16s, and the raw UintLimbs
         // provides — re-partitioned ≤ 2 per column (col 0 a single degree-2
         // fraction) so every closing constraint is degree ≤ 3.
-        let range_gate: LB::Expr = v_lo.clone() + v_hi.clone() + comp_lo + comp_hi;
+        let range_gate: LB::Expr = v_lo.clone() + v_hi + comp_lo + comp_hi;
         let raw: [LB::Expr; 8] = array::from_fn(|j| local[j].into());
         let raw_next: [LB::Expr; 8] = array::from_fn(|j| next[j].into());
         let neg_limbs_mult_next: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].into();

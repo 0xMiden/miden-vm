@@ -10,9 +10,10 @@ by carrying the same benches through both configurations.
 
 - **Hardware** — Apple M3 Max, 16 cores, 64 GB RAM.
 - **Toolchain** — `rustc 1.94.1` (release; `cargo run --release --example …`).
-- **Prover params** — `miden-lifted-stark` 0.26, `log_blowup = 3` (blowup 8),
-  4 FRI queries (the repo's test config in `stark_config.rs`). `D_max = 3`
-  on `main` (`PoseidonAir` × KeccakSponge pin the shared quotient).
+- **Prover params at measurement time** — `miden-lifted-stark` 0.26,
+  `log_blowup = 3` (blowup 8), 4 FRI queries (the repo's test config in
+  `stark_config.rs`). `D_max = 3` on `main` (`PoseidonAir` × KeccakSponge
+  pin the shared quotient). Re-run before treating these as current numbers.
 - **Two commitment hashers measured side-by-side**
   - **P2** — Poseidon2 over Goldilocks for the LMCS sponge / Merkle
     compression / Fiat-Shamir challenger (the repo's current default).
@@ -29,14 +30,14 @@ by carrying the same benches through both configurations.
   - `ec_msm_ecdsa -- N 255 glv` — same workload, **signed GLV**
     decomposition: a real lattice reduction (short basis via half
     extended-Euclid on `(n, λ)` + one Babai step) splits `uᵢ` into two
-    **signed** ~128-bit halves; each half's sign rides on its base via
-    an `ec_neg` node (`|k|·(−P) = (−|k|)·P`), so the MSM consumes four
-    non-negative ~128-bit scalars and the joint ladder is capped near
-    128 doublings. `φ(P)` is certified in-circuit
-    (`x_{φP} = β·x_P mod p` + on-curve check); each split is bound by
-    `uᵢ ≡ uᵢₐ + uᵢᵦ·λ (mod n)` (with `uint_neg` on the half whose base
-    was flipped). The 4-base chain is laid by interleaved wNAF (`w = 4`,
-    `joint_wnaf`) — sparser adds than 4-base Straus.
+    **signed** ~128-bit halves; each half's sign rides on its chosen base
+    (`|k|·(−P) = (−|k|)·P`), so the MSM consumes four non-negative ~128-bit
+    scalars and the joint ladder is capped near 128 doublings. `φ(P)` is
+    certified in-circuit (`x_{φP} = β·x_P mod p` + on-curve check); each
+    split is bound by `uᵢ ≡ uᵢₐ + uᵢᵦ·λ (mod n)`, with the flipped half
+    represented by the corresponding signed scalar relation. The 4-base
+    chain is laid by interleaved wNAF (`w = 4`, `joint_wnaf`) — sparser
+    adds than 4-base Straus.
 - **Phases** are the direct children of the `prove` span (the names below
   match `miden_lifted_stark::prover`):
   - `commit-main` — main trace LDE + Merkle commit (blowup 8).
@@ -116,7 +117,7 @@ Trace heights at N = 32 vs JSF (JSF in brackets):
 uintadd = 2²¹, uintmul = 2²⁰]` — uint/uintadd **halved**),
 `ec_add = ec_msm = 32 768` (`ec_add` **halved**, vs JSF `[65 536]`),
 `ec_points = 8 192` (vs JSF `[16 384]`), `poseidon2 = 16 384` (vs JSF
-`[8 192]` — split + endomorphism + ec_neg certs push transcript-eval
+`[8 192]` — split + endomorphism + sign certificates push transcript-eval
 work into `poseidon2`, doubling it). The padding-boundary crossing on
 the uint family is what makes this real: with the previous unsigned-Straus
 GLV strategy the active uint count was below 2²¹ but still in the
@@ -361,7 +362,7 @@ The BLAKE3 numbers below come from a short-lived edit to
 [`src/stark_config.rs`](src/stark_config.rs) applied only for the
 measurement run — `main` stays on the production Poseidon2 commitment
 hash. The swap is three type aliases plus their constructors (plus
-`p3-blake3 = "0.5.2"` added to `Cargo.toml`):
+`p3-blake3` added to `Cargo.toml` at the matching Plonky3 version):
 
 | component | before (P2, on `main`) | swapped to (BLAKE3, measurement-only) |
 |---|---|---|

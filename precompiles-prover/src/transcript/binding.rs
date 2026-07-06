@@ -92,9 +92,10 @@ where
     }
 
     /// Bind a node hash to a `Group` value — the stored curve point
-    /// interned at `point_ptr`. The curve and coordinates are committed
-    /// in the node's hash (the `EcCreate` cap), not the tuple, so no
-    /// group handle rides the bus: `bound_ptr` is `0`, like `True`.
+    /// interned at `point_ptr`. Curve context is pinned by the node's EC
+    /// relation plumbing (`EcCreate`, `EcBinOp`, or `EcMsm`), not this
+    /// tuple, so no group handle rides the bus: `bound_ptr` is `0`, like
+    /// `True`.
     pub fn group(h: [E; 4], point_ptr: E) -> Self {
         Self {
             h,

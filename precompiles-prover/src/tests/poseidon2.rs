@@ -10,25 +10,24 @@ use miden_air::BaseAir;
 use miden_core::{
     Felt,
     chiplets::hasher::Hasher,
+    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::LiftedAir;
+use miden_precompiles::Keccak256Precompile;
 use p3_matrix::dense::RowMajorMatrix;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult},
-    transcript::{
-        deferred_tags,
-        poseidon2::{
-            COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, COL_PERM_SEQ_ID,
-            COL_STATE_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, NUM_WITNESSES, P2Cap, P2Digest,
-            POSEIDON2_IN_TAG_RATE0, Poseidon2Air, Poseidon2InMsg, Poseidon2OutMsg,
-            math::STATE_WIDTH,
-            program::{NUM_PERIODIC_COLS, PERIOD},
-            trace::{AbsorptionOutput, Poseidon2Requires, generate_trace},
-        },
+    transcript::poseidon2::{
+        COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, COL_PERM_SEQ_ID, COL_STATE_BEGIN,
+        NUM_AUX_COLS, NUM_MAIN_COLS, NUM_WITNESSES, P2Cap, P2Digest, POSEIDON2_IN_TAG_RATE0,
+        Poseidon2Air, Poseidon2InMsg, Poseidon2OutMsg,
+        math::STATE_WIDTH,
+        program::{NUM_PERIODIC_COLS, PERIOD},
+        trace::{AbsorptionOutput, Poseidon2Requires, generate_trace},
     },
 };
 
@@ -119,14 +118,14 @@ fn reference_digest(absorption: &Absorption) -> [Felt; 4] {
 // ================================================================================================
 
 #[test]
-fn p2_caps_match_vm_deferred_tags() {
+fn p2_caps_match_vm_sources() {
     let len_bytes = 136u32;
 
-    assert_eq!(P2Cap::chunk().as_array(), deferred_tags::chunks());
-    assert_eq!(P2Cap::and().as_array(), deferred_tags::and());
+    assert_eq!(P2Cap::chunk().as_array(), Tag::CHUNKS.as_word());
+    assert_eq!(P2Cap::and().as_array(), Tag::AND.as_word());
     assert_eq!(
         P2Cap::keccak256_assertion(Felt::from(len_bytes)).as_array(),
-        deferred_tags::keccak_assert(len_bytes),
+        Keccak256Precompile::assert_tag(len_bytes).as_word(),
     );
 }
 
@@ -274,7 +273,7 @@ fn span_bounds(out: &AbsorptionOutput) -> (u32, u32) {
 #[test]
 fn one_shot_digest_matches_reference_on_zero_input() {
     let absorption = Absorption::one_shot([Felt::ZERO; 4], [Felt::ZERO; 4], [Felt::ZERO; 4]);
-    let (p2, outputs) = build_requires(&[absorption.clone()]);
+    let (p2, outputs) = build_requires(std::slice::from_ref(&absorption));
     let main = generate_trace(p2);
 
     let expected_digest = P2Digest(reference_digest(&absorption));
@@ -289,18 +288,18 @@ fn one_shot_digest_matches_reference_on_zero_input() {
 
 #[test]
 fn one_shot_digest_matches_reference_on_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xc011_5e_ed);
+    let mut rng = StdRng::seed_from_u64(0xc011_5eed);
     let cap = random_chunk(&mut rng);
     let (rate0, rate1) = random_block(&mut rng);
     let absorption = Absorption::one_shot(cap, rate0, rate1);
 
-    let (_, outputs) = build_requires(&[absorption.clone()]);
+    let (_, outputs) = build_requires(std::slice::from_ref(&absorption));
     assert_eq!(outputs[0].digest, P2Digest(reference_digest(&absorption)));
 }
 
 #[test]
 fn three_block_digest_matches_chained_reference_permutation() {
-    let mut rng = StdRng::seed_from_u64(0xc0a1_ced);
+    let mut rng = StdRng::seed_from_u64(0x0c0a_1ced);
     let cap = random_chunk(&mut rng);
     let absorption = Absorption {
         cap,
@@ -309,7 +308,7 @@ fn three_block_digest_matches_chained_reference_permutation() {
         out_multiplicity: 1,
     };
 
-    let (_, outputs) = build_requires(&[absorption.clone()]);
+    let (_, outputs) = build_requires(std::slice::from_ref(&absorption));
     assert_eq!(outputs[0].digest, P2Digest(reference_digest(&absorption)));
     assert_eq!(span_bounds(&outputs[0]), (0, 2));
 }

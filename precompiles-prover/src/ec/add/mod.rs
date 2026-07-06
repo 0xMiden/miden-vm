@@ -363,9 +363,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
                 * mints.clone()
                 * (r_res.clone() - p_res - AB::Expr::ONE - rp_lo - two_16.clone() * rp_hi),
         );
-        builder.assert_zero(
-            at_res * mints.clone() * (r_res - q_res - AB::Expr::ONE - rq_lo - two_16 * rq_hi),
-        );
+        builder
+            .assert_zero(at_res * mints * (r_res - q_res - AB::Expr::ONE - rq_lo - two_16 * rq_hi));
 
         // Cycle-constancy for every metadata column (the term row is the
         // block's last, so the not_term gate drops exactly at the

@@ -109,10 +109,8 @@ impl UintValRequires {
     }
 }
 
-/// Pinned uints (well-known constants) occupy the ptr namespace
-/// `[1, 2^16)`; ptr 0 is never a store address — it is the uint-leaf
-/// cap's "transient" marker (`pin_ptr = 0`) — and transients allocate
-/// from `2^16` upward (later).
+/// Pinned uints occupy the ptr namespace `[1, 2^16)`; ptr 0 is never a store address,
+/// and transients allocate from `2^16` upward (later).
 pub const PIN_NAMESPACE_END: u32 = 1 << 16;
 
 /// `*Requires` accumulator for the UintStore: the interned uints (a

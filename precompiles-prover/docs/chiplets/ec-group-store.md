@@ -25,11 +25,11 @@ the coordinates, records + requires the membership trio).
 ## The model
 
 **Curve-agnostic the way the UintStore is modulus-agnostic.** A group
-is data, not AIR structure: `EcCreate` (a DAG node) pins `a` and `b`
-as uints under a shared `bound_ptr` (which fixes `p`) and allocates a
-**group-table row** binding them — its own chiplet, so the point store
-stays single-role (no `is_group` mutex, no dead point cells on group
-rows) and group-scoped data extends the group tuple without widening
+is data, not AIR structure: `EcCreate` (a DAG node) names coefficient
+pointers `a_ptr` and `b_ptr` under a shared `bound_ptr` (which fixes `p`)
+and allocates a **group-table row** binding them — its own chiplet, so the
+point store stays single-role (no `is_group` mutex, no dead point cells on
+group rows) and group-scoped data extends the group tuple without widening
 any point. Points are pairs of *stored uint ptrs* under that group.
 Everything heavy is delegated downward:
 
@@ -122,7 +122,7 @@ ever has `b = 0`** (the only `b = 0` curves are the j-invariant-1728
 CM family, pairing-exotica, not precompile material), and none of our
 targets (7, 3, NIST's `b`, the ed25519 image's `b`) come close. So the
 wire/DAG encoding of PAI as coordinate values `(0, 0)` under a
-`(tag, a, b, version)` cap is safe given a `b ≠ 0` assertion at
+`(tag, a, b, 0)` cap is safe given a `b ≠ 0` assertion at
 `EcCreate` (a value check at recording — `EcRequire::create_group`
 asserts it). Encoding and representation then split
 cleanly at the seam: the runner maps DAG-`(0,0)` ↔ store-`is_pai` in
@@ -142,10 +142,10 @@ w ≡ 1·(y·y) + 0·dummy    (mod p)     — y² = w
 
 The equality of the two sides is **free**: MAC₂ and MAC₃ name the same
 `r_ptr = w`, and `ptr → value` is functional in the uint store. `a = 0`
-curves need no special case (`a` is a typed zero pin; the κ's stay
-`(1,1)`). Cost per eager (trio) stored point: 2 coordinate uint blocks +
-2 transient blocks (32 store rows) + 3 mul blocks (48 rows) + the point
-row. A closure-cert point (a fresh group-law result) saves the 2
+curves need no special case (`a_ptr` names the curve coefficient; the κ's
+stay `(1,1)`). Cost per eager (trio) stored point: 2 coordinate uint blocks +
+2 transient blocks (32 store rows) + 3 mul blocks (48 rows) + the point row.
+A closure-cert point (a fresh group-law result) saves the 2
 transient blocks + 3 mul blocks — only its 2 coordinate blocks + the
 point row remain.
 
@@ -183,7 +183,7 @@ Carrying them would widen the tuple for zero consumers.
 | curve | fit |
 |---|---|
 | secp256k1 | direct: `a = 0, b = 7`, cofactor 1; the tangent slope's `3x²` is the κ = 3 MAC shape |
-| P-256 | direct: `a = p − 3` (a full-size pinned uint — `a` is data, never a κ), cofactor 1 |
+| P-256 | direct: `a = p − 3` (a full-size coefficient value — `a` is data, never a κ), cofactor 1 |
 | bn254 G1 | direct: `a = 0, b = 3`, cofactor 1. **G2 is out of scope** — it lives over `F_{p²}`; pairing-adjacent work needs a quadratic-extension layer over UintMul, a separate design |
 | ed25519 | via isomorphism: twisted Edwards → Montgomery (birational) → short Weierstrass (a true isomorphism, `X = u + A/3`). The store holds the SW image; conversions are a handful of field ops provable with the existing chiplets. **Full treatment: [`../ed25519-sw-image.md`](../ed25519-sw-image.md)** — the exceptional-point bookkeeping, the 2-torsion culprit, the conversion gadget |
 

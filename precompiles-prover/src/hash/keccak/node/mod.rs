@@ -38,9 +38,11 @@ use core::array;
 
 use miden_core::{
     Felt,
+    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_precompiles::Keccak256Precompile;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -52,7 +54,6 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        deferred_tags,
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
     },
     utils::{current_main, next_main},
@@ -260,7 +261,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // out_mult on inactive rows --------------------------------
         // Pin `out_mult = 0` on dead rows so the `Binding` provide
         // (mult = `−out_mult`) contributes 0 on padding. Deg 2.
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * out_mult.clone());
+        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 
         // Continuity (gated on `act_next`) -----------------------
         // sponge namespace: 32 sponge rows per perm.
@@ -340,7 +341,7 @@ where
         let pos_act: LB::Expr = act.clone();
         let pos_act_x2: LB::Expr = LB::Expr::from(Felt::from(2u8)) * act;
         let out_mult: LB::Expr = local[COL_OUT_MULT].into();
-        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult.clone();
+        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
 
         // Derived addresses / cycles.
         // chunk_ptr_head = 4·chunk_seq_id_head — the bus-side
@@ -360,13 +361,12 @@ where
             - LB::Expr::from(Felt::from(128u8));
 
         // Capacities.
-        let cap_digest_chunks = deferred_tags::chunks().map(|felt| LB::Expr::from(felt));
-        let [keccak_id, assertion_disc, _zero_len, zero] = deferred_tags::keccak_assert(0);
+        let cap_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
         let cap_keccak = [
-            LB::Expr::from(keccak_id),
-            LB::Expr::from(assertion_disc),
+            LB::Expr::from(Keccak256Precompile::id()),
+            LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
             len_bytes.clone(),
-            LB::Expr::from(zero),
+            LB::Expr::ZERO,
         ];
 
         // Rate splits.
