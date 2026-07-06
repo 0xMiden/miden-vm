@@ -22,10 +22,6 @@ pub const K1_SCALAR_BOUND_PTR: u32 = 3;
 pub const R1_BASE_BOUND_PTR: u32 = 4;
 /// VM-owned store pointer for the secp256r1 scalar-field bound (`n - 1`).
 pub const R1_SCALAR_BOUND_PTR: u32 = 5;
-/// VM-owned store pointer for the Ed25519 base-field bound (`p - 1`).
-pub const ED25519_BASE_BOUND_PTR: u32 = 6;
-/// VM-owned store pointer for the Ed25519 scalar-field bound (`l - 1`).
-pub const ED25519_SCALAR_BOUND_PTR: u32 = 7;
 
 /// VM-owned store pointer for the secp256k1 curve coefficient `A`.
 pub const K1_A_PTR: u32 = 8;
@@ -35,17 +31,11 @@ pub const K1_B_PTR: u32 = 9;
 pub const R1_A_PTR: u32 = 10;
 /// VM-owned store pointer for the secp256r1 curve coefficient `B`.
 pub const R1_B_PTR: u32 = 11;
-/// VM-owned store pointer for the Ed25519-SW curve coefficient `A`.
-pub const ED25519_SW_A_PTR: u32 = 12;
-/// VM-owned store pointer for the Ed25519-SW curve coefficient `B`.
-pub const ED25519_SW_B_PTR: u32 = 13;
 
 /// VM-owned store pointer for the secp256k1 group configuration.
 pub const K1_GROUP_PTR: u32 = 1;
 /// VM-owned store pointer for the secp256r1 group configuration.
 pub const R1_GROUP_PTR: u32 = 2;
-/// VM-owned store pointer for the Ed25519-SW group configuration.
-pub const ED25519_SW_GROUP_PTR: u32 = 3;
 
 /// Marker for arithmetic modulo `2^256`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -128,42 +118,6 @@ impl R1Scalar {
         0xffff_ffff,
         0x0000_0000,
         0xffff_ffff,
-    ];
-}
-
-/// Marker type for the Ed25519 base field.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Ed25519Base;
-
-impl Ed25519Base {
-    /// Modulus of the Ed25519 base field `2^255 - 19`, little-endian u32 limbs.
-    pub const MODULUS: Limbs = [
-        0xffff_ffed,
-        0xffff_ffff,
-        0xffff_ffff,
-        0xffff_ffff,
-        0xffff_ffff,
-        0xffff_ffff,
-        0xffff_ffff,
-        0x7fff_ffff,
-    ];
-}
-
-/// Marker type for the Ed25519 scalar field.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Ed25519Scalar;
-
-impl Ed25519Scalar {
-    /// Modulus of the Ed25519 scalar field, little-endian u32 limbs.
-    pub const MODULUS: Limbs = [
-        0x5cf5_d3ed,
-        0x5812_631a,
-        0xa2f7_9cd6,
-        0x14de_f9de,
-        0x0000_0000,
-        0x0000_0000,
-        0x0000_0000,
-        0x1000_0000,
     ];
 }
 
@@ -276,16 +230,6 @@ impl UintSpec for R1Scalar {
     const IS_PRIME_FIELD: bool = true;
 }
 
-impl UintSpec for Ed25519Base {
-    const ENCODED_MODULUS: Limbs = Ed25519Base::MODULUS;
-    const IS_PRIME_FIELD: bool = true;
-}
-
-impl UintSpec for Ed25519Scalar {
-    const ENCODED_MODULUS: Limbs = Ed25519Scalar::MODULUS;
-    const IS_PRIME_FIELD: bool = true;
-}
-
 /// Fixed uint arithmetic domains supported by the native uint precompile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UintDomain {
@@ -299,23 +243,12 @@ pub enum UintDomain {
     R1Base,
     /// secp256r1 scalar field.
     R1Scalar,
-    /// Ed25519 base field.
-    Ed25519Base,
-    /// Ed25519 scalar field.
-    Ed25519Scalar,
 }
 
 impl UintDomain {
     /// All fixed domains in deterministic precompile initialization order.
-    pub const ALL: [Self; 7] = [
-        Self::U256,
-        Self::K1Base,
-        Self::K1Scalar,
-        Self::R1Base,
-        Self::R1Scalar,
-        Self::Ed25519Base,
-        Self::Ed25519Scalar,
-    ];
+    pub const ALL: [Self; 5] =
+        [Self::U256, Self::K1Base, Self::K1Scalar, Self::R1Base, Self::R1Scalar];
 
     /// Returns the VM-owned store pointer for this domain's fixed bound/modulus.
     pub const fn bound_ptr(self) -> u32 {
@@ -325,8 +258,6 @@ impl UintDomain {
             Self::K1Scalar => K1_SCALAR_BOUND_PTR,
             Self::R1Base => R1_BASE_BOUND_PTR,
             Self::R1Scalar => R1_SCALAR_BOUND_PTR,
-            Self::Ed25519Base => ED25519_BASE_BOUND_PTR,
-            Self::Ed25519Scalar => ED25519_SCALAR_BOUND_PTR,
         }
     }
 
@@ -338,8 +269,6 @@ impl UintDomain {
             K1_SCALAR_BOUND_PTR => Some(Self::K1Scalar),
             R1_BASE_BOUND_PTR => Some(Self::R1Base),
             R1_SCALAR_BOUND_PTR => Some(Self::R1Scalar),
-            ED25519_BASE_BOUND_PTR => Some(Self::Ed25519Base),
-            ED25519_SCALAR_BOUND_PTR => Some(Self::Ed25519Scalar),
             _ => None,
         }
     }
@@ -352,8 +281,6 @@ impl UintDomain {
             Self::K1Scalar => <K1Scalar as UintSpec>::ENCODED_MODULUS,
             Self::R1Base => <R1Base as UintSpec>::ENCODED_MODULUS,
             Self::R1Scalar => <R1Scalar as UintSpec>::ENCODED_MODULUS,
-            Self::Ed25519Base => <Ed25519Base as UintSpec>::ENCODED_MODULUS,
-            Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::ENCODED_MODULUS,
         }
     }
 
@@ -365,8 +292,6 @@ impl UintDomain {
             Self::K1Scalar => <K1Scalar as UintSpec>::IS_PRIME_FIELD,
             Self::R1Base => <R1Base as UintSpec>::IS_PRIME_FIELD,
             Self::R1Scalar => <R1Scalar as UintSpec>::IS_PRIME_FIELD,
-            Self::Ed25519Base => <Ed25519Base as UintSpec>::IS_PRIME_FIELD,
-            Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::IS_PRIME_FIELD,
         }
     }
 
@@ -378,8 +303,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::is_canonical(value),
             Self::R1Base => R1Base::is_canonical(value),
             Self::R1Scalar => R1Scalar::is_canonical(value),
-            Self::Ed25519Base => Ed25519Base::is_canonical(value),
-            Self::Ed25519Scalar => Ed25519Scalar::is_canonical(value),
         }
     }
 
@@ -391,8 +314,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::add(lhs, rhs),
             Self::R1Base => R1Base::add(lhs, rhs),
             Self::R1Scalar => R1Scalar::add(lhs, rhs),
-            Self::Ed25519Base => Ed25519Base::add(lhs, rhs),
-            Self::Ed25519Scalar => Ed25519Scalar::add(lhs, rhs),
         }
     }
 
@@ -404,8 +325,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::sub(lhs, rhs),
             Self::R1Base => R1Base::sub(lhs, rhs),
             Self::R1Scalar => R1Scalar::sub(lhs, rhs),
-            Self::Ed25519Base => Ed25519Base::sub(lhs, rhs),
-            Self::Ed25519Scalar => Ed25519Scalar::sub(lhs, rhs),
         }
     }
 
@@ -417,8 +336,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::mul(lhs, rhs),
             Self::R1Base => R1Base::mul(lhs, rhs),
             Self::R1Scalar => R1Scalar::mul(lhs, rhs),
-            Self::Ed25519Base => Ed25519Base::mul(lhs, rhs),
-            Self::Ed25519Scalar => Ed25519Scalar::mul(lhs, rhs),
         }
     }
 
@@ -430,8 +347,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::inv(value),
             Self::R1Base => R1Base::inv(value),
             Self::R1Scalar => R1Scalar::inv(value),
-            Self::Ed25519Base => Ed25519Base::inv(value),
-            Self::Ed25519Scalar => Ed25519Scalar::inv(value),
         }
     }
 
@@ -451,8 +366,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::minus_one(),
             Self::R1Base => R1Base::minus_one(),
             Self::R1Scalar => R1Scalar::minus_one(),
-            Self::Ed25519Base => Ed25519Base::minus_one(),
-            Self::Ed25519Scalar => Ed25519Scalar::minus_one(),
         }
     }
 
@@ -464,8 +377,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::half(),
             Self::R1Base => R1Base::half(),
             Self::R1Scalar => R1Scalar::half(),
-            Self::Ed25519Base => Ed25519Base::half(),
-            Self::Ed25519Scalar => Ed25519Scalar::half(),
         }
     }
 
@@ -477,8 +388,6 @@ impl UintDomain {
             Self::K1Scalar => K1Scalar::pow2_mod(exponent),
             Self::R1Base => R1Base::pow2_mod(exponent),
             Self::R1Scalar => R1Scalar::pow2_mod(exponent),
-            Self::Ed25519Base => Ed25519Base::pow2_mod(exponent),
-            Self::Ed25519Scalar => Ed25519Scalar::pow2_mod(exponent),
         }
     }
 
@@ -535,17 +444,15 @@ impl UintPrecompileDescriptor {
 pub enum CodegenCurveId {
     Secp256k1,
     Secp256r1,
-    Ed25519Sw,
 }
 
 impl CodegenCurveId {
-    pub const ALL: [Self; 3] = [Self::Secp256k1, Self::Secp256r1, Self::Ed25519Sw];
+    pub const ALL: [Self; 2] = [Self::Secp256k1, Self::Secp256r1];
 
     pub fn id(self) -> Felt {
         match self {
             Self::Secp256k1 => SECP256K1_ID,
             Self::Secp256r1 => SECP256R1_ID,
-            Self::Ed25519Sw => ED25519_SW_ID,
         }
     }
 
@@ -553,7 +460,6 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
             Self::Secp256r1 => UintDomain::R1Base,
-            Self::Ed25519Sw => UintDomain::Ed25519Base,
         }
     }
 
@@ -561,7 +467,6 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => K1_GROUP_PTR,
             Self::Secp256r1 => R1_GROUP_PTR,
-            Self::Ed25519Sw => ED25519_SW_GROUP_PTR,
         }
     }
 
@@ -569,7 +474,6 @@ impl CodegenCurveId {
         match ptr {
             K1_GROUP_PTR => Some(Self::Secp256k1),
             R1_GROUP_PTR => Some(Self::Secp256r1),
-            ED25519_SW_GROUP_PTR => Some(Self::Ed25519Sw),
             _ => None,
         }
     }
@@ -578,7 +482,6 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => K1_A_PTR,
             Self::Secp256r1 => R1_A_PTR,
-            Self::Ed25519Sw => ED25519_SW_A_PTR,
         }
     }
 
@@ -586,7 +489,6 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => K1_B_PTR,
             Self::Secp256r1 => R1_B_PTR,
-            Self::Ed25519Sw => ED25519_SW_B_PTR,
         }
     }
 
@@ -594,7 +496,6 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => UintDomain::K1Scalar,
             Self::Secp256r1 => UintDomain::R1Scalar,
-            Self::Ed25519Sw => UintDomain::Ed25519Scalar,
         }
     }
 
@@ -602,14 +503,12 @@ impl CodegenCurveId {
         match self {
             Self::Secp256k1 => (SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y),
             Self::Secp256r1 => (SECP256R1_GENERATOR_X, SECP256R1_GENERATOR_Y),
-            Self::Ed25519Sw => (ED25519_SW_GENERATOR_X, ED25519_SW_GENERATOR_Y),
         }
     }
 }
 
 pub const SECP256K1_ID: Felt = Felt::new_unchecked(1);
 pub const SECP256R1_ID: Felt = Felt::new_unchecked(2);
-pub const ED25519_SW_ID: Felt = Felt::new_unchecked(3);
 
 pub const SECP256K1_GENERATOR_X: Limbs = [
     0x16f8_1798,
@@ -653,31 +552,6 @@ pub const SECP256R1_GENERATOR_Y: Limbs = [
     0x8ee7_eb4a,
     0xfe1a_7f9b,
     0x4fe3_42e2,
-];
-
-/// Ed25519 base point mapped to the short-Weierstrass model `X = u + 486662/3`.
-pub const ED25519_SW_GENERATOR_X: Limbs = [
-    0xaaad_245a,
-    0xaaaa_aaaa,
-    0xaaaa_aaaa,
-    0xaaaa_aaaa,
-    0xaaaa_aaaa,
-    0xaaaa_aaaa,
-    0xaaaa_aaaa,
-    0x2aaa_aaaa,
-];
-
-/// Ed25519 base point mapped to the short-Weierstrass model using the even square root of
-/// `-486664` in the Edwards-to-Montgomery map.
-pub const ED25519_SW_GENERATOR_Y: Limbs = [
-    0x8131_2c14,
-    0xd616_3a5d,
-    0x9283_9e4d,
-    0x6dc2_b281,
-    0x88b7_2eb3,
-    0x1fe1_22d3,
-    0x475f_794b,
-    0x5f51_e65e,
 ];
 
 pub struct CurvePrecompileDescriptor;
@@ -1106,14 +980,7 @@ mod tests {
             reduce_wide(wide, modulus)
         }
 
-        let moduli = [
-            K1Base::MODULUS,
-            K1Scalar::MODULUS,
-            R1Base::MODULUS,
-            R1Scalar::MODULUS,
-            Ed25519Base::MODULUS,
-            Ed25519Scalar::MODULUS,
-        ];
+        let moduli = [K1Base::MODULUS, K1Scalar::MODULUS, R1Base::MODULUS, R1Scalar::MODULUS];
 
         let mut state: u64 = 0x1234_5678_9abc_def0;
         for modulus in moduli {

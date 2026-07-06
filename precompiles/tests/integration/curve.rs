@@ -13,7 +13,7 @@ struct CurveCase {
     curve: CurveId,
 }
 
-fn supported_curves() -> [CurveCase; 3] {
+fn supported_curves() -> [CurveCase; 2] {
     [
         CurveCase {
             module: "secp256k1",
@@ -24,11 +24,6 @@ fn supported_curves() -> [CurveCase; 3] {
             module: "secp256r1",
             scalar_module: "r1_scalar",
             curve: CurveId::Secp256r1,
-        },
-        CurveCase {
-            module: "ed25519_sw",
-            scalar_module: "ed25519_scalar",
-            curve: CurveId::Ed25519Sw,
         },
     ]
 }
