@@ -24,6 +24,7 @@ ChipletCols {
         17,
         18,
         19,
+        20,
     ],
-    chip_clk: 20,
+    chip_clk: 21,
 }

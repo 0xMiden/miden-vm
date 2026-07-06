@@ -31,9 +31,8 @@
 //!
 //! ## Hasher perm-link (`BusId::HasherPermLink{Input,Output}`)
 //!
-//! Binds hasher controller rows to the Poseidon2 permutation AIR. Without this bus, a malicious
-//! prover could pair any controller `(state_in, state_out)` with any permutation cycle or skip the
-//! cycle entirely. The chiplets side emits the controller additions:
+//! Binds hasher controller rows to the Poseidon2 permutation AIR. The `perm_id` column ties each
+//! controller input/output row pair to one permutation cycle.
 //!
 //! - **Controller input** (`controller_active * is_input`, multiplicity `+1`): controller side of a
 //!   `(state_in, state_out)` pair. Routed to `BusId::HasherPermLinkInput`.
@@ -55,6 +54,7 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    trace::chiplets::hasher::STATE_WIDTH,
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -120,7 +120,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let f_ctrl_input = controller_flag.clone() * is_input;
     let f_ctrl_output = controller_flag * is_output;
 
-    let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
+    let ctrl_state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| ctrl.state[i]);
+    let perm_id = ctrl.perm_id;
 
     builder.next_column(
         |col| {
@@ -175,24 +176,24 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
 
-                    // Controller input: +1 / encode(ctrl.state) on HasherPermLinkInput.
+                    // Controller input: +1 / encode(perm_id, ctrl.state) on HasherPermLinkInput.
                     g.add(
                         "perm_ctrl_input",
                         f_ctrl_input,
                         move || {
-                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Input { state }
+                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg::Input { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 2, u: 3 },
                     );
 
-                    // Controller output: +1 / encode(ctrl.state) on HasherPermLinkOutput.
+                    // Controller output: +1 / encode(perm_id, ctrl.state) on HasherPermLinkOutput.
                     g.add(
                         "perm_ctrl_output",
                         f_ctrl_output,
                         move || {
-                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Output { state }
+                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg::Output { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 3, u: 4 },
                     );

@@ -19,7 +19,7 @@ use super::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
+use crate::trace::{CHIPLET_CONTROLLER_OFFSET, CHIPLETS_WIDTH, TRACE_WIDTH};
 
 // CORE TRACE COLUMN STRUCT
 // ================================================================================================
@@ -84,35 +84,44 @@ pub struct ChipletCols<T> {
     pub chip_clk: T,
 }
 
-/// Number of columns in the chiplets trace (21), derived from the struct layout.
+/// Number of columns in the chiplets trace, derived from the struct layout.
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
+pub const CHIPLET_SELECTOR_COUNT: usize = 5;
+
 impl<T> ChipletCols<T> {
+    const CONTROLLER_OFFSET: usize = CHIPLET_CONTROLLER_OFFSET;
+    const CONTROLLER_END: usize = Self::CONTROLLER_OFFSET + size_of::<ControllerCols<u8>>();
+    const BITWISE_OFFSET: usize = 2;
+    const BITWISE_END: usize = Self::BITWISE_OFFSET + size_of::<BitwiseCols<u8>>();
+    const MEMORY_OFFSET: usize = 3;
+    const MEMORY_END: usize = Self::MEMORY_OFFSET + size_of::<MemoryCols<u8>>();
+    const MEMORY_WORD_ADDR_LO_OFFSET: usize = Self::MEMORY_END;
+    const MEMORY_WORD_ADDR_HI_OFFSET: usize = Self::MEMORY_WORD_ADDR_LO_OFFSET + 1;
+    const ACE_OFFSET: usize = 4;
+    const ACE_END: usize = Self::ACE_OFFSET + size_of::<AceCols<u8>>();
+    const KERNEL_ROM_OFFSET: usize = 5;
+    const KERNEL_ROM_END: usize = Self::KERNEL_ROM_OFFSET + size_of::<KernelRomCols<u8>>();
+
     /// Returns the top-level selector slots `[s0, s1, s2, s3, s4]`.
-    pub fn chiplet_selectors(&self) -> [T; 5]
+    pub fn chiplet_selectors(&self) -> [T; CHIPLET_SELECTOR_COUNT]
     where
         T: Copy,
     {
-        [
-            self.chiplets[0],
-            self.chiplets[1],
-            self.chiplets[2],
-            self.chiplets[3],
-            self.chiplets[4],
-        ]
+        core::array::from_fn(|i| self.chiplets[i])
     }
 
-    /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
+    /// Returns a typed borrow of the bitwise chiplet columns.
     pub fn bitwise(&self) -> &BitwiseCols<T> {
-        self.chiplets[2..15].borrow()
+        self.chiplets[Self::BITWISE_OFFSET..Self::BITWISE_END].borrow()
     }
 
-    /// Returns a typed borrow of the memory chiplet columns (chiplets\[3..18\]).
+    /// Returns a typed borrow of the memory chiplet columns.
     pub fn memory(&self) -> &MemoryCols<T> {
-        self.chiplets[3..18].borrow()
+        self.chiplets[Self::MEMORY_OFFSET..Self::MEMORY_END].borrow()
     }
 
-    /// Returns the lower 16-bit limb of the memory word address (chiplets\[18\]).
+    /// Returns the lower 16-bit limb of the memory word address.
     ///
     /// Range-check auxiliary column populated by the trace builder for the lookup-bus
     /// emitter; not part of [`MemoryCols`] because the memory AIR's own transition
@@ -121,10 +130,10 @@ impl<T> ChipletCols<T> {
     where
         T: Copy,
     {
-        self.chiplets[18]
+        self.chiplets[Self::MEMORY_WORD_ADDR_LO_OFFSET]
     }
 
-    /// Returns the upper 16-bit limb of the memory word address (chiplets\[19\]).
+    /// Returns the upper 16-bit limb of the memory word address.
     ///
     /// See [`Self::memory_word_addr_lo`] for the same caveat about the range-check
     /// auxiliary columns living outside [`MemoryCols`].
@@ -132,22 +141,22 @@ impl<T> ChipletCols<T> {
     where
         T: Copy,
     {
-        self.chiplets[19]
+        self.chiplets[Self::MEMORY_WORD_ADDR_HI_OFFSET]
     }
 
-    /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
+    /// Returns a typed borrow of the ACE chiplet columns.
     pub fn ace(&self) -> &AceCols<T> {
-        self.chiplets[4..].borrow()
+        self.chiplets[Self::ACE_OFFSET..Self::ACE_END].borrow()
     }
 
-    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
+    /// Returns a typed borrow of the kernel ROM chiplet columns.
     pub fn kernel_rom(&self) -> &KernelRomCols<T> {
-        self.chiplets[5..10].borrow()
+        self.chiplets[Self::KERNEL_ROM_OFFSET..Self::KERNEL_ROM_END].borrow()
     }
 
-    /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
+    /// Returns a typed borrow of the controller sub-chiplet columns.
     pub fn controller(&self) -> &ControllerCols<T> {
-        self.chiplets[1..].borrow()
+        self.chiplets[Self::CONTROLLER_OFFSET..Self::CONTROLLER_END].borrow()
     }
 }
 
@@ -292,8 +301,8 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[19], 19);
-        assert_eq!(CHIPLET_COL_MAP.chip_clk, 20);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[CHIPLETS_WIDTH - 2], CHIPLETS_WIDTH - 2);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, CHIPLETS_WIDTH - 1);
     }
 
     // --- Per-AIR width invariants -------------------------------------------------------------

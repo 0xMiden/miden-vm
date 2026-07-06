@@ -2,7 +2,7 @@
 //!
 //! The hasher controller records permutation requests as compact (input, output) row pairs and
 //! responds to the chiplets bus. The Poseidon2 permutation AIR enforces the requested
-//! permutations. The perm-link bus binds the controller rows to those permutation cycles.
+//! permutations. The perm-link bus binds each controller pair to its permutation cycle.
 //!
 //! The controller active flag covers all controller rows: input, output, and padding.
 //!
@@ -128,11 +128,11 @@ pub fn enforce_controller_constraints<AB>(
         .assert_one(rows.is_padding_next.clone());
 
     // --- Padding confinement ---
-    // is_boundary and direction_bit must be zero on padding rows.
+    // is_boundary, direction_bit, and perm_id must be zero on padding rows.
     builder
         .when(chiplet.is_active.clone())
         .when(rows.is_padding.clone())
-        .assert_zeros([cols.is_boundary, cols.direction_bit]);
+        .assert_zeros([cols.is_boundary, cols.direction_bit, cols.perm_id]);
 
     // =====================================================================
     // 2. OPERATION START
@@ -166,6 +166,13 @@ pub fn enforce_controller_constraints<AB>(
         .when(chiplet.is_transition.clone())
         .when(rows.is_input.clone())
         .assert_one(rows.is_output_next.clone());
+
+    // --- Pair id continuity ---
+    // The perm-link id is shared by the input and output row of an operation.
+    builder
+        .when(chiplet.is_transition.clone())
+        .when(rows.is_input.clone())
+        .assert_eq(cols_next.perm_id, cols.perm_id);
 
     // =====================================================================
     // 3. SPONGE OPERATIONS (LINEAR_HASH / 2-to-1 / HPERM)

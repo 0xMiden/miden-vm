@@ -1,8 +1,11 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 use core::{borrow::BorrowMut, ops::Range};
 
 use miden_air::{
-    ControllerCols, Poseidon2PermutationCols,
+    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, ControllerCols, INITIAL_EXTERNAL_ROUND_END,
+    INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
+    NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
+    PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols,
     trace::{
         chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
         poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
@@ -10,7 +13,9 @@ use miden_air::{
 };
 use miden_core::chiplets::hasher::Hasher;
 
-use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, StateKey, ZERO};
+use super::{
+    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
+};
 
 // HASHER OPERATION
 // ================================================================================================
@@ -29,6 +34,7 @@ enum HasherOp {
         mrupdate_id: Felt,
         is_boundary: Felt,
         direction_bit: Felt,
+        perm_id: Felt,
     },
     /// Padding rows used to align the controller region inside `ChipletsAir`.
     Padding { count: usize, mrupdate_id: Felt },
@@ -54,13 +60,14 @@ impl HasherOp {
 /// materialized into the separate Poseidon2 permutation AIR by
 /// [`fill_poseidon2_permutation_trace`].
 ///
-/// Controller rows use 19 columns:
+/// Controller rows use the hasher trace layout:
 /// - 3 hasher-internal selector columns (`s0`, `s1`, `s2`).
 /// - 12 Poseidon2 state columns (`h0..h11`).
 /// - `node_index`, used by Merkle operations.
 /// - `mrupdate_id`, the domain separator for MRUPDATE sibling-table entries.
 /// - `is_boundary`, set on operation boundaries.
 /// - `direction_bit`, used by Merkle path operations.
+/// - `perm_id`, the Poseidon2 permutation cycle id for input/output rows.
 #[derive(Debug, Default)]
 pub(super) struct HasherTrace {
     ops: Vec<HasherOp>,
@@ -103,6 +110,7 @@ impl HasherTrace {
         mrupdate_id: Felt,
         is_boundary: Felt,
         direction_bit: Felt,
+        perm_id: Felt,
     ) {
         self.ops.push(HasherOp::Controller {
             selectors,
@@ -111,6 +119,7 @@ impl HasherTrace {
             mrupdate_id,
             is_boundary,
             direction_bit,
+            perm_id,
         });
         self.row_count += 1;
     }
@@ -141,14 +150,15 @@ impl HasherTrace {
         range: Range<usize>,
         new_mrupdate_id: Felt,
     ) -> (HasherState, Vec<HasherState>) {
-        let copied: Vec<HasherOp> = self.ops[range].to_vec();
         let mut last_state = [ZERO; STATE_WIDTH];
-        let mut input_states = Vec::new();
-        for mut op in copied {
+        let mut input_states = Vec::with_capacity(range.len() / 2);
+        for idx in range {
+            let mut op = self.ops[idx].clone();
             match &mut op {
                 HasherOp::Controller { mrupdate_id, selectors, state, .. } => {
                     *mrupdate_id = new_mrupdate_id;
-                    if selectors[0] == ONE {
+                    let [is_input, _, _] = *selectors;
+                    if is_input == ONE {
                         input_states.push(*state);
                     }
                     last_state = *state;
@@ -186,6 +196,7 @@ impl HasherTrace {
                     mrupdate_id,
                     is_boundary,
                     direction_bit,
+                    perm_id,
                 } => {
                     write_controller_row(
                         &mut chunk_rows[0],
@@ -195,6 +206,7 @@ impl HasherTrace {
                         *mrupdate_id,
                         *is_boundary,
                         *direction_bit,
+                        *perm_id,
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
@@ -207,6 +219,7 @@ impl HasherTrace {
                             &[ZERO; STATE_WIDTH],
                             ZERO,
                             *mrupdate_id,
+                            ZERO,
                             ZERO,
                             ZERO,
                         );
@@ -232,16 +245,19 @@ fn write_controller_row(
     mrupdate_id: Felt,
     is_boundary: Felt,
     direction_bit: Felt,
+    perm_id: Felt,
 ) {
     let cols: &mut ControllerCols<Felt> = row.as_mut_slice().borrow_mut();
-    cols.s0 = selectors[0];
-    cols.s1 = selectors[1];
-    cols.s2 = selectors[2];
+    let [s0, s1, s2] = selectors;
+    cols.s0 = s0;
+    cols.s1 = s1;
+    cols.s2 = s2;
     cols.state = *state;
     cols.node_index = node_index;
     cols.mrupdate_id = mrupdate_id;
     cols.is_boundary = is_boundary;
     cols.direction_bit = direction_bit;
+    cols.perm_id = perm_id;
 }
 
 // POSEIDON2 PERMUTATION TRACE
@@ -262,64 +278,83 @@ fn write_controller_row(
 pub(super) fn write_poseidon2_permutation_cycle(
     rows: &mut [[Felt; NUM_POSEIDON2_PERMUTATION_COLS]],
     init_state: &HasherState,
+    perm_id: Felt,
     multiplicity: Felt,
 ) {
     debug_assert_eq!(rows.len(), HASH_CYCLE_LEN);
     let mut state = *init_state;
 
-    write_perm_row(&mut rows[0], &state, multiplicity, [ZERO; 3]);
+    let zero_witnesses = [ZERO; NUM_SBOX_WITNESSES];
+    let multiplicity_witnesses = witnesses_with_first(multiplicity);
+
+    write_perm_row(&mut rows[CYCLE_INPUT_ROW], &state, perm_id, multiplicity_witnesses);
 
     Hasher::apply_matmul_external(&mut state);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
 
-    for (r, row) in rows.iter_mut().enumerate().take(4).skip(1) {
-        write_perm_row(row, &state, multiplicity, [ZERO; 3]);
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+    for round in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
+        write_perm_row(&mut rows[round], &state, perm_id, zero_witnesses);
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
-    for triple in 0..7 {
-        let base = triple * 3;
+    for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
+        let base = triple * NUM_SBOX_WITNESSES;
         let pre_state = state;
-        let mut witnesses = [ZERO; 3];
+        let mut witnesses = zero_witnesses;
         for (k, witness) in witnesses.iter_mut().enumerate() {
             let sbox_out = (state[0] + Hasher::ARK_INT[base + k]).exp_const_u64::<7>();
             *witness = sbox_out;
             state[0] = sbox_out;
             Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
         }
-        write_perm_row(&mut rows[4 + triple], &pre_state, multiplicity, witnesses);
+        write_perm_row(
+            &mut rows[PACKED_INTERNAL_ROUND_START + triple],
+            &pre_state,
+            perm_id,
+            witnesses,
+        );
     }
 
     let pre_state = state;
-    let w0 = (state[0] + Hasher::ARK_INT[21]).exp_const_u64::<7>();
+    let w0 = (state[0] + Hasher::ARK_INT[LAST_INTERNAL_ROUND_ARK_IDX]).exp_const_u64::<7>();
     state[0] = w0;
     Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
-    write_perm_row(&mut rows[11], &pre_state, multiplicity, [w0, ZERO, ZERO]);
+    let final_internal_witnesses = witnesses_with_first(w0);
+    write_perm_row(
+        &mut rows[INTERNAL_PLUS_EXTERNAL_ROW],
+        &pre_state,
+        perm_id,
+        final_internal_witnesses,
+    );
 
-    for r in 1..=3 {
-        write_perm_row(&mut rows[11 + r], &state, multiplicity, [ZERO; 3]);
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+    for round in 1..=NUM_TRAILING_EXTERNAL_ROUND_ROWS {
+        write_perm_row(
+            &mut rows[INTERNAL_PLUS_EXTERNAL_ROW + round],
+            &state,
+            perm_id,
+            zero_witnesses,
+        );
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
-    write_perm_row(&mut rows[15], &state, multiplicity, [ZERO; 3]);
+    write_perm_row(&mut rows[CYCLE_OUTPUT_ROW], &state, perm_id, multiplicity_witnesses);
 }
 
 /// Materializes the Poseidon2 permutation trace from deduplicated permutation requests.
 ///
-/// Requests are supplied by `BTreeMap`, so cycle order is deterministic. Padding uses
-/// zero-multiplicity cycles: they satisfy the permutation constraints and do not contribute to the
-/// perm-link LogUp sum.
+/// Requests are emitted in cycle-id order. Padding uses zero-multiplicity cycles: they satisfy the
+/// permutation constraints and do not contribute to the perm-link LogUp sum.
 pub(super) fn fill_poseidon2_permutation_trace(
-    perm_requests: BTreeMap<StateKey, u64>,
+    perm_requests: Vec<PermRequest>,
     trace: &mut [Felt],
 ) {
     const W: usize = NUM_POSEIDON2_PERMUTATION_COLS;
@@ -332,44 +367,68 @@ pub(super) fn fill_poseidon2_permutation_trace(
         "Poseidon2 trace buffer is too short for permutation requests",
     );
 
+    let request_count = perm_requests.len();
     let mut row_idx = 0;
-    for (key, multiplicity) in perm_requests {
-        let state = key.map(Felt::new_unchecked);
+    for (perm_id, request) in perm_requests.into_iter().enumerate() {
+        let state = request.state.map(Felt::new_unchecked);
         write_poseidon2_permutation_cycle(
             &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
             &state,
-            Felt::new_unchecked(multiplicity),
+            felt_from_usize(perm_id),
+            Felt::new_unchecked(request.multiplicity),
         );
         row_idx += HASH_CYCLE_LEN;
     }
 
-    // Padding consists of zero-state permutation cycles with multiplicity 0: the cycles satisfy
-    // the permutation constraints and do not affect the LogUp sum.
+    // Padding cycles use zero multiplicity and continue the cycle-id sequence.
+    let mut perm_id = request_count;
     let zero_state = [ZERO; STATE_WIDTH];
-    let padding_start = row_idx;
-    write_poseidon2_permutation_cycle(
-        &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
-        &zero_state,
-        ZERO,
-    );
-    row_idx += HASH_CYCLE_LEN;
+    if row_idx < rows.len() {
+        let padding_start = row_idx;
+        write_poseidon2_permutation_cycle(
+            &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
+            &zero_state,
+            felt_from_usize(perm_id),
+            ZERO,
+        );
+        row_idx += HASH_CYCLE_LEN;
+        perm_id += 1;
 
-    while row_idx < rows.len() {
-        let written_padding = row_idx - padding_start;
-        let copy_len = written_padding.min(rows.len() - row_idx);
-        rows.copy_within(padding_start..padding_start + copy_len, row_idx);
-        row_idx += copy_len;
+        while row_idx < rows.len() {
+            rows.copy_within(padding_start..padding_start + HASH_CYCLE_LEN, row_idx);
+            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], felt_from_usize(perm_id));
+            row_idx += HASH_CYCLE_LEN;
+            perm_id += 1;
+        }
+    }
+}
+
+fn witnesses_with_first(value: Felt) -> [Felt; NUM_SBOX_WITNESSES] {
+    let mut witnesses = [ZERO; NUM_SBOX_WITNESSES];
+    witnesses[0] = value;
+    witnesses
+}
+
+fn felt_from_usize(value: usize) -> Felt {
+    Felt::new_unchecked(value.try_into().expect("Poseidon2 permutation id exceeds u64"))
+}
+
+fn set_perm_id(rows: &mut [[Felt; NUM_POSEIDON2_PERMUTATION_COLS]], perm_id: Felt) {
+    debug_assert_eq!(rows.len(), HASH_CYCLE_LEN);
+    for row in rows {
+        let cols: &mut Poseidon2PermutationCols<Felt> = row[..].borrow_mut();
+        cols.perm_id = perm_id;
     }
 }
 
 fn write_perm_row(
     row: &mut [Felt; NUM_POSEIDON2_PERMUTATION_COLS],
     state: &HasherState,
-    multiplicity: Felt,
-    witnesses: [Felt; 3],
+    perm_id: Felt,
+    witnesses: [Felt; NUM_SBOX_WITNESSES],
 ) {
     let cols: &mut Poseidon2PermutationCols<Felt> = row[..].borrow_mut();
     cols.witnesses = witnesses;
     cols.state = *state;
-    cols.multiplicity = multiplicity;
+    cols.perm_id = perm_id;
 }

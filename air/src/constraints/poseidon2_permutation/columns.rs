@@ -1,8 +1,8 @@
 //! Column layout for the Poseidon2 permutation AIR.
 //!
-//! Each row contains the current Poseidon2 state, three S-box witnesses used by packed
-//! internal-round rows, and one request multiplicity. Periodic columns describe the fixed
-//! 16-row schedule and provide the round constants consumed by the transition constraints.
+//! Each row contains the current Poseidon2 state, three row-scheduled witness columns, and the
+//! permutation cycle id. Periodic columns describe the fixed 16-row schedule and provide the round
+//! constants consumed by the transition constraints.
 
 use alloc::{vec, vec::Vec};
 use core::{
@@ -14,19 +14,58 @@ use miden_core::{Felt, chiplets::hasher::Hasher, field::PrimeCharacteristicRing}
 
 use crate::trace::chiplets::hasher::{HASH_CYCLE_LEN, STATE_WIDTH};
 
-/// Witness columns used by packed internal-round rows.
+/// Row-scheduled witness columns used by the permutation AIR.
 pub const NUM_SBOX_WITNESSES: usize = 3;
+
+/// First row of a 16-row cycle; holds the input state.
+pub const CYCLE_INPUT_ROW: usize = 0;
+
+/// First initial-external row after the cycle input row.
+pub const INITIAL_EXTERNAL_ROUND_START: usize = 1;
+
+/// Exclusive end of the initial-external rows.
+pub const INITIAL_EXTERNAL_ROUND_END: usize = 4;
+
+/// First row containing packed internal rounds.
+pub const PACKED_INTERNAL_ROUND_START: usize = INITIAL_EXTERNAL_ROUND_END;
+
+/// Number of rows with three packed internal rounds.
+pub const NUM_PACKED_INTERNAL_ROUND_ROWS: usize = 7;
+
+/// Exclusive end of the packed-internal rows.
+pub const PACKED_INTERNAL_ROUND_END: usize =
+    PACKED_INTERNAL_ROUND_START + NUM_PACKED_INTERNAL_ROUND_ROWS;
+
+/// Row containing the final internal round and the first terminal external round.
+pub const INTERNAL_PLUS_EXTERNAL_ROW: usize = PACKED_INTERNAL_ROUND_END;
+
+/// First terminal-external row after the internal-plus-external row.
+pub const TERMINAL_EXTERNAL_ROUND_START: usize = INTERNAL_PLUS_EXTERNAL_ROW + 1;
+
+/// Output row of a 16-row cycle.
+pub const CYCLE_OUTPUT_ROW: usize = HASH_CYCLE_LEN - 1;
+
+/// Exclusive end of the terminal-external rows.
+pub const TERMINAL_EXTERNAL_ROUND_END: usize = CYCLE_OUTPUT_ROW;
+
+/// Number of terminal-external rows after [`INTERNAL_PLUS_EXTERNAL_ROW`].
+pub const NUM_TRAILING_EXTERNAL_ROUND_ROWS: usize =
+    TERMINAL_EXTERNAL_ROUND_END - TERMINAL_EXTERNAL_ROUND_START;
+
+/// Index of the final internal-round constant.
+pub const LAST_INTERNAL_ROUND_ARK_IDX: usize = NUM_PACKED_INTERNAL_ROUND_ROWS * NUM_SBOX_WITNESSES;
 
 /// Poseidon2 permutation trace columns.
 ///
-/// `witnesses` hold internal-round S-box outputs on rows 4..=11 and are zero otherwise.
-/// `multiplicity` is constant over a cycle and is used only by the perm-link LogUp bus.
+/// `witnesses` hold internal-round S-box outputs on internal-round rows. On the cycle input and
+/// output rows, `witnesses[0]` holds the perm-link multiplicity for the cycle; other unused
+/// witness cells are zero.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct Poseidon2PermutationCols<T> {
     pub witnesses: [T; NUM_SBOX_WITNESSES],
     pub state: [T; STATE_WIDTH],
-    pub multiplicity: T,
+    pub perm_id: T,
 }
 
 /// Number of columns in the Poseidon2 permutation AIR.
@@ -108,32 +147,36 @@ impl Poseidon2PermutationPeriodicCols<Vec<Felt>> {
         let mut is_packed_int = vec![Felt::ZERO; HASH_CYCLE_LEN];
         let mut is_int_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
 
-        is_init_ext[0] = Felt::ONE;
-        for row in [1, 2, 3, 12, 13, 14] {
+        is_init_ext[CYCLE_INPUT_ROW] = Felt::ONE;
+        for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
             is_ext[row] = Felt::ONE;
         }
-        for row in 4..=10 {
+        for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
+            is_ext[row] = Felt::ONE;
+        }
+        for row in PACKED_INTERNAL_ROUND_START..PACKED_INTERNAL_ROUND_END {
             is_packed_int[row] = Felt::ONE;
         }
-        is_int_ext[11] = Felt::ONE;
+        is_int_ext[INTERNAL_PLUS_EXTERNAL_ROW] = Felt::ONE;
 
         let ark = core::array::from_fn(|lane| {
             let mut col = vec![Felt::ZERO; HASH_CYCLE_LEN];
 
-            col[0] = Hasher::ARK_EXT_INITIAL[0][lane];
-            for row in 1..=3 {
+            col[CYCLE_INPUT_ROW] = Hasher::ARK_EXT_INITIAL[0][lane];
+            for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
                 col[row] = Hasher::ARK_EXT_INITIAL[row][lane];
             }
 
             if lane < NUM_SBOX_WITNESSES {
-                for triple in 0..7 {
-                    col[4 + triple] = Hasher::ARK_INT[triple * NUM_SBOX_WITNESSES + lane];
+                for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
+                    col[PACKED_INTERNAL_ROUND_START + triple] =
+                        Hasher::ARK_INT[triple * NUM_SBOX_WITNESSES + lane];
                 }
             }
 
-            col[11] = Hasher::ARK_EXT_TERMINAL[0][lane];
-            for row in 12..=14 {
-                col[row] = Hasher::ARK_EXT_TERMINAL[row - 11][lane];
+            col[INTERNAL_PLUS_EXTERNAL_ROW] = Hasher::ARK_EXT_TERMINAL[0][lane];
+            for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
+                col[row] = Hasher::ARK_EXT_TERMINAL[row - INTERNAL_PLUS_EXTERNAL_ROW][lane];
             }
 
             col
@@ -219,7 +262,7 @@ mod tests {
             let sum = init_ext + ext + packed_int + int_ext;
             assert!(sum == Felt::ZERO || sum == Felt::ONE, "selectors overlap on row {row}: {sum}");
 
-            if row == HASH_CYCLE_LEN - 1 {
+            if row == CYCLE_OUTPUT_ROW {
                 assert_eq!(sum, Felt::ZERO);
             } else {
                 assert_eq!(sum, Felt::ONE);
@@ -234,13 +277,19 @@ mod tests {
         for lane in 0..STATE_WIDTH {
             assert_eq!(periodic.ark[lane][0], Hasher::ARK_EXT_INITIAL[0][lane]);
 
-            for row in 1..=3 {
+            for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
                 assert_eq!(periodic.ark[lane][row], Hasher::ARK_EXT_INITIAL[row][lane]);
             }
 
-            assert_eq!(periodic.ark[lane][11], Hasher::ARK_EXT_TERMINAL[0][lane]);
-            for row in 12..=14 {
-                assert_eq!(periodic.ark[lane][row], Hasher::ARK_EXT_TERMINAL[row - 11][lane]);
+            assert_eq!(
+                periodic.ark[lane][INTERNAL_PLUS_EXTERNAL_ROW],
+                Hasher::ARK_EXT_TERMINAL[0][lane]
+            );
+            for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
+                assert_eq!(
+                    periodic.ark[lane][row],
+                    Hasher::ARK_EXT_TERMINAL[row - INTERNAL_PLUS_EXTERNAL_ROW][lane]
+                );
             }
         }
     }
@@ -249,8 +298,8 @@ mod tests {
     fn poseidon2_internal_round_constants_are_correct() {
         let periodic = Poseidon2PermutationPeriodicCols::new();
 
-        for triple in 0..7 {
-            let row = 4 + triple;
+        for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
+            let row = PACKED_INTERNAL_ROUND_START + triple;
             for lane in 0..NUM_SBOX_WITNESSES {
                 assert_eq!(
                     periodic.ark[lane][row],
@@ -267,7 +316,7 @@ mod tests {
     #[test]
     fn poseidon2_boundary_row_is_zero() {
         let periodic = Poseidon2PermutationPeriodicCols::new();
-        let row = HASH_CYCLE_LEN - 1;
+        let row = CYCLE_OUTPUT_ROW;
 
         assert_eq!(periodic.is_init_ext[row], Felt::ZERO);
         assert_eq!(periodic.is_ext[row], Felt::ZERO);

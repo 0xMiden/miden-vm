@@ -3,8 +3,6 @@
 //! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
 //!
 //! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
-//! The cached-encoding optimization can be reintroduced later if symbolic expression growth
-//! becomes a bottleneck.
 
 use core::array;
 
@@ -17,7 +15,7 @@ use crate::{
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
-        chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
+        chiplets::hasher::{CAPACITY_LEN, CONTROLLER_ROWS_PER_PERMUTATION, RATE_LEN, STATE_WIDTH},
         log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
@@ -599,16 +597,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         op_flags.log_precompile(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
-                                if i < 4 {
+                            let logpre_in: [LB::Expr; STATE_WIDTH] = array::from_fn(|i| {
+                                if i < CAPACITY_LEN {
                                     user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
-                                } else if i < 8 {
-                                    stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
+                                } else if i < RATE_LEN {
+                                    stk.get(STACK_STMNT_RANGE.start + (i - CAPACITY_LEN)).into()
                                 } else {
                                     LB::Expr::ZERO
                                 }
                             });
-                            let logpre_out: [LB::Expr; 12] =
+                            let logpre_out: [LB::Expr; STATE_WIDTH] =
                                 array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
                                 "logprecompile_init",

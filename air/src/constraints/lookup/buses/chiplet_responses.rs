@@ -29,6 +29,7 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    trace::chiplets::hasher::{DIGEST_LEN, RATE_LEN, STATE_WIDTH},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -75,9 +76,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let not_hs1 = hs1.not();
     let not_hs2 = hs2.not();
 
-    let state: [LB::Var; 12] = ctrl.state;
-    let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let state: [LB::Var; STATE_WIDTH] = ctrl.state;
+    let rate_0: [LB::Var; DIGEST_LEN] = array::from_fn(|i| ctrl.state[i]);
+    let rate_1: [LB::Var; DIGEST_LEN] = array::from_fn(|i| ctrl.state[DIGEST_LEN + i]);
 
     // --- Hasher response flags ---
     // All gated by `chiplet_active.controller`; composed with the per-row-type
@@ -129,9 +130,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let clk_plus_one: LB::Expr = local.chip_clk.into();
 
     // Local helpers: convert the copied Var arrays into Expr arrays.
-    let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
-    let full_rate = || -> [LB::Expr; 8] {
-        array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() })
+    let full_state = || -> [LB::Expr; STATE_WIDTH] { state.map(Into::into) };
+    let full_rate = || -> [LB::Expr; RATE_LEN] {
+        array::from_fn(|i| {
+            if i < DIGEST_LEN {
+                rate_0[i].into()
+            } else {
+                rate_1[i - DIGEST_LEN].into()
+            }
+        })
     };
 
     builder.next_column(

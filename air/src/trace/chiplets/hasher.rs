@@ -81,9 +81,12 @@ pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64)
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
 
+/// Controller metadata columns after the selector and state columns.
+pub const NUM_METADATA_COLS: usize = 5;
+
 /// Number of columns in Hasher controller trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit = 19.
-pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 4;
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + perm_id = 20.
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + NUM_METADATA_COLS;
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;

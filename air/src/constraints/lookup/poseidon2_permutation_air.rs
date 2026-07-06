@@ -11,6 +11,7 @@ use crate::{
         Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
     },
     lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup},
+    trace::chiplets::hasher::STATE_WIDTH,
 };
 
 /// Extension trait required by the Poseidon2 permutation lookup AIR.
@@ -21,8 +22,10 @@ pub(crate) const POSEIDON2_PERMUTATION_COLUMN_SHAPE: [usize; 1] = [1];
 
 /// Emits the Poseidon2 side of the perm-link bus.
 ///
-/// Row 0 removes the controller input request and row 15 removes the controller output
-/// request, both with the cycle multiplicity. Padding cycles have multiplicity 0.
+/// Row 0 removes the controller input request and row 15 removes the controller output request.
+/// Controller pair continuity gives each permutation id one output request for every input request;
+/// the two bus balances make rows 0 and 15 cancel those request counts. Padding cycles have zero
+/// multiplicity and consecutive cycle ids.
 pub(crate) fn emit_poseidon2_permutation_lookup_columns<LB>(
     builder: &mut LB,
     local: &Poseidon2PermutationCols<LB::Var>,
@@ -34,8 +37,9 @@ pub(crate) fn emit_poseidon2_permutation_lookup_columns<LB>(
 
     let f_row0: LB::Expr = periodic.is_init_ext.into();
     let f_row15 = LB::Expr::ONE - periodic.not_cycle_end();
-    let multiplicity: LB::Expr = LB::Expr::ZERO - local.multiplicity.into();
-    let state: [LB::Var; 12] = array::from_fn(|i| local.state[i]);
+    let multiplicity: LB::Expr = LB::Expr::ZERO - local.witnesses[0].into();
+    let state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| local.state[i]);
+    let perm_id = local.perm_id;
 
     builder.next_column(
         |col| {
@@ -48,7 +52,7 @@ pub(crate) fn emit_poseidon2_permutation_lookup_columns<LB>(
                         multiplicity.clone(),
                         || {
                             let state = state.map(Into::into);
-                            HasherPermLinkMsg::Input { state }
+                            HasherPermLinkMsg::Input { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 2, u: 2 },
                     );
@@ -59,7 +63,7 @@ pub(crate) fn emit_poseidon2_permutation_lookup_columns<LB>(
                         multiplicity,
                         || {
                             let state = state.map(Into::into);
-                            HasherPermLinkMsg::Output { state }
+                            HasherPermLinkMsg::Output { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 2, u: 2 },
                     );

@@ -11,7 +11,7 @@ use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
     bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH},
+    hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH, TRACE_WIDTH},
 };
 
 // HELPERS
@@ -43,7 +43,7 @@ macro_rules! impl_borrow_for_chiplet_cols {
 // CONTROLLER COLUMNS
 // ================================================================================================
 
-/// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+/// Controller chiplet columns.
 ///
 /// Logical overlay for controller rows. The controller-internal `s0` distinguishes input rows
 /// (`s0 = 1`) from output/padding rows (`s0 = 0`).
@@ -58,9 +58,9 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 | state[12]                                    | extra cols      |
-/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
-/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
+/// | s0 s1 s2 | state[12]                                    | extra cols          |
+/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                     |
+/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir  p  |
 /// ```
 #[repr(C)]
 #[derive(Clone, Debug)]
@@ -81,6 +81,8 @@ pub struct ControllerCols<T> {
     pub is_boundary: T,
     /// Direction bit for Merkle path verification.
     pub direction_bit: T,
+    /// Poseidon2 permutation cycle id.
+    pub perm_id: T,
 }
 
 impl<T: Copy> ControllerCols<T> {
@@ -479,7 +481,7 @@ const _: () = {
     assert!(size_of::<PeriodicCols<u8>>() == 2);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 
-    assert!(size_of::<ControllerCols<u8>>() == 19);
+    assert!(size_of::<ControllerCols<u8>>() == TRACE_WIDTH);
 };
 
 // BORROW IMPLS

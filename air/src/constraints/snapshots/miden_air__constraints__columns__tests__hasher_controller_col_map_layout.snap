@@ -24,4 +24,5 @@ ControllerCols {
     mrupdate_id: 16,
     is_boundary: 17,
     direction_bit: 18,
+    perm_id: 19,
 }

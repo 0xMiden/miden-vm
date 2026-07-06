@@ -57,15 +57,15 @@ pub struct Poseidon2PermutationTrace {
 ///
 /// The chiplets trace is five stacked chiplet segments followed by padding.
 ///
-/// The chiplets trace has 21 columns. Columns 0-4 (`s0..s4`) form a selector prefix chain.
+/// The chiplets trace has 22 columns. Columns 0-4 (`s0..s4`) form a selector prefix chain.
 /// The hasher controller is selected by `s0=0`; the remaining regions are selected by the first
-/// zero after an active prefix. Column 20 holds `chip_clk`, the chiplet-trace row counter.
+/// zero after an active prefix. Column 21 holds `chip_clk`, the chiplet-trace row counter.
 ///
 /// ```text
-/// column:   0..19                                      20
+/// column:   0..20                                      21
 ///          selector prefix / chiplet payload          chip_clk
 ///          ----------------------------------------    --------
-/// hasher   s0=0, controller payload in columns 1..19   clk
+/// hasher   s0=0, controller payload in columns 1..20   clk
 /// bitwise  s0=1, s1=0, payload in columns 2..14        clk
 /// memory   s0=s1=1, s2=0, payload in columns 3..19     clk
 /// ACE      s0=s1=s2=1, s3=0, payload in columns 4..19  clk
@@ -75,34 +75,36 @@ pub struct Poseidon2PermutationTrace {
 ///
 /// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
 ///   - column 0 (s0): ZERO
-///   - columns 1-19: execution trace of the hasher controller
+///   - columns 1-20: execution trace of the hasher controller
 ///
 /// * Bitwise segment: begins at the end of the hasher segment.
 ///   - column 0 (s0): ONE
 ///   - column 1 (s1): ZERO
 ///   - columns 2-14: execution trace of bitwise chiplet
-///   - columns 15-19: unused columns padded with ZERO
+///   - columns 15-20: unused columns padded with ZERO
 ///
 /// * Memory segment: begins at the end of the bitwise segment.
 ///   - column 0 (s0): ONE
 ///   - column 1 (s1): ONE
 ///   - column 2 (s2): ZERO
 ///   - columns 3-19: execution trace of memory chiplet
+///   - column 20: unused, padded with ZERO
 ///
 /// * ACE segment: begins at the end of the memory segment.
 ///   - columns 0-2 (s0, s1, s2): ONE
 ///   - column 3 (s3): ZERO
 ///   - columns 4-19: execution trace of ACE chiplet
+///   - column 20: unused, padded with ZERO
 ///
 /// * Kernel ROM segment: begins at the end of the ACE segment.
 ///   - columns 0-3 (s0, s1, s2, s3): ONE
 ///   - column 4 (s4): ZERO
 ///   - columns 5-9: execution trace of kernel ROM chiplet
-///   - columns 10-19: unused columns padded with ZERO
+///   - columns 10-20: unused columns padded with ZERO
 ///
 /// * Padding segment: fills the rest of the trace.
 ///   - columns 0-4 (s0..s4): ONE
-///   - columns 5-19: unused columns padded with ZERO
+///   - columns 5-20: unused columns padded with ZERO
 #[derive(Debug)]
 pub struct Chiplets {
     pub hasher: Hasher,

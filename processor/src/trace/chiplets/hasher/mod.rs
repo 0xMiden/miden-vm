@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::chiplets::hasher::{
     CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
@@ -26,6 +26,12 @@ type DigestKey = [u64; 4];
 /// Key type for full-state lookups.
 type StateKey = [u64; STATE_WIDTH];
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PermRequest {
+    state: StateKey,
+    multiplicity: u64,
+}
+
 /// Converts a Digest to a DigestKey for BTreeMap lookup.
 fn digest_to_key(digest: Digest) -> DigestKey {
     let elems = digest.as_elements();
@@ -51,18 +57,19 @@ fn state_to_key(state: &HasherState) -> StateKey {
 ///
 /// Equal input states share one permutation cycle with the corresponding multiplicity.
 ///
-/// ## Controller row layout (19 columns)
+/// ## Controller row layout
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit
-/// ├────┴───┴───┴────────┴────┴────────────┴─────────────┴───────────────┤
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  perm_id
+/// ├────┴───┴───┴────────┴────┴────────────┴─────────────┴───────────────┴─────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
-    /// Maps input state -> multiplicity for permutation deduplication.
-    /// Each entry materializes as one 16-row Poseidon2 cycle.
-    perm_request_map: BTreeMap<StateKey, u64>,
+    /// Maps input state -> Poseidon2 cycle id.
+    perm_request_map: BTreeMap<StateKey, usize>,
+    /// Deduplicated Poseidon2 requests in cycle-id order.
+    perm_requests: Vec<PermRequest>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
     /// Whether the controller trace has been finalized.
@@ -101,7 +108,7 @@ impl Hasher {
         if self.finalized {
             0
         } else {
-            (self.perm_request_map.len() + 1) * HASH_CYCLE_LEN
+            (self.perm_requests.len() + 1) * HASH_CYCLE_LEN
         }
     }
 
@@ -320,7 +327,7 @@ impl Hasher {
                 self.trace.trace_len(),
             );
         }
-        let perm_requests = core::mem::take(&mut self.perm_request_map);
+        let perm_requests = core::mem::take(&mut self.perm_requests);
         self.trace.fill_trace(trace);
         fill_poseidon2_permutation_trace(perm_requests, poseidon2_trace);
     }
@@ -367,6 +374,8 @@ impl Hasher {
         input_direction_bit: Felt,
         output_direction_bit: Felt,
     ) -> HasherState {
+        let perm_id = self.record_perm_request(&state);
+
         self.trace.append_controller_row(
             init_selectors,
             &state,
@@ -374,6 +383,7 @@ impl Hasher {
             self.mrupdate_id,
             is_boundary_input,
             input_direction_bit,
+            perm_id,
         );
 
         let mut permuted = state;
@@ -386,9 +396,8 @@ impl Hasher {
             self.mrupdate_id,
             is_boundary_output,
             output_direction_bit,
+            perm_id,
         );
-
-        self.record_perm_request(&state);
 
         permuted
     }
@@ -456,11 +465,18 @@ impl Hasher {
     // PERMUTATION DEDUPLICATION
     // --------------------------------------------------------------------------------------------
 
-    /// Records a permutation request for the given input state. If the same state was already
-    /// seen, increments the multiplicity counter.
-    fn record_perm_request(&mut self, state: &HasherState) {
+    /// Records a permutation request for the given input state and returns its cycle id.
+    fn record_perm_request(&mut self, state: &HasherState) -> Felt {
         let key = state_to_key(state);
-        *self.perm_request_map.entry(key).or_insert(0) += 1;
+        if let Some(&id) = self.perm_request_map.get(&key) {
+            self.perm_requests[id].multiplicity += 1;
+            return perm_id_felt(id);
+        }
+
+        let id = self.perm_requests.len();
+        self.perm_request_map.insert(key, id);
+        self.perm_requests.push(PermRequest { state: key, multiplicity: 1 });
+        perm_id_felt(id)
     }
 
     // MEMOIZATION
@@ -539,6 +555,10 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
         1 => init_state_from_words(b, a),
         _ => panic!("index bit is not a binary value"),
     }
+}
+
+fn perm_id_felt(id: usize) -> Felt {
+    Felt::new_unchecked(id.try_into().expect("Poseidon2 permutation id exceeds u64"))
 }
 
 // HASHER STATE MUTATORS

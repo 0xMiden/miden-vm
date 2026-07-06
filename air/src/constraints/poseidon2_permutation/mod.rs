@@ -6,6 +6,7 @@
 
 use core::borrow::Borrow;
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{AirBuilder, WindowAccess};
 
 use crate::{
@@ -30,10 +31,18 @@ where
         *builder.periodic_values().borrow();
 
     let not_cycle_end: AB::Expr = periodic.not_cycle_end();
+    let cycle_end = AB::Expr::ONE - not_cycle_end.clone();
 
     state::enforce_permutation_steps(builder, local, next, &periodic);
 
-    // Multiplicity is constant within each 16-row cycle. Padding cycles use multiplicity 0,
-    // so they satisfy the permutation AIR but contribute nothing to LogUp.
-    builder.when(not_cycle_end).assert_eq(next.multiplicity, local.multiplicity);
+    // Cycle ids are consecutive and constant inside each 16-row cycle.
+    builder.when_first_row().assert_zero(local.perm_id);
+    builder
+        .when_transition()
+        .when(not_cycle_end)
+        .assert_eq(next.perm_id, local.perm_id);
+    builder
+        .when_transition()
+        .when(cycle_end)
+        .assert_eq(next.perm_id, local.perm_id + AB::Expr::ONE);
 }

@@ -52,7 +52,12 @@ pub use constraints::{
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
-    poseidon2_permutation::columns::{Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols},
+    poseidon2_permutation::columns::{
+        CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, INITIAL_EXTERNAL_ROUND_END,
+        INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
+        NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
+        PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
+    },
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,

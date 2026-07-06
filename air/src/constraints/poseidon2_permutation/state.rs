@@ -18,12 +18,11 @@ use miden_crypto::stark::air::AirBuilder;
 use crate::{
     MidenAirBuilder,
     constraints::poseidon2_permutation::columns::{
-        NUM_SBOX_WITNESSES, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
+        LAST_INTERNAL_ROUND_ARK_IDX, NUM_SBOX_WITNESSES, Poseidon2PermutationCols,
+        Poseidon2PermutationPeriodicCols,
     },
     trace::chiplets::hasher::STATE_WIDTH,
 };
-
-const LAST_INTERNAL_ROUND_ARK_IDX: usize = 21;
 
 /// Enforces the 16-row packed Poseidon2 cycle.
 pub fn enforce_permutation_steps<AB>(
@@ -47,12 +46,9 @@ pub fn enforce_permutation_steps<AB>(
     let mat_diag: [AB::Expr; STATE_WIDTH] = core::array::from_fn(|i| Hasher::MAT_DIAG[i].into());
     let last_internal_ark: AB::Expr = Hasher::ARK_INT[LAST_INTERNAL_ROUND_ARK_IDX].into();
 
-    // Witness columns are only meaningful on packed internal rows and on the mixed
-    // internal/external row. Force unused witness cells to zero so padding cycles and
-    // row-kind mistakes cannot hide extra degrees of freedom.
-    builder
-        .when(AB::Expr::ONE - is_packed_int.clone() - is_int_ext.clone())
-        .assert_zero(w[0].clone());
+    // `witnesses[0]` also carries the perm-link multiplicity on rows 0 and 15.
+    // It must be zero on plain external-round rows.
+    builder.when(is_ext.clone()).assert_zero(w[0].clone());
     {
         let builder = &mut builder.when(AB::Expr::ONE - is_packed_int.clone());
         builder.assert_zero(w[1].clone());

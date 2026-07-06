@@ -87,20 +87,20 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(3612980804699817044),
-    Felt::new_unchecked(8451738781606710415),
-    Felt::new_unchecked(1394764538849721182),
-    Felt::new_unchecked(14200508558721316877),
+    Felt::new_unchecked(8039382831069065458),
+    Felt::new_unchecked(969640491584705462),
+    Felt::new_unchecked(4446485558487724280),
+    Felt::new_unchecked(3245192097882717736),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(5350936486345964173),
-    Felt::new_unchecked(9671725353429978756),
-    Felt::new_unchecked(11780002168902008396),
-    Felt::new_unchecked(11242058310178775051),
+    Felt::new_unchecked(10953582494639793467),
+    Felt::new_unchecked(6798717177851540402),
+    Felt::new_unchecked(14169978211842899689),
+    Felt::new_unchecked(2049184855221061158),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -117,40 +117,40 @@ pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEP
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(18328373710584161736),
-        Felt::new_unchecked(7543487560786780045),
-        Felt::new_unchecked(9030428469415363051),
-        Felt::new_unchecked(15555277161351350417),
+        Felt::new_unchecked(11844999631940221624),
+        Felt::new_unchecked(10859438350150942202),
+        Felt::new_unchecked(2027951413203573913),
+        Felt::new_unchecked(10792613548352067964),
     ],
     [
-        Felt::new_unchecked(15751889535770340666),
-        Felt::new_unchecked(9647581229979897629),
-        Felt::new_unchecked(18054540605206848789),
-        Felt::new_unchecked(1057235226678338816),
+        Felt::new_unchecked(3212079553102672352),
+        Felt::new_unchecked(8242807144398359984),
+        Felt::new_unchecked(16412755628294771724),
+        Felt::new_unchecked(6578470630453545449),
     ],
     [
-        Felt::new_unchecked(18412565999427034082),
-        Felt::new_unchecked(4403492030897755),
-        Felt::new_unchecked(8476538168244723704),
-        Felt::new_unchecked(5906428015432945229),
+        Felt::new_unchecked(12379501551217404125),
+        Felt::new_unchecked(17793345332698442536),
+        Felt::new_unchecked(5929769660991594011),
+        Felt::new_unchecked(7309626521295736008),
     ],
     [
-        Felt::new_unchecked(118628321607645926),
-        Felt::new_unchecked(3681600524822368195),
-        Felt::new_unchecked(13716794233262176137),
-        Felt::new_unchecked(16602371413035877200),
+        Felt::new_unchecked(11063449646803011352),
+        Felt::new_unchecked(13470487733653507956),
+        Felt::new_unchecked(2136435230277631330),
+        Felt::new_unchecked(10070057140062207205),
     ],
     [
-        Felt::new_unchecked(712578240619045370),
-        Felt::new_unchecked(15502053786676963286),
-        Felt::new_unchecked(1221903534160993585),
-        Felt::new_unchecked(12240527606336924375),
+        Felt::new_unchecked(8109032437379459434),
+        Felt::new_unchecked(13882523942956935853),
+        Felt::new_unchecked(6477760258986189041),
+        Felt::new_unchecked(15677879646330064484),
     ],
     [
-        Felt::new_unchecked(12175128083388173771),
-        Felt::new_unchecked(16614999614141036059),
-        Felt::new_unchecked(8403178353622709440),
-        Felt::new_unchecked(4040509629096709434),
+        Felt::new_unchecked(9439083613609830355),
+        Felt::new_unchecked(16741380493536377247),
+        Felt::new_unchecked(10108928100323115025),
+        Felt::new_unchecked(15221526938124742058),
     ],
     [
         Felt::new_unchecked(1422687632582465263),

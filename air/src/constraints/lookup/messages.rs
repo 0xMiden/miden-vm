@@ -11,9 +11,22 @@
 //!
 //! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
 
-use miden_core::field::{Algebra, PrimeCharacteristicRing};
+use miden_core::{
+    WORD_SIZE,
+    field::{Algebra, PrimeCharacteristicRing},
+};
 
-use crate::lookup::{Challenges, message::LookupMessage};
+use crate::{
+    lookup::{Challenges, message::LookupMessage},
+    trace::chiplets::hasher::{RATE_LEN, STATE_WIDTH},
+};
+
+// MESSAGE PAYLOAD ALIASES
+// ================================================================================================
+
+type SpongeState<E> = [E; STATE_WIDTH];
+type Rate<E> = [E; RATE_LEN];
+type WordFields<E> = [E; WORD_SIZE];
 
 // BUS IDENTIFIERS
 // ================================================================================================
@@ -146,11 +159,11 @@ pub struct HasherMsg<E> {
 #[derive(Clone, Debug)]
 pub enum HasherPayload<E> {
     /// 12-lane sponge state.
-    State([E; 12]),
+    State(SpongeState<E>),
     /// 8-lane rate.
-    Rate([E; 8]),
+    Rate(Rate<E>),
     /// 4-element word/digest.
-    Word([E; 4]),
+    Word(WordFields<E>),
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
@@ -159,7 +172,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Linear hash / control block init: full 12-lane sponge state.
     ///
     /// Used by: HPERM input, LOGPRECOMPILE input.
-    pub fn linear_hash_init(addr: E, state: [E; 12]) -> Self {
+    pub fn linear_hash_init(addr: E, state: SpongeState<E>) -> Self {
         Self {
             kind: BusId::HasherLinearHashInit,
             addr,
@@ -171,7 +184,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Control block init: 8 rate lanes + opcode at `capacity[1]`, zeros elsewhere.
     ///
     /// Used by: JOIN, SPLIT, LOOP, SPAN, CALL, SYSCALL, DYN, DYNCALL.
-    pub fn control_block(addr: E, rate: &[E; 8], opcode: u8) -> Self {
+    pub fn control_block(addr: E, rate: &Rate<E>, opcode: u8) -> Self {
         let state = [
             rate[0].clone(),
             rate[1].clone(),
@@ -197,7 +210,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Return full sponge state after permutation.
     ///
     /// Used by: HPERM output, LOGPRECOMPILE output.
-    pub fn return_state(addr: E, state: [E; 12]) -> Self {
+    pub fn return_state(addr: E, state: SpongeState<E>) -> Self {
         Self {
             kind: BusId::HasherReturnState,
             addr,
@@ -211,7 +224,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Absorb new rate into running hash.
     ///
     /// Used by: RESPAN.
-    pub fn absorption(addr: E, rate: [E; 8]) -> Self {
+    pub fn absorption(addr: E, rate: Rate<E>) -> Self {
         Self {
             kind: BusId::HasherAbsorption,
             addr,
@@ -225,7 +238,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Return digest only (node_index = 0).
     ///
     /// Used by: END, MPVERIFY output, MRUPDATE output.
-    pub fn return_hash(addr: E, word: [E; 4]) -> Self {
+    pub fn return_hash(addr: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherReturnHash,
             addr,
@@ -237,7 +250,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Start Merkle path verification (with explicit node_index).
     ///
     /// Used by: MPVERIFY input.
-    pub fn merkle_verify_init(addr: E, node_index: E, word: [E; 4]) -> Self {
+    pub fn merkle_verify_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleVerifyInit,
             addr,
@@ -249,7 +262,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Start Merkle update, old path (with explicit node_index).
     ///
     /// Used by: MRUPDATE old input.
-    pub fn merkle_old_init(addr: E, node_index: E, word: [E; 4]) -> Self {
+    pub fn merkle_old_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleOldInit,
             addr,
@@ -261,7 +274,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Start Merkle update, new path (with explicit node_index).
     ///
     /// Used by: MRUPDATE new input.
-    pub fn merkle_new_init(addr: E, node_index: E, word: [E; 4]) -> Self {
+    pub fn merkle_new_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleNewInit,
             addr,
@@ -306,7 +319,7 @@ pub enum MemoryMsg<E> {
         ctx: E,
         addr: E,
         clk: E,
-        word: [E; 4],
+        word: WordFields<E>,
     },
 }
 
@@ -334,7 +347,7 @@ impl<E> MemoryMsg<E> {
     }
 
     /// Read a 4-element word from memory.
-    pub fn read_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
+    pub fn read_word(ctx: E, addr: E, clk: E, word: WordFields<E>) -> Self {
         Self::Word {
             bus: BusId::MemoryReadWord,
             ctx,
@@ -345,7 +358,7 @@ impl<E> MemoryMsg<E> {
     }
 
     /// Write a 4-element word to memory.
-    pub fn write_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
+    pub fn write_word(ctx: E, addr: E, clk: E, word: WordFields<E>) -> Self {
         Self::Word {
             bus: BusId::MemoryWriteWord,
             ctx,
@@ -417,7 +430,7 @@ pub enum BlockStackMsg<E> {
         ctx: E,
         fmp: E,
         depth: E,
-        fn_hash: [E; 4],
+        fn_hash: WordFields<E>,
     },
 }
 
@@ -432,19 +445,19 @@ pub enum BlockStackMsg<E> {
 pub enum BlockHashMsg<E> {
     FirstChild {
         parent: E,
-        child_hash: [E; 4],
+        child_hash: WordFields<E>,
     },
     Child {
         parent: E,
-        child_hash: [E; 4],
+        child_hash: WordFields<E>,
     },
     LoopBody {
         parent: E,
-        child_hash: [E; 4],
+        child_hash: WordFields<E>,
     },
     End {
         parent: E,
-        child_hash: [E; 4],
+        child_hash: WordFields<E>,
         is_first_child: E,
         is_loop_body: E,
     },
@@ -489,16 +502,20 @@ pub struct StackOverflowMsg<E> {
 // HASHER PERM-LINK MESSAGE
 // ================================================================================================
 
-/// Hasher perm-link message (12 elements): `state[0..12]`.
+/// Number of payload fields in a hasher perm-link message.
 ///
-/// Binds hasher controller rows to Poseidon2 permutation cycles. The `Input` variant pairs a
-/// controller-input row with cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
-/// variant pairs a controller-output row with cycle row 15 on
-/// `BusId::HasherPermLinkOutput`. `state` carries all 12 sponge lanes (rate_0, rate_1, capacity).
+/// The bus domain is encoded separately by [`Challenges::encode`].
+const HASHER_PERM_LINK_MESSAGE_WIDTH: usize = 1 + STATE_WIDTH;
+const _: () = assert!(HASHER_PERM_LINK_MESSAGE_WIDTH <= MIDEN_MAX_MESSAGE_WIDTH);
+
+/// Hasher perm-link message: `[perm_id, state]`.
+///
+/// The id ties a controller input/output row pair to one Poseidon2 cycle. `state` carries the full
+/// Poseidon2 sponge state.
 #[derive(Clone, Debug)]
 pub enum HasherPermLinkMsg<E> {
-    Input { state: [E; 12] },
-    Output { state: [E; 12] },
+    Input { perm_id: E, state: SpongeState<E> },
+    Output { perm_id: E, state: SpongeState<E> },
 }
 
 // KERNEL ROM MESSAGE
@@ -512,17 +529,17 @@ pub enum HasherPermLinkMsg<E> {
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     bus: BusId,
-    pub digest: [E; 4],
+    pub digest: WordFields<E>,
 }
 
 impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     /// Kernel procedure call message (SYSCALL request side + chiplet CALL response).
-    pub fn call(digest: [E; 4]) -> Self {
+    pub fn call(digest: WordFields<E>) -> Self {
         Self { bus: BusId::KernelRomCall, digest }
     }
 
     /// Kernel procedure init message (public-input boundary + chiplet INIT response).
-    pub fn init(digest: [E; 4]) -> Self {
+    pub fn init(digest: WordFields<E>) -> Self {
         Self { bus: BusId::KernelRomInit, digest }
     }
 }
@@ -557,7 +574,7 @@ pub struct RangeMsg<E> {
 /// Log-precompile transcript-state message (4 elements): `state[4]`.
 #[derive(Clone, Debug)]
 pub struct LogPrecompileMsg<E> {
-    pub state: [E; 4],
+    pub state: WordFields<E>,
 }
 
 // SIBLING TABLE MESSAGE
@@ -596,7 +613,7 @@ pub struct MemoryResponseMsg<E> {
     pub clk: E,
     pub is_word: E,
     pub element: E,
-    pub word: [E; 4],
+    pub word: WordFields<E>,
 }
 
 // LOOKUP MESSAGE IMPLEMENTATIONS
@@ -840,11 +857,13 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let (bus, state) = match self {
-            Self::Input { state } => (BusId::HasherPermLinkInput, state),
-            Self::Output { state } => (BusId::HasherPermLinkOutput, state),
+        let (bus, perm_id, state) = match self {
+            Self::Input { perm_id, state } => (BusId::HasherPermLinkInput, perm_id, state),
+            Self::Output { perm_id, state } => (BusId::HasherPermLinkOutput, perm_id, state),
         };
-        challenges.encode(bus as usize, state.clone())
+        let payload: [E; HASHER_PERM_LINK_MESSAGE_WIDTH] =
+            core::array::from_fn(|i| if i == 0 { perm_id.clone() } else { state[i - 1].clone() });
+        challenges.encode(bus as usize, payload)
     }
 }
 
@@ -929,7 +948,7 @@ pub struct SiblingMsg<E> {
     pub bit: SiblingBit,
     pub mrupdate_id: E,
     pub node_index: E,
-    pub h: [E; 4],
+    pub h: WordFields<E>,
 }
 
 /// Which half of the hasher rate block holds the sibling word for this row.
