@@ -1,6 +1,7 @@
 //! Deferred node model: tags, payloads, shapes, and content-addressed digests.
 
 use alloc::{sync::Arc, vec::Vec};
+use core::mem::size_of;
 
 use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
@@ -323,8 +324,7 @@ impl Node {
     /// Number of little-endian bytes represented by one [`DataChunk`].
     ///
     /// Each of the eight field elements stores one packed `u32`, so a chunk carries 32 bytes.
-    pub const PACKED_BYTES_PER_CHUNK: usize =
-        Self::DATA_CHUNK_FELT_LEN * core::mem::size_of::<u32>();
+    pub const PACKED_BYTES_PER_CHUNK: usize = Self::DATA_CHUNK_FELT_LEN * size_of::<u32>();
 
     /// Canonical TRUE node returned by predicates that verify successfully.
     pub const TRUE: Node = Node {

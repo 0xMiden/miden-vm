@@ -197,8 +197,7 @@ fn build_advice(
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
     // 3. Final deferred root, loaded by `verify_proof::stage_reduced_inputs`.
-    advice_stack
-        .extend(pub_inputs.deferred_root().as_ref().iter().map(Felt::as_canonical_u64));
+    advice_stack.extend(pub_inputs.deferred_root().as_ref().iter().map(Felt::as_canonical_u64));
 
     // 4. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));

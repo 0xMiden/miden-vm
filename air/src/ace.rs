@@ -105,8 +105,8 @@ where
     //   the wire byte order exactly. Padding slots within each AIR's subregion are unreferenced by
     //   the constraints (each AIR's eval body only addresses columns up to its original width).
     // - `num_public` is the AIRs' shared public-value count (the stack-i/o felts). The program hash
-    //   and deferred root are statement `aux_inputs`, not read by any AIR constraint, so they
-    //   never enter the ACE READ section.
+    //   and deferred root are statement `aux_inputs`, not read by any AIR constraint, so they never
+    //   enter the ACE READ section.
     // - `num_aux_boundary` sums each AIR's boundary slot count.
     // - `num_periodic` comes from the single AIR that declares periodic columns (the others
     //   contribute none); the combined `LiftedAir` wrapper exposes them once.
