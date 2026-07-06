@@ -205,15 +205,17 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 
     pub(super) fn validate_dense_node_order(&self) -> Result<(), DeserializationError> {
-        let mut previous_class = SerializedNodeOrderClass::External;
+        let mut previous_class = serialized_node_order_class(MastNodeEntry::External);
         let mut previous_external_digest = None;
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
-            let class = SerializedNodeOrderClass::from_entry(entry);
+            let class = serialized_node_order_class(entry);
             if class < previous_class {
                 return Err(DeserializationError::InvalidValue(format!(
-                    "node {index} is {class:?} after {previous_class:?} in dense MAST forest"
+                    "node {index} is {} after {} in dense MAST forest",
+                    serialized_node_order_class_name(class),
+                    serialized_node_order_class_name(previous_class),
                 )));
             }
             previous_class = class;
@@ -230,7 +232,7 @@ impl<'a> ResolvedSerializedForest<'a> {
                 previous_external_digest = Some(digest);
             }
 
-            if let Some(child_id) = entry.forward_reference(index) {
+            if let Some(child_id) = forward_reference(entry, index) {
                 return Err(DeserializationError::InvalidValue(format!(
                     "node {index} references child {child_id} which comes after it"
                 )));
@@ -255,53 +257,38 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum SerializedNodeOrderClass {
-    External,
-    BasicBlock,
-    Internal,
-}
-
-impl SerializedNodeOrderClass {
-    fn from_entry(entry: MastNodeEntry) -> Self {
-        match entry {
-            MastNodeEntry::External => Self::External,
-            MastNodeEntry::Block { .. } => Self::BasicBlock,
-            _ => Self::Internal,
-        }
+fn serialized_node_order_class(entry: MastNodeEntry) -> u8 {
+    match entry {
+        MastNodeEntry::External => 0,
+        MastNodeEntry::Block { .. } => 1,
+        _ => 2,
     }
 }
 
-trait MastNodeEntryOrderExt {
-    fn forward_reference(self, node_index: usize) -> Option<u32>;
+fn serialized_node_order_class_name(class: u8) -> &'static str {
+    match class {
+        0 => "External",
+        1 => "BasicBlock",
+        _ => "Internal",
+    }
 }
 
-impl MastNodeEntryOrderExt for MastNodeEntry {
-    fn forward_reference(self, node_index: usize) -> Option<u32> {
-        let mut child_ids = [None, None];
-        match self {
-            MastNodeEntry::Join { left_child_id, right_child_id } => {
-                child_ids = [Some(left_child_id), Some(right_child_id)];
-            },
-            MastNodeEntry::Split { if_branch_id, else_branch_id } => {
-                child_ids = [Some(if_branch_id), Some(else_branch_id)];
-            },
-            MastNodeEntry::Loop { body_id } => {
-                child_ids = [Some(body_id), None];
-            },
-            MastNodeEntry::Call { callee_id } | MastNodeEntry::SysCall { callee_id } => {
-                child_ids = [Some(callee_id), None];
-            },
-            MastNodeEntry::Block { .. }
-            | MastNodeEntry::Dyn
-            | MastNodeEntry::Dyncall
-            | MastNodeEntry::External => {},
-        }
-
-        child_ids
+fn forward_reference(entry: MastNodeEntry, node_index: usize) -> Option<u32> {
+    match entry {
+        MastNodeEntry::Join { left_child_id, right_child_id } => [left_child_id, right_child_id]
             .into_iter()
-            .flatten()
-            .find(|&child_id| child_id as usize >= node_index)
+            .find(|&child_id| child_id as usize >= node_index),
+        MastNodeEntry::Split { if_branch_id, else_branch_id } => [if_branch_id, else_branch_id]
+            .into_iter()
+            .find(|&child_id| child_id as usize >= node_index),
+        MastNodeEntry::Loop { body_id } => (body_id as usize >= node_index).then_some(body_id),
+        MastNodeEntry::Call { callee_id } | MastNodeEntry::SysCall { callee_id } => {
+            (callee_id as usize >= node_index).then_some(callee_id)
+        },
+        MastNodeEntry::Block { .. }
+        | MastNodeEntry::Dyn
+        | MastNodeEntry::Dyncall
+        | MastNodeEntry::External => None,
     }
 }
 

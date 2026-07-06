@@ -97,48 +97,6 @@ pub enum MastNodeBuilder {
     Split(SplitNodeBuilder),
 }
 
-impl From<BasicBlockNodeBuilder> for MastNodeBuilder {
-    fn from(builder: BasicBlockNodeBuilder) -> Self {
-        Self::BasicBlock(builder)
-    }
-}
-
-impl From<CallNodeBuilder> for MastNodeBuilder {
-    fn from(builder: CallNodeBuilder) -> Self {
-        Self::Call(builder)
-    }
-}
-
-impl From<DynNodeBuilder> for MastNodeBuilder {
-    fn from(builder: DynNodeBuilder) -> Self {
-        Self::Dyn(builder)
-    }
-}
-
-impl From<ExternalNodeBuilder> for MastNodeBuilder {
-    fn from(builder: ExternalNodeBuilder) -> Self {
-        Self::External(builder)
-    }
-}
-
-impl From<JoinNodeBuilder> for MastNodeBuilder {
-    fn from(builder: JoinNodeBuilder) -> Self {
-        Self::Join(builder)
-    }
-}
-
-impl From<LoopNodeBuilder> for MastNodeBuilder {
-    fn from(builder: LoopNodeBuilder) -> Self {
-        Self::Loop(builder)
-    }
-}
-
-impl From<SplitNodeBuilder> for MastNodeBuilder {
-    fn from(builder: SplitNodeBuilder) -> Self {
-        Self::Split(builder)
-    }
-}
-
 impl MastNodeBuilder {
     #[cfg(any(test, feature = "arbitrary"))]
     pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
@@ -265,7 +223,8 @@ mod round_trip_tests {
             MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Push(
                 Felt::new_unchecked(10),
             )]));
-        let mast_node_id1 = forest.push_node(mast_builder1).expect("failed to add mast node1");
+        let mast_node_id1 =
+            forest.push_node_builder(mast_builder1).expect("failed to add mast node1");
         let mast_node1 = forest.get_node_by_id(mast_node_id1).unwrap().unwrap_basic_block();
         let mast_normal_digest = mast_node1.digest();
 
@@ -280,7 +239,7 @@ mod round_trip_tests {
                 .with_digest(forced_mast_digest),
         );
         let mast_node_id2 = forest
-            .push_node(mast_builder2)
+            .push_node_builder(mast_builder2)
             .expect("failed to add mast node with forced digest");
         let mast_node2 = forest.get_node_by_id(mast_node_id2).unwrap().unwrap_basic_block();
 

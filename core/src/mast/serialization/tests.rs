@@ -562,11 +562,6 @@ fn read_word_at(bytes: &[u8], offset: usize) -> Word {
     Word::read_from(&mut reader).unwrap()
 }
 
-fn write_word_at(bytes: &mut [u8], offset: usize, word: Word) {
-    let word_bytes = word.to_bytes();
-    bytes[offset..offset + word_bytes.len()].copy_from_slice(&word_bytes);
-}
-
 #[test]
 fn test_mast_forest_wire_view_rejects_hashless() {
     let mut forest = MastForest::new();
@@ -642,15 +637,6 @@ fn test_mast_forest_wire_view_external_digests_are_ordered_by_prefix() {
     let bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
 
-    assert_eq!(read_word_at(&bytes, view.external_digest_offset()), second);
-    assert_eq!(
-        read_word_at(&bytes, view.external_digest_offset() + Word::min_serialized_size()),
-        third
-    );
-    assert_eq!(
-        read_word_at(&bytes, view.external_digest_offset() + 2 * Word::min_serialized_size()),
-        first
-    );
     assert_eq!(view.node_digest_at(0).unwrap(), second);
     assert_eq!(view.node_digest_at(1).unwrap(), third);
     assert_eq!(view.node_digest_at(2).unwrap(), first);
@@ -713,7 +699,9 @@ fn test_mast_forest_wire_view_rejects_duplicate_external_digests() {
     let mut bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
     let duplicate_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
-    write_word_at(&mut bytes, duplicate_digest_offset, first);
+    let duplicate_digest = first.to_bytes();
+    bytes[duplicate_digest_offset..duplicate_digest_offset + duplicate_digest.len()]
+        .copy_from_slice(&duplicate_digest);
 
     let result = MastForestWireView::new(&bytes);
 

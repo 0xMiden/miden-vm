@@ -22,11 +22,7 @@ pub struct DenseMastForestBuilder {
 
 impl DenseMastForestBuilder {
     pub fn new() -> Self {
-        Self {
-            nodes: IndexVec::new(),
-            roots: Vec::new(),
-            advice_map: AdviceMap::default(),
-        }
+        Self::default()
     }
 
     pub fn push_node_builder(
@@ -34,17 +30,6 @@ impl DenseMastForestBuilder {
         builder: MastNodeBuilder,
     ) -> Result<MastNodeId, MastForestError> {
         let node = builder.build(self)?;
-        self.push_linked_node(node)
-    }
-
-    pub fn push_node(
-        &mut self,
-        builder: impl Into<MastNodeBuilder>,
-    ) -> Result<MastNodeId, MastForestError> {
-        self.push_node_builder(builder.into())
-    }
-
-    fn push_linked_node(&mut self, node: MastNode) -> Result<MastNodeId, MastForestError> {
         self.nodes.push(node).map_err(|_| MastForestError::TooManyNodes)
     }
 
@@ -91,15 +76,5 @@ impl MastNodeContext for DenseMastForestBuilder {
 
     fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode> {
         self.nodes.get(node_id)
-    }
-}
-
-impl From<IndexVec<MastNodeId, MastNode>> for DenseMastForestBuilder {
-    fn from(nodes: IndexVec<MastNodeId, MastNode>) -> Self {
-        Self {
-            nodes,
-            roots: Vec::new(),
-            advice_map: AdviceMap::default(),
-        }
     }
 }
