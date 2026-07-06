@@ -1,8 +1,9 @@
 use miden_core::deferred::{Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST};
 
 use crate::{
-    deferred::{synthetic_keccak_state, vm_digest_to_p2},
+    deferred::synthetic_keccak_state,
     session::{Session, SessionTraces},
+    transcript::poseidon2::P2Digest,
 };
 
 fn keccak_session_traces(input: &[u8]) -> SessionTraces {
@@ -22,7 +23,7 @@ fn synthetic_keccak_deferred_state_reconstructs_root() {
         synthetic.vm_root,
         VmNode::and(VM_TRUE_DIGEST, synthetic.assertion_digest).digest(),
     );
-    assert_eq!(synthetic.root, vm_digest_to_p2(synthetic.vm_root));
+    assert_eq!(synthetic.root, P2Digest::from(synthetic.vm_root));
     assert!(synthetic.state.get_node(&synthetic.input_digest).is_some());
     assert!(synthetic.state.get_node(&synthetic.expected_digest).is_some());
     assert!(synthetic.state.get_node(&synthetic.assertion_digest).is_some());

@@ -6,8 +6,8 @@ How the transcript DAG is *evaluated*. Companion to
 (the chiplet spec). **Implemented** in
 [`src/transcript/eval`](../src/transcript/eval/): the VM `AND` tree —
 the live transcript root, which replaced the spine — uint storage + the
-pin seam ([`chiplets/uint.md`](chiplets/uint.md)), and **uint arithmetic
-+ the `is` predicate** (`UintOp` nodes consuming the
+bootstrap pin seam ([`chiplets/uint.md`](chiplets/uint.md)), and **uint
+arithmetic + the `is` predicate** (`UintOp` nodes consuming the
 [UintAdd](chiplets/uint-add.md) / [UintMul](chiplets/uint-mul.md)
 relations by ptr). Group is the roadmap.
 
@@ -19,6 +19,10 @@ a Poseidon2 hash over its preimage. The **root** is a public 4-felt
 hash. Proving the root "evaluates to `True`" means every assertion in
 the DAG holds. The verifier trusts the root; the proof shows the root
 is a well-formed transcript of valid assertions.
+
+Bootstrap uint pin claims use `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`
+and fold deterministically into the initial root. Program VM graph claims fold
+from that root.
 
 ## Two orthogonal relations
 
@@ -146,8 +150,8 @@ values may sit on different rows. What landed makes the honest prover
 **eagerly canonical**: the uint store's interning
 (`UintStoreRequires::intern`) dedups every leaf and op result by
 `(value, modulus)`, so to-be-equated values — including a result that
-happens to coincide with a pinned constant — always share a ptr and
-`Is` stays complete across arbitrarily different DAG shapes. This is
+happens to coincide with a bootstrap pin — always share a ptr and `Is` stays
+complete across arbitrarily different DAG shapes. This is
 prover-side completeness machinery only; soundness still rests solely
 on `ptr → value` functional. The *constraint-level* eager direction
 that `NotIs` needs remains a stronger, separate construction; defer
@@ -210,9 +214,9 @@ value-binding and the fusion would no longer apply.
   Binding, the one exception being KeccakNode, which fuses (below).
 - **Eval chip** → the transcript chiplet,
   [`src/transcript/eval`](../src/transcript/eval/). Live arms: the VM
-  `AND` tree, uint leaves (pinned + transient), and uint ops (`Add` /
-  `Sub` / `Mul` / `Neg` / `Is`) — a uniform one-hot dispatch. The group
-  arms are the roadmap.
+  `Tag::AND` tree, uint leaves (bootstrap pin claims + runtime VM values), uint ops (`Add` / `Sub` /
+  `Mul` / `Is`), EC create/PAI, EC binops, and EcMsm absorb runs — a uniform
+  role-polymorphic dispatch.
 - **Keccak path** (live, fused): the sponge emits its digest to
   `Memory64` and the chunk chiplet content-commits the input;
   [`KeccakNode`](../src/hash/keccak/node/) ties digest ↔ chunks ↔ node

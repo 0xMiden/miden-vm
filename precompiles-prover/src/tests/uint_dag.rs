@@ -72,10 +72,10 @@ fn fold_balance<A>(
     for u in report.unmatched {
         let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
         entry.0 += u.net_multiplicity;
-        if entry.1.is_empty() {
-            if let Some(c) = u.contributions.first() {
-                entry.1 = c.msg_repr.clone();
-            }
+        if entry.1.is_empty()
+            && let Some(c) = u.contributions.first()
+        {
+            entry.1 = c.msg_repr.clone();
         }
     }
 }
@@ -154,15 +154,15 @@ fn horner_sign_alternation_full_stack() {
     let root = session.assert_and_fold([modulus, claim]);
     let traces = session.finish(root);
 
-    // 23 eval rows (2 ANDs + zero + pin + 5 leaves + 13 value ops + Is);
-    // 7 add-family blocks (4 from A's adds + neg, 3 from B), 6 muls; the
-    // store holds 1 pin + 5 leaf values + 10 distinct intermediates
-    // (3 of B's 6 dedup onto A's).
+    // 24 eval rows (2 ANDs + zero + pin + 6 leaves + 13 value ops + Is);
+    // 7 add-family blocks (4 from A's adds/sub, 3 from B), 6 muls; the store
+    // holds 1 pin + 6 leaf values + 10 distinct intermediates (3 of B's 6
+    // dedup onto A's).
     let mains = traces.mains();
     assert_eq!(mains[7].height(), 32, "eval: 23 rows pad to 32");
     assert_eq!(mains[9].height(), 128, "uint-add: 7 blocks pad to 8");
     assert_eq!(mains[10].height(), 128, "uint-mul: 6 blocks pad to 8");
-    assert_eq!(mains[8].height(), 128, "store: 16 blocks");
+    assert_eq!(mains[8].height(), 256, "store: 17 blocks pad to 32");
 
     traces.check();
     assert_balanced(&traces, &mut rng);

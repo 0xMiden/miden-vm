@@ -64,8 +64,8 @@ pub fn keccak_round(state: &mut [u64; 25], rc: u64) {
 /// permutation output.
 pub fn keccak_f1600(state: [u64; 25]) -> [u64; 25] {
     let mut s = state;
-    for r in 0..24 {
-        keccak_round(&mut s, KECCAK_RC[r]);
+    for &rc in &KECCAK_RC {
+        keccak_round(&mut s, rc);
     }
     s
 }

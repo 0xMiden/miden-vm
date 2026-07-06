@@ -149,7 +149,7 @@ fn uint_store_rejects_tampered_value() {
     let mut main = generate_trace(store, &mut BytePairLutRequires::new());
     // Tamper a v limb of the modulus block (row 0, col 0): v + comp ≠ bound
     // ⇒ SZ `id ≠ 0`.
-    main.values[0] = main.values[0] + Felt::from(1u32);
+    main.values[0] += Felt::from(1u32);
 
     crate::tests::check_local(UintStoreAir, &main);
 }

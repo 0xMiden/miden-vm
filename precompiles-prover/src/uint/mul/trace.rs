@@ -84,7 +84,7 @@ pub(crate) fn canonical_q(op: &MulOp, vals: &MulVals) -> [u32; NUM_Q_LIMBS] {
     let (q, rem) = math::mac_div_rem(op.kappa_a, vals.a, vals.b, op.kappa_c, vals.c, vals.bound);
     debug_assert_eq!(rem, vals.r, "the op's r must be the canonical MAC remainder");
     debug_assert!(q >> 272 == math::U320::ZERO, "quotient exceeds 17 limbs (κₐ out of contract?)",);
-    array::from_fn(|i| (q.as_limbs()[i / 4] >> 16 * (i % 4)) as u32 & 0xffff)
+    array::from_fn(|i| ((q.as_limbs()[i / 4] >> (16 * (i % 4))) as u32) & 0xffff)
 }
 
 /// The 31 carry coefficients of the SZ identity, committed sign-offset:
@@ -118,7 +118,7 @@ pub(crate) fn gamma_halves(
         if k < NUM_Q_LIMBS {
             d -= q[k] as i128;
         }
-        if k % 2 == 0 && k / 2 < 8 {
+        if k.is_multiple_of(2) && k / 2 < 8 {
             d += op.kappa_c as i128 * c32[k / 2] as i128 - r32[k / 2] as i128;
         }
         d

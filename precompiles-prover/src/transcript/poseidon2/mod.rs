@@ -235,25 +235,21 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         );
         // Cycle-to-cycle increment (`when_transition`, deg 2).
         builder.when_transition().assert_zero(
-            p_last_in_cycle.clone()
-                * (perm_seq_id_next.clone() - perm_seq_id.clone() - AB::Expr::ONE),
+            p_last_in_cycle.clone() * (perm_seq_id_next - perm_seq_id - AB::Expr::ONE),
         );
 
         // --- in_multiplicity / out_multiplicity constancy --------------
         builder.assert_zero(
-            (AB::Expr::ONE - p_last_in_cycle.clone())
-                * (in_multiplicity_next.clone() - in_multiplicity.clone()),
+            (AB::Expr::ONE - p_last_in_cycle.clone()) * (in_multiplicity_next - in_multiplicity),
         );
         builder.assert_zero(
-            (AB::Expr::ONE - p_last_in_cycle.clone())
-                * (out_multiplicity_next.clone() - out_multiplicity.clone()),
+            (AB::Expr::ONE - p_last_in_cycle.clone()) * (out_multiplicity_next - out_multiplicity),
         );
 
         // --- is_absorb structure --------------------------------------
         builder.assert_bool(local[COL_IS_ABSORB]);
         builder.assert_zero(
-            (AB::Expr::ONE - p_last_in_cycle.clone())
-                * (is_absorb_next.clone() - is_absorb.clone()),
+            (AB::Expr::ONE - p_last_in_cycle.clone()) * (is_absorb_next.clone() - is_absorb),
         );
 
         // --- Capacity carry (cycle boundary) --------------------------
@@ -325,12 +321,10 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
 
         // --- Witness zeroing on non-packed rows ----------------------
         // w[0] is unused on rows that are neither packed-int nor int+ext.
-        builder.assert_zero(
-            (AB::Expr::ONE - is_packed_int.clone() - is_int_ext.clone()) * w[0].clone(),
-        );
+        builder.assert_zero((AB::Expr::ONE - is_packed_int.clone() - is_int_ext) * w[0].clone());
         // w[1], w[2] are unused on rows that are not packed-int.
-        for k in 1..NUM_WITNESSES {
-            builder.assert_zero((AB::Expr::ONE - is_packed_int.clone()) * w[k].clone());
+        for witness in w.iter().skip(1) {
+            builder.assert_zero((AB::Expr::ONE - is_packed_int.clone()) * witness.clone());
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
@@ -372,11 +366,8 @@ where
         let is_ext: LB::Expr = periodic[PCOL_IS_EXT].into();
         let is_packed_int: LB::Expr = periodic[PCOL_IS_PACKED_INT].into();
         let is_int_ext: LB::Expr = periodic[PCOL_IS_INT_EXT].into();
-        let p_last_in_cycle: LB::Expr = LB::Expr::ONE
-            - is_init_ext.clone()
-            - is_ext.clone()
-            - is_packed_int.clone()
-            - is_int_ext.clone();
+        let p_last_in_cycle: LB::Expr =
+            LB::Expr::ONE - is_init_ext.clone() - is_ext - is_packed_int - is_int_ext;
 
         let perm_seq_id: LB::Expr = local[COL_PERM_SEQ_ID].into();
         let in_multiplicity: LB::Expr = local[COL_IN_MULTIPLICITY].into();
@@ -398,9 +389,9 @@ where
         // to their consumer counts by bus balance — not range-checked.
         let neg_in_mult: LB::Expr = LB::Expr::ZERO - in_multiplicity.clone();
         let neg_in_mult_cap: LB::Expr =
-            (LB::Expr::ZERO - in_multiplicity.clone()) * (LB::Expr::ONE - is_absorb.clone());
+            (LB::Expr::ZERO - in_multiplicity) * (LB::Expr::ONE - is_absorb);
         let neg_out_mult: LB::Expr =
-            (LB::Expr::ZERO - out_multiplicity.clone()) * (LB::Expr::ONE - is_absorb_next.clone());
+            (LB::Expr::ZERO - out_multiplicity) * (LB::Expr::ONE - is_absorb_next);
 
         let interaction_deg = Deg { v: 1, u: 1 };
         // Batch A (row 0, gated by `is_init_ext`): 3 Poseidon2In provides.

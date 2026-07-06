@@ -49,16 +49,12 @@ struct AddOp {
 fn add_carries(limbs: impl Fn(usize) -> u64) -> ([u16; 7], u16) {
     let mut out = [0u16; 7];
     let mut carry: u64 = 0;
-    let mut top = 0u16;
-    for j in 0..8 {
+    for (j, out_j) in out.iter_mut().enumerate() {
         let s = limbs(j) + carry;
         carry = s >> 32;
-        if j < 7 {
-            out[j] = carry as u16;
-        } else {
-            top = carry as u16;
-        }
+        *out_j = carry as u16;
     }
+    let top = ((limbs(7) + carry) >> 32) as u16;
     (out, top)
 }
 

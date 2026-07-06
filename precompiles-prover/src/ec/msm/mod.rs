@@ -327,14 +327,12 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // forged `neg_minted` elsewhere can't provide a phantom `EcOnCurveCert`
         // (the provide is gated `−neg_minted · is_boundary`).
         builder.assert_bool(local[COL_NEG_MINTED]);
-        builder.assert_zero((AB::Expr::ONE - is_neg.clone()) * neg_minted.clone());
+        builder.assert_zero((AB::Expr::ONE - is_neg.clone()) * neg_minted);
 
         // Activity is sticky-downward (pads are a tail), and the op-family
         // one-hot sums to `act` (so every active row is exactly one op and
         // pads are no op).
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
         builder.assert_zero(is_intro.clone() + is_combine.clone() + is_neg.clone() - act.clone());
         // A boundary only on active rows; pads carry `is_boundary = 0` so
         // the allocator freezes `expr_ptr` across the tail.
@@ -345,7 +343,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // `MsmExpr` provide both vanish — so a forged pad `mult` can't inject
         // phantom terms, independent of the consumer set.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].into());
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_CLAIM_MULT].into());
+        builder.assert_zero((AB::Expr::ONE - act) * local[COL_CLAIM_MULT].into());
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.
@@ -360,9 +358,9 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // first row of every run has idx 0 and the boundary's idx is k−1.
         let idx_next: AB::Expr = next[COL_IDX].into();
         builder.when_first_row().assert_zero(idx.clone());
-        builder.when_transition().assert_zero(
-            idx_next - (AB::Expr::ONE - is_boundary.clone()) * (idx.clone() + AB::Expr::ONE),
-        );
+        builder
+            .when_transition()
+            .assert_zero(idx_next - (AB::Expr::ONE - is_boundary.clone()) * (idx + AB::Expr::ONE));
 
         // Within-run constancy of the expression-level columns (vacuous on
         // intro's 1-row runs; load-bearing once combine lays multi-row
@@ -396,7 +394,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(is_intro.clone() * (AB::Expr::ONE - is_boundary.clone()));
         let base: AB::Expr = local[COL_BASE].into();
         let val: AB::Expr = local[COL_VAL].into();
-        builder.assert_zero(is_intro.clone() * (val - base));
+        builder.assert_zero(is_intro * (val - base));
 
         // ---- combine ----------------------------------------------------
         // Per-row take one-hot: each combine row emits one output term.
@@ -424,10 +422,10 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let adv_j = take_b.clone() + take_both.clone();
         builder
             .when_transition()
-            .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i.clone()));
+            .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i));
         builder
             .when_transition()
-            .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j.clone()));
+            .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j));
 
         // Output role-mix: take_a / take_both copy A's (base, s); take_b
         // copies B's. take_both's merged scalar is pinned by its UintAdd
@@ -446,18 +444,17 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             (take_a.clone() + take_both.clone() + is_neg.clone()) * (out_base - base_a.clone())
                 + take_b.clone() * (local[COL_BASE].into() - base_b.clone()),
         );
-        builder.assert_zero(
-            take_a.clone() * (out_scalar - s_a) + take_b.clone() * (local[COL_SCALAR].into() - s_b),
-        );
-        builder.assert_zero(take_both.clone() * (base_a - base_b));
+        builder
+            .assert_zero(take_a * (out_scalar - s_a) + take_b * (local[COL_SCALAR].into() - s_b));
+        builder.assert_zero(take_both * (base_a - base_b));
 
         // Strict pointer ordering (boundary): expr − operand − 1 =
         // lo + 2¹⁶·hi, halves range-checked on the bus ⇒ a_expr, b_expr <
         // expr. This is the well-founded order grounding the induction
         // against circular derivations. The a-side applies to combine AND
         // neg (both consume operand A); the b-side only to combine.
-        let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
-        let bnd_b = is_combine.clone() * is_boundary.clone();
+        let bnd_a = (is_combine.clone() + is_neg) * is_boundary.clone();
+        let bnd_b = is_combine * is_boundary;
         let two16 = AB::Expr::from(Felt::from(TWO16));
         let here_expr: AB::Expr = local[COL_EXPR_PTR].into();
         let a_expr: AB::Expr = local[COL_A_EXPR].into();
@@ -555,7 +552,7 @@ where
         let adv_i = take_a + take_both.clone() + is_neg.clone();
         let adv_j = take_b + take_both.clone();
         let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
-        let bnd_b = is_combine.clone() * is_boundary.clone();
+        let bnd_b = is_combine * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
 
         let one_deg = Deg { v: 1, u: 1 };

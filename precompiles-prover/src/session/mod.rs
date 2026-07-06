@@ -19,9 +19,9 @@
 //!
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
-//! `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` /
-//! `uint_sub` / `uint_neg` / `uint_mul`, the `uint_is` predicate), and the
-//! `Truthy` folds. Each value op lays one eval uint-op node over its
+//! explicit bootstrap/fixed-pin helpers, `pin_uint`, the [`UintNode`] value ops (`uint_leaf`,
+//! `uint_add` / `uint_sub` / `uint_mul`, the `uint_is` predicate), and the `Truthy`
+//! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
 //! intern with canonical `(value, modulus)` dedup, so equal values share
 //! a ptr — the `uint_is` completeness contract — and nodes intern by
@@ -33,6 +33,7 @@
 //! generic lifted-stark usage, not chiplet wiring.
 
 use miden_core::Felt;
+use miden_precompiles::UintDomain;
 use p3_matrix::dense::RowMajorMatrix;
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -55,7 +56,7 @@ use crate::{
             sponge::trace::{SpongeRequires, generate_trace as sponge_trace},
         },
     },
-    math::{U256, to_limbs32},
+    math::{U256, from_limbs32, to_limbs32},
     primitives::{
         bitwise64::{Bitwise64Requires, generate_trace as bw64_trace},
         byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
@@ -121,6 +122,17 @@ impl Session {
         }
     }
 
+    /// Install the VM-owned uint bound self-pins and record their bootstrap pin claims.
+    pub fn bootstrap_fixed_pins(&mut self) -> Vec<Truthy> {
+        UintDomain::ALL
+            .into_iter()
+            .map(|domain| {
+                let ptr = domain.bound_ptr();
+                self.pin_uint(ptr, from_limbs32(&domain.minus_one()), ptr)
+            })
+            .collect()
+    }
+
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
     /// handle to the `Binding(H_keccak, True)` claim — fold the handle into
     /// the transcript via [`assert_and`](Self::assert_and) /
@@ -147,13 +159,16 @@ impl Session {
         (out.keccak_digest, handle)
     }
 
-    /// Pin a uint at the caller's protocol address `ptr ∈ [1, 2^16)`
-    /// under the modulus pinned at `bound_ptr`: store it, hash it under
-    /// `(UintLeaf, bound_ptr, ptr, V)` — the pin address in the cap
-    /// anchors `store[ptr] = value` — and return the [`Truthy`] folding
-    /// it into the transcript root (fold it in via
-    /// [`assert_and`](Self::assert_and) / [`assert_and_fold`](Self::assert_and_fold)).
-    /// The modulus itself is a self-referential pin (`bound_ptr == ptr`).
+    /// Record an explicit uint pin claim at protocol address `ptr ∈ [1, 2^16)` under the modulus
+    /// pinned at `bound_ptr`.
+    ///
+    /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the bootstrap
+    /// pin-claim cap `(UINT_PIN_CLAIM_TAG, bound_ptr, ptr, 0)`, consumes both `UintVal` halves at
+    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. The fixed bootstrap
+    /// manifest uses this for bound self-pins via
+    /// [`bootstrap_fixed_pins`](Self::bootstrap_fixed_pins); ordinary runtime constants should
+    /// use [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
+    /// (`bound_ptr == ptr`).
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
@@ -170,8 +185,8 @@ impl Session {
     /// the value entry point for [`uint_add`](Self::uint_add) /
     /// [`uint_mul`](Self::uint_mul) / [`uint_is`](Self::uint_is). The
     /// value is interned with canonical `(value, modulus)` dedup (a value
-    /// equal to a pinned constant lands on the pin's ptr), hashed
-    /// content-addressed under `(UintLeaf, bound_ptr, 0, V)`, and bound
+    /// value equal to a pinned constant lands on the pin's ptr), hashed
+    /// under the VM uint value cap `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`, and bound
     /// as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
     /// uint: re-leafing a value returns the same shared-use handle.
     ///
@@ -186,18 +201,18 @@ impl Session {
             .uint_leaf(ptr, bound, to_limbs32(value), &mut self.uint.store, &mut self.p2)
     }
 
-    /// The DAG node `a + b mod p`: hashes `(UintOp, Add, 0, V)` over the
-    /// children's hashes, consumes their `Uint` bindings plus one
-    /// [`UintAdd`](crate::relations::BusId::UintAdd) relation tuple, and
-    /// binds the reduced sum. Returns the result's shared-use handle.
+    /// The DAG node `a + b mod p`: hashes the uint `Add` op cap over the children's hashes,
+    /// consumes their `Uint` bindings plus one [`UintAdd`](crate::relations::BusId::UintAdd)
+    /// relation tuple carrying the shared bound, and binds the reduced sum. Returns the result's
+    /// shared-use handle.
     pub fn uint_add(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Add, a, Some(b))
+        self.uint_op(UintOpId::Add, a, b)
     }
 
     /// The DAG node `a − b mod p` — the `UintAdd` arrangement
-    /// `b + r = a`, so no negative anything exists anywhere.
+    /// `b + r = a`, so no transcript-level negation opcode is needed.
     pub fn uint_sub(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Sub, a, Some(b))
+        self.uint_op(UintOpId::Sub, a, b)
     }
 
     /// The DAG node `a · b mod p`: consumes one
@@ -205,14 +220,7 @@ impl Session {
     /// the plain `κₐ = 1, κ_c = 0` arrangement (the dummy `c_ptr` is the
     /// modulus — no zero uint involved).
     pub fn uint_mul(&mut self, a: &UintNode, b: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Mul, a, Some(b))
-    }
-
-    /// The DAG node `−a mod p` — unary (the preimage's rhs slot is zero),
-    /// via the `is_c_zero` add mode `a + r ≡ 0`: no stored zero, and
-    /// `−0 = 0` falls out (`k = 0`).
-    pub fn uint_neg(&mut self, a: &UintNode) -> UintNode {
-        self.uint_op(UintOpId::Neg, a, None)
+        self.uint_op(UintOpId::Mul, a, b)
     }
 
     /// The `is` predicate: the DAG node asserting `a ≡ b`, consuming both
@@ -277,12 +285,6 @@ impl Session {
     /// the points differ.
     pub fn ec_is(&mut self, p: &EcNode, q: &EcNode) -> Truthy {
         self.eval.ec_is(p, q, &mut self.p2)
-    }
-
-    /// The DAG node `R = −P` — the cancel-case primitive `P + R = ∞`
-    /// (one `EcGroupAdd` at mult 1), binding `(h, Group, r_ptr)`.
-    pub fn ec_neg(&mut self, p: &EcNode) -> EcNode {
-        self.eval.ec_neg(p, self.ec.require(self.uint.require()), &mut self.p2)
     }
 
     /// The DAG node `R = P − Q` — one `EcBinOp/Sub` row consuming the
@@ -396,7 +398,7 @@ impl Session {
     /// Delegate a value op to the eval layer's [`uint_op`]
     /// (TranscriptEvalRequires::uint_op), lending it the uint recording
     /// layer and the Poseidon2 accumulator (disjoint field borrows).
-    fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: Option<&UintNode>) -> UintNode {
+    fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: &UintNode) -> UintNode {
         self.eval.uint_op(op, a, b, self.uint.require(), &mut self.p2)
     }
 

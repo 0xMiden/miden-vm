@@ -24,7 +24,7 @@ verification (ed25519).
 A scalar-mul claim is `R = Σᵢ sᵢ·Pᵢ`. The ways to *compute* it —
 double-and-add, wNAF, windowed tables, Straus/Shamir interleaving, GLV,
 Pippenger buckets — differ by integer factors in EC-add count, and the best
-choice depends on basis count, scalar width, and what is pinned. Two
+choice depends on basis count, scalar width, and what is fixed. Two
 architectural facts force the strategy *below* the DAG:
 
 1. **Root determinism.** The expected transcript root must be a deterministic
@@ -276,7 +276,7 @@ coords and `EcBinOp` from a point op) whose hash commits to the term sequence
 | node | produces a `Group` point from… |
 |---|---|
 | `EcCreate` (tag 5) | coordinates |
-| `EcBinOp` (tag 6) | a point op (Add/Sub/Neg) over `EcGroupAdd` |
+| `EcBinOp` (tag 6) | a point op (Add/Sub) over `EcGroupAdd` |
 | **`EcMsm`** (tag 8) | a term-absorption run |
 
 Because EC nodes hash **in the eval chiplet** (unlike Keccak, which hashes its
@@ -287,9 +287,9 @@ This is the one real AIR extension the layer needs.
 ### 6.1 The hashing problem
 
 Today every active eval row is one node = one Poseidon2 perm. Column 1 emits
-`In{rate0 = lhs, rate1 = rhs, cap = (tag, param_a, pin_ptr, V)}` + `Out{h}`;
-the cap is a fixed per-node domain-sep tag and nodes are independent (no
-cross-row state). A `k`-term MSM claim needs a multi-perm sponge:
+`In{rate0 = lhs, rate1 = rhs, cap = (tag, param_a, cap_param_b, 0)}` +
+`Out{h}`; the cap is a fixed per-node domain-sep tag and nodes are independent
+(no cross-row state). A `k`-term MSM claim needs a multi-perm sponge:
 
 ```
 state₀ = IV
@@ -320,10 +320,10 @@ needs no intermediate bindings, at the cost of one new cross-row constraint.
 - **Capacity threading** (the new constraint — the eval's first row-adjacency
   hash link; today nodes couple only through the bus): on an absorb→absorb
   transition, `cap(row) = h(row − 1)`. A flag-gated **cap-source mux**:
-  one-shot rows feed `(tag, param_a, pin_ptr, V)`; absorb rows feed the prev
-  digest.
+  one-shot rows feed `(tag, param_a, cap_param_b, 0)`; absorb rows feed the
+  previous digest.
 - **IV** (first absorb row): `cap = IV`, a domain-sep encoding
-  `(EcMsmTag, group_ptr, V, 0)` — distinct from every one-shot cap, so MSM
+  `(EcMsmTag, group_ptr, 0, 0)` — distinct from every one-shot cap, so MSM
   hashes cannot collide with AND/leaf/op hashes.
 - **Per absorb**: consume `Binding(Pᵢ.hash, Group, Pᵢ_ptr)` and
   `Binding(sᵢ.hash, Uint, sᵢ_ptr)` (tying the rate to real child nodes) and
@@ -388,7 +388,7 @@ GLV split for a plain 2-base walk under the `8ℓ` bound.)
    chain. Signedness rides the [neg rule](#3-the-algebra-chiplet-internal-ptr-referenced):
    spell `G×(n−|a₁|)`, reach it through negated table entries — no `+n` lift, no
    129-bit anything.
-3. **Endomorphism bases**: `ψG` pinned alongside `G`; `ψQ = (β·x_Q, y_Q)` —
+3. **Endomorphism bases**: `ψG` fixed alongside `G`; `ψQ = (β·x_Q, y_Q)` —
    one mod-`p` MAC for `x`, a point row sharing `y_ptr` with `Q`. `ψ(Q) = λ·Q`
    is *verifier knowledge* (precompile semantics), not an in-system obligation.
 4. **The MSM**: claim expression `{G×a₁, ψG×b₁, Q×a₂, ψQ×b₂}`. Strategy

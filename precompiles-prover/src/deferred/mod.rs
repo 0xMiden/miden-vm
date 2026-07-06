@@ -56,13 +56,8 @@ pub(crate) fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredSta
         expected_digest,
         assertion_digest,
         vm_root,
-        root: vm_digest_to_p2(vm_root),
+        root: P2Digest::from(vm_root),
     }
-}
-
-/// Converts a VM deferred digest into the prover's Poseidon2 digest type.
-pub(crate) fn vm_digest_to_p2(digest: Digest) -> P2Digest {
-    P2Digest(digest.into_elements())
 }
 
 fn pack_input_chunks(input: &[u8]) -> Vec<[Felt; 8]> {

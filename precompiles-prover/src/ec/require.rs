@@ -354,15 +354,14 @@ impl<'a> EcRequire<'a> {
 
     /// Negate a point — the cancel-case primitive: intern `R = −P =
     /// (x, −y)` (eager membership) and record the cancel relation
-    /// `P + R = ∞` at `EcGroupAdd` provide `mult` (1 per consumer — an
-    /// eval `EcBinOp/Neg` row, or an MSM `neg`'s value). Returns
-    /// `(group, R, pai)`, where `pai` is the group's ∞ row (the cancel
-    /// result, the `EcGroupAdd` result-slot the consumer carries). The
-    /// cancel block routes its own `EcGroup` / `EcPoint(P, R, ∞)` demand;
-    /// the consumer's `EcPoint(∞)` pin (the eval row's col 7, or the MSM
-    /// neg boundary) — which forces `R = −P`, since the `EcGroupAdd` bus
-    /// alone carries no case flag and so doesn't pin the ∞ result slot —
-    /// routes one more ∞ consume here.
+    /// `P + R = ∞` at `EcGroupAdd` provide `mult` (one per cancel-relation
+    /// consumer). Returns `(group, R, pai)`, where `pai` is the group's ∞
+    /// row (the cancel result, the `EcGroupAdd` result-slot the consumer
+    /// carries). The cancel block routes its own `EcGroup` /
+    /// `EcPoint(P, R, ∞)` demand; the caller's `EcPoint(∞)` pin forces
+    /// `R = −P`, since the `EcGroupAdd` bus alone carries no case flag and
+    /// so doesn't pin the ∞ result slot. Route one more ∞ consume here for
+    /// that pin.
     pub fn neg(
         &mut self,
         p: EcPointPtr,
@@ -381,8 +380,9 @@ impl<'a> EcRequire<'a> {
         let pai = self.add_inner(group, p, r, mult);
         // The consumer also consumes the ∞ result-slot's `EcPoint(is_pai =
         // 1)` to pin `R = −P` — without it the slot is free (the
-        // `EcGroupAdd` tuple matches any case) and `Neg` could bind any
-        // point. Route that demand so the store provides one extra ∞ copy.
+        // `EcGroupAdd` tuple matches any case) and a negation consumer could
+        // bind any point. Route that demand so the store provides one extra ∞
+        // copy.
         self.store.require_ecpoint(pai);
         (group, r, pai)
     }
