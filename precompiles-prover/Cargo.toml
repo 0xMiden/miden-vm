@@ -1,0 +1,36 @@
+[package]
+name = "precompile-experiments"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[dependencies]
+itertools          = "0.14"
+miden-air          = { git = "https://github.com/0xMiden/miden-vm.git", rev = "3176d1fd9032a0f62cf0f338a97325fc50d7d09d" }
+miden-core         = { git = "https://github.com/0xMiden/miden-vm.git", rev = "3176d1fd9032a0f62cf0f338a97325fc50d7d09d" }
+miden-crypto       = "0.24"
+miden-lifted-air   = "0.26"
+miden-lifted-stark = { version = "0.26", features = ["testing"] }
+miden-stateful-hasher = "0.26"
+p3-air             = "0.5.2"
+p3-challenger      = "0.5.2"
+p3-dft             = "0.5.2"
+p3-field           = "0.5.2"
+p3-goldilocks      = "0.5.2"
+p3-matrix          = "0.5.2"
+p3-symmetric       = "0.5.2"
+rand               = "0.9"
+ruint              = "1.18"
+
+[dev-dependencies]
+# Local VM source-of-truth crates used only by tag-compatibility tests. Production code mirrors
+# the small Keccak MVP constants until the prover dependency stack can move to the VM's p3 0.6 line.
+miden-core-vm         = { package = "miden-core", path = "../vm/core" }
+miden-precompiles-vm  = { package = "miden-precompiles", path = "../vm/precompiles" }
+# Known-good secp256k1 ("k1") reference — the oracle for EC circuit
+# cross-validation tests (RustCrypto, pure Rust, no C deps).
+k256               = "0.13"
+# Prover span profiling (`PROFILE=1` on the benches) — research only.
+tracing            = "0.1"
+tracing-subscriber = "0.3"
