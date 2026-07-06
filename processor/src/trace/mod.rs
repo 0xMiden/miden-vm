@@ -262,10 +262,10 @@ impl ExecutionTrace {
         let public_inputs = self.public_inputs();
         let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
-        let (public_values, kernel_felts) = public_inputs.to_air_inputs();
+        let (public_values, aux_inputs) = public_inputs.to_air_inputs();
 
         let statement =
-            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
+            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
                 .expect("valid statement inputs");
         let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
             .expect("valid trace shapes");

@@ -75,7 +75,7 @@
 //!   is_first       Precomputed selector (z^N - 1) / (z - 1).
 //!   is_last        Precomputed selector (z^N - 1) / (z - g^{-1}).
 //!   is_transition  Precomputed selector z - g^{-1}.
-//!   gamma          Batching challenge for auxiliary trace boundary checks.
+//!   reserved       Word-alignment padding slot (kept zero).
 //!   weight0        First barycentric weight for quotient recomposition.
 //!   f              Chunk shift ratio h^N. Generates coset shifts and weights.
 //!   s0             First coset shift offset^N. Base for shifted evaluation points.

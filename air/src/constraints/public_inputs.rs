@@ -13,9 +13,8 @@ use crate::{CoreCols, MidenAirBuilder};
 
 const STACK_DEPTH: usize = 16;
 
-/// Number of public values at the tail of the public_values slice
-/// (stack_inputs + stack_outputs + deferred_root).
-const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH + 4;
+/// Number of public values consumed by the stack boundary (stack_inputs + stack_outputs).
+const PUBLIC_LEN: usize = STACK_DEPTH + STACK_DEPTH;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -31,10 +30,9 @@ where
     // Copy public values into local arrays to release the immutable borrow on builder.
     let pv = builder.public_values();
     let n = pv.len();
-    assert!(n >= TAIL_LEN, "public values too short: {n} < {TAIL_LEN}");
-    let si: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[n - TAIL_LEN + i]);
-    let so: [AB::PublicVar; STACK_DEPTH] =
-        core::array::from_fn(|i| pv[n - TAIL_LEN + STACK_DEPTH + i]);
+    assert!(n >= PUBLIC_LEN, "public values too short: {n} < {PUBLIC_LEN}");
+    let si: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[i]);
+    let so: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[STACK_DEPTH + i]);
 
     // First row: stack[i] == stack_inputs[i]
     {

@@ -94,6 +94,118 @@ fn test_unsorted_array_find_word_fails() {
 }
 
 #[test]
+fn test_assert_sorted_words_accepts_sorted_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8675,5816,5458,2767] mem_storew_le.104 dropw
+            push.[8675,5816,5458,2767] mem_storew_le.108 dropw
+
+            push.112 push.100
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.expect_stack(&[100, 112, 0]);
+}
+
+#[test]
+fn test_assert_sorted_words_rejects_unsorted_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[8675,5816,5458,2767] mem_storew_le.100 dropw
+            push.[8456,415,4922,593] mem_storew_le.104 dropw
+
+            push.108 push.100
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("words must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_words_rejects_invalid_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.100 push.108
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("start_ptr must be <= end_ptr");
+}
+
+#[test]
+fn test_assert_sorted_words_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
+}
+
+#[test]
+fn test_assert_sorted_words_rejects_misaligned_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.108 push.101
+            exec.sorted_array::assert_sorted_words
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("start_ptr must be word-aligned");
+}
+
+#[test]
 fn test_sorted_key_value_array_find_key() {
     // (word, was_value_found, value_ptr)
     let tests = [
@@ -234,6 +346,206 @@ fn test_unsorted_key_value_find_key_fails() {
 
     let program = build_test!(source, &[]);
     program.execute().expect_err("NotAscendingOrder");
+}
+
+#[test]
+fn test_assert_sorted_keys_accepts_sorted_key_value_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8595,8794,8303,7256] mem_storew_le.104 dropw
+
+            push.[3348,6058,5470,2813] mem_storew_le.108 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.112 dropw
+
+            # Duplicate keys are allowed by the non-decreasing sorted_array contract.
+            push.[3348,6058,5470,2813] mem_storew_le.116 dropw
+            push.[1,1,1,1] mem_storew_le.120 dropw
+
+            push.124 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.expect_stack(&[100, 124, 0]);
+}
+
+#[test]
+fn test_assert_sorted_keys_rejects_unsorted_key_value_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[8675,5816,5458,2767] mem_storew_le.100 dropw
+            push.[4942,5573,1077,1968] mem_storew_le.104 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.108 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.112 dropw
+
+            push.116 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("keys must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_keys_rejects_invalid_tuple_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.120 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("key-value range must be double-word aligned");
+}
+
+#[test]
+fn test_assert_sorted_keys_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_accepts_sorted_key_value_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[9,9,3,4] mem_storew_le.100 dropw
+            push.[5,5,5,5] mem_storew_le.104 dropw
+
+            # The low half differs, but the half-key is equal and therefore still sorted.
+            push.[8,8,3,4] mem_storew_le.108 dropw
+            push.[6,6,6,6] mem_storew_le.112 dropw
+
+            push.[10,11,12,13] mem_storew_le.116 dropw
+            push.[3,3,3,3] mem_storew_le.120 dropw
+
+            push.124 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.expect_stack(&[100, 124, 0]);
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_unsorted_key_value_array() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.[10,11,12,13] mem_storew_le.100 dropw
+            push.[1,1,1,1] mem_storew_le.104 dropw
+
+            push.[9,9,3,4] mem_storew_le.108 dropw
+            push.[2,2,2,2] mem_storew_le.112 dropw
+
+            push.116 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("half-keys must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_invalid_tuple_range() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.120 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("key-value range must be double-word aligned");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_non_u32_range_pointer() {
+    let source: String = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.4294967296 push.100
+            exec.sorted_array::assert_sorted_half_keys
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let program = build_test!(source, &[]);
+    program.execute().expect_err("range pointers must be u32");
 }
 
 #[test]
@@ -557,6 +869,93 @@ fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
     );
 }
 
+#[test]
+fn test_assert_sorted_words_rejects_false_miss_on_unsorted_array() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            # Unsorted array: the searched value exists at 104, but the first element is larger.
+            push.[8675,5816,5458,2767] mem_storew_le.100 dropw
+            push.[8456,415,4922,593] mem_storew_le.104 dropw
+
+            push.108 push.100
+            exec.sorted_array::assert_sorted_words
+            push.[8456,415,4922,593]
+            exec.sorted_array::find_word
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_start_ptr);
+
+    test.execute().expect_err("words must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_keys_rejects_false_miss_on_unsorted_keys() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            # Unsorted keys: the searched key exists at 108, but the first key is larger.
+            push.[8675,5816,5458,2767] mem_storew_le.100 dropw
+            push.[1,1,1,1] mem_storew_le.104 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.108 dropw
+            push.[2,2,2,2] mem_storew_le.112 dropw
+
+            push.116 push.100
+            exec.sorted_array::assert_sorted_keys
+            push.[8456,415,4922,593]
+            exec.sorted_array::find_key_value
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
+
+    test.execute().expect_err("keys must be sorted");
+}
+
+#[test]
+fn test_assert_sorted_half_keys_rejects_false_miss_on_unsorted_half_keys() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            # Unsorted half-keys: the searched half-key (w3=4, w2=3) exists at 108.
+            push.[10,11,12,13] mem_storew_le.100 dropw
+            push.[1,1,1,1] mem_storew_le.104 dropw
+
+            push.[9,9,3,4] mem_storew_le.108 dropw
+            push.[2,2,2,2] mem_storew_le.112 dropw
+
+            push.116 push.100
+            exec.sorted_array::assert_sorted_half_keys
+            push.4 push.3
+            exec.sorted_array::find_half_key_value
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
+
+    test.execute().expect_err("half-keys must be sorted");
+}
+
 // MALICIOUS ADVICE PROVIDERS
 // ================================================================================================
 
@@ -583,4 +982,12 @@ fn malicious_lowerbound_oob_below(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
+}
+
+#[allow(clippy::unnecessary_wraps)]
+/// Returns `(was_found = false, maybe_ptr = start_ptr)` regardless of the actual range.
+fn malicious_lowerbound_start_ptr(
+    _process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(100), Felt::ZERO])])
 }

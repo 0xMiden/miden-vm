@@ -241,6 +241,14 @@ impl ProgramInfo {
     pub fn kernel_procedures(&self) -> &[Word] {
         self.kernel.proc_hashes()
     }
+
+    /// Returns the canonical commitment to the kernel used during the compilation.
+    ///
+    /// This is the fixed-size identifier the recursive verifier observes in place of the raw
+    /// kernel-procedure digest list. See [`Kernel::commitment`].
+    pub fn kernel_commitment(&self) -> Word {
+        self.kernel.commitment()
+    }
 }
 
 impl From<Program> for ProgramInfo {

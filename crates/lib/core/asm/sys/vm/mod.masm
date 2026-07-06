@@ -23,10 +23,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
 # CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 2093769913804214420
-const RELATION_DIGEST_1 = 2865512903735413157
-const RELATION_DIGEST_2 = 481516512333928892
-const RELATION_DIGEST_3 = 5125545183454056961
+const RELATION_DIGEST_0 = 5545878270450612432
+const RELATION_DIGEST_1 = 5899812762785237225
+const RELATION_DIGEST_2 = 9712221007631851576
+const RELATION_DIGEST_3 = 15330576920932378486
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -79,13 +79,26 @@ end
 #!   Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
 #!   is 80 for the main trace.
 #!
-#! Inputs:  [log(core_trace_length), log(chiplets_trace_length)]
+#! The kernel-procedure digests and the stack i/o (FLPI) are read from caller memory at the
+#! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
+#! final deferred root is loaded from the advice stack. `verify_proof` stages the reduced-inputs
+#! block (kernel_H | program_digest | deferred_root | pad) before the transcript
+#! starts.
+#!
+#! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3,
+#!           log(core_trace_length), log(chiplets_trace_length)]
 #! Outputs: []
 pub proc verify_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
+    # => [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3,
+    #     log(core_tl), log(chiplets_tl)]
+
+    # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
+
+    exec.public_inputs::stage_reduced_inputs
     # => [log(core_tl), log(chiplets_tl)]
 
     # --- Get constants -------------------------------------------------------

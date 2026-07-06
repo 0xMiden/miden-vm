@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2093769913804214420),
-    Felt::new_unchecked(2865512903735413157),
-    Felt::new_unchecked(481516512333928892),
-    Felt::new_unchecked(5125545183454056961),
+    Felt::new_unchecked(5545878270450612432),
+    Felt::new_unchecked(5899812762785237225),
+    Felt::new_unchecked(9712221007631851576),
+    Felt::new_unchecked(15330576920932378486),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -276,9 +276,8 @@ mod tests {
     fn relation_digest_matches_current_air() {
         let config = AceConfig {
             num_quotient_chunks: 8,
-            num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
-            is_multi_air: true,
+            num_airs: 2,
         };
         let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
         let encoded = circuit.to_ace().unwrap();

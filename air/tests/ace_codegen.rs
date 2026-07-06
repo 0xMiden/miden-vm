@@ -18,9 +18,8 @@ fn core_air_dag_matches_manual_eval() {
     let air = MidenAir::CORE;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
+        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -61,15 +60,13 @@ fn core_air_dag_rejects_mismatched_layout() {
     let air = MidenAir::CORE;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
+        num_airs: 1,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        is_multi_air: false,
+        num_airs: 1,
     };
 
     let dag = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, dag_config).unwrap().dag;
@@ -89,9 +86,8 @@ fn chiplets_air_ace_rows() {
     let air = MidenAir::CHIPLETS;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
+        num_airs: 1,
     };
 
     let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
@@ -115,9 +111,8 @@ fn chiplets_air_ace_rows() {
 fn synthetic_ood_adjusts_quotient_to_zero() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
+        num_airs: 1,
     };
 
     let artifacts =
@@ -146,9 +141,8 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        is_multi_air: false,
+        num_airs: 1,
     };
 
     let artifacts =
@@ -192,9 +186,8 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
+        num_airs: 2,
     };
 
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
@@ -213,9 +206,26 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     );
     assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
 
-    for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {
+    for key in [
+        InputKey::MultiAirBeta(0),
+        InputKey::MultiAirBeta(1),
+        InputKey::IsFirstAir(0),
+        InputKey::IsLastAir(0),
+        InputKey::IsTransitionAir(0),
+        InputKey::IsFirstAir(1),
+        InputKey::IsLastAir(1),
+        InputKey::IsTransitionAir(1),
+    ] {
         let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
         assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    }
+    for key in [
+        InputKey::MultiAirBeta(2),
+        InputKey::IsFirstAir(2),
+        InputKey::IsLastAir(2),
+        InputKey::IsTransitionAir(2),
+    ] {
+        assert!(layout.index(key).is_none(), "{key:?} must be out of range for a 2-AIR layout");
     }
 }
 
@@ -225,9 +235,8 @@ fn multi_air_ace_circuit_emits_consistently() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
+        num_airs: 2,
     };
 
     // Just check the ACE encoding is well-formed (size_in_felt is rate-aligned).
@@ -245,9 +254,8 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
+        num_airs: 2,
     };
 
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
