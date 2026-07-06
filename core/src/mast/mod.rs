@@ -40,9 +40,12 @@
 //!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
-#[cfg(test)]
-use alloc::collections::BTreeSet;
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 use core::{fmt, ops::Index};
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -135,6 +138,15 @@ pub struct MastForest {
 }
 
 /// Commitment values derived from a MAST forest.
+///
+/// Commitment roles:
+/// - [`MastForest::interface_commitment`] identifies the public procedure roots only.
+/// - [`MastForest::dependency_commitment`] identifies the external dependency digests only.
+/// - [`MastForest::advice_commitment`] identifies the stored advice map only.
+/// - [`MastForest::commitment`] identifies the stored dense forest data: public roots, external
+///   dependencies, and advice. Direct forest-backed static libraries use this value as their source
+///   identity. Package-backed static libraries use the package digest, which is derived from this
+///   forest commitment.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct MastForestCommitment {
     /// Commitment to the forest's roots, external dependencies, and advice map.
@@ -258,26 +270,7 @@ fn canonicalize_dense_parts(
     parts: MastForestParts,
 ) -> Result<(MastForestParts, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
     let node_count = parts.nodes.len();
-    let mut ordered_ids = (0..node_count)
-        .map(|index| MastNodeId::new_unchecked(index as u32))
-        .collect::<Vec<_>>();
-
-    // Preserve old dense node-id order within basic blocks and internal nodes. This constructor
-    // only moves nodes across the external/basic-block/internal partitions; callers must already
-    // provide internal nodes in child-before-parent order.
-    ordered_ids.sort_by(|&left, &right| {
-        let left_node = &parts.nodes[left];
-        let right_node = &parts.nodes[right];
-
-        mast_node_order_class(left_node)
-            .cmp(&mast_node_order_class(right_node))
-            .then_with(|| match (left_node, right_node) {
-                (MastNode::External(left), MastNode::External(right)) => {
-                    left.digest().cmp(&right.digest())
-                },
-                _ => left.0.cmp(&right.0),
-            })
-    });
+    let ordered_ids = final_dense_node_order(&parts.nodes)?;
 
     let mut remapping = DenseIdMap::with_len(node_count);
     for (new_index, old_id) in ordered_ids.iter().copied().enumerate() {
@@ -322,6 +315,88 @@ fn canonicalize_dense_parts(
         },
         remapping,
     ))
+}
+
+fn final_dense_node_order(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+) -> Result<Vec<MastNodeId>, MastForestError> {
+    let node_count = nodes.len();
+    let mut external_ids = Vec::new();
+    let mut basic_block_ids = Vec::new();
+    let mut internal_ids = BTreeSet::new();
+
+    for (index, node) in nodes.iter().enumerate() {
+        let node_id = MastNodeId::new_unchecked(index as u32);
+        match mast_node_order_class(node) {
+            MastNodeOrderClass::External => external_ids.push(node_id),
+            MastNodeOrderClass::BasicBlock => basic_block_ids.push(node_id),
+            MastNodeOrderClass::Internal => {
+                internal_ids.insert(node_id);
+            },
+        }
+    }
+
+    external_ids.sort_by(|&left_id, &right_id| {
+        nodes[left_id]
+            .digest()
+            .cmp(&nodes[right_id].digest())
+            .then(left_id.0.cmp(&right_id.0))
+    });
+
+    let mut ordered_ids = external_ids;
+    ordered_ids.extend(basic_block_ids);
+    let mut emitted_ids = ordered_ids.iter().copied().collect::<BTreeSet<_>>();
+
+    while !internal_ids.is_empty() {
+        let ready_ids = internal_ids
+            .iter()
+            .copied()
+            .filter_map(|node_id| {
+                internal_node_is_ready(nodes, node_id, &emitted_ids, node_count).transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if ready_ids.is_empty() {
+            let node_id = *internal_ids
+                .first()
+                .expect("non-empty internal node set must have a first entry");
+            return Err(MastForestError::InvalidNodeOrder {
+                node_id,
+                reason: "internal nodes must form an acyclic child-before-parent graph".into(),
+            });
+        }
+
+        for node_id in ready_ids {
+            internal_ids.remove(&node_id);
+            emitted_ids.insert(node_id);
+            ordered_ids.push(node_id);
+        }
+    }
+
+    Ok(ordered_ids)
+}
+
+fn internal_node_is_ready(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+    node_id: MastNodeId,
+    emitted_ids: &BTreeSet<MastNodeId>,
+    node_count: usize,
+) -> Result<Option<MastNodeId>, MastForestError> {
+    let mut invalid_child = None;
+    let mut is_ready = true;
+    nodes[node_id].for_each_child(|child_id| {
+        if child_id.to_usize() >= node_count {
+            invalid_child = Some(child_id);
+        } else if !emitted_ids.contains(&child_id) {
+            is_ready = false;
+        }
+    });
+
+    if let Some(child_id) = invalid_child {
+        return Err(MastForestError::NodeIdOverflow(child_id, node_count));
+    }
+
+    Ok(is_ready.then_some(node_id))
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

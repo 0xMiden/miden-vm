@@ -9,11 +9,13 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestError, MastNodeExt, MastNodeId,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNodeExt,
+        MastNodeId,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},
     serde::{Deserializable, Serializable},
+    utils::IndexVec,
 };
 
 #[test]
@@ -217,6 +219,42 @@ fn from_raw_parts_canonicalizes_dense_node_order() {
         finalized.procedure_roots(),
         &[MastNodeId::new_unchecked(3), MastNodeId::new_unchecked(0)]
     );
+}
+
+#[test]
+fn from_raw_parts_topologically_orders_internal_nodes() {
+    let mut source = MastForest::new();
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let join = JoinNodeBuilder::new([left, right]).add_to_forest(&mut source).unwrap();
+
+    let mut nodes = IndexVec::new();
+    nodes
+        .push(
+            JoinNodeBuilder::new([MastNodeId::new_unchecked(1), MastNodeId::new_unchecked(2)])
+                .with_digest(source[join].digest())
+                .build_linked()
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+    nodes.push(source[left].clone()).unwrap();
+    nodes.push(source[right].clone()).unwrap();
+
+    let finalized =
+        MastForest::from_raw_parts(nodes, vec![MastNodeId::new_unchecked(0)], AdviceMap::default())
+            .unwrap();
+
+    assert!(finalized[MastNodeId::new_unchecked(0)].is_basic_block());
+    assert!(finalized[MastNodeId::new_unchecked(1)].is_basic_block());
+    let join = finalized[MastNodeId::new_unchecked(2)].unwrap_join();
+    assert_eq!(join.first(), MastNodeId::new_unchecked(0));
+    assert_eq!(join.second(), MastNodeId::new_unchecked(1));
+    assert_eq!(finalized.procedure_roots(), &[MastNodeId::new_unchecked(2)]);
 }
 
 #[test]
