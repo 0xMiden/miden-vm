@@ -36,6 +36,18 @@ pub(crate) fn summary_markdown(result: &Comparison) -> String {
             fmt_pct(Some(row.delta_pct))
         ));
     }
+    if !result.regression_rows.is_empty() {
+        lines.extend([String::new(), "Regressions over threshold:".to_string()]);
+        for row in &result.regression_rows {
+            lines.push(format!(
+                "- `{}` moved by {} ({}) against a {:.2}% threshold.",
+                row.name,
+                fmt_delta(Some(row.delta_ms)),
+                fmt_pct(Some(row.delta_pct)),
+                result.threshold_pct
+            ));
+        }
+    }
     if !result.top_slowdowns.is_empty() {
         lines.extend([String::new(), "Top slowdowns:".to_string()]);
         for row in &result.top_slowdowns {
@@ -72,7 +84,17 @@ pub(crate) fn write_github_output(
     writeln!(file, "current_sha={}", result.current_sha)?;
     writeln!(file, "program_delta_ms={:.6}", result.program_delta_ms)?;
     writeln!(file, "program_delta_pct={:.6}", result.program_delta_pct)?;
+    writeln!(file, "regression_metrics={}", regression_metrics(result))?;
     Ok(())
+}
+
+fn regression_metrics(result: &Comparison) -> String {
+    result
+        .regression_rows
+        .iter()
+        .map(|row| format!("{} ({})", row.name, fmt_pct(Some(row.delta_pct))))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn fmt_ms(value: Option<f64>) -> String {
