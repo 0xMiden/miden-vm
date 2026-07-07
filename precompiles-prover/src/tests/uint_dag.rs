@@ -318,12 +318,11 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
 // BUDGET
 // ================================================================================================
 
-/// The uint-op arm must not push the eval chip past `lqd = 2` — the
-/// whole point of splitting the op fractions across two extra aux
-/// columns instead of packing them into cols 0–2.
+/// The uint-op arm must not push the eval chip past `lqd = 1` — flattened
+/// via `frac_col!`, every closing constraint stays at degree ≤ 3.
 #[test]
-fn eval_chip_stays_at_lqd_2() {
-    assert_eq!(crate::tests::log_quotient_degree(&TranscriptEvalAir), 2);
+fn eval_chip_stays_at_lqd_1() {
+    assert_eq!(crate::tests::log_quotient_degree(&TranscriptEvalAir), 1);
 }
 
 /// The Horner statement proved and verified for real — `#[ignore]`d
