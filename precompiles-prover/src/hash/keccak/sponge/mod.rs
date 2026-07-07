@@ -28,7 +28,7 @@ use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
     primitives::bitwise64::{Logic64Msg, Logic64Op},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -148,24 +148,28 @@ pub const NUM_MAIN_COLS: usize = 27;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Aux columns following the `bitwise64` chaining pattern. Col 0 is
-/// the running-sum σ, hosts its own Memory64 mutex group, and
-/// absorbs the per-row fraction values from cols 1, 2:
+/// Aux columns, FLATTENED to lqd 2. The mutex outer flags are folded into
+/// each insert's multiplicity (sound: the one-hot flags are binary, the same
+/// precondition the mutex-group fold already relies on), giving 13
+/// flag-folded fractions — one degree-2, ten degree-3, two degree-4
+/// multiplicities, all over degree-1 messages — repartitioned so every
+/// closing constraint is degree ≤ 5:
 ///
-/// - col 0: running σ + Memory64 fractions (mutex group of state-lane + lane-16 0x80 batches, `u_g`
-///   deg 4); absorbs col 1 and col 2 values into its running-sum recurrence.
-/// - col 1: Logic64 fractions (mutex group of pad-row + verbatim + lane-16 0x80 batches).
-/// - col 2: KeccakSponge + Memory64 chunk-consume fractions (one batch of 2 independent inserts;
-///   different buses, bus-prefix- distinguished encodings).
+/// - col 0 (running σ): Memory64 `new-state` + `prev-perm` (the two lowest-degree fractions; the
+///   gated last-row close adds +1, so it lands at degree 5).
+/// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
+/// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
+/// - col 3: Logic64 pad-row `andnot` + `xor-padding` + `xor-state`.
+/// - col 4: Logic64 verbatim `xor-state` + lane-16 0x80 `xor`.
+/// - col 5: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+///   → degree 5).
 ///
-/// Max per-LogUp-column constraint deg = 7 → `log_quotient_degree = 3`.
-/// Col 0 hosts the σ-closing, so its last-row close is gated by the
-/// degree-1 `is_transition` / `is_last_row` selector: it lands at
-/// `deg(u_g) + 2 = 7` (was `1 + deg(u_g) = 5` under the older ungated
-/// σ/n form). Col 1's per-row fraction degree lands at 6 (deg-2 outer
-/// flags), col 2 at 5; col 0 dominates. See
+/// Max per-LogUp-column constraint deg = 5 → `log_quotient_degree = 2` (was
+/// the [6, 5, 2] mutex layout at deg 7 → lqd 3). The degree-4 multiplicities
+/// (`squeeze`, `chunk-consume`) are the floor; dropping to lqd 1 would need
+/// them witness-decomposed. Width disregarded (research/logup-flatten). See
 /// `docs/chiplets/keccak-sponge.md` §"Aux columns and σ exposure".
-pub const NUM_AUX_COLS: usize = 3;
+pub const NUM_AUX_COLS: usize = 6;
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]. The sponge's σ aggregates its net
@@ -549,15 +553,13 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column emission shape:
-/// - col 0: 6 inserts (Memory64 group with 2 mutex batches — state-lane batch of 4, lane-16 0x80
-///   batch of 2).
-/// - col 1: 5 inserts (Logic64 group with 3 mutex batches — pad-row of 3, verbatim of 1, lane-16
-///   0x80 of 1).
-/// - col 2: 2 inserts (KeccakSponge + Memory64 chunk-consume, one batch of two independent
-///   inserts). The chunk-consume fires on rate rows and, on the last block, the extra rows [26,29)
-///   that mop up overshoot lanes (gated by `p_extra · b_sum`).
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [6, 5, 2];
+/// Per-column insert counts (FLATTENED to lqd 2): the 13 flag-folded
+/// fractions split ≤ 3 per column (col 0 two low-degree fractions; the
+/// degree-4 `squeeze` alone, the degree-4 `chunk-consume` paired) so every
+/// closing constraint is degree ≤ 5. The chunk-consume fires on rate rows
+/// and, on the last block, the extra rows [26,29) that mop up overshoot
+/// lanes (gated by `p_extra · b_sum`).
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 3, 1, 3, 2, 2];
 
 impl<LB> LookupAir<LB> for KeccakSpongeAir
 where
@@ -672,257 +674,210 @@ where
         let xor_op = LB::Expr::from(Felt::from(Logic64Op::Xor.tag()));
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        // Col 0 Memory64 mutex group: d_A = 4 (state-lane batch),
-        // d_B = 2 (lane-16 0x80 batch); periodic outer flags.
-        let m64_batch_a_deg = Deg { v: 4, u: 4 };
-        let m64_batch_b_deg = Deg { v: 2, u: 2 };
-        let m64_group_deg = Deg { v: 5, u: 4 };
-        // Col 1 Logic64 mutex group: d_C = 3 (pad-row batch), d_D
-        // = d_E = 1 (verbatim, lane-16); witness outer flags (deg 1).
-        let l64_batch_c_deg = Deg { v: 3, u: 3 };
-        let l64_batch_d_deg = Deg { v: 1, u: 1 };
-        let l64_batch_e_deg = Deg { v: 1, u: 1 };
-        let l64_group_deg = Deg { v: 4, u: 4 };
-        // Col 2 KS + chunk-consume batch. The chunk-consume mult now
-        // carries `p_extra · b_sum` (last-block extra-lane gate), so its
-        // degree is 4 (act · (p_rate_block + p_extra·b_sum) ·
-        // is_chunk_avail); the KS-request mult stays deg 3. Still one
-        // tier below the col-0 group → the chiplet stays log_quot 3.
-        let aux_batch_deg = Deg { v: 4, u: 2 };
+        // FLATTENED to lqd 2: the mutex outer flags are folded into each
+        // insert's multiplicity (sound — the one-hot flags are binary on the
+        // rows where they fire, the precondition the mutex fold already
+        // relied on), and the 13 fractions are repartitioned ≤ 3 per column
+        // so every closing constraint is degree ≤ 5. Column-degree hints are
+        // ignored on the constraint path.
+        let pair_deg = Deg { v: 4, u: 2 };
+        let triple_deg = Deg { v: 5, u: 3 };
+        let solo_deg = Deg { v: 4, u: 1 };
+        let mixed_deg = Deg { v: 5, u: 2 };
 
-        // ---- col 0: Memory64 — state-lane (4) ⊕ lane-16 0x80 (2) ----
-        builder.next_column(
-            |col| {
-                col.group(
-                    "memory64",
-                    |g| {
-                        // Batch A — state-lane rows.
-                        g.batch(
-                            "state-lane",
-                            p_state_lane.clone(),
-                            |b| {
-                                b.insert(
-                                    "prev-perm",
-                                    mult_prev_perm,
-                                    Memory64Msg {
-                                        addr: addr_state_lane_prev,
-                                        lo: state_prev_lo.clone(),
-                                        hi: state_prev_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "new-state",
-                                    mult_new_state,
-                                    Memory64Msg {
-                                        addr: addr_state_lane_new,
-                                        lo: state_new_lo.clone(),
-                                        hi: state_new_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "rc",
-                                    mult_rc,
-                                    Memory64Msg { addr: addr_rc, lo: rc_lo, hi: rc_hi },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "squeeze",
-                                    mult_squeeze,
-                                    Memory64Msg {
-                                        addr: addr_squeeze,
-                                        lo: state_out_lo,
-                                        hi: state_out_hi,
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            m64_batch_a_deg,
-                        );
-                        // Batch B — lane-16 0x80 row.
-                        g.batch(
-                            "lane16-0x80",
-                            p_pad_0x80.clone(),
-                            |b| {
-                                b.insert(
-                                    "lane16-consume",
-                                    mult_lane16_consume,
-                                    Memory64Msg {
-                                        addr: addr_lane16.clone(),
-                                        lo: state_prev_lo.clone(),
-                                        hi: state_prev_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "lane16-provide",
-                                    mult_lane16_provide,
-                                    Memory64Msg {
-                                        addr: addr_lane16,
-                                        lo: state_new_lo.clone(),
-                                        hi: state_new_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            m64_batch_b_deg,
-                        );
-                    },
-                    m64_group_deg,
-                );
-            },
-            m64_group_deg,
+        // col 0 (running sum): Memory64 state-lane new-state + prev-perm — the
+        // two lowest-degree fractions, so the gated last-row close stays ≤ 5.
+        frac_col!(
+            builder,
+            "memory64",
+            pair_deg,
+            (
+                "new-state",
+                p_state_lane.clone() * mult_new_state.clone(),
+                Memory64Msg {
+                    addr: addr_state_lane_new.clone(),
+                    lo: state_new_lo.clone(),
+                    hi: state_new_hi.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "prev-perm",
+                p_state_lane.clone() * mult_prev_perm.clone(),
+                Memory64Msg {
+                    addr: addr_state_lane_prev.clone(),
+                    lo: state_prev_lo.clone(),
+                    hi: state_prev_hi.clone(),
+                },
+                interaction_deg
+            ),
+        );
+        // col 1: Memory64 state-lane rc + lane-16 0x80 consume / provide.
+        frac_col!(
+            builder,
+            "memory64",
+            triple_deg,
+            (
+                "rc",
+                p_state_lane.clone() * mult_rc.clone(),
+                Memory64Msg {
+                    addr: addr_rc.clone(),
+                    lo: rc_lo.clone(),
+                    hi: rc_hi.clone()
+                },
+                interaction_deg
+            ),
+            (
+                "lane16-consume",
+                p_pad_0x80.clone() * mult_lane16_consume.clone(),
+                Memory64Msg {
+                    addr: addr_lane16.clone(),
+                    lo: state_prev_lo.clone(),
+                    hi: state_prev_hi.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "lane16-provide",
+                p_pad_0x80.clone() * mult_lane16_provide.clone(),
+                Memory64Msg {
+                    addr: addr_lane16.clone(),
+                    lo: state_new_lo.clone(),
+                    hi: state_new_hi.clone(),
+                },
+                interaction_deg
+            ),
+        );
+        // col 2: Memory64 squeeze — a degree-4 multiplicity, alone (closing 4).
+        frac_col!(
+            builder,
+            "memory64",
+            solo_deg,
+            (
+                "squeeze",
+                p_state_lane.clone() * mult_squeeze.clone(),
+                Memory64Msg {
+                    addr: addr_squeeze.clone(),
+                    lo: state_out_lo.clone(),
+                    hi: state_out_hi.clone()
+                },
+                interaction_deg
+            ),
         );
 
-        // ---- col 1: Logic64 — pad (3) ⊕ verbatim (1) ⊕ lane-16 (1) ----
-        builder.next_column(
-            |col| {
-                col.group(
-                    "logic64",
-                    |g| {
-                        // Batch C — pad row.
-                        g.batch(
-                            "pad-row",
-                            p_rate_block.clone() * is_pad,
-                            |b| {
-                                b.insert(
-                                    "andnot",
-                                    act.clone(),
-                                    Logic64Msg {
-                                        op: andnot_op.clone(),
-                                        a_lo: andnot_mask_lo,
-                                        a_hi: andnot_mask_hi,
-                                        b_lo: chunk_lo.clone(),
-                                        b_hi: chunk_hi.clone(),
-                                        c_lo: cleared_lo.clone(),
-                                        c_hi: cleared_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "xor-padding",
-                                    act.clone(),
-                                    Logic64Msg {
-                                        op: xor_op.clone(),
-                                        a_lo: cleared_lo,
-                                        a_hi: cleared_hi,
-                                        b_lo: padding_mask_lo,
-                                        b_hi: padding_mask_hi,
-                                        c_lo: padded_lo.clone(),
-                                        c_hi: padded_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "xor-state",
-                                    act.clone(),
-                                    Logic64Msg {
-                                        op: xor_op.clone(),
-                                        a_lo: state_prev_lo.clone(),
-                                        a_hi: state_prev_hi.clone(),
-                                        b_lo: padded_lo,
-                                        b_hi: padded_hi,
-                                        c_lo: state_new_lo.clone(),
-                                        c_hi: state_new_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            l64_batch_c_deg,
-                        );
-                        // Batch D — verbatim row.
-                        g.batch(
-                            "verbatim",
-                            p_rate_block.clone() * is_verbatim,
-                            |b| {
-                                b.insert(
-                                    "xor-state",
-                                    act.clone(),
-                                    Logic64Msg {
-                                        op: xor_op.clone(),
-                                        a_lo: state_prev_lo.clone(),
-                                        a_hi: state_prev_hi.clone(),
-                                        b_lo: chunk_lo.clone(),
-                                        b_hi: chunk_hi.clone(),
-                                        c_lo: state_new_lo.clone(),
-                                        c_hi: state_new_hi.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            l64_batch_d_deg,
-                        );
-                        // Batch E — lane-16 0x80 row.
-                        g.batch(
-                            "lane16-0x80",
-                            p_pad_0x80.clone() * b_sum.clone(),
-                            |b| {
-                                b.insert(
-                                    "xor",
-                                    act.clone(),
-                                    Logic64Msg {
-                                        op: xor_op,
-                                        a_lo: state_prev_lo,
-                                        a_hi: state_prev_hi,
-                                        b_lo: LB::Expr::from(Felt::from(PAD_CONST_LO)),
-                                        b_hi: LB::Expr::from(Felt::from(PAD_CONST_HI)),
-                                        c_lo: state_new_lo,
-                                        c_hi: state_new_hi,
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            l64_batch_e_deg,
-                        );
-                    },
-                    l64_group_deg,
-                );
-            },
-            l64_group_deg,
+        // col 3: Logic64 pad-row — andnot + xor-padding + xor-state.
+        frac_col!(
+            builder,
+            "logic64",
+            triple_deg,
+            (
+                "andnot",
+                p_rate_block.clone() * is_pad.clone() * act.clone(),
+                Logic64Msg {
+                    op: andnot_op.clone(),
+                    a_lo: andnot_mask_lo.clone(),
+                    a_hi: andnot_mask_hi.clone(),
+                    b_lo: chunk_lo.clone(),
+                    b_hi: chunk_hi.clone(),
+                    c_lo: cleared_lo.clone(),
+                    c_hi: cleared_hi.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "xor-padding",
+                p_rate_block.clone() * is_pad.clone() * act.clone(),
+                Logic64Msg {
+                    op: xor_op.clone(),
+                    a_lo: cleared_lo.clone(),
+                    a_hi: cleared_hi.clone(),
+                    b_lo: padding_mask_lo.clone(),
+                    b_hi: padding_mask_hi.clone(),
+                    c_lo: padded_lo.clone(),
+                    c_hi: padded_hi.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "xor-state",
+                p_rate_block.clone() * is_pad.clone() * act.clone(),
+                Logic64Msg {
+                    op: xor_op.clone(),
+                    a_lo: state_prev_lo.clone(),
+                    a_hi: state_prev_hi.clone(),
+                    b_lo: padded_lo.clone(),
+                    b_hi: padded_hi.clone(),
+                    c_lo: state_new_lo.clone(),
+                    c_hi: state_new_hi.clone(),
+                },
+                interaction_deg
+            ),
+        );
+        // col 4: Logic64 verbatim xor-state + lane-16 0x80 xor.
+        frac_col!(
+            builder,
+            "logic64",
+            pair_deg,
+            (
+                "xor-state-verbatim",
+                p_rate_block.clone() * is_verbatim.clone() * act.clone(),
+                Logic64Msg {
+                    op: xor_op.clone(),
+                    a_lo: state_prev_lo.clone(),
+                    a_hi: state_prev_hi.clone(),
+                    b_lo: chunk_lo.clone(),
+                    b_hi: chunk_hi.clone(),
+                    c_lo: state_new_lo.clone(),
+                    c_hi: state_new_hi.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "xor-lane16",
+                p_pad_0x80.clone() * b_sum.clone() * act.clone(),
+                Logic64Msg {
+                    op: xor_op.clone(),
+                    a_lo: state_prev_lo.clone(),
+                    a_hi: state_prev_hi.clone(),
+                    b_lo: LB::Expr::from(Felt::from(PAD_CONST_LO)),
+                    b_hi: LB::Expr::from(Felt::from(PAD_CONST_HI)),
+                    c_lo: state_new_lo.clone(),
+                    c_hi: state_new_hi.clone(),
+                },
+                interaction_deg
+            ),
         );
 
-        // ---- col 2: KeccakSponge + Memory64 chunk consume -----
-        // Two independent inserts on different buses, outer flag 1.
-        // Bus-prefix-distinguished encodings keep the contributions
-        // algebraically distinct.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ks-and-chunk",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "ks-request",
-                                    act.clone() * is_first_row_of_invocation,
-                                    KeccakSpongeMsg {
-                                        sponge_seq_id,
-                                        chunk_ptr: chunk_ptr.clone(),
-                                        len_bytes: bytes_left,
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "chunk-consume",
-                                    act * (p_rate_block + p_extra * b_sum) * is_chunk_avail,
-                                    Memory64Msg {
-                                        addr: addr_chunk,
-                                        lo: chunk_lo,
-                                        hi: chunk_hi,
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            aux_batch_deg,
-                        );
-                    },
-                    aux_batch_deg,
-                );
-            },
-            aux_batch_deg,
+        // col 5: the KeccakSponge request + the chunk consume (a degree-4
+        // multiplicity, paired → closing 5). Two independent inserts on
+        // different buses, bus-prefix-distinguished encodings keeping the
+        // contributions algebraically distinct.
+        frac_col!(
+            builder,
+            "ks-and-chunk",
+            mixed_deg,
+            (
+                "ks-request",
+                act.clone() * is_first_row_of_invocation.clone(),
+                KeccakSpongeMsg {
+                    sponge_seq_id: sponge_seq_id.clone(),
+                    chunk_ptr: chunk_ptr.clone(),
+                    len_bytes: bytes_left.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "chunk-consume",
+                act.clone()
+                    * (p_rate_block.clone() + p_extra.clone() * b_sum.clone())
+                    * is_chunk_avail.clone(),
+                Memory64Msg {
+                    addr: addr_chunk.clone(),
+                    lo: chunk_lo.clone(),
+                    hi: chunk_hi.clone()
+                },
+                interaction_deg
+            ),
         );
     }
 }

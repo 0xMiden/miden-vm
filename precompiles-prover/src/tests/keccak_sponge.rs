@@ -168,15 +168,15 @@ fn periodic_columns_match_program() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The 3-aux-column mutex-grouped layout lands at
-    // `log_quotient_degree = 3` under Plonky3's
-    // periodic-deg-1 convention — the same profile as
-    // `bitwise64`. See `docs/chiplets/keccak-sponge.md` §"Aux
-    // columns and σ exposure" for the per-column constraint-deg
-    // breakdown. Pin the value so any constraint or lookup edit
-    // that drifts the degree past the column-max of 9 fails fast.
+    // The mutex outer flags are folded into each insert's multiplicity and the
+    // 13 fractions are partitioned across 6 columns (≤ 3 each, the degree-4
+    // multiplicities `squeeze` / `chunk-consume` kept low-arity), so every
+    // closing constraint is degree ≤ 5 → `log_quotient_degree = 2`. The
+    // degree-4 multiplicities are the floor; lqd 1 would need them
+    // witness-decomposed. See
+    // `docs/chiplets/keccak-sponge.md` §"Aux columns and σ exposure".
     let air = KeccakSpongeAir;
-    assert_eq!(crate::tests::log_quotient_degree(&air), 3);
+    assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }
 
 // CONSTRAINT TESTS
