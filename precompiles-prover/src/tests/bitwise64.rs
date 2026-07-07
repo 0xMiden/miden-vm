@@ -9,8 +9,8 @@ use crate::{
     primitives::{
         bitwise64::{
             A_BYTES_RANGE, AUX_PROVIDE, B_LIMBS_RANGE, Bitwise64Air, Bitwise64Requires,
-            COL_IS_LOGIC, COL_IS_ROL, COL_IS_XORROL_CAP, COL_OP_OR_K, Logic64Op, NUM_AUX_COLS,
-            NUM_MAIN_COLS, generate_trace,
+            COL_IS_LOGIC, COL_IS_ROL, COL_IS_XORROL_CAP, COL_OP_OR_K, LANE_WIDTH, Logic64Op,
+            NUM_AUX_COLS, NUM_LANES, NUM_MAIN_COLS, generate_trace, lane_base,
         },
         byte_pair_lut::{BytePairLutRequires, BytePairOp},
     },
@@ -101,22 +101,27 @@ fn single_logic_emits_real_then_trailing_carrier() {
 }
 
 #[test]
-fn unchained_logics_get_intermediate_carriers() {
+fn unchained_logics_split_across_lanes() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
-    // Two LOGIC triples whose c's don't match the next a — no chaining possible.
+    // Two LOGIC triples whose c's don't match the next a — no chaining
+    // possible. Each is its own 2-row chain (real + trailing carrier); the
+    // least-loaded greedy puts one in each lane.
     requires.require(&mut bpl, Logic64Op::Xor, 0xaa, 0xbb);
     requires.require(&mut bpl, Logic64Op::Xor, 0x22, 0x33);
 
     let trace = generate_trace(requires);
-    // 2 reals + 1 intermediate carrier + 1 trailing carrier = 4 rows.
-    assert_eq!(trace.height(), 4);
+    // Two 2-row chains, one per lane → height 2 (not 4).
+    assert_eq!(trace.height(), 2);
 
-    let is_logic = |r: usize| trace.values[r * NUM_MAIN_COLS + COL_IS_LOGIC];
-    assert_eq!(is_logic(0), Felt::from(1u8), "row 0 real");
-    assert_eq!(is_logic(1), Felt::ZERO, "row 1 carrier");
-    assert_eq!(is_logic(2), Felt::from(1u8), "row 2 real");
-    assert_eq!(is_logic(3), Felt::ZERO, "row 3 trailing carrier");
+    let is_logic =
+        |r: usize, lane: usize| trace.values[r * NUM_MAIN_COLS + lane_base(lane) + COL_IS_LOGIC];
+    // Lane 0: real then trailing carrier.
+    assert_eq!(is_logic(0, 0), Felt::from(1u8), "lane0 row0 real");
+    assert_eq!(is_logic(1, 0), Felt::ZERO, "lane0 row1 carrier");
+    // Lane 1: real then trailing carrier.
+    assert_eq!(is_logic(0, 1), Felt::from(1u8), "lane1 row0 real");
+    assert_eq!(is_logic(1, 1), Felt::ZERO, "lane1 row1 carrier");
 }
 
 #[test]
@@ -146,19 +151,34 @@ fn chained_logics_skip_intermediate_carriers() {
 }
 
 #[test]
-fn three_logics_pad_to_eight_rows() {
+fn three_logics_balance_across_lanes() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     requires.require(&mut bpl, Logic64Op::AndNot, 1, 2);
     requires.require(&mut bpl, Logic64Op::Xor, 3, 4);
     requires.require(&mut bpl, Logic64Op::AndNot, 5, 6);
-    // 3 reals + 2 intermediate + 1 trailing = 6 rows → next pow2 = 8.
+    // Three unchained 2-row chains. Least-loaded greedy: lane 0 takes
+    // chains 0 and 2 (4 rows), lane 1 takes chain 1 (2 rows). Height = 4.
     let trace = generate_trace(requires);
-    assert_eq!(trace.height(), 8);
-    for r in 6..8 {
-        let row = &trace.values[r * NUM_MAIN_COLS..(r + 1) * NUM_MAIN_COLS];
-        for v in row {
-            assert_eq!(*v, Felt::ZERO);
+    assert_eq!(trace.height(), 4);
+
+    let is_logic =
+        |r: usize, lane: usize| trace.values[r * NUM_MAIN_COLS + lane_base(lane) + COL_IS_LOGIC];
+    // Lane 0: two chains back to back (real, carrier, real, carrier).
+    assert_eq!(is_logic(0, 0), Felt::from(1u8));
+    assert_eq!(is_logic(1, 0), Felt::ZERO);
+    assert_eq!(is_logic(2, 0), Felt::from(1u8));
+    assert_eq!(is_logic(3, 0), Felt::ZERO);
+    // Lane 1: one chain (real, carrier) then zero padding for rows 2–3.
+    assert_eq!(is_logic(0, 1), Felt::from(1u8));
+    assert_eq!(is_logic(1, 1), Felt::ZERO);
+    for r in 2..4 {
+        for c in 0..LANE_WIDTH {
+            assert_eq!(
+                trace.values[r * NUM_MAIN_COLS + lane_base(1) + c],
+                Felt::ZERO,
+                "lane1 row {r} padding",
+            );
         }
     }
 }
@@ -298,24 +318,28 @@ fn require_rol_recycles_non_tail_carrier() {
     assert_eq!(b, c1.rotate_left(3));
 
     let trace = generate_trace(requires);
-    // Real_1, Carrier(c1)→Rol(c1), Real_2, Carrier(c2) = 4 rows → pow2 = 4.
-    assert_eq!(trace.height(), 4);
-    let is_logic = |r: usize| trace.values[r * NUM_MAIN_COLS + COL_IS_LOGIC];
-    let is_rol = |r: usize| trace.values[r * NUM_MAIN_COLS + COL_IS_ROL];
-    assert_eq!(is_logic(0), Felt::from(1u8), "row 0 LOGIC (Real_1)");
-    assert_eq!(is_rol(1), Felt::from(1u8), "row 1 ROL (recycled c1 carrier)");
-    assert_eq!(is_logic(2), Felt::from(1u8), "row 2 LOGIC (Real_2)");
-    assert_eq!(is_rol(3), Felt::ZERO, "row 3 trailing carrier for c2");
-    assert_eq!(is_logic(3), Felt::ZERO, "row 3 trailing carrier for c2");
+    // Two chains: A = [Real_1, Rol(c1)] (recycled non-tail carrier), B =
+    // [Real_2, Carrier(c2)]. Greedy puts A in lane 0, B in lane 1 → height 2.
+    assert_eq!(trace.height(), 2);
+    let is_logic =
+        |r: usize, lane: usize| trace.values[r * NUM_MAIN_COLS + lane_base(lane) + COL_IS_LOGIC];
+    let is_rol =
+        |r: usize, lane: usize| trace.values[r * NUM_MAIN_COLS + lane_base(lane) + COL_IS_ROL];
+    // Lane 0: chain A — LOGIC then its ROL cap (recycled c1 carrier).
+    assert_eq!(is_logic(0, 0), Felt::from(1u8), "lane0 row0 LOGIC (Real_1)");
+    assert_eq!(is_rol(1, 0), Felt::from(1u8), "lane0 row1 ROL on c1");
+    // Lane 1: chain B — LOGIC then trailing carrier.
+    assert_eq!(is_logic(0, 1), Felt::from(1u8), "lane1 row0 LOGIC (Real_2)");
+    assert_eq!(is_rol(1, 1), Felt::ZERO, "lane1 row1 carrier for c2");
+    assert_eq!(is_logic(1, 1), Felt::ZERO, "lane1 row1 carrier for c2");
 }
 
 #[test]
 fn air_quotient_degree_matches_constraint_plan() {
-    // FLATTENED (research/logup-flatten): the 18 fractions are repartitioned
-    // ≤ 2 per column (col 0 a single fraction, via a single-insert batch so
-    // the gated σ-close stays at degree 3), so every closing constraint is
-    // degree ≤ 3 → log_quotient_degree 1. (Was two 8-way requires batches at
-    // deg 9 → lqd 3.) The base-trace constraints all sit at deg ≤ 3 too.
+    // The 18 fractions are partitioned ≤ 2 per column (col 0 a single fraction,
+    // via a single-insert batch so the gated σ-close stays at degree 3), so
+    // every closing constraint is degree ≤ 3 → log_quotient_degree 1. The
+    // base-trace constraints all sit at deg ≤ 3 too.
     assert_eq!(crate::tests::log_quotient_degree(&Bitwise64Air), 1);
 }
 
@@ -332,13 +356,41 @@ fn build_aux_trace_starts_at_zero() {
 }
 
 #[test]
-fn build_aux_trace_shape_is_three_columns() {
+fn build_aux_trace_shape_matches_aux_cols() {
     let mut bpl = BytePairLutRequires::new();
     let mut requires = Bitwise64Requires::new();
     requires.require(&mut bpl, Logic64Op::Xor, 0xaabb, 0xccdd);
     let (main, aux, _sigma) = build_aux(requires);
     assert_eq!(aux.height(), main.height());
     assert_eq!(aux.width(), NUM_AUX_COLS);
+}
+
+#[test]
+fn lanes_partition_chains_and_shrink_height() {
+    let mut bpl = BytePairLutRequires::new();
+    let mut requires = Bitwise64Requires::new();
+    // Eight independent single-logic chains (2 rows each = 16 logical rows).
+    // The values are chosen so no result feeds a later input (no chaining).
+    for i in 0..8u64 {
+        requires.require(&mut bpl, Logic64Op::Xor, 0x100 + i, 0x200 + i);
+    }
+    let active = requires.active_rows();
+    let populated = requires.populated_rows();
+    assert_eq!(active, 16, "8 chains × 2 rows");
+    // Whole-chain greedy over equal-size chains balances exactly.
+    assert_eq!(populated, active / NUM_LANES);
+
+    let trace = generate_trace(requires);
+    assert_eq!(trace.width(), NUM_MAIN_COLS);
+    assert_eq!(trace.height(), populated.next_power_of_two().max(2));
+    // Both lane bands carry real LOGIC work on row 0.
+    for lane in 0..NUM_LANES {
+        assert_eq!(
+            trace.values[lane_base(lane) + COL_IS_LOGIC],
+            Felt::from(1u8),
+            "lane {lane} row0 should be a real LOGIC row",
+        );
+    }
 }
 
 #[test]
@@ -394,10 +446,11 @@ fn xorrol_op_pin_accepts_honest_fused_pair() {
     requires.require_xorrol(&mut bpl, a, b, 1u64 << 3);
 
     let main = generate_trace(requires);
-    // One chain: row 0 is the fused LOGIC row, row 1 its cap.
-    assert_eq!(main.values[COL_IS_LOGIC], Felt::from(1u8));
-    assert_eq!(main.values[COL_OP_OR_K], Felt::from(Logic64Op::Xor.tag()));
-    assert_eq!(main.values[NUM_MAIN_COLS + COL_IS_XORROL_CAP], Felt::from(1u8));
+    // One chain → lane 0: row 0 is the fused LOGIC row, row 1 its cap.
+    let base = lane_base(0);
+    assert_eq!(main.values[base + COL_IS_LOGIC], Felt::from(1u8));
+    assert_eq!(main.values[base + COL_OP_OR_K], Felt::from(Logic64Op::Xor.tag()));
+    assert_eq!(main.values[NUM_MAIN_COLS + base + COL_IS_XORROL_CAP], Felt::from(1u8));
 
     crate::tests::check_local(Bitwise64Air, &main);
 }
@@ -415,8 +468,9 @@ fn xorrol_andnot_substitution_rejected() {
     requires.require_xorrol(&mut bpl, 0x1122_3344_5566_7788, 0xaabb_ccdd_eeff_0011, 1u64 << 3);
 
     let mut main = generate_trace(requires);
+    let base = lane_base(0);
     // Row 0 is the fused LOGIC row (row 1 caps it); swap Xor (1) for AndNot (0).
-    main.values[COL_OP_OR_K] = Felt::from(BytePairOp::AndNot.tag());
+    main.values[base + COL_OP_OR_K] = Felt::from(BytePairOp::AndNot.tag());
 
     crate::tests::check_local(Bitwise64Air, &main);
 }

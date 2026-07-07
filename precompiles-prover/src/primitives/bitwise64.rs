@@ -89,6 +89,9 @@ use crate::{
 // COLUMN LAYOUT
 // ================================================================================================
 
+// All column indices below are **lane-local** (within one
+// [`LANE_WIDTH`]-wide band); the absolute index in the main trace is
+// `lane * LANE_WIDTH + local`, via [`lane_base`].
 pub const A_BYTES_RANGE: Range<usize> = 0..8;
 /// 8 columns dual-purpose: 8-bit `b` operand bytes on LOGIC rows
 /// (range-checked via byte requires); 16-bit limbs of `(lo·k, hi·k)`
@@ -107,24 +110,47 @@ pub const COL_IS_ROL: usize = 18;
 /// `Logic64`) and this ROL row suppresses its `Rol64`, so a consumer reads
 /// one fused tuple. Implies `is_rol`.
 pub const COL_IS_XORROL_CAP: usize = 19;
-pub const NUM_MAIN_COLS: usize = 20;
-/// FLATTENED to lqd 1: the 18 fractions (2 self-provides, 8 LOGIC byte
+
+/// Width of one chain-lane's column band.
+pub const LANE_WIDTH: usize = 20;
+/// Number of parallel chain-lanes packed side-by-side per row. The trace
+/// runs `NUM_LANES` independent chain-streams in disjoint column bands, so
+/// the row count is ~`1/NUM_LANES` of a single stream. Each lane holds
+/// **whole chains only** — a chain is never split across lanes — so every
+/// cross-row dependency (the chain trick's `c`-in-next-row, the
+/// `is_rol·(1−is_logic)` predecessor constraint, and the fused cap's
+/// next-row `b_limbs` read) stays intra-lane. The LogUp bus contribution is
+/// the union of all lanes (an unchanged multiset), summed into the single σ.
+pub const NUM_LANES: usize = 2;
+pub const NUM_MAIN_COLS: usize = LANE_WIDTH * NUM_LANES;
+
+/// Absolute start column of `lane`'s band in the main trace.
+#[inline]
+pub fn lane_base(lane: usize) -> usize {
+    lane * LANE_WIDTH
+}
+
+/// FLATTENED to lqd 1: per lane, 18 fractions (2 self-provides, 8 LOGIC byte
 /// requires, 8 ROL Range16 requires — all degree-1 multiplicities) split
-/// across ten columns, ≤ 2 each, col 0 a single fraction. Col 0 uses a
-/// single-insert batch (outer flag ONE) so the gated σ-close lands at
-/// degree 3, not the degree 4 a group-level `remove` flag would give.
-pub const NUM_AUX_COLS: usize = 10;
+/// across ten columns, ≤ 2 each, the lane's provide column a single fraction.
+/// Aux column 0 (lane 0's running sum) uses a single-insert batch (outer flag
+/// ONE) so the gated σ-close lands at degree 3, not the degree 4 a group-level
+/// `remove` flag would give; every later lane's provide is an ordinary
+/// fraction column folded into that same running sum. Width disregarded.
+pub const NUM_AUX_COLS: usize = 10 * NUM_LANES;
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) and the shared
 // transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
 // VM-wide LogUp contract in [`crate::logup`]; the natural last-row
 // σ-closing needs no `inv_n`, and this chiplet declares the root but
-// does not read it. The aux columns' running-sum closings share the
-// natural last-row close.
+// does not read it. The aux columns' running-sum closing shares the
+// natural last-row close, folding every lane's fraction columns into
+// the single running sum at column 0.
 
-/// Aux column 0 (running sum) — the `Rol64` self-provide (gated
+/// Aux column 0 (running sum) — lane 0's `Rol64` self-provide (gated
 /// `−(is_rol − is_xorrol_cap)`; a fused cap defers to the LOGIC row's
-/// `XorRol64`). The `Logic64` / `XorRol64` provides are paired in aux
-/// column 1; the byte / Range16 requires fill the rest.
+/// `XorRol64`). Every other fraction column — including each later lane's
+/// own `Rol64` provide — is summed into this running sum by the col-0
+/// recurrence.
 pub const AUX_PROVIDE: usize = 0;
 
 // OPERATION
@@ -484,12 +510,24 @@ impl Bitwise64Requires {
         self.requests.is_empty()
     }
 
-    /// Laid-out rows before power-of-two padding: each chain emits
-    /// `logics.len()` LOGIC rows plus one (its ROL cap, or the trailing
-    /// dead Carrier holding the uncapped tail). Diagnostic for the
-    /// per-perm floor test and trace-size measurement.
+    /// Total logical rows across all chains, independent of lane packing:
+    /// each chain emits `logics.len()` LOGIC rows plus one (its ROL cap, or
+    /// the trailing dead Carrier holding the uncapped tail). Diagnostic for
+    /// the per-perm floor test; the populated trace height is ~this divided
+    /// by [`NUM_LANES`] (see [`Self::populated_rows`]).
     pub fn active_rows(&self) -> usize {
         build_chains(&self.requests).iter().map(|ch| ch.logics.len() + 1).sum()
+    }
+
+    /// Populated trace height before power-of-two padding: the busiest
+    /// lane's row count after `build_lanes` balances whole chains across
+    /// [`NUM_LANES`] bands.
+    pub fn populated_rows(&self) -> usize {
+        build_lanes(&self.requests)
+            .iter()
+            .map(|lane| lane.iter().map(|ch| ch.logics.len() + 1).sum::<usize>())
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -598,38 +636,76 @@ fn claim_producer(
     None
 }
 
-/// Row-major trace.
-///
-/// Lowers the recorded requests into chains (`build_chains`) and walks
-/// each: its LOGIC links as `Real` rows — every link's `a` is the prior
-/// link's `c`, so the AIR's c-in-next-row holds by construction — then
-/// either the ROL cap or one trailing dead `Carrier` holding the uncapped
-/// tail. Pads to `next_power_of_two` with all-zero rows; minimum height 1.
-pub fn generate_trace(requires: Bitwise64Requires) -> RowMajorMatrix<Felt> {
-    let chains = build_chains(&requires.requests);
-    let total: usize = chains.iter().map(|ch| ch.logics.len() + 1).sum();
-    let height = total.max(1).next_power_of_two().max(2);
-    let mut values = Vec::with_capacity(height * NUM_MAIN_COLS);
-
-    for chain in &chains {
-        for link in &chain.logics {
-            push_row(&mut values, PendingRow::Real { op: link.op, a: link.a, b: link.b });
-        }
-        let tail = chain.tail();
-        push_row(
-            &mut values,
-            match chain.cap {
-                Some(RolCap { k, fused }) => PendingRow::Rol { a: tail, k, fused },
-                None => PendingRow::Carrier { a: tail },
-            },
-        );
+/// Partition the chains ([`build_chains`]) into [`NUM_LANES`] bands by
+/// least-loaded greedy on row count (`logics.len() + 1`). Whole chains
+/// only — a chain is never split — so every intra-chain row dependency
+/// (the chain trick, the ROL-after-LOGIC predecessor, the fused cap's
+/// next-row read) stays inside one lane. Balance is purely a height
+/// concern; soundness is independent of the assignment because the LogUp
+/// bus sees the same multiset regardless of which lane provides it.
+fn build_lanes(requests: &[Request]) -> [Vec<Chain>; NUM_LANES] {
+    let mut lanes: [Vec<Chain>; NUM_LANES] = array::from_fn(|_| Vec::new());
+    let mut loads = [0usize; NUM_LANES];
+    for chain in build_chains(requests) {
+        let rows = chain.logics.len() + 1;
+        // Lowest-index least-loaded lane (deterministic on ties).
+        let target = (0..NUM_LANES).min_by_key(|&l| loads[l]).unwrap_or(0);
+        loads[target] += rows;
+        lanes[target].push(chain);
     }
+    lanes
+}
 
-    values.resize(height * NUM_MAIN_COLS, Felt::ZERO);
+/// Row-major trace, [`NUM_LANES`] chain-lanes packed side-by-side.
+///
+/// Lowers the recorded requests into chains (`build_chains`), balances
+/// whole chains across [`NUM_LANES`] column bands (`build_lanes`), and
+/// lays each lane independently: its LOGIC links as `Real` rows — every
+/// link's `a` is the prior link's `c`, so the AIR's c-in-next-row holds by
+/// construction — then either the ROL cap or one trailing dead `Carrier`
+/// holding the uncapped tail. Each lane is zero-padded past its content;
+/// the matrix pads to `next_power_of_two` of the busiest lane, minimum 2.
+pub fn generate_trace(requires: Bitwise64Requires) -> RowMajorMatrix<Felt> {
+    let lanes = build_lanes(&requires.requests);
+
+    // Each lane lowers to its own flat band of LANE_WIDTH-wide rows.
+    let lane_cells: [Vec<Felt>; NUM_LANES] = array::from_fn(|l| {
+        let mut v = Vec::new();
+        for chain in &lanes[l] {
+            for link in &chain.logics {
+                push_row(&mut v, PendingRow::Real { op: link.op, a: link.a, b: link.b });
+            }
+            let tail = chain.tail();
+            push_row(
+                &mut v,
+                match chain.cap {
+                    Some(RolCap { k, fused }) => PendingRow::Rol { a: tail, k, fused },
+                    None => PendingRow::Carrier { a: tail },
+                },
+            );
+        }
+        v
+    });
+
+    let lane_rows = |l: usize| lane_cells[l].len() / LANE_WIDTH;
+    let max_rows = (0..NUM_LANES).map(lane_rows).max().unwrap_or(0);
+    let height = max_rows.max(1).next_power_of_two().max(2);
+
+    // Interleave the lane bands into one NUM_MAIN_COLS-wide row-major
+    // matrix, zero-padding each lane past its content up to `height`.
+    let mut values = vec![Felt::ZERO; height * NUM_MAIN_COLS];
+    for (l, cells) in lane_cells.iter().enumerate() {
+        let base = lane_base(l);
+        for r in 0..lane_rows(l) {
+            let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
+            let row_start = r * NUM_MAIN_COLS + base;
+            values[row_start..row_start + LANE_WIDTH].copy_from_slice(src);
+        }
+    }
     RowMajorMatrix::new(values, NUM_MAIN_COLS)
 }
 
-/// Append one trace row's `NUM_MAIN_COLS` field elements to `values`.
+/// Append one lane row's `LANE_WIDTH` field elements to `values`.
 fn push_row(values: &mut Vec<Felt>, row: PendingRow) {
     match row {
         PendingRow::Real { op, a, b } => {
@@ -722,68 +798,77 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Phase 1: non-LogUp constraints. Read the row, emit all
-        // boolean / mutex / ROL-after-LOGIC / limb-decomp /
-        // rolled-output constraints against `&mut AB` directly.
+        // Phase 1: non-LogUp constraints, replicated per lane over its
+        // disjoint column band. Whole chains stay in one lane, so each band
+        // is an independent single-stream trace — boolean / mutex /
+        // ROL-after-LOGIC / limb-decomp constraints apply lane-locally.
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next_is_rol: AB::Var = next_main::<_, _, 1>(builder.main(), COL_IS_ROL)[0];
 
-        let op_or_k = AB::Expr::from(local[COL_OP_OR_K]);
-        let is_logic = AB::Expr::from(local[COL_IS_LOGIC]);
-        let is_rol = AB::Expr::from(local[COL_IS_ROL]);
-
-        // Selector binarity.
-        builder.assert_bool(local[COL_IS_LOGIC]);
-        builder.assert_bool(local[COL_IS_ROL]);
-        builder.assert_bool(local[COL_IS_XORROL_CAP]);
-
-        // Mutex: at most one mode active per row. Both 0 = disabled.
-        builder.assert_zero(is_logic.clone() * is_rol.clone());
-
-        // The fused-pair cap flag only ever rides a ROL row (it gates that
-        // row's `Rol64` suppression and the preceding LOGIC's `XorRol64`
-        // provide). `cap ⟹ is_rol`.
-        let is_xorrol_cap = AB::Expr::from(local[COL_IS_XORROL_CAP]);
-        builder.assert_zero(is_xorrol_cap * (AB::Expr::ONE - is_rol.clone()));
-
-        // A LOGIC row whose next row caps a fused pair drives that pair's
-        // `XorRol64` provide. `XorRol64` is definitionally `c = rol_64(a ⊕ b,
-        // k)` — its tuple carries no op field — so the op tag is pinned to Xor
-        // here. Without it an `op_or_k = AndNot` LOGIC row would make the
-        // provide carry `rol_64((¬a)∧b, k)` under the XorRol64 label, and a
-        // consumer (which holds no op of its own) would read it as XOR.
-        let next_is_xorrol_cap: AB::Var =
-            next_main::<_, _, 1>(builder.main(), COL_IS_XORROL_CAP)[0];
-        builder.assert_zero(
-            is_logic.clone()
-                * AB::Expr::from(next_is_xorrol_cap)
-                * (AB::Expr::ONE - op_or_k.clone()),
-        );
-
-        // ROL must be preceded by LOGIC (cyclic ungated). Subsumes
-        // ROL/ROL forbid AND Carrier/padding → ROL forbid AND wrap.
-        builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic.clone()));
-
-        let a_bytes: [AB::Var; 8] = array::from_fn(|i| local[A_BYTES_RANGE.start + i]);
-        let b_limbs: [AB::Var; 8] = array::from_fn(|i| local[B_LIMBS_RANGE.start + i]);
-
-        // Reconstruct 32-bit halves of a (current row).
-        let [a_lo, a_hi]: [AB::Expr; 2] = halves_le(&a_bytes, 256);
-
-        // ROL: b_limbs are 16-bit limbs of ((lo+2^32)·k, (hi+2^32)·k).
-        // The +2^32 offset ensures the product is always ≥ 2^32,
-        // escaping the aliasable range [0, 2^32-2] and eliminating the
-        // need for canonical-decomposition witness columns.
+        // ROL: b_limbs are 16-bit limbs of ((lo+2^32)·k, (hi+2^32)·k). The
+        // +2^32 offset ensures the product is always ≥ 2^32, escaping the
+        // aliasable range [0, 2^32-2] and eliminating the need for
+        // canonical-decomposition witness columns.
         let two_32 = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 fits"));
 
-        let lo_offset_k_decomp: AB::Expr = pack_le(&b_limbs[0..4], 1u64 << 16);
-        let hi_offset_k_decomp: AB::Expr = pack_le(&b_limbs[4..8], 1u64 << 16);
+        for lane in 0..NUM_LANES {
+            let base = lane_base(lane);
 
-        // (lo + 2^32)·k = decomposition (gated by is_rol; deg 1 + 1 + 1 = 3).
-        builder.assert_zero(
-            is_rol.clone() * ((a_lo + two_32.clone()) * op_or_k.clone() - lo_offset_k_decomp),
-        );
-        builder.assert_zero(is_rol * ((a_hi + two_32) * op_or_k - hi_offset_k_decomp));
+            let op_or_k = AB::Expr::from(local[base + COL_OP_OR_K]);
+            let is_logic = AB::Expr::from(local[base + COL_IS_LOGIC]);
+            let is_rol = AB::Expr::from(local[base + COL_IS_ROL]);
+            let next_is_rol: AB::Var = next_main::<_, _, 1>(builder.main(), base + COL_IS_ROL)[0];
+
+            // Selector binarity.
+            builder.assert_bool(local[base + COL_IS_LOGIC]);
+            builder.assert_bool(local[base + COL_IS_ROL]);
+            builder.assert_bool(local[base + COL_IS_XORROL_CAP]);
+
+            // Mutex: at most one mode active per row. Both 0 = disabled.
+            builder.assert_zero(is_logic.clone() * is_rol.clone());
+
+            // The fused-pair cap flag only ever rides a ROL row (it gates
+            // that row's `Rol64` suppression and the preceding LOGIC's
+            // `XorRol64` provide). `cap ⟹ is_rol`.
+            let is_xorrol_cap = AB::Expr::from(local[base + COL_IS_XORROL_CAP]);
+            builder.assert_zero(is_xorrol_cap * (AB::Expr::ONE - is_rol.clone()));
+
+            // A LOGIC row whose next row caps a fused pair drives that pair's
+            // `XorRol64` provide. `XorRol64` is definitionally
+            // `c = rol_64(a ⊕ b, k)` — its tuple carries no op field — so the
+            // op tag is pinned to Xor here. Without it an `op_or_k = AndNot`
+            // LOGIC row would make the provide carry `rol_64((¬a)∧b, k)` under
+            // the XorRol64 label, and a consumer (the keccak round, which holds
+            // no op of its own) would read it as XOR.
+            let next_is_xorrol_cap: AB::Var =
+                next_main::<_, _, 1>(builder.main(), base + COL_IS_XORROL_CAP)[0];
+            builder.assert_zero(
+                is_logic.clone()
+                    * AB::Expr::from(next_is_xorrol_cap)
+                    * (AB::Expr::ONE - op_or_k.clone()),
+            );
+
+            // ROL must be preceded by LOGIC (cyclic ungated), within this
+            // lane. Subsumes ROL/ROL forbid AND Carrier/padding → ROL forbid
+            // AND wrap.
+            builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic.clone()));
+
+            let a_bytes: [AB::Var; 8] = array::from_fn(|i| local[base + A_BYTES_RANGE.start + i]);
+            let b_limbs: [AB::Var; 8] = array::from_fn(|i| local[base + B_LIMBS_RANGE.start + i]);
+
+            // Reconstruct 32-bit halves of a (current row).
+            let [a_lo, a_hi]: [AB::Expr; 2] = halves_le(&a_bytes, 256);
+
+            let lo_offset_k_decomp: AB::Expr = pack_le(&b_limbs[0..4], 1u64 << 16);
+            let hi_offset_k_decomp: AB::Expr = pack_le(&b_limbs[4..8], 1u64 << 16);
+
+            // (lo + 2^32)·k = decomposition (gated by is_rol; deg 1+1+1 = 3).
+            builder.assert_zero(
+                is_rol.clone() * ((a_lo + two_32.clone()) * op_or_k.clone() - lo_offset_k_decomp),
+            );
+            builder.assert_zero(
+                is_rol.clone() * ((a_hi + two_32.clone()) * op_or_k - hi_offset_k_decomp),
+            );
+        }
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =
@@ -795,11 +880,24 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column emission shape (FLATTENED to lqd 1): col 0 = rol provide
-/// (running sum, deg-1 mult), col 1 = the paired logic + fused-xorrol provides
-/// (deg-2 mux mults, lqd-1 like the EC paired columns), cols 2–5 = the 8 LOGIC
-/// byte requires (two per col), cols 6–9 = the 8 ROL Range16 requires.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+/// Per-column emission shape (FLATTENED to lqd 1), repeated per lane: within
+/// each lane's 10-column band, col 0 = rol provide (a single fraction; for
+/// lane 0 it is the running sum, for later lanes an ordinary fraction folded
+/// into it), col 1 = the paired logic + fused-xorrol provides (deg-2 mux
+/// mults), cols 2–5 = the 8 LOGIC byte requires (two per col), cols 6–9 = the
+/// 8 ROL Range16 requires.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
+
+const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
+    let mut shape = [2usize; NUM_AUX_COLS];
+    let mut lane = 0;
+    while lane < NUM_LANES {
+        // Each lane's provide column (band-local index 0) is a single fraction.
+        shape[lane * 10] = 1;
+        lane += 1;
+    }
+    shape
+}
 
 impl<LB> LookupAir<LB> for Bitwise64Air
 where
@@ -824,267 +922,271 @@ where
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let next_a_bytes: [LB::Var; 8] = array::from_fn(|i| next[A_BYTES_RANGE.start + i]);
-        let next_b_limbs: [LB::Var; 8] = array::from_fn(|i| next[B_LIMBS_RANGE.start + i]);
-
-        let op_or_k: LB::Expr = local[COL_OP_OR_K].into();
-        let is_logic: LB::Expr = local[COL_IS_LOGIC].into();
-        let is_rol: LB::Expr = local[COL_IS_ROL].into();
-        // Fused-pair cap flag — local (this ROL suppresses its `Rol64`) and
-        // next (the preceding LOGIC muxes `Logic64` → `XorRol64`).
-        let is_xorrol_cap: LB::Expr = local[COL_IS_XORROL_CAP].into();
-        let is_xorrol_cap_next: LB::Expr = next[COL_IS_XORROL_CAP].into();
-        let next_op_or_k: LB::Expr = next[COL_OP_OR_K].into();
-
-        let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[A_BYTES_RANGE.start + i]);
-        let b_limbs: [LB::Var; 8] = array::from_fn(|i| local[B_LIMBS_RANGE.start + i]);
-
-        // === Shared between LOGIC and ROL self-provides ============
-        // `a` is the row's input operand; both messages encode it as
-        // its two 32-bit halves.
-        let [a_lo, a_hi]: [LB::Expr; 2] = halves_le(&a_bytes, 256);
-
-        // === LOGIC-only halves =====================================
-        // `b` is composed of bytes (8-bit limbs); `c` lives in the
-        // next row's `a_bytes` (chain trick).
-        let [b_lo, b_hi]: [LB::Expr; 2] = halves_le(&b_limbs, 256);
-        let [c_lo, c_hi]: [LB::Expr; 2] = halves_le(&next_a_bytes, 256);
-
-        // === ROL-only halves =======================================
-        // `b` is reconstructed from b_limbs (16-bit limbs of offset
-        // products), with the +2^32·k offset cancelled per half.
-        let two_16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
-        let c0 = LB::Expr::from(b_limbs[0]) + LB::Expr::from(b_limbs[6]);
-        let c1 = LB::Expr::from(b_limbs[1]) + LB::Expr::from(b_limbs[7]);
-        let c2 = LB::Expr::from(b_limbs[2]) + LB::Expr::from(b_limbs[4]);
-        let c3 = LB::Expr::from(b_limbs[3]) + LB::Expr::from(b_limbs[5]);
-        let rol_b_lo = c0 + c1 * two_16.clone() - op_or_k.clone();
-        let rol_b_hi = c2 + c3 * two_16.clone() - op_or_k.clone();
-
-        // The *next* (cap ROL) row's rolled output — the fused `XorRol64`'s
-        // `c` halves, read by the preceding LOGIC row so it can provide the
-        // fused tuple without exposing the XOR intermediate `r`.
-        let nc0 = LB::Expr::from(next_b_limbs[0]) + LB::Expr::from(next_b_limbs[6]);
-        let nc1 = LB::Expr::from(next_b_limbs[1]) + LB::Expr::from(next_b_limbs[7]);
-        let nc2 = LB::Expr::from(next_b_limbs[2]) + LB::Expr::from(next_b_limbs[4]);
-        let nc3 = LB::Expr::from(next_b_limbs[3]) + LB::Expr::from(next_b_limbs[5]);
-        let next_rol_b_lo = nc0 + nc1 * two_16.clone() - next_op_or_k.clone();
-        let next_rol_b_hi = nc2 + nc3 * two_16 - next_op_or_k.clone();
 
         // Per-emission `Deg` annotations. The framework treats these as
         // documentation (production adapters ignore them); names make
         // the call sites legible.
-        //
-        // - Per interaction: payload deg 1 (committed columns), signed multiplicity deg 1 → `n=1,
-        //   d=1`.
-        // - Col 0 mutex group of 2 provides: `U_g = 1 + Σ (v_i−1)·flag_i` ⇒ deg 2; `V_g = ±Σ
-        //   flag_i` ⇒ deg 1.
-        // - Cols 1, 2 8-way batches: `(N, D) = (Σ is_X·∏v_{j≠i}, ∏v)` ⇒ each side deg 8.
-        //   Group/column inherit the batch's shape (single batch per group, single group per
-        //   column).
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
         let requires_deg = Deg { v: 8, u: 8 };
 
-        // col 0: rol self-provide (running sum). A fused cap (`is_xorrol_cap`)
-        // suppresses its own `Rol64` — the preceding LOGIC provides the fused
-        // `XorRol64` instead; since `is_xorrol_cap ⟹ is_rol`, the mult is the
-        // degree-1 `−(is_rol − is_xorrol_cap)`.
-        frac_col!(
-            builder,
-            "self-provides",
-            provides_deg,
-            (
-                "rol",
-                is_xorrol_cap.clone() - is_rol.clone(),
-                Rol64Msg {
-                    a_lo: a_lo.clone(),
-                    a_hi: a_hi.clone(),
-                    b_lo: rol_b_lo,
-                    b_hi: rol_b_hi,
-                    k: op_or_k.clone()
-                },
-                interaction_deg
-            ),
-        );
-        // col 1 (paired, lqd-1): the logic provide muxed with the fused-xorrol
-        // provide. A LOGIC row whose next row is a fused cap provides
-        // `XorRol64(a, b, c=next rolled output, k=next k)` and suppresses its
-        // `Logic64`; otherwise it provides `Logic64`. The two deg-2 mux mults
-        // (`is_logic · {1−cap_next, cap_next}`) close at degree 3 in a paired
-        // column, exactly like the EC chiplets' gated provides.
-        frac_col!(
-            builder,
-            "self-provides",
-            pair_deg,
-            (
-                "logic",
-                (is_xorrol_cap_next.clone() - LB::Expr::ONE) * is_logic.clone(),
-                Logic64Msg {
-                    op: op_or_k.clone(),
-                    a_lo: a_lo.clone(),
-                    a_hi: a_hi.clone(),
-                    b_lo: b_lo.clone(),
-                    b_hi: b_hi.clone(),
-                    c_lo,
-                    c_hi
-                },
-                interaction_deg
-            ),
-            (
-                "xorrol",
-                LB::Expr::ZERO - is_logic.clone() * is_xorrol_cap_next,
-                XorRol64Msg {
-                    a_lo,
-                    a_hi,
-                    b_lo,
-                    b_hi,
-                    c_lo: next_rol_b_lo,
-                    c_hi: next_rol_b_hi,
-                    k: next_op_or_k
-                },
-                interaction_deg
-            ),
-        );
-        // cols 2–5: the 8 LOGIC byte requires (BytePairLut), two per column.
-        frac_col!(
-            builder,
-            "logic-byte-requires",
-            requires_deg,
-            (
-                "byte0",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[0].into(),
-                    b: b_limbs[0].into(),
-                    c: next_a_bytes[0].into()
-                },
-                interaction_deg
-            ),
-            (
-                "byte1",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[1].into(),
-                    b: b_limbs[1].into(),
-                    c: next_a_bytes[1].into()
-                },
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "logic-byte-requires",
-            requires_deg,
-            (
-                "byte2",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[2].into(),
-                    b: b_limbs[2].into(),
-                    c: next_a_bytes[2].into()
-                },
-                interaction_deg
-            ),
-            (
-                "byte3",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[3].into(),
-                    b: b_limbs[3].into(),
-                    c: next_a_bytes[3].into()
-                },
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "logic-byte-requires",
-            requires_deg,
-            (
-                "byte4",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[4].into(),
-                    b: b_limbs[4].into(),
-                    c: next_a_bytes[4].into()
-                },
-                interaction_deg
-            ),
-            (
-                "byte5",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[5].into(),
-                    b: b_limbs[5].into(),
-                    c: next_a_bytes[5].into()
-                },
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "logic-byte-requires",
-            requires_deg,
-            (
-                "byte6",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[6].into(),
-                    b: b_limbs[6].into(),
-                    c: next_a_bytes[6].into()
-                },
-                interaction_deg
-            ),
-            (
-                "byte7",
-                is_logic.clone(),
-                BytePairLutMsg {
-                    op: op_or_k.clone(),
-                    a: a_bytes[7].into(),
-                    b: b_limbs[7].into(),
-                    c: next_a_bytes[7].into()
-                },
-                interaction_deg
-            ),
-        );
-        // cols 6–9: the 8 ROL Range16 requires, two per column.
-        frac_col!(
-            builder,
-            "rol-range16-requires",
-            requires_deg,
-            ("limb0", is_rol.clone(), Range16Msg { w: b_limbs[0].into() }, interaction_deg),
-            ("limb1", is_rol.clone(), Range16Msg { w: b_limbs[1].into() }, interaction_deg),
-        );
-        frac_col!(
-            builder,
-            "rol-range16-requires",
-            requires_deg,
-            ("limb2", is_rol.clone(), Range16Msg { w: b_limbs[2].into() }, interaction_deg),
-            ("limb3", is_rol.clone(), Range16Msg { w: b_limbs[3].into() }, interaction_deg),
-        );
-        frac_col!(
-            builder,
-            "rol-range16-requires",
-            requires_deg,
-            ("limb4", is_rol.clone(), Range16Msg { w: b_limbs[4].into() }, interaction_deg),
-            ("limb5", is_rol.clone(), Range16Msg { w: b_limbs[5].into() }, interaction_deg),
-        );
-        frac_col!(
-            builder,
-            "rol-range16-requires",
-            requires_deg,
-            ("limb6", is_rol.clone(), Range16Msg { w: b_limbs[6].into() }, interaction_deg),
-            ("limb7", is_rol, Range16Msg { w: b_limbs[7].into() }, interaction_deg),
-        );
+        // Each lane emits its own 10-column band of fractions over its
+        // disjoint main columns. Lane 0's provide column is the running sum
+        // (col 0); every later lane's provide is an ordinary fraction column
+        // the col-0 recurrence folds in. The bus contribution is the union
+        // over lanes — an unchanged multiset — so the single σ is identical
+        // to a single-stream trace.
+        for lane in 0..NUM_LANES {
+            let base = lane_base(lane);
+
+            let next_a_bytes: [LB::Var; 8] =
+                array::from_fn(|i| next[base + A_BYTES_RANGE.start + i]);
+            let next_b_limbs: [LB::Var; 8] =
+                array::from_fn(|i| next[base + B_LIMBS_RANGE.start + i]);
+
+            let op_or_k: LB::Expr = local[base + COL_OP_OR_K].into();
+            let is_logic: LB::Expr = local[base + COL_IS_LOGIC].into();
+            let is_rol: LB::Expr = local[base + COL_IS_ROL].into();
+            // Fused-pair cap flag — local (this ROL suppresses its `Rol64`)
+            // and next (the preceding LOGIC muxes `Logic64` → `XorRol64`).
+            let is_xorrol_cap: LB::Expr = local[base + COL_IS_XORROL_CAP].into();
+            let is_xorrol_cap_next: LB::Expr = next[base + COL_IS_XORROL_CAP].into();
+            let next_op_or_k: LB::Expr = next[base + COL_OP_OR_K].into();
+
+            let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + A_BYTES_RANGE.start + i]);
+            let b_limbs: [LB::Var; 8] = array::from_fn(|i| local[base + B_LIMBS_RANGE.start + i]);
+
+            // === Shared between LOGIC and ROL self-provides ============
+            // `a` is the row's input operand; both messages encode it as
+            // its two 32-bit halves.
+            let [a_lo, a_hi]: [LB::Expr; 2] = halves_le(&a_bytes, 256);
+
+            // === LOGIC-only halves =====================================
+            // `b` is composed of bytes (8-bit limbs); `c` lives in the
+            // next row's `a_bytes` (chain trick).
+            let [b_lo, b_hi]: [LB::Expr; 2] = halves_le(&b_limbs, 256);
+            let [c_lo, c_hi]: [LB::Expr; 2] = halves_le(&next_a_bytes, 256);
+
+            // === ROL-only halves =======================================
+            // `b` is reconstructed from b_limbs (16-bit limbs of offset
+            // products), with the +2^32·k offset cancelled per half.
+            let two_16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
+            let c0 = LB::Expr::from(b_limbs[0]) + LB::Expr::from(b_limbs[6]);
+            let c1 = LB::Expr::from(b_limbs[1]) + LB::Expr::from(b_limbs[7]);
+            let c2 = LB::Expr::from(b_limbs[2]) + LB::Expr::from(b_limbs[4]);
+            let c3 = LB::Expr::from(b_limbs[3]) + LB::Expr::from(b_limbs[5]);
+            let rol_b_lo = c0 + c1 * two_16.clone() - op_or_k.clone();
+            let rol_b_hi = c2 + c3 * two_16.clone() - op_or_k.clone();
+
+            // The *next* (cap ROL) row's rolled output — the fused
+            // `XorRol64`'s `c` halves, read by the preceding LOGIC row so it
+            // can provide the fused tuple without exposing the XOR
+            // intermediate `r`.
+            let nc0 = LB::Expr::from(next_b_limbs[0]) + LB::Expr::from(next_b_limbs[6]);
+            let nc1 = LB::Expr::from(next_b_limbs[1]) + LB::Expr::from(next_b_limbs[7]);
+            let nc2 = LB::Expr::from(next_b_limbs[2]) + LB::Expr::from(next_b_limbs[4]);
+            let nc3 = LB::Expr::from(next_b_limbs[3]) + LB::Expr::from(next_b_limbs[5]);
+            let next_rol_b_lo = nc0 + nc1 * two_16.clone() - next_op_or_k.clone();
+            let next_rol_b_hi = nc2 + nc3 * two_16 - next_op_or_k.clone();
+
+            // band col 0: rol self-provide. A fused cap (`is_xorrol_cap`)
+            // suppresses its own `Rol64` — the preceding LOGIC provides the
+            // fused `XorRol64` instead; since `is_xorrol_cap ⟹ is_rol`, the
+            // mult is the degree-1 `−(is_rol − is_xorrol_cap)`.
+            frac_col!(
+                builder,
+                "self-provides",
+                provides_deg,
+                (
+                    "rol",
+                    is_xorrol_cap.clone() - is_rol.clone(),
+                    Rol64Msg {
+                        a_lo: a_lo.clone(),
+                        a_hi: a_hi.clone(),
+                        b_lo: rol_b_lo,
+                        b_hi: rol_b_hi,
+                        k: op_or_k.clone()
+                    },
+                    interaction_deg
+                ),
+            );
+            // band col 1 (paired, lqd-1): the logic provide muxed with the
+            // fused-xorrol provide. A LOGIC row whose next row is a fused cap
+            // provides `XorRol64(a, b, c=next rolled output, k=next k)` and
+            // suppresses its `Logic64`; otherwise it provides `Logic64`.
+            frac_col!(
+                builder,
+                "self-provides",
+                pair_deg,
+                (
+                    "logic",
+                    (is_xorrol_cap_next.clone() - LB::Expr::ONE) * is_logic.clone(),
+                    Logic64Msg {
+                        op: op_or_k.clone(),
+                        a_lo: a_lo.clone(),
+                        a_hi: a_hi.clone(),
+                        b_lo: b_lo.clone(),
+                        b_hi: b_hi.clone(),
+                        c_lo,
+                        c_hi
+                    },
+                    interaction_deg
+                ),
+                (
+                    "xorrol",
+                    LB::Expr::ZERO - is_logic.clone() * is_xorrol_cap_next,
+                    XorRol64Msg {
+                        a_lo,
+                        a_hi,
+                        b_lo,
+                        b_hi,
+                        c_lo: next_rol_b_lo,
+                        c_hi: next_rol_b_hi,
+                        k: next_op_or_k
+                    },
+                    interaction_deg
+                ),
+            );
+            // band cols 2–5: the 8 LOGIC byte requires (BytePairLut), two per column.
+            frac_col!(
+                builder,
+                "logic-byte-requires",
+                requires_deg,
+                (
+                    "byte0",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[0].into(),
+                        b: b_limbs[0].into(),
+                        c: next_a_bytes[0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "byte1",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[1].into(),
+                        b: b_limbs[1].into(),
+                        c: next_a_bytes[1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+            frac_col!(
+                builder,
+                "logic-byte-requires",
+                requires_deg,
+                (
+                    "byte2",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[2].into(),
+                        b: b_limbs[2].into(),
+                        c: next_a_bytes[2].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "byte3",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[3].into(),
+                        b: b_limbs[3].into(),
+                        c: next_a_bytes[3].into()
+                    },
+                    interaction_deg
+                ),
+            );
+            frac_col!(
+                builder,
+                "logic-byte-requires",
+                requires_deg,
+                (
+                    "byte4",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[4].into(),
+                        b: b_limbs[4].into(),
+                        c: next_a_bytes[4].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "byte5",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[5].into(),
+                        b: b_limbs[5].into(),
+                        c: next_a_bytes[5].into()
+                    },
+                    interaction_deg
+                ),
+            );
+            frac_col!(
+                builder,
+                "logic-byte-requires",
+                requires_deg,
+                (
+                    "byte6",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[6].into(),
+                        b: b_limbs[6].into(),
+                        c: next_a_bytes[6].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "byte7",
+                    is_logic.clone(),
+                    BytePairLutMsg {
+                        op: op_or_k.clone(),
+                        a: a_bytes[7].into(),
+                        b: b_limbs[7].into(),
+                        c: next_a_bytes[7].into()
+                    },
+                    interaction_deg
+                ),
+            );
+            // band cols 6–9: the 8 ROL Range16 requires, two per column.
+            frac_col!(
+                builder,
+                "rol-range16-requires",
+                requires_deg,
+                ("limb0", is_rol.clone(), Range16Msg { w: b_limbs[0].into() }, interaction_deg),
+                ("limb1", is_rol.clone(), Range16Msg { w: b_limbs[1].into() }, interaction_deg),
+            );
+            frac_col!(
+                builder,
+                "rol-range16-requires",
+                requires_deg,
+                ("limb2", is_rol.clone(), Range16Msg { w: b_limbs[2].into() }, interaction_deg),
+                ("limb3", is_rol.clone(), Range16Msg { w: b_limbs[3].into() }, interaction_deg),
+            );
+            frac_col!(
+                builder,
+                "rol-range16-requires",
+                requires_deg,
+                ("limb4", is_rol.clone(), Range16Msg { w: b_limbs[4].into() }, interaction_deg),
+                ("limb5", is_rol.clone(), Range16Msg { w: b_limbs[5].into() }, interaction_deg),
+            );
+            frac_col!(
+                builder,
+                "rol-range16-requires",
+                requires_deg,
+                ("limb6", is_rol.clone(), Range16Msg { w: b_limbs[6].into() }, interaction_deg),
+                ("limb7", is_rol, Range16Msg { w: b_limbs[7].into() }, interaction_deg),
+            );
+        }
     }
 }
 
