@@ -36,8 +36,8 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::poseidon2::{
         math::{
-            STATE_WIDTH, apply_init_plus_ext, apply_internal_plus_ext, apply_packed_internals,
-            apply_single_ext,
+            NUM_CUBE_REGS, STATE_WIDTH, apply_init_plus_ext, apply_internal_plus_ext,
+            apply_packed_internals, apply_single_ext,
         },
         program::{
             ARK_INT_LAST_IDX, PCOL_ARK_BEGIN, PCOL_IS_EXT, PCOL_IS_INIT_EXT, PCOL_IS_INT_EXT,
@@ -50,12 +50,13 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 19 main witness columns split into three groups:
+// Main witness columns split into four groups:
 //
 // - Cycle-constant (4): perm_seq_id, in_multiplicity, out_multiplicity, is_absorb.
 // - Sponge state (12):  state[0..12] (rate0[4], rate1[4], capacity[4]).
 // - S-box witnesses (3): w[0..3], used on packed-internal rows 4..10 and (`w[0]` only) on int+ext
 //   row 11.
+// - Cube registers (`NUM_CUBE_REGS`): `x^3` of each S-box input on the busiest row.
 //
 // See `docs/chiplets/poseidon2.md` §"Per-row format".
 
@@ -84,8 +85,13 @@ pub const NUM_WITNESSES: usize = 3;
 /// One past the last witness column.
 pub const COL_WITNESS_END: usize = COL_WITNESS_BEGIN + NUM_WITNESSES;
 
+/// First column of the cube registers (`x^3` per S-box on the busiest row).
+pub const COL_CUBE_BEGIN: usize = COL_WITNESS_END;
+/// One past the last cube-register column.
+pub const COL_CUBE_END: usize = COL_CUBE_BEGIN + NUM_CUBE_REGS;
+
 /// Total number of main witness columns.
-pub const NUM_MAIN_COLS: usize = COL_WITNESS_END;
+pub const NUM_MAIN_COLS: usize = COL_CUBE_END;
 
 /// First state-lane column in the capacity portion (`state[8..12]`).
 pub const COL_CAPACITY_BEGIN: usize = COL_STATE_BEGIN + 8;
@@ -93,26 +99,21 @@ pub const COL_CAPACITY_BEGIN: usize = COL_STATE_BEGIN + 8;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// One aux column hosting all bus emissions in a single group with two
-/// periodic-disjoint mutex batches:
-/// - Batch A (gated by `is_init_ext`): 3 Poseidon2In provides, fires at row 0 of each cycle.
-/// - Batch B (gated by `p_last_in_cycle`): 1 Poseidon2Out provide + 2 Range16 requires (for
-///   in_multiplicity and out_multiplicity), fires at row 15 of each cycle.
-///
-/// Both Range16 requires read the cycle-constant multiplicities (same
-/// values at any row); placing them at row 15 balances the mutex
-/// batches 3+3 for tighter bus column constraint deg.
+/// Three aux columns splitting the bus emissions to keep each column's
+/// constraint degree low:
+/// - col 0: `in_rate0`, gated `is_init_ext`.
+/// - col 1: `in_rate1` + `out_rate0` (gated `is_init_ext` / `p_last_in_cycle` respectively).
+/// - col 2: `in_cap`, gated `is_init_ext`.
 ///
 /// Following [`bitwise64`](crate::primitives::bitwise64) and
 /// [`keccak::sponge`](crate::hash::keccak::sponge), col 0 is the running σ
 /// and hosts the chiplet's only group.
-pub const NUM_AUX_COLS: usize = 1;
+pub const NUM_AUX_COLS: usize = 3;
 
-/// Per-column emission shape: 4 inserts in the single group
-/// (3 in batch A + 1 in batch B; batch B lost its two multiplicity
-/// `Range16` requires). The periodic-disjoint mutex (A on row 0, B on
-/// row 15) still caps the per-row fraction count at the larger batch.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [4];
+/// Per-column emission shape: the three Poseidon2In provides + the
+/// Poseidon2Out provide split across 3 columns — col 0: `in_rate0`; col 1:
+/// `in_rate1` + `out_rate0`; col 2: `in_cap`.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1];
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) and the shared
 // transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
@@ -199,6 +200,8 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         let state_next: [AB::Expr; STATE_WIDTH] =
             array::from_fn(|i| next[COL_STATE_BEGIN + i].into());
         let w: [AB::Expr; NUM_WITNESSES] = array::from_fn(|i| local[COL_WITNESS_BEGIN + i].into());
+        let cube_regs: Vec<AB::Expr> =
+            (0..NUM_CUBE_REGS).map(|i| local[COL_CUBE_BEGIN + i].into()).collect();
         let perm_seq_id: AB::Expr = local[COL_PERM_SEQ_ID].into();
         let perm_seq_id_next: AB::Expr = next[COL_PERM_SEQ_ID].into();
         let in_multiplicity: AB::Expr = local[COL_IN_MULTIPLICITY].into();
@@ -268,13 +271,14 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         // Every step constraint is gated by `multiplicity` as well as
         // its row selector. On padding cycles (mult = 0) the constraints
         // vacuate, freeing the prover to zero-fill rather than evaluate
-        // a dummy permutation. Total degree: 1 (mult) + 1 (selector) +
-        // 7 (sbox) = 9; log_quotient_degree stays at 3.
+        // a dummy permutation. Each S-box's cube is committed to a
+        // register (`cube_regs`), dropping its output degree from 7 to 3
+        // (`reg^2 · x`) at the cost of a degree-3 `reg − x^3` check.
         let mat_diag: [AB::Expr; STATE_WIDTH] = array::from_fn(|i| Hasher::MAT_DIAG[i].into());
         let ark_int_last: AB::Expr = Hasher::ARK_INT[ARK_INT_LAST_IDX].into();
 
         // Init + ext1 (row 0).
-        let expected_init_ext = apply_init_plus_ext(&state, &ark);
+        let (expected_init_ext, init_ext_cubes) = apply_init_plus_ext(&state, &ark, &cube_regs);
         for i in 0..STATE_WIDTH {
             builder.assert_zero(
                 activity.clone()
@@ -282,9 +286,12 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
                     * (state_next[i].clone() - expected_init_ext[i].clone()),
             );
         }
+        for cube in &init_ext_cubes {
+            builder.assert_zero(activity.clone() * is_init_ext.clone() * cube.clone());
+        }
 
         // Single ext (rows 1-3, 12-14).
-        let expected_ext = apply_single_ext(&state, &ark);
+        let (expected_ext, ext_cubes) = apply_single_ext(&state, &ark, &cube_regs);
         for i in 0..STATE_WIDTH {
             builder.assert_zero(
                 activity.clone()
@@ -292,13 +299,19 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
                     * (state_next[i].clone() - expected_ext[i].clone()),
             );
         }
+        for cube in &ext_cubes {
+            builder.assert_zero(activity.clone() * is_ext.clone() * cube.clone());
+        }
 
         // Packed 3× internal (rows 4-10): 3 witness checks + next-state.
         let ark_int_3: [AB::Expr; 3] = array::from_fn(|i| ark[i].clone());
-        let (expected_packed, packed_checks) =
-            apply_packed_internals(&state, &w, &ark_int_3, &mat_diag);
+        let (expected_packed, packed_checks, packed_cubes) =
+            apply_packed_internals(&state, &w, &ark_int_3, &mat_diag, &cube_regs);
         for check in &packed_checks {
             builder.assert_zero(activity.clone() * is_packed_int.clone() * check.clone());
+        }
+        for cube in &packed_cubes {
+            builder.assert_zero(activity.clone() * is_packed_int.clone() * cube.clone());
         }
         for i in 0..STATE_WIDTH {
             builder.assert_zero(
@@ -309,9 +322,12 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         }
 
         // Int + ext merged (row 11): 1 witness check + next-state.
-        let (expected_int_ext, int_ext_check) =
-            apply_internal_plus_ext(&state, &w[0], ark_int_last, &ark, &mat_diag);
+        let (expected_int_ext, int_ext_check, int_ext_cubes) =
+            apply_internal_plus_ext(&state, &w[0], ark_int_last, &ark, &mat_diag, &cube_regs);
         builder.assert_zero(activity.clone() * is_int_ext.clone() * int_ext_check);
+        for cube in &int_ext_cubes {
+            builder.assert_zero(activity.clone() * is_int_ext.clone() * cube.clone());
+        }
         for i in 0..STATE_WIDTH {
             builder.assert_zero(
                 activity.clone()
@@ -395,71 +411,101 @@ where
             (LB::Expr::ZERO - out_multiplicity) * (LB::Expr::ONE - is_absorb_next);
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        // Batch A (row 0, gated by `is_init_ext`): 3 Poseidon2In provides.
-        //   d_A = 3; max inner mult deg = 2 (in_cap); n_A deg = 2 + 2 = 4.
+        // col 0 (in_rate0) / col 2 (in_cap): a single fraction each, mult
+        // gated `is_init_ext · neg_mult` — in_cap's mult is itself deg 2
+        // (`neg_in_mult_cap`), so its column tops out one degree higher; the
+        // shared bound below covers both.
         let row0_batch_deg = Deg { v: 4, u: 3 };
-        // Batch B (row 15, gated by `p_last_in_cycle`): out_rate0 + two
-        //   Range16 requires (for in_multiplicity and out_multiplicity).
-        //   Both multiplicities are cycle-constant so the row choice is
-        //   semantically free; placing both Range16s at row 15 balances
-        //   the mutex batches 3+3.
-        //   d_B = 3; max inner mult deg = 2 (out_rate0); n_B deg = 2 + 2 = 4.
+        // col 1 (in_rate1 + out_rate0): two fractions, each mult gated by its
+        // own row selector (`is_init_ext` / `p_last_in_cycle`).
         let row15_batch_deg = Deg { v: 4, u: 3 };
-        // Mutex group: f_A · f_B = is_init_ext · p_last_in_cycle = 0.
-        //   u_g = 1 + (d_A − 1)·f_A + (d_B − 1)·f_B → deg max(3+1, 3+1) = 4.
-        //   v_g = n_A·f_A + n_B·f_B → deg max(4+1, 4+1) = 5.
-        // Column constraint = max(1 + u_g, v_g) = 5. Chiplet log_quot
-        // stays at 3 (still dominated by the deg-9 step transitions).
+        // Per-column constraint degree bound (shared across cols 0-2).
         let group_deg = Deg { v: 5, u: 4 };
 
+        // Bus emissions split across 3 columns (rather than one mutex-batched
+        // column) so each column's fraction count stays small. The row
+        // selector is folded into each insert's own multiplicity instead of
+        // an outer batch gate — col 0: in_rate0. col 1: in_rate1 + out_rate0.
+        // col 2: in_cap.
+        let m_in_rate0 = is_init_ext.clone() * neg_in_mult.clone();
+        let m_in_rate1 = is_init_ext.clone() * neg_in_mult;
+        let m_in_cap = is_init_ext * neg_in_mult_cap;
+        let m_out = p_last_in_cycle * neg_out_mult;
         builder.next_column(
             |col| {
                 col.group(
-                    "poseidon2-bus",
+                    "p2-col0",
                     |g| {
-                        // Batch A: row 0 — 3 Poseidon2In provides.
                         g.batch(
-                            "row0",
-                            is_init_ext.clone(),
+                            "frac",
+                            LB::Expr::ONE,
                             |b| {
                                 b.insert(
                                     "in_rate0",
-                                    neg_in_mult.clone(),
+                                    m_in_rate0,
                                     Poseidon2InMsg::rate0(perm_seq_id.clone(), rate0_chunk),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "in_rate1",
-                                    neg_in_mult,
-                                    Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "in_cap",
-                                    neg_in_mult_cap,
-                                    Poseidon2InMsg::cap(perm_seq_id.clone(), cap_chunk),
                                     interaction_deg,
                                 );
                             },
                             row0_batch_deg,
                         );
-                        // Batch B: row 15 — the OutRate0 digest provide.
-                        // (The multiplicities are no longer range-checked:
-                        // each is pinned to its consumer count by bus
-                        // balance, so the activity gate `in + out` can't
-                        // wrap — see `docs/lookup-argument.md`.)
+                    },
+                    group_deg,
+                );
+            },
+            group_deg,
+        );
+        builder.next_column(
+            |col| {
+                col.group(
+                    "p2-col1",
+                    |g| {
                         g.batch(
-                            "row15",
-                            p_last_in_cycle.clone(),
+                            "frac",
+                            LB::Expr::ONE,
                             |b| {
                                 b.insert(
+                                    "in_rate1",
+                                    m_in_rate1,
+                                    Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
+                                    interaction_deg,
+                                );
+                                // The multiplicity is no longer range-checked:
+                                // it is pinned to the consumer count by bus
+                                // balance, so the activity gate `in + out`
+                                // can't wrap — see `docs/lookup-argument.md`.
+                                b.insert(
                                     "out_rate0",
-                                    neg_out_mult,
+                                    m_out,
                                     Poseidon2OutMsg { perm_seq_id: perm_seq_id.clone(), digest },
                                     interaction_deg,
                                 );
                             },
                             row15_batch_deg,
+                        );
+                    },
+                    group_deg,
+                );
+            },
+            group_deg,
+        );
+        builder.next_column(
+            |col| {
+                col.group(
+                    "p2-col2",
+                    |g| {
+                        g.batch(
+                            "frac",
+                            LB::Expr::ONE,
+                            |b| {
+                                b.insert(
+                                    "in_cap",
+                                    m_in_cap,
+                                    Poseidon2InMsg::cap(perm_seq_id.clone(), cap_chunk),
+                                    interaction_deg,
+                                );
+                            },
+                            row0_batch_deg,
                         );
                     },
                     group_deg,

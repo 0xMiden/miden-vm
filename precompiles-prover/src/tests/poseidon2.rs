@@ -240,7 +240,7 @@ fn main_column_layout_matches_spec() {
     assert_eq!(COL_IS_ABSORB, 3);
     assert_eq!(COL_STATE_BEGIN, 4);
     assert_eq!(NUM_WITNESSES, 3);
-    assert_eq!(NUM_MAIN_COLS, 19);
+    assert_eq!(NUM_MAIN_COLS, 32);
     assert_eq!(<Poseidon2Air as BaseAir<Felt>>::width(&Poseidon2Air), NUM_MAIN_COLS,);
 }
 
@@ -260,7 +260,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
 #[test]
 fn log_quotient_degree_matches_design_target() {
     let air = Poseidon2Air;
-    assert_eq!(crate::tests::log_quotient_degree(&air), 3);
+    assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }
 
 #[test]

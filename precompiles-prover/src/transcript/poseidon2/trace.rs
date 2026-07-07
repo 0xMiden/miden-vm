@@ -26,7 +26,12 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ops::Range;
 
-use miden_core::{Felt, chiplets::hasher::Hasher, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    chiplets::hasher::Hasher,
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
+};
 
 use crate::{
     logup::build_logup_aux_trace,
@@ -34,7 +39,7 @@ use crate::{
     transcript::poseidon2::{
         NUM_MAIN_COLS, NUM_WITNESSES, Poseidon2Air,
         digest::{P2Cap, P2Digest},
-        math::STATE_WIDTH,
+        math::{NUM_CUBE_REGS, STATE_WIDTH},
         program::PERIOD,
     },
 };
@@ -359,6 +364,17 @@ fn chunk_from_state(state: &[Felt; STATE_WIDTH], offset: usize) -> [Felt; 4] {
     state[offset..offset + 4].try_into().expect("4-felt slice fits")
 }
 
+/// Cube registers for an external-round row: the cube of each of the 12
+/// lane S-box inputs `sbox_in[i]`. Lanes fill registers `0..12`; any
+/// remaining registers stay zero.
+fn ext_cube_regs(sbox_in: &[Felt; STATE_WIDTH]) -> [Felt; NUM_CUBE_REGS] {
+    let mut regs = [Felt::ZERO; NUM_CUBE_REGS];
+    for (reg, x) in regs.iter_mut().zip(sbox_in.iter()) {
+        *reg = x.cube();
+    }
+    regs
+}
+
 /// Append one 16-row Poseidon2 cycle to `trace`, evolving the state step
 /// by step. Returns the row-15 state (= permutation output).
 fn write_cycle(
@@ -377,8 +393,20 @@ fn write_cycle(
 
     let mut state = initial_state;
 
-    // Row 0: initial state, no witnesses.
-    push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
+    // Row 0: init linear + ext1. S-box inputs are `M_E(state) + ark`.
+    let mut row0_sbox_in = state;
+    Hasher::apply_matmul_external(&mut row0_sbox_in);
+    Hasher::add_rc(&mut row0_sbox_in, &Hasher::ARK_EXT_INITIAL[0]);
+    push_row(
+        trace,
+        &state,
+        &[Felt::ZERO; 3],
+        &ext_cube_regs(&row0_sbox_in),
+        perm_seq_id,
+        in_mult,
+        out_mult,
+        absorb,
+    );
 
     // Step from row 0 to row 1: init linear + ext1.
     Hasher::apply_matmul_external(&mut state);
@@ -388,7 +416,18 @@ fn write_cycle(
 
     // Rows 1-3: single ext (ARK_EXT_INITIAL[1..4]), no witnesses.
     for r in 1..=3 {
-        push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
+        let mut sbox_in = state;
+        Hasher::add_rc(&mut sbox_in, &Hasher::ARK_EXT_INITIAL[r]);
+        push_row(
+            trace,
+            &state,
+            &[Felt::ZERO; 3],
+            &ext_cube_regs(&sbox_in),
+            perm_seq_id,
+            in_mult,
+            out_mult,
+            absorb,
+        );
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
@@ -399,14 +438,25 @@ fn write_cycle(
         let base = triple * 3;
         let pre_state = state;
         let mut witnesses = [Felt::ZERO; 3];
+        let mut cube_regs = [Felt::ZERO; NUM_CUBE_REGS];
         for (k, witness) in witnesses.iter_mut().enumerate() {
             let sbox_in = state[0] + Hasher::ARK_INT[base + k];
+            cube_regs[k] = sbox_in.cube();
             let sbox_out = sbox_in.exp_const_u64::<7>();
             *witness = sbox_out;
             state[0] = sbox_out;
             Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
         }
-        push_row(trace, &pre_state, &witnesses, perm_seq_id, in_mult, out_mult, absorb);
+        push_row(
+            trace,
+            &pre_state,
+            &witnesses,
+            &cube_regs,
+            perm_seq_id,
+            in_mult,
+            out_mult,
+            absorb,
+        );
     }
 
     // Row 11: int22 + ext5 merged. Witness w[0] only.
@@ -415,6 +465,10 @@ fn write_cycle(
     let w0 = w0_in.exp_const_u64::<7>();
     state[0] = w0;
     Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+    let mut ext_sbox_in = state;
+    Hasher::add_rc(&mut ext_sbox_in, &Hasher::ARK_EXT_TERMINAL[0]);
+    let mut row11_cube_regs = ext_cube_regs(&ext_sbox_in);
+    row11_cube_regs[STATE_WIDTH] = w0_in.cube();
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
@@ -422,6 +476,7 @@ fn write_cycle(
         trace,
         &pre_state,
         &[w0, Felt::ZERO, Felt::ZERO],
+        &row11_cube_regs,
         perm_seq_id,
         in_mult,
         out_mult,
@@ -430,24 +485,46 @@ fn write_cycle(
 
     // Rows 12-14: single ext (ARK_EXT_TERMINAL[1..4]), no witnesses.
     for r in 1..=3 {
-        push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
+        let mut sbox_in = state;
+        Hasher::add_rc(&mut sbox_in, &Hasher::ARK_EXT_TERMINAL[r]);
+        push_row(
+            trace,
+            &state,
+            &[Felt::ZERO; 3],
+            &ext_cube_regs(&sbox_in),
+            perm_seq_id,
+            in_mult,
+            out_mult,
+            absorb,
+        );
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
     // Row 15: boundary — final state, no transition.
-    push_row(trace, &state, &[Felt::ZERO; 3], perm_seq_id, in_mult, out_mult, absorb);
+    push_row(
+        trace,
+        &state,
+        &[Felt::ZERO; 3],
+        &[Felt::ZERO; NUM_CUBE_REGS],
+        perm_seq_id,
+        in_mult,
+        out_mult,
+        absorb,
+    );
 
     state
 }
 
 /// Append a single row's main columns in column order: perm_seq_id,
-/// in_mult, out_mult, is_absorb, state[12], witnesses[3].
+/// in_mult, out_mult, is_absorb, state[12], witnesses[3], cube
+/// registers[NUM_CUBE_REGS].
 fn push_row(
     trace: &mut Vec<Felt>,
     state: &[Felt; STATE_WIDTH],
     witnesses: &[Felt; NUM_WITNESSES],
+    cube_regs: &[Felt; NUM_CUBE_REGS],
     perm_seq_id: Felt,
     in_multiplicity: Felt,
     out_multiplicity: Felt,
@@ -456,6 +533,7 @@ fn push_row(
     trace.extend([perm_seq_id, in_multiplicity, out_multiplicity, is_absorb]);
     trace.extend(*state);
     trace.extend(*witnesses);
+    trace.extend(*cube_regs);
 }
 
 // AUX TRACE
