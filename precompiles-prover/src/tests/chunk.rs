@@ -129,16 +129,12 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The logup running-sum (ext field) tops out at symbolic degree 6 →
-    // log_quotient_degree 3. The 2-aux batches put the *ungated* recurrence
-    // `D₀·acc_next − …` at degree 5 (denominator product n=4 · acc + 1); the
-    // natural last-row σ-closing then gates it with `when_transition`, whose
-    // degree-1 `is_transition` selector adds the +1 to 6. (The old σ/n-cyclic
-    // adapter kept this recurrence ungated at degree 5 → lqd 2, paid for with
-    // an `inv_n` public input we dropped under 0.26's shared `air_inputs`.)
-    // See the design notes.
+    // Flattened via `frac_col!` into 5 aux columns (col 0 the gated
+    // running-sum anchor alone, cols 1-4 each a pair of at-most-two
+    // fractions), so every closing constraint stays at degree ≤ 3 →
+    // log_quotient_degree = 1. See the design notes.
     let air = ChunkAir;
-    assert_eq!(crate::tests::log_quotient_degree(&air), 3);
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }
 
 // CONSTRAINT TESTS

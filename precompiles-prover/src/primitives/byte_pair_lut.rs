@@ -47,7 +47,7 @@ use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, build_logup_aux_trace,
+        NUM_SIGMA_VALUES, build_logup_aux_trace, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, ProvideMult},
     utils::current_main,
@@ -95,7 +95,7 @@ pub const COL_MULT_ANDNOT: usize = 0;
 pub const COL_MULT_XOR: usize = 1;
 pub const COL_MULT_RANGE16: usize = 2;
 pub const NUM_MAIN_COLS: usize = 3;
-pub const NUM_AUX_COLS: usize = 1;
+pub const NUM_AUX_COLS: usize = 2;
 /// Width of the preprocessed (verifier-known) data table: `a`, `b`,
 /// `c_andnot`, `c_xor`. See `preprocessed_table`.
 pub const NUM_PREPROCESSED_COLS: usize = 4;
@@ -409,9 +409,10 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column emission shape: column 0 absorbs three self-provides
-/// (AndNot, Xor, Range16) per row.
-const COLUMN_SHAPE: [usize; 1] = [3];
+/// Per-column emission shape: column 0 is the gated running-sum anchor
+/// (the AndNot self-provide alone); column 1 pairs the Xor and Range16
+/// self-provides, keeping each closing constraint at degree ≤ 3.
+const COLUMN_SHAPE: [usize; 2] = [1, 2];
 
 impl<LB> LookupAir<LB> for BytePairLutAir
 where
@@ -457,54 +458,43 @@ where
         let neg_range16: LB::Expr = LB::Expr::ZERO - mult_range16;
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        let batch_deg = Deg { v: 3, u: 3 };
-        let group_deg = batch_deg;
-        let column_deg = group_deg;
+        let provides_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // Three simultaneous self-provides per row — wrapped in a single
-        // `batch` so the cross-multiplication folds them into one
-        // `(N, D)` pair (groups are mutex-only; batches are
-        // simultaneous).
-        builder.next_column(
-            |col| {
-                col.group(
-                    "bpl-self-provides",
-                    |g| {
-                        g.batch(
-                            "bpl-fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "andnot",
-                                    neg_andnot,
-                                    BytePairLutMsg {
-                                        op: andnot_op,
-                                        a: a_value.clone(),
-                                        b: b_value.clone(),
-                                        c: c_andnot,
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "xor",
-                                    neg_xor,
-                                    BytePairLutMsg {
-                                        op: xor_op,
-                                        a: a_value.clone(),
-                                        b: b_value.clone(),
-                                        c: c_xor,
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert("range16", neg_range16, Range16Msg { w }, interaction_deg);
-                            },
-                            batch_deg,
-                        );
-                    },
-                    group_deg,
-                );
-            },
-            column_deg,
+        // col 0: AndNot self-provide alone — the gated running-sum anchor.
+        frac_col!(
+            builder,
+            "bpl-self-provides",
+            provides_deg,
+            (
+                "andnot",
+                neg_andnot,
+                BytePairLutMsg {
+                    op: andnot_op,
+                    a: a_value.clone(),
+                    b: b_value.clone(),
+                    c: c_andnot,
+                },
+                interaction_deg
+            ),
+        );
+        // col 1 (paired, lqd-1): the Xor and Range16 self-provides.
+        frac_col!(
+            builder,
+            "bpl-self-provides",
+            pair_deg,
+            (
+                "xor",
+                neg_xor,
+                BytePairLutMsg {
+                    op: xor_op,
+                    a: a_value.clone(),
+                    b: b_value.clone(),
+                    c: c_xor,
+                },
+                interaction_deg
+            ),
+            ("range16", neg_range16, Range16Msg { w }, interaction_deg),
         );
     }
 }

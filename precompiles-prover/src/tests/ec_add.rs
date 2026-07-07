@@ -605,6 +605,15 @@ fn empty_trace_holds() {
     check_ec_add(&main);
 }
 
+#[test]
+fn log_quotient_degree_matches_design_target() {
+    // Flattened via `frac_col!` into 12 aux columns (col 0 the gated
+    // running-sum anchor alone, cols 8 and 11 each a lone leftover
+    // fraction, the rest each a pair), so every closing constraint stays
+    // at degree ≤ 3 → log_quotient_degree = 1.
+    assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
+}
+
 /// The subset proved and verified for real — `#[ignore]`d (slow in
 /// debug); run explicitly or in release alongside the bench.
 #[test]
@@ -742,8 +751,8 @@ fn ed25519_torsion_forged_as_double_unbalances() {
     // satisfy the native double ties — but the slope pin `2λy ≡ 3x² + a` is
     // unsatisfiable at `y = 0` on this smooth curve (`3x² + a ≠ 0`), so no
     // honest tangent certs exist: double's recorded MACs are absent and
-    // `cancel`'s `y₁ + y₂ ≡ 0` cert dangles. The bus rejects it — exactly the
-    // guard the removed `inv·y ≡ b` MAC used to give, now free.
+    // `cancel`'s `y₁ + y₂ ≡ 0` cert dangles. The bus rejects it — the slope pin
+    // alone supplies the guard, with no `inv·y ≡ b` MAC required.
     let bound = "7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEC";
     let a_w = "2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA984914A144";
     let b_w = "7B425ED097B425ED097B425ED097B425ED097B425ED097B4260B5E9C7710C864";

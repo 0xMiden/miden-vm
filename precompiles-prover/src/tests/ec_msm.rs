@@ -17,6 +17,7 @@ use miden_core::{Felt, utils::Matrix};
 use miden_precompiles::CurveId;
 
 use crate::{
+    ec::msm::EcMsmAir,
     math::{U256, from_hex},
     session::{
         EcNode, Session,
@@ -74,6 +75,16 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
     let claim_q = s.ec_is(&q_pt, &q_pt);
     let root = s.assert_and_fold([claim_g, claim_q]);
     s.finish(root)
+}
+
+#[test]
+fn log_quotient_degree_matches_design_target() {
+    // Flattened via `frac_col!` into 11 aux columns (col 0 the gated
+    // running-sum anchor alone, the rest each a pair of at-most-two
+    // fractions — folding both the flatten and the follow-on singleton
+    // pack into one step), so every closing constraint stays at degree
+    // ≤ 3 → log_quotient_degree = 1.
+    assert_eq!(crate::tests::log_quotient_degree(&EcMsmAir), 1);
 }
 
 #[test]

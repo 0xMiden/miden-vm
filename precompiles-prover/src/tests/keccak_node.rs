@@ -128,14 +128,12 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // 4-aux-column product layout — batches n = 4 put the *ungated* logup
-    // recurrence at degree 5 (denominator product · acc + 1). The natural
-    // last-row σ-closing gates it with `when_transition` (degree-1
-    // `is_transition` selector), tipping the ext-field constraint to degree
-    // 6 → log_quotient_degree 3. (Old σ/n-cyclic form: ungated deg 5 → lqd 2,
-    // at the cost of the now-dropped `inv_n` public input.)
+    // Flattened via `frac_col!` into 9 aux columns (col 0 the gated
+    // running-sum anchor alone, the rest each a pair of at-most-two
+    // fractions), so every closing constraint stays at degree ≤ 3 →
+    // log_quotient_degree = 1.
     let air = KeccakNodeAir;
-    assert_eq!(crate::tests::log_quotient_degree(&air), 3);
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }
 
 // HASH ORACLES

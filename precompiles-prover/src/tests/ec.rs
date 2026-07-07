@@ -168,6 +168,15 @@ fn check_groups(main: &RowMajorMatrix<Felt>) {
     crate::tests::check_local(EcGroupsAir, main);
 }
 
+#[test]
+fn log_quotient_degree_matches_design_target() {
+    // Flattened via `frac_col!` into 5 aux columns (col 0 the gated
+    // running-sum anchor alone, col 1 a pair, cols 2-4 each a lone
+    // degree-3 membership MAC), so every closing constraint stays at
+    // degree ≤ 3 → log_quotient_degree = 1.
+    assert_eq!(crate::tests::log_quotient_degree(&EcPointStoreAir), 1);
+}
+
 fn group_trace_with_pad_row() -> (RowMajorMatrix<Felt>, usize) {
     let mut store = EcStoreRequires::new();
     let mut live_groups = CurveId::ALL.len();

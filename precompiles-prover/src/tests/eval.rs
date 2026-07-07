@@ -173,11 +173,12 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The uint-leaf seam keeps the one-hot node-type gates degree-1, so the
-    // deg-2 `−out_mult` provide still tops col 0 at constraint deg 5 →
-    // log_quotient_degree 2, unchanged from the AND-only chip.
+    // Flattened via `frac_col!` into 16 aux columns (col 0 the gated
+    // running-sum anchor alone, the heavy degree-2-message provides/
+    // consumes each sitting alone, the rest each a pair), so every
+    // closing constraint stays at degree ≤ 3 → log_quotient_degree = 1.
     let air = TranscriptEvalAir;
-    assert_eq!(crate::tests::log_quotient_degree(&air), 2);
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }
 
 // BUILDER
