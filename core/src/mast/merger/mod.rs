@@ -182,7 +182,7 @@ impl MastForestMerger {
             None => {
                 // If no node with a matching fingerprint exists, then the merging node is
                 // unique and we can add it to the merged forest using builders.
-                let new_node_id = self.mast_forest.push_node_builder(remapped_builder)?;
+                let new_node_id = self.mast_forest.push_node(remapped_builder)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);

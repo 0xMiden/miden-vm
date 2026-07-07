@@ -97,50 +97,8 @@ pub enum MastNodeBuilder {
     Split(SplitNodeBuilder),
 }
 
-impl From<BasicBlockNodeBuilder> for MastNodeBuilder {
-    fn from(builder: BasicBlockNodeBuilder) -> Self {
-        Self::BasicBlock(builder)
-    }
-}
-
-impl From<CallNodeBuilder> for MastNodeBuilder {
-    fn from(builder: CallNodeBuilder) -> Self {
-        Self::Call(builder)
-    }
-}
-
-impl From<DynNodeBuilder> for MastNodeBuilder {
-    fn from(builder: DynNodeBuilder) -> Self {
-        Self::Dyn(builder)
-    }
-}
-
-impl From<ExternalNodeBuilder> for MastNodeBuilder {
-    fn from(builder: ExternalNodeBuilder) -> Self {
-        Self::External(builder)
-    }
-}
-
-impl From<JoinNodeBuilder> for MastNodeBuilder {
-    fn from(builder: JoinNodeBuilder) -> Self {
-        Self::Join(builder)
-    }
-}
-
-impl From<LoopNodeBuilder> for MastNodeBuilder {
-    fn from(builder: LoopNodeBuilder) -> Self {
-        Self::Loop(builder)
-    }
-}
-
-impl From<SplitNodeBuilder> for MastNodeBuilder {
-    fn from(builder: SplitNodeBuilder) -> Self {
-        Self::Split(builder)
-    }
-}
-
 impl MastNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary"))]
+    #[cfg(feature = "arbitrary")]
     pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         match self {
             MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest(forest),

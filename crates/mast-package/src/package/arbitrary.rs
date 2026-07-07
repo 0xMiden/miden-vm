@@ -49,7 +49,7 @@ impl proptest::arbitrary::Arbitrary for Package {
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastNodeExt},
+            mast::{BasicBlockNodeBuilder, DenseMastForestBuilder},
             operations::Operation,
         };
         use proptest::prelude::*;
@@ -71,41 +71,56 @@ impl proptest::arbitrary::Arbitrary for Package {
                 }
 
                 // Create a MastForest with actual nodes for the exports
-                let mut mast_forest = Box::new(MastForest::new());
+                let mut builder = DenseMastForestBuilder::new();
                 let mut nodes = Vec::with_capacity(exports.len());
-                for export in exports.iter_mut() {
-                    if let PackageExport::Procedure(export) = export {
-                        let node_id =
-                            BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-                                .add_to_forest(&mut mast_forest)
-                                .unwrap();
-                        // Add the node to the forest roots if it's not already there
-                        mast_forest.make_root(node_id);
-                        nodes.push(node_id);
+                for (export_index, export) in exports.iter().enumerate() {
+                    if let PackageExport::Procedure(_) = export {
+                        let node_id = builder
+                            .push_node(BasicBlockNodeBuilder::new(vec![
+                                Operation::Add,
+                                Operation::Mul,
+                            ]))
+                            .unwrap();
+                        builder.mark_root(node_id);
+                        nodes.push((export_index, node_id));
+                    }
+                }
+
+                // Generate an entrypoint export if needed
+                let entrypoint = if kind.is_executable() {
+                    let node_id = builder
+                        .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul]))
+                        .unwrap();
+                    builder.mark_root(node_id);
+                    let path: Arc<Path> =
+                        Path::EXEC.join(ast::ProcedureName::MAIN_PROC_NAME).into();
+                    Some((path, node_id))
+                } else {
+                    None
+                };
+
+                let (mast_forest, remapping) =
+                    builder.finish_with_id_map().expect("generated package forest should be valid");
+
+                for (export_index, node_id) in nodes {
+                    let node_id = remapping.get(node_id).expect("export node should be retained");
+                    if let PackageExport::Procedure(export) = &mut exports[export_index] {
                         export.node = Some(node_id);
                         export.digest = mast_forest[node_id].digest();
                     }
                 }
 
-                // Generate an entrypoint export if needed
-                if kind.is_executable() {
-                    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-                        .add_to_forest(&mut mast_forest)
-                        .unwrap();
-                    // Add the node to the forest roots if it's not already there
-                    mast_forest.make_root(node_id);
-                    nodes.push(node_id);
-                    let path: Arc<Path> =
-                        Path::EXEC.join(ast::ProcedureName::MAIN_PROC_NAME).into();
+                if let Some((path, node_id)) = entrypoint {
+                    let node_id = remapping.get(node_id).expect("entrypoint should be retained");
                     exports.push(PackageExport::Procedure(ProcedureExport::new(
                         path,
                         Some(node_id),
                         mast_forest[node_id].digest(),
                         None,
                     )));
-                }
+                };
 
-                let mast_forest = Arc::from(mast_forest);
+                let mast_forest = Arc::new(mast_forest);
                 Package::create(
                     name.clone(),
                     version.clone(),

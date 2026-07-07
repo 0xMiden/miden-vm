@@ -648,7 +648,8 @@ impl MastForest {
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
         for live_node_builder in node_builders {
-            live_node_builder.remap_children(id_remappings).add_to_forest(self).unwrap();
+            let node = live_node_builder.remap_children(id_remappings).build_linked().unwrap();
+            self.nodes.push(node).unwrap();
         }
     }
 
