@@ -20,7 +20,7 @@
 //! With the store holding `bound = p − 1` (so any modulus, incl. 2²⁵⁶, stays
 //! representable), the looked-up value is `bound` and the `+1` becomes a `−k`
 //! correction at `β⁰`. Verified at the LogUp challenge `β` by a single `id`
-//! ext-field register (aux col 7, excluded from σ by `num_logup_cols = 7`):
+//! ext-field register (aux col 5, excluded from σ by `num_logup_cols = 5`):
 //!
 //! ```text
 //! a(β) + b(β) − c(β) − k·bound(β) − k + (β − t)·Γ(β) = 0,    t = 2³²
@@ -76,10 +76,10 @@
 //!
 //! | row | role | cells 0–7  | cells 8–14                                   |
 //! |-----|------|------------|-----------------------------------------------|
-//! | 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄                                       |
+//! | 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄ (13–14 spare)                         |
 //! | 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12, `w`@13 `wS`@14 |
-//! | 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12            |
-//! | 3   | `p`  | p's limbs  | `k`@8, γ⁻₆@9, `mult`@12 (10–11, 13–14 spare)   |
+//! | 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12, `b_on`@13 (14 spare) |
+//! | 3   | `p`  | p's limbs  | `k`@8, `c_on`@10, γ⁻₆@9, `mult`@12 (11, 13–14 spare) |
 
 pub mod trace;
 
@@ -207,6 +207,16 @@ pub const CELL_D_W: usize = 13;
 /// (`nz · (wS − 1) = 0`) reads one degree-1 cell instead of multiplying `w`
 /// and `S` inline at the point that also carries `nz` and `b_sel`.
 pub const CELL_D_WS: usize = 14;
+/// C-row cell holding `b_on = act·(1 − is_b_zero)`, the witnessed activity
+/// gate for the `b` `UintVal` consumes: `sel[ROW_B]·b_on` (read from `b`'s
+/// next row, i.e. here) is degree 2, letting the two gated `b` consumes pair
+/// with the `c` consumes in one column instead of sitting alone at degree 3
+/// (`sel·(1−is_zero)·act`). Spare on the C row (unused by `is_c_zero`).
+pub const CELL_B_ON: usize = 13;
+/// P-row cell holding `c_on = act·(1 − is_c_zero)`, the same witnessed
+/// activity gate for the `c` `UintVal` consumes (read from `c`'s next row).
+/// Spare on the P row (unused by `k` / the provide mult).
+pub const CELL_C_ON: usize = 10;
 /// P-row cell holding the boolean reduction bit `k`.
 pub const CELL_K: usize = CELL_FLAG;
 /// P-row cell holding the `UintAdd` provide multiplicity = consumer count
@@ -258,19 +268,21 @@ pub const GAMMA_NEG_SLOTS: [(usize, usize); NUM_GAMMA] = [
     (ROW_P, 9),
 ];
 
-// Aux layout (FLATTENED to lqd 1): cols 0..7 = LogUp fraction columns,
-// one/two fractions each so every closing constraint is degree ≤ 3; col 7
-// = the Schwartz–Zippel `id` register (excluded from σ via
-// num_logup_cols = 7). The four gated b/c consumes carry degree-3
-// multiplicities (`flag·(1−is_zero)·act`), so each sits alone; the
-// degree-2 consumes/provide pair up; col 0 (the running sum) hosts a
-// single degree-2 fraction (the gate adds +1, so a degree-3 multiplicity
-// there would bust the budget). Width is disregarded — the point is to
-// drop every per-AIR quotient coset to ×2 (research/logup-flatten).
-const NUM_LOGUP_COLS: usize = 7;
-const REGISTER_COL: usize = 7;
-const AUX_WIDTH: usize = 8;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 1, 1, 1];
+// Aux layout (FLATTENED to lqd 1): cols 0..5 = LogUp fraction columns, two
+// fractions each (col 0 a single one) so every closing constraint is
+// degree ≤ 3; col 5 = the Schwartz–Zippel `id` register (excluded from σ
+// via num_logup_cols = 5). The gated b/c consumes carry a witnessed
+// activity gate `on = act·(1−is_zero)` in a spare cell on the next row
+// (see [`CELL_B_ON`] / [`CELL_C_ON`]), so their multiplicity `sel·on` is
+// degree 2 and the four pair into two columns, like the degree-2 a/p
+// consumes and the provide; col 0 (the running sum) hosts a single
+// degree-2 fraction (the gate adds +1, so a degree-3 multiplicity there
+// would bust the budget). Width is disregarded — the point is to drop
+// every per-AIR quotient coset to ×2.
+const NUM_LOGUP_COLS: usize = 5;
+const REGISTER_COL: usize = 5;
+const AUX_WIDTH: usize = 6;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -344,7 +356,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         }
         let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
-        // `id` register on aux col 7.
+        // `id` register on aux col 5.
         let id: AB::ExprEF =
             current_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
         let id_next: AB::ExprEF =
@@ -439,6 +451,18 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
         builder.assert_zero(b_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
+        // b_on / c_on host act·(1 − is_zero): the witnessed activity gate
+        // that lets the gated b/c UintVal consumes carry a degree-2
+        // multiplicity `sel·on` instead of `sel·(1−is_zero)·act` (degree 3).
+        // Pinned from the row that hosts is_zero, read by the LogUp side
+        // from the *next* row (b_on lives on b's next row — the c row;
+        // c_on lives on c's next row — the p row).
+        let b_on_next: AB::Expr = next[CELL_B_ON].into();
+        builder
+            .assert_zero(b_sel.clone() * (b_on_next - act.clone() * (AB::Expr::ONE - is_b_zero)));
+        let c_on_next: AB::Expr = next[CELL_C_ON].into();
+        builder.assert_zero(c_sel * (c_on_next - act * (AB::Expr::ONE - is_c_zero)));
+
         // Nonzero certificate: when `nz = 1`, this block additionally
         // certifies `b ≠ 0` — the disequality cert the EC group law's
         // generic-add case consumes in place of a full inverse modmul.
@@ -485,13 +509,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
 // ================================================================================================
 
 /// Emit one flattened LogUp column carrying a small batch of UintVal
-/// consumes (multiplicity `flag·act`). With ≤ 2 degree-2 consumes (or one
-/// degree-3 gated consume) per column, every closing constraint stays at
-/// degree ≤ 3 → lqd 1. `col_deg` is an ignored hint on the constraint path.
+/// consumes at their full multiplicities. With ≤ 2 degree-2 consumes per
+/// column, every closing constraint stays at degree ≤ 3 → lqd 1. `col_deg`
+/// is an ignored hint on the constraint path.
 fn consume_column<LB>(
     builder: &mut LB,
     bound_ptr: &LB::Expr,
-    act: &LB::Expr,
     consumes: Vec<(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 4], Deg)>,
     col_deg: Deg,
 ) where
@@ -506,10 +529,10 @@ fn consume_column<LB>(
                         "frac",
                         LB::Expr::ONE,
                         |b| {
-                            for (flag, ptr, offset, msg_limbs, deg) in consumes {
+                            for (mult, ptr, offset, msg_limbs, deg) in consumes {
                                 b.insert(
                                     "consume-uintval",
-                                    flag * act.clone(),
+                                    mult,
                                     UintValMsg {
                                         ptr,
                                         bound_ptr: bound_ptr.clone(),
@@ -552,6 +575,7 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
         let sel: [LB::Expr; NUM_PERIODIC] = {
             let p = builder.periodic_values();
@@ -569,71 +593,90 @@ where
         // The two 4×32 `UintVal` halves of the value on this row: the lo
         // half (cells 0..4, offset 0) and the hi half (cells 4..8, offset
         // 1). Both operand halves consume from the same row (a, b, c and p
-        // each take one row), so no next-row read is needed.
+        // each take one row), so no next-row read is needed for the values
+        // themselves.
         let lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
         let hi: [LB::Expr; 4] = array::from_fn(|k| local[4 + k].into());
 
-        // When is_c_zero (this row's flag cell), c is the unstored zero:
-        // suppress its UintVal consumes (deg-3 multiplicities with the act
-        // gate — inside the budget). is_b_zero suppresses the b consumes
-        // the same way.
-        let c_active: LB::Expr = LB::Expr::ONE - local[CELL_IS_C_ZERO].into();
-        let b_active: LB::Expr = LB::Expr::ONE - local[CELL_IS_B_ZERO].into();
+        // The gated b/c consumes read the witnessed activity gate
+        // `on = act·(1 − is_zero)` from the *next* row: b_on lives on b's
+        // next row (the c row), c_on on c's next row (the p row). `sel·on`
+        // is degree 2 (the pinned `on` folds the act gate in), so the two
+        // gated consumes pair per fraction column instead of sitting alone
+        // at degree 3 (`sel·(1−is_zero)·act`).
+        let b_on_next: LB::Expr = next[CELL_B_ON].into();
+        let c_on_next: LB::Expr = next[CELL_C_ON].into();
 
         let consume_deg = Deg { v: 2, u: 1 };
-        let gated_consume_deg = Deg { v: 3, u: 1 };
         let provide_deg = Deg { v: 2, u: 1 };
         // Flattened columns hold ≤ 2 fractions; the mixed p-hi+provide column
         // is a 2-denominator batch (degree-3 numerator, degree-2 denominator).
         let cp_col_deg = Deg { v: 3, u: 2 };
 
-        // Each operand consumes both `UintVal` halves from its own row. The
-        // a/p multiplicities are `sel·act`; the gated b/c halves carry
-        // `sel·(1−is_zero)·act` (degree 3). (flag, ptr, offset, limbs, deg).
-        let a_lo = (sel[ROW_A].clone(), a_ptr.clone(), LB::Expr::ZERO, lo.clone(), consume_deg);
-        let a_hi = (sel[ROW_A].clone(), a_ptr.clone(), LB::Expr::ONE, hi.clone(), consume_deg);
+        // Each operand consumes both `UintVal` halves from its own row. Every
+        // multiplicity is degree 2: the a/p halves carry `sel·act`, the
+        // gated b/c halves `sel·on`. (mult, ptr, offset, limbs, deg).
+        let a_lo = (
+            sel[ROW_A].clone() * act.clone(),
+            a_ptr.clone(),
+            LB::Expr::ZERO,
+            lo.clone(),
+            consume_deg,
+        );
+        let a_hi = (
+            sel[ROW_A].clone() * act.clone(),
+            a_ptr.clone(),
+            LB::Expr::ONE,
+            hi.clone(),
+            consume_deg,
+        );
         let b_lo = (
-            sel[ROW_B].clone() * b_active.clone(),
+            sel[ROW_B].clone() * b_on_next.clone(),
             b_ptr.clone(),
             LB::Expr::ZERO,
             lo.clone(),
-            gated_consume_deg,
+            consume_deg,
         );
         let b_hi = (
-            sel[ROW_B].clone() * b_active,
+            sel[ROW_B].clone() * b_on_next,
             b_ptr.clone(),
             LB::Expr::ONE,
             hi.clone(),
-            gated_consume_deg,
+            consume_deg,
         );
         let c_lo = (
-            sel[ROW_C].clone() * c_active.clone(),
+            sel[ROW_C].clone() * c_on_next.clone(),
             c_ptr.clone(),
             LB::Expr::ZERO,
             lo.clone(),
-            gated_consume_deg,
+            consume_deg,
         );
         let c_hi = (
-            sel[ROW_C].clone() * c_active,
+            sel[ROW_C].clone() * c_on_next,
             c_ptr.clone(),
             LB::Expr::ONE,
             hi.clone(),
-            gated_consume_deg,
+            consume_deg,
         );
-        let p_lo = (sel[ROW_P].clone(), bound_ptr.clone(), LB::Expr::ZERO, lo, consume_deg);
-        let p_hi = (sel[ROW_P].clone(), bound_ptr.clone(), LB::Expr::ONE, hi, consume_deg);
+        let p_lo = (
+            sel[ROW_P].clone() * act.clone(),
+            bound_ptr.clone(),
+            LB::Expr::ZERO,
+            lo,
+            consume_deg,
+        );
+        let p_hi = (sel[ROW_P].clone() * act, bound_ptr.clone(), LB::Expr::ONE, hi, consume_deg);
 
-        // Flattened LogUp (lqd 1), one/two fractions per column. The four
-        // gated b/c consumes carry degree-3 multiplicities
-        // (`flag·(1−is_zero)·act`) so each sits alone; the degree-2 a/p
-        // consumes pair; the UintAdd provide rides with p-hi; col 0 (the
+        // Flattened LogUp (lqd 1), one/two fractions per column. The a/p
+        // consumes pair, the UintAdd provide rides with p-hi, and the four
+        // gated b/c consumes pair (degree-2 via `sel·on`); col 0 (the
         // running sum) hosts a single degree-2 consume (the +1 gate forbids
         // a degree-3 one there).
 
         // col 0: a-lo (running sum, one degree-2 consume).
-        consume_column(builder, &bound_ptr, &act, vec![a_lo], consume_deg);
+        consume_column(builder, &bound_ptr, vec![a_lo], consume_deg);
         // col 1: a-hi + p-lo (two degree-2 consumes).
-        consume_column(builder, &bound_ptr, &act, vec![a_hi, p_lo], consume_deg);
+        consume_column(builder, &bound_ptr, vec![a_hi, p_lo], consume_deg);
         // col 2: p-hi consume + the UintAdd provide (mixed batch, both deg-2).
         builder.next_column(
             |col| {
@@ -644,10 +687,10 @@ where
                             "pp",
                             LB::Expr::ONE,
                             |b| {
-                                let (flag, ptr, offset, msg_limbs, deg) = p_hi;
+                                let (mult, ptr, offset, msg_limbs, deg) = p_hi;
                                 b.insert(
                                     "consume-uintval",
-                                    flag * act.clone(),
+                                    mult,
                                     UintValMsg {
                                         ptr,
                                         bound_ptr: bound_ptr.clone(),
@@ -677,10 +720,9 @@ where
             },
             cp_col_deg,
         );
-        // cols 3..6: the gated b/c consumes, one per column (degree-3 mult).
-        consume_column(builder, &bound_ptr, &act, vec![b_lo], gated_consume_deg);
-        consume_column(builder, &bound_ptr, &act, vec![b_hi], gated_consume_deg);
-        consume_column(builder, &bound_ptr, &act, vec![c_lo], gated_consume_deg);
-        consume_column(builder, &bound_ptr, &act, vec![c_hi], gated_consume_deg);
+        // col 3: b-lo + c-lo (two degree-2 gated consumes).
+        consume_column(builder, &bound_ptr, vec![b_lo, c_lo], consume_deg);
+        // col 4: b-hi + c-hi (two degree-2 gated consumes).
+        consume_column(builder, &bound_ptr, vec![b_hi, c_hi], consume_deg);
     }
 }
