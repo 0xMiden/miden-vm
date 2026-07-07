@@ -36,6 +36,7 @@
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
 //! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
+//! | 21    | `XorRol64`     | `bitwise64::Bitwise64Air`     | `(a_lo, a_hi, b_lo, b_hi, c_lo, c_hi, k)` — fused `c = rol_64(a ⊕ b, log2(k))`; provided once per θ-apply+ρ pair (from the pair's LOGIC row, reading the ROL row's output) so the keccak round consumes one tuple instead of `Logic64 + Rol64` and drops its `r` columns |
 //!
 //! ## Adding a new relation
 //!
@@ -73,12 +74,13 @@ pub enum BusId {
     MsmTerm = 18,
     MsmExpr = 19,
     MsmClaimTerm = 20,
+    XorRol64 = 21,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
 /// exactly one prefix per [`BusId`] variant.
-pub const NUM_BUS_IDS: usize = 21;
+pub const NUM_BUS_IDS: usize = 22;
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
