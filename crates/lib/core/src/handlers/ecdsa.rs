@@ -15,8 +15,9 @@
 //! During verification, the [`PrecompileVerifier`] receives the stored request data (public key,
 //! digest, signature), re-performs the ECDSA verification, and generates a commitment
 //! `P2(P2(P2(pk) || P2(digest)) || P2(sig))`, where P2 stands for Poseidon2, with a tag containing
-//! the verification result that validates the computation was performed correctly. Here `pk`,
-//! `digest`, and `sig` are hashed as u32‑packed field elements before being merged.
+//! the verification result that validates the computation was performed correctly. Here `pk` is
+//! hashed as native coordinate elements; `digest` and `sig` are hashed as u32‑packed field elements
+//! before being merged.
 //!
 //! ### Commitment Tag Format
 //! Each request is tagged as `[event_id, result, 0, 0]` where `result` is 1 for valid signatures
@@ -24,7 +25,7 @@
 //! matches the verification-time result.
 //!
 //! ## Data Format
-//! - **Public Key**: 33 bytes (compressed secp256k1 point)
+//! - **Public Key**: 64 bytes (`qx_le_u32[8] || qy_le_u32[8]`) packed as 16 u32 limbs
 //! - **Message Digest**: 32 bytes (Keccak256 hash of the message)
 //! - **Signature**: 65 bytes (implementation‑defined serialization used by
 //!   `miden_crypto::dsa::ecdsa_k256_keccak::Signature`). When packed into u32 elements for VM
@@ -38,10 +39,10 @@ use miden_core::{
     field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-    utils::bytes_to_packed_u32_elements,
+    utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
 use miden_crypto::{
-    ZERO,
+    SequentialCommit, ZERO,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
     hash::poseidon2::Poseidon2,
 };
@@ -57,7 +58,8 @@ use crate::handlers::read_memory_packed_u32;
 pub const ECDSA_VERIFY_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::dsa::ecdsa_k256_keccak::verify");
 
-const PUBLIC_KEY_LEN_BYTES: usize = 33;
+const PUBLIC_KEY_LEN_FELTS: usize = 16;
+const PUBLIC_KEY_LEN_BYTES: usize = PUBLIC_KEY_LEN_FELTS * 4;
 const MESSAGE_DIGEST_LEN_BYTES: usize = 32;
 const SIGNATURE_LEN_BYTES: usize = 65; // r (32) + s (32) + v (1)
 
@@ -95,7 +97,7 @@ impl EventHandler for EcdsaPrecompile {
             let data_type = DataType::PublicKey;
             let bytes = read_memory_packed_u32(process, ptr_pk, PUBLIC_KEY_LEN_BYTES)
                 .map_err(|source| EcdsaError::ReadError { data_type, source })?;
-            PublicKey::read_from_bytes(&bytes)
+            public_key_from_native_bytes(&bytes)
                 .map_err(|source| EcdsaError::DeserializeError { data_type, source })?
         };
 
@@ -128,8 +130,8 @@ impl PrecompileVerifier for EcdsaPrecompile {
     /// Receives the serialized request data (public key || digest || signature) stored during
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
     /// generates a commitment `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
-    /// `[event_id, result, 0, 0]` that validates against the execution trace. Each of `pk`,
-    /// `digest`, and `sig` is first converted to u32‑packed field elements before hashing.
+    /// `[event_id, result, 0, 0]` that validates against the execution trace. `pk` is hashed as
+    /// native coordinate elements.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let request = EcdsaRequest::read_from_bytes(calldata)?;
         Ok(request.as_precompile_commitment())
@@ -142,7 +144,7 @@ impl PrecompileVerifier for EcdsaPrecompile {
 /// message digest, and signature. It is used during both execution (via the event handler) and
 /// verification (via the precompile verifier).
 pub struct EcdsaRequest {
-    /// secp256k1 public key (33 bytes, compressed)
+    /// secp256k1 public key
     pk: PublicKey,
     /// Message digest (32 bytes, typically Keccak256 hash)
     digest: [u8; MESSAGE_DIGEST_LEN_BYTES],
@@ -154,7 +156,7 @@ impl EcdsaRequest {
     /// Creates a new ECDSA verification request.
     ///
     /// # Arguments
-    /// * `pk` - The secp256k1 public key (33 bytes, compressed)
+    /// * `pk` - The secp256k1 public key
     /// * `digest` - The message digest (32 bytes)
     /// * `sig` - The ECDSA signature
     pub fn new(pk: PublicKey, digest: [u8; MESSAGE_DIGEST_LEN_BYTES], sig: Signature) -> Self {
@@ -198,7 +200,7 @@ impl EcdsaRequest {
     ///
     /// The commitment is `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
     /// `[event_id, result, 0, 0]`, where `result` is 1 for valid signatures and 0 for
-    /// invalid ones. Each component is hashed over u32‑packed field elements.
+    /// invalid ones. The public key commitment is `PublicKey::to_commitment()`.
     ///
     /// This is called by the [`PrecompileVerifier`] at verification time and must match
     /// the commitment generated during execution.
@@ -207,11 +209,7 @@ impl EcdsaRequest {
         let result = Felt::from_bool(self.result());
         let tag = [ECDSA_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
-        // Convert serialized bytes to field elements and hash
-        let pk_comm = {
-            let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
-            Poseidon2::hash_elements(&felts)
-        };
+        let pk_comm = self.pk.to_commitment();
         let digest_comm = {
             // `digest` is a 32‑byte array; hash its u32‑packed representation
             let felts = bytes_to_packed_u32_elements(&self.digest);
@@ -230,7 +228,7 @@ impl EcdsaRequest {
 
 impl Serializable for EcdsaRequest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.pk.write_into(target);
+        target.write_bytes(&packed_u32_elements_to_bytes(&self.pk.to_elements()));
         self.digest.write_into(target);
         self.sig.write_into(target);
     }
@@ -238,7 +236,8 @@ impl Serializable for EcdsaRequest {
 
 impl Deserializable for EcdsaRequest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let pk = PublicKey::read_from(source)?;
+        let pk_bytes: [u8; PUBLIC_KEY_LEN_BYTES] = source.read_array()?;
+        let pk = public_key_from_native_bytes(&pk_bytes)?;
         let digest = source.read_array()?;
         let sig = Signature::read_from(source)?;
         Ok(Self { pk, digest, sig })
@@ -248,6 +247,26 @@ impl Deserializable for EcdsaRequest {
 impl From<EcdsaRequest> for PrecompileRequest {
     fn from(request: EcdsaRequest) -> Self {
         request.as_precompile_request()
+    }
+}
+
+fn public_key_from_native_bytes(bytes: &[u8]) -> Result<PublicKey, DeserializationError> {
+    if bytes.len() != PUBLIC_KEY_LEN_BYTES {
+        return Err(DeserializationError::InvalidValue("invalid public key length".into()));
+    }
+
+    let mut compressed = [0u8; 33];
+    compressed[0] = if bytes[32] & 1 == 0 { 0x02 } else { 0x03 };
+    for (dst, src) in compressed[1..].iter_mut().zip(bytes[..32].iter().rev()) {
+        *dst = *src;
+    }
+
+    let pk = PublicKey::read_from_bytes(&compressed)?;
+    let pk_bytes = packed_u32_elements_to_bytes(&pk.to_elements());
+    if pk_bytes.as_slice() == bytes {
+        Ok(pk)
+    } else {
+        Err(DeserializationError::InvalidValue("invalid public key coordinates".into()))
     }
 }
 

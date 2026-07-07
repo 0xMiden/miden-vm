@@ -21,7 +21,10 @@ pub mod ecdsa_k256_keccak {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
-    use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey};
+    use miden_crypto::{
+        SequentialCommit,
+        dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
+    };
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
     /// associated public key into a vector of field elements in the format expected by
@@ -37,15 +40,14 @@ pub mod ecdsa_k256_keccak {
     /// Encodes the provided public key and signature into a vector of field elements in the format
     /// expected by `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
     ///
-    /// 1. The compressed secp256k1 public key encoded as 9 packed-u32 felts (33 bytes total).
-    /// 2. The ECDSA signature encoded as 17 packed-u32 felts (66 bytes total).
+    /// 1. The secp256k1 public key coordinates as `qx_le_u32[8] || qy_le_u32[8]` (16 felts).
+    /// 2. The ECDSA signature encoded as 17 packed-u32 felts (65 bytes total, padded to 17 felts).
     ///
-    /// The two chunks are concatenated as `[PK[9] || SIG[17]]` so they can be streamed straight to
+    /// The two chunks are concatenated as `[PK[16] || SIG[17]]` so they can be streamed straight to
     /// the advice provider before invoking `ecdsa_k256_keccak::verify`.
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         let mut out = Vec::new();
-        let pk_bytes = pk.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&pk_bytes));
+        out.extend(pk.to_elements());
         let sig_bytes = sig.to_bytes();
         out.extend(bytes_to_packed_u32_elements(&sig_bytes));
         out
