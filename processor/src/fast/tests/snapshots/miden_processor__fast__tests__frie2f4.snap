@@ -1,6 +1,6 @@
 ---
 source: processor/src/fast/tests/mod.rs
-assertion_line: 393
+assertion_line: 1472
 expression: stack_outputs
 ---
 StackOutputs {
@@ -9,17 +9,17 @@ StackOutputs {
         10542705566309791467,
         15811494916641072287,
         7905747458320536148,
-        0,
         1,
         0,
         0,
         49,
-        18446462594437873665,
+        9,
         9,
         2401,
         9,
         14492051010740125224,
         6668243544126892022,
+        9,
         0,
     ],
 }
