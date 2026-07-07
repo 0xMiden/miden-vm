@@ -50,7 +50,7 @@ use crate::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
@@ -159,25 +159,19 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Four aux columns, each with one group / one batch:
+/// Nine aux columns, flattened via `frac_col!` so every closing
+/// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
-/// - col 0: running σ + `KeccakSponge` provide + `Binding(_, True, 0, 0)` provide + `ChunkChain`
-///   consume + `Poseidon2Out(H_input_chunks)` consume (4 inserts).
-/// - col 1: four `Memory64` D-limb consumes (one per digest lane).
-/// - col 2: digest-chunks P2 perm — three `Poseidon2In` consumes (rate0, rate1, cap) + one
-///   `Poseidon2Out(H_digest_chunks)` consume.
-/// - col 3: keccak-node P2 perm — three `Poseidon2In` consumes + one `Poseidon2Out(H_keccak)`
-///   consume.
-///
-/// All cols keep mults at degree ≤ 1 (× `act` or `out_mult`). The
-/// ungated fraction columns (1, 2, 3) land at `4 + 1 = 5`, but col 0
-/// hosts the σ-closing, whose last-row close is gated by `is_transition`
-/// / `is_last_row` (degree-1 selectors), so its batch of 4 lands at
-/// `4 + 2 = 6`. Max constraint deg 6 → `log_quotient_degree = 3` (was
-/// deg 5 → lqd 2 under the older ungated σ/n form).
-pub const NUM_AUX_COLS: usize = 4;
+/// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
+/// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
+/// - col 2: `Poseidon2Out(H_input_chunks)` consume alone (no partner left to pair).
+/// - col 3/4: the four `Memory64` D-limb consumes, paired.
+/// - col 5/6: digest-chunks P2 perm — `Poseidon2In` rate0+rate1, then cap +
+///   `Poseidon2Out(H_digest_chunks)`.
+/// - col 7/8: keccak-node P2 perm — `Poseidon2In` rate0+rate1, then cap + `Poseidon2Out(H_keccak)`.
+pub const NUM_AUX_COLS: usize = 9;
 
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [4, 4, 4, 4];
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -375,237 +369,193 @@ where
         let d_rate1 = [d[4].clone(), d[5].clone(), d[6].clone(), d[7].clone()];
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        // All aux columns: 1 batch of 4 inserts, each mult deg 1
-        // (× act). d = 4, n = 4. Ungated fraction columns (1, 2, 3)
-        // land at max(1 + 4, 4) = 5; col 0 carries the σ-closing's
-        // `is_transition` / `is_last_row` gate (+1 over the old ungated
-        // σ/n form), so it lands at 6. Max constraint deg 6 →
-        // log_quotient_degree = 3.
-        let aux_deg = Deg { v: 4, u: 4 };
+        let provides_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // ---- col 0: KS + Binding + ChunkChain + P2Out(H_input_chunks) ----
-        builder.next_column(
-            |col| {
-                col.group(
-                    "handshake-and-chunks-digest",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "ks-request",
-                                    neg_act.clone(),
-                                    KeccakSpongeMsg {
-                                        sponge_seq_id: local[COL_SPONGE_SEQ_ID_HEAD].into(),
-                                        chunk_ptr: chunk_ptr_head,
-                                        len_bytes: len_bytes.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "binding-truth",
-                                    neg_out_mult,
-                                    BindingMsg::truth(h_keccak.clone()),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "chunk-chain",
-                                    pos_act.clone(),
-                                    ChunkChainMsg {
-                                        chunk_seq_id_head: chunk_seq_id_head.clone(),
-                                        perm_seq_id_head: perm_seq_id_chunks,
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2out-h-input-chunks",
-                                    pos_act.clone(),
-                                    Poseidon2OutMsg {
-                                        perm_seq_id: perm_seq_id_chunks_tail,
-                                        digest: h_input_chunks.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            aux_deg,
-                        );
-                    },
-                    aux_deg,
-                );
-            },
-            aux_deg,
+        // col 0: KeccakSponge request alone — the gated running-sum anchor.
+        frac_col!(
+            builder,
+            "handshake-and-chunks-digest",
+            provides_deg,
+            (
+                "ks-request",
+                neg_act.clone(),
+                KeccakSpongeMsg {
+                    sponge_seq_id: local[COL_SPONGE_SEQ_ID_HEAD].into(),
+                    chunk_ptr: chunk_ptr_head,
+                    len_bytes: len_bytes.clone(),
+                },
+                interaction_deg
+            ),
+        );
+        // col 1 (paired, lqd-1): Binding truth provide + ChunkChain consume.
+        frac_col!(
+            builder,
+            "handshake-and-chunks-digest",
+            pair_deg,
+            (
+                "binding-truth",
+                neg_out_mult,
+                BindingMsg::truth(h_keccak.clone()),
+                interaction_deg
+            ),
+            (
+                "chunk-chain",
+                pos_act.clone(),
+                ChunkChainMsg {
+                    chunk_seq_id_head: chunk_seq_id_head.clone(),
+                    perm_seq_id_head: perm_seq_id_chunks,
+                },
+                interaction_deg
+            ),
+        );
+        // col 2: Poseidon2Out(H_input_chunks) consume alone (no partner
+        // left to pair).
+        frac_col!(
+            builder,
+            "handshake-and-chunks-digest",
+            provides_deg,
+            (
+                "p2out-h-input-chunks",
+                pos_act.clone(),
+                Poseidon2OutMsg {
+                    perm_seq_id: perm_seq_id_chunks_tail,
+                    digest: h_input_chunks.clone(),
+                },
+                interaction_deg
+            ),
         );
 
-        // ---- col 1: 4 Memory64 D-limb consumes -----------------
+        // ---- col 3/4: 4 Memory64 D-limb consumes, paired -------
         let addr_lane =
             |j: u8| -> LB::Expr { digest_addr_base.clone() + LB::Expr::from(Felt::from(j)) };
-        builder.next_column(
-            |col| {
-                col.group(
-                    "memory64-d-limbs",
-                    |g| {
-                        g.batch(
-                            "lanes",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "d-lane-0",
-                                    pos_act_x2.clone(),
-                                    Memory64Msg {
-                                        addr: addr_lane(0),
-                                        lo: d[0].clone(),
-                                        hi: d[1].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "d-lane-1",
-                                    pos_act_x2.clone(),
-                                    Memory64Msg {
-                                        addr: addr_lane(1),
-                                        lo: d[2].clone(),
-                                        hi: d[3].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "d-lane-2",
-                                    pos_act_x2.clone(),
-                                    Memory64Msg {
-                                        addr: addr_lane(2),
-                                        lo: d[4].clone(),
-                                        hi: d[5].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "d-lane-3",
-                                    pos_act_x2,
-                                    Memory64Msg {
-                                        addr: addr_lane(3),
-                                        lo: d[6].clone(),
-                                        hi: d[7].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            aux_deg,
-                        );
-                    },
-                    aux_deg,
-                );
-            },
-            aux_deg,
+        frac_col!(
+            builder,
+            "memory64-d-limbs",
+            pair_deg,
+            (
+                "d-lane-0",
+                pos_act_x2.clone(),
+                Memory64Msg {
+                    addr: addr_lane(0),
+                    lo: d[0].clone(),
+                    hi: d[1].clone()
+                },
+                interaction_deg
+            ),
+            (
+                "d-lane-1",
+                pos_act_x2.clone(),
+                Memory64Msg {
+                    addr: addr_lane(1),
+                    lo: d[2].clone(),
+                    hi: d[3].clone()
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "memory64-d-limbs",
+            pair_deg,
+            (
+                "d-lane-2",
+                pos_act_x2.clone(),
+                Memory64Msg {
+                    addr: addr_lane(2),
+                    lo: d[4].clone(),
+                    hi: d[5].clone()
+                },
+                interaction_deg
+            ),
+            (
+                "d-lane-3",
+                pos_act_x2,
+                Memory64Msg {
+                    addr: addr_lane(3),
+                    lo: d[6].clone(),
+                    hi: d[7].clone()
+                },
+                interaction_deg
+            ),
         );
 
-        // ---- col 2: digest-chunks P2 perm — 3 P2In + 1 P2Out ------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "digest-chunks-p2",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "p2in-rate0",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::rate0(
-                                        perm_seq_id_digest_chunks.clone(),
-                                        d_rate0,
-                                    ),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2in-rate1",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::rate1(
-                                        perm_seq_id_digest_chunks.clone(),
-                                        d_rate1,
-                                    ),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2in-cap",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::cap(
-                                        perm_seq_id_digest_chunks.clone(),
-                                        cap_digest_chunks,
-                                    ),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2out-h-digest-chunks",
-                                    pos_act.clone(),
-                                    Poseidon2OutMsg {
-                                        perm_seq_id: perm_seq_id_digest_chunks,
-                                        digest: h_digest_chunks.clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            aux_deg,
-                        );
-                    },
-                    aux_deg,
-                );
-            },
-            aux_deg,
+        // ---- col 5/6: digest-chunks P2 perm — 3 P2In + 1 P2Out, paired ----
+        frac_col!(
+            builder,
+            "digest-chunks-p2",
+            pair_deg,
+            (
+                "p2in-rate0",
+                pos_act.clone(),
+                Poseidon2InMsg::rate0(perm_seq_id_digest_chunks.clone(), d_rate0),
+                interaction_deg
+            ),
+            (
+                "p2in-rate1",
+                pos_act.clone(),
+                Poseidon2InMsg::rate1(perm_seq_id_digest_chunks.clone(), d_rate1),
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "digest-chunks-p2",
+            pair_deg,
+            (
+                "p2in-cap",
+                pos_act.clone(),
+                Poseidon2InMsg::cap(perm_seq_id_digest_chunks.clone(), cap_digest_chunks),
+                interaction_deg
+            ),
+            (
+                "p2out-h-digest-chunks",
+                pos_act.clone(),
+                Poseidon2OutMsg {
+                    perm_seq_id: perm_seq_id_digest_chunks,
+                    digest: h_digest_chunks.clone(),
+                },
+                interaction_deg
+            ),
         );
 
-        // ---- col 3: keccak-node P2 perm — 3 P2In + 1 P2Out -----
-        builder.next_column(
-            |col| {
-                col.group(
-                    "keccak-p2",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "p2in-rate0",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::rate0(
-                                        perm_seq_id_keccak.clone(),
-                                        h_input_chunks,
-                                    ),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2in-rate1",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::rate1(
-                                        perm_seq_id_keccak.clone(),
-                                        h_digest_chunks,
-                                    ),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2in-cap",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::cap(perm_seq_id_keccak.clone(), cap_keccak),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "p2out-h-keccak",
-                                    pos_act,
-                                    Poseidon2OutMsg {
-                                        perm_seq_id: perm_seq_id_keccak,
-                                        digest: h_keccak,
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            aux_deg,
-                        );
-                    },
-                    aux_deg,
-                );
-            },
-            aux_deg,
+        // ---- col 7/8: keccak-node P2 perm — 3 P2In + 1 P2Out, paired ----
+        frac_col!(
+            builder,
+            "keccak-p2",
+            pair_deg,
+            (
+                "p2in-rate0",
+                pos_act.clone(),
+                Poseidon2InMsg::rate0(perm_seq_id_keccak.clone(), h_input_chunks),
+                interaction_deg
+            ),
+            (
+                "p2in-rate1",
+                pos_act.clone(),
+                Poseidon2InMsg::rate1(perm_seq_id_keccak.clone(), h_digest_chunks),
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "keccak-p2",
+            pair_deg,
+            (
+                "p2in-cap",
+                pos_act.clone(),
+                Poseidon2InMsg::cap(perm_seq_id_keccak.clone(), cap_keccak),
+                interaction_deg
+            ),
+            (
+                "p2out-h-keccak",
+                pos_act,
+                Poseidon2OutMsg {
+                    perm_seq_id: perm_seq_id_keccak,
+                    digest: h_keccak
+                },
+                interaction_deg
+            ),
         );
     }
 }

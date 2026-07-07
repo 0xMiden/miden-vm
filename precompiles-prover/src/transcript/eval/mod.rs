@@ -82,7 +82,7 @@ use crate::{
     },
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+        LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
@@ -323,34 +323,29 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// Nine aux columns:
+// 16 aux columns, flattened via `frac_col!` so every closing constraint
+// stays at degree ≤ 3 → `log_quotient_degree = 1`, one bus-relation pool
+// per column pairing (matching every other flattened chiplet's
+// convention):
 //
-// - col 0: Binding bus, True path — consume `lhs`, consume `rhs` (AND rows), and provide `h` as
-//   `True` (AND / zero / `Is` rows).
-// - col 1: the unhash Poseidon2 perm's static-cap path — `In{rate0, rate1, cap}` + `Out` (4
-//   fractions). EcMsm's threaded cap rides col 7.
-// - col 2: Binding bus, value path — consume both `UintVal` halves on uint-leaf rows (the 4×32 view
-//   is the perm rate) + provide the row's value binding (uint-leaf and value-op rows), `(1 −
-//   is_pinned)`-scaled so a pinned leaf collapses to the `True` form.
-// - col 3: Binding bus, op-children path — consume the lhs / rhs `Uint` bindings at `a_ptr` /
-//   `b_ptr`.
-// - col 4: the uint relation consumes — one `UintAdd` (add / sub, roles wired per-op) + one
-//   `UintMul` (mul; κ slots are the constants 1 / 0).
-// - col 5: Binding bus, Group path — consume the P / Q operand `Group` bindings (group add / sub /
-//   is) + provide the created / result / MSM boundary point's `Group` binding.
-// - col 6: the EC relation consumes — `EcPoint` (create / PAI) and `EcGroupAdd` (group add / sub);
-//   raw degree-1 fields for `EcPoint`, role-mixed fields for `EcGroupAdd`.
-// - col 7: the EcMsm head Poseidon2 cap fraction.
-// - col 8: the EcMsm absorb-run consumes. Per absorb row: `Binding(Pᵢ.hash, Group, Pᵢ_ptr)`,
-//   `Binding(sᵢ.hash, Uint, sᵢ_ptr)`, `MsmClaimTerm(expr, Pᵢ_ptr, sᵢ_ptr)`; at the boundary,
-//   `MsmExpr(expr, group, val, k = idx + 1)`.
-//
-// The uniform one-hot keeps every bus mult ≤ degree-2; cols 0/1/2/5/8 top
-// out at constraint deg 5 (cols 3/4/6 lower, col 7 trivial), so
-// `log_quotient_degree` stays 2 — width, not blowup.
-
-pub const NUM_AUX_COLS: usize = 9;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 4, 3, 2, 2, 3, 2, 1, 4];
+// - col 0:  Binding bus, True path — `consume-lhs`, alone (the gated running-sum anchor).
+// - col 1:  `consume-rhs` + `provide-h` (the True-binding provide, heavy — a degree-2 message).
+// - col 2:  unhash Poseidon2 perm — `p2in-rate0` + `p2in-rate1`.
+// - col 3:  unhash Poseidon2 perm — `p2in-cap` + `p2out`.
+// - col 4:  Binding bus, value path — `consume-lo` + `consume-hi` (both `UintVal` halves).
+// - col 5:  `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
+// - col 6:  Binding bus, op-children path — `consume-lhs-uint` + `consume-rhs-uint`.
+// - col 7:  `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 8:  `consume-uintmul`, alone (no partner left to pair).
+// - col 9:  Binding bus, Group path — `consume-p` + `consume-q`.
+// - col 10: `provide-group`, alone (heavy).
+// - col 11: `consume-ecpoint`, alone (no partner left to pair).
+// - col 12: `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 13: the EcMsm head Poseidon2 cap fraction, alone (sole fraction in its pool).
+// - col 14: EcMsm absorb — `consume-base-group` + `consume-scalar-uint`.
+// - col 15: EcMsm absorb — `consume-msmclaimterm` + `consume-msmexpr`.
+pub const NUM_AUX_COLS: usize = 16;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 1, 2, 1, 1, 2, 1, 1, 1, 1, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -786,263 +781,187 @@ where
         // `transient`-scaled fields and the role-mixed UintAdd consume are
         // deg 2 (denominator 2).
         let mixed_deg = Deg { v: 1, u: 2 };
-        // col 0: the deg-2 True provide dominates the 3-fraction batch ⇒
-        // numerator 5. col 1: all perm mults deg 1 ⇒ 4. col 2: the forked
-        // Binding provide carries a deg-2 message (transient·ptr) ⇒ denom 4.
-        // cols 3/4: two fractions each, raw / role-mixed fields.
-        let col0_deg = Deg { v: 5, u: 4 };
-        let col1_deg = Deg { v: 4, u: 4 };
-        let col2_deg = Deg { v: 4, u: 4 };
-        let col3_deg = Deg { v: 2, u: 2 };
-        let col4_deg = Deg { v: 3, u: 3 };
-        // col 5 (Group binding) mirrors col 0: two deg-1 consumes + a deg-2
-        // provide. col 6 (EC relations): EcPoint (deg-1) + the role-mixed
-        // EcGroupAdd (deg-2 message), like col 4.
-        let col5_deg = Deg { v: 5, u: 4 };
-        let col6_deg = Deg { v: 3, u: 3 };
-        // col 7 (EcMsm head P2 cap): the IV cap is degree-1.
-        let col7_deg = Deg { v: 1, u: 1 };
+        // Column-level degree hints (documentation only, not framework-
+        // checked): a lone fraction anchoring the running sum, or a pair.
+        let single_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // ---- col 0: Binding bus, True path (consume lhs/rhs on AND rows;
-        //             provide h as True on AND / zero / Is rows)
-        builder.next_column(
-            |col| {
-                col.group(
-                    "binding-and",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-lhs",
-                                    and_gate.clone(),
-                                    BindingMsg::truth(lhs.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-rhs",
-                                    and_gate,
-                                    BindingMsg::truth(rhs.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "provide-h",
-                                    and_provide,
-                                    BindingMsg::truth(h.clone()),
-                                    two_deg,
-                                );
-                            },
-                            col0_deg,
-                        );
-                    },
-                    col0_deg,
-                );
-            },
-            col0_deg,
+        // col 0: Binding bus, True path — consume-lhs alone, the gated
+        // running-sum anchor.
+        frac_col!(
+            builder,
+            "binding-and",
+            single_deg,
+            ("consume-lhs", and_gate.clone(), BindingMsg::truth(lhs.clone()), one_deg),
+        );
+        // col 1 (paired, lqd-1): consume-rhs (AND rows) + provide-h (the
+        // True-binding provide on AND / zero / Is rows).
+        frac_col!(
+            builder,
+            "binding-and",
+            pair_deg,
+            ("consume-rhs", and_gate, BindingMsg::truth(rhs.clone()), one_deg),
+            ("provide-h", and_provide, BindingMsg::truth(h.clone()), two_deg),
         );
 
-        // ---- col 1: unhash Poseidon2 perm (3 In + 1 Out), shared by
-        //             every hashing kind; the cap forks on the tag ------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "unhash-p2",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "p2in-rate0",
-                                    node.clone(),
-                                    Poseidon2InMsg::rate0(perm_seq_id.clone(), lhs.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "p2in-rate1",
-                                    node.clone(),
-                                    Poseidon2InMsg::rate1(perm_seq_id.clone(), rhs.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "p2in-cap",
-                                    static_node,
-                                    Poseidon2InMsg::cap(perm_seq_id.clone(), cap),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "p2out",
-                                    node.clone() - is_ec_msm.clone()
-                                        + local[COL_IS_MSM_LAST].into(),
-                                    Poseidon2OutMsg { perm_seq_id, digest: h.clone() },
-                                    one_deg,
-                                );
-                            },
-                            col1_deg,
-                        );
-                    },
-                    col1_deg,
-                );
-            },
-            col1_deg,
+        // col 2 (paired, lqd-1): unhash Poseidon2 perm — rate0 + rate1,
+        // shared by every hashing kind.
+        frac_col!(
+            builder,
+            "unhash-p2",
+            pair_deg,
+            (
+                "p2in-rate0",
+                node.clone(),
+                Poseidon2InMsg::rate0(perm_seq_id.clone(), lhs.clone()),
+                one_deg
+            ),
+            (
+                "p2in-rate1",
+                node.clone(),
+                Poseidon2InMsg::rate1(perm_seq_id.clone(), rhs.clone()),
+                one_deg
+            ),
+        );
+        // col 3 (paired, lqd-1): unhash Poseidon2 perm — the cap (forks on
+        // the tag) + the perm output.
+        frac_col!(
+            builder,
+            "unhash-p2",
+            pair_deg,
+            ("p2in-cap", static_node, Poseidon2InMsg::cap(perm_seq_id.clone(), cap), one_deg),
+            (
+                "p2out",
+                node.clone() - is_ec_msm.clone() + local[COL_IS_MSM_LAST].into(),
+                Poseidon2OutMsg { perm_seq_id, digest: h.clone() },
+                one_deg
+            ),
         );
 
-        // ---- col 2: Binding bus, value path — consume both UintVal
-        //             halves on leaf rows (the 4×32 view is the perm rate)
-        //             + provide the row's binding (leaf ∪ value op): True
-        //             if pinned (→ spine), else Uint --------------------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "binding-uint",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-lo",
-                                    uint_gate.clone(),
-                                    UintValMsg {
-                                        ptr: ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: lhs.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-hi",
-                                    uint_gate,
-                                    UintValMsg {
-                                        ptr: ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: rhs.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "provide-binding",
-                                    uint_provide,
-                                    BindingMsg {
-                                        h,
-                                        value_tag: transient.clone()
-                                            * LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
-                                        ptr: transient.clone() * ptr.clone(),
-                                        bound_ptr: transient * bound_ptr.clone(),
-                                    },
-                                    two_deg,
-                                );
-                            },
-                            col2_deg,
-                        );
-                    },
-                    col2_deg,
-                );
-            },
-            col2_deg,
+        // col 4 (paired, lqd-1): Binding bus, value path — consume both
+        // UintVal halves on leaf rows (the 4×32 view is the perm rate).
+        frac_col!(
+            builder,
+            "binding-uint",
+            pair_deg,
+            (
+                "consume-lo",
+                uint_gate.clone(),
+                UintValMsg {
+                    ptr: ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    offset: LB::Expr::ZERO,
+                    limbs: lhs.clone(),
+                },
+                one_deg
+            ),
+            (
+                "consume-hi",
+                uint_gate,
+                UintValMsg {
+                    ptr: ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    offset: LB::Expr::ONE,
+                    limbs: rhs.clone(),
+                },
+                one_deg
+            ),
+        );
+        // col 5: provide the row's binding (leaf ∪ value op), alone (heavy
+        // — a transient-scaled degree-2 message): True if pinned (→
+        // spine), else Uint.
+        frac_col!(
+            builder,
+            "binding-uint",
+            single_deg,
+            (
+                "provide-binding",
+                uint_provide,
+                BindingMsg {
+                    h,
+                    value_tag: transient.clone() * LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
+                    ptr: transient.clone() * ptr.clone(),
+                    bound_ptr: transient * bound_ptr.clone(),
+                },
+                two_deg
+            ),
         );
 
-        // ---- col 3: Binding bus, op-children path — consume the lhs / rhs
-        //             `Uint` bindings at the witnessed a_ptr / b_ptr. Raw
-        //             degree-1 fields: the op gates zero the mults off op
-        //             rows, so no field scaling is needed (an `Is` row's
-        //             b_ptr = a_ptr — the equality) ---------------------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "binding-op-children",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-lhs-uint",
-                                    op_lhs_gate.clone() + is_ec_create.clone(),
-                                    BindingMsg {
-                                        h: lhs,
-                                        value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
-                                        ptr: a_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-rhs-uint",
-                                    op_rhs_gate + is_ec_create.clone(),
-                                    BindingMsg {
-                                        h: rhs,
-                                        value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
-                                        ptr: b_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                    },
-                                    one_deg,
-                                );
-                            },
-                            col3_deg,
-                        );
-                    },
-                    col3_deg,
-                );
-            },
-            col3_deg,
+        // col 6 (paired, lqd-1): Binding bus, op-children path — consume
+        // the lhs / rhs `Uint` bindings at the witnessed a_ptr / b_ptr. Raw
+        // degree-1 fields: the op gates zero the mults off op rows, so no
+        // field scaling is needed (an `Is` row's b_ptr = a_ptr — the
+        // equality).
+        frac_col!(
+            builder,
+            "binding-op-children",
+            pair_deg,
+            (
+                "consume-lhs-uint",
+                op_lhs_gate.clone() + is_ec_create.clone(),
+                BindingMsg {
+                    h: lhs,
+                    value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
+                    ptr: a_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                },
+                one_deg
+            ),
+            (
+                "consume-rhs-uint",
+                op_rhs_gate + is_ec_create.clone(),
+                BindingMsg {
+                    h: rhs,
+                    value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
+                    ptr: b_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                },
+                one_deg
+            ),
         );
 
-        // ---- col 4: the pointered relation consumes. One UintAdd serves
-        //             add / sub with the roles mixed per-op (sub is the
-        //             arrangement b + r = a); one UintMul serves mul with
-        //             the κ slots pinned to the constants 1 / 0 and the
-        //             modulus as the dummy c_ptr -------------------------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "uint-relations",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-uintadd",
-                                    is_uint_op.clone() * (is_add.clone() + is_sub.clone()),
-                                    UintAddMsg {
-                                        bound_ptr: bound_ptr.clone(),
-                                        a_ptr: is_add.clone() * a_ptr.clone()
-                                            + is_sub.clone() * b_ptr.clone(),
-                                        b_ptr: is_add.clone() * b_ptr.clone()
-                                            + is_sub.clone() * ptr.clone(),
-                                        c_ptr: is_add.clone() * ptr.clone()
-                                            + is_sub.clone() * a_ptr.clone(),
-                                        nz: LB::Expr::ZERO,
-                                    },
-                                    mixed_deg,
-                                );
-                                b.insert(
-                                    "consume-uintmul",
-                                    is_mul,
-                                    UintMulMsg {
-                                        kappa_a: LB::Expr::ONE,
-                                        kappa_c: LB::Expr::ZERO,
-                                        a_ptr,
-                                        b_ptr,
-                                        c_ptr: bound_ptr.clone(),
-                                        r_ptr: ptr,
-                                        bound_ptr,
-                                        is_sub: LB::Expr::ZERO,
-                                    },
-                                    one_deg,
-                                );
-                            },
-                            col4_deg,
-                        );
-                    },
-                    col4_deg,
-                );
-            },
-            col4_deg,
+        // col 7: the UintAdd relation consume, alone (heavy — a role-mixed
+        // degree-2 message). Serves add / sub with the roles mixed per-op
+        // (sub is the arrangement b + r = a).
+        frac_col!(
+            builder,
+            "uint-relations",
+            single_deg,
+            (
+                "consume-uintadd",
+                is_uint_op.clone() * (is_add.clone() + is_sub.clone()),
+                UintAddMsg {
+                    bound_ptr: bound_ptr.clone(),
+                    a_ptr: is_add.clone() * a_ptr.clone() + is_sub.clone() * b_ptr.clone(),
+                    b_ptr: is_add.clone() * b_ptr.clone() + is_sub.clone() * ptr.clone(),
+                    c_ptr: is_add.clone() * ptr.clone() + is_sub.clone() * a_ptr.clone(),
+                    nz: LB::Expr::ZERO,
+                },
+                mixed_deg
+            ),
+        );
+        // col 8: the UintMul relation consume, alone (no partner left to
+        // pair). Serves mul with the κ slots pinned to the constants 1 / 0
+        // and the modulus as the dummy c_ptr.
+        frac_col!(
+            builder,
+            "uint-relations",
+            single_deg,
+            (
+                "consume-uintmul",
+                is_mul,
+                UintMulMsg {
+                    kappa_a: LB::Expr::ONE,
+                    kappa_c: LB::Expr::ZERO,
+                    a_ptr,
+                    b_ptr,
+                    c_ptr: bound_ptr.clone(),
+                    r_ptr: ptr,
+                    bound_ptr,
+                    is_sub: LB::Expr::ZERO,
+                },
+                one_deg
+            ),
         );
 
         // The EC columns read their fields fresh from `local` (cheap Copy
@@ -1075,113 +994,95 @@ where
         let g_out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let g_neg_out_mult: LB::Expr = LB::Expr::ZERO - g_out_mult;
 
-        // ---- col 5: Binding bus, Group path — consume the P / Q operand
-        //             `Group` bindings (group add / sub / is) + provide the
-        //             created / result point's `Group` binding (create ∪
-        //             add/sub). `Is` binds `True` (col 0), only consuming here.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "binding-group",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    // Every ec op consumes its P operand binding.
-                                    "consume-p",
-                                    is_ec_op.clone(),
-                                    BindingMsg::group(g_lhs.clone(), ec_op_lhs_ptr.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    // Binary ec ops (add / sub / is) consume Q.
-                                    "consume-q",
-                                    ec_binary.clone(),
-                                    BindingMsg::group(g_rhs.clone(), ec_op_rhs_ptr.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    // Create / pai / result-binding ec ops (not Is,
-                                    // which binds True) provide their result binding.
-                                    "provide-group",
-                                    g_neg_out_mult
-                                        * (is_create.clone()
-                                            + ec_result.clone()
-                                            + g_is_msm_last.clone()),
-                                    BindingMsg::group(g_h.clone(), ec_value_ptr.clone()),
-                                    two_deg,
-                                );
-                            },
-                            col5_deg,
-                        );
-                    },
-                    col5_deg,
-                );
-            },
-            col5_deg,
+        // col 9 (paired, lqd-1): Binding bus, Group path — consume the P / Q
+        // operand `Group` bindings (group add / sub / is). `Is` binds
+        // `True` (col 0), only consuming here.
+        frac_col!(
+            builder,
+            "binding-group",
+            pair_deg,
+            (
+                // Every ec op consumes its P operand binding.
+                "consume-p",
+                is_ec_op.clone(),
+                BindingMsg::group(g_lhs.clone(), ec_op_lhs_ptr.clone()),
+                one_deg
+            ),
+            (
+                // Binary ec ops (add / sub / is) consume Q.
+                "consume-q",
+                ec_binary.clone(),
+                BindingMsg::group(g_rhs.clone(), ec_op_rhs_ptr.clone()),
+                one_deg
+            ),
+        );
+        // col 10: provide the created / result point's `Group` binding
+        // (create ∪ add/sub), alone (heavy). Create / pai / result-binding
+        // ec ops (not Is, which binds True) provide their result binding.
+        frac_col!(
+            builder,
+            "binding-group",
+            single_deg,
+            (
+                "provide-group",
+                g_neg_out_mult * (is_create.clone() + ec_result.clone() + g_is_msm_last.clone()),
+                BindingMsg::group(g_h.clone(), ec_value_ptr.clone()),
+                two_deg
+            ),
         );
 
-        // ---- col 6: EC relation consumes — EcPoint pins an EcCreate / PAI
-        //             point to the group committed in cap slot 2, and
-        //             EcGroupAdd ties an EcBinOp Add/Sub's operands and result.
-        //             COL_EC_CONTEXT_GROUP_PTR is only live for the binop/MSM paths.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-relations",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-ecpoint",
-                                    is_create.clone(),
-                                    EcPointMsg {
-                                        // Finite create: (pt, group, x, y, 0).
-                                        // PAI: (pai, group, 0, 0, 1). The group
-                                        // is the same physical cell as cap slot 2.
-                                        point_ptr: create_point_ptr.clone(),
-                                        group_ptr: create_group_ptr.clone(),
-                                        x_ptr: create_x_ptr.clone(),
-                                        y_ptr: create_y_ptr.clone(),
-                                        is_pai: create_is_pai.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-ecgroupadd",
-                                    ec_result.clone(),
-                                    EcGroupAddMsg {
-                                        group_ptr: ec_context_group_ptr.clone(),
-                                        // The consume's `ec_result` gate already pins
-                                        // an add/sub row, so the slot perm rides the bare
-                                        // op flags (degree-1). Add: (P, Q, R) — P + Q = R.
-                                        // Sub: (R, Q, P) — R + Q = P, R (ptr) the first
-                                        // operand, P (a_ptr) the result.
-                                        p_ptr: is_add.clone() * ec_op_lhs_ptr.clone()
-                                            + is_sub.clone() * ec_value_ptr.clone(),
-                                        q_ptr: (is_add.clone() + is_sub.clone())
-                                            * ec_op_rhs_ptr.clone(),
-                                        r_ptr: is_add.clone() * ec_value_ptr.clone()
-                                            + is_sub.clone() * ec_op_lhs_ptr.clone(),
-                                    },
-                                    mixed_deg,
-                                );
-                            },
-                            col6_deg,
-                        );
-                    },
-                    col6_deg,
-                );
-            },
-            col6_deg,
+        // col 11: EcPoint pins an EcCreate / PAI point to the group
+        // committed in cap slot 2, alone (no partner left to pair).
+        frac_col!(
+            builder,
+            "ec-relations",
+            single_deg,
+            (
+                "consume-ecpoint",
+                is_create.clone(),
+                EcPointMsg {
+                    // Finite create: (pt, group, x, y, 0).
+                    // PAI: (pai, group, 0, 0, 1). The group
+                    // is the same physical cell as cap slot 2.
+                    point_ptr: create_point_ptr.clone(),
+                    group_ptr: create_group_ptr.clone(),
+                    x_ptr: create_x_ptr.clone(),
+                    y_ptr: create_y_ptr.clone(),
+                    is_pai: create_is_pai.clone(),
+                },
+                one_deg
+            ),
+        );
+        // col 12: EcGroupAdd ties an EcBinOp Add/Sub's operands and result,
+        // alone (heavy — a role-mixed degree-2 message).
+        // COL_EC_CONTEXT_GROUP_PTR is only live for the binop/MSM paths.
+        frac_col!(
+            builder,
+            "ec-relations",
+            single_deg,
+            (
+                "consume-ecgroupadd",
+                ec_result.clone(),
+                EcGroupAddMsg {
+                    group_ptr: ec_context_group_ptr.clone(),
+                    // The consume's `ec_result` gate already pins
+                    // an add/sub row, so the slot perm rides the bare
+                    // op flags (degree-1). Add: (P, Q, R) — P + Q = R.
+                    // Sub: (R, Q, P) — R + Q = P, R (ptr) the first
+                    // operand, P (a_ptr) the result.
+                    p_ptr: is_add.clone() * ec_op_lhs_ptr.clone()
+                        + is_sub.clone() * ec_value_ptr.clone(),
+                    q_ptr: (is_add.clone() + is_sub.clone()) * ec_op_rhs_ptr.clone(),
+                    r_ptr: is_add.clone() * ec_value_ptr.clone()
+                        + is_sub.clone() * ec_op_lhs_ptr.clone(),
+                },
+                mixed_deg
+            ),
         );
 
-        // ---- col 7: EcMsm head Poseidon2 cap. Continuation capacity is private
-        //             to the P2 chiplet's absorption chain.
+        // col 13: EcMsm head Poseidon2 cap, alone (sole fraction in its
+        // pool). Continuation capacity is private to the P2 chiplet's
+        // absorption chain.
         let d_perm_seq_id: LB::Expr = local[COL_PERM_SEQ_ID].into();
         let d_is_msm_head: LB::Expr = local[COL_MSM_IS_HEAD].into();
         let d_msm_iv = [
@@ -1190,39 +1091,25 @@ where
             LB::Expr::ZERO,
             LB::Expr::ZERO,
         ];
-        builder.next_column(
-            |col| {
-                col.group(
-                    "msm-head-cap",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "p2in-cap-msm-head",
-                                    d_is_msm_head,
-                                    Poseidon2InMsg::cap(d_perm_seq_id, d_msm_iv),
-                                    one_deg,
-                                );
-                            },
-                            col7_deg,
-                        );
-                    },
-                    col7_deg,
-                );
-            },
-            col7_deg,
+        frac_col!(
+            builder,
+            "msm-head-cap",
+            single_deg,
+            (
+                "p2in-cap-msm-head",
+                d_is_msm_head,
+                Poseidon2InMsg::cap(d_perm_seq_id, d_msm_iv),
+                one_deg
+            ),
         );
 
-        // ---- col 8: the EcMsm absorb-run consumes. Per absorb row: the
-        //             `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying
-        //             the perm rate to real child nodes) + `MsmClaimTerm(expr,
-        //             Pᵢ, sᵢ)` (positionless — tying to the chiplet's term
-        //             *set*, so the absorb order is the caller's). At the
-        //             boundary: `MsmExpr(expr, group, val, k = idx + 1)`
-        //             (every term named, the value bound). Fields re-read
-        //             fresh from `local`.
+        // col 14/15: the EcMsm absorb-run consumes. Per absorb row: the
+        // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the perm
+        // rate to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
+        // (positionless — tying to the chiplet's term *set*, so the absorb
+        // order is the caller's). At the boundary: `MsmExpr(expr, group,
+        // val, k = idx + 1)` (every term named, the value bound). Fields
+        // re-read fresh from `local`.
         let m_msm: LB::Expr = local[COL_IS_EC_MSM].into();
         let m_last: LB::Expr = local[COL_IS_MSM_LAST].into();
         let m_lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
@@ -1234,65 +1121,55 @@ where
         let m_val: LB::Expr = local[COL_PTR].into();
         let m_idx: LB::Expr = local[COL_MSM_IDX].into();
         let m_expr: LB::Expr = local[COL_MSM_EXPR].into();
-        let col8_deg = Deg { v: 5, u: 4 };
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-msm-absorb",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-base-group",
-                                    m_msm.clone(),
-                                    BindingMsg::group(m_lhs, m_a.clone()),
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-scalar-uint",
-                                    m_msm.clone(),
-                                    BindingMsg {
-                                        h: m_rhs,
-                                        value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
-                                        ptr: m_b.clone(),
-                                        bound_ptr: m_bound,
-                                    },
-                                    one_deg,
-                                );
-                                // Positionless set match: the claim's terms,
-                                // any order — so the absorb (hash) order is the
-                                // caller's, not the chiplet's `idx`.
-                                b.insert(
-                                    "consume-msmclaimterm",
-                                    m_msm,
-                                    MsmClaimTermMsg {
-                                        expr_ptr: m_expr.clone(),
-                                        base_ptr: m_a,
-                                        scalar_ptr: m_b,
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-msmexpr",
-                                    m_last,
-                                    MsmExprMsg {
-                                        expr_ptr: m_expr,
-                                        group_ptr: m_group,
-                                        val_ptr: m_val,
-                                        k: m_idx + LB::Expr::ONE,
-                                    },
-                                    one_deg,
-                                );
-                            },
-                            col8_deg,
-                        );
-                    },
-                    col8_deg,
-                );
-            },
-            col8_deg,
+        frac_col!(
+            builder,
+            "ec-msm-absorb",
+            pair_deg,
+            (
+                "consume-base-group",
+                m_msm.clone(),
+                BindingMsg::group(m_lhs, m_a.clone()),
+                one_deg
+            ),
+            (
+                "consume-scalar-uint",
+                m_msm.clone(),
+                BindingMsg {
+                    h: m_rhs,
+                    value_tag: LB::Expr::from(Felt::from(ValueTag::Uint as u8)),
+                    ptr: m_b.clone(),
+                    bound_ptr: m_bound,
+                },
+                one_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "ec-msm-absorb",
+            pair_deg,
+            // Positionless set match: the claim's terms, any order — so the
+            // absorb (hash) order is the caller's, not the chiplet's `idx`.
+            (
+                "consume-msmclaimterm",
+                m_msm,
+                MsmClaimTermMsg {
+                    expr_ptr: m_expr.clone(),
+                    base_ptr: m_a,
+                    scalar_ptr: m_b
+                },
+                one_deg
+            ),
+            (
+                "consume-msmexpr",
+                m_last,
+                MsmExprMsg {
+                    expr_ptr: m_expr,
+                    group_ptr: m_group,
+                    val_ptr: m_val,
+                    k: m_idx + LB::Expr::ONE,
+                },
+                one_deg
+            ),
         );
     }
 }

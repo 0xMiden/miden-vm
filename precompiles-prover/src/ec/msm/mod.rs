@@ -48,7 +48,7 @@ use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        NUM_SIGMA_VALUES, frac_col,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -253,17 +253,24 @@ pub const COL_NEG_YR: usize = 36;
 pub const COL_NEG_MINTED: usize = 37;
 pub const NUM_MAIN_COLS: usize = 38;
 
-// Aux: LogUp running sum (col 0) + three fraction columns. Fractions:
-//  col 0: MsmTerm provide, MsmExpr provide, MsmClaimTerm provide, two
-//         literal-1 UintVal (intro), EcOnCurveCert provide (neg value R)
-//  col 1: MsmTerm consume A / B, UintAdd (take_both merge), UintAdd (neg
-//         scalar), UintAdd (neg value y-flip y_a + y_R ≡ 0)
-//  col 2: MsmExpr consume A / B, EcGroupAdd (combine value), EcGroup
-//         (sbound pin), EcPoint(val_a) + EcPoint(R) (neg value coords)
-//  col 3: four ordering Range16 consumes (a halves: combine|neg; b: combine)
-const NUM_LOGUP_COLS: usize = 4;
-const AUX_WIDTH: usize = 4;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [6, 5, 6, 4];
+// Aux: 11 columns, flattened via `frac_col!` over the 21 fractions so
+// every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
+// 1 (folding the intermediate 12-column flatten and the follow-on
+// singleton-pack into one step):
+//  col 0:  MsmTerm provide — alone, the gated running-sum anchor.
+//  col 1:  MsmExpr provide + MsmClaimTerm provide.
+//  col 2:  EcOnCurveCert provide (neg value R) + literal-1 UintVal lo (intro).
+//  col 3:  literal-1 UintVal hi (intro) + MsmTerm consume A.
+//  col 4:  MsmTerm consume B + UintAdd (take_both merge).
+//  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
+//  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
+//  col 7:  EcGroupAdd (combine value) + EcPoint(val_a) (neg value coord).
+//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin).
+//  col 9:  ordering Range16 — a_lo + a_hi.
+//  col 10: ordering Range16 — b_lo + b_hi.
+const NUM_LOGUP_COLS: usize = 11;
+const AUX_WIDTH: usize = 11;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -559,357 +566,295 @@ where
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
-        let col0_deg = Deg { v: 6, u: 5 };
-        let col1_deg = Deg { v: 4, u: 3 };
-        let col2_deg = Deg { v: 6, u: 4 };
-        let col3_deg = Deg { v: 6, u: 4 };
+        let single_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // ---- col 0: provides (MsmTerm every row, MsmExpr on the boundary)
-        //             + intro's literal-1 UintVal pair.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-msm-provide",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "provide-msmterm",
-                                    neg_mult.clone(),
-                                    MsmTermMsg {
-                                        expr_ptr: expr_ptr.clone(),
-                                        idx: idx.clone(),
-                                        base_ptr: base.clone(),
-                                        scalar_ptr: scalar.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                // The head is consumed by combine/neg operand
-                                // heads (op uses) AND the eval resolve (claim
-                                // uses), so it provides at the *sum*.
-                                b.insert(
-                                    "provide-msmexpr",
-                                    (neg_mult.clone() + neg_claim_mult.clone())
-                                        * is_boundary.clone(),
-                                    MsmExprMsg {
-                                        expr_ptr: expr_ptr.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        val_ptr: val.clone(),
-                                        k: idx.clone() + LB::Expr::ONE,
-                                    },
-                                    two_deg,
-                                );
-                                // The positionless resolve-seam term — one per
-                                // term row at the resolve count, consumed by
-                                // the eval `EcMsm` absorb as an unordered set.
-                                b.insert(
-                                    "provide-msmclaimterm",
-                                    neg_claim_mult.clone(),
-                                    MsmClaimTermMsg {
-                                        expr_ptr: expr_ptr.clone(),
-                                        base_ptr: base.clone(),
-                                        scalar_ptr: scalar.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                // neg's value `R = −val_a` is a trio-free cert
-                                // point — vouch its on-curve membership here (R
-                                // is on-curve because val_a is), once, when this
-                                // neg freshly mints R (`neg_minted` on the
-                                // boundary). Mirrors the add chiplet's mint.
-                                b.insert(
-                                    "provide-oncurvecert-neg",
-                                    LB::Expr::ZERO - neg_minted.clone() * is_boundary.clone(),
-                                    EcOnCurveCertMsg {
-                                        group_ptr: group_ptr.clone(),
-                                        r_ptr: val.clone(),
-                                    },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "consume-one-lo",
-                                    is_intro.clone(),
-                                    UintValMsg {
-                                        ptr: scalar.clone(),
-                                        bound_ptr: sbound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: [
-                                            LB::Expr::ONE,
-                                            LB::Expr::ZERO,
-                                            LB::Expr::ZERO,
-                                            LB::Expr::ZERO,
-                                        ],
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-one-hi",
-                                    is_intro.clone(),
-                                    UintValMsg {
-                                        ptr: scalar.clone(),
-                                        bound_ptr: sbound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: [
-                                            LB::Expr::ZERO,
-                                            LB::Expr::ZERO,
-                                            LB::Expr::ZERO,
-                                            LB::Expr::ZERO,
-                                        ],
-                                    },
-                                    one_deg,
-                                );
-                            },
-                            col0_deg,
-                        );
-                    },
-                    col0_deg,
-                );
-            },
-            col0_deg,
+        // col 0: the MsmTerm provide, alone — the gated running-sum anchor.
+        frac_col!(
+            builder,
+            "ec-msm-provide",
+            single_deg,
+            (
+                "provide-msmterm",
+                neg_mult.clone(),
+                MsmTermMsg {
+                    expr_ptr: expr_ptr.clone(),
+                    idx: idx.clone(),
+                    base_ptr: base.clone(),
+                    scalar_ptr: scalar.clone(),
+                },
+                one_deg
+            ),
+        );
+        // col 1 (paired, lqd-1): the expression head — consumed by
+        // combine/neg operand heads (op uses) AND the eval resolve (claim
+        // uses), so it provides at the *sum* — paired with the positionless
+        // resolve-seam term (one per term row at the resolve count).
+        frac_col!(
+            builder,
+            "ec-msm-provide",
+            pair_deg,
+            (
+                "provide-msmexpr",
+                (neg_mult.clone() + neg_claim_mult.clone()) * is_boundary.clone(),
+                MsmExprMsg {
+                    expr_ptr: expr_ptr.clone(),
+                    group_ptr: group_ptr.clone(),
+                    val_ptr: val.clone(),
+                    k: idx.clone() + LB::Expr::ONE,
+                },
+                two_deg
+            ),
+            (
+                "provide-msmclaimterm",
+                neg_claim_mult.clone(),
+                MsmClaimTermMsg {
+                    expr_ptr: expr_ptr.clone(),
+                    base_ptr: base.clone(),
+                    scalar_ptr: scalar.clone(),
+                },
+                one_deg
+            ),
+        );
+        // col 2 (paired, lqd-1): neg's value `R = −val_a` is a trio-free
+        // cert point — vouch its on-curve membership here (R is on-curve
+        // because val_a is), once, when this neg freshly mints R
+        // (`neg_minted` on the boundary) — paired with intro's literal-1
+        // UintVal low limb.
+        frac_col!(
+            builder,
+            "ec-msm-provide",
+            pair_deg,
+            (
+                "provide-oncurvecert-neg",
+                LB::Expr::ZERO - neg_minted.clone() * is_boundary.clone(),
+                EcOnCurveCertMsg {
+                    group_ptr: group_ptr.clone(),
+                    r_ptr: val.clone()
+                },
+                two_deg
+            ),
+            (
+                "consume-one-lo",
+                is_intro.clone(),
+                UintValMsg {
+                    ptr: scalar.clone(),
+                    bound_ptr: sbound_ptr.clone(),
+                    offset: LB::Expr::ZERO,
+                    limbs: [LB::Expr::ONE, LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO],
+                },
+                one_deg
+            ),
+        );
+        // col 3 (paired, lqd-1): intro's literal-1 UintVal high limb,
+        // paired with the combine term walk's operand-A consume.
+        frac_col!(
+            builder,
+            "ec-msm-walk",
+            pair_deg,
+            (
+                "consume-one-hi",
+                is_intro.clone(),
+                UintValMsg {
+                    ptr: scalar.clone(),
+                    bound_ptr: sbound_ptr.clone(),
+                    offset: LB::Expr::ONE,
+                    limbs: [LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO],
+                },
+                one_deg
+            ),
+            (
+                "consume-term-a",
+                adv_i.clone(),
+                MsmTermMsg {
+                    expr_ptr: a_expr.clone(),
+                    idx: i_cur.clone(),
+                    base_ptr: base_a.clone(),
+                    scalar_ptr: s_a.clone(),
+                },
+                one_deg
+            ),
+        );
+        // col 4 (paired, lqd-1): the combine term walk's operand-B consume,
+        // paired with the take_both scalar merge `s_a + s_b ≡ scalar (mod
+        // sbound)`.
+        frac_col!(
+            builder,
+            "ec-msm-walk",
+            pair_deg,
+            (
+                "consume-term-b",
+                adv_j.clone(),
+                MsmTermMsg {
+                    expr_ptr: b_expr.clone(),
+                    idx: j_cur.clone(),
+                    base_ptr: base_b.clone(),
+                    scalar_ptr: s_b.clone(),
+                },
+                one_deg
+            ),
+            (
+                "consume-uintadd",
+                take_both.clone(),
+                UintAddMsg {
+                    bound_ptr: sbound_ptr.clone(),
+                    a_ptr: s_a.clone(),
+                    b_ptr: s_b.clone(),
+                    c_ptr: scalar.clone(),
+                    nz: LB::Expr::ZERO,
+                },
+                one_deg
+            ),
+        );
+        // col 5 (paired, lqd-1): neg's scalar negation (`out_scalar = −s_a`,
+        // the `is_c_zero` arrangement `s_a + out_scalar ≡ 0 (mod sbound)`,
+        // one per term row), paired with neg's VALUE y-flip (`R.y =
+        // −val_a.y`, the is_c_zero UintAdd `y_a + y_R ≡ 0` over the
+        // COORDINATE field — once per neg, on the boundary). With x shared
+        // (both EcPoint consumes, col 7/8) this pins `R = −val_a` without
+        // any group law.
+        frac_col!(
+            builder,
+            "ec-msm-walk",
+            pair_deg,
+            (
+                "consume-uintadd-neg",
+                is_neg.clone(),
+                UintAddMsg {
+                    bound_ptr: sbound_ptr.clone(),
+                    a_ptr: s_a.clone(),
+                    b_ptr: scalar.clone(),
+                    c_ptr: LB::Expr::ZERO,
+                    nz: LB::Expr::ZERO,
+                },
+                one_deg
+            ),
+            (
+                "consume-uintadd-neg-y",
+                bnd_neg.clone(),
+                UintAddMsg {
+                    bound_ptr: bound_ptr.clone(),
+                    a_ptr: neg_ya.clone(),
+                    b_ptr: neg_yr.clone(),
+                    c_ptr: LB::Expr::ZERO,
+                    nz: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+        );
+        // col 6 (paired, lqd-1): the boundary expr-level operand head(s) —
+        // `k` = the final cursor, so every operand term was walked exactly
+        // once.
+        frac_col!(
+            builder,
+            "ec-msm-heads",
+            pair_deg,
+            (
+                "consume-head-a",
+                bnd_a.clone(),
+                MsmExprMsg {
+                    expr_ptr: a_expr.clone(),
+                    group_ptr: group_ptr.clone(),
+                    val_ptr: val_a.clone(),
+                    k: i_cur.clone() + adv_i.clone(),
+                },
+                two_deg
+            ),
+            (
+                "consume-head-b",
+                bnd_b.clone(),
+                MsmExprMsg {
+                    expr_ptr: b_expr.clone(),
+                    group_ptr: group_ptr.clone(),
+                    val_ptr: val_b.clone(),
+                    k: j_cur.clone() + adv_j.clone(),
+                },
+                two_deg
+            ),
+        );
+        // col 7 (paired, lqd-1): the value `EcGroupAdd` (combine's
+        // `val = val_a + val_b`), paired with neg's CHEAP value negation
+        // read of val_a's coords (R = val, read in col 8). Both EcPoint
+        // consumes carry the same `neg_x`, so the store's provides pin
+        // `R.x = val_a.x`; the y-flip UintAdd (col 5) ties `R.y = −val_a.y`.
+        // No group law for neg — `val = −val_a`.
+        frac_col!(
+            builder,
+            "ec-msm-heads",
+            pair_deg,
+            (
+                "consume-ecgroupadd",
+                bnd_b.clone(),
+                EcGroupAddMsg {
+                    group_ptr: group_ptr.clone(),
+                    p_ptr: val_a.clone(),
+                    q_ptr: val_b.clone(),
+                    r_ptr: val.clone(),
+                },
+                two_deg
+            ),
+            (
+                "consume-ecpoint-val-a",
+                bnd_neg.clone(),
+                EcPointMsg {
+                    point_ptr: val_a.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: neg_x.clone(),
+                    y_ptr: neg_ya.clone(),
+                    is_pai: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+        );
+        // col 8 (paired, lqd-1): neg's cheap value-negation read of R's
+        // coords, paired with the `EcGroup` pin (sbound ↔ group) — both
+        // combine and neg.
+        frac_col!(
+            builder,
+            "ec-msm-heads",
+            pair_deg,
+            (
+                "consume-ecpoint-neg",
+                bnd_neg.clone(),
+                EcPointMsg {
+                    point_ptr: val.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: neg_x.clone(),
+                    y_ptr: neg_yr.clone(),
+                    is_pai: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+            (
+                "consume-ecgroup",
+                bnd_a.clone(),
+                EcGroupMsg {
+                    group_ptr: group_ptr.clone(),
+                    a_ptr: a_ptr.clone(),
+                    b_ptr: b_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    scalar_bound_ptr: sbound_ptr.clone(),
+                },
+                two_deg
+            ),
         );
 
-        // ---- col 1: combine term walk — consume each operand's term at
-        //             its cursor (gated by the advance), and the take_both
-        //             scalar merge `s_a + s_b ≡ scalar (mod sbound)`.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-msm-walk",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-term-a",
-                                    adv_i.clone(),
-                                    MsmTermMsg {
-                                        expr_ptr: a_expr.clone(),
-                                        idx: i_cur.clone(),
-                                        base_ptr: base_a.clone(),
-                                        scalar_ptr: s_a.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-term-b",
-                                    adv_j.clone(),
-                                    MsmTermMsg {
-                                        expr_ptr: b_expr.clone(),
-                                        idx: j_cur.clone(),
-                                        base_ptr: base_b.clone(),
-                                        scalar_ptr: s_b.clone(),
-                                    },
-                                    one_deg,
-                                );
-                                b.insert(
-                                    "consume-uintadd",
-                                    take_both.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: sbound_ptr.clone(),
-                                        a_ptr: s_a.clone(),
-                                        b_ptr: s_b.clone(),
-                                        c_ptr: scalar.clone(),
-                                        nz: LB::Expr::ZERO,
-                                    },
-                                    one_deg,
-                                );
-                                // neg: out_scalar = −s_a, the `is_c_zero`
-                                // arrangement `s_a + out_scalar ≡ 0 (mod
-                                // sbound)` (c_ptr = 0 sentinel) — one per
-                                // term row.
-                                b.insert(
-                                    "consume-uintadd-neg",
-                                    is_neg.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: sbound_ptr.clone(),
-                                        a_ptr: s_a.clone(),
-                                        b_ptr: scalar.clone(),
-                                        c_ptr: LB::Expr::ZERO,
-                                        nz: LB::Expr::ZERO,
-                                    },
-                                    one_deg,
-                                );
-                                // neg's VALUE y-flip: `R.y = −val_a.y`, the
-                                // is_c_zero UintAdd `y_a + y_R ≡ 0` over the
-                                // COORDINATE field (`bound_ptr`, not the scalar
-                                // bound) — once per neg, on the boundary. With x
-                                // shared (both EcPoint consumes, col 2) this pins
-                                // `R = −val_a` without any group law.
-                                b.insert(
-                                    "consume-uintadd-neg-y",
-                                    bnd_neg.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound_ptr.clone(),
-                                        a_ptr: neg_ya.clone(),
-                                        b_ptr: neg_yr.clone(),
-                                        c_ptr: LB::Expr::ZERO,
-                                        nz: LB::Expr::ZERO,
-                                    },
-                                    two_deg,
-                                );
-                            },
-                            col1_deg,
-                        );
-                    },
-                    col1_deg,
-                );
-            },
-            col1_deg,
+        // col 9/10 (paired, lqd-1): the ordering range checks — the two
+        // 32-bit difference decompositions enforcing `a_expr, b_expr <
+        // expr`.
+        frac_col!(
+            builder,
+            "ec-msm-order",
+            pair_deg,
+            ("range-a-lo", bnd_a.clone(), Range16Msg { w: a_lo }, two_deg),
+            ("range-a-hi", bnd_a, Range16Msg { w: a_hi }, two_deg),
         );
-
-        // ---- col 2: boundary expr-level consumes — the operand head(s)
-        //             (`k` = the final cursor, so every operand term was
-        //             walked exactly once), the value `EcGroupAdd` (combine's
-        //             add or neg's cancel), the `EcGroup` pinning `sbound` to
-        //             the group, and — for neg — the `EcPoint(∞)` pinning the
-        //             cancel result slot (so `val = −val_a`).
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-msm-heads",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                // Operand-A head (combine + neg): k = the
-                                // final cursor, so every A term was walked
-                                // once.
-                                b.insert(
-                                    "consume-head-a",
-                                    bnd_a.clone(),
-                                    MsmExprMsg {
-                                        expr_ptr: a_expr.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        val_ptr: val_a.clone(),
-                                        k: i_cur.clone() + adv_i.clone(),
-                                    },
-                                    two_deg,
-                                );
-                                // Operand-B head + combine's value add
-                                // `val = val_a + val_b` (combine only).
-                                b.insert(
-                                    "consume-head-b",
-                                    bnd_b.clone(),
-                                    MsmExprMsg {
-                                        expr_ptr: b_expr.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        val_ptr: val_b.clone(),
-                                        k: j_cur.clone() + adv_j.clone(),
-                                    },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "consume-ecgroupadd",
-                                    bnd_b.clone(),
-                                    EcGroupAddMsg {
-                                        group_ptr: group_ptr.clone(),
-                                        p_ptr: val_a.clone(),
-                                        q_ptr: val_b.clone(),
-                                        r_ptr: val.clone(),
-                                    },
-                                    two_deg,
-                                );
-                                // neg's CHEAP value negation: read val_a's and
-                                // R's coords (R = val). Both EcPoint consumes
-                                // carry the same `neg_x`, so the store's
-                                // provides pin `R.x = val_a.x`; the y-flip
-                                // UintAdd (col 1) ties `R.y = −val_a.y`. No
-                                // group law — `val = −val_a` (neg only).
-                                b.insert(
-                                    "consume-ecpoint-val-a",
-                                    bnd_neg.clone(),
-                                    EcPointMsg {
-                                        point_ptr: val_a.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        x_ptr: neg_x.clone(),
-                                        y_ptr: neg_ya.clone(),
-                                        is_pai: LB::Expr::ZERO,
-                                    },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "consume-ecpoint-neg",
-                                    bnd_neg.clone(),
-                                    EcPointMsg {
-                                        point_ptr: val.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        x_ptr: neg_x.clone(),
-                                        y_ptr: neg_yr.clone(),
-                                        is_pai: LB::Expr::ZERO,
-                                    },
-                                    two_deg,
-                                );
-                                // The `EcGroup` pin (sbound ↔ group) — both
-                                // combine and neg.
-                                b.insert(
-                                    "consume-ecgroup",
-                                    bnd_a.clone(),
-                                    EcGroupMsg {
-                                        group_ptr: group_ptr.clone(),
-                                        a_ptr: a_ptr.clone(),
-                                        b_ptr: b_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        scalar_bound_ptr: sbound_ptr.clone(),
-                                    },
-                                    two_deg,
-                                );
-                            },
-                            col2_deg,
-                        );
-                    },
-                    col2_deg,
-                );
-            },
-            col2_deg,
-        );
-
-        // ---- col 3: ordering range checks — the two 32-bit difference
-        //             decompositions enforcing `a_expr, b_expr < expr`.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-msm-order",
-                    |g| {
-                        g.batch(
-                            "fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "range-a-lo",
-                                    bnd_a.clone(),
-                                    Range16Msg { w: a_lo },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "range-a-hi",
-                                    bnd_a.clone(),
-                                    Range16Msg { w: a_hi },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "range-b-lo",
-                                    bnd_b.clone(),
-                                    Range16Msg { w: b_lo },
-                                    two_deg,
-                                );
-                                b.insert(
-                                    "range-b-hi",
-                                    bnd_b.clone(),
-                                    Range16Msg { w: b_hi },
-                                    two_deg,
-                                );
-                            },
-                            col3_deg,
-                        );
-                    },
-                    col3_deg,
-                );
-            },
-            col3_deg,
+        frac_col!(
+            builder,
+            "ec-msm-order",
+            pair_deg,
+            ("range-b-lo", bnd_b.clone(), Range16Msg { w: b_lo }, two_deg),
+            ("range-b-hi", bnd_b, Range16Msg { w: b_hi }, two_deg),
         );
     }
 }

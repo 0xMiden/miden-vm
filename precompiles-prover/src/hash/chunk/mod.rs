@@ -30,7 +30,7 @@ use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::poseidon2::Poseidon2InMsg,
@@ -81,25 +81,17 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Three aux columns, following the `bitwise64` chaining pattern:
-/// - col 0: running σ + Memory64 fractions (one group, one batch of 4 product inserts — all four
-///   lanes every active row).
-/// - col 1: Poseidon2 fractions (one group, one batch of 3 product inserts — rate0/rate1 every row,
-///   InCap on chain heads).
-/// - col 2: ChunkChain fractions (one group, one batch of 1 insert — chain-head emit, mult
-///   `−act·is_head`).
-///
-/// Col 0 hosts the σ-closing, so its last-row close is gated by
-/// `is_transition` / `is_last_row` (degree-1 selectors): a col-0 batch
-/// of 4 fractions lands at `4 + 2 = 6`, vs the ungated fraction columns'
-/// `k + 1`. Max per-column constraint deg 6 → `log_quotient_degree = 3`
-/// (was deg 5 → lqd 2 under the older ungated σ/n form, which closed on
-/// the wrap with a degree-0 `σ·inv_n` correction instead of a gate).
-pub const NUM_AUX_COLS: usize = 3;
+/// Five aux columns, flattened via `frac_col!` so every closing
+/// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
+/// - col 0: `lane0` alone — the gated running-sum anchor.
+/// - col 1: `lane1` + `lane2` (Memory64).
+/// - col 2: `lane3` (Memory64) + `rate0` (Poseidon2In) — cross-bus pair.
+/// - col 3: `rate1` + `cap` (Poseidon2In).
+/// - col 4: `emit` alone (ChunkChain, no partner left to pair).
+pub const NUM_AUX_COLS: usize = 5;
 
-/// Per-column insert counts: col 0 = 4 Memory64 lanes, col 1 = 3
-/// Poseidon2In messages (rate0, rate1, cap), col 2 = 1 ChunkChain emit.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [4, 3, 1];
+/// Per-column fraction counts, matching the pairing above.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 1];
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; aggregating the Memory64 + Poseidon2In
@@ -261,145 +253,110 @@ where
         let cap_chunk = Tag::CHUNKS.as_word().map(LB::Expr::from);
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        // Col 0 Memory64: one batch, 4 product inserts. d = 4; every
-        // insert mult is `−act` (deg 1) → n = 1 + 3 = 4.
-        let m64_deg = Deg { v: 4, u: 4 };
-        // Col 1 Poseidon2In: one batch, 3 product inserts. d = 3; worst
-        // insert mult deg 2 (cap) → n = 2 + 2 = 4.
-        let p2_deg = Deg { v: 4, u: 3 };
-        // Col 2 ChunkChain: one batch, 1 insert. d = 1; insert mult
-        // `−act · is_head` (deg 2) → n = 2.
-        let chunkchain_deg = Deg { v: 2, u: 1 };
+        let provides_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // ---- col 0: Memory64 lane provides --------------------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "memory64",
-                    |g| {
-                        g.batch(
-                            "lanes",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "lane0",
-                                    neg_act.clone(),
-                                    Memory64Msg {
-                                        addr: addr0,
-                                        lo: f[0].clone(),
-                                        hi: f[1].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "lane1",
-                                    neg_act.clone(),
-                                    Memory64Msg {
-                                        addr: addr1,
-                                        lo: f[2].clone(),
-                                        hi: f[3].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "lane2",
-                                    neg_act.clone(),
-                                    Memory64Msg {
-                                        addr: addr2,
-                                        lo: f[4].clone(),
-                                        hi: f[5].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "lane3",
-                                    neg_act,
-                                    Memory64Msg {
-                                        addr: addr3,
-                                        lo: f[6].clone(),
-                                        hi: f[7].clone(),
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            m64_deg,
-                        );
-                    },
-                    m64_deg,
-                );
-            },
-            m64_deg,
+        // col 0: lane0 alone — the gated running-sum anchor.
+        frac_col!(
+            builder,
+            "memory64",
+            provides_deg,
+            (
+                "lane0",
+                neg_act.clone(),
+                Memory64Msg {
+                    addr: addr0,
+                    lo: f[0].clone(),
+                    hi: f[1].clone()
+                },
+                interaction_deg
+            ),
+        );
+        // col 1 (paired, lqd-1): lane1 + lane2 (Memory64).
+        frac_col!(
+            builder,
+            "memory64",
+            pair_deg,
+            (
+                "lane1",
+                neg_act.clone(),
+                Memory64Msg {
+                    addr: addr1,
+                    lo: f[2].clone(),
+                    hi: f[3].clone()
+                },
+                interaction_deg
+            ),
+            (
+                "lane2",
+                neg_act.clone(),
+                Memory64Msg {
+                    addr: addr2,
+                    lo: f[4].clone(),
+                    hi: f[5].clone()
+                },
+                interaction_deg
+            ),
+        );
+        // col 2 (paired, lqd-1): lane3 (Memory64) + rate0 (Poseidon2In).
+        frac_col!(
+            builder,
+            "chunk-flatten",
+            pair_deg,
+            (
+                "lane3",
+                neg_act,
+                Memory64Msg {
+                    addr: addr3,
+                    lo: f[6].clone(),
+                    hi: f[7].clone()
+                },
+                interaction_deg
+            ),
+            (
+                "rate0",
+                pos_act.clone(),
+                Poseidon2InMsg::rate0(perm_seq_id.clone(), rate0_chunk),
+                interaction_deg
+            ),
+        );
+        // col 3 (paired, lqd-1): rate1 + cap (Poseidon2In).
+        frac_col!(
+            builder,
+            "poseidon2-in",
+            pair_deg,
+            (
+                "rate1",
+                pos_act,
+                Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
+                interaction_deg
+            ),
+            (
+                "cap",
+                pos_act_head.clone(),
+                Poseidon2InMsg::cap(perm_seq_id.clone(), cap_chunk),
+                interaction_deg
+            ),
         );
 
-        // ---- col 1: Poseidon2In consumes ----------------------
-        builder.next_column(
-            |col| {
-                col.group(
-                    "poseidon2-in",
-                    |g| {
-                        g.batch(
-                            "rate-and-cap",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "rate0",
-                                    pos_act.clone(),
-                                    Poseidon2InMsg::rate0(perm_seq_id.clone(), rate0_chunk),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "rate1",
-                                    pos_act,
-                                    Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
-                                    interaction_deg,
-                                );
-                                b.insert(
-                                    "cap",
-                                    pos_act_head.clone(),
-                                    Poseidon2InMsg::cap(perm_seq_id.clone(), cap_chunk),
-                                    interaction_deg,
-                                );
-                            },
-                            p2_deg,
-                        );
-                    },
-                    p2_deg,
-                );
-            },
-            p2_deg,
-        );
-
-        // ---- col 2: ChunkChain provide on chain heads ---------
-        // mult = `−act · is_head` (deg 2); message ties this chain's
-        // chunk-side index to its P2 absorption-chain head. Consumed by
-        // hasher-orchestration chiplets (Keccak node, …).
+        // col 4: ChunkChain provide on chain heads, alone (no partner left
+        // to pair). mult = `−act · is_head` (deg 2); message ties this
+        // chain's chunk-side index to its P2 absorption-chain head.
+        // Consumed by hasher-orchestration chiplets (Keccak node, …).
         let neg_act_head: LB::Expr = LB::Expr::ZERO - pos_act_head;
-        builder.next_column(
-            |col| {
-                col.group(
-                    "chunk-chain",
-                    |g| {
-                        g.batch(
-                            "head",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "emit",
-                                    neg_act_head,
-                                    ChunkChainMsg {
-                                        chunk_seq_id_head: local[COL_CHUNK_SEQ_ID].into(),
-                                        perm_seq_id_head: perm_seq_id,
-                                    },
-                                    interaction_deg,
-                                );
-                            },
-                            chunkchain_deg,
-                        );
-                    },
-                    chunkchain_deg,
-                );
-            },
-            chunkchain_deg,
+        frac_col!(
+            builder,
+            "chunk-chain",
+            provides_deg,
+            (
+                "emit",
+                neg_act_head,
+                ChunkChainMsg {
+                    chunk_seq_id_head: local[COL_CHUNK_SEQ_ID].into(),
+                    perm_seq_id_head: perm_seq_id,
+                },
+                interaction_deg
+            ),
         );
     }
 }

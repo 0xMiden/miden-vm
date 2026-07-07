@@ -116,7 +116,7 @@ use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        NUM_SIGMA_VALUES, frac_col,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -261,13 +261,23 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: four LogUp columns — three for the bindings / certificates, plus a
-// fourth (the "mint column") carrying the closure-cert ptr-ordering
-// Range16 checks (4 limb consumes) and the result-membership cert provide,
-// all gated on `mints`.
-const NUM_LOGUP_COLS: usize = 4;
-const AUX_WIDTH: usize = 4;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [7, 6, 6, 5];
+// Aux: 12 columns, flattened via `frac_col!` over the 21 fractions so
+// every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
+// = 1:
+// - col 0: the `EcGroupAdd` provide, alone — the gated running-sum anchor.
+// - col 1: the `p` / `q` operand `EcPoint` consumes.
+// - col 2: the live-result and cancel-PAI-result `EcPoint` consumes.
+// - col 3: the `EcGroup` consume + the cancel `y₁+y₂≡0` certificate.
+// - col 4: the generic case's `d`-subtract + chord certificates.
+// - col 5: the double case's tangent-numerator + slope-pin certificates.
+// - col 6: the generic case's `t`-add + fused `x₃` mul-subtract.
+// - col 7: the shared tail's `e`-subtract + fused `y₃` mul-subtract.
+// - col 8: the double case's fused `x₃` mul-subtract, alone (no partner left to pair).
+// - col 9/10: the closure-cert ptr-ordering Range16 limb pairs.
+// - col 11: the result-membership cert provide, alone.
+const NUM_LOGUP_COLS: usize = 12;
+const AUX_WIDTH: usize = 12;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1];
 
 // AIR
 // ================================================================================================
@@ -508,400 +518,335 @@ where
         let three: LB::Expr = LB::Expr::from(Felt::from(3u32));
 
         let f2 = Deg { v: 2, u: 1 };
-        let col_deg = Deg { v: 8, u: 7 };
-        // Slope / tail columns each shed one fraction (the `is_b_zero`
-        // x-/y-equality certs are now native degree-2 constraints).
-        let col_deg6 = Deg { v: 7, u: 6 };
-        // Mint column: 4 Range16 consumes + 1 cert provide, each a deg-2
-        // gate (at_res · mints) over a deg-1 message ⇒ over 5 fractions the
-        // numerator is 2 + 4·1 = 6, denominator 5.
-        let mint_col_deg = Deg { v: 6, u: 5 };
+        let single_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
 
-        // Col 0 (running sum): the provide + the point / group bindings,
-        // all emitted in the res-row window (term cells via next), except
-        // the live result consume, which needs x₃ (row 1) and y₃/r/group
-        // (row 2) together — the tail-row window.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-add-bindings",
-                    |g| {
-                        g.batch(
-                            "bindings",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "provide-ecgroupadd",
-                                    neg_mult * at_res.clone(),
-                                    EcGroupAddMsg {
-                                        group_ptr: group_local.clone(),
-                                        p_ptr: p_ptr.clone(),
-                                        q_ptr: q_ptr.clone(),
-                                        r_ptr: r_local.clone(),
-                                    },
-                                    f2,
-                                );
-                                // Operands: the case flags ARE the is_pai
-                                // fields — a forged claim matches no row.
-                                b.insert(
-                                    "consume-ecpoint-p",
-                                    act.clone() * at_res.clone(),
-                                    EcPointMsg {
-                                        point_ptr: p_ptr,
-                                        group_ptr: group_local.clone(),
-                                        x_ptr: px.clone(),
-                                        y_ptr: py.clone(),
-                                        is_pai: pai_p,
-                                    },
-                                    f2,
-                                );
-                                b.insert(
-                                    "consume-ecpoint-q",
-                                    act.clone() * at_res.clone(),
-                                    EcPointMsg {
-                                        point_ptr: q_ptr,
-                                        group_ptr: group_local.clone(),
-                                        x_ptr: qx.clone(),
-                                        y_ptr: qy.clone(),
-                                        is_pai: pai_q,
-                                    },
-                                    f2,
-                                );
-                                // The live result binds the computed
-                                // coordinates…
-                                b.insert(
-                                    "consume-ecpoint-r",
-                                    tail.clone() * at_tail.clone(),
-                                    EcPointMsg {
-                                        point_ptr: r_next,
-                                        group_ptr: group_next,
-                                        x_ptr: x3_local,
-                                        y_ptr: y3_local,
-                                        is_pai: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // …and cancel resolves to the group's PAI
-                                // row.
-                                b.insert(
-                                    "consume-ecpoint-r-pai",
-                                    cancel.clone() * at_res.clone(),
-                                    EcPointMsg {
-                                        point_ptr: r_local,
-                                        group_ptr: group_local.clone(),
-                                        x_ptr: zero.clone(),
-                                        y_ptr: zero.clone(),
-                                        is_pai: one.clone(),
-                                    },
-                                    f2,
-                                );
-                                b.insert(
-                                    "consume-ecgroup",
-                                    live * at_res.clone(),
-                                    EcGroupMsg {
-                                        group_ptr: group_local,
-                                        a_ptr: a_ptr.clone(),
-                                        b_ptr: b_ptr.clone(),
-                                        bound_ptr: bound.clone(),
-                                        scalar_bound_ptr: sbound,
-                                    },
-                                    f2,
-                                );
-                                // cancel: y₁ + y₂ ≡ 0 — the is_c_zero
-                                // negation tuple as the certificate.
-                                b.insert(
-                                    "consume-cancel-zero",
-                                    cancel.clone() * at_res,
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: py.clone(),
-                                        b_ptr: qy.clone(),
-                                        c_ptr: zero.clone(),
-                                        nz: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                            },
-                            col_deg,
-                        );
-                    },
-                    col_deg,
-                );
-            },
-            col_deg,
+        // col 0: the `EcGroupAdd` provide, alone — the gated running-sum
+        // anchor.
+        frac_col!(
+            builder,
+            "ec-add-bindings",
+            single_deg,
+            (
+                "provide-ecgroupadd",
+                neg_mult * at_res.clone(),
+                EcGroupAddMsg {
+                    group_ptr: group_local.clone(),
+                    p_ptr: p_ptr.clone(),
+                    q_ptr: q_ptr.clone(),
+                    r_ptr: r_local.clone(),
+                },
+                f2
+            ),
+        );
+        // col 1 (paired, lqd-1): the `p` / `q` operand `EcPoint` consumes.
+        // The case flags ARE the is_pai fields — a forged claim matches no
+        // row.
+        frac_col!(
+            builder,
+            "ec-add-bindings",
+            pair_deg,
+            (
+                "consume-ecpoint-p",
+                act.clone() * at_res.clone(),
+                EcPointMsg {
+                    point_ptr: p_ptr.clone(),
+                    group_ptr: group_local.clone(),
+                    x_ptr: px.clone(),
+                    y_ptr: py.clone(),
+                    is_pai: pai_p,
+                },
+                f2
+            ),
+            (
+                "consume-ecpoint-q",
+                act.clone() * at_res.clone(),
+                EcPointMsg {
+                    point_ptr: q_ptr.clone(),
+                    group_ptr: group_local.clone(),
+                    x_ptr: qx.clone(),
+                    y_ptr: qy.clone(),
+                    is_pai: pai_q,
+                },
+                f2
+            ),
+        );
+        // col 2 (paired, lqd-1): the live result binds the computed
+        // coordinates; cancel resolves to the group's PAI row.
+        frac_col!(
+            builder,
+            "ec-add-bindings",
+            pair_deg,
+            (
+                "consume-ecpoint-r",
+                tail.clone() * at_tail,
+                EcPointMsg {
+                    point_ptr: r_next,
+                    group_ptr: group_next,
+                    x_ptr: x3_local,
+                    y_ptr: y3_local,
+                    is_pai: zero.clone(),
+                },
+                f2
+            ),
+            (
+                "consume-ecpoint-r-pai",
+                cancel.clone() * at_res.clone(),
+                EcPointMsg {
+                    point_ptr: r_local,
+                    group_ptr: group_local.clone(),
+                    x_ptr: zero.clone(),
+                    y_ptr: zero.clone(),
+                    is_pai: one.clone(),
+                },
+                f2
+            ),
+        );
+        // col 3 (paired, lqd-1): the group binding + cancel's `y₁+y₂≡0`
+        // certificate (the is_c_zero negation tuple).
+        frac_col!(
+            builder,
+            "ec-add-bindings",
+            pair_deg,
+            (
+                "consume-ecgroup",
+                live * at_res.clone(),
+                EcGroupMsg {
+                    group_ptr: group_local.clone(),
+                    a_ptr: a_ptr.clone(),
+                    b_ptr: b_ptr.clone(),
+                    bound_ptr: bound.clone(),
+                    scalar_bound_ptr: sbound,
+                },
+                f2
+            ),
+            (
+                "consume-cancel-zero",
+                cancel.clone() * at_res.clone(),
+                UintAddMsg {
+                    bound_ptr: bound.clone(),
+                    a_ptr: py.clone(),
+                    b_ptr: qy.clone(),
+                    c_ptr: zero.clone(),
+                    nz: zero.clone(),
+                },
+                f2
+            ),
         );
 
-        // Col 1 (fractions): the slope + predicate certificates, all in
-        // the slope-row window.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-add-slope",
-                    |g| {
-                        g.batch(
-                            "slope",
-                            LB::Expr::ONE,
-                            |b| {
-                                // generic: d = x₂ − x₁ (the arrangement
-                                // x₁ + d ≡ x₂, certified `d ≠ 0` — `nz = 1`
-                                // — in place of the separate inverse modmul
-                                // disequality) and the chord λ·d + y₁ ≡ y₂.
-                                b.insert(
-                                    "consume-d-sub",
-                                    generic.clone() * at_slope.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: px.clone(),
-                                        b_ptr: slope_aux.clone(),
-                                        c_ptr: qx.clone(),
-                                        nz: one.clone(),
-                                    },
-                                    f2,
-                                );
-                                b.insert(
-                                    "consume-chord",
-                                    generic.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: one.clone(),
-                                        a_ptr: lambda.clone(),
-                                        b_ptr: slope_aux.clone(),
-                                        c_ptr: py.clone(),
-                                        r_ptr: qy.clone(),
-                                        bound_ptr: bound.clone(),
-                                        is_sub: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // double: s ≡ 3·x² + a and 2·λ·y ≡ s (the
-                                // κ's carrying the tangent constants;
-                                // shared r_ptr = s).
-                                b.insert(
-                                    "consume-tangent-s",
-                                    dbl.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: three,
-                                        kappa_c: one.clone(),
-                                        a_ptr: px.clone(),
-                                        b_ptr: px.clone(),
-                                        c_ptr: a_ptr,
-                                        r_ptr: slope_aux.clone(),
-                                        bound_ptr: bound.clone(),
-                                        is_sub: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // double's slope pin `2λy ≡ s = 3x² + a`. No
-                                // `y₁ ≠ 0` witness is needed: at `y = 0` this
-                                // would force `s = 0`, which never holds at a
-                                // 2-torsion point of a **smooth** curve
-                                // (`3x² + a ≠ 0` at a simple cubic root). A
-                                // `y = 0` self-add thus cannot satisfy the
-                                // double case — it can only take `cancel`
-                                // (2·(2-torsion) = ∞). This leans on curve
-                                // smoothness (`4a³ + 27b² ≠ 0`), the same
-                                // anchored-curve well-formedness assumption as
-                                // the `b ≠ 0` guard the disequality MACs rest
-                                // on.
-                                b.insert(
-                                    "consume-tangent-2ly",
-                                    dbl.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: two.clone(),
-                                        kappa_c: zero.clone(),
-                                        a_ptr: lambda.clone(),
-                                        b_ptr: py.clone(),
-                                        c_ptr: bound.clone(),
-                                        r_ptr: slope_aux,
-                                        bound_ptr: bound.clone(),
-                                        is_sub: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // The double/cancel `x₁ = x₂` equality is now
-                                // a native degree-2 constraint (see Phase 1),
-                                // so no is_b_zero cert here.
-                            },
-                            col_deg6,
-                        );
-                    },
-                    col_deg6,
-                );
-            },
-            col_deg6,
+        // col 4 (paired, lqd-1): generic's d = x₂ − x₁ (the arrangement
+        // x₁ + d ≡ x₂, certified `d ≠ 0` — `nz = 1` — in place of the
+        // separate inverse modmul disequality) and the chord λ·d + y₁ ≡ y₂.
+        frac_col!(
+            builder,
+            "ec-add-slope",
+            pair_deg,
+            (
+                "consume-d-sub",
+                generic.clone() * at_slope.clone(),
+                UintAddMsg {
+                    bound_ptr: bound.clone(),
+                    a_ptr: px.clone(),
+                    b_ptr: slope_aux.clone(),
+                    c_ptr: qx.clone(),
+                    nz: one.clone(),
+                },
+                f2
+            ),
+            (
+                "consume-chord",
+                generic.clone() * at_slope.clone(),
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: one.clone(),
+                    a_ptr: lambda.clone(),
+                    b_ptr: slope_aux.clone(),
+                    c_ptr: py.clone(),
+                    r_ptr: qy.clone(),
+                    bound_ptr: bound.clone(),
+                    is_sub: zero.clone(),
+                },
+                f2
+            ),
+        );
+        // col 5 (paired, lqd-1): double's s ≡ 3·x² + a and its slope pin
+        // 2·λ·y ≡ s = 3x² + a. No `y₁ ≠ 0` witness is needed: at `y = 0`
+        // this would force `s = 0`, which never holds at a 2-torsion point
+        // of a **smooth** curve (`3x² + a ≠ 0` at a simple cubic root). A
+        // `y = 0` self-add thus cannot satisfy the double case — it can
+        // only take `cancel` (2·(2-torsion) = ∞). This leans on curve
+        // smoothness (`4a³ + 27b² ≠ 0`), the same anchored-curve
+        // well-formedness assumption as the `b ≠ 0` guard the disequality
+        // MACs rest on.
+        frac_col!(
+            builder,
+            "ec-add-slope",
+            pair_deg,
+            (
+                "consume-tangent-s",
+                dbl.clone() * at_slope.clone(),
+                UintMulMsg {
+                    kappa_a: three,
+                    kappa_c: one.clone(),
+                    a_ptr: px.clone(),
+                    b_ptr: px.clone(),
+                    c_ptr: a_ptr,
+                    r_ptr: slope_aux.clone(),
+                    bound_ptr: bound.clone(),
+                    is_sub: zero.clone(),
+                },
+                f2
+            ),
+            (
+                "consume-tangent-2ly",
+                dbl.clone() * at_slope.clone(),
+                UintMulMsg {
+                    kappa_a: two.clone(),
+                    kappa_c: zero.clone(),
+                    a_ptr: lambda.clone(),
+                    b_ptr: py.clone(),
+                    c_ptr: bound.clone(),
+                    r_ptr: slope_aux.clone(),
+                    bound_ptr: bound.clone(),
+                    is_sub: zero.clone(),
+                },
+                f2
+            ),
+        );
+        // The double/cancel `x₁ = x₂` and double's `y₁ = y₂` equalities are
+        // native degree-2 constraints (see Phase 1), so no is_b_zero certs
+        // here.
+
+        // col 6 (paired, lqd-1): the shared tail. generic forms
+        // `t = x₁ + x₂` then the fused `x₃ = λ² − t`. Mutually exclusive
+        // with double's fused x₃ (col 8) — exactly one fires per live op.
+        frac_col!(
+            builder,
+            "ec-add-tail",
+            pair_deg,
+            (
+                "consume-t-add",
+                generic.clone() * at_slope.clone(),
+                UintAddMsg {
+                    bound_ptr: bound.clone(),
+                    a_ptr: px.clone(),
+                    b_ptr: qx.clone(),
+                    c_ptr: t.clone(),
+                    nz: zero.clone(),
+                },
+                f2
+            ),
+            (
+                "consume-x3-macsub-gen",
+                generic.clone() * at_slope.clone(),
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: one.clone(),
+                    a_ptr: lambda.clone(),
+                    b_ptr: lambda.clone(),
+                    c_ptr: t,
+                    r_ptr: x3_next.clone(),
+                    bound_ptr: bound.clone(),
+                    is_sub: one.clone(),
+                },
+                f2
+            ),
+        );
+        // col 7 (paired, lqd-1): e = x₁ − x₃ (x₃ + e ≡ x₁), then the fused
+        // y₃ = λ·e − y₁ — shared by both live cases.
+        frac_col!(
+            builder,
+            "ec-add-tail",
+            pair_deg,
+            (
+                "consume-e-sub",
+                tail.clone() * at_slope.clone(),
+                UintAddMsg {
+                    bound_ptr: bound.clone(),
+                    a_ptr: x3_next.clone(),
+                    b_ptr: e.clone(),
+                    c_ptr: px.clone(),
+                    nz: zero.clone(),
+                },
+                f2
+            ),
+            (
+                "consume-y3-macsub",
+                tail * at_slope.clone(),
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: one.clone(),
+                    a_ptr: lambda.clone(),
+                    b_ptr: e,
+                    c_ptr: py.clone(),
+                    r_ptr: y3_next,
+                    bound_ptr: bound.clone(),
+                    is_sub: one.clone(),
+                },
+                f2
+            ),
+        );
+        // col 8: double's fused x₃ = λ² − 2·x₁, alone (no partner left to
+        // pair) — folds `t = 2x₁` into the mul-subtract (κ_c = 2, c = x₁),
+        // laying no separate `t` add.
+        frac_col!(
+            builder,
+            "ec-add-tail",
+            single_deg,
+            (
+                "consume-x3-macsub-dbl",
+                dbl * at_slope,
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: two,
+                    a_ptr: lambda.clone(),
+                    b_ptr: lambda,
+                    c_ptr: px,
+                    r_ptr: x3_next,
+                    bound_ptr: bound.clone(),
+                    is_sub: one,
+                },
+                f2
+            ),
         );
 
-        // Col 2 (fractions): the shared tail, two fused mul-subtracts (no
-        // `w` / `u` store, no `x₃` / `y₃` sub op). All fire on the slope-row
-        // window — `e` / `x₃` / `y₃` live on the tail row, read via next. The
-        // x₃ subtract splits by case: generic forms `t = x₁ + x₂` then
-        // `x₃ = λ² − t` (κ_c = 1); double, where `x₁ = x₂`, folds `t = 2x₁`
-        // into `x₃ = λ² − 2·x₁` (κ_c = 2, c = x₁) and lays no `t` add.
-        //
-        // generic's `t = x₁ + x₂`, or double's fused `x₃ = λ² − 2·x₁` —
-        // mutually exclusive, exactly one fires per live op — plus double's
-        // y-equality.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-add-tail",
-                    |g| {
-                        g.batch(
-                            "tail",
-                            LB::Expr::ONE,
-                            |b| {
-                                // generic: t = x₁ + x₂.
-                                b.insert(
-                                    "consume-t-add",
-                                    generic.clone() * at_slope.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: px.clone(),
-                                        b_ptr: qx.clone(),
-                                        c_ptr: t.clone(),
-                                        nz: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // double: the fused x₃ = λ² − 2·x₁.
-                                b.insert(
-                                    "consume-x3-macsub-dbl",
-                                    dbl.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: two.clone(),
-                                        a_ptr: lambda.clone(),
-                                        b_ptr: lambda.clone(),
-                                        c_ptr: px.clone(),
-                                        r_ptr: x3_next.clone(),
-                                        bound_ptr: bound.clone(),
-                                        is_sub: one.clone(),
-                                    },
-                                    f2,
-                                );
-                                // generic: the fused x₃ = λ² − t.
-                                b.insert(
-                                    "consume-x3-macsub-gen",
-                                    generic.clone() * at_slope.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: one.clone(),
-                                        a_ptr: lambda.clone(),
-                                        b_ptr: lambda.clone(),
-                                        c_ptr: t,
-                                        r_ptr: x3_next.clone(),
-                                        bound_ptr: bound.clone(),
-                                        is_sub: one.clone(),
-                                    },
-                                    f2,
-                                );
-                                // e = x₁ − x₃  (x₃ + e ≡ x₁).
-                                b.insert(
-                                    "consume-e-sub",
-                                    tail.clone() * at_slope.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: x3_next,
-                                        b_ptr: e.clone(),
-                                        c_ptr: px,
-                                        nz: zero.clone(),
-                                    },
-                                    f2,
-                                );
-                                // the fused y₃ = λ·e − y₁.
-                                b.insert(
-                                    "consume-y3-macsub",
-                                    tail * at_slope,
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: one.clone(),
-                                        a_ptr: lambda,
-                                        b_ptr: e,
-                                        c_ptr: py.clone(),
-                                        r_ptr: y3_next,
-                                        bound_ptr: bound.clone(),
-                                        is_sub: one,
-                                    },
-                                    f2,
-                                );
-                                // The double `y₁ = y₂` equality is now a
-                                // native degree-2 constraint (see Phase 1),
-                                // so no is_b_zero cert here.
-                            },
-                            col_deg6,
-                        );
-                    },
-                    col_deg6,
-                );
-            },
-            col_deg6,
+        // ---- col 9/10: the mint columns. Four Range16 consumes for the
+        //      limbs of r−p−1 and r−q−1 (reconstructed in the main AIR),
+        //      proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op — the
+        //      well-foundedness the certificate rests on. All gated
+        //      `at_res · mints`: one set per mint block.
+        let gate = sel[PCOL_RES].clone() * mints;
+        frac_col!(
+            builder,
+            "ec-add-mint",
+            pair_deg,
+            ("range16-rp-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
+            ("range16-rp-hi", gate.clone(), Range16Msg { w: rp_hi }, f2),
         );
-
-        // ---- col 3: the mint column. Four Range16 consumes for the limbs
-        //             of r−p−1 and r−q−1 (reconstructed in the main AIR),
-        //             proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op —
-        //             the well-foundedness the certificate rests on — plus
-        //             the result-membership cert *provide* itself. All gated
-        //             `at_res · mints`: one set per mint block. The provide
-        //             is consumed by `r`'s point-store row (`EcPointStore`),
-        //             discharging its on-curve obligation without the MAC
-        //             trio; the bus balances because a fresh result is minted
-        //             by exactly one op.
-        // The col-0 binders moved their `group_local` / `r_local`; re-read
-        // the res-row group / result cells for the cert provide.
+        frac_col!(
+            builder,
+            "ec-add-mint",
+            pair_deg,
+            ("range16-rq-lo", gate.clone(), Range16Msg { w: rq_lo }, f2),
+            ("range16-rq-hi", gate.clone(), Range16Msg { w: rq_hi }, f2),
+        );
+        // col 11: the result-membership cert provide, alone. −1 per mint
+        // op (negative ⇒ provide), naming the fresh result `r` and its
+        // group. Consumed by `r`'s point-store row (`EcPointStore`),
+        // discharging its on-curve obligation without the MAC trio; the
+        // bus balances because a fresh result is minted by exactly one op.
         let cert_group: LB::Expr = local[CELL_GROUP].into();
         let cert_r: LB::Expr = local[CELL_R].into();
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-add-mint",
-                    |g| {
-                        g.batch(
-                            "mint",
-                            LB::Expr::ONE,
-                            |b| {
-                                let gate = sel[PCOL_RES].clone() * mints.clone();
-                                b.insert(
-                                    "range16-rp-lo",
-                                    gate.clone(),
-                                    Range16Msg { w: rp_lo },
-                                    f2,
-                                );
-                                b.insert(
-                                    "range16-rp-hi",
-                                    gate.clone(),
-                                    Range16Msg { w: rp_hi },
-                                    f2,
-                                );
-                                b.insert(
-                                    "range16-rq-lo",
-                                    gate.clone(),
-                                    Range16Msg { w: rq_lo },
-                                    f2,
-                                );
-                                b.insert(
-                                    "range16-rq-hi",
-                                    gate.clone(),
-                                    Range16Msg { w: rq_hi },
-                                    f2,
-                                );
-                                // The cert provide: −1 per mint op (negative ⇒
-                                // provide), naming the fresh result `r` and
-                                // its group.
-                                b.insert(
-                                    "provide-ecgroupadd-cert",
-                                    LB::Expr::ZERO - gate,
-                                    EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
-                                    f2,
-                                );
-                            },
-                            mint_col_deg,
-                        );
-                    },
-                    mint_col_deg,
-                );
-            },
-            mint_col_deg,
+        frac_col!(
+            builder,
+            "ec-add-mint",
+            single_deg,
+            (
+                "provide-ecgroupadd-cert",
+                LB::Expr::ZERO - gate,
+                EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
+                f2
+            ),
         );
     }
 }

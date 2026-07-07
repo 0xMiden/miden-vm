@@ -187,13 +187,12 @@ fn trace_row_carries_results_and_multiplicities_at_lex_index() {
 
 #[test]
 fn air_quotient_degree_matches_constraint_plan() {
-    // Column 0 batches the 3 self-provide fractions, so its denominator
-    // product `D₀` is degree 3 and the running-sum close `D₀·(acc' − acc) −
-    // N₀` is degree 4 ungated. The natural last-row σ-closing gates it with
-    // the degree-1 `is_transition` / `is_last_row` selector → degree 5 →
-    // log_quotient_degree = log2_ceil(5 − 1) = 2. Reading the operands from
+    // Flattened via `frac_col!`: column 0 carries only the AndNot
+    // self-provide alone (the gated running-sum anchor), and column 1
+    // batches the Xor + Range16 pair — each closing constraint stays at
+    // degree ≤ 3 → log_quotient_degree = 1. Reading the operands from
     // preprocessed vs. witness columns doesn't change the degree.
-    assert_eq!(crate::tests::log_quotient_degree(&BytePairLutAir), 2);
+    assert_eq!(crate::tests::log_quotient_degree(&BytePairLutAir), 1);
 }
 
 /// Prover-driven aux-trace build. Returns `(aux, sigma)`; `aux_values`

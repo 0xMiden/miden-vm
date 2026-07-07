@@ -70,7 +70,7 @@ use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        NUM_SIGMA_VALUES, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::mul::UintMulMsg,
@@ -185,13 +185,16 @@ pub const COL_ACT: usize = 12;
 pub const COL_IS_CERT: usize = 13;
 pub const NUM_MAIN_COLS: usize = 14;
 
-// Aux: the single LogUp running-sum column. Six fractions: the `EcPoint`
-// provide, the `EcGroup` consume, the three trio MAC consumes (finite,
-// non-cert rows) and the one cert consume (finite, cert rows) — the trio
-// and the cert are mutually-exclusive membership modes.
-const NUM_LOGUP_COLS: usize = 1;
-const AUX_WIDTH: usize = 1;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [6];
+// Aux: five columns, flattened via `frac_col!` so every closing
+// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`. Six
+// fractions total: `EcPoint` provide (col 0, the gated running-sum
+// anchor, alone), `EcGroup` consume paired with the `EcGroupAdd`
+// on-curve-cert consume (col 1), and the three trio MAC consumes — each
+// degree 3, so each sits alone (cols 2-4). The trio and the cert are
+// mutually-exclusive membership modes.
+const NUM_LOGUP_COLS: usize = 5;
+const AUX_WIDTH: usize = 5;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 1, 1, 1];
 
 // AIR
 // ================================================================================================
@@ -343,118 +346,120 @@ where
         let consume_deg = Deg { v: 1, u: 1 };
         let member_deg = Deg { v: 3, u: 1 };
         let cert_deg = Deg { v: 2, u: 1 };
-        let col_deg = Deg { v: 8, u: 6 };
+        let single_deg = Deg { v: 1, u: 2 };
+        let paired_deg = Deg { v: 3, u: 2 };
 
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-points",
-                    |g| {
-                        g.batch(
-                            "ec-point-fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                // The point binding…
-                                b.insert(
-                                    "provide-ecpoint",
-                                    neg_mult,
-                                    EcPointMsg {
-                                        point_ptr: ptr.clone(),
-                                        group_ptr: group_ptr.clone(),
-                                        x_ptr: x_ptr.clone(),
-                                        y_ptr: y_ptr.clone(),
-                                        is_pai: is_pai.clone(),
-                                    },
-                                    provide_deg,
-                                );
-                                // …consumes its group's binding (forcing
-                                // group_ptr onto a real group row and the
-                                // a/b/bound/sbound cells onto its context —
-                                // for PAI rows the only tie to a real
-                                // group)…
-                                b.insert(
-                                    "consume-ecgroup",
-                                    act,
-                                    EcGroupMsg {
-                                        group_ptr: group_ptr.clone(),
-                                        a_ptr: a_ptr.clone(),
-                                        b_ptr: b_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        scalar_bound_ptr: sbound_ptr.clone(),
-                                    },
-                                    consume_deg,
-                                );
-                                // …and, when finite, the curve-membership
-                                // MAC trio (shared r_ptr = w makes
-                                // y² = x³ + ax + b an identity of stored
-                                // values).
-                                b.insert(
-                                    "consume-mac-u",
-                                    member_flag.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: one.clone(),
-                                        a_ptr: x_ptr.clone(),
-                                        b_ptr: x_ptr.clone(),
-                                        c_ptr: a_ptr.clone(),
-                                        r_ptr: u_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        is_sub: LB::Expr::ZERO,
-                                    },
-                                    member_deg,
-                                );
-                                b.insert(
-                                    "consume-mac-w",
-                                    member_flag.clone(),
-                                    UintMulMsg {
-                                        kappa_a: one.clone(),
-                                        kappa_c: one.clone(),
-                                        a_ptr: x_ptr.clone(),
-                                        b_ptr: u_ptr.clone(),
-                                        c_ptr: b_ptr.clone(),
-                                        r_ptr: w_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        is_sub: LB::Expr::ZERO,
-                                    },
-                                    member_deg,
-                                );
-                                b.insert(
-                                    "consume-mac-y",
-                                    member_flag,
-                                    UintMulMsg {
-                                        kappa_a: one,
-                                        kappa_c: zero,
-                                        a_ptr: y_ptr.clone(),
-                                        b_ptr: y_ptr.clone(),
-                                        c_ptr: bound_ptr.clone(),
-                                        r_ptr: w_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        is_sub: LB::Expr::ZERO,
-                                    },
-                                    member_deg,
-                                );
-                                // …or, for a fresh group-law result, one
-                                // closure cert in place of the trio: `r` is
-                                // on-curve because `r = p + q` for on-curve
-                                // operands (the minting op's own block), and
-                                // the ptr ordering grounds the induction.
-                                b.insert(
-                                    "consume-ecgroupadd-cert",
-                                    cert_flag,
-                                    EcOnCurveCertMsg {
-                                        group_ptr: group_ptr.clone(),
-                                        r_ptr: ptr.clone(),
-                                    },
-                                    cert_deg,
-                                );
-                            },
-                            col_deg,
-                        );
-                    },
-                    col_deg,
-                );
-            },
-            col_deg,
+        // col 0: the point binding, alone — the gated running-sum anchor.
+        frac_col!(
+            builder,
+            "ec-points",
+            single_deg,
+            (
+                "provide-ecpoint",
+                neg_mult,
+                EcPointMsg {
+                    point_ptr: ptr.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: x_ptr.clone(),
+                    y_ptr: y_ptr.clone(),
+                    is_pai: is_pai.clone(),
+                },
+                provide_deg
+            ),
+        );
+        // col 1 (paired, lqd-1): the group binding consume (forcing
+        // group_ptr onto a real group row and the a/b/bound/sbound cells
+        // onto its context — for PAI rows the only tie to a real group)
+        // paired with the closure-cert consume (a fresh group-law
+        // result's on-curve membership, discharged in place of the trio).
+        frac_col!(
+            builder,
+            "ec-points",
+            paired_deg,
+            (
+                "consume-ecgroup",
+                act,
+                EcGroupMsg {
+                    group_ptr: group_ptr.clone(),
+                    a_ptr: a_ptr.clone(),
+                    b_ptr: b_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    scalar_bound_ptr: sbound_ptr.clone(),
+                },
+                consume_deg
+            ),
+            (
+                "consume-ecgroupadd-cert",
+                cert_flag,
+                EcOnCurveCertMsg {
+                    group_ptr: group_ptr.clone(),
+                    r_ptr: ptr.clone()
+                },
+                cert_deg
+            ),
+        );
+        // cols 2-4: the curve-membership MAC trio (shared r_ptr = w makes
+        // y² = x³ + ax + b an identity of stored values), each degree 3
+        // so each sits alone.
+        frac_col!(
+            builder,
+            "ec-points",
+            single_deg,
+            (
+                "consume-mac-u",
+                member_flag.clone(),
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: one.clone(),
+                    a_ptr: x_ptr.clone(),
+                    b_ptr: x_ptr.clone(),
+                    c_ptr: a_ptr.clone(),
+                    r_ptr: u_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    is_sub: LB::Expr::ZERO,
+                },
+                member_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "ec-points",
+            single_deg,
+            (
+                "consume-mac-w",
+                member_flag.clone(),
+                UintMulMsg {
+                    kappa_a: one.clone(),
+                    kappa_c: one.clone(),
+                    a_ptr: x_ptr.clone(),
+                    b_ptr: u_ptr.clone(),
+                    c_ptr: b_ptr.clone(),
+                    r_ptr: w_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    is_sub: LB::Expr::ZERO,
+                },
+                member_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "ec-points",
+            single_deg,
+            (
+                "consume-mac-y",
+                member_flag,
+                UintMulMsg {
+                    kappa_a: one,
+                    kappa_c: zero,
+                    a_ptr: y_ptr.clone(),
+                    b_ptr: y_ptr.clone(),
+                    c_ptr: bound_ptr.clone(),
+                    r_ptr: w_ptr.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    is_sub: LB::Expr::ZERO,
+                },
+                member_deg
+            ),
         );
     }
 }
