@@ -11,6 +11,7 @@ miden-debug-types
 miden-utils-diagnostics
 miden-assembly-syntax-cst
 miden-core
+miden-precompiles-codegen
 miden-ace-codegen
 miden-assembly-syntax
 miden-air
@@ -19,6 +20,7 @@ miden-package-registry
 miden-project
 miden-assembly
 miden-processor
+miden-precompiles
 miden-prover
 miden-verifier
 miden-core-lib
