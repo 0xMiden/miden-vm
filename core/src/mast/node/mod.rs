@@ -86,6 +86,17 @@ pub enum MastNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl MastNode {
+    /// Returns the ordering class used by finalized dense MAST forests.
+    pub(in crate::mast) fn order_class(&self) -> super::MastNodeOrderClass {
+        if self.is_external() {
+            super::MastNodeOrderClass::External
+        } else if self.is_basic_block() {
+            super::MastNodeOrderClass::BasicBlock
+        } else {
+            super::MastNodeOrderClass::Internal
+        }
+    }
+
     /// Returns true if this node is an external node.
     pub fn is_external(&self) -> bool {
         matches!(self, MastNode::External(_))

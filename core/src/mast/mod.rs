@@ -187,6 +187,8 @@ impl MastForest {
     }
 
     /// Builds a [`MastForest`] from raw parts and validates local structure.
+    ///
+    /// This is hidden because raw dense parts are not a stable public construction API.
     #[doc(hidden)]
     pub fn from_raw_parts(
         nodes: IndexVec<MastNodeId, MastNode>,
@@ -198,6 +200,9 @@ impl MastForest {
 
     /// Builds a [`MastForest`] from raw parts and returns the node ID remapping applied during
     /// canonicalization.
+    ///
+    /// This is hidden because raw dense parts and builder-local ID remapping are only used by
+    /// internal builders and tests.
     #[doc(hidden)]
     pub fn from_raw_parts_with_id_map(
         nodes: IndexVec<MastNodeId, MastNode>,
@@ -216,7 +221,7 @@ impl MastForest {
         parts: MastForestParts,
     ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
         validate_mast_forest_parts_bounds(&parts)?;
-        let (parts, id_remapping) = canonicalize_dense_parts(parts)?;
+        let (parts, id_remapping) = canonicalize_parts(parts)?;
 
         let forest = Self {
             commitment: compute_mast_forest_commitment(
@@ -255,6 +260,9 @@ impl MastForest {
     }
 }
 
+// ------------------------------------------------------------------------------------------------
+// Dense forest validation and canonicalization
+
 fn validate_mast_forest_parts_bounds(parts: &MastForestParts) -> Result<(), MastForestError> {
     if parts.nodes.len() > MastForest::MAX_NODES {
         return Err(MastForestError::TooManyNodes);
@@ -270,7 +278,12 @@ fn validate_mast_forest_parts_bounds(parts: &MastForestParts) -> Result<(), Mast
     Ok(())
 }
 
-fn canonicalize_dense_parts(
+/// Canonicalizes dense forest parts and returns the old-to-new node ID remapping.
+///
+/// The final node order is external nodes sorted by digest, then basic blocks in construction
+/// order, then internal nodes with children before parents and construction order as the
+/// tie-breaker.
+fn canonicalize_parts(
     parts: MastForestParts,
 ) -> Result<(MastForestParts, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
     let node_count = parts.nodes.len();
@@ -286,7 +299,7 @@ fn canonicalize_dense_parts(
         .enumerate()
         .all(|(index, &old_id)| old_id == MastNodeId::new_unchecked(index as u32))
     {
-        validate_dense_node_order(&parts.nodes)?;
+        debug_assert!(validate_dense_node_order(&parts.nodes).is_ok());
         return Ok((parts, remapping));
     }
 
@@ -296,7 +309,9 @@ fn canonicalize_dense_parts(
         let node = parts.nodes[old_id].clone();
         let remapped_node =
             node.to_builder(&empty_forest).remap_children(&remapping).build_linked()?;
-        nodes.push(remapped_node).map_err(|_| MastForestError::TooManyNodes)?;
+        nodes
+            .push(remapped_node)
+            .expect("canonicalized node count was validated before remapping");
     }
 
     let roots = parts
@@ -309,7 +324,7 @@ fn canonicalize_dense_parts(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    validate_dense_node_order(&nodes)?;
+    debug_assert!(validate_dense_node_order(&nodes).is_ok());
 
     Ok((
         MastForestParts {
@@ -331,7 +346,7 @@ fn final_dense_node_order(
 
     for (index, node) in nodes.iter().enumerate() {
         let node_id = MastNodeId::new_unchecked(index as u32);
-        match mast_node_order_class(node) {
+        match node.order_class() {
             MastNodeOrderClass::External => external_ids.push(node_id),
             MastNodeOrderClass::BasicBlock => basic_block_ids.push(node_id),
             MastNodeOrderClass::Internal => internal_ids.push(node_id),
@@ -345,54 +360,83 @@ fn final_dense_node_order(
             .then(left_id.0.cmp(&right_id.0))
     });
 
+    // External nodes are identified only by digest, so duplicate external digests would create two
+    // IDs for the same dependency. Reject them before building the final order.
+    let mut previous_external_digest = None;
+    for &node_id in &external_ids {
+        let digest = nodes[node_id].digest();
+        if let Some(previous_digest) = previous_external_digest
+            && previous_digest >= digest
+        {
+            return Err(MastForestError::InvalidNodeOrder {
+                node_id,
+                reason: "external node digests must be strictly increasing".into(),
+            });
+        }
+        previous_external_digest = Some(digest);
+    }
+
     let mut ordered_ids = external_ids;
+    let mut ordered = vec![false; node_count];
     ordered_ids.extend(basic_block_ids);
-    let mut ready_internal_ids = BTreeSet::new();
-    let mut pending_child_counts = vec![0_usize; node_count];
-    let mut parent_ids_by_child = vec![Vec::new(); node_count];
+    for &node_id in &ordered_ids {
+        ordered[node_id.to_usize()] = true;
+    }
+
+    // Internal nodes are emitted once all children already appear in the final order. The ready set
+    // is keyed by original node ID, so construction order remains the tie-breaker among all
+    // currently-ready internal nodes.
+    let mut unresolved_child_counts = vec![0usize; node_count];
+    let mut parents_by_child = vec![Vec::new(); node_count];
+    for &node_id in &internal_ids {
+        nodes[node_id].for_each_child(|child_id| {
+            if child_id.to_usize() < node_count && !ordered[child_id.to_usize()] {
+                unresolved_child_counts[node_id.to_usize()] += 1;
+                parents_by_child[child_id.to_usize()].push(node_id);
+            }
+        });
+    }
 
     for &node_id in &internal_ids {
         let mut invalid_child = None;
         nodes[node_id].for_each_child(|child_id| {
             if child_id.to_usize() >= node_count {
                 invalid_child = Some(child_id);
-            } else if mast_node_order_class(&nodes[child_id]) == MastNodeOrderClass::Internal {
-                pending_child_counts[node_id.to_usize()] += 1;
-                parent_ids_by_child[child_id.to_usize()].push(node_id);
             }
         });
 
         if let Some(child_id) = invalid_child {
             return Err(MastForestError::NodeIdOverflow(child_id, node_count));
         }
+    }
 
-        if pending_child_counts[node_id.to_usize()] == 0 {
+    let mut ready_internal_ids = BTreeSet::new();
+    for &node_id in &internal_ids {
+        if unresolved_child_counts[node_id.to_usize()] == 0 {
             ready_internal_ids.insert(node_id);
         }
     }
 
-    let internal_node_count = internal_ids.len();
-    let mut emitted_internal_node_count = 0;
-
-    while let Some(node_id) = ready_internal_ids.first().copied() {
-        ready_internal_ids.remove(&node_id);
+    let mut ordered_internal_count = 0;
+    while let Some(node_id) = ready_internal_ids.pop_first() {
+        ordered[node_id.to_usize()] = true;
         ordered_ids.push(node_id);
-        emitted_internal_node_count += 1;
+        ordered_internal_count += 1;
 
-        for &parent_id in &parent_ids_by_child[node_id.to_usize()] {
-            let pending_count = &mut pending_child_counts[parent_id.to_usize()];
-            *pending_count -= 1;
-            if *pending_count == 0 {
+        for parent_id in core::mem::take(&mut parents_by_child[node_id.to_usize()]) {
+            let count = &mut unresolved_child_counts[parent_id.to_usize()];
+            *count = count.checked_sub(1).expect("ready child must have a pending parent");
+            if *count == 0 {
                 ready_internal_ids.insert(parent_id);
             }
         }
     }
 
-    if emitted_internal_node_count != internal_node_count {
+    if ordered_internal_count != internal_ids.len() {
         let node_id = internal_ids
             .into_iter()
-            .find(|&node_id| pending_child_counts[node_id.to_usize()] > 0)
-            .expect("non-empty internal cycle must contain a pending node");
+            .find(|node_id| !ordered[node_id.to_usize()])
+            .expect("internal cycle must contain a pending node");
         return Err(MastForestError::InvalidNodeOrder {
             node_id,
             reason: "internal nodes must form an acyclic child-before-parent graph".into(),
@@ -403,20 +447,10 @@ fn final_dense_node_order(
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum MastNodeOrderClass {
+pub(in crate::mast) enum MastNodeOrderClass {
     External,
     BasicBlock,
     Internal,
-}
-
-fn mast_node_order_class(node: &MastNode) -> MastNodeOrderClass {
-    if node.is_external() {
-        MastNodeOrderClass::External
-    } else if node.is_basic_block() {
-        MastNodeOrderClass::BasicBlock
-    } else {
-        MastNodeOrderClass::Internal
-    }
 }
 
 fn validate_dense_node_order(
@@ -427,7 +461,7 @@ fn validate_dense_node_order(
 
     for (node_index, node) in nodes.iter().enumerate() {
         let node_id = MastNodeId::new_unchecked(node_index as u32);
-        let node_class = mast_node_order_class(node);
+        let node_class = node.order_class();
 
         if node_class < previous_class {
             return Err(MastForestError::InvalidNodeOrder {

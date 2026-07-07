@@ -233,6 +233,7 @@ impl MastForestMerger {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap)
     }
 
+    /// Remaps each source forest's node IDs from merger-local IDs to finalized dense IDs.
     fn remap_finalized_node_ids(
         mut node_id_mappings: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
         final_id_remapping: &DenseIdMap<MastNodeId, MastNodeId>,

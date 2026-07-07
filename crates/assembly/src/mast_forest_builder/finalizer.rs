@@ -196,6 +196,8 @@ impl MastForestFinalizer {
             MastForest::from_raw_parts_with_id_map(nodes, roots, advice_map)
                 .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
+        // Source/debug references were recorded against builder-local node IDs. Rewrite them to
+        // the finalized dense IDs before constructing the debug graph.
         for node_id in node_id_by_ref.values_mut() {
             *node_id = final_id_remapping.get(*node_id).ok_or_else(|| {
                 Report::new(MastForestBuilderError::FinalizeForest {

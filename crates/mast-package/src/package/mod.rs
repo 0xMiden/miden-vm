@@ -160,27 +160,34 @@ impl Package {
             debug_sections_trusted: true,
         };
 
-        package.recompute_mast_commitment()?;
+        package.compute_interface_digest()?;
+        package.recompute_mast_commitment();
 
         Ok(package)
     }
 
-    fn recompute_mast_commitment(&mut self) -> Result<(), ManifestValidationError> {
+    fn compute_interface_digest(&self) -> Result<Word, ManifestValidationError> {
+        let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
         for export in self.manifest.exports() {
-            if let PackageExport::Procedure(export) = export
-                && export.node.is_none()
-            {
-                self.mast.find_procedure_root(export.digest).ok_or_else(|| {
-                    ManifestValidationError::MissingProcedureMast {
-                        path: export.path.clone(),
-                        digest: export.digest,
-                    }
-                })?;
+            if let PackageExport::Procedure(export) = export {
+                if let Some(node_id) = export.node {
+                    node_ids.push(node_id);
+                } else {
+                    node_ids.push(self.mast.find_procedure_root(export.digest).ok_or_else(
+                        || ManifestValidationError::MissingProcedureMast {
+                            path: export.path.clone(),
+                            digest: export.digest,
+                        },
+                    )?);
+                }
             }
         }
 
+        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
+    }
+
+    fn recompute_mast_commitment(&mut self) {
         self.digest = self.mast.commitment();
-        Ok(())
     }
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
@@ -193,7 +200,7 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.digest = self.mast.commitment();
+        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
@@ -234,6 +241,11 @@ impl Package {
     #[inline]
     pub fn digest(&self) -> Word {
         self.digest
+    }
+
+    /// Returns the digest of the exported procedure roots used by the linker.
+    pub fn interface_digest(&self) -> Result<Word, ManifestValidationError> {
+        self.compute_interface_digest()
     }
 
     /// Returns a digest of the package content relevant to assembly and dependency resolution.
@@ -424,6 +436,8 @@ impl Package {
 
     /// Returns an iterator over the module infos of the library.
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
+        let source_library_commitment =
+            self.interface_digest().expect("package manifest exports were validated");
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
 
         for module in self.manifest.modules() {
@@ -460,7 +474,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.digest()),
+                        Some(source_library_commitment),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -483,6 +497,7 @@ impl Package {
     /// item export paths. Link-time resolution relies on explicit module metadata so that modules
     /// remain distinct from exported items.
     pub fn try_module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+        let source_library_commitment = self.interface_digest()?;
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
 
         for module in self.manifest.modules() {
@@ -554,7 +569,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.digest()),
+                        Some(source_library_commitment),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -1492,7 +1507,9 @@ mod tests {
     fn package_digest_changes_when_advice_map_changes() {
         let package = build_kernel_package("kernel");
         let package_digest = package.digest();
+        let interface_digest = package.interface_digest().unwrap();
         let content_digest = package.content_digest();
+        let mast_commitment = package.mast_forest().commitment();
 
         let advice_map = AdviceMap::from_iter([(
             Word::from([1_u32, 2, 3, 4]),
@@ -1501,7 +1518,9 @@ mod tests {
         let with_advice = package.with_advice_map(advice_map);
 
         assert_ne!(package_digest, with_advice.digest());
+        assert_eq!(interface_digest, with_advice.interface_digest().unwrap());
         assert_ne!(content_digest, with_advice.content_digest());
+        assert_ne!(mast_commitment, with_advice.mast_forest().commitment());
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {

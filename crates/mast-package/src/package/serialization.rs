@@ -282,8 +282,9 @@ impl Package {
         };
 
         package
-            .recompute_mast_commitment()
+            .compute_interface_digest()
             .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+        package.recompute_mast_commitment();
 
         Ok(package)
     }

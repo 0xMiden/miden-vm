@@ -126,6 +126,11 @@ pub enum LinkStatus {
 pub struct Linker {
     /// The set of libraries to link against.
     libraries: BTreeMap<Word, LinkLibrary>,
+    /// The statically linked libraries to pass to MAST forest construction.
+    ///
+    /// This index is keyed by full MAST forest commitment, not package digest, so static libraries
+    /// with the same exported procedure roots but different stored advice are retained.
+    static_libraries: BTreeMap<Word, LinkLibrary>,
     /// The global set of items known to the linker
     modules: Vec<LinkModule>,
     /// The global call graph of calls, not counting those that are performed directly via MAST
@@ -152,6 +157,7 @@ impl Linker {
     pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             libraries: Default::default(),
+            static_libraries: Default::default(),
             modules: Default::default(),
             callgraph: Default::default(),
             procedures_by_mast_root: Default::default(),
@@ -171,8 +177,15 @@ impl Linker {
                 package: library.package.name.to_string(),
                 reason: err.to_string(),
             })?;
+        let library_interface_digest = library.package.interface_digest().map_err(|err| {
+            LinkerError::InvalidPackageModuleSurface {
+                package: library.package.name.to_string(),
+                reason: err.to_string(),
+            }
+        })?;
 
-        match self.libraries.entry(library.package.digest()) {
+        let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
+        let result = match self.libraries.entry(library_interface_digest) {
             Entry::Vacant(entry) => {
                 entry.insert(library);
                 self.link_assembled_modules(module_infos)
@@ -188,7 +201,17 @@ impl Linker {
 
                 Ok(())
             },
+        };
+
+        if result.is_ok()
+            && let Some(static_library) = static_library
+        {
+            self.static_libraries
+                .entry(static_library.commitment())
+                .or_insert(static_library);
         }
+
+        result
     }
 
     /// Registers a set of MAST modules with the linker.
@@ -706,6 +729,11 @@ impl Linker {
         self.libraries.values()
     }
 
+    /// Get an iterator over the static libraries used to build the final MAST forest.
+    pub fn static_libraries(&self) -> impl Iterator<Item = &LinkLibrary> {
+        self.static_libraries.values()
+    }
+
     /// Compute the topological sort of the callgraph rooted at `caller`
     pub fn topological_sort_from_root(
         &self,
@@ -964,9 +992,14 @@ mod tests {
         debuginfo::{SourceSpan, Span},
         module::{ItemInfo, TypeInfo},
     };
+    use miden_core::Felt;
 
     use super::*;
-    use crate::testing::{TestContext, source_file};
+    use crate::{
+        Assembler,
+        ast::Module,
+        testing::{TestContext, source_file},
+    };
 
     #[test]
     fn failed_kernel_link_restores_kernel_state() {
@@ -1039,6 +1072,45 @@ mod tests {
             )
             .expect_err("expected syscall without a linked kernel to be rejected");
         assert!(matches!(err, LinkerError::InvalidSysCallTarget { .. }));
+    }
+
+    #[test]
+    fn link_library_keeps_same_interface_libraries_with_distinct_forest_commitments() {
+        let context = TestContext::default();
+        let module = context
+            .parse_module(source_file!(
+                &context,
+                r#"
+                namespace lib
+
+                pub proc foo
+                    push.1
+                end
+                "#
+            ))
+            .expect("library module should parse");
+        let package: Arc<MastPackage> = Assembler::new(context.source_manager())
+            .assemble_library("lib", module, None::<Box<Module>>)
+            .expect("library should assemble")
+            .into();
+        let with_advice = Arc::new(package.as_ref().clone().with_advice_map(AdviceMap::from_iter(
+            [(Word::from([1_u32, 2, 3, 4]), vec![Felt::from_u32(5)])],
+        )));
+
+        assert_ne!(package.digest(), with_advice.digest());
+        assert_eq!(package.interface_digest().unwrap(), with_advice.interface_digest().unwrap());
+        assert_ne!(package.mast_forest().commitment(), with_advice.mast_forest().commitment());
+
+        let mut linker = Linker::new(context.source_manager());
+        linker
+            .link_library(LinkLibrary::from_package(package).with_linkage(Linkage::Static))
+            .expect("first library should link");
+        linker
+            .link_library(LinkLibrary::from_package(with_advice).with_linkage(Linkage::Static))
+            .expect("same public interface with distinct forest commitment should link");
+
+        assert_eq!(linker.libraries().count(), 1);
+        assert_eq!(linker.static_libraries().count(), 2);
     }
 
     #[test]

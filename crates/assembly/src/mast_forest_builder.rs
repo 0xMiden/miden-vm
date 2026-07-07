@@ -111,6 +111,7 @@ pub(crate) struct StaticLibrary<'a> {
     pub(crate) mast: &'a MastForest,
     pub(crate) debug_info: Option<PackageDebugInfo>,
     pub(crate) source_library_commitment: Word,
+    pub(crate) alternate_source_library_commitment: Option<Word>,
 }
 
 impl<'a> StaticLibrary<'a> {
@@ -122,6 +123,7 @@ impl<'a> StaticLibrary<'a> {
             // identity is the full forest commitment. This keeps provenance hints scoped to the
             // same roots, external dependencies, and advice as package-backed static libraries.
             source_library_commitment: mast.commitment(),
+            alternate_source_library_commitment: None,
         }
     }
 
@@ -130,6 +132,14 @@ impl<'a> StaticLibrary<'a> {
         source_library_commitment: Word,
     ) -> Self {
         self.source_library_commitment = source_library_commitment;
+        self
+    }
+
+    pub(crate) fn with_alternate_source_library_commitment(
+        mut self,
+        source_library_commitment: Word,
+    ) -> Self {
+        self.alternate_source_library_commitment = Some(source_library_commitment);
         self
     }
 }
@@ -180,6 +190,14 @@ impl MastForestBuilder {
                 .entry(library.source_library_commitment)
                 .or_insert_with(Vec::new)
                 .push(idx);
+            if let Some(source_library_commitment) = library.alternate_source_library_commitment
+                && source_library_commitment != library.source_library_commitment
+            {
+                statically_linked_forest_indices_by_commitment
+                    .entry(source_library_commitment)
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            }
         }
         let (statically_linked_mast, statically_linked_root_map) =
             MastForest::merge(forests.iter().copied()).into_diagnostic()?;
