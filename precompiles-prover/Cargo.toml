@@ -40,6 +40,7 @@ ruint = { version = "1.18", default-features = false }
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 wincode.workspace = true
 
 [dev-dependencies]
@@ -49,6 +50,4 @@ k256 = "0.13"
 miden-air = { workspace = true, features = ["std"] }
 p3-field = { version = "0.6.1", default-features = false }
 rand = "0.9"
-# Prover span profiling (`PROFILE=1` on the benches) — research only.
-tracing.workspace = true
 tracing-subscriber = "0.3"
