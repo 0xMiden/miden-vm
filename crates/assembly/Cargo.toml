@@ -1,6 +1,6 @@
 [package]
 name = "miden-assembly"
-version.workspace = true
+version = "0.25.0"
 description = "Miden VM assembly language"
 documentation = "https://docs.rs/miden-assembly"
 readme = "README.md"

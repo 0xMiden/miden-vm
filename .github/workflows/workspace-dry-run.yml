@@ -5,6 +5,29 @@ on:
     branches:
       - main
       - next
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "release-packages.txt"
+      - "scripts/check-release-packages.sh"
+      - "scripts/release-selected.sh"
+      - ".github/actions/workspace-release/**"
+      - ".github/workflows/workspace-dry-run.yml"
+      - ".github/workflows/workspace-publish.yml"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Comma, space, or newline separated packages to dry-run. Empty uses packages_file."
+        required: false
+        default: ""
+        type: string
+      packages_file:
+        description: "Package list file used when packages is empty."
+        required: false
+        default: "release-packages.txt"
+        type: string
 
 permissions: {}
 
@@ -31,4 +54,6 @@ jobs:
         with:
           mode: "dry-run"
           verify-main-head: "false"
+          packages: ${{ github.event.inputs.packages || '' }}
+          packages_file: ${{ github.event.inputs.packages_file || 'release-packages.txt' }}
           # ref left blank: uses the pushed ref
