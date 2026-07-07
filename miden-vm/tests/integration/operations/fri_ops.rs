@@ -5,54 +5,59 @@ use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, ra
 
 #[test]
 fn fri_ext2fold4() {
-    // create a set of random inputs
-    let mut inputs =
-        rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
-    // inputs[7] -> stack[9] = p (bit-reversed tree index).
-    // The instruction computes d_seg = p & 3 and f_pos = p >> 2.
-    // We want d_seg=2, f_pos=inputs[8], so p = 4*f_pos + 2.
-    // f_pos must fit in u32 to avoid overflow when computing p.
-    inputs[8] %= (u32::MAX as u64) >> 2;
-    inputs[7] = 4 * inputs[8] + 2;
+    for coset in 0..4 {
+        let mut inputs =
+            rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
 
-    // When d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
-    // After pushing 17 inputs:
-    //   v4 = inputs[12] (stack[4]), v5 = inputs[11] (stack[5])
-    //   pe0 = inputs[5] (stack[11]), pe1 = inputs[4] (stack[12])
-    // So we need inputs[12] = inputs[5] (v4 = pe0) and inputs[11] = inputs[4] (v5 = pe1).
-    inputs[12] = inputs[5];
-    inputs[11] = inputs[4];
+        // inputs[7] -> stack[9] = natural coset.
+        inputs[7] = coset;
+        // poe must be nonzero.
+        inputs[6] = inputs[6].max(1);
 
-    let end_ptr = inputs[0];
-    let layer_ptr = inputs[1];
-    let poe = inputs[6];
-    let f_pos = inputs[8];
+        // The opened row is stored in bit-reversed order. The selected row must match
+        // prev_value = (pe0, pe1) at stack positions 11 and 12.
+        let row_idx = match coset {
+            0 => 0,
+            1 => 2,
+            2 => 1,
+            3 => 3,
+            _ => unreachable!(),
+        };
+        let row_stack_pos = row_idx as usize * 2;
+        inputs[5] = inputs[16 - row_stack_pos];
+        inputs[4] = inputs[16 - (row_stack_pos + 1)];
 
-    let source = format!(
-        "
-        {TRUNCATE_STACK_PROC}
+        let end_ptr = Felt::new_unchecked(inputs[0]);
+        let layer_ptr = Felt::new_unchecked(inputs[1]);
+        let poe = Felt::new_unchecked(inputs[6]);
+        let f_pos = Felt::new_unchecked(inputs[8]);
+        let next_layer_ptr = layer_ptr + Felt::new_unchecked(8);
 
-        begin
-            {inputs}
-            fri_ext2fold4
+        let source = format!(
+            "
+            {TRUNCATE_STACK_PROC}
 
-            exec.truncate_stack
-        end",
-        inputs = push_inputs(&inputs)
-    );
+            begin
+                {inputs}
+                fri_ext2fold4
 
-    // execute the program
-    let test = build_test!(source, &[]);
+                exec.truncate_stack
+            end",
+            inputs = push_inputs(&inputs)
+        );
 
-    // check some items in the state transition; full state transition is checked in the
-    // processor tests
-    let stack_state = test.get_last_stack_state();
-    assert_eq!(stack_state[8], Felt::new_unchecked(poe).square());
-    assert_eq!(stack_state[10], Felt::new_unchecked(layer_ptr + 8));
-    assert_eq!(stack_state[11], Felt::new_unchecked(poe).exp_u64(4));
-    assert_eq!(stack_state[12], Felt::new_unchecked(f_pos));
-    assert_eq!(stack_state[15], Felt::new_unchecked(end_ptr));
+        let test = build_test!(source, &[]);
 
-    // make sure STARK proof can be generated and verified
-    test.check_constraints();
+        // Full transition constraints are checked by `check_constraints`; these assertions
+        // pin down the loop state consumed by the recursive verifier.
+        let stack_state = test.get_last_stack_state();
+        assert_eq!(stack_state[8], next_layer_ptr);
+        assert_eq!(stack_state[9], next_layer_ptr);
+        assert_eq!(stack_state[10], poe.exp_u64(4));
+        assert_eq!(stack_state[11], f_pos);
+        assert_eq!(stack_state[14], next_layer_ptr);
+        assert_eq!(stack_state[15], end_ptr);
+
+        test.check_constraints();
+    }
 }

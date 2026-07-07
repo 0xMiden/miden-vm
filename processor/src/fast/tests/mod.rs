@@ -1434,11 +1434,11 @@ fn test_frie2f4() {
     // --- build stack inputs ---------------------------------------------
     // FastProcessor::new expects inputs in natural order: first element goes to top.
     // After Push(42), the stack layout becomes:
-    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, p, poe, pe0, pe1, a0, a1, cptr, ...]
-    //    ^0   1   2   3   4   5   6   7    8     9  10   11   12   13  14   15
+    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, coset, poe, pe0, pe1, a0, a1, cptr, ...]
+    //    ^0   1   2   3   4   5   6   7    8      9    10   11   12   13  14   15
     //
-    // p is the bit-reversed tree index; the instruction computes d_seg = p & 3.
-    // With p=38 (d_seg=2, f_pos=9), query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
+    // With coset=1, the instruction checks the bit-reversed row at index 2. Thus,
+    // query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
     let previous_value: [Felt; 2] = [Felt::from_u32(10), Felt::from_u32(11)];
     let stack_inputs = StackInputs::new(&[
         Felt::from_u32(16), // pos 0 -> pos 1 (v1) after push
@@ -1449,7 +1449,7 @@ fn test_frie2f4() {
         Felt::from_u32(11), // pos 5 -> pos 6 (v6) after push
         Felt::from_u32(10), // pos 6 -> pos 7 (v7) after push
         Felt::from_u32(9),  // pos 7 -> pos 8 (f_pos) after push
-        Felt::from_u32(38), // pos 8 -> pos 9 (p=4*9+2=38, d_seg=2) after push
+        Felt::from_u32(1),  // pos 8 -> pos 9 (coset) after push
         Felt::from_u32(7),  // pos 9 -> pos 10 (poe) after push
         previous_value[0],  // pos 10 -> pos 11 (pe0) after push
         previous_value[1],  // pos 11 -> pos 12 (pe1) after push
