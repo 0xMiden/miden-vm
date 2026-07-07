@@ -208,9 +208,11 @@ fn keccak_round_constraints_hold_on_random_input() {
 
 /// Stack 3 independent perms in one trace and verify both per-perm
 /// output correctness (via `extract_outputs`) and constraint
-/// satisfaction. Trace height = `3 * 3200 = 9600` padded to `16384`.
+/// satisfaction. With NUM_LANES=2, the 3 perms split into a busiest lane of
+/// `⌈3/2⌉ = 2` perms, so the height is `2 * 3200 = 6400` padded to `8192`.
 #[test]
 fn keccak_round_multi_perm_oracle_and_constraints() {
+    use crate::hash::keccak::round::NUM_LANES;
     let mut rng = StdRng::seed_from_u64(0xc0ffee);
     let mut states = [[0u64; 25]; 3];
     for state in states.iter_mut() {
@@ -224,7 +226,10 @@ fn keccak_round_multi_perm_oracle_and_constraints() {
     assert_eq!(got, expected, "per-perm oracle agreement");
 
     let main = generate_trace_from_states(&states, &KECCAK_RC);
-    assert_eq!(main.height(), (states.len() * PERM_CYCLE).next_power_of_two());
+    assert_eq!(
+        main.height(),
+        (states.len().div_ceil(NUM_LANES) * PERM_CYCLE).next_power_of_two()
+    );
 
     crate::tests::check_local(KeccakRoundAir, &main);
 }
