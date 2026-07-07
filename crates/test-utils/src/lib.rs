@@ -96,9 +96,10 @@ fn new_vm_default_processor(
     advice_inputs: AdviceInputs,
     options: ExecutionOptions,
 ) -> Result<FastProcessor, ExecutionError> {
-    FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .with_precompile_registry(miden_precompiles::registry())
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_err(ExecutionError::advice_error_no_context)?;
+    // SAFETY: this helper models the default VM environment, which verifies with this registry.
+    unsafe { processor.with_trace_safe_precompile_registry(miden_precompiles::registry()) }
 }
 
 // CONSTANTS

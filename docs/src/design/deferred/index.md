@@ -20,8 +20,8 @@ meaning of the nodes.
 
 > **Status.** This page describes the current proof-bound precompile model: the VM accumulates
 > the DAG during execution, `ExecutionProof` carries its canonical `DeferredStateWire`, and the
-> verifier rehydrates that wire with a caller-supplied `PrecompileRegistry` before checking the
-> STARK proof. See [Status and scope](#status-and-scope).
+> verifier rehydrates that wire with the built-in precompile registry before checking the STARK
+> proof. See [Status and scope](#status-and-scope).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
@@ -241,14 +241,14 @@ This framework is now the proof-bound precompile substrate. In its current form:
 - `log_deferred` advances the deferred root by folding registered statements with `Tag::AND`;
 - the final deferred root is threaded into the STARK public inputs;
 - `ExecutionProof` carries a canonical `DeferredStateWire`, which the verifier rehydrates under the
-  caller-supplied `PrecompileRegistry` before checking the STARK proof;
+  built-in precompile registry before checking the STARK proof;
 - the `miden-precompiles` crate provides concrete hash, arithmetic, curve, and native signature
   precompile implementations used by core-library facades and registry-based verification.
 
-The proof format binds the final deferred root, not a registry name or version. A verifier must use
-the same registry semantics that were used to create the deferred wire. The built-in verifier path
-uses `miden_precompiles::registry()`. Direct processor integrations that install custom
-precompiles must pass the matching registry through `VerificationOptions`.
+The proof format binds the final deferred root, not a registry name or version. For that reason,
+custom precompile registries are execution-only at the `FastProcessor` layer. Trace and proof
+generation reject non-built-in registries so the verifier can keep using
+`miden_precompiles::registry()`.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

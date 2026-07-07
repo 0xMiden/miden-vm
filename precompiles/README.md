@@ -3,8 +3,6 @@ This crate is the home for concrete precompile implementations used by Miden VM'
 
 The generic deferred-computation framework stays in [`miden-core`](../core), under `miden_core::deferred`: the node/DAG data model, the `Precompile` trait, the `PrecompileRegistry`, deferred state, and wire validation. This crate builds on that framework and provides the concrete precompiles that programs can defer their semantic checks to, exposing them through a single `registry()` constructor.
 
-Proofs do not name the registry that was used to create their deferred wire. Verifiers that use a custom registry must pass the same registry when checking the proof.
-
 ## Usage
 This crate exposes a `registry()` function that returns a `miden_core::deferred::PrecompileRegistry` — the registry that routes deferred tags to their owning precompile — populated with the precompiles this crate provides.
 

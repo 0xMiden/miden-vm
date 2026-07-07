@@ -24,7 +24,7 @@ pub use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_from_trace_sync;
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word};
-pub use miden_verifier::{PrecompileRegistry, VerificationError, VerificationOptions};
+pub use miden_verifier::VerificationError;
 
 // (private) exports
 // ================================================================================================
@@ -130,38 +130,6 @@ pub fn verify(
     miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
 }
 
-/// Verifies a Miden proof using explicit verification options.
-///
-/// See [miden_verifier::verify_with_options] for more details.
-pub fn verify_with_options(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    options: VerificationOptions,
-) -> Result<u32, VerificationError> {
-    miden_verifier::verify_with_options(program_info, stack_inputs, stack_outputs, proof, options)
-}
-
-/// Verifies a Miden proof using an explicit precompile registry.
-///
-/// See [miden_verifier::verify_with_precompile_registry] for more details.
-pub fn verify_with_precompile_registry(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_registry: PrecompileRegistry,
-) -> Result<u32, VerificationError> {
-    miden_verifier::verify_with_precompile_registry(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        precompile_registry,
-    )
-}
-
 /// Verifies a Miden proof using an explicit deferred-state verifier budget.
 ///
 /// See [miden_verifier::verify_with_max_deferred_elements] for more details.
@@ -177,28 +145,6 @@ pub fn verify_with_max_deferred_elements(
         stack_inputs,
         stack_outputs,
         proof,
-        max_deferred_elements,
-    )
-}
-
-/// Verifies a Miden proof using an explicit precompile registry and deferred-state verifier budget.
-///
-/// See [miden_verifier::verify_with_precompile_registry_and_max_deferred_elements] for more
-/// details.
-pub fn verify_with_precompile_registry_and_max_deferred_elements(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_registry: PrecompileRegistry,
-    max_deferred_elements: usize,
-) -> Result<u32, VerificationError> {
-    miden_verifier::verify_with_precompile_registry_and_max_deferred_elements(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        precompile_registry,
         max_deferred_elements,
     )
 }

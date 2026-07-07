@@ -16,15 +16,14 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
-mod verification_options;
+const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_DEFERRED_ELEMENTS;
 
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
         Word,
-        deferred::{DeferredState, IntegrityError, PrecompileRegistry},
+        deferred::{DeferredState, IntegrityError},
         program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
@@ -33,7 +32,6 @@ mod exports {
     }
 }
 pub use exports::*;
-pub use verification_options::VerificationOptions;
 
 // VERIFIER
 // ================================================================================================
@@ -65,56 +63,13 @@ pub fn verify(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    verify_with_options(
+    verify_with_max_deferred_elements(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
-        VerificationOptions::new(),
+        DEFAULT_MAX_DEFERRED_ELEMENTS,
     )
-}
-
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs, using explicit verification options.
-///
-/// Use this when the proof must be checked with a caller-supplied precompile registry or a
-/// non-default deferred-state verifier budget.
-///
-/// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under `options` within its deferred-state
-///   verifier budget.
-pub fn verify_with_options(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    options: VerificationOptions,
-) -> Result<u32, VerificationError> {
-    verify_with_deferred_options(program_info, stack_inputs, stack_outputs, proof, options)
-}
-
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs, using an explicit precompile registry.
-///
-/// Use this when verifying proofs produced by direct processor integrations that installed a
-/// custom precompile registry.
-///
-/// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under `precompile_registry` within the default
-///   deferred-state verifier budget.
-pub fn verify_with_precompile_registry(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_registry: PrecompileRegistry,
-) -> Result<u32, VerificationError> {
-    let options = VerificationOptions::new().with_precompile_registry(precompile_registry);
-    verify_with_options(program_info, stack_inputs, stack_outputs, proof, options)
 }
 
 /// Returns the security level of the proof if the specified program was executed correctly against
@@ -134,50 +89,11 @@ pub fn verify_with_max_deferred_elements(
     proof: ExecutionProof,
     max_deferred_elements: usize,
 ) -> Result<u32, VerificationError> {
-    let options = VerificationOptions::new().with_max_deferred_elements(max_deferred_elements);
-    verify_with_options(program_info, stack_inputs, stack_outputs, proof, options)
-}
-
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs, using an explicit precompile registry and deferred-state
-/// verifier budget.
-///
-/// Use this when verifying proofs produced by direct processor integrations that installed a
-/// custom precompile registry or used a non-default deferred-state execution budget.
-///
-/// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under `precompile_registry` within
-///   `max_deferred_elements`.
-pub fn verify_with_precompile_registry_and_max_deferred_elements(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_registry: PrecompileRegistry,
-    max_deferred_elements: usize,
-) -> Result<u32, VerificationError> {
-    let options = VerificationOptions::from_parts(precompile_registry, max_deferred_elements);
-    verify_with_deferred_options(program_info, stack_inputs, stack_outputs, proof, options)
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-fn verify_with_deferred_options(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    options: VerificationOptions,
-) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
     let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
-    let (precompile_registry, max_deferred_elements) = options.into_parts();
 
     let state = DeferredState::from_wire(
-        Arc::new(precompile_registry),
+        Arc::new(miden_precompiles::registry()),
         &deferred_wire,
         max_deferred_elements,
     )?;
@@ -186,6 +102,9 @@ fn verify_with_deferred_options(
 
     Ok(security_level)
 }
+
+// HELPER FUNCTIONS
+// ================================================================================================
 
 fn verify_stark(
     program_info: ProgramInfo,

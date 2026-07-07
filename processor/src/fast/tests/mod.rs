@@ -8,6 +8,10 @@ use miden_assembly::{
 };
 use miden_core::{
     ONE, Word,
+    deferred::{
+        DeferredContext, Node, NodeType, Payload, Precompile, PrecompileError, PrecompileRegistry,
+        precompile_id,
+    },
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
@@ -43,6 +47,32 @@ mod advice_provider;
 mod all_ops;
 mod masm_consistency;
 mod memory;
+
+#[derive(Debug)]
+struct CustomPrecompile;
+
+impl Precompile for CustomPrecompile {
+    fn name(&self) -> &'static str {
+        "custom-test-precompile"
+    }
+
+    fn id(&self) -> Felt {
+        precompile_id(self.name())
+    }
+
+    fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
+        Some(NodeType::value())
+    }
+
+    fn evaluate(
+        &self,
+        _args: [Felt; 3],
+        _payload: &Payload,
+        _context: &mut DeferredContext<'_>,
+    ) -> Result<Node, PrecompileError> {
+        Err(PrecompileError::InvalidNode)
+    }
+}
 
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
@@ -81,6 +111,29 @@ fn stack_get_word_out_of_bounds_read() {
 
     // Should not panic
     processor.execute_sync(&program, &mut host).unwrap();
+}
+
+#[test]
+fn custom_precompile_registry_can_execute_but_cannot_generate_trace_inputs() {
+    let program = Assembler::default()
+        .assemble_program("program", "begin push.1 drop end")
+        .expect("program should assemble")
+        .unwrap_program();
+    let registry = PrecompileRegistry::new().with_precompile(CustomPrecompile);
+
+    FastProcessor::new(StackInputs::default())
+        .with_precompile_registry(registry.clone())
+        .expect("custom registry should install")
+        .execute_sync(&program, &mut DefaultHost::default())
+        .expect("custom registries remain valid for direct execution");
+
+    let err = FastProcessor::new(StackInputs::default())
+        .with_precompile_registry(registry)
+        .expect("custom registry should install")
+        .execute_trace_inputs_sync(&program, &mut DefaultHost::default())
+        .expect_err("custom registries must not produce trace inputs");
+
+    assert_matches!(err, ExecutionError::CustomPrecompileRegistryTraceInputs);
 }
 
 #[test]
