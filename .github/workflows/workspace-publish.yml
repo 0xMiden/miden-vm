@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag name for the release (e.g. v0.12.0)'
+        description: "Tag name for the release (e.g. v0.12.0)"
         required: true
         type: string
       packages:
@@ -155,10 +155,20 @@ jobs:
       - name: Prepare artifact
         run: |
           mv target/${{ matrix.target }}/optimized/miden-vm miden-vm-${{ matrix.target }}
+          mv target/${{ matrix.target }}/optimized/miden-format miden-format-${{ matrix.target }}
+          mv target/${{ matrix.target }}/optimized/miden-registry miden-registry-${{ matrix.target }}
       - name: Attest miden-vm
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: miden-vm-${{ matrix.target }}
+      - name: Attest miden-format
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: miden-format-${{ matrix.target }}
+      - name: Attest miden-registry
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: miden-registry-${{ matrix.target }}
       - name: Upload
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
@@ -167,7 +177,10 @@ jobs:
           set -euo pipefail
           # Reruns are safe after partial artifact upload: --clobber replaces
           # existing draft assets instead of failing on "already exists".
-          gh release upload --clobber "${RELEASE_TAG}" miden-vm-${{ matrix.target }}
+          gh release upload --clobber "${RELEASE_TAG}" \
+           miden-vm-${{ matrix.target }} \
+           miden-format-${{ matrix.target }} \
+           miden-registry-${{ matrix.target }}
       # Since the core.masp package is triplet independent, we only build it once.
       - name: Install nightly
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
@@ -205,7 +218,7 @@ jobs:
     environment: release
     permissions:
       contents: read
-      id-token: write  # Required for OIDC token exchange with crates.io
+      id-token: write # Required for OIDC token exchange with crates.io
 
     steps:
       - name: Checkout repository
