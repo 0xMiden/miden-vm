@@ -35,10 +35,13 @@
 //!
 //! ## Predicates as certificates
 //!
-//! Equality (`double`/`cancel`'s `x₁ = x₂`, `double`'s `y₁ = y₂`) is
-//! the [`is_b_zero`](crate::uint::add) `UintAdd` form `x₁ + 0 ≡ x₂` —
-//! value-level (distinct ptrs binding equal coordinates still close),
-//! deterministic, no limbs. Disequality (`generic`'s `x₁ ≠ x₂`) rides the
+//! Equality (`double`/`cancel`'s `x₁ = x₂`, `double`'s `y₁ = y₂`) is a
+//! **native degree-2 constraint** on the operand coordinate-ptr columns
+//! (`(cancel + dbl)·(px − qx)`, `dbl·(py − qy)`). The res-row `EcPoint`
+//! consumes pin those columns to the operands' stored coordinates, and
+//! the uint store interns by value, so a ptr-level equality is exactly
+//! value equality — no UintAdd certificate, no limbs. Disequality
+//! (`generic`'s `x₁ ≠ x₂`) rides the
 //! **`nz` flag on `d`'s own `UintAdd` tuple**: `d = x₂ − x₁` is already
 //! recorded as the arrangement `x₁ + d ≡ x₂` (the slope transient
 //! `consume-d-sub`), and demanding `nz = 1` on that same tuple certifies
@@ -264,7 +267,7 @@ const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 // all gated on `mints`.
 const NUM_LOGUP_COLS: usize = 4;
 const AUX_WIDTH: usize = 4;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [7, 7, 7, 5];
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [7, 6, 6, 5];
 
 // AIR
 // ================================================================================================
@@ -346,6 +349,25 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
                 - act
                 - pai_p.clone() * pai_q.clone(),
         );
+
+        // Operand-coordinate ties for the `x₁ = x₂` cases. The coordinate
+        // ptr columns are pinned to the operands' stored coordinates by the
+        // res-row `EcPoint` consumes, and the store interns by value, so
+        // these ptr-level equalities are exactly the value equalities the
+        // old `is_b_zero` certificates proved — at degree 2, no UintAdd op:
+        //  - `x_eq` (double ∨ cancel): `x₁ = x₂`, what makes the tail's `t = x₁ + x₂` the doubling
+        //    `2x₁` and grounds the chord/tangent.
+        //  - `dbl`: `y₁ = y₂`, which (with `inv·y ≡ b ≠ 0` ⟹ `y ≠ 0`) rules out the `P, −P` cancel
+        //    branch, so the tangent is the genuine one — an in-cell `p = q` cannot forge a wrong
+        //    tangent.
+        let px_eq: AB::Expr = local[COL_PX].into();
+        let qx_eq: AB::Expr = local[COL_QX].into();
+        let py_eq: AB::Expr = local[COL_PY].into();
+        let qy_eq: AB::Expr = local[COL_QY].into();
+        let cancel_eq: AB::Expr = local[COL_CANCEL].into();
+        let dbl_eq: AB::Expr = local[COL_DBL].into();
+        builder.assert_zero((cancel_eq + dbl_eq.clone()) * (px_eq - qx_eq));
+        builder.assert_zero(dbl_eq * (py_eq - qy_eq));
 
         // Pass-through result ties, at the res row where r is local and
         // p / q sit in the term row's cells (next).
@@ -452,7 +474,6 @@ where
         let rq_hi: LB::Expr = local[COL_RQ_HI].into();
         let live: LB::Expr = cancel.clone() + dbl.clone() + generic.clone();
         let tail: LB::Expr = dbl.clone() + generic.clone();
-        let x_eq: LB::Expr = dbl.clone() + cancel.clone();
 
         let at_slope: LB::Expr = sel[PCOL_SLOPE].clone();
         let at_tail: LB::Expr = sel[PCOL_TAIL].clone();
@@ -488,6 +509,9 @@ where
 
         let f2 = Deg { v: 2, u: 1 };
         let col_deg = Deg { v: 8, u: 7 };
+        // Slope / tail columns each shed one fraction (the `is_b_zero`
+        // x-/y-equality certs are now native degree-2 constraints).
+        let col_deg6 = Deg { v: 7, u: 6 };
         // Mint column: 4 Range16 consumes + 1 cert provide, each a deg-2
         // gate (at_res · mints) over a deg-1 message ⇒ over 5 fractions the
         // numerator is 2 + 4·1 = 6, denominator 5.
@@ -694,28 +718,17 @@ where
                                     },
                                     f2,
                                 );
-                                // double/cancel: x₁ = x₂ — the is_b_zero
-                                // equality certificate.
-                                b.insert(
-                                    "consume-x-eq",
-                                    x_eq * at_slope.clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound.clone(),
-                                        a_ptr: px.clone(),
-                                        b_ptr: zero.clone(),
-                                        c_ptr: qx.clone(),
-                                        nz: zero.clone(),
-                                    },
-                                    f2,
-                                );
+                                // The double/cancel `x₁ = x₂` equality is now
+                                // a native degree-2 constraint (see Phase 1),
+                                // so no is_b_zero cert here.
                             },
-                            col_deg,
+                            col_deg6,
                         );
                     },
-                    col_deg,
+                    col_deg6,
                 );
             },
-            col_deg,
+            col_deg6,
         );
 
         // Col 2 (fractions): the shared tail, two fused mul-subtracts (no
@@ -811,28 +824,17 @@ where
                                     },
                                     f2,
                                 );
-                                // double: y₁ = y₂ — the second equality
-                                // certificate.
-                                b.insert(
-                                    "consume-y-eq",
-                                    dbl * sel[PCOL_SLOPE].clone(),
-                                    UintAddMsg {
-                                        bound_ptr: bound,
-                                        a_ptr: py,
-                                        b_ptr: zero.clone(),
-                                        c_ptr: qy,
-                                        nz: zero,
-                                    },
-                                    f2,
-                                );
+                                // The double `y₁ = y₂` equality is now a
+                                // native degree-2 constraint (see Phase 1),
+                                // so no is_b_zero cert here.
                             },
-                            col_deg,
+                            col_deg6,
                         );
                     },
-                    col_deg,
+                    col_deg6,
                 );
             },
-            col_deg,
+            col_deg6,
         );
 
         // ---- col 3: the mint column. Four Range16 consumes for the limbs

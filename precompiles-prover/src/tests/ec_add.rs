@@ -654,30 +654,27 @@ fn double_forged_as_generic_unbalances() {
 }
 
 #[test]
-fn generic_forged_as_double_unbalances() {
-    // The dual flip: claiming double on distinct x's demands the
-    // x₁ + 0 ≡ x₂ equality certificate — unrecordable for unequal
-    // values — plus the tangent MACs nothing recorded.
+#[should_panic(expected = "constraint")]
+fn generic_forged_as_double_rejected() {
+    // The dual flip: claiming double on distinct x's (G + 2G). The native
+    // `double·(x₁ − x₂) = 0` constraint demands x₁ = x₂ for a doubling, and
+    // G.x ≠ 2G.x violates it locally — no is_b_zero cert, no bus round-trip.
     let mut k1 = k1_stack();
     k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
     let traces = k1.stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_DBL, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xecad_da02);
     check_ec_add(&forged);
-
-    let mut mains = traces.mains();
-    mains[6] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
 #[test]
-fn cancel_forged_on_distinct_x_unbalances() {
+#[should_panic(expected = "constraint")]
+fn cancel_forged_on_distinct_x_rejected() {
     // G + (β·Gx, −Gy): the y's cancel but the x's differ — an honest
     // *generic* configuration. Forging cancel (tying R to the PAI row)
-    // satisfies every constraint, but cancel demands the x₁ + 0 ≡ x₂
-    // equality certificate, unrecordable across distinct x's — exactly
-    // the certificate that keeps "vertical chord" forgeries out.
+    // satisfies the bus, but the native `(cancel + double)·(x₁ − x₂) = 0`
+    // constraint demands x₁ = x₂, which the distinct x's violate locally —
+    // exactly what keeps "vertical chord" forgeries out.
     let mut k1 = k1_stack();
     let pai = k1.pai;
     let mut ec = k1.stack.require();
@@ -685,18 +682,10 @@ fn cancel_forged_on_distinct_x_unbalances() {
     ec.add(k1.g_pt, q_pt, 0);
     let traces = k1.stack.traces();
 
-    // Clear mints too: a real forger vacates the (now-false) mint claim, so
-    // the cancel x-equality certificate — not the ptr-ordering — is what
-    // must reject this (an honest generic mint set mints = 1 here).
     let mut forged =
         tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_CANCEL, 1), (COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, pai.addr());
-    let mut rng = StdRng::seed_from_u64(0xecad_da06);
     check_ec_add(&forged);
-
-    let mut mains = traces.mains();
-    mains[6] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
 #[test]
@@ -770,7 +759,7 @@ fn ed25519_torsion_forged_as_double_unbalances() {
     let traces = stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_CANCEL, 0), (COL_DBL, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xECADD_25519F);
+    let mut rng = StdRng::seed_from_u64(0xecadd_25519f);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();

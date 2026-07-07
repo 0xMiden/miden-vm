@@ -230,16 +230,19 @@ impl<'a> EcRequire<'a> {
                     let (transients, r, fresh) = self.add_tail(d, lambda, px, py, qx, group);
                     (EcAddCase::Generic, r, Some(transients), fresh)
                 } else if add_reduce(y1, y2, bound_v) == U256::ZERO {
-                    // cancel (covers `y = 0` 2-torsion doubling): the
-                    // x-equality certificate + the `is_c_zero` negation
-                    // tuple; `R` is the group's canonical PAI row.
-                    self.uint.value_eq(px, qx);
+                    // cancel (covers `y = 0` 2-torsion doubling): `x₁ = x₂`
+                    // is enforced natively in the AIR (the coords share a
+                    // ptr under value-interning), so only the `is_c_zero`
+                    // negation tuple is recorded; `R` is the group's
+                    // canonical PAI row.
                     self.uint.add_to_zero(py, qy);
                     (EcAddCase::Cancel, self.store.group_pai(group), None, false)
                 } else {
                     // double: s ≡ 3x² + a and 2λy ≡ s (the κ's carry the
-                    // tangent constants; shared r_ptr = s), λ = s·(2y)⁻¹, and
-                    // the equality certificates x₁ = x₂ / y₁ = y₂. No
+                    // tangent constants; shared r_ptr = s), λ = s·(2y)⁻¹. The
+                    // `x₁ = x₂` / `y₁ = y₂` equalities are enforced natively
+                    // in the AIR (the operands are the same stored point, so
+                    // their coords share ptrs under value-interning). No
                     // `y₁ ≠ 0` witness: the slope pin `2λy ≡ s = 3x² + a`
                     // already excludes `y = 0`, since on a **smooth** curve a
                     // 2-torsion point has `3x² + a ≠ 0` (simple cubic root),
@@ -252,8 +255,6 @@ impl<'a> EcRequire<'a> {
                     let lambda_val = mac_reduce(1, s_v, two_y_inv, 0, U256::ZERO, bound_v);
                     let lambda = self.uint.intern(lambda_val, bound);
                     self.uint.mac_into(2, lambda, py, 0, bound, s);
-                    self.uint.value_eq(px, qx);
-                    self.uint.value_eq(py, qy);
                     let (transients, r, fresh) = self.add_tail(s, lambda, px, py, qx, group);
                     (EcAddCase::Double, r, Some(transients), fresh)
                 }

@@ -61,13 +61,12 @@ uint relation chiplets; the chiplet holds no limbs and no witness
 registers.
 
 - **Equality** (`double`/`cancel`'s `x₁ = x₂`, `double`'s `y₁ = y₂`):
-  the [`is_b_zero`](uint-add.md#equality-the-is_b_zero-mode) `UintAdd`
-  form `x₁ + 0 ≡ x₂` — with both values stored canonical under one
-  modulus, the modular identity *is* value equality. Value-level, so
-  two distinct ptrs binding equal coordinates still close;
-  deterministic; one add block per tie (and in honest traces the tie's
-  operands are usually one interned ptr, so blocks dedup across ops by
-  relation identity).
+  a **native degree-2 constraint** on the operand coordinate-ptr columns
+  — `(cancel + dbl)·(px − qx) = 0` and `dbl·(py − qy) = 0`. The res-row
+  `EcPoint` consumes pin `px`/`qx`/`py`/`qy` to the operands' stored
+  coordinate ptrs, and the uint store interns by value, so a ptr-level
+  equality of those columns *is* value equality. No UintAdd block, no
+  limbs — the tie costs nothing on the uint relations.
 - **Disequality / nonzero** (`generic`'s `x₁ ≠ x₂`, `double`'s
   `y₁ ≠ 0`): the **allocated-inverse MAC** (the `is_c_zero` idiom
   inverted) — store `inv = b·d⁻¹` (resp. `b·y₁⁻¹`) as a transient and
@@ -102,9 +101,9 @@ pins λ to the unique chord slope; it is not bookkeeping.
 Note `double` never materializes `d = x₂ − x₁` at all: `d` exists as
 a sub-arrangement transient only in the `generic` case — each case
 allocates (and demands) only its own witnesses. `cancel` demands the
-x-equality certificate plus the **`is_c_zero` `UintAdd` tuple**
+native x-equality constraint plus the **`is_c_zero` `UintAdd` tuple**
 `(bound, y₁_ptr, y₂_ptr, 0)` — the negation primitive is exactly the
-cancel-case certificate (and the x-equality is what keeps a
+cancel-case certificate (and the native x-equality is what keeps a
 "vertical chord" forgery out: `y₁ + y₂ ≡ 0` across *distinct* x's is
 an honest `generic` configuration, not a cancellation).
 
