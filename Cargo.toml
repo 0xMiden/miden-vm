@@ -77,7 +77,7 @@ miden-test-serde-macros = { path = "./crates/test-serde-macros", default-feature
 miden-project           = { path = "./crates/project", version = "0.25", default-features = false }
 miden-prover            = { path = "./prover", version = "0.25", default-features = false }
 miden-core-lib          = { path = "./crates/lib/core", version = "0.25", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.8", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.9", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.25", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.25", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.25", default-features = false }
