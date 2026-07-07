@@ -152,7 +152,7 @@ pub const NUM_MAIN_COLS: usize = 27;
 /// each insert's multiplicity (sound: the one-hot flags are binary, the same
 /// precondition the mutex-group fold already relies on), giving 13
 /// flag-folded fractions — one degree-2, ten degree-3, two degree-4
-/// multiplicities, all over degree-1 messages — repartitioned so every
+/// multiplicities, all over degree-1 messages — partitioned so every
 /// closing constraint is degree ≤ 5:
 ///
 /// - col 0 (running σ): Memory64 `new-state` + `prev-perm` (the two lowest-degree fractions; the
@@ -164,10 +164,9 @@ pub const NUM_MAIN_COLS: usize = 27;
 /// - col 5: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
-/// Max per-LogUp-column constraint deg = 5 → `log_quotient_degree = 2` (was
-/// the [6, 5, 2] mutex layout at deg 7 → lqd 3). The degree-4 multiplicities
-/// (`squeeze`, `chunk-consume`) are the floor; dropping to lqd 1 would need
-/// them witness-decomposed. Width disregarded (research/logup-flatten). See
+/// Max per-LogUp-column constraint deg = 5 → `log_quotient_degree = 2`. The
+/// degree-4 multiplicities (`squeeze`, `chunk-consume`) are the floor; dropping
+/// to lqd 1 would need them witness-decomposed. Width disregarded. See
 /// `docs/chiplets/keccak-sponge.md` §"Aux columns and σ exposure".
 pub const NUM_AUX_COLS: usize = 6;
 
@@ -662,7 +661,7 @@ where
         let mult_new_state: LB::Expr =
             LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone();
         let mult_rc: LB::Expr =
-            LB::Expr::ZERO - LB::Expr::from(Felt::from(3u8)) * act.clone() * p_rc_active;
+            LB::Expr::ZERO - LB::Expr::from(Felt::from(1u8)) * act.clone() * p_rc_active;
         let mult_squeeze: LB::Expr =
             LB::Expr::from(Felt::from(2u8)) * act.clone() * p_squeeze_active * b_sum.clone();
         let mult_lane16_consume: LB::Expr =
@@ -677,7 +676,7 @@ where
         // FLATTENED to lqd 2: the mutex outer flags are folded into each
         // insert's multiplicity (sound — the one-hot flags are binary on the
         // rows where they fire, the precondition the mutex fold already
-        // relied on), and the 13 fractions are repartitioned ≤ 3 per column
+        // relied on), and the 13 fractions are partitioned ≤ 3 per column
         // so every closing constraint is degree ≤ 5. Column-degree hints are
         // ignored on the constraint path.
         let pair_deg = Deg { v: 4, u: 2 };

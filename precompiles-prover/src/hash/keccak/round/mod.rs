@@ -81,9 +81,9 @@ pub const LANE_WIDTH: usize = 8;
 /// lane's absolute `ip` frame (its memory64 address range) is pinned by the
 /// bus — its round-0 reads of the sponge-provided initial state force it, so a
 /// shifted frame would leave uncancelled bus terms (Σσ ≠ 0). The lanes hold
-/// disjoint, contiguous address ranges (the original per-perm layout is
-/// preserved), so the memory64 multiset is unchanged and the sponge consumer
-/// is untouched.
+/// disjoint, contiguous address ranges (one per perm), so the packed memory64
+/// multiset equals the union of the per-perm ranges and the sponge consumer
+/// reads the same stream.
 pub const NUM_LANES: usize = 2;
 pub const NUM_MAIN_COLS: usize = LANE_WIDTH * NUM_LANES;
 
@@ -91,6 +91,21 @@ pub const NUM_MAIN_COLS: usize = LANE_WIDTH * NUM_LANES;
 #[inline]
 pub fn lane_base(lane: usize) -> usize {
     lane * LANE_WIDTH
+}
+
+/// Interleave the per-lane column bands into one `NUM_MAIN_COLS`-wide
+/// row-major matrix, each lane's `LANE_WIDTH` cells placed at its band base.
+fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMajorMatrix<Felt> {
+    let mut trace = vec![Felt::ZERO; height * NUM_MAIN_COLS];
+    for (lane, cells) in lane_cells.iter().enumerate() {
+        let base = lane_base(lane);
+        for r in 0..height {
+            let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
+            let row_start = r * NUM_MAIN_COLS + base;
+            trace[row_start..row_start + LANE_WIDTH].copy_from_slice(src);
+        }
+    }
+    RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
 // AUX COLUMN LAYOUT
@@ -123,6 +138,7 @@ pub use program::{
     COL_BACK_A as PCOL_BACK_A, COL_BACK_B as PCOL_BACK_B, COL_DST_MULT as PCOL_DST_MULT,
     COL_IS_ANDNOT as PCOL_IS_ANDNOT, COL_IS_ROL as PCOL_IS_ROL, COL_IS_XOR as PCOL_IS_XOR,
     COL_IS_XORROL as PCOL_IS_XORROL, COL_K as PCOL_K, COL_P_LAST as PCOL_P_LAST,
+    COL_SWAP as PCOL_SWAP,
 };
 
 // AIR
@@ -243,7 +259,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
 /// - band col 3: Bitwise64 fused XorRol64 require.
 ///
 /// Every closing constraint is degree ≤ 3, so `log_quotient_degree = 1`
-/// (aux blowup factor = 2). Width disregarded (research/logup-flatten).
+/// (aux blowup factor = 2). Width disregarded.
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
 
 const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
@@ -291,6 +307,10 @@ where
         let back_b: LB::Expr = periodic[PCOL_BACK_B].into();
         let k: LB::Expr = periodic[PCOL_K].into();
         let dst_mult: LB::Expr = periodic[PCOL_DST_MULT].into();
+        // Half-swap flag for full-range rotation: on `ρ ≥ 32` XORROL slots the
+        // chiplet provides `ROL(a⊕b, ρ−32)` = halfswap of the round's committed
+        // `c`, so the XorRol64 message sends `c` with its 32-bit halves swapped.
+        let swap: LB::Expr = periodic[PCOL_SWAP].into();
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let triple_deg = Deg { v: 3, u: 3 };
@@ -411,7 +431,12 @@ where
                 ),
             );
             // band col 3: bitwise64 fused `XorRol64(a, b, c, k)` for θ-apply+ρ
-            // rows — `c = rol(a ⊕ b, k)` in one consume.
+            // rows — `c = rol(a ⊕ b, k)` in one consume. On swap slots the
+            // chiplet provides ROL(a⊕b, ρ−32) = halfswap(committed c), so the
+            // message's c halves are swapped (`swap ∈ {0,1}`); `k` already
+            // carries `2^(ρ−32)` from the periodic program.
+            let xc_lo = c_lo.clone() + swap.clone() * (c_hi.clone() - c_lo.clone());
+            let xc_hi = c_hi.clone() + swap.clone() * (c_lo.clone() - c_hi.clone());
             frac_col!(
                 builder,
                 "bitwise64",
@@ -424,8 +449,8 @@ where
                         a_hi,
                         b_lo,
                         b_hi,
-                        c_lo,
-                        c_hi,
+                        c_lo: xc_lo,
+                        c_hi: xc_hi,
                         k: k.clone()
                     },
                     interaction_deg
@@ -546,16 +571,7 @@ pub fn generate_trace_from_states(
         cells
     });
 
-    let mut trace = vec![Felt::ZERO; height * NUM_MAIN_COLS];
-    for (lane, cells) in lane_cells.iter().enumerate() {
-        let base = lane_base(lane);
-        for r in 0..height {
-            let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
-            let row_start = r * NUM_MAIN_COLS + base;
-            trace[row_start..row_start + LANE_WIDTH].copy_from_slice(src);
-        }
-    }
-    RowMajorMatrix::new(trace, NUM_MAIN_COLS)
+    interleave_lanes(&lane_cells, height)
 }
 
 /// Execute one slot's operation, returning the destination value
@@ -757,10 +773,10 @@ pub fn generate_trace(
     let height = (perms_per_lane * PERM_CYCLE).next_power_of_two().max(2);
     let program = slots();
 
-    // Memory keyed by absolute IP — the original per-perm address layout is
-    // preserved (lanes only repartition which trace rows hold which perm), so
-    // the memory64 multiset and the sponge consumer are unchanged. Sized to
-    // cover every perm's range (lane content reads stay inside it).
+    // Memory keyed by absolute IP — each perm owns a fixed address range
+    // regardless of which lane and rows hold it, so the memory64 multiset and
+    // the sponge consumer see a per-perm layout. Sized to cover every perm's
+    // range (lane content reads stay inside it).
     let mem_size = IP_BOUNDARY as usize + NUM_LANES * perms_per_lane * PERM_CYCLE + 1;
     let mut memory = vec![0u64; mem_size];
 
@@ -834,7 +850,10 @@ pub fn generate_trace(
                         bw64_req.require_rol(bpl_req, a, 1u64 << s);
                     },
                     Op::XorRol(s) => {
-                        bw64_req.require_xorrol(bpl_req, a, b, 1u64 << s);
+                        // bitwise64 sees the reduced shift (≤ 30); the round's
+                        // half-swap recovers the full rotation for ρ ≥ 32.
+                        let (shift, _) = program::rol_decompose(s);
+                        bw64_req.require_xorrol(bpl_req, a, b, 1u64 << shift);
                     },
                     Op::Nop => {},
                 }
@@ -845,15 +864,5 @@ pub fn generate_trace(
         cells
     });
 
-    // Interleave the lane bands into one NUM_MAIN_COLS-wide row-major matrix.
-    let mut trace = vec![Felt::ZERO; height * NUM_MAIN_COLS];
-    for (lane, cells) in lane_cells.iter().enumerate() {
-        let base = lane_base(lane);
-        for r in 0..height {
-            let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
-            let row_start = r * NUM_MAIN_COLS + base;
-            trace[row_start..row_start + LANE_WIDTH].copy_from_slice(src);
-        }
-    }
-    RowMajorMatrix::new(trace, NUM_MAIN_COLS)
+    interleave_lanes(&lane_cells, height)
 }

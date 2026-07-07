@@ -1,7 +1,7 @@
-//! Keccak round program: 128 slots, encoded as 9 length-128 periodic
+//! Keccak round program: 128 slots, encoded as 10 length-128 periodic
 //! columns over the chiplet's trace.
 //!
-//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The nine
+//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The ten
 //! columns are:
 //!
 //! - `is_xor`, `is_andnot`, `is_rol` — selector flags. A fused XORROL row sets both `is_xor` and
@@ -9,6 +9,7 @@
 //! - `is_xorrol` — 1 exactly on fused XORROL rows (= `is_xor · is_rol`, precomputed). Lets the
 //!   chiplet recover a one-per-row "reads src_a" count from the otherwise-overlapping selectors
 //!   without a degree bump.
+//! - `swap` — 1 on fused XORROL slots whose true rotation `ρ ≥ 32` (see [`COL_SWAP`]).
 //! - `back_a`, `back_b` — source A / B back-offsets (`src_addr = ip - back`).
 //! - `k` — ROL shift multiplier `2^s` (0 when `is_rol = 0`).
 //! - `dst_mult` — destination provide multiplicity (0 on NOP rows).
@@ -21,7 +22,7 @@
 //!
 //! ```text
 //! [  0,   1)  RC slot                (NOP; sponge writes RC[r] at IP)
-//! [  1,   2)  ZERO slot              (Andnot(RC, RC) = 0; mult 12)
+//! [  1,   2)  ZERO slot              (NOP; unused since full-range rotation)
 //! [  2,  22)  θ C-computation        (20 XORs, balanced trees)
 //! [ 22,  27)  θ D-ROL                (5 ROL(1) ops)
 //! [ 27,  32)  θ D-XOR                (5 XOR ops)
@@ -52,7 +53,7 @@ use crate::relations::ProvideMult;
 pub const ROUND_PERIOD: usize = 128;
 
 /// Number of preprocessed columns produced by [`round_program`].
-pub const NUM_PERIODIC_COLS: usize = 9;
+pub const NUM_PERIODIC_COLS: usize = 10;
 
 /// Column indices in the periodic table.
 pub const COL_IS_XOR: usize = 0;
@@ -67,6 +68,11 @@ pub const COL_DST_MULT: usize = 6;
 /// counts it twice; subtracting this column recovers the true
 /// one-read-per-row `src_a` multiplicity at degree 1.
 pub const COL_IS_XORROL: usize = 8;
+/// 1 on fused XORROL slots whose true rotation `ρ ≥ 32`, where the chiplet
+/// shift is `ρ − 32 ≤ 30` and the rolled output's 32-bit halves are swapped
+/// (`ROL(x, ρ) = halfswap(ROL(x, ρ − 32))`). The round commits the true `c`
+/// for memory but sends bitwise64 the half-swapped `c` (what it provides).
+pub const COL_SWAP: usize = 9;
 /// 1 at slot 127 of each round (the round's last slot), 0 elsewhere.
 /// Gates the round-boundary toggles of [`act`](super::COL_ACT): the
 /// within-round-constant constraint multiplies the column difference
@@ -79,9 +85,9 @@ pub const COL_P_LAST: usize = 7;
 
 /// RC slot — NOP; sponge writes `RC[r]` at this IP.
 pub const SLOT_RC: usize = 0;
-/// Zero-producer slot — `Andnot(RC[r], RC[r]) = 0`. The chiplet
-/// manufactures `0` here, providing a memory-bus zero cell that
-/// trailing-ROL rows read for their `src_b`.
+/// NOP with no readers: full-range rotation (see `emit_apply_rpi`) has no
+/// additive-split trailing-ROL rows, so nothing consumes a memory-bus zero
+/// cell (`Andnot(RC, RC) = 0`) here for a `src_b`.
 pub const SLOT_ZERO: usize = 1;
 /// First slot of θ C-computation (4 XORs per parity tree, 5 trees).
 pub const SLOT_C_BEGIN: usize = 2;
@@ -281,20 +287,12 @@ pub fn slots() -> [Slot; ROUND_PERIOD] {
 fn slot_table() -> [SlotSpec; ROUND_PERIOD] {
     let mut s = [SlotSpec::NOP; ROUND_PERIOD];
 
-    // --- ZERO slot: Andnot(RC[r], RC[r]) = 0, mult 12 ----------------
-    // Manufactures a memory-bus zero cell that trailing-ROL rows read
-    // as their `src_b`. `Andnot(v, v) = (~v) & v = 0` for any `v`, so
-    // we read RC[r] (the previous slot's value) twice — costs RC[r]
-    // 2 extra read multiplicity (now 3 total per round: 1 from ι +
-    // 2 here), saves having to wire a separate zero cell through the
-    // sponge contract.
-    s[SLOT_ZERO] = SlotSpec {
-        op: Op::Andnot,
-        src_a: Source::Local(SLOT_RC),
-        src_b: Source::Local(SLOT_RC),
-        // 12 trailing-ROL rows in apply+ρπ read this slot for src_b.
-        dst_mult: 12,
-    };
+    // --- ZERO slot: NOP ---------------------------------------------
+    // Full-range rotation (the half-swap in `emit_apply_rpi`) has no
+    // additive-split trailing-ROL rows, so no memory-bus zero cell
+    // (`Andnot(RC, RC) = 0`) is consumed here for a `src_b`. The slot is a
+    // NOP and RC[r] is read just once per round (by ι), matching the sponge's
+    // single-read RC provide.
 
     // --- C-computation: 5 linear 4-XOR chains, slots 2..22 ----------
     // C[x] = l0 ⊕ l1 ⊕ l2 ⊕ l3 ⊕ l4, folded *linearly* so each XOR reads
@@ -460,65 +458,32 @@ fn emit_apply_rpi(s: &mut [SlotSpec; ROUND_PERIOD], out_x: usize, out_y: usize) 
     // (x, y), +1 arg for (x−1, y), +2 arg for (x−2, y)).
     let final_mult = 3;
 
-    if rho == 0 {
-        // Lane (0, 0): plain XOR, no rotation.
-        s[b_slot] = SlotSpec {
-            op: Op::Xor,
-            src_a: apply_a,
-            src_b: apply_b,
-            dst_mult: final_mult,
-        };
-    } else if rho <= 30 {
-        // Single fused XORROL handles the apply + full rotation.
-        s[b_slot] = SlotSpec {
-            op: Op::XorRol(rho),
-            src_a: apply_a,
-            src_b: apply_b,
-            dst_mult: final_mult,
-        };
-    } else if rho <= 60 {
-        // Split: XORROL by 30, then trailing XORROL(_, 0, rho−30). The
-        // trailing row is XORROL (not pure ROL) so Bitwise64's IR can
-        // materialize a LOGIC predecessor + Carrier that the Rol row
-        // recycles — satisfying the ROL-after-LOGIC invariant.
-        let first = b_slot - 1;
-        s[first] = SlotSpec {
-            op: Op::XorRol(30),
-            src_a: apply_a,
-            src_b: apply_b,
-            dst_mult: 1, // intermediate.
-        };
-        s[b_slot] = SlotSpec {
-            op: Op::XorRol(rho - 30),
-            src_a: Source::Local(first),
-            src_b: Source::Local(SLOT_ZERO),
-            dst_mult: final_mult,
-        };
+    // Full-range rotation in one fused op. ρ > 30 is handled by the round's
+    // half-swap (ROL by 32 = swap halves), so bitwise64 only ever sees the
+    // reduced shift `ρ − 32 ≤ 30` (see `rol_decompose` / `COL_SWAP`). No
+    // additive 30+30+rest split — the former intermediate slots stay NOP and
+    // the ZERO cell is gone. Keccak's ρ never lands in [31, 35], so the
+    // reduced shift is always within bitwise64's `s ≤ 30` bound.
+    let op = if rho == 0 {
+        Op::Xor // Lane (0, 0): plain XOR, no rotation.
     } else {
-        // rho ∈ (60, 63]: ρ = 61 or 62. Split into 30 + 30 + (rho − 60).
-        // 3 slots. Trailing rows are XORROL with src_b = ZERO (same
-        // reason as above).
-        let first = b_slot - 2;
-        let second = b_slot - 1;
-        s[first] = SlotSpec {
-            op: Op::XorRol(30),
-            src_a: apply_a,
-            src_b: apply_b,
-            dst_mult: 1,
-        };
-        s[second] = SlotSpec {
-            op: Op::XorRol(30),
-            src_a: Source::Local(first),
-            src_b: Source::Local(SLOT_ZERO),
-            dst_mult: 1,
-        };
-        s[b_slot] = SlotSpec {
-            op: Op::XorRol(rho - 60),
-            src_a: Source::Local(second),
-            src_b: Source::Local(SLOT_ZERO),
-            dst_mult: final_mult,
-        };
-    }
+        Op::XorRol(rho)
+    };
+    s[b_slot] = SlotSpec {
+        op,
+        src_a: apply_a,
+        src_b: apply_b,
+        dst_mult: final_mult,
+    };
+}
+
+/// Decompose a true rotation `s ∈ [0, 63]` into `(chiplet_shift, swap)` such
+/// that `ROL(x, s) = halfswap^swap(ROL(x, chiplet_shift))`, with
+/// `chiplet_shift ≤ 30` for every keccak ρ. For `s ≥ 32` the free 32-bit
+/// half-swap absorbs the high bit (`ROL(x, 32) = halfswap(x)`), leaving
+/// `s − 32`; keccak ρ never lands in `[31, 35]`, so `s − 32 ≤ 30`.
+pub fn rol_decompose(s: u32) -> (u32, bool) {
+    if s >= 32 { (s - 32, true) } else { (s, false) }
 }
 
 // PERIODIC-COLUMN MATERIALIZATION
@@ -534,17 +499,21 @@ pub fn round_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
         core::array::from_fn(|_| vec![Felt::ZERO; ROUND_PERIOD]);
 
     for (slot, spec) in table.iter().enumerate() {
-        let (is_xor, is_andnot, is_rol, is_xorrol, k) = match spec.op {
-            Op::Nop => (0, 0, 0, 0, 0u64),
-            Op::Xor => (1, 0, 0, 0, 0),
-            Op::Andnot => (0, 1, 0, 0, 0),
-            Op::Rol(s) => (0, 0, 1, 0, 1u64 << s),
-            Op::XorRol(s) => (1, 0, 1, 1, 1u64 << s),
+        let (is_xor, is_andnot, is_rol, is_xorrol, k, swap) = match spec.op {
+            Op::Nop => (0, 0, 0, 0, 0u64, false),
+            Op::Xor => (1, 0, 0, 0, 0, false),
+            Op::Andnot => (0, 1, 0, 0, 0, false),
+            Op::Rol(s) => (0, 0, 1, 0, 1u64 << s, false),
+            Op::XorRol(s) => {
+                let (shift, swap) = rol_decompose(s);
+                (1, 0, 1, 1, 1u64 << shift, swap)
+            },
         };
         cols[COL_IS_XOR][slot] = Felt::from(is_xor as u8);
         cols[COL_IS_ANDNOT][slot] = Felt::from(is_andnot as u8);
         cols[COL_IS_ROL][slot] = Felt::from(is_rol as u8);
         cols[COL_IS_XORROL][slot] = Felt::from(is_xorrol as u8);
+        cols[COL_SWAP][slot] = Felt::from(swap as u8);
         cols[COL_BACK_A][slot] =
             Felt::new(spec.src_a.back_off(slot)).expect("back_a fits in canonical Goldilocks");
         cols[COL_BACK_B][slot] =
@@ -582,20 +551,19 @@ mod tests {
                 Op::XorRol(_) => xorrol += 1,
             }
         }
-        // 1 RC slot + 8 trailing NOPs. (ZERO slot ate one slacker.)
-        assert_eq!(nop, 9, "nop");
+        // 1 RC + 1 now-NOP ZERO slot + 8 slackers + 12 freed apply+ρπ
+        // intermediates (the additive-split rows full-range rotation drops).
+        assert_eq!(nop, 22, "nop");
         // 20 C-comp + 5 D-XOR + 1 (lane (0,0) apply+ρπ) + 1 χ for (0,0)
         // + 24 other χ XORs + 1 ι = 52.
         assert_eq!(xor, 52, "xor");
-        // 25 χ ANDNOTs + 1 ZERO slot Andnot.
-        assert_eq!(andnot, 26, "andnot");
-        // Pure ROL: only 5 D-ROL rows. Trailing ρπ ROLs are now XORROL
-        // (with src_b = ZERO slot).
+        // 25 χ ANDNOTs (the ZERO-slot Andnot is gone).
+        assert_eq!(andnot, 25, "andnot");
+        // Pure ROL: only 5 D-ROL rows.
         assert_eq!(rol, 5, "rol");
-        // 24 non-(0,0) leading XORROLs + 12 trailing XORROLs
-        // (8 lanes ρ ∈ (30, 60] contribute 1 trailing each;
-        //  2 lanes ρ ∈ (60, 63] contribute 2 each).
-        assert_eq!(xorrol, 24 + 12, "xorrol");
+        // One fused XORROL per rotated apply+ρπ lane (24 lanes; lane (0,0)
+        // is plain XOR). Full-range rotation means no trailing-row splits.
+        assert_eq!(xorrol, 24, "xorrol");
         assert_eq!(nop + xor + andnot + rol + xorrol, ROUND_PERIOD);
     }
 
