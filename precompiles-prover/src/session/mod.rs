@@ -467,6 +467,7 @@ impl Session {
         let round =
             trace_span!("keccak_round", round_trace(self.round, &mut self.bw64, &mut self.bpl));
         let bw64_active_rows = self.bw64.active_rows();
+        let bw64_populated_rows = self.bw64.populated_rows();
         let bw64 = trace_span!("bitwise64", bw64_trace(self.bw64));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
@@ -509,6 +510,7 @@ impl Session {
             msm,
             public_root,
             bw64_active_rows,
+            bw64_populated_rows,
         }
     }
 }
@@ -540,6 +542,7 @@ pub struct SessionTraces {
     msm: RowMajorMatrix<Felt>,
     public_root: P2Digest,
     bw64_active_rows: usize,
+    bw64_populated_rows: usize,
 }
 
 impl SessionTraces {
@@ -604,9 +607,15 @@ impl SessionTraces {
         self.public_root
     }
 
-    /// Active (pre-power-of-two-pad) bitwise64 row count — a trace-density
+    /// Total logical bitwise64 row count (lane-independent) — a trace-density
     /// diagnostic; the chiplet's other dimensions come from `mains()`.
     pub fn bw64_active_rows(&self) -> usize {
         self.bw64_active_rows
+    }
+
+    /// Populated (pre-power-of-two-pad) bitwise64 trace height — the busiest
+    /// chain-lane's row count, ≈ `active_rows / NUM_LANES`.
+    pub fn bw64_populated_rows(&self) -> usize {
+        self.bw64_populated_rows
     }
 }
