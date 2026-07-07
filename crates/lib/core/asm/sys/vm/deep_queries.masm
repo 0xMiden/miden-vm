@@ -13,7 +13,7 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #! Computes the DEEP composition polynomial FRI queries.
 #!
 #! This procedure iterates over all FRI query indices stored in memory at `query_ptr` and
-#! overwrites each word with `[eval0, eval1, index, poe]` where:
+#! overwrites each word with `[poe, index, eval0, eval1]` where:
 #!
 #! 1. `index` is the FRI query index,
 #! 2. `poe := g^index`, with `g` being the evaluation domain generator,
@@ -45,7 +45,7 @@ pub proc compute_deep_composition_polynomial_queries
         # Compute the current query and store the result
         # We also re-arrange the stack for the next iteration of the loop
         exec.deep_queries::compute_deep_query
-        # => [has_more_queries, Y, query_ptr+1, query_end_ptr]
+        # => [has_more_queries, Y, query_ptr+4, query_end_ptr]
     end
 
     # Clean up the stack and return
