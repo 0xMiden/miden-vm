@@ -23,7 +23,9 @@ keywords     = ["crypto", "hash", "merkle", "miden"]
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/0xMiden/crypto"
 rust-version = "1.93"
-version      = "0.29.0"
+# Private workspace members inherit this version. Publishable crates keep their own
+# package versions so release tooling can publish only the crates selected for a release.
+version = "0.29.0"
 
 [workspace.dependencies]
 miden-crypto-derive    = { path = "miden-crypto-derive", version = "0.29" }

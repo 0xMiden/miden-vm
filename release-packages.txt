@@ -1,0 +1,12 @@
+# Publish order for the next miden-crypto release.
+#
+# Keep this list in dependency order. Remove crates that are not part of a given
+# release; the workflow_dispatch `packages` input can also override this file.
+miden-serde-utils
+miden-field
+miden-crypto-derive
+miden-lifted-air
+miden-stark-transcript
+miden-stateful-hasher
+miden-lifted-stark
+miden-crypto
