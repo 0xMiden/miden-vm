@@ -461,7 +461,7 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let statement_digest: Word = processor.stack().get_word(4);
-    let state_prev = processor.deferred_root();
+    let state_prev = processor.system().deferred_root();
 
     // Hasher input: [RATE0 = DEFERRED_ROOT_PREV, RATE1 = STATEMENT, CAPACITY = Tag::AND].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
@@ -475,7 +475,7 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
     let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
-    processor.log_deferred_statement(statement_digest, state_new)?;
+    processor.system_mut().log_deferred_statement(statement_digest, state_new)?;
 
     processor.stack_mut().set_word(0, &state_new);
     processor.stack_mut().set_word(4, &out_rate1);

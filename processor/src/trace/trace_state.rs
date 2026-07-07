@@ -95,7 +95,7 @@ impl SystemState {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),
             fn_hash: processor.system().caller_hash(),
-            deferred_root: processor.deferred_root(),
+            deferred_root: processor.system().deferred_root(),
         }
     }
 }
