@@ -286,7 +286,9 @@ impl SessionTraces {
 
     /// Prove the precompile session with the default production-style hash function,
     /// returning a STARK-backed deferred proof for the session's exact deferred root.
-    pub fn prove(&self) -> DeferredProof {
+    /// Consumes the bundle so the main traces move into the prover statement rather
+    /// than being cloned.
+    pub fn prove(self) -> DeferredProof {
         self.prove_deferred(DEFAULT_HASH_FUNCTION)
             .expect("prove precompile session with default hash function")
     }
@@ -296,9 +298,11 @@ impl SessionTraces {
     ///
     /// The proof bytes are the `serde_wincode` serialization of
     /// `StarkProofData<Felt, QuadFelt, SC>` with `wincode`'s default
-    /// configuration, matching the VM prover's proof-byte surface.
+    /// configuration, matching the VM prover's proof-byte surface. Consumes
+    /// the bundle so the main traces move into the prover statement rather
+    /// than being cloned.
     #[tracing::instrument("prove_stark", skip_all)]
-    pub fn prove_stark(&self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
+    pub fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
         let params = pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
@@ -325,15 +329,17 @@ impl SessionTraces {
     }
 
     /// Prove the precompile session and wrap the serialized STARK proof in the core
-    /// deferred-proof envelope together with the exact deferred root it proves.
-    pub fn prove_deferred(&self, hash_fn: HashFunction) -> Result<DeferredProof, ProveError> {
-        let proof = self.prove_stark(hash_fn)?;
+    /// deferred-proof envelope together with the exact deferred root it proves. Consumes
+    /// the bundle so the main traces move into the prover statement rather than being
+    /// cloned.
+    pub fn prove_deferred(self, hash_fn: HashFunction) -> Result<DeferredProof, ProveError> {
         let public_root: DeferredRoot = self.public_root().as_array().into();
+        let proof = self.prove_stark(hash_fn)?;
         Ok(DeferredProof::stark(proof, public_root))
     }
 
     fn prove_stark_with_config<SC>(
-        &self,
+        self,
         config: &SC,
         hash_fn: HashFunction,
     ) -> Result<StarkProof, ProveError>
@@ -341,7 +347,10 @@ impl SessionTraces {
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
     {
-        let prover_statement = self.prover_statement();
+        let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
+            .expect("chiplet statement inputs are valid");
+        let prover_statement = ProverStatement::new(statement, self.into_mains())
+            .expect("chiplet trace shapes are valid");
 
         // BytePairLut declares preprocessed columns (its fixed `(a,b,c)`
         // table), so this must be `Some`; built deterministically from the AIR

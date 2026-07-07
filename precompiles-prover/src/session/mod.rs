@@ -32,7 +32,7 @@
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
 //! generic lifted-stark usage, not chiplet wiring.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 pub use miden_core::proof::{DeferredProof, StarkProof};
 use miden_core::{Felt, utils::RowMajorMatrix};
@@ -565,6 +565,29 @@ impl SessionTraces {
             &self.ec,
             &self.ec_add,
             &self.msm,
+        ]
+    }
+
+    /// The fifteen main traces by value in [`mains`](Self::mains) order,
+    /// consuming the bundle — lets the prover take ownership rather than
+    /// clone the (potentially large) traces.
+    pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
+        vec![
+            self.chunk,
+            self.p2,
+            self.round,
+            self.bw64,
+            self.bpl,
+            self.sponge,
+            self.node,
+            self.eval,
+            self.uint,
+            self.add,
+            self.mul,
+            self.ec_groups,
+            self.ec,
+            self.ec_add,
+            self.msm,
         ]
     }
 
