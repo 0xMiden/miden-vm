@@ -9,8 +9,8 @@ use crate::{
     primitives::{
         bitwise64::{
             A_BYTES_RANGE, AUX_PROVIDE, B_LIMBS_RANGE, Bitwise64Air, Bitwise64Requires,
-            COL_IS_LOGIC, COL_IS_ROL, COL_OP_OR_K, Logic64Op, NUM_AUX_COLS, NUM_MAIN_COLS,
-            generate_trace,
+            COL_IS_LOGIC, COL_IS_ROL, COL_IS_XORROL_CAP, COL_OP_OR_K, Logic64Op, NUM_AUX_COLS,
+            NUM_MAIN_COLS, generate_trace,
         },
         byte_pair_lut::{BytePairLutRequires, BytePairOp},
     },
@@ -311,12 +311,12 @@ fn require_rol_recycles_non_tail_carrier() {
 
 #[test]
 fn air_quotient_degree_matches_constraint_plan() {
-    // The dominant constraint is the cyclic σ/n on either requires
-    // column: 8 LogUp summands → cyclic inner deg 1 + 8 = 9. Other
-    // constraints (ROL limb-decomp, canonical-decomp checks, selector
-    // mutex, ROL-needs-LOGIC-predecessor) all sit at deg ≤ 4.
-    // log_quotient_degree = log2_ceil(9 − 1) = 3 (8 quotient chunks).
-    assert_eq!(crate::tests::log_quotient_degree(&Bitwise64Air), 3);
+    // FLATTENED (research/logup-flatten): the 18 fractions are repartitioned
+    // ≤ 2 per column (col 0 a single fraction, via a single-insert batch so
+    // the gated σ-close stays at degree 3), so every closing constraint is
+    // degree ≤ 3 → log_quotient_degree 1. (Was two 8-way requires batches at
+    // deg 9 → lqd 3.) The base-trace constraints all sit at deg ≤ 3 too.
+    assert_eq!(crate::tests::log_quotient_degree(&Bitwise64Air), 1);
 }
 
 #[test]
@@ -380,4 +380,43 @@ fn num_public_values_matches_shared_root() {
     // transcript root. Each chiplet declares that shared count even when it
     // reads none of it (bitwise64 ignores the root entirely).
     assert_eq!(Bitwise64Air.num_public_values(), crate::logup::NUM_PUBLIC_VALUES);
+}
+
+#[test]
+fn xorrol_op_pin_accepts_honest_fused_pair() {
+    // A fused θ-apply+ρ pair: a LOGIC(Xor a, b) row capped by an
+    // is_xorrol_cap ROL row, which drives the XorRol64 provide. The honest
+    // op tag is Xor, so the op-pin constraint passes (completeness).
+    let mut bpl = BytePairLutRequires::new();
+    let mut requires = Bitwise64Requires::new();
+    let a = 0x1122_3344_5566_7788u64;
+    let b = 0xaabb_ccdd_eeff_0011u64;
+    requires.require_xorrol(&mut bpl, a, b, 1u64 << 3);
+
+    let main = generate_trace(requires);
+    // One chain: row 0 is the fused LOGIC row, row 1 its cap.
+    assert_eq!(main.values[COL_IS_LOGIC], Felt::from(1u8));
+    assert_eq!(main.values[COL_OP_OR_K], Felt::from(Logic64Op::Xor.tag()));
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_IS_XORROL_CAP], Felt::from(1u8));
+
+    crate::tests::check_local(Bitwise64Air, &main);
+}
+
+#[test]
+#[should_panic(expected = "constraint")]
+fn xorrol_andnot_substitution_rejected() {
+    // The op-substitution forgery: relabel the fused LOGIC row's op tag
+    // Xor → AndNot. The XorRol64 tuple carries no op, so absent the op-pin
+    // constraint the provide would ship rol((¬a)∧b, k) under the XOR label
+    // and a consumer would accept a non-XOR permutation. The
+    // `is_logic · cap_next · (1 − op_or_k)` constraint rejects it locally.
+    let mut bpl = BytePairLutRequires::new();
+    let mut requires = Bitwise64Requires::new();
+    requires.require_xorrol(&mut bpl, 0x1122_3344_5566_7788, 0xaabb_ccdd_eeff_0011, 1u64 << 3);
+
+    let mut main = generate_trace(requires);
+    // Row 0 is the fused LOGIC row (row 1 caps it); swap Xor (1) for AndNot (0).
+    main.values[COL_OP_OR_K] = Felt::from(BytePairOp::AndNot.tag());
+
+    crate::tests::check_local(Bitwise64Air, &main);
 }

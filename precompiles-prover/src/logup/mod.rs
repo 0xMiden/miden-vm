@@ -57,11 +57,34 @@
 mod aux_builder;
 mod constraint;
 
+/// Emit one **flattened** LogUp column — a single batch of its fractions —
+/// inside a chiplet's `LookupAir::eval` (where the builder param is `LB` and
+/// the `LookupColumn` / `LookupGroup` / `LookupBatch` traits are in scope).
+///
+/// Each fraction is `(name, multiplicity, message, deg)`. Keep <= 2 degree-2
+/// fractions (or 1 degree-3) per column, and <= 1 in column 0 (the gated
+/// running sum), so every closing constraint stays at degree <= 3 -> lqd 1.
+/// `$cd` is the (ignored, on the constraint path) column-degree hint.
+macro_rules! frac_col {
+    ($builder:expr, $group:expr, $cd:expr, $( ($name:expr, $mult:expr, $msg:expr, $deg:expr) ),+ $(,)?) => {
+        $builder.next_column(
+            |col| {
+                col.group($group, |g| {
+                    g.batch("f", LB::Expr::ONE, |b| {
+                        $( b.insert($name, $mult, $msg, $deg); )+
+                    }, $cd);
+                }, $cd);
+            },
+            $cd,
+        );
+    };
+}
 pub use aux_builder::build_logup_aux_trace;
 pub use constraint::{
     CombinedWindow, CyclicConstraintBatch, CyclicConstraintColumn, CyclicConstraintGroup,
     CyclicConstraintLookupBuilder, LookupMainWindow,
 };
+pub(crate) use frac_col;
 // Re-export miden-vm's framework so chiplets only need one `use`.
 pub use miden_air::lookup::{
     BoundaryBuilder, Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
