@@ -118,6 +118,10 @@ mod tests;
 ///   tie-breaker.
 ///
 /// Serialization expects this in-memory order and validates it before writing.
+///
+/// Normal construction goes through builders. Once finalized, a `MastForest` exposes no append API;
+/// code that changes dense nodes must rebuild and finalize a new forest so ordering, root, and
+/// commitment invariants stay in sync.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),

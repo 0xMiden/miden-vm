@@ -45,9 +45,12 @@ pub(crate) fn fingerprint_with_child_fingerprints(
     }
 }
 
+/// Read-only node lookup used while building MAST nodes.
 pub trait MastNodeContext {
+    /// Returns the number of nodes available in this context.
     fn node_count(&self) -> usize;
 
+    /// Returns a node by ID, if that ID is present in this context.
     fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode>;
 }
 
@@ -98,19 +101,6 @@ pub enum MastNodeBuilder {
 }
 
 impl MastNodeBuilder {
-    #[cfg(feature = "arbitrary")]
-    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        match self {
-            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::Call(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::Dyn(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::External(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::Join(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::Loop(builder) => builder.add_to_forest(forest),
-            MastNodeBuilder::Split(builder) => builder.add_to_forest(forest),
-        }
-    }
-
     /// Build the node from this builder.
     ///
     /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.

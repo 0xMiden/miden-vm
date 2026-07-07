@@ -827,6 +827,7 @@ impl BasicBlockNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl BasicBlockNodeBuilder {
+    /// Adds this builder to a mutable forest for test and arbitrary data construction.
     pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node = self.build()?;
         forest

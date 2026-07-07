@@ -155,6 +155,7 @@ impl ExternalNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl ExternalNodeBuilder {
+    /// Adds this builder to a mutable forest for test and arbitrary data construction.
     pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node_id = forest
             .nodes

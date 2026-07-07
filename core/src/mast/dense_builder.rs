@@ -23,10 +23,12 @@ pub struct DenseMastForestBuilder {
 }
 
 impl DenseMastForestBuilder {
+    /// Returns an empty dense MAST forest builder.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds a node builder to this forest and returns its builder-local node ID.
     pub fn push_node(
         &mut self,
         builder: impl Into<MastNodeBuilder>,
@@ -35,10 +37,16 @@ impl DenseMastForestBuilder {
         self.nodes.push(node).map_err(|_| MastForestError::TooManyNodes)
     }
 
+    /// Returns a node by its builder-local node ID.
     pub fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode> {
         self.nodes.get(node_id)
     }
 
+    /// Marks a builder-local node ID as a procedure root.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `root` does not identify a node already added to this builder.
     pub fn mark_root(&mut self, root: MastNodeId) {
         assert!(root.to_usize() < self.nodes.len());
 
@@ -56,10 +64,12 @@ impl DenseMastForestBuilder {
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
+    /// Finalizes this builder into a dense [`MastForest`].
     pub fn finish(self) -> Result<MastForest, MastForestError> {
         self.finish_with_id_map().map(|(forest, _remapping)| forest)
     }
 
+    /// Finalizes this builder and returns the builder-local to final node ID map.
     pub fn finish_with_id_map(
         self,
     ) -> Result<(MastForest, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
