@@ -30,12 +30,19 @@ pub fn prove_deferred_state(
     state: &DeferredState,
     hash_fn: HashFunction,
 ) -> Result<DeferredProof, ProveDeferredStateError> {
+    let _span = tracing::info_span!("prove_deferred_state").entered();
     if state.root() == TRUE_DIGEST {
         return Ok(DeferredProof::Empty);
     }
 
-    let deferred = deferred::session_from_deferred_state(state)?;
-    let traces = deferred.session.finish(deferred.root);
+    let deferred = {
+        let _span = tracing::info_span!("deferred_state_to_session").entered();
+        deferred::session_from_deferred_state(state)?
+    };
+    let traces = {
+        let _span = tracing::info_span!("build_precompile_session_traces").entered();
+        deferred.session.finish(deferred.root)
+    };
     Ok(traces.prove_deferred(hash_fn)?)
 }
 

@@ -247,6 +247,7 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
 		--exclude miden-bench \
+		--exclude miden-vm-precompiles-bench \
 		--exclude miden-crypto-wycheproof-tests
 
 .PHONY: build-target-miden

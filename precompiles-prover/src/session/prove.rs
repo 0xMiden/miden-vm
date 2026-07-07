@@ -291,6 +291,7 @@ impl SessionTraces {
     /// `StarkProofData<Felt, QuadFelt, SC>` with `wincode`'s default
     /// configuration, matching the VM prover's proof-byte surface.
     pub fn prove_stark(&self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
+        let _span = tracing::info_span!("prove_precompile_stark").entered();
         let params = pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
@@ -319,6 +320,7 @@ impl SessionTraces {
     /// Prove the precompile session and wrap the serialized STARK proof in the core
     /// deferred-proof envelope together with the exact deferred root it proves.
     pub fn prove_deferred(&self, hash_fn: HashFunction) -> Result<DeferredProof, ProveError> {
+        let _span = tracing::info_span!("prove_precompile_deferred").entered();
         let proof = self.prove_stark(hash_fn)?;
         let public_root: DeferredRoot = self.public_root().as_array().into();
         Ok(DeferredProof::stark(proof, public_root))
@@ -333,28 +335,33 @@ impl SessionTraces {
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
     {
-        let prover_statement = self.prover_statement();
+        let prover_statement = {
+            let _span = tracing::info_span!("build_precompile_prover_statement").entered();
+            self.prover_statement()
+        };
 
         // BytePairLut declares preprocessed columns (its fixed `(a,b,c)`
         // table), so this must be `Some`; built deterministically from the AIR
         // list and borrowed by the prover instance.
-        let preprocessed = Preprocessed::build(prover_statement.statement(), config)
-            .ok_or(ProveError::MissingPreprocessed)?;
+        let preprocessed = {
+            let _span = tracing::info_span!("build_precompile_preprocessed_trace").entered();
+            Preprocessed::build(prover_statement.statement(), config)
+                .ok_or(ProveError::MissingPreprocessed)?
+        };
 
         let mut challenger = config.challenger();
         observe_protocol_params(&mut challenger);
 
-        let output: StarkOutput<Felt, QuadFelt, SC> =
+        let output: StarkOutput<Felt, QuadFelt, SC> = {
+            let _span = tracing::info_span!("prove_precompile_stark_inner").entered();
             ProverInstance::new(config, &prover_statement, Some(&preprocessed))?
-                .prove(challenger)?;
+                .prove(challenger)?
+        };
 
         let proof_encoding_config = wincode::config::Configuration::default();
-        let proof_bytes = <SerdeCompat<
-            StarkProofData<Felt, QuadFelt, SC>,
-        > as wincode::config::Serialize<_>>::serialize(
-            &output.proof,
-            proof_encoding_config,
-        )?;
+        let proof_bytes = <SerdeCompat<StarkProofData<Felt, QuadFelt, SC>> as wincode::config::Serialize<
+            _,
+        >>::serialize(&output.proof, proof_encoding_config)?;
         Ok(StarkProof::new(proof_bytes, hash_fn))
     }
 }

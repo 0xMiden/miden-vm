@@ -90,7 +90,10 @@ pub async fn prove(
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_for_trace").entered();
+        processor.execute_trace_inputs(program, host).await?
+    };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
@@ -110,7 +113,10 @@ pub async fn prove_partial(
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_for_trace").entered();
+        processor.execute_trace_inputs(program, host).await?
+    };
     prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
@@ -127,7 +133,10 @@ pub fn prove_sync(
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_for_trace").entered();
+        processor.execute_trace_inputs_sync(program, host)?
+    };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
@@ -144,7 +153,10 @@ pub fn prove_partial_sync(
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_for_trace").entered();
+        processor.execute_trace_inputs_sync(program, host)?
+    };
     prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
@@ -158,7 +170,10 @@ pub fn prove_from_trace_sync(
     inputs: TraceProvingInputs,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let (trace_inputs, options) = inputs.into_parts();
-    let trace = build_trace(trace_inputs)?;
+    let trace = {
+        let _span = tracing::info_span!("build_execution_trace").entered();
+        build_trace(trace_inputs)?
+    };
     prove_execution_trace(trace, options, DeferredProvingMode::Full)
 }
 
@@ -171,7 +186,10 @@ pub fn prove_partial_from_trace_sync(
     inputs: TraceProvingInputs,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let (trace_inputs, options) = inputs.into_parts();
-    let trace = build_trace(trace_inputs)?;
+    let trace = {
+        let _span = tracing::info_span!("build_execution_trace").entered();
+        build_trace(trace_inputs)?
+    };
     prove_execution_trace(trace, options, DeferredProvingMode::Partial)
 }
 
@@ -193,7 +211,10 @@ fn prove_execution_trace(
 
     let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
-    let deferred_proof = prove_deferred(trace.deferred_state(), hash_fn, deferred_mode)?;
+    let deferred_proof = {
+        let _span = tracing::info_span!("prove_deferred_precompiles").entered();
+        prove_deferred(trace.deferred_state(), hash_fn, deferred_mode)?
+    };
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
@@ -204,62 +225,65 @@ fn prove_execution_trace(
     };
 
     let params = config::pcs_params();
-    let proof_bytes = match hash_fn {
-        HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(params);
-            prove_stark(
-                &config,
-                core_matrix,
-                chiplets_matrix,
-                poseidon2_matrix,
-                &public_values,
-                &aux_inputs,
-            )
-        },
-        HashFunction::Keccak => {
-            let config = config::keccak_config(params);
-            prove_stark(
-                &config,
-                core_matrix,
-                chiplets_matrix,
-                poseidon2_matrix,
-                &public_values,
-                &aux_inputs,
-            )
-        },
-        HashFunction::Rpo256 => {
-            let config = config::rpo_config(params);
-            prove_stark(
-                &config,
-                core_matrix,
-                chiplets_matrix,
-                poseidon2_matrix,
-                &public_values,
-                &aux_inputs,
-            )
-        },
-        HashFunction::Poseidon2 => {
-            let config = config::poseidon2_config(params);
-            prove_stark(
-                &config,
-                core_matrix,
-                chiplets_matrix,
-                poseidon2_matrix,
-                &public_values,
-                &aux_inputs,
-            )
-        },
-        HashFunction::Rpx256 => {
-            let config = config::rpx_config(params);
-            prove_stark(
-                &config,
-                core_matrix,
-                chiplets_matrix,
-                poseidon2_matrix,
-                &public_values,
-                &aux_inputs,
-            )
-        },
+    let proof_bytes = {
+        let _span = tracing::info_span!("prove_vm_stark").entered();
+        match hash_fn {
+            HashFunction::Blake3_256 => {
+                let config = config::blake3_256_config(params);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    poseidon2_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+            HashFunction::Keccak => {
+                let config = config::keccak_config(params);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    poseidon2_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+            HashFunction::Rpo256 => {
+                let config = config::rpo_config(params);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    poseidon2_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+            HashFunction::Poseidon2 => {
+                let config = config::poseidon2_config(params);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    poseidon2_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+            HashFunction::Rpx256 => {
+                let config = config::rpx_config(params);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    poseidon2_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+        }
     }?;
 
     let proof = ExecutionProof::from_parts(proof_bytes, hash_fn, deferred_proof);
@@ -332,20 +356,24 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-    // statement inputs read during observation/boundary correction.
-    let statement =
-        Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let prover_statement =
+    let prover_statement = {
+        let _span = tracing::info_span!("build_vm_prover_statement").entered();
+        // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
+        // statement inputs read during observation/boundary correction.
+        let statement =
+            Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
+                .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
         ProverStatement::new(statement, vec![core_trace, chiplets_trace, poseidon2_trace])
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
+    };
 
-    let output: StarkOutput<Felt, QuadFelt, SC> =
+    let output: StarkOutput<Felt, QuadFelt, SC> = {
+        let _span = tracing::info_span!("prove_vm_stark_inner").entered();
         ProverInstance::new(config, &prover_statement, None)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
+    };
 
     let proof_encoding_config = wincode::config::Configuration::default();
     let proof_bytes =
