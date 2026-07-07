@@ -78,6 +78,13 @@ runs:
         echo "Cleaning target/package directory to ensure fresh state"
         rm -rf target/package
 
+    - name: Check release package list
+      if: ${{ inputs.packages == '' }}
+      shell: bash
+      env:
+        RELEASE_PACKAGES_FILE: ${{ inputs.packages_file }}
+      run: scripts/check-release-packages.sh "$RELEASE_PACKAGES_FILE"
+
     # Clear cargo registry to ensure fresh resolution during verification.
     # This prevents issues where cached metadata from previous runs
     # might interfere with workspace dependency feature resolution

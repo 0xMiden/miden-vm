@@ -5,6 +5,17 @@ on:
     branches:
       - main
       - next
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "release-packages.txt"
+      - "scripts/check-release-packages.sh"
+      - "scripts/release-selected.sh"
+      - ".github/actions/workspace-release/**"
+      - ".github/workflows/workspace-dry-run.yml"
+      - ".github/workflows/workspace-publish.yml"
   workflow_dispatch:
     inputs:
       packages:
