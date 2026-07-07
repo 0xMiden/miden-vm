@@ -239,10 +239,12 @@ fn bw64_per_perm_floor_holds() {
     // Regression pin on the bitwise64 chain-packing + round-program operand
     // chaining: one perm lowers to this many bw64 rows — the optimum for
     // this input, since the greedy ROL-first claim is a maximum matching
-    // (it recovers every recyclable carrier). The exact count sits in a
-    // narrow, input-dependent band (≈3769–3789: value collisions shift the
-    // matching; L=1 lands at 3771), so we pin one fixed pseudo-random state.
-    // A chaining or round-program regression moves the count and trips this.
+    // (it recovers every recyclable carrier). Full-range rotation (the
+    // half-swap that drops the ρ>30 additive-split trailing rows and the
+    // ZERO-slot Andnot) brought this down from 3769. The exact count sits in
+    // a narrow, input-dependent band (value collisions shift the matching),
+    // so we pin one fixed pseudo-random state. A chaining or round-program
+    // regression moves the count and trips this.
     use crate::{
         hash::keccak::round::{RoundRequires, generate_trace},
         primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
@@ -264,7 +266,7 @@ fn bw64_per_perm_floor_holds() {
 
     assert_eq!(
         bw64.active_rows(),
-        3769,
+        3145,
         "per-perm bw64 floor regressed (chaining or round program changed)",
     );
 }
