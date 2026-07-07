@@ -88,6 +88,182 @@ fn stark_verifier_e2f4_with_log_precompile_transcript() {
     run_recursive_verifier(&data);
 }
 
+#[test]
+fn folding_reseed_helper_matches_reference_sampler() {
+    fn source(use_combined_helper: bool) -> String {
+        let sample = if use_combined_helper {
+            "
+            push.41.31.29.23 push.17
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+            "
+        } else {
+            "
+            push.41.31.29.23 push.17
+            exec.random_coin::reseed_with_felt
+            exec.constants::get_folding_pow_bits
+            exec.random_coin::sample_bits
+            assertz
+            exec.random_coin::sample_ext
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.0 exec.constants::set_folding_pow_bits
+                push.109.113.127.131 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+                {sample}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    let (reference, _) = build_test!(&source(false), &[])
+        .execute_for_output()
+        .expect("reference sampler should execute");
+    let (combined, _) = build_test!(&source(true), &[])
+        .execute_for_output()
+        .expect("combined sampler should execute");
+
+    assert_eq!(
+        combined.stack.get_num_elements(15),
+        reference.stack.get_num_elements(15),
+        "combined FRI reseed helper diverged from reference sampler"
+    );
+    assert_eq!(combined.stack.get_element(12), Some(Felt::from_u32(5)));
+}
+
+#[test]
+fn word_observe_helpers_match_scalar_observe() {
+    fn source(use_word_helpers: bool) -> String {
+        let observe = if use_word_helpers {
+            "
+            push.11.7.5.3
+            exec.random_coin::observe_word
+            push.23.19.17.13
+            exec.random_coin::observe_word_and_flush_buffer
+            "
+        } else {
+            "
+            push.3 exec.random_coin::observe_felt
+            push.5 exec.random_coin::observe_felt
+            push.7 exec.random_coin::observe_felt
+            push.11 exec.random_coin::observe_felt
+            push.13 exec.random_coin::observe_felt
+            push.17 exec.random_coin::observe_felt
+            push.19 exec.random_coin::observe_felt
+            push.23 exec.random_coin::observe_felt
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+                {observe}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    let (reference, _) = build_test!(&source(false), &[])
+        .execute_for_output()
+        .expect("scalar observe path should execute");
+    let (optimized, _) = build_test!(&source(true), &[])
+        .execute_for_output()
+        .expect("word observe path should execute");
+
+    assert_eq!(
+        optimized.stack.get_num_elements(13),
+        reference.stack.get_num_elements(13),
+        "word observe helpers changed random coin state"
+    );
+    assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+}
+
+#[test]
+fn observe_word_and_flush_buffer_matches_scalar_observe() {
+    fn source(prefix_len: usize, use_word_helper: bool) -> String {
+        let prefix = (0..prefix_len)
+            .map(|idx| format!("push.{} exec.random_coin::observe_felt", idx + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let observe = if use_word_helper {
+            "
+            push.23.19.17.13
+            exec.random_coin::observe_word_and_flush_buffer
+            "
+        } else {
+            "
+            push.13 exec.random_coin::observe_felt
+            push.17 exec.random_coin::observe_felt
+            push.19 exec.random_coin::observe_felt
+            push.23 exec.random_coin::observe_felt
+            exec.random_coin::flush_buffer
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+                {prefix}
+                {observe}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    for prefix_len in [0, 3, 4, 6] {
+        let (reference, _) = build_test!(&source(prefix_len, false), &[])
+            .execute_for_output()
+            .expect("scalar observe path should execute");
+        let (optimized, _) = build_test!(&source(prefix_len, true), &[])
+            .execute_for_output()
+            .expect("word observe path should execute");
+
+        assert_eq!(
+            optimized.stack.get_num_elements(13),
+            reference.stack.get_num_elements(13),
+            "word observe-and-flush helper changed random coin state with prefix_len={prefix_len}"
+        );
+        assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+    }
+}
+
 // Helper function for recursive verification
 pub fn generate_recursive_verifier_data(
     source: &str,

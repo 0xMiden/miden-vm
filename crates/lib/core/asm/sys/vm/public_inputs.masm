@@ -457,8 +457,10 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc observe_miden_air_shape
-    push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
-    exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
-    exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
-    exec.constants::get_poseidon2_permutation_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    exec.constants::get_core_trace_length_log
+    push.NUM_MIDEN_AIRS
+    # => [NUM_MIDEN_AIRS, core_log, chiplets_log, poseidon2_log, ...]
+    exec.random_coin::observe_word
 end

@@ -9,17 +9,20 @@
 #! rate[output_len - 1].
 #!
 #! Two absorption paths are provided:
-#!   - `observe_felt`/`flush_buffer`: a faithful buffered duplex matching p3's `DuplexChallenger`
-#!     (append to `rate[input_len]`, permute only once the rate fills, flush a partial buffer
-#!     lazily). Used by callers for non-rate-aligned transcript streams, such as public inputs,
-#!     instance shape, and the main-trace commitment.
-#!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that write directly to
-#!     rate memory and permute immediately. Valid only when the input buffer is empty (the stream
-#!     is known to start and end on a rate boundary).
+#!   - `observe_felt`/`observe_word`/`observe_word_and_flush_buffer`/`flush_buffer`: a faithful
+#!     buffered duplex matching p3's `DuplexChallenger` (append to `rate[input_len]`, permute only
+#!     once the rate fills, flush a partial buffer lazily). The word helpers cover common aligned
+#!     cases without changing the transcript stream.
+#!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that build a complete
+#!     rate and permute immediately. Valid only when the input buffer is empty (the stream is known
+#!     to start and end on a rate boundary).
 
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::utils
+
+# SPONGE STATE ACCESS
+# =============================================================================================
 
 #! Return the first half of the rate portion of the random coin state.
 #!
@@ -78,7 +81,7 @@ end
 #! Load the random coin state on the stack.
 #!
 #! Input: [...]
-#! Output: [R0, R1, C, ...]
+#! Output: [R1, R2, C, ...]
 #! Cycles: 18
 pub proc load_random_coin_state
     exec.get_capacity
@@ -88,7 +91,7 @@ end
 
 #! Store the random coin state to memory.
 #!
-#! Input: [R0, R1, C, ...]
+#! Input: [R1, R2, C, ...]
 #! Output: [...]
 #! Cycles: 18
 pub proc store_random_coin_state
@@ -109,6 +112,10 @@ pub proc add_absorb_length_tag
     exec.constants::c_ptr mem_load add
     exec.constants::c_ptr mem_store
 end
+
+
+# SAMPLING
+# =============================================================================================
 
 #! Sample a single base field element from the transcript.
 #!
@@ -157,6 +164,10 @@ pub proc sample_bits
     drop
 end
 
+
+# BUFFERED ABSORPTION
+# =============================================================================================
+
 #! Absorb a single base field element into the transcript via the buffered duplex.
 #!
 #! Mirrors p3's `DuplexChallenger::observe`: invalidates any buffered rate output
@@ -198,6 +209,57 @@ pub proc observe_felt
     end
 end
 
+#! Absorb one word into an empty input buffer.
+#!
+#! This is equivalent to four `observe_felt` calls, but updates the random coin counters once and
+#! stores the word directly in rate[0..3]. It does not permute.
+#!
+#! SAFETY:
+#!   1. input_len=0 (asserted).
+#!   2. On exit: input_len=4, output_len=0.
+#!
+#! Input:  [w0, w1, w2, w3, ...]
+#! Output: [...]
+pub proc observe_word
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="observe_word: input buffer must be empty"
+    # => [w0, w1, w2, w3, ...]
+
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    exec.set_rate_1
+    push.4 exec.constants::random_coin_input_len_ptr mem_store
+end
+
+#! Absorb the second buffered word into rate[4..7] and flush the full input buffer.
+#!
+#! This is equivalent to four `observe_felt` calls which fill the rate and trigger the buffered
+#! duplex permutation.
+#!
+#! SAFETY:
+#!   1. input_len=4 (asserted).
+#!   2. On exit: input_len=0, output_len=8.
+#!
+#! Input:  [w0, w1, w2, w3, ...]
+#! Output: [...]
+proc observe_second_word_and_flush
+    exec.constants::random_coin_input_len_ptr mem_load
+    push.4 assert_eq.err="observe_second_word_and_flush: input buffer must contain one word"
+    # => [w0, w1, w2, w3, ...]
+
+    exec.get_capacity
+    add.8
+    # => [C, R2, ...]
+    swapw
+    # => [R2, C, ...]
+    exec.get_rate_1
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
+    exec.store_random_coin_state
+
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+end
+
 #! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
 #!
 #! When the input buffer is non-empty, permute the sponge: the buffered prefix already occupies
@@ -232,6 +294,39 @@ pub proc flush_buffer
         drop
     end
 end
+
+#! Absorb one word into the buffered transcript stream and flush it before sampling.
+#!
+#! This is equivalent to four `observe_felt` calls followed by `flush_buffer`. It uses word-sized
+#! paths for the two aligned cases: empty buffer and one word already buffered.
+#!
+#! Input:  [w0, w1, w2, w3, ...]
+#! Output: [...]
+pub proc observe_word_and_flush_buffer
+    exec.constants::random_coin_input_len_ptr mem_load
+    dup eq.4
+    if.true
+        drop
+        exec.observe_second_word_and_flush
+    else
+        dup eq.0
+        if.true
+            drop
+            exec.reseed_direct
+        else
+            drop
+            exec.observe_felt
+            exec.observe_felt
+            exec.observe_felt
+            exec.observe_felt
+            exec.flush_buffer
+        end
+    end
+end
+
+
+# TRANSCRIPT INITIALIZATION
+# =============================================================================================
 
 #! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
 #! then derives trace domain parameters.
@@ -384,27 +479,37 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the main-trace commitment and flush the buffered duplex.
+
+# RATE-ALIGNED ABSORPTION
+# =============================================================================================
+
+#! Absorb `[word, felt, 0, 0, 0]` and permute.
 #!
-#! Appends the commitment word `[c0, c1, c2, c3]` to the buffered transcript stream and flushes any
-#! partial buffer, matching the DuplexChallenger's duplex at the first post-commitment sample
-#! (auxiliary randomness). On exit: output_len=8.
+#! The felt is on top of the operand stack, but the absorbed rate order is word first, then felt.
 #!
-#! Input: [c0, c1, c2, c3, ...]
-#! Output: [...]
-pub proc observe_main_trace_commitment
-    exec.observe_felt
-    exec.observe_felt
-    exec.observe_felt
-    exec.observe_felt
-    exec.flush_buffer
+#! Input: [felt, w0, w1, w2, w3, ...]
+#! Output: [R1, R2, C, ...]
+proc absorb_word_and_felt
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="absorb_word_and_felt: input buffer must be empty"
+    # => [felt, w0, w1, w2, w3, ...]
+
+    push.0.0.0 movup.3
+    # => [felt, 0, 0, 0, w0, w1, w2, w3, ...]
+    exec.get_capacity
+    add.5
+    # => [C, R2, R1, ...]
+    swapw
+    # => [R2, C, R1, ...]
+    movupw.2
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
 end
 
-#! Reseed with a commitment word and absorb an additional single felt, then permute.
+#! Reseed with a commitment word and an additional single felt, then permute.
 #!
-#! Writes the commitment word to rate[0..3] and the felt to rate[4], zeroes rate[5..7],
-#! binds the absorbed length (5) into the capacity, then permutes. Used in the FRI layer
-#! loop where each round absorbs a layer commitment plus a PoW nonce felt.
+#! Absorbs `[commitment, felt, 0, 0, 0]`, binds the absorbed length (5) into the capacity,
+#! then permutes.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -413,43 +518,17 @@ end
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_with_felt
-    # Assert input buffer is empty.
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="reseed_with_felt: input buffer must be empty"
-
-    # Write the felt to rate[4] (= r2_ptr position 0), since we can only modify one
-    # element of R2 and need the rest from memory.
-    exec.constants::r2_ptr mem_store
-    # => [w0, w1, w2, w3, ...]
-
-    # Zero the unabsorbed rate slots rate[5..7] and bind the absorbed length (5)
-    # into the capacity.
-    push.0 exec.constants::r2_ptr add.1 mem_store
-    push.0 exec.constants::r2_ptr add.2 mem_store
-    push.0 exec.constants::r2_ptr add.3 mem_store
-    push.5 exec.add_absorb_length_tag
-
-    # Build sponge state [R1, R2, C] on the stack directly.
-    # R1 = commitment word (already on the stack).
-    # R2 and C are loaded from memory.
-    exec.get_capacity
-    exec.get_rate_2
-    # => [R2, C, R1, ...]
-    movupw.2
-    # => [R1, R2, C, ...]
-
-    exec.poseidon2::permute
+    exec.absorb_word_and_felt
     exec.store_random_coin_state
 
     # Mark output buffer as full.
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 end
 
-#! Reseed by writing a word directly to rate[0..3] and permuting.
+#! Reseed by absorbing a word directly and permuting.
 #!
-#! Overwrites rate[0..3] with the given word, zeroes rate[4..7], binds the absorbed
-#! length (4) into the capacity, then permutes. This is the standard absorb-and-permute
-#! pattern for a single word.
+#! Absorbs `[word, 0, 0, 0, 0]`, binds the absorbed length (4) into the capacity, then
+#! permutes. This is the standard absorb-and-permute pattern for a single word.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -459,20 +538,19 @@ end
 #! Input: [w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_direct
-    # Assert input buffer is empty.
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="reseed_direct: input buffer must be empty"
+    # => [w0, w1, w2, w3, ...]
 
-    # Write the word to rate[0..3] and consume it from the stack.
-    exec.set_rate_1
-
-    # Zero the unabsorbed rate slots rate[4..7] and bind the absorbed length (4)
-    # into the capacity.
-    padw exec.set_rate_2
-    push.4 exec.add_absorb_length_tag
-
-    # Permute.
-    exec.load_random_coin_state
+    padw
+    # => [0, 0, 0, 0, w0, w1, w2, w3, ...]
+    exec.get_capacity
+    add.4
+    # => [C, R2, R1, ...]
+    swapw
+    # => [R2, C, R1, ...]
+    movupw.2
+    # => [R1, R2, C, ...]
     exec.poseidon2::permute
     exec.store_random_coin_state
 
@@ -480,57 +558,77 @@ pub proc reseed_direct
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 end
 
-#! Verify per-round FRI folding proof-of-work and sample one extension field element,
-#! reading rate elements directly instead of going through `sample_felt`.
+#! Reseed with a FRI layer commitment, check folding PoW, and sample folding alpha.
 #!
-#! Reads rate[7] (grinding), rate[6] and rate[5] (ext element) from r2_ptr memory,
-#! matching what `sample_felt` would return at output_len=8,7,6.
+#! Equivalent to `reseed_with_felt; get_folding_pow_bits sample_bits assertz; sample_ext`, but it
+#! keeps the fresh rate on the stack.
 #!
-#! The folding PoW bit count is read from memory (set by load_security_params).
-#! When folding_pow_bits=0 the check is trivially satisfied (mask=0).
+#! On exit, output_len=5 because rate[7] is used for grinding and rate[6..5] for alpha.
 #!
-#! Equivalent to: `get_folding_pow_bits sample_bits assertz; sample_ext`
-#!
-#! SAFETY:
-#!   1. MUST be called immediately after `reseed_with_felt` with no intervening
-#!      random coin operations (output_len=8, input_len=0 guaranteed).
-#!   2. Sets output_len=5 on exit (3 elements consumed), input_len=0 unchanged.
-#!   3. folding_pow_bits must already be stored in memory.
-#!
-#! Input: [...]
+#! Input: [pow_witness, w0, w1, w2, w3, ...]
 #! Output: [a0, a1, ...]
-pub proc sample_folding_pow_and_ext
-    # Assert precondition: input buffer must be empty.
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="sample_folding_pow_and_ext: input buffer must be empty"
+pub proc reseed_check_folding_pow_and_sample_alpha
+    exec.absorb_word_and_felt
+    # => [R1, R2, C, ...]
 
-    exec.constants::r2_ptr
-    # => [r2, ...]
+    # Store the sponge state, but keep R2 on the stack for the samples consumed below.
+    exec.set_rate_1
+    # => [R2, C, ...]
+    dupw exec.set_rate_2
+    swapw exec.set_capacity
+    # => [R2, ...]
 
-    # Grinding check: read rate[7], extract low 32 bits, mask with 2^folding_pow_bits - 1.
-    dup add.3 mem_load
+    # Check rate[7] for the folding PoW and return rate[6], rate[5] as the challenge.
+    movup.3
     u32split swap drop
-    # => [lo, r2, ...]
-
+    # => [lo, rate4, rate5, rate6, ...]
     exec.constants::get_folding_pow_bits
     pow2
     u32assert u32overflowing_sub.1 assertz
-    # => [mask, lo, r2, ...]
-
     u32and
     assertz.err="per-round FRI folding grinding check failed"
-    # => [r2, ...]
+    # => [rate4, rate5, rate6, ...]
 
-    # Ext element: read rate[6] (first sampled) and rate[5] (second sampled)
-    # sample_ext does: sample_felt -> rate[6], sample_felt -> rate[5], swap -> [rate[6], rate[5]]
-    dup add.2 mem_load
-    swap add.1 mem_load
-    # => [rate[5], rate[6], ...] -- but sample_ext swaps, so final is [rate[6], rate[5]]
-    swap
-    # => [rate[6], rate[5], ...] = [a0, a1, ...]
+    drop swap
+    # => [a0, a1, ...]
 
-    # Update output_len to 5 (consumed rate[7], rate[6], rate[5])
     push.5 exec.constants::random_coin_output_len_ptr mem_store
+end
+
+#! Absorb a nonzero proof-of-work nonce from advice and permute.
+#!
+#! The caller has already established `pow_bits != 0`; the zero-PoW path consumes a zero nonce
+#! without changing the transcript.
+#!
+#! Input: [pow_bits, ...]
+#! Output: [R2, pow_bits, ...]
+proc absorb_pow_nonce
+    adv_push
+    # => [nonce, pow_bits, ...]
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="absorb_pow_nonce: input buffer must be empty"
+    # => [nonce, pow_bits, ...]
+
+    push.0.0.0 movup.3
+    # => [nonce, 0, 0, 0, pow_bits, ...]
+    padw
+    # => [0, 0, 0, 0, nonce, 0, 0, 0, pow_bits, ...]
+    exec.get_capacity
+    add.1
+    # => [C, R2, R1, pow_bits, ...]
+    swapw
+    # => [R2, C, R1, pow_bits, ...]
+    movupw.2
+    # => [R1, R2, C, pow_bits, ...]
+    exec.poseidon2::permute
+    # => [R1, R2, C, pow_bits, ...]
+
+    # Store the sponge state, but keep R2 on the stack for direct sampling.
+    exec.set_rate_1
+    # => [R2, C, pow_bits, ...]
+    dupw exec.set_rate_2
+    swapw exec.set_capacity
+    # => [R2, pow_bits, ...]
 end
 
 # COEFFICIENT GENERATION
@@ -579,7 +677,6 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 22
 pub proc generate_deep_composition_random_coefficients
     # Sample challenge_columns (deep alpha) for batching columns.
     exec.sample_ext
@@ -604,6 +701,67 @@ pub proc generate_deep_composition_random_coefficients
     exec.constants::deep_rand_coef_ptr mem_store
     exec.constants::deep_rand_coef_ptr add.1 mem_store
     #=> [...]
+end
+
+#! Check a nonzero DEEP PoW and sample the DEEP coefficients from the same fresh rate.
+#!
+#! Equivalent to `check_deep_pow; generate_deep_composition_random_coefficients` when
+#! `deep_pow_bits != 0`. It avoids routing the four sampled coefficient elements through
+#! `sample_felt` one at a time.
+#!
+#! Input: [pow_bits, ...]
+#! Output: [...]
+proc check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients
+    exec.absorb_pow_nonce
+    # => [R2, pow_bits, ...]
+
+    # Check rate[7] for the DEEP PoW.
+    movup.3
+    u32split swap drop
+    # => [lo, rate4, rate5, rate6, pow_bits, ...]
+    movup.4 pow2 u32assert u32overflowing_sub.1 assertz
+    # => [mask, lo, rate4, rate5, rate6, ...]
+    u32and
+    assertz.err="proof-of-work check failed"
+    # => [rate4, rate5, rate6, ...]
+
+    # rate[6], rate[5] are deep alpha; they must match the advice-provided alpha used
+    # while processing OOD frames.
+    dup.2 exec.constants::deep_rand_alpha_nd_ptr mem_load
+    assert_eq
+    # => [rate4, rate5, rate6, ...]
+    dup.1 exec.constants::deep_rand_alpha_nd_ptr add.1 mem_load
+    assert_eq
+    # => [rate4, rate5, rate6, ...]
+    dup.2 exec.constants::deep_rand_coef_ptr add.2 mem_store
+    dup.1 exec.constants::deep_rand_coef_ptr add.3 mem_store
+    # => [rate4, rate5, rate6, ...]
+
+    # rate[4], rate[3] are deep beta.
+    movdn.2 drop drop
+    # => [rate4, ...]
+    exec.constants::deep_rand_coef_ptr mem_store
+    exec.constants::r1_ptr add.3 mem_load
+    exec.constants::deep_rand_coef_ptr add.1 mem_store
+
+    # PoW consumed rate[7], alpha consumed rate[6..5], and beta consumed rate[4..3].
+    push.3 exec.constants::random_coin_output_len_ptr mem_store
+end
+
+#! Check DEEP PoW and draw DEEP composition coefficients.
+#!
+#! The nonzero-PoW path consumes the needed samples directly from the fresh permutation. The
+#! zero-PoW path leaves the transcript unchanged before using the generic sampler.
+pub proc check_deep_pow_and_generate_deep_composition_random_coefficients
+    exec.constants::get_deep_pow_bits
+    dup push.0 neq
+    if.true
+        exec.check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients
+    else
+        drop
+        exec.check_deep_pow
+        exec.generate_deep_composition_random_coefficients
+    end
 end
 
 
@@ -658,11 +816,11 @@ end
 #! Reads rate elements directly from memory (decrementing from output_len-1 down to 0),
 #! permuting when the rate is exhausted, rather than calling sample_felt per query.
 #!
+#! The caller must run the query PoW check first. This procedure starts from the current
+#! `output_len`, so it also supports the zero-PoW case where no fresh output element is consumed.
+#!
 #! Input: [...]
 #! Output: [...]
-#!
-#! NOTE: This procedure is called right after the PoW check. The PoW check consumes one
-#! rate element via sample_bits, leaving output_len = 7.
 pub proc generate_list_indices
     exec.constants::get_number_queries
     exec.constants::get_fri_queries_address
@@ -671,24 +829,18 @@ pub proc generate_list_indices
     exec.constants::get_lde_domain_depth
     #=> [depth, query_ptr, num_queries, ...]
 
-    # Pre-compute pow2_shift = 2^(32 - depth) and mask = 2^depth - 1.
-    # pow2_shift is kept for stack shape compatibility with the old bit-reversal path.
-    dup push.32 swap u32wrapping_sub pow2
-    #=> [pow2_shift, depth, query_ptr, num_queries, ...]
-    swap dup pow2 u32assert u32overflowing_sub.1 assertz
-    #=> [mask, depth, pow2_shift, query_ptr, num_queries, ...]
+    # Pre-compute mask = 2^depth - 1.
+    dup pow2 u32assert u32overflowing_sub.1 assertz
+    #=> [mask, depth, query_ptr, num_queries, ...]
 
-    # Rearrange to loop layout: [query_ptr, num_queries, mask, depth, pow2_shift, ...]
-    movup.3 movup.4 swap
-    #=> [query_ptr, num_queries, mask, depth, pow2_shift, ...]
+    # Rearrange to loop layout: [query_ptr, num_queries, mask, depth, ...]
+    movup.2 movup.3 swap
+    #=> [query_ptr, num_queries, mask, depth, ...]
 
-    # Load current output_len from random coin state (7 after PoW).
-    # Assert it is nonzero: this procedure expects a freshly permuted sponge with at least
-    # one element already consumed (by the PoW check). A zero output_len would mean the
-    # sponge was never permuted or was fully drained, which is a caller bug.
+    # Load current output_len from random coin state.
     exec.constants::random_coin_output_len_ptr mem_load
     dup push.0 neq assert.err="generate_list_indices: output_len must be nonzero"
-    #=> [output_len, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+    #=> [output_len, query_ptr, num_queries, mask, depth, ...]
 
     # Stack layout during loop:
     # pos 0: output_len (rate elements remaining before next permute)
@@ -696,7 +848,6 @@ pub proc generate_list_indices
     # pos 2: num_queries (decrements to 0)
     # pos 3: mask (constant)
     # pos 4: depth (constant, needed for inclusion in the stored word)
-    # pos 5: pow2_shift (constant, needed for bit_reverse)
 
     dup.2 push.0 neq
     while.true
@@ -709,42 +860,42 @@ pub proc generate_list_indices
             exec.store_random_coin_state
             push.8
         end
-        #=> [output_len, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [output_len, query_ptr, num_queries, mask, depth, ...]
 
         # --- Read rate element at index (output_len - 1) ---
         sub.1
-        #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [idx, query_ptr, num_queries, mask, depth, ...]
         # R1 and R2 are contiguous in memory (R1_PTR, R1_PTR+4 = R2_PTR), so
         # rate[idx] is at R1_PTR + idx.
         dup exec.constants::r1_ptr add mem_load
-        #=> [felt, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [felt, idx, query_ptr, num_queries, mask, depth, ...]
 
         # --- Extract masked index: lo 32 bits AND mask ---
         u32split swap drop
-        #=> [lo, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [lo, idx, query_ptr, num_queries, mask, depth, ...]
         dup.4 u32and
-        #=> [natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [natural_index, idx, query_ptr, num_queries, mask, depth, ...]
 
         # --- Prepare domain-order query word ---
         # 0.24 LMCS trees are indexed by domain order, so the Merkle index and the DEEP
         # evaluation index are both the sampled natural index.
         dup.5 swap dup movdn.2
-        #=> [natural_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [natural_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, ...]
 
         # --- Store [index, depth, index, 0] at query_ptr ---
         push.0 movdn.3
-        #=> [natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, ...]
         dup.5
-        #=> [query_ptr, natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [query_ptr, natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, ...]
         mem_storew_le
         dropw
-        #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [idx, query_ptr, num_queries, mask, depth, ...]
 
         # --- Advance query_ptr, decrement num_queries ---
         swap add.4 swap
-        #=> [idx, query_ptr', num_queries, mask, depth, pow2_shift, ...]
+        #=> [idx, query_ptr', num_queries, mask, depth, ...]
         movup.2 sub.1 movdn.2
-        #=> [idx, query_ptr', num_queries-1, mask, depth, pow2_shift, ...]
+        #=> [idx, query_ptr', num_queries-1, mask, depth, ...]
 
         # --- Check loop condition ---
         # idx is our output_len for next iteration (already decremented).
@@ -754,12 +905,21 @@ pub proc generate_list_indices
     # --- Restore random coin output_len so subsequent operations see correct state ---
     # pos 0 = output_len (remaining), store it back.
     exec.constants::random_coin_output_len_ptr mem_store
-    #=> [query_ptr, num_queries, mask, depth, pow2_shift, ...]
+    #=> [query_ptr, num_queries, mask, depth, ...]
 
-    # Also clear the input_len to 0 (should already be 0, but it is better to be safe).
+    # No transcript input remains buffered while sampling indices.
     push.0 exec.constants::random_coin_input_len_ptr mem_store
 
-    dropw drop
+    dropw
+end
+
+#! Check query PoW and generate the query index list.
+#!
+#! The generic query generator starts from the output buffer left by the PoW check. For a nonzero
+#! PoW this is `output_len = 7`; for a zero-PoW configuration, the transcript is unchanged.
+pub proc check_query_pow_and_generate_list_indices
+    exec.check_query_pow
+    exec.generate_list_indices
 end
 
 
@@ -768,14 +928,14 @@ end
 
 #! Verify a proof-of-work witness given pow_bits on the stack.
 #!
-#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], zeroes
-#! rate[1..7], binds the absorbed length (1) into the capacity, permutes, and checks
-#! that the low pow_bits of the output are zero.
+#! When pow_bits != 0, reads the nonce from advice, absorbs `[nonce, 0, 0, 0, 0, 0, 0, 0]`,
+#! binds the absorbed length (1) into the capacity, permutes, and checks that the low pow_bits
+#! of the output are zero.
 #! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
 #!
 #! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
-#! FRI folding PoW uses a separate path (sample_folding_pow_and_ext) because the
-#! witness is bundled with the commitment reseed.
+#! FRI folding PoW uses `reseed_check_folding_pow_and_sample_alpha` because the witness is bundled
+#! with the commitment reseed.
 #!
 #! SAFETY: Requires input_len=0.
 #!
@@ -785,27 +945,19 @@ proc check_pow
     dup
     push.0 neq
     if.true
-        adv_push
-        # Assert input buffer is empty, then write nonce directly to rate[0] and permute.
-        exec.constants::random_coin_input_len_ptr mem_load
-        assertz.err="check_pow: input buffer must be empty"
-        exec.constants::r1_ptr mem_store
+        exec.absorb_pow_nonce
+        # => [R2, pow_bits, ...]
 
-        # Zero the unabsorbed rate slots rate[1..7] and bind the absorbed length (1)
-        # into the capacity.
-        push.0 exec.constants::r1_ptr add.1 mem_store
-        push.0 exec.constants::r1_ptr add.2 mem_store
-        push.0 exec.constants::r1_ptr add.3 mem_store
-        padw exec.set_rate_2
-        push.1 exec.add_absorb_length_tag
-
-        exec.load_random_coin_state
-        exec.poseidon2::permute
-        exec.store_random_coin_state
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
-        # sample_bits reads from fresh output (no duplex triggered).
-        exec.sample_bits
+        movup.3
+        u32split swap drop
+        # => [lo, rate4, rate5, rate6, pow_bits, ...]
+        movup.4 pow2 u32assert u32overflowing_sub.1 assertz
+        # => [mask, lo, rate4, rate5, rate6, ...]
+        u32and
         assertz.err="proof-of-work check failed"
+        # => [rate4, rate5, rate6, ...]
+        drop drop drop
+        push.7 exec.constants::random_coin_output_len_ptr mem_store
     else
         # Consume witness to keep advice layout, but do not affect transcript.
         adv_push

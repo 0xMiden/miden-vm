@@ -1,46 +1,45 @@
 use miden::core::stark::constants
 
-#! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
-#! (x - z) and (x - gz).
+#! Takes a query index and computes poe := domain_gen^index and x := offset * poe. It also computes
+#! the denominators (x - z) and (x - gz).
 #!
 #! Input: [Y, Y, index, query_ptr, ...]
-#! Output: [Z, Y, x, index, query_ptr, ...]
+#! Output: [Z, Y, poe, index, query_ptr, ...]
 #!
 #! where:
 #! - Z := [x - z0, -z1, x - gz0, -gz1]
-#! - x := offset * domain_gen^natural_index
+#! - poe := domain_gen^index
+#! - x := offset * poe
 #! - Y is a "garbage" word
 proc compute_denominators
-    # Compute x = offset * domain_gen^natural_index
-    # The natural (un-reversed) index is stored at query_ptr + 2 in memory,
-    # placed there by generate_list_indices to avoid a costly bit_reverse_len call here.
+    # Compute poe and x.
     exec.constants::get_lde_domain_info_word
     #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
     movup.2
     #=> [domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
-    dup.9 add.2 mem_load
-    #=> [natural_index, domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
+    dup.8
+    #=> [index, domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
     exp.u32
+    dup movdn.8
     exec.constants::get_domain_offset mul
-    #=> [x, lde_size, depth, 0, Y, index, ...]
+    #=> [x, lde_size, depth, 0, Y, poe, index, ...]
 
     # Get z and gz from memory
     movdn.3
-    #=> [lde_size, depth, 0, x, Y, index, ...]
+    #=> [lde_size, depth, 0, x, Y, poe, index, ...]
     push.0
     exec.constants::tmp1 mem_loadw_le
-    #=> [-z0, -z1, -gz0, -gz1, x, Y, index, ...]
+    #=> [-z0, -z1, -gz0, -gz1, x, Y, poe, index, ...]
 
-    # Compute denominators and place x after Y for word alignment.
-    # The movup.4 dup movdn.9 moves x past the Y word while keeping a copy on top.
+    # Compute denominators and place poe after Y for word alignment.
     dup.4 add
-    #=> [x - z0, -z1, -gz0, -gz1, x, Y, index, ...]
-    movup.4 dup movdn.9
-    #=> [x, x - z0, -z1, -gz0, -gz1, Y, x, index, ...]
+    #=> [x - z0, -z1, -gz0, -gz1, x, Y, poe, index, ...]
+    movup.4
+    #=> [x, x - z0, -z1, -gz0, -gz1, Y, poe, index, ...]
     movup.3 add
-    #=> [x - gz0, x - z0, -z1, -gz1, Y, x, index, ...]
+    #=> [x - gz0, x - z0, -z1, -gz1, Y, poe, index, ...]
     movdn.2
-    #=> [x - z0, -z1, x - gz0, -gz1, Y, x, index, ...]
+    #=> [x - z0, -z1, x - gz0, -gz1, Y, poe, index, ...]
 end
 
 #! Computes the DEEP query.
@@ -52,8 +51,6 @@ end
 #!
 #! 1. X is [q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]
 #! 2. W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
-#!
-#! Cycles: 54
 proc divide_and_add
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
@@ -156,7 +153,7 @@ end
 #! Compute the DEEP composition polynomial FRI query at `index`.
 #!
 #! Input: [Y, X, index, query_ptr, query_end_ptr, W, query_ptr, ...]
-#! Output: [?, Y, query_ptr+1, query_end_ptr, ...]
+#! Output: [?, Y, query_ptr+4, query_end_ptr, ...]
 #!
 #! where:
 #! 1. `Y` is a garbage word,
@@ -171,41 +168,30 @@ end
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 #! 7. `?` is a binary flag indicating if there are further queries to process.
 pub proc compute_deep_query
-        # 1) Compute x := offset * domain_gen^index and denominators (x - z) and (x - gz)
-        #
-        # Cycles: 58
-        exec.compute_denominators
-        #=> [Z, X, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
+    # 1) Compute poe := domain_gen^index, x := offset * poe, and denominators (x - z)
+    # and (x - gz).
+    exec.compute_denominators
+    #=> [Z, X, poe, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        # 2) Compute final result
-        #
-        # Cycles: 62
-        exec.divide_and_add
-        #=> [eval0, eval1, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
+    # 2) Compute final result
+    exec.divide_and_add
+    #=> [eval0, eval1, poe, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        # 3) Store [poe, index, eval0, eval1] where poe := g^index = x / offset and prepare stack
-        # for next iteration.
+    # 3) Store [poe, index, eval0, eval1] and prepare stack for next iteration.
 
-        ## a) Compute poe
-        ##
-        ## Cycles: 4
-        movup.3 movup.3
-        exec.constants::get_domain_offset_inv mul
-        #=> [poe, index, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
+    ## a) Bring poe and index to the top of the stack.
+    movup.3 movup.3
+    #=> [poe, index, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        ## b) Store [poe, index, eval0, eval1]
-        ##
-        ## Cycles: 5
-        dup.4 add.4 swap.5
-        mem_storew_le
-        #=> [poe, index, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
+    ## b) Store [poe, index, eval0, eval1].
+    dup.4 add.4 swap.5
+    mem_storew_le
+    #=> [poe, index, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
 
-        ## c) Prepare stack for next iteration
-        ##
-        ## Cycles: 4
-        dup.5 dup.5
-        neq
-        #=> [?, Y, query_ptr+1, query_end_ptr, ...]
+    ## c) Prepare stack for next iteration
+    dup.5 dup.5
+    neq
+    #=> [?, Y, query_ptr+4, query_end_ptr, ...]
 end
 
 #! Computes the DEEP composition polynomial FRI queries.
