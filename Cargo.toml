@@ -2,6 +2,7 @@
 members = [
     "air",
     "benches/blake3-bench",
+    "benches/precompiles-bench",
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
