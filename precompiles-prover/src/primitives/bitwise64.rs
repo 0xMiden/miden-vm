@@ -1,6 +1,6 @@
 //! 64-bit lane bitwise chiplet.
 //!
-//! Provides two relations:
+//! Provides three relations:
 //!
 //! - [`Logic64Msg`]: tuple `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` where `op ∈ {AndNot, Xor}`,
 //!   `a, b, c ∈ [0, 2^64)` carried as 32-bit halves (Goldilocks `p ≈ 2^64 − 2^32 + 1` cannot
@@ -9,6 +9,10 @@
 //!   is a power of two with `s < 31`. The AIR does not enforce `k` to be a power of two; callers
 //!   supply `k` from a periodic column of valid values and [`Bitwise64Requires::require_rol`]
 //!   asserts the bound at IR-construction time.
+//! - [`XorRol64Msg`]: tuple `(a_lo, a_hi, b_lo, b_hi, c_lo, c_hi, k)` describing the fused `c =
+//!   rol_64(a ⊕ b, log2(k))` — a θ-apply+ρ pair provided as one tuple instead of a `Logic64 +
+//!   Rol64` pair, so a consumer (the keccak round) never needs the XOR intermediate `r = a ⊕ b` to
+//!   leave this chiplet. See [`Bitwise64Requires::require_xorrol`].
 //!
 //! The chiplet requires:
 //! - [`BytePairLutMsg`] byte-wise on LOGIC rows (8 lookups per row, verifying `c = op(a, b)`
@@ -36,6 +40,12 @@
 //! - **Carrier / padding** (`is_logic = 0, is_rol = 0`): no provide, no requires. Used to hold a
 //!   chain value between LOGIC rows (so the previous LOGIC's byte requires resolve) or as zero
 //!   padding.
+//!
+//! A ROL row may additionally set `is_xorrol_cap` (implies `is_rol`): the preceding LOGIC row then
+//! provides `XorRol64` (reading this row's rolled output + `k`) instead of `Logic64`, and this row
+//! suppresses its own `Rol64`. The requires are unchanged — the LOGIC row's byte requires and this
+//! row's Range16 requires still pin `r = a ⊕ b` and `c = rol(r, k)`, so verification is identical
+//! to the un-fused two-op form.
 //!
 //! `b_limbs` is shared across LOGIC and ROL with different bit-width
 //! semantics: 8-bit bytes on LOGIC (range-checked via byte requires);
@@ -69,7 +79,7 @@ use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, build_logup_aux_trace,
+        NUM_SIGMA_VALUES, build_logup_aux_trace, frac_col,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, BytePairLutRequires, BytePairOp, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -91,28 +101,31 @@ pub const B_LIMBS_RANGE: Range<usize> = 8..16;
 pub const COL_OP_OR_K: usize = 16;
 pub const COL_IS_LOGIC: usize = 17;
 pub const COL_IS_ROL: usize = 18;
-pub const NUM_MAIN_COLS: usize = 19;
-/// Three aux columns: one combined provide column (Logic64 + Rol64)
-/// and one requires column per row mode (BPL byte requires for LOGIC,
-/// Range16 requires for ROL).
-pub const NUM_AUX_COLS: usize = 3;
+/// Fused-pair cap flag (boolean): 1 on the ROL row that caps a θ-apply+ρ
+/// fused request ([`Bitwise64Requires::require_xorrol`]), 0 elsewhere. Drives
+/// the provide mux — the LOGIC row before it provides `XorRol64` (not
+/// `Logic64`) and this ROL row suppresses its `Rol64`, so a consumer reads
+/// one fused tuple. Implies `is_rol`.
+pub const COL_IS_XORROL_CAP: usize = 19;
+pub const NUM_MAIN_COLS: usize = 20;
+/// FLATTENED to lqd 1: the 18 fractions (2 self-provides, 8 LOGIC byte
+/// requires, 8 ROL Range16 requires — all degree-1 multiplicities) split
+/// across ten columns, ≤ 2 each, col 0 a single fraction. Col 0 uses a
+/// single-insert batch (outer flag ONE) so the gated σ-close lands at
+/// degree 3, not the degree 4 a group-level `remove` flag would give.
+pub const NUM_AUX_COLS: usize = 10;
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) and the shared
 // transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
 // VM-wide LogUp contract in [`crate::logup`]; the natural last-row
 // σ-closing needs no `inv_n`, and this chiplet declares the root but
-// does not read it. The three aux columns' running-sum closings share
-// the natural last-row close.
+// does not read it. The aux columns' running-sum closings share the
+// natural last-row close.
 
-/// Aux column accumulating the per-row self-provides — Logic64 on
-/// LOGIC rows (gated by `is_logic`) and Rol64 on ROL rows (gated by
-/// `is_rol`). 2 LogUp summands per row.
+/// Aux column 0 (running sum) — the `Rol64` self-provide (gated
+/// `−(is_rol − is_xorrol_cap)`; a fused cap defers to the LOGIC row's
+/// `XorRol64`). The `Logic64` / `XorRol64` provides are paired in aux
+/// column 1; the byte / Range16 requires fill the rest.
 pub const AUX_PROVIDE: usize = 0;
-/// Aux column accumulating 8 byte-wise [`BytePairLutMsg`] requires per
-/// LOGIC row (gated by `is_logic`).
-pub const AUX_LOGIC_REQUIRES: usize = 1;
-/// Aux column accumulating 8 [`Range16Msg`] requires per ROL row
-/// (gated by `is_rol`).
-pub const AUX_ROL_REQUIRES: usize = 2;
 
 // OPERATION
 // ================================================================================================
@@ -236,6 +249,49 @@ where
     }
 }
 
+/// LogUp message for the fused `XorRol64` relation: a 7-tuple
+/// `(a_lo, a_hi, b_lo, b_hi, c_lo, c_hi, k)` describing `c = rol_64(a ⊕ b, log2(k))`.
+///
+/// Provided once per θ-apply+ρ pair from the pair's LOGIC row (reading the capping ROL row's
+/// rolled output and `k`), so a consumer reads one tuple instead of `Logic64 + Rol64`. The fusion
+/// is provide-only: the LOGIC row's `BytePairLut` requires still pin `r = a ⊕ b` (in the ROL row's
+/// `a_bytes` via the chain trick) and the ROL row's `Range16` requires still pin `c = rol(r, k)`,
+/// so `r` never leaves the chiplet and the verification is unchanged.
+///
+/// Provided by [`Bitwise64Air`] on bus [`BusId::XorRol64`]. Encoded as
+/// `bus_prefix[XorRol64] + β⁰·a_lo + … + β⁵·c_hi + β⁶·k`.
+#[derive(Debug, Clone)]
+pub struct XorRol64Msg<E> {
+    pub a_lo: E,
+    pub a_hi: E,
+    pub b_lo: E,
+    pub b_hi: E,
+    pub c_lo: E,
+    pub c_hi: E,
+    pub k: E,
+}
+
+impl<E, EF> LookupMessage<E, EF> for XorRol64Msg<E>
+where
+    E: Algebra<E>,
+    EF: Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::XorRol64 as usize,
+            [
+                self.a_lo.clone(),
+                self.a_hi.clone(),
+                self.b_lo.clone(),
+                self.b_hi.clone(),
+                self.c_lo.clone(),
+                self.c_hi.clone(),
+                self.k.clone(),
+            ],
+        )
+    }
+}
+
 // REQUESTS + CHAIN IR
 // ================================================================================================
 
@@ -247,8 +303,10 @@ enum PendingRow {
     Real { op: Logic64Op, a: u64, b: u64 },
     /// ROL row (`is_rol = 1`): provides `Rol64(a, b, k)` and issues 8
     /// `Range16` requires. `k` is assumed (by caller contract) to be a
-    /// power of two `< 2^31`.
-    Rol { a: u64, k: u64 },
+    /// power of two `< 2^31`. `fused` caps a `require_xorrol` pair: the row
+    /// sets `is_xorrol_cap` and suppresses its `Rol64` (the preceding LOGIC
+    /// provides `XorRol64` instead).
+    Rol { a: u64, k: u64, fused: bool },
     /// Disabled row (`is_logic = is_rol = 0`): holds an uncapped chain's
     /// tail `c` in its `a_bytes` — the one dead carrier every ROL-less
     /// chain leaves. No LogUp activity. (Trace padding shares this mode.)
@@ -282,6 +340,9 @@ impl LogicOp {
 #[derive(Debug, Clone, Copy)]
 struct RolCap {
     k: u64,
+    /// Set when this cap closes a `require_xorrol` pair — the row is flagged
+    /// `is_xorrol_cap` and the chain's last LOGIC provides `XorRol64`.
+    fused: bool,
 }
 
 /// A maximal `a`-chain: a non-empty run of [`LogicOp`] links where each
@@ -310,7 +371,7 @@ impl Chain {
 #[derive(Debug, Clone, Copy)]
 enum Request {
     Logic { op: Logic64Op, a: u64, b: u64 },
-    Rol { a: u64, k: u64 },
+    Rol { a: u64, k: u64, fused: bool },
 }
 
 /// Records the `(op, a, b)` LOGIC triples and `(a, k)` rotations
@@ -371,6 +432,34 @@ impl Bitwise64Requires {
     /// upper bound. Drives 8 `Range16` requires for the b-limb decomposition
     /// (order-invariant).
     pub fn require_rol(&mut self, bpl_req: &mut BytePairLutRequires, a: u64, k: u64) -> u64 {
+        self.require_rol_inner(bpl_req, a, k, false)
+    }
+
+    /// Record a fused `c = rol_64(a ⊕ b, log2(k))` — one `require(Xor, a, b)`
+    /// producing `r = a ⊕ b` then a *fused* ROL on `r`. The pair lays a LOGIC
+    /// row (the XOR) capped by an `is_xorrol_cap` ROL row; the LOGIC row
+    /// provides a single `XorRol64(a, b, c, k)` instead of `Logic64`, and the
+    /// ROL row suppresses its `Rol64`. Drives both the 8 byte-wise XOR
+    /// requires and the 8 ROL `Range16` requires (the verification is
+    /// unchanged from the two-op form). Returns `c`.
+    pub fn require_xorrol(
+        &mut self,
+        bpl_req: &mut BytePairLutRequires,
+        a: u64,
+        b: u64,
+        k: u64,
+    ) -> u64 {
+        let r = self.require(bpl_req, Logic64Op::Xor, a, b);
+        self.require_rol_inner(bpl_req, r, k, true)
+    }
+
+    fn require_rol_inner(
+        &mut self,
+        bpl_req: &mut BytePairLutRequires,
+        a: u64,
+        k: u64,
+        fused: bool,
+    ) -> u64 {
         assert!(
             k.is_power_of_two() && k < (1u64 << 31),
             "ROL k must be a power of two < 2^31, got {k:#x}",
@@ -386,7 +475,7 @@ impl Bitwise64Requires {
             bpl_req.require_range16(limb);
         }
 
-        self.requests.push(Request::Rol { a, k });
+        self.requests.push(Request::Rol { a, k, fused });
         a.rotate_left(k.trailing_zeros())
     }
 
@@ -478,8 +567,8 @@ fn build_chains(requests: &[Request]) -> Vec<Chain> {
                     logics.push(LogicOp { op, a, b });
                     cur = next[idx];
                 },
-                Request::Rol { k, .. } => {
-                    cap = Some(RolCap { k });
+                Request::Rol { k, fused, .. } => {
+                    cap = Some(RolCap { k, fused });
                     cur = None;
                 },
             }
@@ -530,7 +619,7 @@ pub fn generate_trace(requires: Bitwise64Requires) -> RowMajorMatrix<Felt> {
         push_row(
             &mut values,
             match chain.cap {
-                Some(RolCap { k }) => PendingRow::Rol { a: tail, k },
+                Some(RolCap { k, fused }) => PendingRow::Rol { a: tail, k, fused },
                 None => PendingRow::Carrier { a: tail },
             },
         );
@@ -546,10 +635,10 @@ fn push_row(values: &mut Vec<Felt>, row: PendingRow) {
         PendingRow::Real { op, a, b } => {
             values.extend(a.to_le_bytes().map(Felt::from));
             values.extend(b.to_le_bytes().map(Felt::from));
-            // op_or_k = op tag; is_logic = 1; is_rol = 0.
-            values.extend([Felt::from(op.tag()), Felt::from(1u8), Felt::ZERO]);
+            // op_or_k = op tag; is_logic = 1; is_rol = 0; is_xorrol_cap = 0.
+            values.extend([Felt::from(op.tag()), Felt::from(1u8), Felt::ZERO, Felt::ZERO]);
         },
-        PendingRow::Rol { a, k } => {
+        PendingRow::Rol { a, k, fused } => {
             values.extend(a.to_le_bytes().map(Felt::from));
             // b_limbs: 8 × 16-bit limbs of ((lo+2^32)·k, (hi+2^32)·k).
             // The +2^32 offset keeps the product ≥ 2^32, escaping the
@@ -560,17 +649,18 @@ fn push_row(values: &mut Vec<Felt>, row: PendingRow) {
             let hi_offset_k: u64 = (a_hi + (1u64 << 32)).wrapping_mul(k);
             values.extend(u64_as_four_u16_limbs(lo_offset_k).map(Felt::from));
             values.extend(u64_as_four_u16_limbs(hi_offset_k).map(Felt::from));
-            // op_or_k = k; is_logic = 0; is_rol = 1.
+            // op_or_k = k; is_logic = 0; is_rol = 1; is_xorrol_cap = fused.
             values.extend([
                 Felt::new(k).expect("k fits in canonical Goldilocks"),
                 Felt::ZERO,
                 Felt::from(1u8),
+                Felt::from(fused as u8),
             ]);
         },
         PendingRow::Carrier { a } => {
             values.extend(a.to_le_bytes().map(Felt::from));
-            // Zero b_limbs (8) + zero op_or_k + zero is_logic + zero is_rol.
-            values.extend([Felt::ZERO; 11]);
+            // Zero b_limbs (8) + op_or_k + is_logic + is_rol + is_xorrol_cap.
+            values.extend([Felt::ZERO; 12]);
         },
     }
 }
@@ -645,13 +735,34 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
         // Selector binarity.
         builder.assert_bool(local[COL_IS_LOGIC]);
         builder.assert_bool(local[COL_IS_ROL]);
+        builder.assert_bool(local[COL_IS_XORROL_CAP]);
 
         // Mutex: at most one mode active per row. Both 0 = disabled.
         builder.assert_zero(is_logic.clone() * is_rol.clone());
 
+        // The fused-pair cap flag only ever rides a ROL row (it gates that
+        // row's `Rol64` suppression and the preceding LOGIC's `XorRol64`
+        // provide). `cap ⟹ is_rol`.
+        let is_xorrol_cap = AB::Expr::from(local[COL_IS_XORROL_CAP]);
+        builder.assert_zero(is_xorrol_cap * (AB::Expr::ONE - is_rol.clone()));
+
+        // A LOGIC row whose next row caps a fused pair drives that pair's
+        // `XorRol64` provide. `XorRol64` is definitionally `c = rol_64(a ⊕ b,
+        // k)` — its tuple carries no op field — so the op tag is pinned to Xor
+        // here. Without it an `op_or_k = AndNot` LOGIC row would make the
+        // provide carry `rol_64((¬a)∧b, k)` under the XorRol64 label, and a
+        // consumer (which holds no op of its own) would read it as XOR.
+        let next_is_xorrol_cap: AB::Var =
+            next_main::<_, _, 1>(builder.main(), COL_IS_XORROL_CAP)[0];
+        builder.assert_zero(
+            is_logic.clone()
+                * AB::Expr::from(next_is_xorrol_cap)
+                * (AB::Expr::ONE - op_or_k.clone()),
+        );
+
         // ROL must be preceded by LOGIC (cyclic ungated). Subsumes
         // ROL/ROL forbid AND Carrier/padding → ROL forbid AND wrap.
-        builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic));
+        builder.assert_zero(AB::Expr::from(next_is_rol) * (AB::Expr::ONE - is_logic.clone()));
 
         let a_bytes: [AB::Var; 8] = array::from_fn(|i| local[A_BYTES_RANGE.start + i]);
         let b_limbs: [AB::Var; 8] = array::from_fn(|i| local[B_LIMBS_RANGE.start + i]);
@@ -684,12 +795,11 @@ impl LiftedAir<Felt, QuadFelt> for Bitwise64Air {
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column emission shape, mutex-aware:
-/// - col 0: 2 mutex provides → max 1 active per row.
-/// - col 1: 8-way batch of byte requires (always 8 pushes per row, with multiplicity = is_logic
-///   baked in).
-/// - col 2: 8-way batch of Range16 requires (always 8 pushes, multiplicity = is_rol).
-const COLUMN_SHAPE: [usize; 3] = [1, 8, 8];
+/// Per-column emission shape (FLATTENED to lqd 1): col 0 = rol provide
+/// (running sum, deg-1 mult), col 1 = the paired logic + fused-xorrol provides
+/// (deg-2 mux mults, lqd-1 like the EC paired columns), cols 2–5 = the 8 LOGIC
+/// byte requires (two per col), cols 6–9 = the 8 ROL Range16 requires.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 
 impl<LB> LookupAir<LB> for Bitwise64Air
 where
@@ -713,11 +823,18 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next_a_bytes: [LB::Var; 8] = next_main(builder.main(), A_BYTES_RANGE.start);
+        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        let next_a_bytes: [LB::Var; 8] = array::from_fn(|i| next[A_BYTES_RANGE.start + i]);
+        let next_b_limbs: [LB::Var; 8] = array::from_fn(|i| next[B_LIMBS_RANGE.start + i]);
 
         let op_or_k: LB::Expr = local[COL_OP_OR_K].into();
         let is_logic: LB::Expr = local[COL_IS_LOGIC].into();
         let is_rol: LB::Expr = local[COL_IS_ROL].into();
+        // Fused-pair cap flag — local (this ROL suppresses its `Rol64`) and
+        // next (the preceding LOGIC muxes `Logic64` → `XorRol64`).
+        let is_xorrol_cap: LB::Expr = local[COL_IS_XORROL_CAP].into();
+        let is_xorrol_cap_next: LB::Expr = next[COL_IS_XORROL_CAP].into();
+        let next_op_or_k: LB::Expr = next[COL_OP_OR_K].into();
 
         let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[A_BYTES_RANGE.start + i]);
         let b_limbs: [LB::Var; 8] = array::from_fn(|i| local[B_LIMBS_RANGE.start + i]);
@@ -742,7 +859,17 @@ where
         let c2 = LB::Expr::from(b_limbs[2]) + LB::Expr::from(b_limbs[4]);
         let c3 = LB::Expr::from(b_limbs[3]) + LB::Expr::from(b_limbs[5]);
         let rol_b_lo = c0 + c1 * two_16.clone() - op_or_k.clone();
-        let rol_b_hi = c2 + c3 * two_16 - op_or_k.clone();
+        let rol_b_hi = c2 + c3 * two_16.clone() - op_or_k.clone();
+
+        // The *next* (cap ROL) row's rolled output — the fused `XorRol64`'s
+        // `c` halves, read by the preceding LOGIC row so it can provide the
+        // fused tuple without exposing the XOR intermediate `r`.
+        let nc0 = LB::Expr::from(next_b_limbs[0]) + LB::Expr::from(next_b_limbs[6]);
+        let nc1 = LB::Expr::from(next_b_limbs[1]) + LB::Expr::from(next_b_limbs[7]);
+        let nc2 = LB::Expr::from(next_b_limbs[2]) + LB::Expr::from(next_b_limbs[4]);
+        let nc3 = LB::Expr::from(next_b_limbs[3]) + LB::Expr::from(next_b_limbs[5]);
+        let next_rol_b_lo = nc0 + nc1 * two_16.clone() - next_op_or_k.clone();
+        let next_rol_b_hi = nc2 + nc3 * two_16 - next_op_or_k.clone();
 
         // Per-emission `Deg` annotations. The framework treats these as
         // documentation (production adapters ignore them); names make
@@ -757,115 +884,206 @@ where
         //   column).
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };
+        let pair_deg = Deg { v: 3, u: 2 };
         let requires_deg = Deg { v: 8, u: 8 };
 
-        // ---- col 0: mutex group, 2 self-provides ------------------
-        // `g.remove` carries multiplicity = -1 implicitly (provide).
-        // Mutex flags is_logic / is_rol select which message is active
-        // for the row; carrier/padding rows produce no contribution.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "self-provides",
-                    |g| {
-                        g.remove(
-                            "logic",
-                            is_logic.clone(),
-                            || Logic64Msg {
-                                op: op_or_k.clone(),
-                                a_lo: a_lo.clone(),
-                                a_hi: a_hi.clone(),
-                                b_lo,
-                                b_hi,
-                                c_lo,
-                                c_hi,
-                            },
-                            interaction_deg,
-                        );
-                        g.remove(
-                            "rol",
-                            is_rol.clone(),
-                            || Rol64Msg {
-                                a_lo,
-                                a_hi,
-                                b_lo: rol_b_lo,
-                                b_hi: rol_b_hi,
-                                k: op_or_k.clone(),
-                            },
-                            interaction_deg,
-                        );
-                    },
-                    provides_deg,
-                );
-            },
+        // col 0: rol self-provide (running sum). A fused cap (`is_xorrol_cap`)
+        // suppresses its own `Rol64` — the preceding LOGIC provides the fused
+        // `XorRol64` instead; since `is_xorrol_cap ⟹ is_rol`, the mult is the
+        // degree-1 `−(is_rol − is_xorrol_cap)`.
+        frac_col!(
+            builder,
+            "self-provides",
             provides_deg,
+            (
+                "rol",
+                is_xorrol_cap.clone() - is_rol.clone(),
+                Rol64Msg {
+                    a_lo: a_lo.clone(),
+                    a_hi: a_hi.clone(),
+                    b_lo: rol_b_lo,
+                    b_hi: rol_b_hi,
+                    k: op_or_k.clone()
+                },
+                interaction_deg
+            ),
         );
-
-        // ---- col 1: 8 simultaneous LOGIC byte requires ------------
-        // Inner mult = is_logic gates the contribution per insert.
-        // Outer flag = ONE keeps the column degree at 9 (legacy
-        // parity); the prover does push 8 zero-multiplicity fractions
-        // per row when is_logic = 0, which the accumulator collapses
-        // to 0 in col 1's per-row value.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "logic-byte-requires",
-                    |g| {
-                        g.batch(
-                            "bytes",
-                            LB::Expr::ONE,
-                            |b| {
-                                for i in 0..8 {
-                                    b.insert(
-                                        "byte_i",
-                                        is_logic.clone(),
-                                        BytePairLutMsg {
-                                            op: op_or_k.clone(),
-                                            a: a_bytes[i].into(),
-                                            b: b_limbs[i].into(),
-                                            c: next_a_bytes[i].into(),
-                                        },
-                                        interaction_deg,
-                                    );
-                                }
-                            },
-                            requires_deg,
-                        );
-                    },
-                    requires_deg,
-                );
-            },
-            requires_deg,
+        // col 1 (paired, lqd-1): the logic provide muxed with the fused-xorrol
+        // provide. A LOGIC row whose next row is a fused cap provides
+        // `XorRol64(a, b, c=next rolled output, k=next k)` and suppresses its
+        // `Logic64`; otherwise it provides `Logic64`. The two deg-2 mux mults
+        // (`is_logic · {1−cap_next, cap_next}`) close at degree 3 in a paired
+        // column, exactly like the EC chiplets' gated provides.
+        frac_col!(
+            builder,
+            "self-provides",
+            pair_deg,
+            (
+                "logic",
+                (is_xorrol_cap_next.clone() - LB::Expr::ONE) * is_logic.clone(),
+                Logic64Msg {
+                    op: op_or_k.clone(),
+                    a_lo: a_lo.clone(),
+                    a_hi: a_hi.clone(),
+                    b_lo: b_lo.clone(),
+                    b_hi: b_hi.clone(),
+                    c_lo,
+                    c_hi
+                },
+                interaction_deg
+            ),
+            (
+                "xorrol",
+                LB::Expr::ZERO - is_logic.clone() * is_xorrol_cap_next,
+                XorRol64Msg {
+                    a_lo,
+                    a_hi,
+                    b_lo,
+                    b_hi,
+                    c_lo: next_rol_b_lo,
+                    c_hi: next_rol_b_hi,
+                    k: next_op_or_k
+                },
+                interaction_deg
+            ),
         );
-
-        // ---- col 2: 8 simultaneous ROL Range16 requires -----------
-        // Same inner-mult pattern, gated by is_rol.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "rol-range16-requires",
-                    |g| {
-                        g.batch(
-                            "limbs",
-                            LB::Expr::ONE,
-                            |b| {
-                                for &limb in &b_limbs {
-                                    b.insert(
-                                        "limb_i",
-                                        is_rol.clone(),
-                                        Range16Msg { w: limb.into() },
-                                        interaction_deg,
-                                    );
-                                }
-                            },
-                            requires_deg,
-                        );
-                    },
-                    requires_deg,
-                );
-            },
+        // cols 2–5: the 8 LOGIC byte requires (BytePairLut), two per column.
+        frac_col!(
+            builder,
+            "logic-byte-requires",
             requires_deg,
+            (
+                "byte0",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[0].into(),
+                    b: b_limbs[0].into(),
+                    c: next_a_bytes[0].into()
+                },
+                interaction_deg
+            ),
+            (
+                "byte1",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[1].into(),
+                    b: b_limbs[1].into(),
+                    c: next_a_bytes[1].into()
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "logic-byte-requires",
+            requires_deg,
+            (
+                "byte2",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[2].into(),
+                    b: b_limbs[2].into(),
+                    c: next_a_bytes[2].into()
+                },
+                interaction_deg
+            ),
+            (
+                "byte3",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[3].into(),
+                    b: b_limbs[3].into(),
+                    c: next_a_bytes[3].into()
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "logic-byte-requires",
+            requires_deg,
+            (
+                "byte4",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[4].into(),
+                    b: b_limbs[4].into(),
+                    c: next_a_bytes[4].into()
+                },
+                interaction_deg
+            ),
+            (
+                "byte5",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[5].into(),
+                    b: b_limbs[5].into(),
+                    c: next_a_bytes[5].into()
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "logic-byte-requires",
+            requires_deg,
+            (
+                "byte6",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[6].into(),
+                    b: b_limbs[6].into(),
+                    c: next_a_bytes[6].into()
+                },
+                interaction_deg
+            ),
+            (
+                "byte7",
+                is_logic.clone(),
+                BytePairLutMsg {
+                    op: op_or_k.clone(),
+                    a: a_bytes[7].into(),
+                    b: b_limbs[7].into(),
+                    c: next_a_bytes[7].into()
+                },
+                interaction_deg
+            ),
+        );
+        // cols 6–9: the 8 ROL Range16 requires, two per column.
+        frac_col!(
+            builder,
+            "rol-range16-requires",
+            requires_deg,
+            ("limb0", is_rol.clone(), Range16Msg { w: b_limbs[0].into() }, interaction_deg),
+            ("limb1", is_rol.clone(), Range16Msg { w: b_limbs[1].into() }, interaction_deg),
+        );
+        frac_col!(
+            builder,
+            "rol-range16-requires",
+            requires_deg,
+            ("limb2", is_rol.clone(), Range16Msg { w: b_limbs[2].into() }, interaction_deg),
+            ("limb3", is_rol.clone(), Range16Msg { w: b_limbs[3].into() }, interaction_deg),
+        );
+        frac_col!(
+            builder,
+            "rol-range16-requires",
+            requires_deg,
+            ("limb4", is_rol.clone(), Range16Msg { w: b_limbs[4].into() }, interaction_deg),
+            ("limb5", is_rol.clone(), Range16Msg { w: b_limbs[5].into() }, interaction_deg),
+        );
+        frac_col!(
+            builder,
+            "rol-range16-requires",
+            requires_deg,
+            ("limb6", is_rol.clone(), Range16Msg { w: b_limbs[6].into() }, interaction_deg),
+            ("limb7", is_rol, Range16Msg { w: b_limbs[7].into() }, interaction_deg),
         );
     }
 }
