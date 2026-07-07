@@ -17,9 +17,9 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CELL_D_W, CELL_D_WS, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K, COL_A_PTR, COL_NZ,
-    GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P,
-    TERM_CELL_MULT, UintAddAir,
+    AUX_WIDTH, CELL_B_ON, CELL_C_ON, CELL_D_W, CELL_D_WS, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K,
+    COL_A_PTR, COL_NZ, GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B,
+    ROW_C, ROW_P, TERM_CELL_MULT, UintAddAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -278,6 +278,10 @@ pub fn generate_trace(
         put(&mut block[ROW_P], &w.bound);
         block[ROW_B][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
         block[ROW_C][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
+        // b_on / c_on = act·(1 − is_zero); act = 1 for every real op block
+        // (padding blocks stay all-zero via the trailing zero-fill).
+        block[ROW_C][CELL_B_ON] = Felt::from(op.b.is_some() as u32);
+        block[ROW_P][CELL_C_ON] = Felt::from(op.c.is_some() as u32);
         block[ROW_P][CELL_K] = Felt::from(w.k);
         for (j, &(row, cell)) in GAMMA_POS_SLOTS.iter().enumerate() {
             block[row][cell] = Felt::from(w.gamma_pos[j]);
