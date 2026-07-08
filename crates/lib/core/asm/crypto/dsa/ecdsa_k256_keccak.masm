@@ -28,8 +28,9 @@ const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 #!
 #! This wrapper mirrors the materialization performed in `miden-crypto::ecdsa_k256_keccak`: given
 #! a public key commitment and the original message, it reconstructs the calldata expected by the
-#! precompile (public key bytes, Keccak256(message), signature). The public key and signature are
-#! supplied via the advice stack, and can be obtained with the `ecdsa_k256_keccak` function.
+#! precompile (affine-coordinate public key bytes, Keccak256(message), signature). The public key
+#! and signature are supplied via the advice stack, and can be obtained with the `ecdsa_k256_keccak`
+#! function.
 #!
 #! Inputs:
 #!   Operand stack: [PK_COMM, MSG, ...]
@@ -39,13 +40,13 @@ const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 #!   Advice stack:  []
 #!
 #! Where:
-#! - `PK_COMM`: Poseidon2 hash commitment of the native ECDSA public key elements
+#! - `PK_COMM`: Poseidon2 hash commitment of the ECDSA public key affine-coordinate elements
 #! - `MSG`: single word (4 field elements) representing the message to verify
-#! - `PK[16]`: `qx_le_u32[8] || qy_le_u32[8]` on advice stack
+#! - `PK[16]`: affine public key coordinates `qx_le_u32[8] || qy_le_u32[8]` on advice stack
 #! - `SIG[17]`: 65-byte signature packed as 17 field elements on advice stack
 #!
 #! Local memory layout (element addresses):
-#!   - locaddr[0 ..16] : public key coordinates `qx_le_u32[8] || qy_le_u32[8]`
+#!   - locaddr[0 ..16] : affine public key coordinates `qx_le_u32[8] || qy_le_u32[8]`
 #!   - locaddr[16..24] : message bytes (MSG written as eight u32 limbs)
 #!   - locaddr[24..32] : keccak256(message) digest (8 felts)
 #!   - locaddr[32..49] : signature (65 bytes packed as 17 felts)
@@ -114,7 +115,7 @@ end
 #! Output: `[result, ...]`
 #!
 #! Where:
-#! - `pk_ptr`: word-aligned memory address containing `qx_le_u32[8] || qy_le_u32[8]`
+#! - `pk_ptr`: word-aligned memory address containing affine public key coordinates `qx_le_u32[8] || qy_le_u32[8]`
 #! - `digest_ptr`: word-aligned memory address containing the 32-byte message digest
 #! - `sig_ptr`: word-aligned memory address containing the 65-byte signature
 #! - `result`: 1 if the signature is valid, 0 if invalid
@@ -148,7 +149,7 @@ end
 #! Output: `[COMM, TAG, result, ...]`
 #!
 #! Where:
-#! - `pk_ptr`: word-aligned memory address containing `qx_le_u32[8] || qy_le_u32[8]`
+#! - `pk_ptr`: word-aligned memory address containing affine public key coordinates `qx_le_u32[8] || qy_le_u32[8]`
 #! - `digest_ptr`: word-aligned memory address containing 32-byte digest
 #! - `sig_ptr`: word-aligned memory address containing 65-byte signature
 #! - `COMM`: commitment to calldata computed as

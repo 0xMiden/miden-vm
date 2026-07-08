@@ -16,7 +16,7 @@
 //! digest, signature), re-performs the ECDSA verification, and generates a commitment
 //! `P2(P2(P2(pk) || P2(digest)) || P2(sig))`, where P2 stands for Poseidon2, with a tag containing
 //! the verification result that validates the computation was performed correctly. Here `pk` is
-//! hashed as native coordinate elements; `digest` and `sig` are hashed as u32‑packed field elements
+//! hashed as affine-coordinate elements; `digest` and `sig` are hashed as u32‑packed field elements
 //! before being merged.
 //!
 //! ### Commitment Tag Format
@@ -25,7 +25,8 @@
 //! matches the verification-time result.
 //!
 //! ## Data Format
-//! - **Public Key**: 64 bytes (`qx_le_u32[8] || qy_le_u32[8]`) packed as 16 u32 limbs
+//! - **Public Key**: 64 bytes of affine coordinates (`qx_le_u32[8] || qy_le_u32[8]`) packed as 16
+//!   u32 limbs
 //! - **Message Digest**: 32 bytes (Keccak256 hash of the message)
 //! - **Signature**: 65 bytes (implementation‑defined serialization used by
 //!   `miden_crypto::dsa::ecdsa_k256_keccak::Signature`). When packed into u32 elements for VM
@@ -97,7 +98,7 @@ impl EventHandler for EcdsaPrecompile {
             let data_type = DataType::PublicKey;
             let bytes = read_memory_packed_u32(process, ptr_pk, PUBLIC_KEY_LEN_BYTES)
                 .map_err(|source| EcdsaError::ReadError { data_type, source })?;
-            public_key_from_native_bytes(&bytes)
+            public_key_from_affine_coordinate_bytes(&bytes)
                 .map_err(|source| EcdsaError::DeserializeError { data_type, source })?
         };
 
@@ -131,7 +132,7 @@ impl PrecompileVerifier for EcdsaPrecompile {
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
     /// generates a commitment `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
     /// `[event_id, result, 0, 0]` that validates against the execution trace. `pk` is hashed as
-    /// native coordinate elements.
+    /// affine-coordinate elements.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let request = EcdsaRequest::read_from_bytes(calldata)?;
         Ok(request.as_precompile_commitment())
@@ -237,7 +238,7 @@ impl Serializable for EcdsaRequest {
 impl Deserializable for EcdsaRequest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let pk_bytes: [u8; PUBLIC_KEY_LEN_BYTES] = source.read_array()?;
-        let pk = public_key_from_native_bytes(&pk_bytes)?;
+        let pk = public_key_from_affine_coordinate_bytes(&pk_bytes)?;
         let digest = source.read_array()?;
         let sig = Signature::read_from(source)?;
         Ok(Self { pk, digest, sig })
@@ -250,7 +251,9 @@ impl From<EcdsaRequest> for PrecompileRequest {
     }
 }
 
-fn public_key_from_native_bytes(bytes: &[u8]) -> Result<PublicKey, DeserializationError> {
+fn public_key_from_affine_coordinate_bytes(
+    bytes: &[u8],
+) -> Result<PublicKey, DeserializationError> {
     if bytes.len() != PUBLIC_KEY_LEN_BYTES {
         return Err(DeserializationError::InvalidValue("invalid public key length".into()));
     }

@@ -40,7 +40,7 @@ pub mod ecdsa_k256_keccak {
     /// Encodes the provided public key and signature into a vector of field elements in the format
     /// expected by `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
     ///
-    /// 1. The secp256k1 public key coordinates as `qx_le_u32[8] || qy_le_u32[8]` (16 felts).
+    /// 1. The secp256k1 affine public key coordinates as `qx_le_u32[8] || qy_le_u32[8]` (16 felts).
     /// 2. The ECDSA signature encoded as 17 packed-u32 felts (65 bytes total, padded to 17 felts).
     ///
     /// The two chunks are concatenated as `[PK[16] || SIG[17]]` so they can be streamed straight to
