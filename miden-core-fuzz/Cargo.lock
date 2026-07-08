@@ -297,9 +297,9 @@ checksum = "aeda16ab4059c5fd2a83f2b9c9e9c981327b18aa8e3b313f7e6563799d4f093e"
 
 [[package]]
 name = "ecdsa"
-version = "0.17.0-rc.22"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c72d1455753a703ad4b90ed2a759f2bc4562024a303176439cf6e593b5ade4"
+checksum = "c0681a4fc24c767085329728d8dfba959af91228aa4610cca4f8ce317ba46ae0"
 dependencies = [
  "der",
  "digest",
@@ -343,9 +343,9 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "elliptic-curve"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3273f1195b6f6253ebda493d6742c8baa9b26a291674cd96d92a0f09e90e9b46"
+checksum = "9d65aa39b3a5c1c9c1b745c9a019234bb7a21b77abcb4f4d266d706e2d577d65"
 dependencies = [
  "base16ct",
  "crypto-bigint",
@@ -552,9 +552,9 @@ dependencies = [
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
+checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
 dependencies = [
  "subtle",
  "typenum",
@@ -613,9 +613,9 @@ dependencies = [
 
 [[package]]
 name = "k256"
-version = "0.14.0-rc.14"
+version = "0.14.0-rc.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "905d38bdbb43bb506efa0a428b3e969ff244549832a86b18591492f503adfe37"
+checksum = "78ce7f1aa9a24c53c6572d8017c8c1ceb5d44c6071ff68c9912860fa4d262101"
 dependencies = [
  "cpubits",
  "ecdsa",
@@ -783,9 +783,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb57a3fbdf2bdc51bd024050719c65929d0545f4cca225000f99678f62935f02"
+checksum = "afd70d37ade91ce0f37a0ad7b9f1709391657243857d5d209ec62a100e358d4d"
 dependencies = [
  "blake3",
  "cc",
@@ -824,9 +824,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ee301b99abeeb640f9f5eaa7c11f731bab5b2e7671cbaebed606da5ff1a4a2b"
+checksum = "9197f2837af387b5a9b60ef3c30670cf34a453c3a8e81f9cf68df84ca3122253"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -851,9 +851,9 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06741437192077e3fec0a0685ef05ea883aa3823bc0722ae56b178233db2812f"
+checksum = "45929f2e6b18f6535cfa25a55f5dac8be556410a4fc5c7e003a147b678af9e18"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -879,9 +879,9 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abf4dca41a33d65992ad877746539b48fbc367101d2ed3161d3b727140af3aaf"
+checksum = "320d7e0f1ac4a668682146cce69585ddc8dfe1fdf6ba5dac1986233e3e48d4df"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -893,9 +893,9 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7087fe7fa147cd443848844afdf54ffa8be697bd8d7b8304662fd6b252a01aa2"
+checksum = "8075f037bb02eb763223bc2f762a55c793f3795677f88fc06e58641091fd69e0"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -1003,9 +1003,9 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a89e64d3ccd5b51b0ef08cdfc36e1bbd1402448275520eb0208de740125509"
+checksum = "6bf6872ac0f2de384ac65968e9bdc24656b31c487ea3bb1665871095c10f11ee"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1013,9 +1013,9 @@ dependencies = [
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca940751e1ca7abc33a9b8eaaad4cdd6f153613380ad2c3626134bab6aafb91"
+checksum = "13f2f5cc37a6b24ef2ab4c8d4dfb874a8f55add5147bfad47fde901f03165a51"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1025,9 +1025,9 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc3510d500d4ce676652ef24539e2be4f04ae63d0bf8299799ca16d79b66a9d"
+checksum = "93a95d46e93b94d82e0fcc6cec67ea362a548c1b6209bfdd1211433537314b83"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1471,13 +1471,14 @@ dependencies = [
 
 [[package]]
 name = "primeorder"
-version = "0.14.0-rc.14"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e56e6d67fdf5744e9e245ae571450fe584b91f5af261d0e40163b618e53a1f6"
+checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
 dependencies = [
  "elliptic-curve",
  "primefield",
  "serdect",
+ "wnaf",
 ]
 
 [[package]]
@@ -1655,11 +1656,11 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rfc6979"
-version = "0.6.0-pre.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9935425142ac6e252364413291d96c8bc9898d0876a801824c7af4eae397b689"
+checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
 dependencies = [
- "ctutils",
+ "crypto-bigint",
  "hmac",
 ]
 
@@ -2290,9 +2291,9 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wnaf"
-version = "0.14.0-rc.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86421f2a70c9e6cab8d84c99fb62d8761d355bd1285443a7e7ccad15aa515f2"
+checksum = "ab12e7090f27e2ffd9322651492942d50c2926094af30601e1964337db39daf1"
 dependencies = [
  "ff",
  "group",
