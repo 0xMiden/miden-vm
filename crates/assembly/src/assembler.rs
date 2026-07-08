@@ -1,5 +1,5 @@
 pub(super) mod debuginfo;
-mod error;
+pub(crate) mod error;
 mod product;
 
 use alloc::{
@@ -1276,8 +1276,8 @@ impl Assembler {
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )
-                    .with_num_locals(num_locals)
-                    .with_span(proc.span());
+                    .with_span(proc.span())
+                    .with_num_locals(num_locals)?;
 
                     // Compile this procedure
                     let procedure = self.compile_procedure(pctx, mast_forest_builder)?;
@@ -1334,20 +1334,6 @@ impl Assembler {
         let gid = proc_ctx.id();
 
         let num_locals = proc_ctx.num_locals();
-
-        // Reject procedures that declare more locals than can be represented once the count is
-        // rounded up to a word boundary during frame-pointer codegen. The text parser enforces this
-        // on `@locals(..)`, but procedures built directly via the AST bypass this check.
-        if num_locals > MAX_PROC_LOCALS {
-            let span = proc_ctx.span();
-            let source_file = proc_ctx.source_manager().get(span.source_id()).ok();
-            return Err(Report::new(AssemblerError::TooManyProcedureLocals {
-                span,
-                source_file,
-                max_locals: MAX_PROC_LOCALS,
-                num_locals,
-            }));
-        }
 
         let proc = match self.linker[gid].item() {
             SymbolItem::Procedure(proc) => proc.borrow(),

@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
-pub(super) enum AssemblerError {
+pub(crate) enum AssemblerError {
     #[error("control-flow nesting depth exceeded")]
     #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
     ControlFlowNestingDepthExceeded {
