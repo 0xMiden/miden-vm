@@ -179,7 +179,7 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let (stack_outputs, proof) = miden_vm::prove_sync(
+    let (stack_outputs, proof) = prove_sync(
         &program,
         stack_inputs,
         advice_inputs,
