@@ -11,6 +11,7 @@
 - [BREAKING] Optimize constraint evaluation step by dropping redundant transition guards on op-flag-gated constraints ([#3319](https://github.com/0xMiden/miden-vm/pull/3319)).
 - Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
+- [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
 
 ## v0.24.0 (2026-06-24)
 
