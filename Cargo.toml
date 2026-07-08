@@ -86,9 +86,9 @@ miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-
 miden-verifier          = { path = "./verifier", version = "0.25", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.27", default-features = false }
+miden-crypto     = { version = "0.28", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-miden-serde-utils = { version = "0.27", default-features = false }
+miden-serde-utils = { version = "0.28", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
