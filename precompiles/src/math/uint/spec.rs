@@ -1,4 +1,4 @@
-//! Fixed uint arithmetic specs shared by deferred evaluation and MASM codegen.
+//! Fixed uint arithmetic specs shared by deferred evaluation and generated MASM support.
 
 use core::cmp::Ordering;
 

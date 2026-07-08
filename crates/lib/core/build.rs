@@ -274,8 +274,8 @@ fn copy_masm_tree(source_dir: &Path, target_dir: &Path) -> Result<(), Report> {
 fn main() -> Result<(), Report> {
     use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
 
-    // re-build the `[OUT_DIR]/assets/core.masp` file iff core/precompile MASM sources,
-    // codegen support, or its builder changed:
+    // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
+    // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-changed={PRECOMPILES_ASM_DIR_PATH}");
     println!("cargo:rerun-if-changed=codegen");

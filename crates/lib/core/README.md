@@ -13,7 +13,7 @@ The second goal can be achieved because calls to procedures in the core library 
 so users do not need any separate precompile-package wiring for standard Miden programs. Users
 should call the stable facades under `miden::core::*`.
 
-Generated precompile-support MASM can be inspected locally with:
+Generated core-library MASM can be inspected locally:
 
 ```sh
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm

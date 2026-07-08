@@ -1,4 +1,4 @@
-//! Fixed uint domains supported by deferred evaluation and MASM codegen.
+//! Fixed uint domains supported by deferred evaluation and generated MASM support.
 
 use miden_core::Felt;
 
