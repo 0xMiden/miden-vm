@@ -2,7 +2,7 @@
 
 use miden_core::Felt;
 
-pub use super::spec::{Limbs, ONE_LIMBS, TWO_LIMBS, UintSpec, ZERO_LIMBS};
+use super::spec::{Limbs, UintSpec};
 use crate::math::{k1_base::K1Base, k1_scalar::K1Scalar, u256::U256};
 
 /// VM-owned store pointer for the U256 wrapping-domain bound (`2^256 - 1`).
