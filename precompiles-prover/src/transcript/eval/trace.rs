@@ -53,9 +53,9 @@ use miden_core::{
     Felt,
     deferred::{Digest, fold_deferred_root},
     field::QuadFelt,
+    utils::RowMajorMatrix,
 };
 use miden_precompiles::CurvePrecompile;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::{

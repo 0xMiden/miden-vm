@@ -34,9 +34,8 @@
 
 use alloc::vec::Vec;
 
-use miden_core::Felt;
 pub use miden_core::proof::{DeferredProof, StarkProof};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
 use crate::{

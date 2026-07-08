@@ -1,9 +1,9 @@
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     primitives::{

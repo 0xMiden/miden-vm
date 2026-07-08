@@ -18,9 +18,8 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_precompiles::CurveId;
-use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_ECPOINT_MULT, COL_GROUP_PTR, COL_IS_CERT,

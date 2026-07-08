@@ -13,8 +13,8 @@ use core::array;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AUX_WIDTH, B_HUB_CELL_IS_B_ZERO, C_HUB_CELL_IS_C_ZERO, COL_A_PTR, COL_ACT, K_HUB_CELL_K,

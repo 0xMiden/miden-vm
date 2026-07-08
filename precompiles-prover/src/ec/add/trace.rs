@@ -10,8 +10,7 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 
 use super::{
     CELL_GROUP, CELL_R, CELL_SBOUND, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_CANCEL,

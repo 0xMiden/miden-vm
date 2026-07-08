@@ -22,9 +22,9 @@ use miden_core::{
     Felt,
     deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},

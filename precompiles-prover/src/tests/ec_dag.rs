@@ -13,10 +13,13 @@ use std::{format, string::String, vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
 use miden_air::lookup::Challenges;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_precompiles::CurveId;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     math::{U256, from_hex},

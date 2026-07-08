@@ -1,8 +1,7 @@
 //! Focused tests for VM uint caps.
 
-use miden_core::Felt;
+use miden_core::{Felt, utils::Matrix};
 use miden_precompiles::{UintDomain, UintPrecompile};
-use p3_matrix::Matrix;
 
 use crate::{
     math::U256,

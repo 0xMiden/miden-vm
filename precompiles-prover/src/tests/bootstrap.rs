@@ -3,9 +3,8 @@
 use std::{collections::HashMap, string::String};
 
 use miden_air::lookup::Challenges;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_precompiles::{CurveId, UintDomain};
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::groups::{

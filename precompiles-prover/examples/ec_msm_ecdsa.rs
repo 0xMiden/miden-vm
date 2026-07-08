@@ -48,6 +48,7 @@ use k256::{
     FieldBytes, ProjectivePoint, Scalar,
     elliptic_curve::{PrimeField, sec1::ToEncodedPoint},
 };
+use miden_core::utils::Matrix;
 use miden_lifted_air::LiftedAir;
 use miden_precompiles::CurveId;
 use miden_precompiles_prover::{
@@ -58,8 +59,7 @@ use miden_precompiles_prover::{
         verify_deferred,
     },
 };
-use p3_matrix::Matrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 /// secp256k1 VM-owned uint/curve pointers.
 const FP: u32 = CurveId::Secp256k1.base_domain().bound_ptr();

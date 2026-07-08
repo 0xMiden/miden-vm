@@ -9,8 +9,7 @@
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 
 use super::{
     COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_A_PTR, COL_ACT, COL_B_DIFF_HI, COL_B_DIFF_LO,
@@ -513,7 +512,7 @@ pub(crate) fn build_aux(
 mod tests {
     use std::vec;
 
-    use p3_matrix::Matrix;
+    use miden_core::utils::Matrix;
 
     use super::*;
 

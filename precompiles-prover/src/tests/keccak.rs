@@ -6,8 +6,8 @@
 
 use std::{vec, vec::Vec};
 
-use p3_matrix::Matrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use miden_core::utils::Matrix;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::hash::keccak::{
     reference::{KECCAK_RC, keccak_f1600, keccak_round},
