@@ -51,7 +51,7 @@ use miden::precompiles::math::field::k1_scalar
 #! `0 < s <= n/2` before calling or canonicalize upstream.
 pub proc assert_verify_prehash
     exec.prepare_verify_prehash_inputs
-    # => [pubkey_ptr, U1, U2, SIG_R, ...]
+    # => [U1, Q, U2, SIG_R, ...]
 
     exec.msm_mul_scalar
     # => [VERIFY_POINT, SIG_R, ...]
@@ -65,17 +65,20 @@ end
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!
 #! Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]
-#! Output: [pubkey_ptr, U1_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
 proc prepare_verify_prehash_inputs
-    swap
-    # => [digest_ptr, pubkey_ptr, sig_ptr, ...]
-    exec.load_reduced_z_k1_from_ptr
-    # => [Z, pubkey_ptr, sig_ptr, ...]
+    exec.secp256k1::load_mem
+    # => [Q, digest_ptr, sig_ptr, ...]
 
-    movup.5
-    # => [sig_ptr, Z, pubkey_ptr, ...]
+    movup.4
+    # => [digest_ptr, Q, sig_ptr, ...]
+    exec.load_reduced_z_k1_from_ptr
+    # => [Z, Q, sig_ptr, ...]
+
+    movup.8
+    # => [sig_ptr, Z, Q, ...]
     exec.load_signature_k1
-    # => [SIG_S, SIG_R, Z, pubkey_ptr, ...]
+    # => [SIG_S, SIG_R, Z, Q, ...]
 
     exec.k1_scalar::inv
     # => [S_INV, SIG_R, Z, pubkey_ptr, ...]
@@ -88,33 +91,25 @@ proc prepare_verify_prehash_inputs
     dupw.1
     dupw.3
     exec.k1_scalar::mul
-    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, pubkey_ptr, ...]
+    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
 
     swapw.2
-    # => [S_INV, U1, U2, SIG_R, pubkey_ptr, ...]
+    # => [S_INV, U1, U2, SIG_R, Q, ...]
     dropw
-    # => [U1, U2, SIG_R, pubkey_ptr, ...]
+    # => [U1, U2, SIG_R, Q, ...]
 
-    movup.12
-    # => [pubkey_ptr, U1, U2, SIG_R, ...]
+    movupw.3 swapw
+    # => [U1, Q, U2, SIG_R, ...]
 end
 
 #! Computes `[U1]G + [U2]Q` using a two-pair MSM.
 #!
-#! Input:  [pubkey_ptr, U1_DIGEST, U2_DIGEST, ...]
+#! Input:  [U1_DIGEST, Q_DIGEST, U2_DIGEST, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
 proc msm_mul_scalar
-    exec.secp256k1::load_mem
-    # => [Q_DIGEST, U1_DIGEST, U2_DIGEST, ...]
-
-    swapw
-    # => [U1_DIGEST, Q_DIGEST, U2_DIGEST, ...]
-    movupw.2
-    # => [U2_DIGEST, U1_DIGEST, Q_DIGEST, ...]
-    swapw
-    # => [U1_DIGEST, U2_DIGEST, Q_DIGEST, ...]
-
-    exec.secp256k1::msm2_generator
+    exec.secp256k1::push_generator
+    # => [G_DIGEST, U1_DIGEST, Q_DIGEST, U2_DIGEST, ...]
+    exec.secp256k1::msm2
     # => [MSM_POINT_DIGEST, ...]
 end
 

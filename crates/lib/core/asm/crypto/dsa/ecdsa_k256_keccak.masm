@@ -1,5 +1,5 @@
 use miden::precompiles::crypto::dsa::ecdsa_secp256k1
-use miden::core::crypto::hashes::keccak256
+use miden::precompiles::crypto::hashes::keccak256
 use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS
@@ -33,7 +33,7 @@ use miden::core::crypto::hashes::poseidon2
 #!   - loc[0 ..16] : native public key, QX[8] || QY[8]. Required by
 #!                   `ecdsa_secp256k1::assert_verify_prehash(pubkey_ptr, digest_ptr, sig_ptr)`.
 #!   - loc[16..32] : native signature, SIG_R[8] || SIG_S[8]. Required by the same precompile ABI.
-#!   - loc[32..40] : Keccak256(MSG) digest/prehash buffer passed as `digest_ptr`.
+#!   - loc[32..40] : Keccak256 message/digest/prehash scratch buffer passed as `digest_ptr`.
 #!
 #! The 40 local elements are the minimal contiguous memory ABI needed for the raw verifier call:
 #! public key (16) + signature (16) + prehash output (8).
@@ -61,46 +61,50 @@ pub proc verify
     # Assert Poseidon2::hash_elements(QX[8] || QY[8]) == PK_COMM.
     exec.poseidon2::squeeze_digest
     # => [PK_HASH, write_ptr=loc[16], PK_COMM, MSG, ...]
-    movup.4 drop
-    # => [PK_HASH, PK_COMM, MSG, ...]
+    movup.4 movdn.8
+    # => [PK_HASH, PK_COMM, write_ptr=loc[16], MSG, ...]
     assert_eqw.err="invalid public key commitment"
-    # => [MSG, ...]
+    # => [write_ptr=loc[16], MSG, ...]
 
-    # Load SIG_R || SIG_S from advice into the precompile signature buffer.
-    locaddr.16 padw padw padw
-    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[16], MSG, ...]
+    # Load SIG_R || SIG_S from advice into the precompile signature buffer. Keep a copy of sig_ptr
+    # under MSG so we don't need to recover it from digest_ptr after the pipes advance write_ptr.
+    dup movdn.5
+    # => [write_ptr=loc[16], MSG, sig_ptr=loc[16], ...]
+    padw padw padw
+    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[16], MSG, sig_ptr, ...]
     adv_pipe
     # => [SIG_R_RATE[8], C=0w, write_ptr=loc[24], MSG, ...]
     adv_pipe
     # => [SIG_S_RATE[8], C=0w, write_ptr=loc[32], MSG, ...]
-    dropw dropw dropw drop
-    # => [MSG, ...]
+    dropw dropw dropw movdn.4
+    # => [MSG, digest_ptr=loc[32], sig_ptr=loc[16], ...]
 
-    # Keccak256(MSG[32]) -> loc[32..40], then convert the digest bytes into the native little-endian
-    # scalar limbs expected by `assert_verify_prehash` in-place.
-    exec.split_word_u32s_le
-    # => [MSG_U32[8], ...]
-    exec.keccak256::hash
-    # => [DIGEST_U32[8], ...]
-    loc_storew_le.32 dropw
-    loc_storew_le.36 dropw
-    # => [...]  (DIGEST_U32[8] written to loc[32..40])
+    # Stage MSG[32] in loc[32..40], hash it in-place via the memory-oriented Keccak precompile,
+    # then convert the digest bytes into the native little-endian scalar limbs expected by
+    # `assert_verify_prehash`.
+    exec.store_word_u32s_le
+    # => [digest_ptr, sig_ptr, ...]  (MSG_U32[8] written to loc[32..40])
 
-    locaddr.32
-    # => [read_ptr=loc[32], ...]
+    dup dup push.32 swap
+    # => [in_ptr=loc[32], len_bytes=32, out_ptr=loc[32], digest_ptr=loc[32], sig_ptr, ...]
+    exec.keccak256::hash_1_chunk_mem
+    # => [digest_ptr=loc[32], sig_ptr, ...]  (DIGEST_U32[8] written to loc[32..40])
+
+    dup
+    # => [read_ptr=loc[32], digest_ptr=loc[32], sig_ptr, ...]
     repeat.8
         dup mem_load
         exec.reverse_u32_bytes
         swap add.1
     end
-    # => [read_ptr=loc[40], PREHASH_U32[8], ...]
+    # => [read_ptr=loc[40], PREHASH_U32[8], digest_ptr, sig_ptr, ...]
     drop
-    # => [PREHASH_U32[8], ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
-    locaddr.32 mem_storew_le dropw
-    locaddr.36 mem_storew_le dropw
-    # => [...]
+    # => [PREHASH_U32[8], digest_ptr, sig_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
+    dup.8 mem_storew_le dropw
+    dup.4 add.4 mem_storew_le dropw
+    # => [digest_ptr, sig_ptr, ...]
 
-    locaddr.16 locaddr.32 locaddr.0
+    dup.1 sub.16
     # => [pubkey_ptr, digest_ptr, sig_ptr, ...]
     exec.ecdsa_secp256k1::assert_verify_prehash
     # => [...]
@@ -130,28 +134,27 @@ pub proc verify_prehash
     exec.ecdsa_secp256k1::assert_verify_prehash
 end
 
-# INTERNAL PROCEDURES — MESSAGE PACKING
+# INTERNAL PROCEDURES — BYTE OPS
 # ================================================================================================
 
-#! Splits a word into the eight little-endian u32 limbs used as the 32-byte Keccak message.
+#! Stores a word as the eight little-endian u32 limbs used as the 32-byte Keccak message.
 #!
-#! Input:  [w0, w1, w2, w3, ...]
-#! Output: [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi, ...]
-proc split_word_u32s_le
+#! Input:  [w0, w1, w2, w3, ptr, ...]
+#! Output: [ptr, ...]
+proc store_word_u32s_le
     swap u32split
-    # => [w1_lo, w1_hi, w0, w2, w3, ...]
+    # => [w1_lo, w1_hi, w0, w2, w3, ptr, ...]
     movup.2 u32split
-    # => [w0_lo, w0_hi, w1_lo, w1_hi, w2, w3, ...]
+    # => [w0_lo, w0_hi, w1_lo, w1_hi, w2, w3, ptr, ...]
+    dup.6 mem_storew_le dropw
+    # => [w2, w3, ptr, ...]  (ptr[0..4] = [w0_lo, w0_hi, w1_lo, w1_hi])
 
-    movup.4 u32split
-    # => [w2_lo, w2_hi, w0_lo, w0_hi, w1_lo, w1_hi, w3, ...]
-    movdn.5 movdn.5
-    # => [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3, ...]
-
-    movup.6 u32split
-    # => [w3_lo, w3_hi, w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, ...]
-    movdn.7 movdn.7
-    # => [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi, ...]
+    swap u32split
+    # => [w3_lo, w3_hi, w2, ptr, ...]
+    movup.2 u32split
+    # => [w2_lo, w2_hi, w3_lo, w3_hi, ptr, ...]
+    dup.4 add.4 mem_storew_le dropw
+    # => [ptr, ...]  (ptr[4..8] = [w2_lo, w2_hi, w3_lo, w3_hi])
 end
 
 #! Reverses the byte order of a u32 limb.

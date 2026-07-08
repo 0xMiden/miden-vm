@@ -14,7 +14,7 @@ use super::helpers::{
 const PUBKEY_PTR: u32 = 128;
 const DIGEST_PTR: u32 = PUBKEY_PTR + 16;
 const SIG_PTR: u32 = DIGEST_PTR + 8;
-const ASSERT_VERIFY_PREHASH_EXPECTED_CYCLES: u64 = 1_105;
+const ASSERT_VERIFY_PREHASH_EXPECTED_CYCLES: u64 = 1_085;
 
 #[test]
 fn assert_verify_prehash_accepts_valid_signature() {
