@@ -1,6 +1,6 @@
 use miden_precompiles::{K1Base, K1Scalar};
 
-use crate::uint_fixtures::{assert_cross_modulus_children_rejected, assert_prime_field_contract};
+use super::uint_fixtures::{assert_cross_modulus_children_rejected, assert_prime_field_contract};
 
 #[derive(Clone, Copy)]
 struct PrimeFieldCase {

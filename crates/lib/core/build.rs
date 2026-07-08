@@ -16,6 +16,7 @@ use miden_assembly::{
 // ================================================================================================
 
 const ASM_DIR_PATH: &str = "asm";
+const PRECOMPILES_ASM_DIR_PATH: &str = "precompiles/asm";
 const ASL_DIR_PATH: &str = "assets";
 const DOC_DIR_PATH: &str = "docs";
 const AGGREGATE_ASM_DIR: &str = "aggregate-masm";
@@ -236,12 +237,12 @@ trim_paths = true
         ),
     )
     .into_diagnostic()?;
-    fs::write(aggregate_dir.join("mod.masm"), "pub mod core\nmod precompiles\n")
+    fs::write(aggregate_dir.join("mod.masm"), "pub mod core\npub mod precompiles\n")
         .into_diagnostic()?;
 
     copy_masm_tree(core_asm_dir, &aggregate_dir.join("core"))?;
     copy_masm_tree(precompiles_asm_dir, &aggregate_dir.join("precompiles"))?;
-    miden_precompiles_codegen::masm::write_math_masm(aggregate_dir.join("precompiles"))
+    miden_core_lib_codegen::masm::write_math_masm(aggregate_dir.join("precompiles"))
         .map_err(Report::msg)?;
 
     Ok(aggregate_dir)
@@ -273,10 +274,11 @@ fn copy_masm_tree(source_dir: &Path, target_dir: &Path) -> Result<(), Report> {
 fn main() -> Result<(), Report> {
     use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
 
-    // re-build the `[OUT_DIR]/assets/core.masp` file iff something in the `./asm` directory
-    // or its builder changed:
+    // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
+    // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
-    println!("cargo:rerun-if-changed={}", miden_precompiles::asm_source_dir().display());
+    println!("cargo:rerun-if-changed={PRECOMPILES_ASM_DIR_PATH}");
+    println!("cargo:rerun-if-changed=codegen");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
     // ../../ to reach crates/assembly/src.
@@ -294,7 +296,7 @@ fn main() -> Result<(), Report> {
     // Build the aggregate core library package.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
-    let precompiles_asm_dir = miden_precompiles::asm_source_dir();
+    let precompiles_asm_dir = Path::new(manifest_dir).join(PRECOMPILES_ASM_DIR_PATH);
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let aggregate_dir = prepare_aggregate_project(&build_dir, &asm_dir, &precompiles_asm_dir)?;
 

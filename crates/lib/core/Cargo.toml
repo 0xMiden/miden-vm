@@ -56,6 +56,7 @@ criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
@@ -70,8 +71,7 @@ fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-assembly-syntax = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
-miden-precompiles = { workspace = true, features = ["std"] }
-miden-precompiles-codegen = { workspace = true, features = ["std"] }
+miden-core-lib-codegen = { workspace = true, features = ["std"] }
 
 [[bin]]
 name = "regenerate-constraints"

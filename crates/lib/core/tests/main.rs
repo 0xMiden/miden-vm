@@ -123,7 +123,7 @@ fn core_library_exports_crypto_wrappers() {
 }
 
 #[test]
-fn core_library_package_exports_core_but_hides_precompiles() {
+fn core_library_package_exports_core_and_internal_precompiles() {
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
@@ -144,16 +144,16 @@ fn core_library_package_exports_core_but_hides_precompiles() {
         "::miden::precompiles::crypto::hashes::keccak256::hash_bytes_mem",
     ] {
         assert!(
-            package.get_procedure_root_by_path(path).is_none(),
-            "{path} must not be exported by aggregate corelib",
+            package.get_procedure_root_by_path(path).is_some(),
+            "{path} must be bundled in aggregate corelib for internal wrapper tests",
         );
     }
 }
 
 #[test]
-fn precompile_api_is_available_from_precompiles_crate() {
+fn precompile_semantic_api_is_available_from_precompiles_crate() {
     let _ = miden_precompiles::registry();
-    let _ = miden_precompiles::PrecompilesLibrary::default();
+    let _ = miden_precompiles::UintPrecompile::id();
 }
 
 #[test]
@@ -177,14 +177,19 @@ fn core_library_links_precompile_wrappers_without_precompiles_library() {
 
 #[test]
 fn core_library_load_registers_precompile_handlers() {
-    use miden_core_lib::CoreLibrary;
+    use miden_core_lib::{
+        CoreLibrary,
+        handlers::precompiles::{
+            keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
+        },
+    };
     use miden_processor::{BaseHost, DefaultHost};
 
     let core_lib = CoreLibrary::default();
     let mut host = DefaultHost::default();
     host.load_library(&core_lib).expect("failed to load core library");
 
-    for (event, _) in miden_precompiles::event_handlers::default_event_handlers() {
+    for event in [KECCAK256_DIGEST_EVENT_NAME, UINT_FIELD_INV_EVENT_NAME] {
         assert_eq!(host.resolve_event(event.to_event_id()), Some(&event));
     }
 }
@@ -195,6 +200,7 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
+mod precompiles;
 mod stark_asserts;
 mod sys;
 mod word;

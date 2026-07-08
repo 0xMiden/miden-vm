@@ -75,8 +75,6 @@ pub enum ExecutionError {
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
-    #[error("trace inputs cannot be generated after installing a custom precompile registry")]
-    CustomPrecompileRegistryTraceInputs,
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -126,15 +124,6 @@ impl ExecutionError {
     /// Wraps an advice error without source-location context.
     pub fn advice_error_no_context(err: AdviceError) -> Self {
         Self::AdviceError {
-            label: SourceSpan::UNKNOWN,
-            source_file: None,
-            err,
-        }
-    }
-
-    /// Wraps a deferred error without source-location context.
-    pub fn deferred_error_no_context(err: PrecompileError) -> Self {
-        Self::DeferredError {
             label: SourceSpan::UNKNOWN,
             source_file: None,
             err,

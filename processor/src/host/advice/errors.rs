@@ -3,6 +3,7 @@
 
 use alloc::vec::Vec;
 
+use miden_core::deferred::PrecompileError;
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
@@ -36,6 +37,8 @@ pub enum AdviceError {
         "Merkle store node budget exceeded: adding {added} nodes to the current {current} would exceed the maximum of {max}"
     )]
     MerkleStoreNodeBudgetExceeded { current: usize, added: usize, max: usize },
+    #[error("failed to initialize deferred state with the built-in precompile registry")]
+    DeferredStateInitializationFailed(#[source] PrecompileError),
     #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]

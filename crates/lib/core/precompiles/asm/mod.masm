@@ -12,9 +12,9 @@ const CHUNKS_TAG = [2, 0, 0, 0]
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
 # NOTE: `register_value`, `register_mem`, and `log_deferred` are adapted from `miden::core::sys`
-# (crates/lib/core/asm/sys/mod.masm) so the `miden-precompiles` package is self-contained while the
-# crate is being stood up on this tracking branch. They should be deduplicated against a single
-# shared source once the precompile proof-model migration settles.
+# (crates/lib/core/asm/sys/mod.masm) so the internal `miden::precompiles` support namespace can be
+# assembled inside the aggregate core package. They should be deduplicated against a single shared
+# source once the precompile proof-model migration settles.
 #
 # `register_value` / `register_mem` are safe by default: they derive the node digest in-circuit,
 # so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`

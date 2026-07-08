@@ -6,12 +6,11 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, Tag,
+        PrecompileError, Tag, precompile_id,
     },
 };
-use miden_precompiles_codegen::UintPrecompileDescriptor;
 
-use super::domain::{Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, ZERO_LIMBS};
+use super::{Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, ZERO_LIMBS};
 
 /// Recognized uint binary operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,33 +125,44 @@ pub struct UintPrecompile;
 
 impl UintPrecompile {
     /// Stable precompile name used to derive this precompile's tag id.
-    pub const NAME: &'static str = UintPrecompileDescriptor::NAME;
+    pub const NAME: &'static str = "uint256";
 
     /// Operation discriminants owned by this precompile.
-    pub const VALUE_OP_ID: u64 = UintPrecompileDescriptor::VALUE_OP_ID;
-    pub const ADD_OP_ID: u64 = UintPrecompileDescriptor::ADD_OP_ID;
-    pub const SUB_OP_ID: u64 = UintPrecompileDescriptor::SUB_OP_ID;
-    pub const MUL_OP_ID: u64 = UintPrecompileDescriptor::MUL_OP_ID;
-    pub const EQ_OP_ID: u64 = UintPrecompileDescriptor::EQ_OP_ID;
+    pub const VALUE_OP_ID: u64 = 0;
+    pub const ADD_OP_ID: u64 = 1;
+    pub const SUB_OP_ID: u64 = 2;
+    pub const MUL_OP_ID: u64 = 3;
+    pub const EQ_OP_ID: u64 = 4;
 
     /// Stable precompile id derived from [`Self::NAME`].
     pub fn id() -> Felt {
-        UintPrecompileDescriptor::id()
+        precompile_id(Self::NAME)
     }
 
     /// Builds a canonical uint `VALUE` tag for `domain`.
     pub fn value_tag(domain: UintDomain) -> Tag {
-        UintPrecompileDescriptor::value_tag(domain)
+        let op_id = Felt::new(Self::VALUE_OP_ID).expect("uint VALUE op id must fit in a felt");
+        Tag::precompile(Self::id(), [op_id, Felt::from(domain.bound_ptr()), ZERO])
+            .expect("uint precompile id is not framework-reserved")
     }
 
     /// Builds a canonical uint operation tag. Operand `VALUE` nodes carry the concrete domain.
     pub fn op_tag(op_id: u64) -> Tag {
-        UintPrecompileDescriptor::op_tag(op_id)
+        let op_id = Felt::new(op_id).expect("uint op id must fit in a felt");
+        Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
+            .expect("uint precompile id is not framework-reserved")
     }
 
     /// Builds a canonical value node.
     pub fn value_node(domain: UintDomain, limbs: Limbs) -> Node {
-        UintPrecompileDescriptor::value_node(domain, limbs)
+        debug_assert!(domain.is_canonical(&limbs));
+        Node::value(Self::value_tag(domain), limbs.map(Felt::from_u32))
+            .expect("value tag is precompile-owned")
+    }
+
+    /// Decodes a canonical uint `VALUE` node for `domain`.
+    pub fn decode_value_node(node: &Node, domain: UintDomain) -> Result<Limbs, DeferredError> {
+        Self::limbs_from_value_node(node, domain)
     }
 
     /// Decodes a uint precompile node without evaluating its children.

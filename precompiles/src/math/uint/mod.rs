@@ -1,11 +1,12 @@
 //! Fixed-domain 256-bit uint precompile support for deferred evaluation.
 
+mod arithmetic;
 mod domain;
-pub(crate) mod handlers;
 mod precompile;
+mod spec;
 
-pub(crate) use self::domain::ZERO_LIMBS;
 pub use self::{
-    domain::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, U256_BOUND_PTR, UintDomain, UintSpec},
+    domain::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, U256_BOUND_PTR, UintDomain},
     precompile::{UintNodeRef, UintPrecompile},
+    spec::{Limbs, ONE_LIMBS, TWO_LIMBS, UintSpec, ZERO_LIMBS},
 };

@@ -2,7 +2,7 @@ use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
 use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::ExecutionError;
 
-use crate::helpers::{
+use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, masm_store_felts,
     read_memory_felts, read_stack_felts, run_precompile_program,
 };

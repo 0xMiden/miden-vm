@@ -13,6 +13,12 @@ The second goal can be achieved because calls to procedures in the core library 
 so users do not need any separate precompile-package wiring for standard Miden programs. Users
 should call the stable facades under `miden::core::*`.
 
+Generated core-library MASM can be inspected locally:
+
+```sh
+cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
+```
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 

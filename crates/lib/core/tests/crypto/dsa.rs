@@ -150,8 +150,7 @@ fn run_core_program_with_advice(
         AdviceInputs::default().with_stack(advice.iter().copied()),
         ExecutionOptions::default(),
     )
-    .expect("processor construction")
-    .with_precompile_registry(miden_precompiles::registry())?;
+    .expect("processor construction");
 
     let output = processor.execute_sync(&program, &mut host);
     if let Ok(output) = &output {

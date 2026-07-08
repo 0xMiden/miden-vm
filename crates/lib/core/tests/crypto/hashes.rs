@@ -260,8 +260,7 @@ fn run_core_program(source: &str) -> Result<ExecutionOutput, ExecutionError> {
         AdviceInputs::default(),
         ExecutionOptions::default(),
     )
-    .expect("processor construction")
-    .with_precompile_registry(miden_precompiles::registry())?;
+    .expect("processor construction");
 
     let output = processor.execute_sync(&program, &mut host);
     if let Ok(output) = &output {
