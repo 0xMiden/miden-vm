@@ -153,11 +153,16 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     }
 
     let mut air_config = read_file(AIR_CONFIG_PATH);
-    let marker = "pub const RELATION_DIGEST: [Felt; 4] = [";
+    let marker = "pub const RELATION_DIGEST:";
     let start = air_config.find(marker).ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST not found in config.rs")
     })?;
-    let block_start = start + marker.len();
+    let init_marker = " = [";
+    let init_start =
+        air_config[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST initializer not found")
+        })?;
+    let block_start = init_start + init_marker.len();
     let block_end =
         air_config[block_start..]
             .find("];")
