@@ -22,12 +22,11 @@ pub mod ecdsa_k256_keccak {
 
     use alloc::vec::Vec;
 
-    use miden_core::{
-        Felt, Word, crypto::hash::Poseidon2, serde::Serializable,
-        utils::bytes_to_packed_u32_elements,
+    use miden_core::{Felt, Word};
+    use miden_crypto::{
+        SequentialCommit,
+        dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
     };
-    use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey};
-    use miden_precompiles::{K1Base, Limbs, UintSpec};
 
     /// Signs the provided message with the supplied secret key and encodes the resulting signature
     /// and public key into the native advice-stack format expected by `ecdsa_k256_keccak::verify`.
@@ -46,20 +45,29 @@ pub mod ecdsa_k256_keccak {
     ///
     /// The encoding is the structural order consumed from the advice stack:
     /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. The public key is decompressed from compressed SEC1 form.
+    /// represented as a field element. The public-key elements come from
+    /// [`SequentialCommit::to_elements()`], matching the commitment returned by
+    /// [`public_key_commitment()`].
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
+        let pk_elements = pk.to_elements();
+        assert_eq!(
+            pk_elements.len(),
+            16,
+            "ECDSA public key elements must be QX[8] || QY[8] native limbs",
+        );
+
         let mut out = Vec::with_capacity(32);
-        out.extend_from_slice(&decompress_public_key(&pk.to_bytes()));
+        out.extend(pk_elements);
         out.extend_from_slice(&signature_felts(sig));
         out
     }
 
     /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.
     ///
-    /// This intentionally preserves the previous public-key commitment semantics: Poseidon2 over
-    /// the compressed SEC1 public key packed into little-endian `u32` field elements.
+    /// The commitment is delegated to [`PublicKey::to_commitment()`], which commits to the same
+    /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].
     pub fn public_key_commitment(pk: &PublicKey) -> Word {
-        Poseidon2::hash_elements(&bytes_to_packed_u32_elements(&pk.to_bytes()))
+        pk.to_commitment()
     }
 
     fn signature_felts(signature: &Signature) -> [Felt; 16] {
@@ -67,76 +75,6 @@ pub mod ecdsa_k256_keccak {
         felts[..8].copy_from_slice(&limbs_to_felts(be_bytes_to_le_limbs(signature.r())));
         felts[8..].copy_from_slice(&limbs_to_felts(be_bytes_to_le_limbs(signature.s())));
         felts
-    }
-
-    fn decompress_public_key(compressed: &[u8]) -> [Felt; 16] {
-        assert_eq!(compressed.len(), 33, "public key must be compressed SEC1");
-        let prefix = compressed[0];
-        assert!(matches!(prefix, 0x02 | 0x03), "unexpected compressed SEC1 prefix");
-
-        let x_bytes = compressed[1..].try_into().expect("x coordinate length");
-        let x = be_bytes_to_le_limbs(x_bytes);
-        assert!(K1Base::is_canonical(&x), "public key x must be canonical");
-        let rhs = K1Base::add(K1Base::mul(K1Base::mul(x, x), x), k1_base_from_u32(7));
-        let mut y = sqrt_k1_base(rhs);
-        let should_be_odd = prefix == 0x03;
-        if (y[0] & 1 != 0) != should_be_odd {
-            y = K1Base::sub([0; 8], y);
-        }
-
-        let mut felts = [Felt::from_u32(0); 16];
-        felts[..8].copy_from_slice(&limbs_to_felts(x));
-        felts[8..].copy_from_slice(&limbs_to_felts(y));
-        felts
-    }
-
-    fn sqrt_k1_base(value: Limbs) -> Limbs {
-        let root = pow_k1_base(value, secp256k1_p_plus_one_over_four());
-        assert_eq!(K1Base::mul(root, root), value, "public key y coordinate must exist");
-        root
-    }
-
-    fn pow_k1_base(base: Limbs, exponent: Limbs) -> Limbs {
-        let mut result = [1, 0, 0, 0, 0, 0, 0, 0];
-        for limb in exponent.into_iter().rev() {
-            for bit in (0..32).rev() {
-                result = K1Base::mul(result, result);
-                if (limb >> bit) & 1 == 1 {
-                    result = K1Base::mul(result, base);
-                }
-            }
-        }
-        result
-    }
-
-    fn secp256k1_p_plus_one_over_four() -> Limbs {
-        let mut p_plus_one = K1Base::MODULUS;
-        let mut carry = 1u64;
-        for limb in &mut p_plus_one {
-            let sum = *limb as u64 + carry;
-            *limb = sum as u32;
-            carry = sum >> 32;
-            if carry == 0 {
-                break;
-            }
-        }
-        debug_assert_eq!(carry, 0);
-
-        let mut shifted = [0u32; 8];
-        let mut carry_bits = 0u32;
-        for i in (0..8).rev() {
-            shifted[i] = (p_plus_one[i] >> 2) | (carry_bits << 30);
-            carry_bits = p_plus_one[i] & 0b11;
-        }
-        debug_assert_eq!(carry_bits, 0, "p + 1 must be divisible by four");
-        shifted
-    }
-
-    fn k1_base_from_u32(value: u32) -> Limbs {
-        let mut limbs = [0; 8];
-        limbs[0] = value;
-        assert!(K1Base::is_canonical(&limbs), "small base-field element must be canonical");
-        limbs
     }
 
     fn be_bytes_to_le_limbs(bytes: &[u8; 32]) -> [u32; 8] {
