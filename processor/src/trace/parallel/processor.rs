@@ -260,6 +260,10 @@ impl SystemInterface for ReplayProcessor {
         self.system.ctx
     }
 
+    fn deferred_root(&self) -> Word {
+        self.system.deferred_root
+    }
+
     fn set_caller_hash(&mut self, caller_hash: Word) {
         self.system.fn_hash = caller_hash;
     }
@@ -270,6 +274,15 @@ impl SystemInterface for ReplayProcessor {
 
     fn increment_clock(&mut self) {
         self.system.clk += 1_u32;
+    }
+
+    fn log_deferred_statement(
+        &mut self,
+        _statement_digest: Digest,
+        expected_new_root: Word,
+    ) -> Result<(), OperationError> {
+        self.system.deferred_root = expected_new_root;
+        Ok(())
     }
 
     fn save_call_state(&mut self) {
@@ -478,19 +491,6 @@ impl Processor for ReplayProcessor {
 
     fn hasher(&mut self) -> &mut Self::Hasher {
         &mut self.hasher_response_replay
-    }
-
-    fn deferred_root(&self) -> Word {
-        self.system.deferred_root
-    }
-
-    fn log_deferred_statement(
-        &mut self,
-        _statement_digest: Digest,
-        expected_new_root: Word,
-    ) -> Result<(), OperationError> {
-        self.system.deferred_root = expected_new_root;
-        Ok(())
     }
 }
 

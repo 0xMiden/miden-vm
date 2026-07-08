@@ -1,0 +1,29 @@
+# Publish order for the next miden-vm crate release.
+#
+# Keep this list in dependency order. Remove crates that are not part of a
+# given release, or use the workflow_dispatch packages input to override this
+# file.
+miden-utils-core-derive
+miden-utils-indexing
+miden-utils-sync
+midenc-hir-type
+miden-debug-types
+miden-utils-diagnostics
+miden-assembly-syntax-cst
+miden-core
+miden-precompiles-codegen
+miden-ace-codegen
+miden-assembly-syntax
+miden-air
+miden-mast-package
+miden-package-registry
+miden-project
+miden-assembly
+miden-processor
+miden-precompiles
+miden-prover
+miden-verifier
+miden-core-lib
+miden-vm
+miden-package-registry-local
+miden-format

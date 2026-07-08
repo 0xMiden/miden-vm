@@ -149,7 +149,6 @@ end
 #!
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi, ...]
-@locals(0)
 proc split_word_u32s_le
     swap u32split
     # => [w1_lo, w1_hi, w0, w2, w3, ...]
@@ -173,7 +172,6 @@ end
 #! Output: [prefix | byte3(QX7)<<8 | byte2(QX7)<<16 | byte1(QX7)<<24, ...]
 #!
 #! Preconditions: QX7 is a u32 value. `byte_i(x) = (x >> 8*i) & 0xff`.
-@locals(0)
 proc pack_sec1_first_word
     dup u32shr.16 u32and.65280
     # => [byte3(QX7)<<8, QX7, prefix, ...]
@@ -197,7 +195,6 @@ end
 #! Output: [byte0(A) | byte3(B)<<8 | byte2(B)<<16 | byte1(B)<<24, ...]
 #!
 #! Preconditions: A and B are u32 values. `byte_i(x) = (x >> 8*i) & 0xff`.
-@locals(0)
 proc pack_sec1_middle_word
     u32and.255
     # => [byte0(A), B, ...]
@@ -228,7 +225,6 @@ end
 #! Memory:
 #! - src_ptr[0] = B, src_ptr[1] = A
 #! - dst_ptr receives byte0(A) | byte3(B)<<8 | byte2(B)<<16 | byte1(B)<<24
-@locals(0)
 proc pack_sec1_middle_word_from_mem
     dup mem_load
     # => [B, src_ptr, dst_ptr, ...]
@@ -249,7 +245,6 @@ end
 #!
 #! Input:  [x, ...]
 #! Output: [byte_reverse(x), ...]
-@locals(0)
 proc reverse_u32_bytes
     dup u32shr.8 push.0x00FF00FF u32and
     # => [(x >> 8) & 0x00ff00ff, x, ...]
@@ -279,7 +274,6 @@ end
 #! This fixed helper matches core Poseidon2::hash_elements(PK[9]): capacity word [1, 0, 0, 0],
 #! first absorb PK[0..8] as two full rate words via `mem_stream`, then absorb PK[8] with seven
 #! zero padding elements.
-@locals(0)
 proc hash_staged_pk9
     push.1 push.0.0.0 movup.3 padw padw
     # => [R0=0w, R1=0w, C=[1,0,0,0], pk_ptr, PK8, ...]

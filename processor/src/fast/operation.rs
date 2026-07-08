@@ -65,23 +65,6 @@ impl Processor for FastProcessor {
     fn system_mut(&mut self) -> &mut Self::System {
         self
     }
-
-    #[inline(always)]
-    fn deferred_root(&self) -> Word {
-        self.deferred_state.root()
-    }
-
-    #[inline(always)]
-    fn log_deferred_statement(
-        &mut self,
-        statement_digest: Digest,
-        expected_new_root: Word,
-    ) -> Result<(), OperationError> {
-        self.deferred_state
-            .log_verified_statement(statement_digest, expected_new_root)
-            .map(|_| ())
-            .map_err(OperationError::from)
-    }
 }
 
 impl HasherInterface for FastProcessor {
@@ -155,8 +138,25 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
+    fn deferred_root(&self) -> Word {
+        self.deferred_state.root()
+    }
+
+    #[inline(always)]
     fn increment_clock(&mut self) {
         self.clk += 1_u32;
+    }
+
+    #[inline(always)]
+    fn log_deferred_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Word,
+    ) -> Result<(), OperationError> {
+        self.deferred_state
+            .log_verified_statement(statement_digest, expected_new_root)
+            .map(|_| ())
+            .map_err(OperationError::from)
     }
 
     #[inline(always)]

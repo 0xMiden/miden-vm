@@ -308,21 +308,67 @@ impl WireEncoder {
         state: &DeferredState,
         digest: Digest,
     ) -> Result<(), IntegrityError> {
-        if digest == TRUE_DIGEST {
-            return Ok(());
+        let mut pending = Vec::new();
+        pending.push(WireEncodeStep::Visit(digest));
+
+        while let Some(step) = pending.pop() {
+            match step {
+                WireEncodeStep::Visit(digest) => {
+                    self.schedule_digest(state, digest, &mut pending)?
+                },
+                WireEncodeStep::Emit(digest) => {
+                    let entry = self.entry_for_digest(state, digest)?;
+                    self.push_entry(digest, entry)?;
+                },
+            }
         }
-        if !self.seen.insert(digest) {
+
+        Ok(())
+    }
+
+    fn schedule_digest(
+        &mut self,
+        state: &DeferredState,
+        digest: Digest,
+        pending: &mut Vec<WireEncodeStep>,
+    ) -> Result<(), IntegrityError> {
+        if digest == TRUE_DIGEST || !self.seen.insert(digest) {
             return Ok(());
         }
 
-        let node = state.get_node(&digest).ok_or(IntegrityError::InvalidStructure)?;
-        let node_type = state
-            .registry()
-            .decode_node_type(node.tag())
-            .map_err(|_| IntegrityError::InvalidStructure)?;
-        node_type.validate_node(node).map_err(|_| IntegrityError::InvalidStructure)?;
+        let node = self.validated_node(state, digest)?;
+        pending.push(WireEncodeStep::Emit(digest));
 
-        let entry = match node_type {
+        match self.node_type(state, node)? {
+            NodeType::Data => {},
+            NodeType::Join => {
+                let (lhs, rhs) =
+                    node.payload().as_join().map_err(|_| IntegrityError::InvalidStructure)?;
+                pending.push(WireEncodeStep::Visit(rhs));
+                pending.push(WireEncodeStep::Visit(lhs));
+            },
+            NodeType::PairList => {
+                let pairs =
+                    node.payload().as_pair_list().map_err(|_| IntegrityError::InvalidStructure)?;
+                for (lhs, rhs) in pairs.iter().rev() {
+                    pending.push(WireEncodeStep::Visit(*rhs));
+                    pending.push(WireEncodeStep::Visit(*lhs));
+                }
+            },
+            NodeType::True => return Err(IntegrityError::InvalidStructure),
+        };
+
+        Ok(())
+    }
+
+    fn entry_for_digest(
+        &self,
+        state: &DeferredState,
+        digest: Digest,
+    ) -> Result<WireEntry, IntegrityError> {
+        let node = self.validated_node(state, digest)?;
+
+        Ok(match self.node_type(state, node)? {
             NodeType::Data => WireEntry::Data {
                 tag: node.tag(),
                 chunks: node
@@ -334,8 +380,6 @@ impl WireEncoder {
             NodeType::Join => {
                 let (lhs, rhs) =
                     node.payload().as_join().map_err(|_| IntegrityError::InvalidStructure)?;
-                self.visit_state_digest(state, lhs)?;
-                self.visit_state_digest(state, rhs)?;
                 let lhs = self.index_for(lhs)?;
                 let rhs = self.index_for(rhs)?;
                 WireEntry::Join { tag: node.tag(), lhs, rhs }
@@ -343,10 +387,6 @@ impl WireEncoder {
             NodeType::PairList => {
                 let pairs =
                     node.payload().as_pair_list().map_err(|_| IntegrityError::InvalidStructure)?;
-                for (lhs, rhs) in pairs.iter() {
-                    self.visit_state_digest(state, *lhs)?;
-                    self.visit_state_digest(state, *rhs)?;
-                }
                 let pairs = pairs
                     .iter()
                     .map(|(lhs, rhs)| Ok((self.index_for(*lhs)?, self.index_for(*rhs)?)))
@@ -354,9 +394,26 @@ impl WireEncoder {
                 WireEntry::PairList { tag: node.tag(), pairs }
             },
             NodeType::True => return Err(IntegrityError::InvalidStructure),
-        };
+        })
+    }
 
-        self.push_entry(digest, entry)
+    fn validated_node<'a>(
+        &self,
+        state: &'a DeferredState,
+        digest: Digest,
+    ) -> Result<&'a Node, IntegrityError> {
+        let node = state.get_node(&digest).ok_or(IntegrityError::InvalidStructure)?;
+        self.node_type(state, node)?
+            .validate_node(node)
+            .map_err(|_| IntegrityError::InvalidStructure)?;
+        Ok(node)
+    }
+
+    fn node_type(&self, state: &DeferredState, node: &Node) -> Result<NodeType, IntegrityError> {
+        state
+            .registry()
+            .decode_node_type(node.tag())
+            .map_err(|_| IntegrityError::InvalidStructure)
     }
 
     fn index_for(&self, digest: Digest) -> Result<u32, IntegrityError> {
@@ -374,6 +431,11 @@ impl WireEncoder {
         self.by_digest.insert(digest, next_index);
         Ok(())
     }
+}
+
+enum WireEncodeStep {
+    Visit(Digest),
+    Emit(Digest),
 }
 
 // SERIALIZATION
@@ -574,6 +636,33 @@ mod tests {
             },
         ]));
         assert_wire_round_trips(DeferredStateWire::default());
+    }
+
+    #[test]
+    fn wire_encoder_handles_deep_roots_iteratively() {
+        let mut state = DeferredState::default();
+        for _ in 0..4_096 {
+            state.log_statement(TRUE_DIGEST).unwrap();
+        }
+
+        let root = state.root();
+        let wire = state.to_wire().unwrap();
+
+        assert_eq!(wire.entries.len(), 4_096);
+        assert_eq!(
+            wire.entries.last(),
+            Some(&WireEntry::Join {
+                tag: Tag::AND,
+                lhs: 4_095,
+                rhs: TRUE_INDEX,
+            })
+        );
+        assert_eq!(
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &wire, usize::MAX)
+                .unwrap()
+                .root(),
+            root
+        );
     }
 
     fn encoded_entry_count(entry_count: usize) -> Vec<u8> {

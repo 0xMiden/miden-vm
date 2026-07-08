@@ -11,6 +11,7 @@ members = [
     "crates/debug-types",
     "crates/lib/core",
     "crates/mast-package",
+    "crates/midenc-hir-type",
     "crates/package-registry",
     "crates/package-registry-local",
     "crates/miden-format",
@@ -39,6 +40,9 @@ homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
 rust-version = "1.96"
+# Private workspace members inherit this version. Publishable crates keep their
+# own package versions so release tooling can publish only the crates selected
+# for a release.
 version = "0.25.0"
 
 [profile.optimized]
@@ -77,6 +81,7 @@ miden-test-serde-macros = { path = "./crates/test-serde-macros", default-feature
 miden-project           = { path = "./crates/project", version = "0.25", default-features = false }
 miden-prover            = { path = "./prover", version = "0.25", default-features = false }
 miden-core-lib          = { path = "./crates/lib/core", version = "0.25", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.9", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.25", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.25", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.25", default-features = false }
@@ -87,7 +92,7 @@ miden-verifier          = { path = "./verifier", version = "0.25", default-featu
 # Miden crates
 miden-crypto     = { version = "0.27", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type  = { version = "0.8", default-features = false }
+miden-serde-utils = { version = "0.27", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
@@ -107,6 +112,7 @@ proptest        = { version = "1.8", default-features = false, features = ["no_s
 proptest-derive = { version = "0.7", default-features = false }
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
+serde_repr      = { version = "0.1" }
 serde-untagged  = {version = "0.1" }
 smallvec        = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 syn             = "1.0"
