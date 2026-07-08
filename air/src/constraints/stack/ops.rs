@@ -359,7 +359,11 @@ pub fn enforce_main<AB>(
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::{
+        format,
+        string::{String, ToString},
+        vec::Vec,
+    };
 
     use miden_core::{
         Felt,
@@ -429,7 +433,7 @@ mod tests {
     /// `sys_ops`) — independent of the folded constraint's own arithmetic in
     /// `enforce_main`.
     struct StackOpCase {
-        name: &'static str,
+        name: String,
         opcode: u8,
         setup: fn(&mut CoreCols<Felt>),
         expected: Vec<(usize, Felt)>,
@@ -437,183 +441,89 @@ mod tests {
 
     fn stack_op_cases() -> Vec<StackOpCase> {
         let s = sentinel;
-        Vec::from([
+
+        // DUP8/10/12/14 have no dedicated opcode (their opcode slots are reused by other
+        // ops), so the indices below are not contiguous.
+        const DUP_INDICES: [usize; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 13, 15];
+        const DUP_OPCODES: [u8; 12] = [
+            opcodes::DUP0,
+            opcodes::DUP1,
+            opcodes::DUP2,
+            opcodes::DUP3,
+            opcodes::DUP4,
+            opcodes::DUP5,
+            opcodes::DUP6,
+            opcodes::DUP7,
+            opcodes::DUP9,
+            opcodes::DUP11,
+            opcodes::DUP13,
+            opcodes::DUP15,
+        ];
+        const MOVUP_OPCODES: [u8; 7] = [
+            opcodes::MOVUP2,
+            opcodes::MOVUP3,
+            opcodes::MOVUP4,
+            opcodes::MOVUP5,
+            opcodes::MOVUP6,
+            opcodes::MOVUP7,
+            opcodes::MOVUP8,
+        ];
+        const MOVDN_OPCODES: [u8; 7] = [
+            opcodes::MOVDN2,
+            opcodes::MOVDN3,
+            opcodes::MOVDN4,
+            opcodes::MOVDN5,
+            opcodes::MOVDN6,
+            opcodes::MOVDN7,
+            opcodes::MOVDN8,
+        ];
+
+        let mut cases = Vec::from([StackOpCase {
+            name: "PAD".to_string(),
+            opcode: opcodes::PAD,
+            setup: base_setup,
+            expected: Vec::from([(0, Felt::ZERO)]),
+        }]);
+
+        cases.extend(DUP_INDICES.into_iter().zip(DUP_OPCODES).map(|(i, opcode)| StackOpCase {
+            name: format!("DUP{i}"),
+            opcode,
+            setup: base_setup,
+            expected: Vec::from([(0, s(i))]),
+        }));
+
+        cases.extend([
             StackOpCase {
-                name: "PAD",
-                opcode: opcodes::PAD,
-                setup: base_setup,
-                expected: Vec::from([(0, Felt::ZERO)]),
-            },
-            StackOpCase {
-                name: "DUP0",
-                opcode: opcodes::DUP0,
-                setup: base_setup,
-                expected: Vec::from([(0, s(0))]),
-            },
-            StackOpCase {
-                name: "DUP1",
-                opcode: opcodes::DUP1,
-                setup: base_setup,
-                expected: Vec::from([(0, s(1))]),
-            },
-            StackOpCase {
-                name: "DUP2",
-                opcode: opcodes::DUP2,
-                setup: base_setup,
-                expected: Vec::from([(0, s(2))]),
-            },
-            StackOpCase {
-                name: "DUP3",
-                opcode: opcodes::DUP3,
-                setup: base_setup,
-                expected: Vec::from([(0, s(3))]),
-            },
-            StackOpCase {
-                name: "DUP4",
-                opcode: opcodes::DUP4,
-                setup: base_setup,
-                expected: Vec::from([(0, s(4))]),
-            },
-            StackOpCase {
-                name: "DUP5",
-                opcode: opcodes::DUP5,
-                setup: base_setup,
-                expected: Vec::from([(0, s(5))]),
-            },
-            StackOpCase {
-                name: "DUP6",
-                opcode: opcodes::DUP6,
-                setup: base_setup,
-                expected: Vec::from([(0, s(6))]),
-            },
-            StackOpCase {
-                name: "DUP7",
-                opcode: opcodes::DUP7,
-                setup: base_setup,
-                expected: Vec::from([(0, s(7))]),
-            },
-            StackOpCase {
-                name: "DUP9",
-                opcode: opcodes::DUP9,
-                setup: base_setup,
-                expected: Vec::from([(0, s(9))]),
-            },
-            StackOpCase {
-                name: "DUP11",
-                opcode: opcodes::DUP11,
-                setup: base_setup,
-                expected: Vec::from([(0, s(11))]),
-            },
-            StackOpCase {
-                name: "DUP13",
-                opcode: opcodes::DUP13,
-                setup: base_setup,
-                expected: Vec::from([(0, s(13))]),
-            },
-            StackOpCase {
-                name: "DUP15",
-                opcode: opcodes::DUP15,
-                setup: base_setup,
-                expected: Vec::from([(0, s(15))]),
-            },
-            StackOpCase {
-                name: "CLK",
+                name: "CLK".to_string(),
                 opcode: opcodes::CLK,
                 setup: setup_clk,
                 expected: Vec::from([(0, Felt::new_unchecked(555))]),
             },
             StackOpCase {
-                name: "SWAP",
+                name: "SWAP".to_string(),
                 opcode: opcodes::SWAP,
                 setup: base_setup,
                 expected: Vec::from([(0, s(1)), (1, s(0))]),
             },
+        ]);
+
+        cases.extend((2usize..=8).zip(MOVUP_OPCODES).map(|(i, opcode)| StackOpCase {
+            name: format!("MOVUP{i}"),
+            opcode,
+            setup: base_setup,
+            expected: Vec::from([(0, s(i))]),
+        }));
+
+        cases.extend((2usize..=8).zip(MOVDN_OPCODES).map(|(i, opcode)| StackOpCase {
+            name: format!("MOVDN{i}"),
+            opcode,
+            setup: base_setup,
+            expected: Vec::from([(i, s(0))]),
+        }));
+
+        cases.extend([
             StackOpCase {
-                name: "MOVUP2",
-                opcode: opcodes::MOVUP2,
-                setup: base_setup,
-                expected: Vec::from([(0, s(2))]),
-            },
-            StackOpCase {
-                name: "MOVUP3",
-                opcode: opcodes::MOVUP3,
-                setup: base_setup,
-                expected: Vec::from([(0, s(3))]),
-            },
-            StackOpCase {
-                name: "MOVUP4",
-                opcode: opcodes::MOVUP4,
-                setup: base_setup,
-                expected: Vec::from([(0, s(4))]),
-            },
-            StackOpCase {
-                name: "MOVUP5",
-                opcode: opcodes::MOVUP5,
-                setup: base_setup,
-                expected: Vec::from([(0, s(5))]),
-            },
-            StackOpCase {
-                name: "MOVUP6",
-                opcode: opcodes::MOVUP6,
-                setup: base_setup,
-                expected: Vec::from([(0, s(6))]),
-            },
-            StackOpCase {
-                name: "MOVUP7",
-                opcode: opcodes::MOVUP7,
-                setup: base_setup,
-                expected: Vec::from([(0, s(7))]),
-            },
-            StackOpCase {
-                name: "MOVUP8",
-                opcode: opcodes::MOVUP8,
-                setup: base_setup,
-                expected: Vec::from([(0, s(8))]),
-            },
-            StackOpCase {
-                name: "MOVDN2",
-                opcode: opcodes::MOVDN2,
-                setup: base_setup,
-                expected: Vec::from([(2, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN3",
-                opcode: opcodes::MOVDN3,
-                setup: base_setup,
-                expected: Vec::from([(3, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN4",
-                opcode: opcodes::MOVDN4,
-                setup: base_setup,
-                expected: Vec::from([(4, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN5",
-                opcode: opcodes::MOVDN5,
-                setup: base_setup,
-                expected: Vec::from([(5, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN6",
-                opcode: opcodes::MOVDN6,
-                setup: base_setup,
-                expected: Vec::from([(6, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN7",
-                opcode: opcodes::MOVDN7,
-                setup: base_setup,
-                expected: Vec::from([(7, s(0))]),
-            },
-            StackOpCase {
-                name: "MOVDN8",
-                opcode: opcodes::MOVDN8,
-                setup: base_setup,
-                expected: Vec::from([(8, s(0))]),
-            },
-            StackOpCase {
-                name: "SWAPW",
+                name: "SWAPW".to_string(),
                 opcode: opcodes::SWAPW,
                 setup: base_setup,
                 expected: Vec::from([
@@ -628,7 +538,7 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "SWAPW2",
+                name: "SWAPW2".to_string(),
                 opcode: opcodes::SWAPW2,
                 setup: base_setup,
                 expected: Vec::from([
@@ -643,7 +553,7 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "SWAPW3",
+                name: "SWAPW3".to_string(),
                 opcode: opcodes::SWAPW3,
                 setup: base_setup,
                 expected: Vec::from([
@@ -658,7 +568,7 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "SWAPDW",
+                name: "SWAPDW".to_string(),
                 opcode: opcodes::SWAPDW,
                 setup: base_setup,
                 expected: Vec::from([
@@ -681,19 +591,19 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "CSWAP (selector = 0)",
+                name: "CSWAP (selector = 0)".to_string(),
                 opcode: opcodes::CSWAP,
                 setup: setup_cswap_false,
                 expected: Vec::from([(0, s(1)), (1, s(2))]),
             },
             StackOpCase {
-                name: "CSWAP (selector = 1)",
+                name: "CSWAP (selector = 1)".to_string(),
                 opcode: opcodes::CSWAP,
                 setup: setup_cswap_true,
                 expected: Vec::from([(0, s(2)), (1, s(1))]),
             },
             StackOpCase {
-                name: "CSWAPW (selector = 0)",
+                name: "CSWAPW (selector = 0)".to_string(),
                 opcode: opcodes::CSWAPW,
                 setup: setup_cswap_false,
                 expected: Vec::from([
@@ -708,7 +618,7 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "CSWAPW (selector = 1)",
+                name: "CSWAPW (selector = 1)".to_string(),
                 opcode: opcodes::CSWAPW,
                 setup: setup_cswap_true,
                 expected: Vec::from([
@@ -723,7 +633,7 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "CALLER",
+                name: "CALLER".to_string(),
                 opcode: opcodes::CALLER,
                 setup: setup_caller,
                 expected: Vec::from([
@@ -734,24 +644,26 @@ mod tests {
                 ]),
             },
             StackOpCase {
-                name: "SDEPTH",
+                name: "SDEPTH".to_string(),
                 opcode: opcodes::SDEPTH,
                 setup: setup_sdepth,
                 expected: Vec::from([(0, Felt::new_unchecked(7))]),
             },
             StackOpCase {
-                name: "MSTREAM",
+                name: "MSTREAM".to_string(),
                 opcode: opcodes::MSTREAM,
                 setup: base_setup,
                 expected: Vec::from([(12, s(12) + Felt::new_unchecked(8))]),
             },
             StackOpCase {
-                name: "PIPE",
+                name: "PIPE".to_string(),
                 opcode: opcodes::PIPE,
                 setup: base_setup,
                 expected: Vec::from([(12, s(12) + Felt::new_unchecked(8))]),
             },
-        ])
+        ]);
+
+        cases
     }
 
     /// For every opcode folded into the shared per-position constraints in `enforce_main`,
