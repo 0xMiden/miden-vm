@@ -34,7 +34,8 @@ mod tests;
 /// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, coset, poe, pe0, pe1, a0, a1, cptr, ...]
 ///
 /// Output:
-/// [t0, t1, s0, s1, cf1, cf2, cf3, poe^2, cptr+8, cptr+8, poe^4, f_pos, ne0, ne1, cptr+8, eptr, ...]
+/// [t0, t1, s0, s1, cf1, cf2, cf3, poe^2, cptr+8, cptr+8, poe^4, f_pos, ne0, ne1, cptr+8, eptr,
+/// ...]
 ///
 /// In the above, eptr is moved from the stack overflow table and is expected to be the address
 /// of the final FRI layer.
