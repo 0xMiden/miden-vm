@@ -10,7 +10,7 @@ use miden_processor::{
 };
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-const VERIFY_EXPECTED_CYCLES: u64 = 2_044;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_697;
 
 #[test]
 fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {

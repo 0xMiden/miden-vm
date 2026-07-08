@@ -1,3 +1,16 @@
+#! Loads a 128-bit little-endian chunk from the operand stack as a canonical field value.
+#! Input:  [CHUNK_U32[4], ...]
+#! Output: [FIELD_DIGEST, ...]
+#!
+#! Every 128-bit chunk is canonical in the generated prime fields because 2^128 is smaller than
+#! the field modulus.
+pub proc load_128
+    push.[0, 0, 0, 0] swapw
+    # => [CHUNK_U32[4], ZERO_HI_U32[4], ...]
+    exec.load
+    # => [FIELD_DIGEST, ...]
+end
+
 #! Loads a 128-bit little-endian chunk from memory as a canonical field value.
 #! Input:  [ptr, ...]
 #! Output: [FIELD_DIGEST, ...]
@@ -5,9 +18,30 @@
 pub proc load_128_mem
     padw movup.4 mem_loadw_le
     # => [CHUNK_U32[4], ...]
-    push.[0, 0, 0, 0] swapw
-    # => [CHUNK_U32[4], ZERO_HI_U32[4], ...]
-    exec.load
+    exec.load_128
+    # => [FIELD_DIGEST, ...]
+end
+
+#! Reduces a 256-bit little-endian u32 value from the operand stack into this field.
+#! Input:  [VALUE_U32[8], ...]
+#! Output: [FIELD_DIGEST, ...]
+#!
+#! Registers the expression `lo128 + hi128 * 2^128`, where each half is loaded as a canonical
+#! field value.
+pub proc load_reduced_256
+    exec.load_128
+    # => [LO_DIGEST, HI_U32[4], ...]
+
+    swapw
+    # => [HI_U32[4], LO_DIGEST, ...]
+    exec.load_128
+    # => [HI_DIGEST, LO_DIGEST, ...]
+
+    exec.push_pow_2_128_digest
+    # => [POW_2_128_DIGEST, HI_DIGEST, LO_DIGEST, ...]
+    exec.mul
+    # => [HI_TERM_DIGEST, LO_DIGEST, ...]
+    exec.add
     # => [FIELD_DIGEST, ...]
 end
 

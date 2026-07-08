@@ -120,6 +120,12 @@ end
 #!
 #! No result word is pushed. The procedure traps on malformed native limbs, invalid/off-curve public
 #! keys, invalid signature scalars, or failed signature verification.
+#!
+#! Low-s note: the signature at `sig_ptr` only needs to satisfy the ECDSA equation
+#! with canonical, nonzero scalar values; low-s normalization (`SIG_S <= n/2`) is
+#! not checked. Thus both `(r, s)` and `(r, n - s)` verify when otherwise valid.
+#! If the signature encoding is protocol-visible or must be unique, enforce
+#! `0 < s <= n/2` before calling or canonicalize upstream.
 pub proc verify_prehash
     exec.ecdsa_secp256k1::assert_verify_prehash
 end

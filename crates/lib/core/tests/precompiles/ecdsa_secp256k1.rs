@@ -3,8 +3,8 @@ use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
 };
-use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, K1Scalar};
-use miden_processor::{ExecutionError, ExecutionOutput};
+use miden_precompiles::{CurvePrecompile, K1Scalar};
+use miden_processor::ExecutionOutput;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 use super::helpers::{
@@ -14,13 +14,13 @@ use super::helpers::{
 const PUBKEY_PTR: u32 = 128;
 const DIGEST_PTR: u32 = PUBKEY_PTR + 16;
 const SIG_PTR: u32 = DIGEST_PTR + 8;
-const ASSERT_VERIFY_PREHASH_EXPECTED_CYCLES: u64 = 1_452;
+const ASSERT_VERIFY_PREHASH_EXPECTED_CYCLES: u64 = 1_105;
 
 #[test]
 fn assert_verify_prehash_accepts_valid_signature() {
     let fixture = valid_prehash_fixture();
 
-    let output = run_assert_verify_prehash(&fixture)
+    let output = run_precompile_program(&assert_verify_prehash_source(&fixture))
         .expect("valid secp256k1 ECDSA prehash signature must verify");
     assert_deferred_state_round_trips(&output);
 }
@@ -48,16 +48,18 @@ fn assert_verify_prehash_traps_on_off_curve_public_key() {
 
 #[test]
 fn assert_verify_prehash_traps_on_non_u32_limb() {
+    let non_u32 = Felt::new(u32::MAX as u64 + 1).expect("2^32 must fit in the VM field");
+
     let mut digest_fixture = valid_prehash_fixture();
-    digest_fixture.digest[0] = non_u32_felt();
+    digest_fixture.digest[0] = non_u32;
     expect_assert_verify_trap(&digest_fixture);
 
     let mut r_fixture = valid_prehash_fixture();
-    r_fixture.signature[0] = non_u32_felt();
+    r_fixture.signature[0] = non_u32;
     expect_assert_verify_trap(&r_fixture);
 
     let mut s_fixture = valid_prehash_fixture();
-    s_fixture.signature[8] = non_u32_felt();
+    s_fixture.signature[8] = non_u32;
     expect_assert_verify_trap(&s_fixture);
 }
 
@@ -102,14 +104,14 @@ fn assert_verify_prehash_traps_on_tampered_signature() {
 #[test]
 fn assert_verify_prehash_traps_on_valid_but_wrong_public_key() {
     let mut fixture = valid_prehash_fixture();
-    let generator = generator_pubkey_felts();
-    assert_ne!(fixture.pubkey, generator, "deterministic test key should not be the generator");
-    fixture.pubkey = generator;
+    let mut rng = ChaCha20Rng::from_seed([0xa5; 32]);
+    let wrong_pubkey = public_key_felts(&SigningKey::with_rng(&mut rng).public_key());
+    assert_ne!(fixture.pubkey, wrong_pubkey, "deterministic wrong key should differ");
+    fixture.pubkey = wrong_pubkey;
 
     expect_assert_verify_trap(&fixture);
 }
 
-#[derive(Clone)]
 struct EcdsaPrehashFixture {
     pubkey: [Felt; 16],
     digest: [Felt; 8],
@@ -170,34 +172,14 @@ fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
     limbs.map(Felt::from_u32)
 }
 
-fn non_u32_felt() -> Felt {
-    Felt::new(u32::MAX as u64 + 1).expect("2^32 must fit in the VM field")
-}
-
 fn flip_low_bit(felt: &mut Felt) {
     let value: u32 = felt.as_canonical_u64().try_into().expect("fixture limb must fit in u32");
     *felt = Felt::from_u32(value ^ 1);
 }
 
-fn generator_pubkey_felts() -> [Felt; 16] {
-    let CurvePoint::Affine { x, y } = CurveId::Secp256k1.generator() else {
-        unreachable!("secp256k1 generator is affine");
-    };
-
-    let mut felts = [Felt::from_u32(0); 16];
-    felts[..8].copy_from_slice(&limbs_to_felts(x));
-    felts[8..].copy_from_slice(&limbs_to_felts(y));
-    felts
-}
-
-fn run_assert_verify_prehash(
-    fixture: &EcdsaPrehashFixture,
-) -> Result<ExecutionOutput, ExecutionError> {
+fn expect_assert_verify_trap(fixture: &EcdsaPrehashFixture) {
     run_precompile_program(&assert_verify_prehash_source(fixture))
-}
-
-fn expect_assert_verify_trap(fixture: &EcdsaPrehashFixture) -> ExecutionError {
-    run_assert_verify_prehash(fixture).expect_err("invalid verifier fixture must trap")
+        .expect_err("invalid verifier fixture must trap");
 }
 
 fn curve_op_count(output: &ExecutionOutput, op_id: u64) -> usize {
