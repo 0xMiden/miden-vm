@@ -24,8 +24,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_core::{Felt, deferred::Node, field::QuadFelt};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::RowMajorMatrix};
 
 use crate::{
     hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},

@@ -19,8 +19,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 
 use crate::{
     hash::{

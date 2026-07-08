@@ -23,14 +23,14 @@
 
 use std::time::Instant;
 
+use miden_core::utils::Matrix;
 use miden_lifted_air::LiftedAir;
 use miden_precompiles::K1_BASE_BOUND_PTR;
 use miden_precompiles_prover::{
     math::{U256, from_hex},
     session::{ChipletAir, Session, statements::horner_sign_paths, verify_deferred},
 };
-use p3_matrix::Matrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 /// VM fixed secp256k1 base-field bound pointer.
 const FP: u32 = K1_BASE_BOUND_PTR;

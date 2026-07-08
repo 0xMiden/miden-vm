@@ -15,8 +15,8 @@ use core::array;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR, GAMMA_OFFSET,

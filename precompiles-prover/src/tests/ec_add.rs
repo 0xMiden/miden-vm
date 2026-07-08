@@ -15,11 +15,14 @@ use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 use k256::elliptic_curve::sec1::ToEncodedPoint; // to_encoded_point()
 use k256::{ProjectivePoint, Scalar};
 use miden_air::lookup::Challenges;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 // `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
 // (ignored) prove round-trip.

@@ -2416,7 +2416,6 @@ dependencies = [
 name = "miden-precompiles-prover"
 version = "0.25.0"
 dependencies = [
- "itertools 0.14.0",
  "k256 0.13.4",
  "miden-air",
  "miden-core",
@@ -2424,17 +2423,14 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "p3-air",
- "p3-field",
- "p3-matrix",
- "rand 0.9.4",
+ "rand 0.10.2",
  "ruint",
  "serde",
  "serde-wincode",
  "thiserror",
  "tracing",
  "tracing-subscriber",
- "wincode 0.4.9",
+ "wincode",
 ]
 
 [[package]]
@@ -2496,7 +2492,7 @@ dependencies = [
  "serde-wincode",
  "tokio",
  "tracing",
- "wincode 0.4.9",
+ "wincode",
 ]
 
 [[package]]
@@ -2572,7 +2568,7 @@ dependencies = [
  "serde-wincode",
  "test-case",
  "thiserror",
- "wincode 0.4.9",
+ "wincode",
 ]
 
 [[package]]
@@ -2627,7 +2623,7 @@ dependencies = [
  "serde",
  "serde-wincode",
  "thiserror",
- "wincode 0.4.9",
+ "wincode",
 ]
 
 [[package]]
@@ -3869,7 +3865,7 @@ checksum = "9aa9d3a86c66cf10ce79df36f555a5a4c8d72a82515d9ea8ca420e02c925c30f"
 dependencies = [
  "serde",
  "thiserror",
- "wincode 0.5.5",
+ "wincode",
 ]
 
 [[package]]
@@ -4738,18 +4734,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "wincode"
-version = "0.4.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "657690780ce23e6f66576a782ffd88eb353512381817029cc1d7a99154bb6d1f"
-dependencies = [
- "pastey",
- "proc-macro2",
- "quote",
- "thiserror",
-]
 
 [[package]]
 name = "wincode"

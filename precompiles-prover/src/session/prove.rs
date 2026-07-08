@@ -15,6 +15,7 @@ use miden_core::{
     deferred::DeferredRoot,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     proof::{DeferredProof, HashFunction, StarkProof},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{
     BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, ReductionError, Statement,
@@ -25,7 +26,6 @@ use miden_lifted_stark::{
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
-use p3_matrix::dense::RowMajorMatrix;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
 

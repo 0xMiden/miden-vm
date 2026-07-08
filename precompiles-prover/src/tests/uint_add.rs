@@ -8,10 +8,13 @@ use miden_air::lookup::{
     Challenges, LookupAir,
     debug::{check_trace_balance, trace::DebugTraceBuilder},
 };
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_lifted_air::LiftedAir;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     math::{U256, add_reduce, sub_reduce},

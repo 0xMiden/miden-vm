@@ -27,10 +27,10 @@
 
 use std::time::Instant;
 
+use miden_core::utils::Matrix;
 use miden_lifted_air::LiftedAir;
 use miden_precompiles_prover::session::{ChipletAir, Session, verify_deferred};
-use p3_matrix::Matrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 fn main() {
     // `PROFILE=1` installs a span timer (stderr) so the prover's phase

@@ -14,11 +14,11 @@ use miden_core::{
     chiplets::hasher::Hasher,
     deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::LiftedAir;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
-use p3_matrix::dense::RowMajorMatrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},

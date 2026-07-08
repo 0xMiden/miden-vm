@@ -41,10 +41,10 @@ use miden_core::{
     Felt,
     deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_precompiles::Keccak256Precompile;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},

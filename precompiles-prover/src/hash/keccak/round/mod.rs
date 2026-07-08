@@ -17,9 +17,9 @@ use alloc::{vec, vec::Vec};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use p3_matrix::dense::RowMajorMatrix;
 pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slots};
 
 use crate::{

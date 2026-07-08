@@ -20,6 +20,7 @@ miden-project
 miden-assembly
 miden-processor
 miden-precompiles
+miden-precompiles-prover
 miden-prover
 miden-verifier
 miden-core-lib-codegen
