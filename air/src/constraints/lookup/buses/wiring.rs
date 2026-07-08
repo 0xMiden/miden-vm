@@ -35,11 +35,13 @@
 //! controller input/output row pair to one permutation cycle.
 //!
 //! - **Controller input** (`controller_active * is_input`, multiplicity `+1`): controller side of a
-//!   `(state_in, state_out)` pair. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`controller_active * is_output`, multiplicity `+1`). Routed to
-//!   `BusId::HasherPermLinkOutput`.
+//!   `(perm_id, input_state)` message. Routed to `BusId::HasherPermLinkInput`.
+//! - **Controller output** (`controller_active * is_output`, multiplicity `+1`): controller side of
+//!   a `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
 //!
-//! The Poseidon2 AIR emits the matching removals on cycle rows 0 and 15.
+//! Each controller pair contributes one input message and one output message with the same
+//! `perm_id`. The Poseidon2 AIR removes those messages on rows 0 and 15 of the matching
+//! permutation instance, and its transition constraints tie the row-15 state to the row-0 state.
 
 use core::array;
 

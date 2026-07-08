@@ -87,20 +87,20 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(8039382831069065458),
-    Felt::new_unchecked(969640491584705462),
-    Felt::new_unchecked(4446485558487724280),
-    Felt::new_unchecked(3245192097882717736),
+    Felt::new_unchecked(8903120029260883115),
+    Felt::new_unchecked(10018834173992526777),
+    Felt::new_unchecked(12336418097098812819),
+    Felt::new_unchecked(7234726349621296827),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(10953582494639793467),
-    Felt::new_unchecked(6798717177851540402),
-    Felt::new_unchecked(14169978211842899689),
-    Felt::new_unchecked(2049184855221061158),
+    Felt::new_unchecked(18291993154447238642),
+    Felt::new_unchecked(12437459575707891108),
+    Felt::new_unchecked(8908580329030930744),
+    Felt::new_unchecked(16274380725663020576),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -117,40 +117,40 @@ pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEP
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(11844999631940221624),
-        Felt::new_unchecked(10859438350150942202),
-        Felt::new_unchecked(2027951413203573913),
-        Felt::new_unchecked(10792613548352067964),
+        Felt::new_unchecked(15279729375870817821),
+        Felt::new_unchecked(12996637549952554367),
+        Felt::new_unchecked(11181975714969167245),
+        Felt::new_unchecked(1849729977452407476),
     ],
     [
-        Felt::new_unchecked(3212079553102672352),
-        Felt::new_unchecked(8242807144398359984),
-        Felt::new_unchecked(16412755628294771724),
-        Felt::new_unchecked(6578470630453545449),
+        Felt::new_unchecked(16165449047817492303),
+        Felt::new_unchecked(11618848632062225791),
+        Felt::new_unchecked(14591151312555901507),
+        Felt::new_unchecked(4554770632759836928),
     ],
     [
-        Felt::new_unchecked(12379501551217404125),
-        Felt::new_unchecked(17793345332698442536),
-        Felt::new_unchecked(5929769660991594011),
-        Felt::new_unchecked(7309626521295736008),
+        Felt::new_unchecked(5733315348279014014),
+        Felt::new_unchecked(13810579725412164217),
+        Felt::new_unchecked(13597781429110518237),
+        Felt::new_unchecked(10341562124708643948),
     ],
     [
-        Felt::new_unchecked(11063449646803011352),
-        Felt::new_unchecked(13470487733653507956),
-        Felt::new_unchecked(2136435230277631330),
-        Felt::new_unchecked(10070057140062207205),
+        Felt::new_unchecked(3270254126301089965),
+        Felt::new_unchecked(17455021774768827483),
+        Felt::new_unchecked(17785206211962741296),
+        Felt::new_unchecked(1662170162056201184),
     ],
     [
-        Felt::new_unchecked(8109032437379459434),
-        Felt::new_unchecked(13882523942956935853),
-        Felt::new_unchecked(6477760258986189041),
-        Felt::new_unchecked(15677879646330064484),
+        Felt::new_unchecked(8471430098413845140),
+        Felt::new_unchecked(15693434091094173108),
+        Felt::new_unchecked(7109325929269501773),
+        Felt::new_unchecked(11034458968919387194),
     ],
     [
-        Felt::new_unchecked(9439083613609830355),
-        Felt::new_unchecked(16741380493536377247),
-        Felt::new_unchecked(10108928100323115025),
-        Felt::new_unchecked(15221526938124742058),
+        Felt::new_unchecked(13244281734058100393),
+        Felt::new_unchecked(4381471052336895968),
+        Felt::new_unchecked(3978929279871829385),
+        Felt::new_unchecked(7448791305173661389),
     ],
     [
         Felt::new_unchecked(1422687632582465263),

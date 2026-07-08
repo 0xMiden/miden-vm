@@ -502,16 +502,17 @@ pub struct StackOverflowMsg<E> {
 // HASHER PERM-LINK MESSAGE
 // ================================================================================================
 
-/// Number of payload fields in a hasher perm-link message.
+/// Beta-power offset at which the Poseidon2 state starts in a perm-link denominator.
 ///
-/// The bus domain is encoded separately by [`Challenges::encode`].
-const HASHER_PERM_LINK_MESSAGE_WIDTH: usize = 1 + STATE_WIDTH;
-const _: () = assert!(HASHER_PERM_LINK_MESSAGE_WIDTH <= MIDEN_MAX_MESSAGE_WIDTH);
+/// Offset 2 aligns the state lanes with full-state hasher messages; beta^1 is unused.
+const HASHER_PERM_LINK_STATE_OFFSET: usize = 2;
+const _: () = assert!(HASHER_PERM_LINK_STATE_OFFSET + STATE_WIDTH <= MIDEN_MAX_MESSAGE_WIDTH);
 
-/// Hasher perm-link message: `[perm_id, state]`.
+/// Hasher perm-link message: `perm_id` plus the full Poseidon2 state.
 ///
-/// The id ties a controller input/output row pair to one Poseidon2 cycle. `state` carries the full
-/// Poseidon2 sponge state.
+/// The id ties a controller input/output row pair to the corresponding Poseidon2 permutation
+/// instance. `state` is encoded at [`HASHER_PERM_LINK_STATE_OFFSET`] to match full-state hasher
+/// messages.
 #[derive(Clone, Debug)]
 pub enum HasherPermLinkMsg<E> {
     Input { perm_id: E, state: SpongeState<E> },
@@ -861,9 +862,10 @@ where
             Self::Input { perm_id, state } => (BusId::HasherPermLinkInput, perm_id, state),
             Self::Output { perm_id, state } => (BusId::HasherPermLinkOutput, perm_id, state),
         };
-        let payload: [E; HASHER_PERM_LINK_MESSAGE_WIDTH] =
-            core::array::from_fn(|i| if i == 0 { perm_id.clone() } else { state[i - 1].clone() });
-        challenges.encode(bus as usize, payload)
+        let mut acc = challenges.bus_prefix[bus as usize].clone();
+        acc += perm_id.clone();
+        acc += challenges.inner_product_at(HASHER_PERM_LINK_STATE_OFFSET, state.as_slice());
+        acc
     }
 }
 
