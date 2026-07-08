@@ -225,11 +225,10 @@ end
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
 #!
-@locals(4)
 proc verify_64
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
-    loc_storew_le.0
+    exec.constants::fri_verify_state_ptr mem_storew_le
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     dup
@@ -256,9 +255,9 @@ proc verify_64
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
-        loc_loadw_le.0   # load [query_ptr, layer_ptr, rem_ptr, g]
+        exec.constants::fri_verify_state_ptr mem_loadw_le
         add.4
-        loc_storew_le.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
+        exec.constants::fri_verify_state_ptr mem_storew_le
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
         dup.5
@@ -301,11 +300,10 @@ end
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
 #!
-@locals(4)
 proc verify_128
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
-    loc_storew_le.0
+    exec.constants::fri_verify_state_ptr mem_storew_le
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     dup
@@ -332,9 +330,9 @@ proc verify_128
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
-        loc_loadw_le.0   # load [query_ptr, layer_ptr, rem_ptr, g]
+        exec.constants::fri_verify_state_ptr mem_loadw_le
         add.4
-        loc_storew_le.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
+        exec.constants::fri_verify_state_ptr mem_storew_le
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
         dup.5

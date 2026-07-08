@@ -170,10 +170,10 @@ proc process_aux_segment_execution_trace
 
     # Load the values of the auxiliary segment of the execution trace at the current query
 
-    # Set up the stack
-    exec.constants::zero_word_ptr mem_loadw_le
-    swapw padw
-    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    # The leaf was saved in tmp3 and the root is no longer needed. Reuse both words as
+    # the rate words and insert zero capacity.
+    padw swapw.2
+    #=> [Y, Y, 0, 0, 0, 0, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the 12 aligned auxiliary extension-field values as 24 base felts.
     exec.load_aux_segment_execution_trace

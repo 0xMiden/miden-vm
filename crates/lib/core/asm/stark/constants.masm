@@ -17,6 +17,15 @@ const NUM_AUX_TRACE_COEFS = 2
 const BLOWUP_FACTOR = 8
 const BLOWUP_FACTOR_LOG = 3
 
+# Quotient recomposition constants for the fixed blowup factor.
+# With N = 2^log_trace and log_lde = log_trace + BLOWUP_FACTOR_LOG, both
+# f = lde_g^N and s0 = offset^N are independent of N. The first barycentric
+# weight is 1 / (BLOWUP_FACTOR * s0^(BLOWUP_FACTOR - 1)).
+# Update these constants if BLOWUP_FACTOR_LOG changes.
+const QUOTIENT_SHIFT_RATIO = 18446744069397807105
+const QUOTIENT_FIRST_SHIFT = 5473358340599679662
+const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
+
 # FRI parameters (hardcoded; future versions may make these configurable)
 const LOG_FINAL_DEGREE = 7
 const FRI_FOLD_ARITY = 4
@@ -102,6 +111,10 @@ const KERNEL_DIGESTS_ADDRESS_PTR = 3223322706
 ### Caller-supplied base address of the fixed-length public inputs (stack i/o, 32 base felts).
 ### Persisted by `verify_proof` from its operand so `load_public_inputs` can EF-expand them.
 const STACK_IO_ADDRESS_PTR = 3223322707
+
+### Scratch word used by the FRI verifier to persist loop state between queries.
+### Stores [query_ptr, layer_ptr, rem_ptr, g].
+const FRI_VERIFY_STATE_PTR = 3223322708
 
 ### Addresses to store the state of Poseidon2-based random coin
 const C_PTR = 3223322672
@@ -316,6 +329,18 @@ end
 
 pub proc get_blowup_factor_log
     push.BLOWUP_FACTOR_LOG
+end
+
+pub proc get_quotient_shift_ratio
+    push.QUOTIENT_SHIFT_RATIO
+end
+
+pub proc get_quotient_first_shift
+    push.QUOTIENT_FIRST_SHIFT
+end
+
+pub proc get_quotient_first_weight
+    push.QUOTIENT_FIRST_WEIGHT
 end
 
 pub proc get_log_final_degree
@@ -594,6 +619,10 @@ end
 
 pub proc stack_io_address_ptr
     push.STACK_IO_ADDRESS_PTR
+end
+
+pub proc fri_verify_state_ptr
+    push.FRI_VERIFY_STATE_PTR
 end
 
 pub proc num_kernel_digests_ptr

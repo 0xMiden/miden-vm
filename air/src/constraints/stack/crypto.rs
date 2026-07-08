@@ -252,8 +252,8 @@ fn enforce_hornerext_constraints<AB>(
 /// Index convention:
 /// - `d_size` is the number of Merkle leaves in this FRI layer and the size of the folded domain.
 ///   The source domain for this layer has 4 * d_size positions.
-/// - Before this operation, `verify_query_layer` divides the current-layer query index `pos` by
-///   `d_size`: folded_pos = pos % d_size coset = pos / d_size
+/// - Before this operation, `verify_query_layer` computes the folded position as `pos % d_size` and
+///   the coset as `pos / d_size`.
 /// - `folded_pos` is the opened Merkle leaf index and the query index carried to the next FRI
 ///   layer.
 /// - `coset` is one of 0, 1, 2, or 3. It tells which natural leaf value, q0 through q3, corresponds
