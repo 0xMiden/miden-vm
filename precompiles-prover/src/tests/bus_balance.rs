@@ -6,9 +6,8 @@ use miden_air::lookup::{
     Challenges, LookupAir,
     debug::{check_trace_balance, trace::DebugTraceBuilder},
 };
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::LiftedAir;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},

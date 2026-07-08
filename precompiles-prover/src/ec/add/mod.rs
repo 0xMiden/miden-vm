@@ -89,9 +89,9 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     ec::{EcGroupMsg, EcPointMsg},

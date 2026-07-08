@@ -10,10 +10,13 @@
 //! passes every local constraint and dies on the Poseidon2 cap bus).
 
 use miden_air::lookup::Challenges;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_precompiles::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, UintDomain};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use super::uint::random_uint_below;
 use crate::{

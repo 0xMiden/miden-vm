@@ -61,9 +61,9 @@ use add::EcOnCurveCertMsg;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
-use p3_matrix::dense::RowMajorMatrix;
 pub use require::{EcRequire, EcStores};
 
 use crate::{

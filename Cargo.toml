@@ -146,7 +146,7 @@ once_cell       = { version = "1.21", default-features = false }
 paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.7", default-features = false }
-rand            = { version = "0.10", default-features = false }
+rand            = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
 rayon           = "1.10"
 rocksdb         = { version = "0.24", default-features = false }
 seq-macro       = "0.3"
@@ -201,6 +201,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 rand_chacha = { version = "0.10", default-features = false }
 rstest = "0.26"
+ruint = { version = "1.18", default-features = false }
 toml = { version = "1.0", default-features = false }
 tracing-forest = "0.3.1"
 walkdir = "2.5"

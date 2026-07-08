@@ -23,9 +23,9 @@ use miden_core::{
     Felt,
     deferred::{Digest, Node},
     field::QuadFelt,
+    utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     hash::{

@@ -6,9 +6,8 @@
 
 use std::{eprintln, string::String, vec, vec::Vec};
 
-use miden_core::{Felt, deferred::Node, field::QuadFelt};
-use p3_matrix::Matrix;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::Matrix};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::primitives::{
     bitwise64::{Bitwise64Air, Bitwise64Requires, Logic64Op, generate_trace as bw64_trace},

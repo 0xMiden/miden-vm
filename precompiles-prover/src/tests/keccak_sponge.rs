@@ -13,7 +13,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
@@ -378,7 +378,7 @@ fn constraints_hold_on_multiple_invocations() {
 fn corrupt_and_check(
     _seed: u64,
     inv: Invocation,
-    corruption: impl FnOnce(&mut p3_matrix::dense::RowMajorMatrix<Felt>),
+    corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
 ) {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[inv]);
     let mut main = generate_trace(sponge_req);
@@ -455,9 +455,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // so the corruption must live in that override (the 0.26 API no longer
     // accepts a standalone `AuxBuilder` — the AIR owns the aux build).
     use miden_air::BaseAir;
+    use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
     use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
-    use p3_field::PrimeCharacteristicRing;
-    use p3_matrix::dense::RowMajorMatrix;
 
     use crate::hash::keccak::sponge::NUM_AUX_COLS;
 

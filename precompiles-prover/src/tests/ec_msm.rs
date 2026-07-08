@@ -13,9 +13,8 @@
 use std::{format, string::String};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
-use miden_core::Felt;
+use miden_core::{Felt, utils::Matrix};
 use miden_precompiles::CurveId;
-use p3_matrix::Matrix;
 
 use crate::{
     math::{U256, from_hex},

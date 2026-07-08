@@ -13,7 +13,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::LiftedAir;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
@@ -214,7 +214,7 @@ fn constraints_hold_with_perm_seq_id_jump_at_head() {
 fn corrupt_and_check(
     _seed: u64,
     invocations: &[Invocation],
-    corruption: impl FnOnce(&mut p3_matrix::dense::RowMajorMatrix<Felt>),
+    corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
 ) {
     let (chunk_req, _p2) = build_chunk_requires(invocations);
     let mut main = generate_trace(chunk_req);

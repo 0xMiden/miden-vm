@@ -3,9 +3,9 @@ use std::vec::Vec;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, batch_multiplicative_inverse},
+    utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     logup::{Challenges, lookup_challenges_from_slice},

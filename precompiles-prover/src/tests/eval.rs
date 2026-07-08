@@ -17,10 +17,10 @@ use miden_core::{
     Felt,
     deferred::{Digest, fold_deferred_root},
     field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},

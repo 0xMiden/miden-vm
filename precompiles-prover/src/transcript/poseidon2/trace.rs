@@ -26,8 +26,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ops::Range;
 
-use miden_core::{Felt, chiplets::hasher::Hasher, field::QuadFelt};
-use p3_matrix::dense::RowMajorMatrix;
+use miden_core::{Felt, chiplets::hasher::Hasher, field::QuadFelt, utils::RowMajorMatrix};
 
 use crate::{
     logup::build_logup_aux_trace,
