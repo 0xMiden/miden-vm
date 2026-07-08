@@ -1,4 +1,13 @@
-//! Miden-side wiring for the LogUp lookup-argument module.
+//! Miden VM LogUp lookup argument wiring.
+//!
+//! ## What lives here
+//!
+//! - [`main_air`]: main-trace lookup columns and their shared row context.
+//! - [`chiplet_air`]: chiplet-trace lookup columns and their shared row context.
+//! - [`miden_air`]: boundary corrections and committed-final metadata.
+//! - [`messages`]: denominator encodings and bus identifiers.
+//! - [`buses`]: per-bus emitters used by the main and chiplet lookup AIRs.
+//! - [`extension_impls`]: adapter-specific builder hooks for constraint, prover, and debug paths.
 
 pub(crate) mod buses;
 pub mod chiplet_air;

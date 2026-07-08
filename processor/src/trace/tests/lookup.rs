@@ -18,14 +18,15 @@
 //! The oracle cross-check in (4) subsumes the "does it run to completion?" shape of a
 //! separate plumbing test, so both live in one function below.
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 
 use miden_air::{
-    BaseAir, ChipletCols, ControllerCols, LiftedAir, MidenAir,
+    BaseAir, ChipletCols, ControllerCols, LiftedAir, MidenAir, MidenMultiAir, ProverStatement,
+    StarkConfig, Statement, config, debug,
     logup::{BusId, HasherPermLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
         Challenges, LookupMessage, accumulate, build_lookup_fractions,
@@ -38,11 +39,12 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 
-use super::{Felt, build_trace_from_ops, rand_array};
+use super::{ExecutionTrace, Felt, build_trace_from_ops, rand_array};
 use crate::operation::Operation;
 
 const CONTROLLER_OFFSET: usize = CHIPLET_CONTROLLER_OFFSET;
 const CONTROLLER_WIDTH: usize = size_of::<ControllerCols<u8>>();
+static PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Pad/Add/Mul/Drop inside a span — same flavour of ops the decoder/stack tests use, with
 /// enough variety to exercise decoder, stack, and range-check bus emitters.
@@ -155,6 +157,31 @@ fn controller_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut Con
     matrix.values[start..start + CONTROLLER_WIDTH].borrow_mut()
 }
 
+fn assert_trace_constraints_reject(
+    trace: &ExecutionTrace,
+    core_matrix: RowMajorMatrix<Felt>,
+    chip_matrix: RowMajorMatrix<Felt>,
+    poseidon2_matrix: RowMajorMatrix<Felt>,
+) {
+    let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
+    let statement =
+        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .expect("valid statement inputs");
+    let prover_statement =
+        ProverStatement::new(statement, vec![core_matrix, chip_matrix, poseidon2_matrix])
+            .expect("valid trace shapes");
+
+    let config = config::poseidon2_config(config::pcs_params());
+    let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
+    let panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        debug::check_constraints(&prover_statement, config.challenger());
+    }));
+    std::panic::set_hook(panic_hook);
+    assert!(result.is_err(), "mutated trace should violate AIR constraints");
+}
+
 #[test]
 fn build_lookup_fractions_matches_constraint_path_oracle() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
@@ -241,7 +268,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
 fn perm_link_rejects_swapped_controller_outputs() {
     let trace =
         build_trace_from_ops(vec![Operation::HPerm, Operation::HPerm], &[8, 7, 6, 5, 4, 3, 2, 1]);
-    let (_, mut chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
+    let (core_matrix, chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
 
     let output_rows: Vec<_> = (0..chip_matrix.height())
         .filter(|&row| {
@@ -285,10 +312,12 @@ fn perm_link_rejects_swapped_controller_outputs() {
         );
     }
 
-    controller_row_mut(&mut chip_matrix, output_rows[0]).state = state_b;
-    controller_row_mut(&mut chip_matrix, output_rows[1]).state = state_a;
+    let mut state_swapped_chip_matrix = chip_matrix.clone();
+    controller_row_mut(&mut state_swapped_chip_matrix, output_rows[0]).state = state_b;
+    controller_row_mut(&mut state_swapped_chip_matrix, output_rows[1]).state = state_a;
 
-    let swapped_fractions = perm_link_fractions(&chip_matrix, &poseidon2_matrix, &challenges);
+    let swapped_fractions =
+        perm_link_fractions(&state_swapped_chip_matrix, &poseidon2_matrix, &challenges);
     for msg in [
         HasherPermLinkMsg::Output { perm_id: perm_id_a, state: state_b },
         HasherPermLinkMsg::Output { perm_id: perm_id_b, state: state_a },
@@ -299,4 +328,36 @@ fn perm_link_rejects_swapped_controller_outputs() {
             "swapped controller output leaves an unmatched perm-link addition"
         );
     }
+
+    let mut tuple_swapped_chip_matrix = chip_matrix;
+    {
+        let row = controller_row_mut(&mut tuple_swapped_chip_matrix, output_rows[0]);
+        row.state = state_b;
+        row.perm_id = perm_id_b;
+    }
+    {
+        let row = controller_row_mut(&mut tuple_swapped_chip_matrix, output_rows[1]);
+        row.state = state_a;
+        row.perm_id = perm_id_a;
+    }
+
+    let balanced_fractions =
+        perm_link_fractions(&tuple_swapped_chip_matrix, &poseidon2_matrix, &challenges);
+    for msg in [
+        HasherPermLinkMsg::Output { perm_id: perm_id_a, state: state_a },
+        HasherPermLinkMsg::Output { perm_id: perm_id_b, state: state_b },
+    ] {
+        assert_eq!(
+            net_multiplicity(&balanced_fractions, msg.encode(&challenges)),
+            Felt::ZERO,
+            "swapping output tuples keeps the perm-link bus balanced"
+        );
+    }
+
+    assert_trace_constraints_reject(
+        &trace,
+        core_matrix,
+        tuple_swapped_chip_matrix,
+        poseidon2_matrix,
+    );
 }

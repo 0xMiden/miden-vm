@@ -3,9 +3,9 @@
 //! The patterns are deliberately few and natural -- they mirror work a real transaction does,
 //! rather than one synthetic op per chiplet:
 //!
-//! - **hasher** drives the Poseidon2 AIR via repeated `hperm`. The state evolves between
-//!   iterations (one `padw padw padw` as setup, no reset), so each permutation has a distinct input
-//!   and the Poseidon2 multiplicity column does not collapse them.
+//! - **hasher** drives the Poseidon2 AIR via repeated `hperm`. The state evolves between iterations
+//!   (one `padw padw padw` as setup, no reset), so each permutation has a distinct input and the
+//!   Poseidon2 multiplicity column does not collapse them.
 //! - **bitwise** drives the bitwise chiplet via `u32split + u32xor`.
 //! - **u32arith** drives the range checker via two banded u32 counters, advancing each by 65537 per
 //!   iter so their 16-bit halves evolve as disjoint contiguous bands. `u32assert2` issues fresh

@@ -1,9 +1,10 @@
+use core::num::NonZeroUsize;
+
 use super::{
     InputCounts, InputLayout, InputRegion, LayoutRegions, MultiAirIndices, SELECTORS_PER_AIR,
     StarkVarIndices,
 };
 use crate::{EXT_DEGREE, randomness};
-use core::num::NonZeroUsize;
 
 #[derive(Clone, Copy)]
 enum Alignment {

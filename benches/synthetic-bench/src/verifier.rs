@@ -1,8 +1,8 @@
 //! Verification helpers for synthetic-trace matching.
 //!
 //! Hard checks:
-//! - `padded_core_side(actual) == padded_core_side(target)`:
-//!   `next_pow2(max(core_rows, range_rows))`
+//! - `padded_core_side(actual) == padded_core_side(target)`: `next_pow2(max(core_rows,
+//!   range_rows))`
 //! - `padded_chiplets(actual) == padded_chiplets(target)` when the snapshot contains a per-AIR
 //!   Poseidon2 target.
 //! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)` when the

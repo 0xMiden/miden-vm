@@ -1,6 +1,6 @@
 [package]
 name = "miden-air"
-version.workspace = true
+version = "0.25.0"
 description = "Algebraic intermediate representation of Miden VM processor"
 documentation = "https://docs.rs/miden-air"
 readme = "README.md"

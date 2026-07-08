@@ -1,6 +1,7 @@
+use core::num::NonZeroUsize;
+
 use super::{InputKey, SELECTORS_PER_AIR};
 use crate::EXT_DEGREE;
-use core::num::NonZeroUsize;
 
 /// A contiguous region of inputs within the ACE READ layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

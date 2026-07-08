@@ -14,18 +14,8 @@
 //! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the batch's contribution to
 //! `(deg(U_g), deg(V_g)) = (7, 8)`.
 //!
-//! Algebraic equivalence:
-//!
-//! ```text
-//!   is_read · (m_0/wire_0 + m_1/wire_1)
-//! + is_eval · (m_0/wire_0 − 1/wire_1 − 1/wire_2)
-//!   = ace_flag · [ m_0/wire_0
-//!                + ((1 − sblock)·m_1 − sblock)/wire_1
-//!                + (−sblock)/wire_2 ]
-//! ```
-//!
 //! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
-//! slot — under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
+//! slot. Under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
@@ -34,10 +24,10 @@
 //! Binds hasher controller rows to the Poseidon2 permutation AIR. The `perm_id` column ties each
 //! controller input/output row pair to one permutation cycle.
 //!
-//! - **Controller input** (`controller_active * is_input`, multiplicity `+1`): controller side of a
+//! - Controller input (`controller_active * is_input`, multiplicity `+1`): controller side of a
 //!   `(perm_id, input_state)` message. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`controller_active * is_output`, multiplicity `+1`): controller side of
-//!   a `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
+//! - Controller output (`controller_active * is_output`, multiplicity `+1`): controller side of a
+//!   `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
 //!
 //! Each controller pair contributes one input message and one output message with the same
 //! `perm_id`. The Poseidon2 AIR removes those messages on rows 0 and 15 of the matching
@@ -49,6 +39,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
+        chiplets::hasher_control::flags::ControllerFlags,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{AceWireMsg, HasherPermLinkMsg},
@@ -63,9 +54,9 @@ use crate::{
 ///
 /// Single group hosts both buses. ACE and hasher-controller rows are mutually exclusive, so on any
 /// given row only one of:
-/// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
-///   when the outer `ace_flag` fires).
-/// - **Perm-link** on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
+/// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally when
+///   the outer `ace_flag` fires).
+/// - Perm-link on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
 ///   `s0`).
 ///
 /// Per-row max is therefore `max(3, 1) = 3`.
@@ -112,10 +103,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     // Controller-side row-kind flags. `is_input = s0` (deg 1); `is_output = (1-s0)*(1-s1)`
     // (deg 2). Padding rows (`s0=0, s1=1`) are excluded automatically by both expressions.
     let ctrl = local.controller();
-    let s0c: LB::Expr = ctrl.s0.into();
-    let s1c: LB::Expr = ctrl.s1.into();
-    let is_input = s0c.clone();
-    let is_output = (LB::Expr::ONE - s0c) * (LB::Expr::ONE - s1c);
+    let (is_input, is_output) = ControllerFlags::<LB::Expr>::input_output(ctrl);
 
     let controller_flag = ctx.chiplet_active.controller.clone();
 

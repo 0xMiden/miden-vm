@@ -374,8 +374,8 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     initial_stack.extend_from_slice(&program_digest);
 
     // 3) Build the advice stack: kernel digests (4N) and stack i/o (32) for the marshalling, then
-    //    transcript state for `stage_reduced_inputs`, then the aux randomness consumed by the
-    //    test prologue that drives `compute_outer_logup_correction`.
+    //    transcript state for `stage_reduced_inputs`, then the aux randomness consumed by the test
+    //    prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&stack_inputs);

@@ -33,17 +33,27 @@ on:
       light_sample_size:
         description: Criterion sample size for light axes.
         required: false
-        default: "100"
+        default: "200"
         type: string
       measurement_time_secs:
-        description: Criterion measurement time per benchmark.
+        description: Criterion measurement time for proof-heavy axes.
         required: false
         default: "1"
         type: string
       warm_up_time_secs:
-        description: Criterion warm-up time per benchmark.
+        description: Criterion warm-up time for proof-heavy axes.
         required: false
         default: "1"
+        type: string
+      light_measurement_time_secs:
+        description: Criterion measurement time for light axes.
+        required: false
+        default: "15"
+        type: string
+      light_warm_up_time_secs:
+        description: Criterion warm-up time for light axes.
+        required: false
+        default: "3"
         type: string
       bench_axes:
         description: "Comma-separated axes: all, execute_trace_inputs_sync, build_trace, prove_trace_sync, e2e_prove."
@@ -117,6 +127,8 @@ jobs:
           INPUT_LIGHT_SAMPLE_SIZE: ${{ inputs.light_sample_size }}
           INPUT_MEASUREMENT_TIME_SECS: ${{ inputs.measurement_time_secs }}
           INPUT_WARM_UP_TIME_SECS: ${{ inputs.warm_up_time_secs }}
+          INPUT_LIGHT_MEASUREMENT_TIME_SECS: ${{ inputs.light_measurement_time_secs }}
+          INPUT_LIGHT_WARM_UP_TIME_SECS: ${{ inputs.light_warm_up_time_secs }}
           INPUT_BENCH_AXES: ${{ inputs.bench_axes }}
         shell: bash
         run: |
@@ -154,9 +166,11 @@ jobs:
             threshold_pct="5"
             rayon_threads="8"
             sample_size="10"
-            light_sample_size="100"
+            light_sample_size="200"
             measurement_time_secs="1"
             warm_up_time_secs="1"
+            light_measurement_time_secs="15"
+            light_warm_up_time_secs="3"
             bench_axes="all"
           else
             baseline_ref="${INPUT_BASELINE_REF}"
@@ -167,6 +181,8 @@ jobs:
             light_sample_size="${INPUT_LIGHT_SAMPLE_SIZE}"
             measurement_time_secs="${INPUT_MEASUREMENT_TIME_SECS}"
             warm_up_time_secs="${INPUT_WARM_UP_TIME_SECS}"
+            light_measurement_time_secs="${INPUT_LIGHT_MEASUREMENT_TIME_SECS}"
+            light_warm_up_time_secs="${INPUT_LIGHT_WARM_UP_TIME_SECS}"
             bench_axes="${INPUT_BENCH_AXES}"
           fi
 
@@ -185,13 +201,19 @@ jobs:
             sample_size="10"
           fi
           if [[ -z "${light_sample_size}" ]]; then
-            light_sample_size="100"
+            light_sample_size="200"
           fi
           if [[ -z "${measurement_time_secs}" ]]; then
             measurement_time_secs="1"
           fi
           if [[ -z "${warm_up_time_secs}" ]]; then
             warm_up_time_secs="1"
+          fi
+          if [[ -z "${light_measurement_time_secs}" ]]; then
+            light_measurement_time_secs="15"
+          fi
+          if [[ -z "${light_warm_up_time_secs}" ]]; then
+            light_warm_up_time_secs="3"
           fi
           if [[ -z "${bench_axes}" ]]; then
             bench_axes="all"
@@ -220,6 +242,14 @@ jobs:
           fi
           if [[ ! "${warm_up_time_secs}" =~ ^[0-9]+$ ]]; then
             echo "warm_up_time_secs must be an integer" >&2
+            exit 1
+          fi
+          if [[ ! "${light_measurement_time_secs}" =~ ^[0-9]+$ ]]; then
+            echo "light_measurement_time_secs must be an integer" >&2
+            exit 1
+          fi
+          if [[ ! "${light_warm_up_time_secs}" =~ ^[0-9]+$ ]]; then
+            echo "light_warm_up_time_secs must be an integer" >&2
             exit 1
           fi
 
@@ -269,6 +299,8 @@ jobs:
             echo "light_sample_size=${light_sample_size}"
             echo "measurement_time_secs=${measurement_time_secs}"
             echo "warm_up_time_secs=${warm_up_time_secs}"
+            echo "light_measurement_time_secs=${light_measurement_time_secs}"
+            echo "light_warm_up_time_secs=${light_warm_up_time_secs}"
             echo "bench_axes=${bench_axes}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -313,6 +345,8 @@ jobs:
           LIGHT_SAMPLE_SIZE: ${{ steps.refs.outputs.light_sample_size }}
           MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.measurement_time_secs }}
           WARM_UP_TIME_SECS: ${{ steps.refs.outputs.warm_up_time_secs }}
+          LIGHT_MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.light_measurement_time_secs }}
+          LIGHT_WARM_UP_TIME_SECS: ${{ steps.refs.outputs.light_warm_up_time_secs }}
           BENCH_AXES: ${{ steps.refs.outputs.bench_axes }}
           BASELINE_SHA: ${{ steps.refs.outputs.baseline_sha }}
         shell: bash
@@ -326,6 +360,8 @@ jobs:
             --light-sample-size "${LIGHT_SAMPLE_SIZE}" \
             --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
             --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --light-measurement-time-secs "${LIGHT_MEASUREMENT_TIME_SECS}" \
+            --light-warm-up-time-secs "${LIGHT_WARM_UP_TIME_SECS}" \
             --bench-axes "${BENCH_AXES}" \
             --git-ref "${BASELINE_SHA}"
 
@@ -339,6 +375,8 @@ jobs:
           LIGHT_SAMPLE_SIZE: ${{ steps.refs.outputs.light_sample_size }}
           MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.measurement_time_secs }}
           WARM_UP_TIME_SECS: ${{ steps.refs.outputs.warm_up_time_secs }}
+          LIGHT_MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.light_measurement_time_secs }}
+          LIGHT_WARM_UP_TIME_SECS: ${{ steps.refs.outputs.light_warm_up_time_secs }}
           BENCH_AXES: ${{ steps.refs.outputs.bench_axes }}
           CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
         shell: bash
@@ -352,6 +390,8 @@ jobs:
             --light-sample-size "${LIGHT_SAMPLE_SIZE}" \
             --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
             --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --light-measurement-time-secs "${LIGHT_MEASUREMENT_TIME_SECS}" \
+            --light-warm-up-time-secs "${LIGHT_WARM_UP_TIME_SECS}" \
             --bench-axes "${BENCH_AXES}" \
             --git-ref "${CURRENT_SHA}"
 
@@ -424,10 +464,12 @@ jobs:
         if: steps.compare.outputs.regression == 'true'
         env:
           PROGRAM_DELTA_PCT: ${{ steps.compare.outputs.program_delta_pct }}
+          REGRESSION_METRICS: ${{ steps.compare.outputs.regression_metrics }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "blake3 1-to-1 benchmark regressed by ${PROGRAM_DELTA_PCT}%"
+          echo "Blake3 benchmark regressions over threshold: ${REGRESSION_METRICS}"
+          echo "Primary metric delta: ${PROGRAM_DELTA_PCT}%"
           exit 1
 
   comment:

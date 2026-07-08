@@ -9,21 +9,32 @@
 //! interactions via [`super::LookupColumn::group`] or
 //! [`super::LookupColumn::group_with_cached_encoding`].
 //!
+//! ## Shared merge rules
+//!
+//! A [`super::LookupColumn::group`] assumes its top-level entries are mutually exclusive,
+//! so the column degree is the max over active branches. Simultaneous fractions belong in
+//! a [`super::LookupGroup::batch`] with an explicit degree. If two interaction families are
+//! not mutually exclusive, they must be emitted as sibling groups; sibling groups compose
+//! product-wise and increase the column degree accordingly.
+//!
+//! Some columns merge multiple bus families into one group. This is valid only when their
+//! row selectors are mutually exclusive. Each bus still has its own `bus_prefix[bus]`.
+//!
 //! The emitters are routed per-AIR:
 //! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
 //!   `LookupAir` impl.
 //! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
 //!   [`crate::ChipletsAir`]'s `LookupAir` impl.
 //! - [`super::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns`] for the
-//!   Poseidon2-permutation trace column, driven by [`crate::Poseidon2PermutationAir`]'s
-//!   `LookupAir` impl.
+//!   Poseidon2-permutation trace column, driven by [`crate::Poseidon2PermutationAir`]'s `LookupAir`
+//!   impl.
 //!
 //! ## Shared precompute contexts
 //!
 //! The main-trace and chiplet-trace contexts live next to their respective LookupAirs:
-//! - [`super::main_air::MainBusContext`] — two-row window plus the shared
-//!   [`crate::constraints::op_flags::OpFlags`] instance consumed by the 4 main-trace emitters.
-//! - [`super::chiplet_air::ChipletBusContext`] — two-row window plus the shared
+//! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`] instance
+//!   consumed by the 4 main-trace emitters.
+//! - [`super::chiplet_air::ChipletBusContext`]: two-row window plus the shared
 //!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
@@ -54,9 +65,9 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// Per-chiplet `is_active` expressions, mirroring the active-flag block of
 /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors).
 ///
-/// These are the only chiplet-flag flavors the LogUp buses consume —
-/// `is_transition` / `is_last` / `next_is_first` are used only by the constraint-path
-/// chiplet code, not by the LogUp argument — so this type carries no other variants.
+/// These are the only chiplet flags the LogUp buses consume.
+/// `is_transition`, `is_last`, and `next_is_first` are used only by the chiplet
+/// constraints, so this type does not carry them.
 ///
 /// The constructor is a pure compute function: it builds the same algebra as
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is

@@ -9,7 +9,7 @@ use miden::core::sys::vm::constraints_eval_inputs
 const NUM_INPUTS_CIRCUIT = 630
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 5516
+const NUM_EVAL_GATES_CIRCUIT = 5380
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 4
@@ -50,7 +50,7 @@ proc load_and_authenticate_ace_circuit
     adv.push_mapval
     exec.constants::ace_circuit_stream_ptr
     padw padw padw
-    repeat.764
+    repeat.747
         adv_pipe
         exec.poseidon2::permute
     end

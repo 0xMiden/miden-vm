@@ -48,9 +48,9 @@ fn state_to_key(state: &HasherState) -> StateKey {
 /// This component records controller rows in the chiplets trace and permutation cycles in the
 /// Poseidon2 permutation trace:
 ///
-/// - **Controller region**: pairs of (input, output) rows for each permutation request.
-///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
-///   s1=0) capture the post-permutation state.
+/// - **Controller region**: pairs of (input, output) rows for each permutation request. Input rows
+///   (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0, s1=0) capture
+///   the post-permutation state.
 ///
 /// - **Poseidon2 permutation trace**: one 16-row cycle per unique input state, linked to controller
 ///   rows via the hasher perm-link LogUp bus.

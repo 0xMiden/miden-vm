@@ -5,7 +5,6 @@
 
 use alloc::{vec, vec::Vec};
 
-use crate::PROOF_ORDER_REGISTRY_DEPTH;
 use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::Field,
@@ -30,6 +29,8 @@ use miden_crypto::{
         },
     },
 };
+
+use crate::PROOF_ORDER_REGISTRY_DEPTH;
 
 // SHARED TYPES
 // ================================================================================================
@@ -87,20 +88,20 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(8903120029260883115),
-    Felt::new_unchecked(10018834173992526777),
-    Felt::new_unchecked(12336418097098812819),
-    Felt::new_unchecked(7234726349621296827),
+    Felt::new_unchecked(16712714565761995),
+    Felt::new_unchecked(1741325793994889113),
+    Felt::new_unchecked(16751890206374581781),
+    Felt::new_unchecked(4411953051185709836),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(18291993154447238642),
-    Felt::new_unchecked(12437459575707891108),
-    Felt::new_unchecked(8908580329030930744),
-    Felt::new_unchecked(16274380725663020576),
+    Felt::new_unchecked(12547663262993042801),
+    Felt::new_unchecked(15271061008892860831),
+    Felt::new_unchecked(282043376737771578),
+    Felt::new_unchecked(12748829443299078430),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -117,40 +118,40 @@ pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEP
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(15279729375870817821),
-        Felt::new_unchecked(12996637549952554367),
-        Felt::new_unchecked(11181975714969167245),
-        Felt::new_unchecked(1849729977452407476),
+        Felt::new_unchecked(10669894151545046179),
+        Felt::new_unchecked(14056436838715203078),
+        Felt::new_unchecked(13422402495499166534),
+        Felt::new_unchecked(15183718438472837285),
     ],
     [
-        Felt::new_unchecked(16165449047817492303),
-        Felt::new_unchecked(11618848632062225791),
-        Felt::new_unchecked(14591151312555901507),
-        Felt::new_unchecked(4554770632759836928),
+        Felt::new_unchecked(10173458767905295348),
+        Felt::new_unchecked(6117961383666099765),
+        Felt::new_unchecked(13094656694246736247),
+        Felt::new_unchecked(13723433310531842495),
     ],
     [
-        Felt::new_unchecked(5733315348279014014),
-        Felt::new_unchecked(13810579725412164217),
-        Felt::new_unchecked(13597781429110518237),
-        Felt::new_unchecked(10341562124708643948),
+        Felt::new_unchecked(8491734840840950276),
+        Felt::new_unchecked(6786616521397161015),
+        Felt::new_unchecked(9489825026132708086),
+        Felt::new_unchecked(10126629915447259931),
     ],
     [
-        Felt::new_unchecked(3270254126301089965),
-        Felt::new_unchecked(17455021774768827483),
-        Felt::new_unchecked(17785206211962741296),
-        Felt::new_unchecked(1662170162056201184),
+        Felt::new_unchecked(14896280379264327625),
+        Felt::new_unchecked(770603093385983999),
+        Felt::new_unchecked(485245589609465028),
+        Felt::new_unchecked(6733489332580155854),
     ],
     [
-        Felt::new_unchecked(8471430098413845140),
-        Felt::new_unchecked(15693434091094173108),
-        Felt::new_unchecked(7109325929269501773),
-        Felt::new_unchecked(11034458968919387194),
+        Felt::new_unchecked(10538320295619141641),
+        Felt::new_unchecked(13597911731253441178),
+        Felt::new_unchecked(13867437684177628616),
+        Felt::new_unchecked(913501059497796806),
     ],
     [
-        Felt::new_unchecked(13244281734058100393),
-        Felt::new_unchecked(4381471052336895968),
-        Felt::new_unchecked(3978929279871829385),
-        Felt::new_unchecked(7448791305173661389),
+        Felt::new_unchecked(5591457716660264900),
+        Felt::new_unchecked(10345840811345681866),
+        Felt::new_unchecked(9756127347962954702),
+        Felt::new_unchecked(11230256701375962619),
     ],
     [
         Felt::new_unchecked(1422687632582465263),

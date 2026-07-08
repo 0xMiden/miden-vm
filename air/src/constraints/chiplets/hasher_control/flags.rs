@@ -94,6 +94,15 @@ pub struct ControllerFlags<E> {
 }
 
 impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
+    /// Build the current-row input/output flags from controller selector columns.
+    pub fn input_output<V: Copy + Into<E>>(cols: &ControllerCols<V>) -> (E, E) {
+        let s0: E = cols.s0.into();
+        let s1: E = cols.s1.into();
+        let not_s0 = s0.not();
+        let not_s1 = s1.not();
+        Self::input_output_from_parts(s0, not_s0, not_s1)
+    }
+
     /// Build all row-kind flags from the current and next row's sub-selector columns.
     pub fn new<V: Copy + Into<E>>(cols: &ControllerCols<V>, cols_next: &ControllerCols<V>) -> Self {
         // --- Current row ---
@@ -104,8 +113,8 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let not_s1 = s1.not();
         let not_s2 = s2.not();
 
-        let is_input = s0.clone();
-        let is_output = not_s0.clone() * not_s1.clone();
+        let (is_input, is_output) =
+            Self::input_output_from_parts(s0.clone(), not_s0.clone(), not_s1.clone());
         let is_padding = not_s0 * s1.clone();
         let is_sponge_input = s0.clone() * not_s1 * not_s2.clone();
         let is_merkle_input = s0 * (s1.clone() + s2.clone() - s1 * s2.clone());
@@ -140,5 +149,9 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
             is_merkle_input_next,
             is_mv_input_next,
         }
+    }
+
+    fn input_output_from_parts(s0: E, not_s0: E, not_s1: E) -> (E, E) {
+        (s0, not_s0 * not_s1)
     }
 }
