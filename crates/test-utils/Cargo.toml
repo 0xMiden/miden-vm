@@ -19,7 +19,6 @@ arbitrary = ["dep:proptest", "miden-assembly/testing", "miden-core/testing"]
 std = [
     "miden-assembly/std",
     "miden-core/std",
-    "miden-precompiles/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -34,7 +33,6 @@ miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-mast-package.workspace = true
-miden-precompiles.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-verifier.workspace = true

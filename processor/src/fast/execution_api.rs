@@ -163,7 +163,6 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -181,7 +180,6 @@ impl FastProcessor {
         package_debug_info: &PackageDebugInfo,
         host: &mut impl SyncHost,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -210,7 +208,6 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl SyncHost,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -233,7 +230,6 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -252,7 +248,6 @@ impl FastProcessor {
         package_debug_info: &PackageDebugInfo,
         host: &mut impl Host,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -281,7 +276,6 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl Host,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        self.ensure_trace_safe_precompile_registry()?;
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),

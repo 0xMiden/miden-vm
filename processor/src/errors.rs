@@ -75,8 +75,6 @@ pub enum ExecutionError {
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
-    #[error("trace inputs cannot be generated after installing a custom precompile registry")]
-    CustomPrecompileRegistryTraceInputs,
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.

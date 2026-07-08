@@ -246,9 +246,9 @@ This framework is now the proof-bound precompile substrate. In its current form:
   precompile implementations used by core-library facades and registry-based verification.
 
 The proof format binds the final deferred root, not a registry name or version. For that reason,
-custom precompile registries are execution-only at the `FastProcessor` layer. Trace and proof
-generation reject non-built-in registries so the verifier can keep using
-`miden_precompiles::registry()`.
+execution, trace generation, proof generation, and verification all use the built-in
+`miden_precompiles::registry()` policy. The public VM/prover/verifier APIs do not accept
+caller-supplied precompile registries.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

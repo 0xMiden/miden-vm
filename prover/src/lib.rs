@@ -81,9 +81,6 @@ pub async fn prove(
     // execute the program to create an execution trace using FastProcessor
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
-    // SAFETY: the verifier rehydrates deferred proof wires with the same built-in registry.
-    let processor =
-        unsafe { processor.with_trace_safe_precompile_registry(miden_precompiles::registry()) }?;
 
     let trace_inputs = processor.execute_trace_inputs(program, host).await?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -101,9 +98,6 @@ pub fn prove_sync(
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
-    // SAFETY: the verifier rehydrates deferred proof wires with the same built-in registry.
-    let processor =
-        unsafe { processor.with_trace_safe_precompile_registry(miden_precompiles::registry()) }?;
 
     let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -201,9 +195,7 @@ where
     config::observe_protocol_params(&mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
-    // digests). The lifted prover absorbs both into Fiat-Shamir internally, along with the per-AIR
-    // trace heights.
+    // statement inputs read during observation/boundary correction.
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;

@@ -275,18 +275,8 @@ mod fast_parallel {
         advice_inputs: AdviceInputs,
         host: &mut DefaultHost,
     ) -> TraceBuildInputs {
-        let processor = FastProcessor::new_with_options(
-            stack_inputs,
-            advice_inputs,
-            parallel_execution_options(),
-        )
-        .expect("processor advice inputs should fit advice map limits");
-        // SAFETY: these tests verify proofs with the same built-in registry.
-        let processor =
-            unsafe { processor.with_trace_safe_precompile_registry(miden_precompiles::registry()) }
-                .expect("official precompiles should install");
-
-        processor
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, parallel_execution_options())
+            .expect("processor should initialize with built-in precompiles")
             .execute_trace_inputs_sync(program, host)
             .expect("Fast processor execution failed")
     }

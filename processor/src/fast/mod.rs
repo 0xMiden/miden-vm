@@ -4,7 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, PrecompileRegistry},
+    deferred::DeferredState,
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
@@ -145,26 +145,9 @@ pub struct FastProcessor {
 
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
-
-    /// Whether this processor's deferred registry may be used for trace/proof generation.
-    trace_safe_precompile_registry: bool,
 }
 
 impl FastProcessor {
-    /// Returns whether this processor's registry may be used for trace/proof generation.
-    ///
-    /// The verifier rehydrates deferred proof wires with the built-in precompile registry. Direct
-    /// processor users may still execute with custom registries, but those executions must not be
-    /// turned into proofs through `FastProcessor` trace-input APIs.
-    #[inline(always)]
-    pub(super) fn ensure_trace_safe_precompile_registry(&self) -> Result<(), ExecutionError> {
-        if self.trace_safe_precompile_registry {
-            Ok(())
-        } else {
-            Err(ExecutionError::CustomPrecompileRegistryTraceInputs)
-        }
-    }
-
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
@@ -232,7 +215,7 @@ impl FastProcessor {
     /// inputs are validated against the intended execution options.
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
-            .expect("empty advice inputs should fit default advice map limits")
+            .expect("default processor initialization should fit default execution limits")
     }
 
     /// Sets the advice inputs for the processor.
@@ -296,11 +279,10 @@ impl FastProcessor {
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
             deferred_state: DeferredState::new(
-                Arc::new(PrecompileRegistry::new()),
+                Arc::new(miden_precompiles::registry()),
                 options.max_deferred_elements(),
             )
-            .expect("empty deferred registry initialization cannot fail"),
-            trace_safe_precompile_registry: true,
+            .map_err(AdviceError::DeferredStateInitializationFailed)?,
             options,
         })
     }
@@ -324,41 +306,6 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Low-level hook for installing a precompile registry into this processor's deferred state.
-    ///
-    /// `FastProcessor` starts with the framework's empty registry because it is the raw processor
-    /// layer. Use this hook for direct processor integration, custom registries, or tests.
-    /// High-level VM/prover/CLI entry points install the official `miden-precompiles` registry
-    /// automatically.
-    pub fn with_precompile_registry(
-        mut self,
-        registry: PrecompileRegistry,
-    ) -> Result<Self, ExecutionError> {
-        self.deferred_state
-            .extend_precompiles(registry)
-            .map_err(ExecutionError::deferred_error_no_context)?;
-        self.trace_safe_precompile_registry = false;
-        Ok(self)
-    }
-
-    /// Installs a verifier-compatible precompile registry into this processor's deferred state.
-    ///
-    /// # Safety
-    /// The supplied registry must have exactly the semantics used by the verifier when it
-    /// rehydrates a proof's deferred wire. This is intended for high-level VM and prover entry
-    /// points that install `miden_precompiles::registry()`. Callers that need custom registries
-    /// must use [`Self::with_precompile_registry`], which remains execution-only.
-    pub unsafe fn with_trace_safe_precompile_registry(
-        mut self,
-        registry: PrecompileRegistry,
-    ) -> Result<Self, ExecutionError> {
-        self.deferred_state
-            .extend_precompiles(registry)
-            .map_err(ExecutionError::deferred_error_no_context)?;
-        self.trace_safe_precompile_registry = true;
-        Ok(self)
-    }
 
     /// Returns the deferred witness accumulated during execution.
     #[inline(always)]

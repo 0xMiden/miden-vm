@@ -12,8 +12,7 @@ pub use miden_assembly::{
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 /// Low-level processor type for callers that need direct execution control.
 ///
-/// Prefer the high-level [`execute`] and [`execute_sync`] facade functions for default
-/// execution; they install the built-in precompile registry automatically.
+/// `FastProcessor` includes the built-in precompile registry by default.
 pub use miden_processor::FastProcessor;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend,
@@ -32,7 +31,7 @@ pub use miden_verifier::VerificationError;
 #[cfg(feature = "internal")]
 pub mod internal;
 
-/// Executes the provided program with the built-in precompile registry.
+/// Executes the provided program.
 ///
 /// The `host` parameter is used to provide the external environment to the program being executed,
 /// such as access to the advice provider and libraries that the program depends on.
@@ -48,8 +47,7 @@ pub async fn execute(
     options: ExecutionOptions,
 ) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .with_precompile_registry(miden_precompiles::registry())?;
+        .map_err(ExecutionError::advice_error_no_context)?;
 
     processor.execute(program, host).await
 }
@@ -72,13 +70,12 @@ pub fn execute_sync(
     options: ExecutionOptions,
 ) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .with_precompile_registry(miden_precompiles::registry())?;
+        .map_err(ExecutionError::advice_error_no_context)?;
 
     processor.execute_sync(program, host)
 }
 
-/// Executes and proves a Miden program with the built-in precompile registry.
+/// Executes and proves a Miden program.
 pub async fn prove(
     program: &Program,
     stack_inputs: StackInputs,
