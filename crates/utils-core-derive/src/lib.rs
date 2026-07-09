@@ -246,11 +246,11 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Extract variant information
     let variants: Vec<_> = enum_data.variants.iter().collect();
     let variant_names: Vec<_> = variants.iter().map(|v| &v.ident).collect();
-    let variant_fields: Vec<_> = variants.iter().map(|v| extract_single_field(v)).collect();
+    let variant_types: Vec<_> = variants.iter().map(|v| extract_single_field_type(v)).collect();
 
     // Generate trait implementation by reading the trait definition
     let trait_impl =
-        generate_mast_forest_contributor_impl(enum_name, generics, &variant_names, &variant_fields);
+        generate_mast_forest_contributor_impl(enum_name, generics, &variant_names, &variant_types);
 
     TokenStream::from(trait_impl)
 }
@@ -260,31 +260,25 @@ fn generate_mast_forest_contributor_impl(
     enum_name: &Ident,
     generics: &syn::Generics,
     variant_names: &[&Ident],
-    variant_fields: &[Ident],
+    variant_types: &[&Type],
 ) -> proc_macro2::TokenStream {
-    // For now, let's generate a simple implementation to test the macro
-    let add_to_forest_arms =
-        variant_names.iter().zip(variant_fields.iter()).map(|(variant, field)| {
-            quote! {
-                #enum_name::#variant(#field) => #field.add_to_forest(forest)
-            }
-        });
-
     quote! {
-        impl #generics crate::mast::MastForestContributor for #enum_name #generics {
-            fn add_to_forest(self, forest: &mut crate::mast::MastForest) -> Result<crate::mast::MastNodeId, crate::mast::MastForestError> {
-                match self {
-                    #(#add_to_forest_arms),*
+        #(
+            impl #generics From<#variant_types> for #enum_name #generics {
+                fn from(builder: #variant_types) -> Self {
+                    Self::#variant_names(builder)
                 }
             }
+        )*
 
+        impl #generics crate::mast::MastForestContributor for #enum_name #generics {
             fn fingerprint_for_node(
                 &self,
-                forest: &crate::mast::MastForest,
+                context: &impl crate::mast::MastNodeContext,
                 hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::Word>,
             ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
+                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(context, hash_by_node_id)),*
                 }
             }
 
@@ -335,6 +329,17 @@ fn extract_single_field(variant: &Variant) -> Ident {
             // We'll use "node" as the field name in the generated code
             Ident::new("node", Span::call_site())
         },
+        _ => panic!(
+            "Each variant must have exactly one unnamed field, but {:?} does not",
+            variant.ident
+        ),
+    }
+}
+
+/// Extract the single field type from a tuple variant.
+fn extract_single_field_type(variant: &Variant) -> &Type {
+    match &variant.fields {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
         _ => panic!(
             "Each variant must have exactly one unnamed field, but {:?} does not",
             variant.ident

@@ -27,7 +27,7 @@ use miden_core::{
     events::EventName,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
-        MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
+        MastForest, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     program::{Kernel, Program, StackInputs},

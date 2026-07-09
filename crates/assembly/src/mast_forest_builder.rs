@@ -110,11 +110,37 @@ pub struct MastForestBuilder {
 pub(crate) struct StaticLibrary<'a> {
     pub(crate) mast: &'a MastForest,
     pub(crate) debug_info: Option<PackageDebugInfo>,
+    pub(crate) source_library_commitment: Word,
+    pub(crate) alternate_source_library_commitment: Option<Word>,
 }
 
 impl<'a> StaticLibrary<'a> {
     pub(crate) fn new(mast: &'a MastForest, debug_info: Option<PackageDebugInfo>) -> Self {
-        Self { mast, debug_info }
+        Self {
+            mast,
+            debug_info,
+            // Direct forest-backed static libraries do not have a package digest, so their source
+            // identity is the full forest commitment. This keeps provenance hints scoped to the
+            // same roots, external dependencies, and advice as package-backed static libraries.
+            source_library_commitment: mast.commitment(),
+            alternate_source_library_commitment: None,
+        }
+    }
+
+    pub(crate) fn with_source_library_commitment(
+        mut self,
+        source_library_commitment: Word,
+    ) -> Self {
+        self.source_library_commitment = source_library_commitment;
+        self
+    }
+
+    pub(crate) fn with_alternate_source_library_commitment(
+        mut self,
+        source_library_commitment: Word,
+    ) -> Self {
+        self.alternate_source_library_commitment = Some(source_library_commitment);
+        self
     }
 }
 
@@ -146,7 +172,7 @@ impl MastForestBuilder {
             .collect::<Vec<_>>();
         let mut error_messages = BTreeMap::new();
         let statically_linked_package_debug_info = static_libraries
-            .into_iter()
+            .iter()
             .map(|library| {
                 if let Some(debug_info) = library.debug_info.as_ref()
                     && let Some(section) = debug_info.error_messages()
@@ -155,15 +181,23 @@ impl MastForestBuilder {
                         error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
                     }
                 }
-                library.debug_info
+                library.debug_info.clone()
             })
             .collect::<Vec<_>>();
         let mut statically_linked_forest_indices_by_commitment = BTreeMap::new();
-        for (idx, forest) in forests.iter().enumerate() {
+        for (idx, library) in static_libraries.iter().enumerate() {
             statically_linked_forest_indices_by_commitment
-                .entry(forest.commitment())
+                .entry(library.source_library_commitment)
                 .or_insert_with(Vec::new)
                 .push(idx);
+            if let Some(source_library_commitment) = library.alternate_source_library_commitment
+                && source_library_commitment != library.source_library_commitment
+            {
+                statically_linked_forest_indices_by_commitment
+                    .entry(source_library_commitment)
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            }
         }
         let (statically_linked_mast, statically_linked_root_map) =
             MastForest::merge(forests.iter().copied()).into_diagnostic()?;
@@ -530,9 +564,8 @@ impl MastForestBuilder {
     /// Finalization preserves every recorded procedure root and every pending node reachable from
     /// those roots. Pending records which are unreachable from all roots are pruned.
     ///
-    /// External nodes are emitted before non-external nodes. This preserves the positional
-    /// convention used by externally linked procedure roots while still keeping final node IDs
-    /// local to the resulting forest.
+    /// Final nodes are emitted in dense `MastForest` order: external nodes, then basic blocks,
+    /// then internal nodes with children before parents.
     ///
     /// Finalization must happen in the order used below: plan the live layout first, materialize
     /// live nodes so builder-local refs have final node IDs, then register metadata against those
@@ -2452,7 +2485,7 @@ mod tests {
         let source_b_root = source_b_remapping[&source_b_ref];
 
         assert_eq!(source_a_root, source_b_root);
-        assert_eq!(source_a_forest.commitment(), source_b_forest.commitment());
+        assert_eq!(source_a_forest.interface_commitment(), source_b_forest.interface_commitment());
         assert_eq!(
             source_a_forest[source_a_root].digest(),
             source_b_forest[source_b_root].digest()
@@ -2480,6 +2513,73 @@ mod tests {
             source_asm_contexts(&source_graph, final_linked).is_empty(),
             "ambiguous same-commitment provenance should import execution without source metadata"
         );
+    }
+
+    #[test]
+    fn test_static_link_direct_forest_identity_uses_full_commitment() {
+        let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_a_asm_op = add_test_asm_op(
+            &mut source_a_builder,
+            AssemblyOp::new(None, "source_a".into(), 1, "add".into()),
+        );
+        let source_a_ref = source_a_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_a_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_a_builder, source_a_ref);
+        let (source_a_forest, source_a_remapping, source_a_graph, _) =
+            source_a_builder.build().unwrap().into_parts_with_source_graph();
+        let source_a_root = source_a_remapping[&source_a_ref];
+
+        let mut source_b_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_b_asm_op = add_test_asm_op(
+            &mut source_b_builder,
+            AssemblyOp::new(None, "source_b".into(), 1, "add".into()),
+        );
+        let source_b_ref = source_b_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_b_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_b_builder, source_b_ref);
+        let (source_b_forest, source_b_remapping, source_b_graph, _) =
+            source_b_builder.build().unwrap().into_parts_with_source_graph();
+        let source_b_root = source_b_remapping[&source_b_ref];
+        let source_b_forest = source_b_forest.with_advice_map(AdviceMap::from_iter([(
+            Word::from([Felt::new_unchecked(9), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
+            vec![Felt::new_unchecked(1)],
+        )]));
+
+        assert_eq!(source_a_forest.interface_commitment(), source_b_forest.interface_commitment());
+        assert_ne!(source_a_forest.commitment(), source_b_forest.commitment());
+        assert_eq!(
+            source_a_forest[source_a_root].digest(),
+            source_b_forest[source_b_root].digest()
+        );
+
+        let source_b_debug_root = source_b_graph.roots()[0];
+        let mut builder = MastForestBuilder::new_with_static_libraries([
+            StaticLibrary::new(
+                &source_a_forest,
+                Some(package_debug_info_from_source_graph(&source_a_graph)),
+            ),
+            StaticLibrary::new(
+                &source_b_forest,
+                Some(package_debug_info_from_source_graph(&source_b_graph)),
+            ),
+        ])
+        .unwrap();
+        let linked_ref = builder
+            .ensure_external_link_with_source_ref(
+                source_b_forest[source_b_root].digest(),
+                Some(source_b_forest.commitment()),
+                Some(source_b_root),
+                Some(DebugSourceNodeId::from(u32::from(source_b_debug_root))),
+            )
+            .unwrap();
+        record_test_root(&mut builder, linked_ref);
+        let (_forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_linked = remapping[&linked_ref];
+
+        assert_eq!(source_asm_contexts(&source_graph, final_linked), vec!["source_b"]);
     }
 
     /// Provenance-aware static linking imports package-owned source metadata for the selected root.
