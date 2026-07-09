@@ -122,8 +122,8 @@ where
                     .get(v.index)
                     .copied()
                     .unwrap_or_else(|| panic!("periodic column index {} is out of range", v.index)),
-                BaseEntry::Preprocessed { .. } => {
-                    panic!("preprocessed trace entries are not supported")
+                BaseEntry::Preprocessed { offset } => {
+                    builder.input(InputKey::Preprocessed { offset, index: v.index })
                 },
             },
             BaseLeaf::IsFirstRow => builder.input(InputKey::IsFirst),
