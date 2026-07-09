@@ -77,6 +77,11 @@
 ## miden-vm v0.25.1 (2026-07-10)
 
 - `ResumeContext` now makes the debug info it carries available to users beyond the `miden-processor` crate itself ([#3355](https://github.com/0xMiden/miden-vm/pull/3355))
+## v0.25.1 (TBD)
+
+#### Changes
+
+- Split dense `MastForest` order helpers and package serialization tests into smaller modules, and routed dense forest finalization and static library setup through dedicated builder and library methods ([#3346](https://github.com/0xMiden/miden-vm/pull/3346)).
 
 ## miden-vm v0.25.0 (2026-07-09)
 
