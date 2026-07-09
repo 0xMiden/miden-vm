@@ -5,14 +5,17 @@ use proptest::prelude::*;
 
 use crate::{
     Felt, WORD_SIZE, Word,
+    advice::AdviceMap,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, MastForest,
-        MastForestContributor, MastNodeExt,
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNodeExt,
+        MastNodeId,
     },
     operations::Operation,
     program::{Kernel, ProgramInfo},
     serde::{Deserializable, Serializable},
+    utils::IndexVec,
 };
 
 #[test]
@@ -132,12 +135,12 @@ fn test_commitment_caching() {
     let commitment4 = forest.commitment();
     assert_eq!(commitment3, commitment4);
 
-    // Test that advice_map mutations don't invalidate the cache
-    forest.advice_map_mut().insert(Word::from([Felt::ZERO; 4]), vec![]);
+    // Test that advice map changes recompute the forest commitment.
+    forest = forest.with_advice_map(AdviceMap::from_iter([(Word::from([Felt::ZERO; 4]), vec![])]));
     let commitment5 = forest.commitment();
-    assert_eq!(
+    assert_ne!(
         commitment3, commitment5,
-        "advice_map mutation should not invalidate commitment cache"
+        "advice_map changes should affect the forest commitment"
     );
 
     // Test that remove_nodes invalidates the cache
@@ -145,7 +148,129 @@ fn test_commitment_caching() {
     forest.remove_nodes(&nodes_to_remove); // Empty set, but still calls the method
     let commitment7 = forest.commitment();
     // Since we didn't actually remove anything, commitment should still be the same
-    assert_eq!(commitment3, commitment7);
+    assert_eq!(commitment5, commitment7);
+}
+
+#[test]
+fn mast_forest_commitment_separates_interface_and_dependencies() {
+    let mut first = MastForest::new();
+    let first_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut first)
+        .unwrap();
+    first.make_root(first_root);
+    ExternalNodeBuilder::new(Word::new([
+        Felt::new_unchecked(1),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ]))
+    .add_to_forest(&mut first)
+    .unwrap();
+
+    let (first, _) =
+        MastForest::from_raw_parts_with_id_map(first.nodes, first.roots, first.advice_map).unwrap();
+
+    let mut second = MastForest::new();
+    let second_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut second)
+        .unwrap();
+    second.make_root(second_root);
+    ExternalNodeBuilder::new(Word::new([
+        Felt::new_unchecked(2),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ]))
+    .add_to_forest(&mut second)
+    .unwrap();
+    let (second, _) =
+        MastForest::from_raw_parts_with_id_map(second.nodes, second.roots, second.advice_map)
+            .unwrap();
+
+    assert_eq!(first.interface_commitment(), second.interface_commitment());
+    assert_ne!(first.dependency_commitment(), second.dependency_commitment());
+    assert_ne!(first.commitment(), second.commitment());
+}
+
+#[test]
+fn from_raw_parts_canonicalizes_dense_node_order() {
+    let mut forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let high = Word::new([Felt::new_unchecked(9), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let low = Word::new([Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let high_external = ExternalNodeBuilder::new(high).add_to_forest(&mut forest).unwrap();
+    let low_external = ExternalNodeBuilder::new(low).add_to_forest(&mut forest).unwrap();
+    let join = JoinNodeBuilder::new([block, high_external]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+    forest.make_root(low_external);
+
+    let finalized =
+        MastForest::from_raw_parts(forest.nodes, forest.roots, forest.advice_map).unwrap();
+
+    assert_eq!(finalized[MastNodeId::new_unchecked(0)].digest(), low);
+    assert_eq!(finalized[MastNodeId::new_unchecked(1)].digest(), high);
+    assert!(finalized[MastNodeId::new_unchecked(2)].is_basic_block());
+    let join = finalized[MastNodeId::new_unchecked(3)].unwrap_join();
+    assert_eq!(join.first(), MastNodeId::new_unchecked(2));
+    assert_eq!(join.second(), MastNodeId::new_unchecked(1));
+    assert_eq!(
+        finalized.procedure_roots(),
+        &[MastNodeId::new_unchecked(3), MastNodeId::new_unchecked(0)]
+    );
+}
+
+#[test]
+fn from_raw_parts_topologically_orders_internal_nodes() {
+    let mut source = MastForest::new();
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let join = JoinNodeBuilder::new([left, right]).add_to_forest(&mut source).unwrap();
+
+    let mut nodes = IndexVec::new();
+    nodes
+        .push(
+            JoinNodeBuilder::new([MastNodeId::new_unchecked(1), MastNodeId::new_unchecked(2)])
+                .with_digest(source[join].digest())
+                .build_linked()
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+    nodes.push(source[left].clone()).unwrap();
+    nodes.push(source[right].clone()).unwrap();
+
+    let finalized =
+        MastForest::from_raw_parts(nodes, vec![MastNodeId::new_unchecked(0)], AdviceMap::default())
+            .unwrap();
+
+    assert!(finalized[MastNodeId::new_unchecked(0)].is_basic_block());
+    assert!(finalized[MastNodeId::new_unchecked(1)].is_basic_block());
+    let join = finalized[MastNodeId::new_unchecked(2)].unwrap_join();
+    assert_eq!(join.first(), MastNodeId::new_unchecked(0));
+    assert_eq!(join.second(), MastNodeId::new_unchecked(1));
+    assert_eq!(finalized.procedure_roots(), &[MastNodeId::new_unchecked(2)]);
+}
+
+#[test]
+fn from_raw_parts_rejects_duplicate_external_digests() {
+    let mut forest = MastForest::new();
+    let duplicate = Word::new([Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+    ExternalNodeBuilder::new(duplicate).add_to_forest(&mut forest).unwrap();
+
+    let result = MastForest::from_raw_parts(forest.nodes, forest.roots, forest.advice_map);
+
+    assert!(matches!(
+        result,
+        Err(MastForestError::InvalidNodeOrder { reason, .. })
+            if reason.contains("external node digests must be strictly increasing")
+    ));
 }
 
 #[test]

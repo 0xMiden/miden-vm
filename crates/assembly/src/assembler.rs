@@ -1121,8 +1121,7 @@ impl Assembler {
 
     fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
         self.linker
-            .libraries()
-            .filter(|lib| matches!(lib.linkage, Linkage::Static))
+            .static_libraries()
             .map(|lib| {
                 let debug_info = match lib.package.debug_info() {
                     Ok(debug_info) => debug_info,
@@ -1134,7 +1133,11 @@ impl Assembler {
                         )));
                     },
                 };
-                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info))
+                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info)
+                    .with_source_library_commitment(lib.commitment())
+                    .with_alternate_source_library_commitment(
+                        lib.package.interface_digest().into_diagnostic()?,
+                    ))
             })
             .collect()
     }

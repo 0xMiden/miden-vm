@@ -4,7 +4,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
     mast::{MastForest, MastForestError, MastNodeId},
@@ -210,30 +210,19 @@ impl DynNodeBuilder {
     }
 }
 
-impl MastForestContributor for DynNodeBuilder {
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use the default digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else if self.is_dyncall {
-            DynNode::DYNCALL_DEFAULT_DIGEST
-        } else {
-            DynNode::DYN_DEFAULT_DIGEST
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(DynNode { is_dyncall: self.is_dyncall, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl DynNodeBuilder {
+    /// Adds this builder to a mutable forest for test and arbitrary data construction.
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build();
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for DynNodeBuilder {
     fn fingerprint_for_node(
         &self,
-        _forest: &MastForest,
+        _context: &impl MastNodeContext,
         _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         Ok(if let Some(forced_digest) = self.digest {
@@ -253,40 +242,6 @@ impl MastForestContributor for DynNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-impl DynNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use the default digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else if self.is_dyncall {
-            DynNode::DYNCALL_DEFAULT_DIGEST
-        } else {
-            DynNode::DYN_DEFAULT_DIGEST
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(DynNode { is_dyncall: self.is_dyncall, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 
@@ -320,15 +275,15 @@ mod tests {
     /// domain.
     #[test]
     pub fn test_dyn_node_digest() {
-        let mut forest = MastForest::new();
-        let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+        let mut forest = crate::mast::DenseMastForestBuilder::new();
+        let dyn_node_id = forest.push_node(DynNodeBuilder::new_dyn()).unwrap();
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
             Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
-        let dyncall_node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        let dyncall_node_id = forest.push_node(DynNodeBuilder::new_dyncall()).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
