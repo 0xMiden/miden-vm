@@ -78,18 +78,15 @@ pub fn enforce_main<AB>(
             f_call.clone() + f_syscall.clone() + f_dyncall.clone() + f_end.clone();
         let default_flag = change_ctx_flag.not();
 
-        let builder = &mut builder.when_transition();
         builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
         builder.when(f_syscall).assert_zero(ctx_next);
-        builder.when(default_flag).assert_eq(ctx_next, ctx);
+        builder.when_transition().when(default_flag).assert_eq(ctx_next, ctx);
     }
 
     // Function hash transition constraints (see module doc for transition table)
     {
         let f_load = f_call + f_dyncall;
         let f_preserve = (f_load.clone() + f_end).not();
-
-        let builder = &mut builder.when_transition();
 
         {
             let builder = &mut builder.when(f_load);
@@ -98,10 +95,10 @@ pub fn enforce_main<AB>(
             }
         }
 
-        {
-            let builder = &mut builder.when(f_preserve);
-            builder.assert_eq_arrays(next.system.fn_hash, local.system.fn_hash);
-        }
+        builder
+            .when_transition()
+            .when(f_preserve)
+            .assert_eq_arrays(next.system.fn_hash, local.system.fn_hash);
     }
 }
 

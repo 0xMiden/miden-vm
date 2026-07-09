@@ -8,10 +8,11 @@ use crate::{
     Felt,
     chiplets::hasher,
     mast::{
-        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
+        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, MastNode, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
+    utils::IndexVec,
 };
 
 /// Digest sources for a parsed serialized forest.
@@ -136,7 +137,7 @@ impl<'a> ResolvedSerializedForest<'a> {
             self.layout.basic_block_offset(),
             self.layout.basic_block_len(),
         )?);
-        let mut mast_forest = MastForest::new();
+        let mut nodes = IndexVec::<MastNodeId, MastNode>::with_capacity(self.node_count());
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
@@ -147,10 +148,15 @@ impl<'a> ResolvedSerializedForest<'a> {
                 &basic_block_data_decoder,
                 digest,
             )?;
-            mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
+            let node = mast_node_builder.build_linked().map_err(|e| {
                 DeserializationError::InvalidValue(format!(
-                    "failed to add node to MAST forest while deserializing: {e}",
+                    "failed to build node while deserializing MAST forest: {e}",
                 ))
+            })?;
+            nodes.push(node).map_err(|_| {
+                DeserializationError::InvalidValue(
+                    "too many nodes while deserializing MAST forest".into(),
+                )
             })?;
         }
 
@@ -159,16 +165,12 @@ impl<'a> ResolvedSerializedForest<'a> {
             roots.push(self.procedure_root_at(index)?);
         }
 
-        MastForest::from_trusted_deserialization_parts(MastForestParts {
-            nodes: mast_forest.nodes,
-            roots,
-            advice_map,
-        })
-        .map_err(|e| {
-            DeserializationError::InvalidValue(format!(
-                "failed to construct trusted deserialized MAST forest: {e}",
-            ))
-        })
+        MastForest::from_trusted_deserialization_parts(MastForestParts { nodes, roots, advice_map })
+            .map_err(|e| {
+                DeserializationError::InvalidValue(format!(
+                    "failed to construct trusted deserialized MAST forest: {e}",
+                ))
+            })
     }
 
     pub(super) fn node_count(&self) -> usize {
@@ -202,6 +204,47 @@ impl<'a> ResolvedSerializedForest<'a> {
         self.node_digest_for_entry(index, entry)
     }
 
+    pub(super) fn validate_dense_node_order(&self) -> Result<(), DeserializationError> {
+        // Serialized dense payloads use the same final dense order as in-memory forests:
+        // external nodes first, with strictly increasing digests, then basic blocks, then
+        // internal nodes. Child IDs must point backward so children appear before parents.
+        let mut previous_class = serialized_node_order_class(MastNodeEntry::External);
+        let mut previous_external_digest = None;
+
+        for index in 0..self.node_count() {
+            let entry = self.node_entry_at(index)?;
+            let class = serialized_node_order_class(entry);
+            if class < previous_class {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "node {index} is {} after {} in dense MAST forest",
+                    serialized_node_order_class_name(class),
+                    serialized_node_order_class_name(previous_class),
+                )));
+            }
+            previous_class = class;
+
+            if matches!(entry, MastNodeEntry::External) {
+                let digest = self.node_digest_for_entry(index, entry)?;
+                if let Some(previous_digest) = previous_external_digest
+                    && previous_digest >= digest
+                {
+                    return Err(DeserializationError::InvalidValue(
+                        "external node digests must be strictly increasing".into(),
+                    ));
+                }
+                previous_external_digest = Some(digest);
+            }
+
+            if let Some(child_id) = forward_reference(entry, index) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "node {index} references child {child_id} which comes after it"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the digest for a node whose entry was already read and bounds-checked by the caller.
     fn node_digest_for_entry(
         &self,
@@ -214,6 +257,41 @@ impl<'a> ResolvedSerializedForest<'a> {
     #[cfg(test)]
     pub(super) fn digest_slot_at(&self, index: usize) -> usize {
         self.digests.slot_by_node[index] as usize
+    }
+}
+
+fn serialized_node_order_class(entry: MastNodeEntry) -> u8 {
+    match entry {
+        MastNodeEntry::External => 0,
+        MastNodeEntry::Block { .. } => 1,
+        _ => 2,
+    }
+}
+
+fn serialized_node_order_class_name(class: u8) -> &'static str {
+    match class {
+        0 => "External",
+        1 => "BasicBlock",
+        _ => "Internal",
+    }
+}
+
+fn forward_reference(entry: MastNodeEntry, node_index: usize) -> Option<u32> {
+    match entry {
+        MastNodeEntry::Join { left_child_id, right_child_id } => [left_child_id, right_child_id]
+            .into_iter()
+            .find(|&child_id| child_id as usize >= node_index),
+        MastNodeEntry::Split { if_branch_id, else_branch_id } => [if_branch_id, else_branch_id]
+            .into_iter()
+            .find(|&child_id| child_id as usize >= node_index),
+        MastNodeEntry::Loop { body_id } => (body_id as usize >= node_index).then_some(body_id),
+        MastNodeEntry::Call { callee_id } | MastNodeEntry::SysCall { callee_id } => {
+            (callee_id as usize >= node_index).then_some(callee_id)
+        },
+        MastNodeEntry::Block { .. }
+        | MastNodeEntry::Dyn
+        | MastNodeEntry::Dyncall
+        | MastNodeEntry::External => None,
     }
 }
 
@@ -397,12 +475,12 @@ fn checked_child_index(
 }
 
 pub(super) fn basic_block_offset_for_node_index(
-    nodes: &[super::MastNode],
+    nodes: &[MastNode],
     node_index: usize,
 ) -> Result<u32, DeserializationError> {
     let mut offset = 0usize;
     for node in nodes.iter().take(node_index) {
-        if let super::MastNode::Block(block) = node {
+        if let MastNode::Block(block) = node {
             offset = offset.checked_add(basic_block_data_len(block)).ok_or_else(|| {
                 DeserializationError::InvalidValue("basic-block data offset overflow".to_string())
             })?;

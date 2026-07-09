@@ -76,12 +76,16 @@ fn blake3_bench(c: &mut Criterion) {
     let proof_sample_size =
         env_usize("BLAKE3_PROOF_SAMPLE_SIZE", env_usize("BLAKE3_SAMPLE_SIZE", 10));
     let light_sample_size = env_usize("BLAKE3_LIGHT_SAMPLE_SIZE", 100);
-    let measurement_time_secs = env_u64("BLAKE3_MEASUREMENT_TIME_SECS", 1);
-    let warm_up_time_secs = env_u64("BLAKE3_WARM_UP_TIME_SECS", 1);
+    let proof_measurement_time_secs = env_u64("BLAKE3_MEASUREMENT_TIME_SECS", 1);
+    let proof_warm_up_time_secs = env_u64("BLAKE3_WARM_UP_TIME_SECS", 1);
+    let light_measurement_time_secs =
+        env_u64("BLAKE3_LIGHT_MEASUREMENT_TIME_SECS", proof_measurement_time_secs);
+    let light_warm_up_time_secs =
+        env_u64("BLAKE3_LIGHT_WARM_UP_TIME_SECS", proof_warm_up_time_secs);
     assert!(!axes.is_empty(), "BLAKE3_BENCH_AXES did not select any axes");
     println!("\n=== Blake3 axes: {}", axes.join(", "));
     println!(
-        "=== Criterion: proof_sample_size={proof_sample_size} light_sample_size={light_sample_size} measurement_time={measurement_time_secs}s warm_up={warm_up_time_secs}s"
+        "=== Criterion: proof_sample_size={proof_sample_size} proof_measurement_time={proof_measurement_time_secs}s proof_warm_up={proof_warm_up_time_secs}s light_sample_size={light_sample_size} light_measurement_time={light_measurement_time_secs}s light_warm_up={light_warm_up_time_secs}s"
     );
 
     let fixture = Blake3Fixture::load_from_repo(&repo_root_from_manifest());
@@ -90,7 +94,12 @@ fn blake3_bench(c: &mut Criterion) {
         prove_and_verify_once(&fixture);
 
         let mut group = c.benchmark_group(BENCH_GROUP);
-        configure_group(&mut group, proof_sample_size, measurement_time_secs, warm_up_time_secs);
+        configure_group(
+            &mut group,
+            proof_sample_size,
+            proof_measurement_time_secs,
+            proof_warm_up_time_secs,
+        );
 
         if has_axis(&axes, "e2e_prove") {
             group.bench_function("e2e_prove", |b| {
@@ -122,7 +131,12 @@ fn blake3_bench(c: &mut Criterion) {
 
     if LIGHT_AXES.iter().any(|axis| has_axis(&axes, axis)) {
         let mut group = c.benchmark_group(BENCH_GROUP);
-        configure_group(&mut group, light_sample_size, measurement_time_secs, warm_up_time_secs);
+        configure_group(
+            &mut group,
+            light_sample_size,
+            light_measurement_time_secs,
+            light_warm_up_time_secs,
+        );
 
         if has_axis(&axes, "execute_sync") {
             group.bench_function("execute_sync", |b| {

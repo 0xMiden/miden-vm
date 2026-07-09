@@ -27,6 +27,7 @@ use crate::handlers::{
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
+    readonly::readonly_noop_handlers,
     sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
@@ -156,6 +157,7 @@ impl CoreLibrary {
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ];
         handlers.extend(default_debug_handlers());
+        handlers.extend(readonly_noop_handlers());
         handlers
     }
 
@@ -187,6 +189,20 @@ impl Default for CoreLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_package_version_matches_crate_version() {
+        let core_lib = CoreLibrary::default();
+        let package = core_lib.package();
+        let crate_version = env!("CARGO_PKG_VERSION")
+            .parse::<miden_mast_package::Version>()
+            .expect("crate version should be a valid package version");
+
+        assert_eq!(
+            &package.version, &crate_version,
+            "embedded core package version should track the miden-core-lib crate version",
+        );
+    }
 
     #[test]
     fn test_compile() {
