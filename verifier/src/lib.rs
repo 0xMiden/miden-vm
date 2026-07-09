@@ -137,29 +137,29 @@ fn verify_stark(
 
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+    let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
 
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -201,7 +201,7 @@ pub enum StarkVerificationError {
 fn verify_stark_proof<SC>(
     config: &SC,
     public_values: &[Felt],
-    kernel_felts: &[Felt],
+    aux_inputs: &[Felt],
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
@@ -226,13 +226,14 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    // `air_inputs` are the fixed public values; `aux_inputs` are the kernel-procedure
-    // digests. The lifted verifier absorbs both into Fiat-Shamir internally, and derives
-    // the multi-AIR ordering deterministically from the proof's per-AIR trace heights.
+    // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
+    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
+    // digests). The lifted verifier absorbs both into Fiat-Shamir internally, and derives the
+    // multi-AIR ordering deterministically from the proof's per-AIR trace heights.
     let statement = Statement::<Felt, QuadFelt, _>::new(
         MidenMultiAir::new(),
         public_values.to_vec(),
-        kernel_felts.to_vec(),
+        aux_inputs.to_vec(),
     )
     .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 

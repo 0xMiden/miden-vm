@@ -64,14 +64,18 @@ FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
+# Deny warnings locally so `make clippy`/`make lint` fail on the same warnings as CI,
+# which runs `make clippy` with RUSTFLAGS=-D warnings (see .github/workflows/lint.yml).
+DENY_WARNINGS := RUSTFLAGS="$(RUSTFLAGS) -D warnings"
+
 .PHONY: clippy
 clippy: ## Runs Clippy with configs (alias for xclippy)
-	cargo +stable xclippy
+	$(DENY_WARNINGS) cargo +stable xclippy
 
 
 .PHONY: xclippy
 xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
-	cargo +stable xclippy
+	$(DENY_WARNINGS) cargo +stable xclippy
 
 
 .PHONY: fix
@@ -212,7 +216,7 @@ build: ## Builds with default parameters
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace
+	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace --exclude miden-vm-blake3-bench
 
 # --- executable ----------------------------------------------------------------------------------
 
@@ -245,9 +249,20 @@ exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
 
 .PHONY: exec-dist
-exec-dist: ## Builds the CLI for $(BUILD_TARGET) with --locked (for release artifact uploads)
-# NOTE: the resulting binary is stores in target/<$(BUILD_TARGET)>/optimized/
+exec-dist: miden-vm-dist miden-format-dist miden-registry-dist ## Builds CLIs for $(BUILD_TARGET) with --locked (for release artifact uploads)
+# NOTE: the resulting binaries are stored in target/<$(BUILD_TARGET)>/optimized/
+
+.PHONY: miden-vm-dist
+miden-vm-dist:
 	cargo build -p miden-vm --bin miden-vm --profile optimized $(FEATURES_CONCURRENT_EXEC) --target $(BUILD_TARGET) --locked
+
+.PHONY: miden-format-dist
+miden-format-dist:
+	cargo build -p miden-format --bin miden-format --profile optimized --target $(BUILD_TARGET) --locked
+
+.PHONY: miden-registry-dist
+miden-registry-dist:
+	cargo build -p miden-package-registry-local --bin miden-registry --profile optimized --target $(BUILD_TARGET) --locked
 
 .PHONY: packages
 packages: ## Builds .masp packages and store them in target/packages

@@ -3,10 +3,15 @@ use alloc::sync::Arc;
 use miden_assembly_syntax::{
     ast::{Path, Visibility, types::FunctionType},
     debuginfo::{SourceManager, SourceSpan, Spanned},
+    diagnostics::Report,
 };
 use miden_core::Word;
 
-use super::{GlobalItemIndex, mast_forest_builder::MastNodeRef};
+use super::{
+    GlobalItemIndex,
+    assembler::{MAX_PROC_LOCALS, error::AssemblerError},
+    mast_forest_builder::MastNodeRef,
+};
 
 // PROCEDURE CONTEXT
 // ================================================================================================
@@ -50,9 +55,25 @@ impl ProcedureContext {
     }
 
     /// Sets the number of locals to allocate for the procedure.
-    pub fn with_num_locals(mut self, num_locals: u16) -> Self {
+    ///
+    /// Returns an error if `num_locals` exceeds `MAX_PROC_LOCALS`, the largest count that
+    /// stays representable in a `u16` once rounded up to a word boundary during frame-pointer
+    /// codegen. The text parser enforces this on `@locals(..)`, but procedures built directly
+    /// via the AST bypass the parser. So the limit is enforced here for all callers.
+    ///
+    /// Call [`Self::with_span`] first so the error can point at the procedure definition.
+    pub fn with_num_locals(mut self, num_locals: u16) -> Result<Self, Report> {
+        if num_locals > MAX_PROC_LOCALS {
+            let source_file = self.source_manager.get(self.span.source_id()).ok();
+            return Err(Report::new(AssemblerError::TooManyProcedureLocals {
+                span: self.span,
+                source_file,
+                max_locals: MAX_PROC_LOCALS,
+                num_locals,
+            }));
+        }
         self.num_locals = num_locals;
-        self
+        Ok(self)
     }
 
     pub fn with_span(mut self, span: SourceSpan) -> Self {

@@ -160,12 +160,13 @@ impl Package {
             debug_sections_trusted: true,
         };
 
-        package.recompute_mast_commitment()?;
+        package.compute_interface_digest()?;
+        package.recompute_mast_commitment();
 
         Ok(package)
     }
 
-    fn recompute_mast_commitment(&mut self) -> Result<(), ManifestValidationError> {
+    fn compute_interface_digest(&self) -> Result<Word, ManifestValidationError> {
         let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
         for export in self.manifest.exports() {
             if let PackageExport::Procedure(export) = export {
@@ -182,9 +183,11 @@ impl Package {
             }
         }
 
-        let digest = self.mast.compute_nodes_commitment(node_ids.iter());
-        self.digest = digest;
-        Ok(())
+        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
+    }
+
+    fn recompute_mast_commitment(&mut self) {
+        self.digest = self.mast.commitment();
     }
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
@@ -197,6 +200,7 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
+        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
@@ -237,6 +241,11 @@ impl Package {
     #[inline]
     pub fn digest(&self) -> Word {
         self.digest
+    }
+
+    /// Returns the digest of the exported procedure roots used by the linker.
+    pub fn interface_digest(&self) -> Result<Word, ManifestValidationError> {
+        self.compute_interface_digest()
     }
 
     /// Returns a digest of the package content relevant to assembly and dependency resolution.
@@ -427,6 +436,8 @@ impl Package {
 
     /// Returns an iterator over the module infos of the library.
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
+        let source_library_commitment =
+            self.interface_digest().expect("package manifest exports were validated");
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
 
         for module in self.manifest.modules() {
@@ -463,7 +474,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.mast.commitment()),
+                        Some(source_library_commitment),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -486,6 +497,7 @@ impl Package {
     /// item export paths. Link-time resolution relies on explicit module metadata so that modules
     /// remain distinct from exported items.
     pub fn try_module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+        let source_library_commitment = self.interface_digest()?;
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
 
         for module in self.manifest.modules() {
@@ -557,7 +569,7 @@ impl Package {
                         attributes.clone(),
                         *node,
                         source_node.map(u32::from),
-                        Some(self.mast.commitment()),
+                        Some(source_library_commitment),
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
@@ -1323,9 +1335,10 @@ mod tests {
         Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
+        Felt, Word,
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
+            BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
             MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
         },
         operations::Operation,
@@ -1345,26 +1358,32 @@ mod tests {
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let node_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build basic block");
-        forest.make_root(node_id);
+        builder.mark_root(node_id);
+        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let node_id = remapping.get(node_id).expect("root node should be retained");
         (forest, node_id)
     }
 
     fn build_split_forest() -> (MastForest, MastNodeId, MastNodeId, MastNodeId) {
-        let mut forest = MastForest::new();
-        let left_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut forest)
+        let mut builder = DenseMastForestBuilder::new();
+        let left_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build left basic block");
-        let right_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
-            .add_to_forest(&mut forest)
+        let right_id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Mul]))
             .expect("failed to build right basic block");
-        let root_id = SplitNodeBuilder::new([left_id, right_id])
-            .add_to_forest(&mut forest)
+        let root_id = builder
+            .push_node(SplitNodeBuilder::new([left_id, right_id]))
             .expect("failed to build split node");
-        forest.make_root(root_id);
+        builder.mark_root(root_id);
+        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let root_id = remapping.get(root_id).expect("root node should be retained");
+        let left_id = remapping.get(left_id).expect("left node should be retained");
+        let right_id = remapping.get(right_id).expect("right node should be retained");
         (forest, root_id, left_id, right_id)
     }
 
@@ -1482,6 +1501,26 @@ mod tests {
 
     fn build_kernel_package(name: &str) -> Package {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    #[test]
+    fn package_digest_changes_when_advice_map_changes() {
+        let package = build_kernel_package("kernel");
+        let package_digest = package.digest();
+        let interface_digest = package.interface_digest().unwrap();
+        let content_digest = package.content_digest();
+        let mast_commitment = package.mast_forest().commitment();
+
+        let advice_map = AdviceMap::from_iter([(
+            Word::from([1_u32, 2, 3, 4]),
+            vec![Felt::from_u32(5), Felt::from_u32(6)],
+        )]);
+        let with_advice = package.with_advice_map(advice_map);
+
+        assert_ne!(package_digest, with_advice.digest());
+        assert_eq!(interface_digest, with_advice.interface_digest().unwrap());
+        assert_ne!(content_digest, with_advice.content_digest());
+        assert_ne!(mast_commitment, with_advice.mast_forest().commitment());
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
@@ -2111,18 +2150,23 @@ mod tests {
             }
         }
 
-        let mut concrete_forest = MastForest::new();
-        let concrete_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
-            .add_to_forest(&mut concrete_forest)
+        let mut concrete_builder = DenseMastForestBuilder::new();
+        let concrete_root = concrete_builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .unwrap();
-        concrete_forest.make_root(concrete_root);
+        concrete_builder.mark_root(concrete_root);
+        let (concrete_forest, concrete_remapping) = concrete_builder.finish_with_id_map().unwrap();
+        let concrete_root = concrete_remapping.get(concrete_root).unwrap();
         let concrete_digest = concrete_forest[concrete_root].digest();
 
-        let mut placeholder_forest = MastForest::new();
-        let placeholder_root = ExternalNodeBuilder::new(concrete_digest)
-            .add_to_forest(&mut placeholder_forest)
+        let mut placeholder_builder = DenseMastForestBuilder::new();
+        let placeholder_root = placeholder_builder
+            .push_node(ExternalNodeBuilder::new(concrete_digest))
             .unwrap();
-        placeholder_forest.make_root(placeholder_root);
+        placeholder_builder.mark_root(placeholder_root);
+        let (placeholder_forest, placeholder_remapping) =
+            placeholder_builder.finish_with_id_map().unwrap();
+        let placeholder_root = placeholder_remapping.get(placeholder_root).unwrap();
 
         let placeholder_debug = debug_info_for_root(placeholder_root, "placeholder");
         let concrete_debug = debug_info_for_root(concrete_root, "concrete");

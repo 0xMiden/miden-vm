@@ -1,6 +1,6 @@
 [package]
 name = "miden-format"
-version.workspace = true
+version = "0.25.0"
 description = "Formatter for the Miden Assembly language"
 documentation = "https://docs.rs/miden-format"
 readme = "README.md"

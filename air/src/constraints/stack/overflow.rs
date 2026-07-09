@@ -162,14 +162,10 @@ fn enforce_overflow_index_constraints<AB>(
     let last_stack_item_next = next.stack.get(15);
 
     // On right shift, the overflow address should be set to current clk
-    builder
-        .when_transition()
-        .when(op_flags.right_shift())
-        .assert_eq(overflow_addr_next, clk);
+    builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next, clk);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     builder
-        .when_transition()
         .when(op_flags.overflow().not())
         .when(op_flags.left_shift())
         .assert_zero(last_stack_item_next);
