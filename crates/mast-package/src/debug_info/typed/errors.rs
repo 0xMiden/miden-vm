@@ -30,9 +30,6 @@ pub enum TypedDebugInfoError {
     #[error("invalid {ty:?} value '{token}'")]
     InvalidFloat { token: String, ty: DebugPrimitiveType },
 
-    #[error("invalid hex '{0}'")]
-    InvalidHex(String),
-
     #[error("value '{0}' is out of range for a field element")]
     FeltOutOfRange(String),
 

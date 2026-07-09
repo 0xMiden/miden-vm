@@ -8,7 +8,7 @@ use alloc::{
 
 use super::{
     super::{DebugFieldInfo, DebugTypeIdx, DebugTypeInfo, DebugTypesSection},
-    lookup::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    lookup::{field_name, is_anonymous, type_leaf_name, type_name_raw, unnamed_field_count},
 };
 
 // Stops infinite recursion if a type refers back to itself.
@@ -36,7 +36,7 @@ pub(super) fn format_type(types: &DebugTypesSection, idx: DebugTypeIdx, depth: u
             format_function(types, *return_type_idx, param_type_indices, depth)
         },
         DebugTypeInfo::Enum { name_idx, .. } => {
-            wit_type_name(type_name_raw(types, *name_idx)).to_string()
+            type_leaf_name(type_name_raw(types, *name_idx)).to_string()
         },
         DebugTypeInfo::Unknown => "?".into(),
     }
@@ -62,8 +62,21 @@ fn format_struct(
     depth: usize,
 ) -> String {
     let full = type_name_raw(types, name_idx);
-    let short = wit_type_name(full);
-    if is_anonymous(short) {
+    let short = type_leaf_name(full);
+    if !is_anonymous(short) {
+        return short.to_string();
+    }
+    // A tuple shows its element types as `(T0, T1)`; a record shows `{x: T0, y: T1}`. A struct that
+    // mixes named and unnamed fields is rejected when decoding a value; `Display` cannot fail, so
+    // here it falls back to the record form.
+    if !fields.is_empty() && unnamed_field_count(types, fields) == fields.len() {
+        let elems = fields
+            .iter()
+            .map(|f| format_type(types, f.type_idx, depth + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("({elems})")
+    } else {
         let fields_str = fields
             .iter()
             .map(|f| {
@@ -74,8 +87,6 @@ fn format_struct(
             .collect::<Vec<_>>()
             .join(", ");
         format!("{{{fields_str}}}")
-    } else {
-        short.to_string()
     }
 }
 

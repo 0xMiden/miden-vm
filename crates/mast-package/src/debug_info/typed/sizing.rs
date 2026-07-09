@@ -7,7 +7,7 @@
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     MAX_TYPE_DEPTH, TypedView, WitScalarCodec,
-    lookup::{type_name_raw, wit_type_name},
+    lookup::{type_leaf_name, type_name_raw},
 };
 
 /// Sums a per-leaf unit count over `idx`. `primitive` weights a primitive leaf; `codec` weights a
@@ -47,7 +47,7 @@ fn count_units_at(
             // A codec-handled scalar (e.g. `account-id`) is one opaque leaf, so weight it with
             // `codec` regardless of its fields.
             let name = type_name_raw(view.types, *name_idx);
-            if let Some(c) = view.codec_for(wit_type_name(name)) {
+            if let Some(c) = view.codec_for(type_leaf_name(name)) {
                 return Some(codec(c));
             }
             let mut total = 0usize;

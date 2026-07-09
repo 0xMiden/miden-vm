@@ -1,45 +1,50 @@
 //! Encodes argument tokens into felts using debug type info.
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::ToString, vec::Vec};
 
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     Felt, MAX_TYPE_DEPTH, TypedDebugInfoError, TypedView, WitScalarCodec, WordCodec,
-    lookup::{type_name_raw, wit_type_name},
+    lookup::{type_leaf_name, type_name_raw},
     max_for_bits,
     sizing::count_units,
 };
 
 /// Encodes the tokens for a value of type `idx` into its stack felts.
 /// Consumes exactly `arg_token_count(idx)` tokens and produces `stack_felt_count(idx)` felts.
-pub(super) fn encode_tokens<I: Iterator<Item = String>>(
+pub(super) fn encode_tokens<I>(
     tokens: &mut I,
     view: &TypedView<'_>,
     idx: DebugTypeIdx,
-) -> Result<Vec<Felt>, TypedDebugInfoError> {
+) -> Result<Vec<Felt>, TypedDebugInfoError>
+where
+    I: Iterator,
+    I::Item: AsRef<str>,
+{
     encode_tokens_at(tokens, view, idx, 0)
 }
 
-fn encode_tokens_at<I: Iterator<Item = String>>(
+fn encode_tokens_at<I>(
     tokens: &mut I,
     view: &TypedView<'_>,
     idx: DebugTypeIdx,
     depth: usize,
-) -> Result<Vec<Felt>, TypedDebugInfoError> {
+) -> Result<Vec<Felt>, TypedDebugInfoError>
+where
+    I: Iterator,
+    I::Item: AsRef<str>,
+{
     if depth > MAX_TYPE_DEPTH {
         return Err(TypedDebugInfoError::RecursionLimit);
     }
     let ty = view.types.get_type(idx).ok_or(TypedDebugInfoError::MissingType(idx.as_u32()))?;
     match ty {
         DebugTypeInfo::Primitive(DebugPrimitiveType::Void) => Ok(Vec::new()),
-        DebugTypeInfo::Primitive(p) => encode_primitive(next_token(tokens)?, *p),
+        DebugTypeInfo::Primitive(p) => encode_primitive(next_token(tokens)?.as_ref(), *p),
         DebugTypeInfo::Struct { name_idx, fields, .. } => {
             let name = type_name_raw(view.types, *name_idx);
-            if let Some(codec) = view.codec_for(wit_type_name(name)) {
-                return codec.encode(&next_token(tokens)?);
+            if let Some(codec) = view.codec_for(type_leaf_name(name)) {
+                return codec.encode(next_token(tokens)?.as_ref());
             }
             let mut felts = Vec::new();
             for f in fields {
@@ -90,34 +95,29 @@ pub(super) fn arg_token_count(view: &TypedView<'_>, idx: DebugTypeIdx) -> Option
     )
 }
 
-fn encode_primitive(
-    token: String,
-    p: DebugPrimitiveType,
-) -> Result<Vec<Felt>, TypedDebugInfoError> {
+fn encode_primitive(token: &str, p: DebugPrimitiveType) -> Result<Vec<Felt>, TypedDebugInfoError> {
     let n = p.size_in_felts() as usize;
     match p {
         // Compiler-built packages emit `word` as a struct handled by `WordCodec`; this arm fires
         // only for a core `Word` primitive.
-        DebugPrimitiveType::Word => WordCodec.encode(&token),
+        DebugPrimitiveType::Word => WordCodec.encode(token),
         DebugPrimitiveType::Void => Ok(Vec::new()),
         DebugPrimitiveType::Bool => {
             let v = match token.to_ascii_lowercase().as_str() {
-                "true" | "1" => 1u64,
+                "true" | "1" => 1,
                 "false" | "0" => 0,
-                _ => return Err(TypedDebugInfoError::InvalidBool(token)),
+                _ => return Err(TypedDebugInfoError::InvalidBool(token.to_string())),
             };
-            Felt::try_from(v)
-                .map(|f| alloc::vec![f])
-                .map_err(|_| TypedDebugInfoError::FeltOutOfRange(token))
+            Ok(alloc::vec![Felt::from_u32(v)])
         },
-        DebugPrimitiveType::Felt => Ok(alloc::vec![parse_felt_token(&token)?]),
+        DebugPrimitiveType::Felt => Ok(alloc::vec![parse_felt_token(token)?]),
         // Signed ints: check the range, then store as two's-complement 32-bit limbs (low first).
         DebugPrimitiveType::I8
         | DebugPrimitiveType::I16
         | DebugPrimitiveType::I32
         | DebugPrimitiveType::I64
         | DebugPrimitiveType::I128 => {
-            let value = parse_signed(&token, p.size_in_bytes() * 8, p)?;
+            let value = parse_signed(token, p.size_in_bytes() * 8, p)?;
             Ok(limbs_to_felts(value, n))
         },
         DebugPrimitiveType::U8
@@ -125,17 +125,21 @@ fn encode_primitive(
         | DebugPrimitiveType::U32
         | DebugPrimitiveType::U64
         | DebugPrimitiveType::U128 => {
-            let value = parse_unsigned(&token, p.size_in_bytes() * 8, p)?;
+            let value = parse_unsigned(token, p.size_in_bytes() * 8, p)?;
             Ok(limbs_to_felts(value, n))
         },
         DebugPrimitiveType::F32 => {
-            let v: f32 =
-                token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat { token, ty: p })?;
+            let v: f32 = token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat {
+                token: token.to_string(),
+                ty: p,
+            })?;
             Ok(limbs_to_felts(v.to_bits() as u128, n))
         },
         DebugPrimitiveType::F64 => {
-            let v: f64 =
-                token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat { token, ty: p })?;
+            let v: f64 = token.parse().map_err(|_| TypedDebugInfoError::InvalidFloat {
+                token: token.to_string(),
+                ty: p,
+            })?;
             Ok(limbs_to_felts(v.to_bits() as u128, n))
         },
         // 256-bit values exceed the `u128` limb path; no typed encoding is defined for them yet.
@@ -143,47 +147,35 @@ fn encode_primitive(
     }
 }
 
-/// Cuts `value` into `n` 32-bit limbs (low first), one felt each. Each limb is a `u32`, so
-/// [`Felt::from_u32`] never fails.
+/// Cuts `value` into `n` 32-bit limbs, one felt each. The limbs are emitted little-endian: least-
+/// significant first, most-significant last (`felts[0]` holds bits `0..32`, `felts[1]` bits
+/// `32..64`, and so on). Each limb is a `u32`, so [`Felt::from_u32`] never fails.
 fn limbs_to_felts(value: u128, n: usize) -> Vec<Felt> {
     (0..n).map(|i| Felt::from_u32((value >> (32 * i)) as u32)).collect()
 }
 
-/// Reads an unsigned int (decimal or `0x..` hex) and checks it fits in `bits` bits.
+/// Reads an unsigned decimal int and checks it fits in `bits` bits.
 fn parse_unsigned(
     token: &str,
     bits: u32,
     p: DebugPrimitiveType,
 ) -> Result<u128, TypedDebugInfoError> {
-    let value = if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
-        u128::from_str_radix(hex, 16)
-            .map_err(|_| TypedDebugInfoError::InvalidHex(token.to_string()))?
-    } else {
-        token
-            .parse::<u128>()
-            .map_err(|_| TypedDebugInfoError::InvalidInt { token: token.to_string(), ty: p })?
-    };
+    let value = token
+        .parse::<u128>()
+        .map_err(|_| TypedDebugInfoError::InvalidInt { token: token.to_string(), ty: p })?;
     if value > max_for_bits(bits) {
         return Err(int_out_of_range(token, p));
     }
     Ok(value)
 }
 
-/// Reads a signed int and returns its two's-complement bits. A `0x..` token is raw bits (must fit
-/// in `bits`); a decimal token is checked against the signed range.
+/// Reads a signed decimal int and returns its two's-complement bits, checked against the signed
+/// range for `bits` bits.
 fn parse_signed(
     token: &str,
     bits: u32,
     p: DebugPrimitiveType,
 ) -> Result<u128, TypedDebugInfoError> {
-    if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
-        let raw = u128::from_str_radix(hex, 16)
-            .map_err(|_| TypedDebugInfoError::InvalidHex(token.to_string()))?;
-        if raw > max_for_bits(bits) {
-            return Err(int_out_of_range(token, p));
-        }
-        return Ok(raw);
-    }
     let signed = token
         .parse::<i128>()
         .map_err(|_| TypedDebugInfoError::InvalidInt { token: token.to_string(), ty: p })?;
@@ -200,16 +192,18 @@ fn int_out_of_range(token: &str, p: DebugPrimitiveType) -> TypedDebugInfoError {
     TypedDebugInfoError::IntOutOfRange { token: token.to_string(), ty: p }
 }
 
-/// Reads a decimal or `0x..` hex token into a `Felt` (full field range). Used by the `Felt` arm.
+/// Reads a decimal `felt` token. A Goldilocks felt is a value in `[0, p)` with
+/// `p = 2^64 - 2^32 + 1`, and `p < 2^64`, so every felt fits in a `u64`; `Felt::try_from` then
+/// rejects the values in `[p, 2^64)` that fit a `u64` but are not valid felts.
 fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
-    let v: u64 = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16).map_err(|_| TypedDebugInfoError::InvalidHex(s.to_string()))?
-    } else {
-        s.parse::<u64>().map_err(|_| TypedDebugInfoError::InvalidFelt(s.to_string()))?
-    };
+    let v: u64 = s.parse().map_err(|_| TypedDebugInfoError::InvalidFelt(s.to_string()))?;
     Felt::try_from(v).map_err(|_| TypedDebugInfoError::FeltOutOfRange(s.to_string()))
 }
 
-fn next_token<I: Iterator<Item = String>>(tokens: &mut I) -> Result<String, TypedDebugInfoError> {
+fn next_token<I>(tokens: &mut I) -> Result<I::Item, TypedDebugInfoError>
+where
+    I: Iterator,
+    I::Item: AsRef<str>,
+{
     tokens.next().ok_or(TypedDebugInfoError::NotEnoughArgs)
 }

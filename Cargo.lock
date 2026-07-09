@@ -1596,6 +1596,7 @@ dependencies = [
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
+ "midenc-hir-type",
  "proptest",
  "proptest-derive",
  "serde",

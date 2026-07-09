@@ -28,6 +28,7 @@ serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+midenc-hir-type.workspace = true
 
 # External dependencies
 log.workspace = true

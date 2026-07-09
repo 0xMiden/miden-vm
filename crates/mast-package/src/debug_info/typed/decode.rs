@@ -11,7 +11,7 @@ use miden_core::Word;
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     Felt, MAX_TYPE_DEPTH, TypedView, WitScalarCodec,
-    lookup::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    lookup::{field_name, is_anonymous, type_leaf_name, type_name_raw, unnamed_field_count},
     max_for_bits,
     sizing::count_units,
 };
@@ -46,27 +46,39 @@ fn decode_value_at<'a>(
         DebugTypeInfo::Primitive(p) => decode_primitive(felts, *p),
         DebugTypeInfo::Struct { name_idx, fields, .. } => {
             let full = type_name_raw(view.types, *name_idx);
-            let short = wit_type_name(full);
-            // A codec that fails to render (invalid value) falls through to the generic
-            // field-by-field rendering below.
-            if let Some(codec) = view.codec_for(short)
-                && let Some((rendered, rest)) = decode_scalar(felts, codec)
-            {
-                return Some((rendered, rest));
+            let short = type_leaf_name(full);
+            // If a codec is registered for this type, it decides the output. When it rejects a
+            // value it returns `None`, and we fall back to raw felts. We do not run the field-by-
+            // field code below, which would make a bad value look like a valid one.
+            if let Some(codec) = view.codec_for(short) {
+                return decode_scalar(felts, codec);
             }
-            if let [only] = fields.as_slice() {
-                let (inner, rest) = decode_value_at(felts, view, only.type_idx, depth + 1)?;
-                return Some((wrap_struct(short, &inner), rest));
+            // Field names decide the shape: all unnamed is a tuple `(a, b)`, all named a record
+            // `{ x: a, y: b }`. The assembler never writes a mix of the two, so such debug info is
+            // invalid and we fall back to raw felts rather than guess a shape.
+            let unnamed = unnamed_field_count(view.types, fields);
+            if unnamed != 0 && unnamed != fields.len() {
+                return None;
             }
+            let tuple = unnamed != 0;
             let mut cursor = felts;
             let mut rendered = Vec::with_capacity(fields.len());
             for f in fields {
-                let fname = field_name(view.types, f.name_idx);
                 let (fv, rest) = decode_value_at(cursor, view, f.type_idx, depth + 1)?;
-                rendered.push(format!("{fname}={fv}"));
+                if tuple {
+                    rendered.push(fv);
+                } else {
+                    rendered.push(format!("{}: {fv}", field_name(view.types, f.name_idx)));
+                }
                 cursor = rest;
             }
-            Some((wrap_struct(short, &rendered.join(", ")), cursor))
+            let body = rendered.join(", ");
+            let out = if tuple {
+                wrap_tuple(short, &body)
+            } else {
+                wrap_struct(short, &body)
+            };
+            Some((out, cursor))
         },
         DebugTypeInfo::Array { element_type_idx, count: Some(n) } => {
             // Don't pre-size from the (untrusted) `count`: an array of a zero-width element type
@@ -211,10 +223,19 @@ fn render_signed(value: u128, bits: u32) -> String {
     (((value << shift) as i128) >> shift).to_string()
 }
 
-/// `name(body)` for named structs; `{body}` for anonymous or unnamed ones.
+/// `name { body }` for named structs; `{ body }` for anonymous ones, e.g. `point { x: 3, y: 4 }`.
 fn wrap_struct(short: &str, body: &str) -> String {
     if is_anonymous(short) {
-        format!("{{{body}}}")
+        format!("{{ {body} }}")
+    } else {
+        format!("{short} {{ {body} }}")
+    }
+}
+
+/// `name(body)` for a named tuple struct; `(body)` for an anonymous one, e.g. `(3, 4)`.
+fn wrap_tuple(short: &str, body: &str) -> String {
+    if is_anonymous(short) {
+        format!("({body})")
     } else {
         format!("{short}({body})")
     }

@@ -6,7 +6,9 @@ use alloc::{
     string::{String, ToString},
 };
 
-use super::super::{DebugFunctionInfo, DebugFunctionsSection, DebugTypesSection};
+use miden_assembly_syntax::ast::path::Path;
+
+use super::super::{DebugFieldInfo, DebugFunctionInfo, DebugFunctionsSection, DebugTypesSection};
 use crate::{Package, PackageDebugInfoError};
 
 /// Reads both debug sections from `package` through the trusted [`Package::debug_info`] path.
@@ -34,65 +36,85 @@ pub(super) fn read_debug_sections(
 /// matches after the rewrite (`foo-bar`). Rust contract names become kebab (`get-count`), so a
 /// `get_count` query resolves through the kebab pass.
 ///
-/// The compiler writes the same procedure under two names: the `::`-path form (`..."get-count"`)
-/// carries the full typed signature, the `#`-form (`...@0.1.0#get-count`) the lowered (felt) one.
-/// Within each pass we prefer the `::`-path form, because it retains the high-level WIT
-/// types (e.g. `AccountId`, `Word`) we want to preserve, whereas the `#`-form has already been
-/// lowered to raw felts. We fall back to any entry with a `type_idx`, then to any match at all;
-/// ties keep the first entry in iteration order.
+/// The compiler can list the same procedure under several names: a mangled Rust symbol
+/// (`_RNvXs...get_count`), a lowered form (`...@0.1.0#get-count`), and the interface form
+/// (`"get-count"`). Only the interface form has `get-count` as its leaf, so it is the only one
+/// that matches the query. That form also keeps the high-level types (`AccountId`, `Word`), so
+/// matching by leaf gives us the typed entry with no special-casing. Among matches we prefer one
+/// with a `type_idx`, else take any match; ties keep the first in iteration order.
 pub(super) fn find_debug_fn<'a>(
     funcs: &'a DebugFunctionsSection,
     procedure_name: &str,
 ) -> Option<&'a DebugFunctionInfo> {
     let kebab = procedure_name.replace('_', "-");
     [procedure_name, kebab.as_str()].into_iter().find_map(|target| {
-        let mut typed_path: Option<&DebugFunctionInfo> = None;
-        let mut typed_any: Option<&DebugFunctionInfo> = None;
+        let mut typed: Option<&DebugFunctionInfo> = None;
         let mut first_any: Option<&DebugFunctionInfo> = None;
         for f in &funcs.functions {
             let Some(s) = funcs.strings.get(f.name_idx as usize) else {
                 continue;
             };
-            let s = s.as_ref();
-            if proc_display_name(s) != target {
+            if proc_display_name(s.as_ref()) != target {
                 continue;
             }
             first_any.get_or_insert(f);
             if f.type_idx.is_some() {
-                typed_any.get_or_insert(f);
-                if !s.contains('#') {
-                    typed_path.get_or_insert(f);
-                }
+                typed.get_or_insert(f);
             }
         }
-        typed_path.or(typed_any).or(first_any)
+        typed.or(first_any)
     })
 }
 
-/// The bare type name from a full WIT path.
+/// The bare leaf of a type name.
 ///
-/// Debug type names are full WIT paths with namespace and version, e.g.
-/// `miden:base/core-types@1.0.0/account-id`. We want the last `/`-segment (`account-id`) for
-/// display and for matching a type regardless of package or version. Empty if `name` is empty or
-/// ends in `/`.
-pub(super) fn wit_type_name(name: &str) -> &str {
-    name.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or("")
+/// Debug type names come in a few shapes: WIT-style `/`-paths with a namespace and version
+/// (`miden:base/core-types@1.0.0/account-id`), `::`-paths (`crate::module::Point`), or a plain name
+/// with no separator (`point`). This returns the last component — after the final `/`, then after
+/// the final `::` — with surrounding quotes removed, so a type matches regardless of package,
+/// version, or module path. A plain name is returned as is; the result is empty only when `name` is
+/// empty or ends in a separator.
+pub(super) fn type_leaf_name(name: &str) -> &str {
+    let after_slash = name.rsplit('/').next().unwrap_or(name);
+    after_slash.rsplit("::").next().unwrap_or(after_slash).trim_matches('"')
 }
 
-/// The short procedure name from a long compiler name: take the last `::` part, remove the quotes,
-/// and drop anything before `#`. `::"miden:cc/mcc@0.1.0"::"get-count"` becomes `get-count`.
+/// The short procedure name from a long compiler name: the last path component with surrounding
+/// quotes removed. `::"miden:cc/mcc@0.1.0"::"get-count"` becomes `get-count`.
+///
+/// The `::` splitting goes through [`Path::split_last`] rather than a manual `rsplit`, so it reuses
+/// the assembler's own path parsing (which respects quoting) instead of re-encoding those rules
+/// here. `split_last` keeps the surrounding quotes on a component, so we still trim them.
 pub(super) fn proc_display_name(raw: &str) -> &str {
-    let seg = raw.rsplit("::").next().unwrap_or(raw).trim_matches('"');
-    seg.rsplit('#').next().unwrap_or(seg)
+    Path::new(raw).split_last().map_or(raw, |(last, _)| last).trim_matches('"')
 }
 
-/// Whether a struct's short name is anonymous, so callers render its fields instead of a name.
-/// `<anon>` is the sentinel the compiler writes when it has no name for a struct.
+/// Whether a struct's short name means it is anonymous, so callers show its fields, not a name. An
+/// empty name and the `<anon>` name the assembler writes both count as anonymous.
 pub(super) fn is_anonymous(short: &str) -> bool {
     short.is_empty() || short == "<anon>"
 }
 
-/// The type/field name string at `name_idx`, or `""` when the string table has no entry.
+/// How many of `fields` are unnamed. `0` means a record, shown as `{ x: a, y: b }`; `fields.len()`
+/// means a tuple, shown as `(a, b)` — that is how a multi-result return reaches us. Anything in
+/// between mixes the two, which the assembler never writes, so callers treat it as invalid.
+pub(super) fn unnamed_field_count(types: &DebugTypesSection, fields: &[DebugFieldInfo]) -> usize {
+    fields
+        .iter()
+        .enumerate()
+        .filter(|(i, f)| is_unnamed_struct_field(type_name_raw(types, f.name_idx), *i))
+        .count()
+}
+
+/// Whether `name` is what the assembler writes for an unnamed field at position `index`: the index
+/// as text (`"0"`, `"1"`, ...), or an empty name. Real field names are not just numbers, so they
+/// never match their index.
+fn is_unnamed_struct_field(name: &str, index: usize) -> bool {
+    name.is_empty() || name.parse::<usize>() == Ok(index)
+}
+
+/// The type/field name string at `name_idx`, or the empty string when the string table has no
+/// entry.
 pub(super) fn type_name_raw(types: &DebugTypesSection, name_idx: u32) -> &str {
     types.strings.get(name_idx as usize).map_or("", AsRef::as_ref)
 }
@@ -112,8 +134,23 @@ mod tests {
 
     use super::{
         super::super::{DebugFunctionInfo, DebugFunctionsSection, DebugTypeIdx},
-        find_debug_fn, proc_display_name,
+        find_debug_fn, proc_display_name, type_leaf_name,
     };
+
+    #[test]
+    fn type_leaf_name_extracts_leaf() {
+        // WIT-style `/`-separated path.
+        assert_eq!(type_leaf_name("miden:base/core-types@1.0.0/account-id"), "account-id");
+        // Plain `::`-separated path.
+        assert_eq!(type_leaf_name("crate::module::Point"), "Point");
+        // Quoted `::` leaf is unquoted.
+        assert_eq!(type_leaf_name("::\"pkg\"::\"Point\""), "Point");
+        // No separator: returned unchanged.
+        assert_eq!(type_leaf_name("Point"), "Point");
+        // Empty or trailing separator yields an empty leaf.
+        assert_eq!(type_leaf_name(""), "");
+        assert_eq!(type_leaf_name("a/b/"), "");
+    }
 
     /// A debug function entry with the given name and a typed signature.
     // `LineNumber`/`ColumnNumber` aren't re-exported here, so we can't name them for the
@@ -158,14 +195,16 @@ mod tests {
 
     #[test]
     fn proc_display_name_extracts_leaf() {
-        // Quoted WIT leaf, `#`-qualified form, and a bare plain name.
+        // Quoted WIT leaf and a bare plain name.
         assert_eq!(
             proc_display_name("::\"miden:cc/mcc@0.1.0\"::\"take-account-id\""),
             "take-account-id"
         );
+        // A `#`-qualified leaf is kept whole, so it does not match a bare `take-account-id` query;
+        // the interface-form entry is the one that matches.
         assert_eq!(
             proc_display_name("::\"x\"::counter_contract::\"miden:cc/mcc@0.1.0#take-account-id\""),
-            "take-account-id"
+            "miden:cc/mcc@0.1.0#take-account-id"
         );
         assert_eq!(proc_display_name("take-account-id"), "take-account-id");
 
@@ -175,14 +214,13 @@ mod tests {
         // The whole leaf is kept: `-` is not a boundary, so these are not truncated to `count` or
         // `mixed` — which is what lets `find_debug_fn` reject a partial-name query.
         assert_eq!(proc_display_name("::\"x\"::\"get-count\""), "get-count");
-        assert_eq!(proc_display_name("foo#get-count"), "get-count");
         assert_eq!(proc_display_name("::\"miden:cc/mcc@0.1.0\"::\"mixed-format\""), "mixed-format");
     }
 
     #[test]
     fn find_debug_fn_prefers_bare_colon_path_over_hash_form() {
-        // Like `mixed`: the `#mixed` entry has the lowered signature, the `::mixed` entry the
-        // typed one. The `::` form must win.
+        // The `#mixed` entry's leaf keeps the `#`-qualified interface, so it does not match a bare
+        // `mixed` query; only the `::mixed` entry matches, so it is the one returned.
         let mut funcs = DebugFunctionsSection::new();
         let hash = funcs.add_string(Arc::from(
             "::\"miden:cc/mcc@0.1.0\"::counter_contract::\"miden:cc/mcc@0.1.0#mixed\"",

@@ -89,11 +89,14 @@ struct TypedParam {
 impl TypedProcInfo {
     /// Resolves the typed signature of `procedure_name` from `package`'s debug sections.
     ///
-    /// `Ok(None)` if the package has no debug info or no entry for `procedure_name`; `Err` if the
-    /// package's debug sections are present but untrusted or malformed.
+    /// Returns `Ok(None)` when there is no typed signature: the package has no debug info, has no
+    /// entry for `procedure_name`, or has an entry with no typed (`Function`) signature (e.g. a
+    /// hand-written MASM procedure). Returns `Err` if the debug sections are present but untrusted
+    /// or broken. Since the "no signature" case stops here, a built `TypedProcInfo` always has a
+    /// signature.
     ///
-    /// The returned info has the built-in [`WordCodec`] registered; add further scalar codecs
-    /// with [`Self::with_scalar_codec`].
+    /// The returned info has the built-in [`WordCodec`]; add more scalar codecs with
+    /// [`Self::with_scalar_codec`].
     pub fn from_package(
         package: &Package,
         procedure_name: &str,
@@ -104,13 +107,15 @@ impl TypedProcInfo {
         let Some(func) = find_debug_fn(&funcs, procedure_name) else {
             return Ok(None);
         };
+        let Some(sig) = extract_signature_types(func, &types) else {
+            return Ok(None);
+        };
         let name = func_display_name(func, &funcs, procedure_name);
-        let (return_type_idx, fallback_param_types) = extract_signature_types(func, &types);
-        let params = build_params(&fallback_param_types);
+        let params = build_params(&sig.param_type_indices);
         Ok(Some(Self {
             types,
             name,
-            return_type_idx,
+            return_type_idx: sig.return_type_idx,
             params,
             codecs: alloc::vec![Box::new(WordCodec)],
         }))
@@ -124,11 +129,17 @@ impl TypedProcInfo {
         self
     }
 
-    /// Number of argument tokens the procedure expects, summed over its parameters
-    /// (codec-handled scalars like `word` and `account-id` take one token each; other structs
-    /// take one per leaf field). `None` if any parameter has no statically-known token count
-    /// (e.g. a dynamic array).
-    pub fn expected_arg_count(&self) -> Option<usize> {
+    /// Number of argument tokens the procedure expects, added up over its parameters. Codec-handled
+    /// scalars like `word` and `account-id` take one token each; other structs take one per leaf
+    /// field.
+    ///
+    /// A [`TypedProcInfo`] always has a signature (see [`Self::from_package`]) and MASM procedures
+    /// have a fixed number of arguments, so this is `Some` in the normal case (no parameters gives
+    /// `Some(0)`). It is `None` only when a parameter's token count can't be found ahead of time: a
+    /// type this crate can't encode yet (pointer, function, dynamic array, unknown), or a broken
+    /// type graph from the untrusted debug sections (a cycle, too deep, or an overflow). So `None`
+    /// means an unsupported or broken parameter type, never a missing signature.
+    pub fn expected_arg_token_count(&self) -> Option<usize> {
         let view = self.view();
         let mut total = 0usize;
         for p in &self.params {
@@ -138,33 +149,42 @@ impl TypedProcInfo {
         Some(total)
     }
 
-    /// Type-table indices of the procedure's parameters, in declaration order. Pair with
-    /// [`Self::encode_arg`] to encode argument tokens parameter by parameter; the orchestration
-    /// (iterating parameters and validating the total argument count) is left to the caller, since
-    /// turning user-supplied strings into arguments is an application concern.
+    /// Type-table indices of the procedure's parameters, in order. Pair with [`Self::encode_arg`]
+    /// to encode the tokens one parameter at a time; the caller loops over the parameters and
+    /// checks the total argument count, since turning user strings into arguments is an application
+    /// concern.
     pub fn param_type_indices(&self) -> Vec<DebugTypeIdx> {
         self.params.iter().map(|p| p.type_idx).collect()
     }
 
-    /// Encodes the argument tokens for the parameter (or any type) at `idx` into its stack felts,
-    /// consuming exactly the tokens that type needs from `tokens` and using the registered scalar
-    /// codecs. Codec-handled scalars (`word`, `account-id`, ..) each parse from a single token;
-    /// other structs expect one token per leaf field.
+    /// Encodes the argument tokens for the type at `idx` into its stack felts. It takes exactly the
+    /// tokens that type needs from `tokens` and uses the registered scalar codecs. Codec-handled
+    /// scalars (`word`, `account-id`, ..) each read one token; other structs read one token per
+    /// leaf field.
     ///
-    /// Exposed per parameter rather than as a whole-signature call so the caller owns the argument
-    /// policy — how many are expected (see [`Self::expected_arg_count`] and
-    /// [`Self::param_type_indices`]) and how a wrong count is reported — since turning
-    /// user-supplied strings into arguments is an application concern.
-    pub fn encode_arg<I: Iterator<Item = String>>(
+    /// This works per parameter, not on the whole signature, so the caller owns the argument
+    /// policy: how many are expected (see [`Self::expected_arg_token_count`] and
+    /// [`Self::param_type_indices`]) and how a wrong count is reported.
+    pub fn encode_arg<I>(
         &self,
         tokens: &mut I,
         idx: DebugTypeIdx,
-    ) -> Result<Vec<Felt>, TypedDebugInfoError> {
+    ) -> Result<Vec<Felt>, TypedDebugInfoError>
+    where
+        I: Iterator,
+        I::Item: AsRef<str>,
+    {
         encode_tokens(tokens, &self.view(), idx)
     }
 
-    /// Number of felts the procedure pushes on the stack for its return value. `Some(0)` if
-    /// there is no return type; `None` if the return type has no statically-known felt size.
+    /// Number of felts the procedure pushes on the stack for its return value. `Some(0)` when the
+    /// return type is missing or `Void`, `Some(n)` for a normal one.
+    ///
+    /// Like [`Self::expected_arg_token_count`], a [`TypedProcInfo`] always has a signature, so this
+    /// is `Some` in the normal case. It is `None` only when the return type's felt size can't be
+    /// found ahead of time: a type this crate can't decode yet (pointer, function, dynamic array,
+    /// unknown), or a broken type graph from the untrusted debug sections (a cycle, too deep, or an
+    /// overflow) — never a missing signature.
     pub fn output_felt_count(&self) -> Option<usize> {
         match self.return_type_idx {
             Some(idx) => stack_felt_count(&self.view(), idx),
@@ -189,8 +209,13 @@ impl TypedProcInfo {
             return None;
         }
         Some(match return_ty {
+            // `true`/`false` and a word's hex are already self-describing, so they carry no type
+            // suffix. Other primitives render as typed literals, e.g. `42u32`, `-1i32`, `0felt`.
+            Some(DebugTypeInfo::Primitive(DebugPrimitiveType::Bool | DebugPrimitiveType::Word)) => {
+                rendered
+            },
             Some(DebugTypeInfo::Primitive(p)) => {
-                format!("{}({rendered})", format!("{p:?}").to_lowercase())
+                format!("{rendered}{}", format!("{p:?}").to_lowercase())
             },
             _ => rendered,
         })
@@ -250,12 +275,25 @@ fn func_display_name(
         .map_or_else(|| fallback.to_string(), |s| proc_display_name(s.as_ref()).to_string())
 }
 
-/// `(return_type, param_types)` from the `Function`-typed debug entry, or `(None, vec![])` if
-/// the entry has no Function type. A `Void` return type is normalized to `None`
+/// A procedure's resolved typed signature.
+struct SignatureTypes {
+    /// The return type, or `None` for a `Void`/`()` return.
+    return_type_idx: Option<DebugTypeIdx>,
+    /// Parameter types, in declaration order.
+    param_type_indices: Vec<DebugTypeIdx>,
+}
+
+/// The typed signature from the `Function`-typed debug entry, or `None` when the entry carries no
+/// `Function` type, i.e. no typed signature is available. A `Void` return type is normalized to
+/// `None`.
+///
+/// The outer `None` is what lets [`TypedProcInfo::from_package`] refuse to construct an instance
+/// for a procedure with no signature: whether typed info exists is decided once, at construction,
+/// so a live [`TypedProcInfo`] always has a signature and its arity/output size always resolve.
 fn extract_signature_types(
     func: &DebugFunctionInfo,
     types: &DebugTypesSection,
-) -> (Option<DebugTypeIdx>, Vec<DebugTypeIdx>) {
+) -> Option<SignatureTypes> {
     match func.type_idx.and_then(|i| types.get_type(i)) {
         Some(DebugTypeInfo::Function { return_type_idx, param_type_indices }) => {
             let return_type_idx = return_type_idx.filter(|i| {
@@ -264,18 +302,21 @@ fn extract_signature_types(
                     Some(DebugTypeInfo::Primitive(DebugPrimitiveType::Void))
                 )
             });
-            (return_type_idx, param_type_indices.clone())
+            Some(SignatureTypes {
+                return_type_idx,
+                param_type_indices: param_type_indices.clone(),
+            })
         },
-        _ => (None, Vec::new()),
+        _ => None,
     }
 }
 
 /// Builds the parameter list from the function-type signature: one [`TypedParam`] per positional
-/// index, named `arg1`, `arg2`, .... Returns an empty list when the debug entry has no `Function`
-/// type, which (since argument variables are no longer attached to functions) is the only source of
-/// parameter info.
-fn build_params(fallback_indices: &[DebugTypeIdx]) -> Vec<TypedParam> {
-    fallback_indices
+/// index, named `arg1`, `arg2`, .... An empty slice (a signature with no parameters) yields an
+/// empty list; the "no signature at all" case is refused earlier, in
+/// [`TypedProcInfo::from_package`].
+fn build_params(param_indices: &[DebugTypeIdx]) -> Vec<TypedParam> {
+    param_indices
         .iter()
         .enumerate()
         .map(|(i, t)| TypedParam {
@@ -413,7 +454,7 @@ mod tests {
         let encoded = encode_all(&proc, &["42"]);
         assert_eq!(encoded, vec![felt(42)]);
 
-        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("felt(42)"));
+        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("42felt"));
         assert_eq!(proc.to_string(), "take-felt(f: Felt) -> Felt");
     }
 
@@ -434,8 +475,8 @@ mod tests {
         assert_eq!(encode_all(&proc, &["true"]), vec![felt(1)]);
         assert_eq!(encode_all(&proc, &["false"]), vec![felt(0)]);
 
-        assert_eq!(proc.decode_result(&[felt(1)]).as_deref(), Some("bool(true)"));
-        assert_eq!(proc.decode_result(&[felt(0)]).as_deref(), Some("bool(false)"));
+        assert_eq!(proc.decode_result(&[felt(1)]).as_deref(), Some("true"));
+        assert_eq!(proc.decode_result(&[felt(0)]).as_deref(), Some("false"));
         assert_eq!(proc.decode_result(&[felt(2)]), None);
         assert_eq!(proc.to_string(), "take-bool(b: Bool) -> Bool");
     }
@@ -454,7 +495,7 @@ mod tests {
         let encoded = encode_all(&proc, &["4294967295"]);
         assert_eq!(encoded, vec![felt(4_294_967_295)]);
 
-        assert_eq!(proc.decode_result(&[felt(4_294_967_295)]).as_deref(), Some("u32(4294967295)"));
+        assert_eq!(proc.decode_result(&[felt(4_294_967_295)]).as_deref(), Some("4294967295u32"));
         assert_eq!(proc.to_string(), "take-u32(n: U32) -> U32");
     }
 
@@ -463,16 +504,16 @@ mod tests {
         // Types narrower than their 32-bit limb must reject a felt that doesn't fit the declared
         // width instead of masking it down (300 & 0xFF = 44), which would hide malformed output.
         let u8_proc = prim_proc(DebugPrimitiveType::U8, "take-u8");
-        assert_eq!(u8_proc.decode_result(&[felt(255)]).as_deref(), Some("u8(255)"));
+        assert_eq!(u8_proc.decode_result(&[felt(255)]).as_deref(), Some("255u8"));
         assert_eq!(u8_proc.decode_result(&[felt(300)]), None);
 
         let i8_proc = prim_proc(DebugPrimitiveType::I8, "take-i8");
         // 0xFF is the in-range two's-complement encoding of -1; 300 is out of range.
-        assert_eq!(i8_proc.decode_result(&[felt(0xff)]).as_deref(), Some("i8(-1)"));
+        assert_eq!(i8_proc.decode_result(&[felt(0xff)]).as_deref(), Some("-1i8"));
         assert_eq!(i8_proc.decode_result(&[felt(300)]), None);
 
         let u16_proc = prim_proc(DebugPrimitiveType::U16, "take-u16");
-        assert_eq!(u16_proc.decode_result(&[felt(65_535)]).as_deref(), Some("u16(65535)"));
+        assert_eq!(u16_proc.decode_result(&[felt(65_535)]).as_deref(), Some("65535u16"));
         assert_eq!(u16_proc.decode_result(&[felt(65_536)]), None);
     }
 
@@ -492,7 +533,7 @@ mod tests {
         let lo = felt(v & 0xffff_ffff);
         let hi = felt(v >> 32);
         assert_eq!(encode_all(&proc, &["1234567890123"]), vec![lo, hi]);
-        assert_eq!(proc.decode_result(&[lo, hi]).as_deref(), Some("u64(1234567890123)"));
+        assert_eq!(proc.decode_result(&[lo, hi]).as_deref(), Some("1234567890123u64"));
         assert_eq!(proc.output_felt_count(), Some(2));
         assert_eq!(proc.to_string(), "take-u64(n: U64) -> U64");
     }
@@ -515,10 +556,10 @@ mod tests {
         // -1 is stored as the 32-bit two's-complement limb 0xFFFFFFFF.
         let neg_one = felt(0xffff_ffff);
         assert_eq!(encode_all(&proc, &["-1"]), vec![neg_one]);
-        assert_eq!(proc.decode_result(&[neg_one]).as_deref(), Some("i32(-1)"));
+        assert_eq!(proc.decode_result(&[neg_one]).as_deref(), Some("-1i32"));
         // Positive values round-trip unchanged.
         assert_eq!(encode_all(&proc, &["42"]), vec![felt(42)]);
-        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("i32(42)"));
+        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("42i32"));
     }
 
     #[test]
@@ -527,7 +568,7 @@ mod tests {
         // -2 across two limbs: low = 0xFFFFFFFE, high = 0xFFFFFFFF.
         let encoded = encode_all(&proc, &["-2"]);
         assert_eq!(encoded, vec![felt(0xffff_fffe), felt(0xffff_ffff)]);
-        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("i64(-2)"));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("-2i64"));
     }
 
     #[test]
@@ -537,7 +578,7 @@ mod tests {
         let encoded = encode_all(&proc, &[&v.to_string()]);
         assert_eq!(encoded, vec![felt(4), felt(3), felt(2), felt(1)]);
         assert_eq!(proc.output_felt_count(), Some(4));
-        assert_eq!(proc.decode_result(&encoded).as_deref(), Some(&*format!("u128({v})")));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some(&*format!("{v}u128")));
     }
 
     #[test]
@@ -579,7 +620,7 @@ mod tests {
         let encoded = encode_all(&proc, &["-1"]);
         // -1 is all-ones across four 32-bit limbs.
         assert_eq!(encoded, vec![felt(0xffff_ffff); 4]);
-        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("i128(-1)"));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("-1i128"));
     }
 
     #[test]
@@ -590,7 +631,7 @@ mod tests {
         // A 32-bit float fits in a single limb (one felt), not two.
         assert_eq!(encoded, vec![felt(bits as u64)]);
         assert_eq!(proc.output_felt_count(), Some(1));
-        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("f32(1.5)"));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("1.5f32"));
     }
 
     #[test]
@@ -599,7 +640,7 @@ mod tests {
         let bits = 1.5f64.to_bits();
         let encoded = encode_all(&proc, &["1.5"]);
         assert_eq!(encoded, vec![felt(bits & 0xffff_ffff), felt(bits >> 32)]);
-        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("f64(1.5)"));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("1.5f64"));
     }
 
     #[test]
@@ -666,6 +707,46 @@ mod tests {
     }
 
     #[test]
+    fn registered_codec_rejection_falls_back_to_raw() {
+        // A registered codec is authoritative: when it rejects a value (returns `None`), decoding
+        // must fall back to raw felts, not the generic `account-id { .. }` struct rendering, which
+        // would make an invalid value look like a valid typed one.
+        struct RejectingIdCodec;
+        impl WitScalarCodec for RejectingIdCodec {
+            fn wit_name(&self) -> &str {
+                "account-id"
+            }
+
+            fn felt_count(&self) -> usize {
+                2
+            }
+
+            fn encode(&self, _token: &str) -> Result<Vec<Felt>, TypedDebugInfoError> {
+                Ok(vec![felt(0), felt(0)])
+            }
+
+            fn decode(&self, _felts: &[Felt]) -> Option<String> {
+                None
+            }
+        }
+
+        let mut types = DebugTypesSection::new();
+        let aid_idx = account_id_type(&mut types);
+        let proc = make_proc(
+            types,
+            "take-account-id",
+            Some(aid_idx),
+            vec![TypedParam {
+                name: "id".to_string(),
+                type_idx: aid_idx,
+            }],
+        )
+        .with_scalar_codec(Box::new(RejectingIdCodec));
+
+        assert_eq!(proc.decode_result(&[felt(1), felt(2)]), None);
+    }
+
+    #[test]
     fn unregistered_scalar_falls_back_to_field_encoding() {
         // Without the codec the same struct encodes field by field: two tokens, two felts.
         let mut types = DebugTypesSection::new();
@@ -680,12 +761,12 @@ mod tests {
             }],
         );
 
-        assert_eq!(proc.expected_arg_count(), Some(2));
+        assert_eq!(proc.expected_arg_token_count(), Some(2));
         let encoded = encode_all(&proc, &["7", "42"]);
         assert_eq!(encoded, vec![felt(7), felt(42)]);
         assert_eq!(
             proc.decode_result(&encoded).as_deref(),
-            Some("account-id(prefix=7, suffix=42)")
+            Some("account-id { prefix: 7, suffix: 42 }")
         );
     }
 
@@ -774,6 +855,7 @@ mod tests {
     fn anonymous_struct_falls_back_to_field_shape() {
         let mut types = DebugTypesSection::new();
         let felt_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        // An anonymous struct has the `<anon>` name the assembler writes.
         let anon = types.add_string(Arc::from("<anon>"));
         let x = types.add_string(Arc::from("x"));
         let y = types.add_string(Arc::from("y"));
@@ -793,7 +875,109 @@ mod tests {
         );
 
         assert_eq!(proc.to_string(), "take-point(p: {x: Felt, y: Felt}) -> {x: Felt, y: Felt}");
-        assert_eq!(proc.decode_result(&[felt(3), felt(4)]).as_deref(), Some("{x=3, y=4}"));
+        assert_eq!(proc.decode_result(&[felt(3), felt(4)]).as_deref(), Some("{ x: 3, y: 4 }"));
+    }
+
+    #[test]
+    fn anonymous_tuple_struct_renders_as_tuple() {
+        // A tuple reaches us as a struct with fields named by position (`"0"`, `"1"`). It is shown
+        // as `(a, b)`, not `{ 0: a, 1: b }`.
+        let mut types = DebugTypesSection::new();
+        let felt_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let anon = types.add_string(Arc::from("<anon>"));
+        let f0 = types.add_string(Arc::from("0"));
+        let f1 = types.add_string(Arc::from("1"));
+        let tuple = types.add_type(DebugTypeInfo::Struct {
+            name_idx: anon,
+            size: 8,
+            fields: vec![
+                DebugFieldInfo {
+                    name_idx: f0,
+                    type_idx: felt_t,
+                    offset: 0,
+                },
+                DebugFieldInfo {
+                    name_idx: f1,
+                    type_idx: felt_t,
+                    offset: 4,
+                },
+            ],
+        });
+        let proc = make_proc(
+            types,
+            "take-pair",
+            Some(tuple),
+            vec![TypedParam { name: "p".to_string(), type_idx: tuple }],
+        );
+
+        assert_eq!(proc.to_string(), "take-pair(p: (Felt, Felt)) -> (Felt, Felt)");
+        assert_eq!(proc.decode_result(&[felt(3), felt(4)]).as_deref(), Some("(3, 4)"));
+    }
+
+    #[test]
+    fn named_tuple_struct_renders_with_name() {
+        // A named tuple struct has unnamed fields but a real name; it is shown as `name(a, b)`.
+        let mut types = DebugTypesSection::new();
+        let felt_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let name = types.add_string(Arc::from("pkg/pair"));
+        let f0 = types.add_string(Arc::from("0"));
+        let f1 = types.add_string(Arc::from("1"));
+        let pair = types.add_type(DebugTypeInfo::Struct {
+            name_idx: name,
+            size: 8,
+            fields: vec![
+                DebugFieldInfo {
+                    name_idx: f0,
+                    type_idx: felt_t,
+                    offset: 0,
+                },
+                DebugFieldInfo {
+                    name_idx: f1,
+                    type_idx: felt_t,
+                    offset: 4,
+                },
+            ],
+        });
+        let proc = make_proc(
+            types,
+            "take-pair",
+            Some(pair),
+            vec![TypedParam { name: "p".to_string(), type_idx: pair }],
+        );
+
+        assert_eq!(proc.decode_result(&[felt(3), felt(4)]).as_deref(), Some("pair(3, 4)"));
+    }
+
+    #[test]
+    fn mixed_named_and_unnamed_fields_are_rejected() {
+        // The assembler writes either all-named fields (a record) or all-positional ones (the
+        // aggregate it synthesises for a multi-result return). A mix cannot come from a real
+        // package, so it is invalid debug info: decoding falls back to raw felts.
+        let mut types = DebugTypesSection::new();
+        let felt_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let name = types.add_string(Arc::from("pkg/mixed"));
+        let x = types.add_string(Arc::from("x"));
+        let f1 = types.add_string(Arc::from("1"));
+        let mixed = types.add_type(DebugTypeInfo::Struct {
+            name_idx: name,
+            size: 8,
+            fields: vec![
+                DebugFieldInfo { name_idx: x, type_idx: felt_t, offset: 0 },
+                DebugFieldInfo {
+                    name_idx: f1,
+                    type_idx: felt_t,
+                    offset: 4,
+                },
+            ],
+        });
+        let proc = make_proc(
+            types,
+            "take-mixed",
+            Some(mixed),
+            vec![TypedParam { name: "m".to_string(), type_idx: mixed }],
+        );
+
+        assert_eq!(proc.decode_result(&[felt(3), felt(4)]), None);
     }
 
     /// A cyclic type graph (a struct field pointing back at the struct) must be rejected
@@ -855,7 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn expected_arg_count_overflow_is_none() {
+    fn expected_arg_token_count_overflow_is_none() {
         let mut types = DebugTypesSection::new();
         let u8_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
         // `[u8; u32::MAX]` -> u32::MAX tokens.
@@ -879,6 +1063,6 @@ mod tests {
             ],
         );
 
-        assert_eq!(proc.expected_arg_count(), None);
+        assert_eq!(proc.expected_arg_token_count(), None);
     }
 }

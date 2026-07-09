@@ -24,6 +24,7 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{ColumnNumber, LineNumber, Location};
+use midenc_hir_type::{ArrayType, Type};
 
 // DEBUG SOURCE GRAPH LOOKUP ERROR
 // ================================================================================================
@@ -1628,34 +1629,30 @@ pub enum DebugPrimitiveType {
 
 impl DebugPrimitiveType {
     /// Returns the size of this primitive type in bytes.
-    pub const fn size_in_bytes(self) -> u32 {
+    ///
+    /// Sizes come from [`midenc_hir_type::Type`], so this crate and the compiler always agree.
+    /// `Void` and `F32` are not in that type system, so their sizes are set here.
+    pub fn size_in_bytes(self) -> u32 {
         match self {
             Self::Void => 0,
-            Self::Bool | Self::I8 | Self::U8 => 1,
-            Self::I16 | Self::U16 => 2,
-            Self::I32 | Self::U32 | Self::F32 => 4,
-            Self::I64 | Self::U64 | Self::F64 | Self::Felt => 8,
-            Self::I128 | Self::U128 => 16,
-            Self::Word | Self::U256 => 32,
+            Self::F32 => 4,
+            other => Type::try_from(other)
+                .expect("every primitive but Void and F32 maps to a Type")
+                .size_in_bytes() as u32,
         }
     }
 
     /// Returns the size of this primitive type in Miden stack elements (felts).
-    pub const fn size_in_felts(self) -> u32 {
+    ///
+    /// Like [`Self::size_in_bytes`], sizes come from [`midenc_hir_type::Type`]. `Void` and `F32`
+    /// are set here because they are not in that type system.
+    pub fn size_in_felts(self) -> u32 {
         match self {
             Self::Void => 0,
-            Self::Bool
-            | Self::I8
-            | Self::U8
-            | Self::I16
-            | Self::U16
-            | Self::I32
-            | Self::U32
-            | Self::F32
-            | Self::Felt => 1,
-            Self::I64 | Self::U64 | Self::F64 => 2,
-            Self::I128 | Self::U128 | Self::Word => 4,
-            Self::U256 => 8,
+            Self::F32 => 1,
+            other => Type::try_from(other)
+                .expect("every primitive but Void and F32 maps to a Type")
+                .size_in_felts() as u32,
         }
     }
 
@@ -1681,6 +1678,37 @@ impl DebugPrimitiveType {
             16 => Some(Self::U256),
             _ => None,
         }
+    }
+}
+
+/// Maps a [`DebugPrimitiveType`] to [`midenc_hir_type::Type`], so size rules live in one place and
+/// are not copied here. It fails for the two primitives that are not in `Type`: `Void` (means "no
+/// value") and `F32` (kept only so old debug info still reads).
+impl TryFrom<DebugPrimitiveType> for Type {
+    type Error = DebugPrimitiveType;
+
+    fn try_from(p: DebugPrimitiveType) -> Result<Self, Self::Error> {
+        use DebugPrimitiveType as P;
+        Ok(match p {
+            P::Bool => Type::I1,
+            P::I8 => Type::I8,
+            P::U8 => Type::U8,
+            P::I16 => Type::I16,
+            P::U16 => Type::U16,
+            P::I32 => Type::I32,
+            P::U32 => Type::U32,
+            P::I64 => Type::I64,
+            P::U64 => Type::U64,
+            P::I128 => Type::I128,
+            P::U128 => Type::U128,
+            P::F64 => Type::F64,
+            P::Felt => Type::Felt,
+            P::U256 => Type::U256,
+            // A word is four felts.
+            P::Word => Type::from(ArrayType::new(Type::Felt, 4)),
+            // Not in Type; the size methods handle these.
+            P::Void | P::F32 => return Err(p),
+        })
     }
 }
 
@@ -2184,8 +2212,10 @@ mod tests {
         assert_eq!(DebugPrimitiveType::F32.size_in_bytes(), 4);
         assert_eq!(DebugPrimitiveType::I64.size_in_bytes(), 8);
         assert_eq!(DebugPrimitiveType::F64.size_in_bytes(), 8);
-        assert_eq!(DebugPrimitiveType::Felt.size_in_bytes(), 8);
-        assert_eq!(DebugPrimitiveType::Word.size_in_bytes(), 32);
+        // Sizes come from `midenc_hir_type::Type`: a felt is 4 bytes and a word is four felts
+        // (16 bytes).
+        assert_eq!(DebugPrimitiveType::Felt.size_in_bytes(), 4);
+        assert_eq!(DebugPrimitiveType::Word.size_in_bytes(), 16);
         assert_eq!(DebugPrimitiveType::U256.size_in_bytes(), 32);
 
         assert_eq!(DebugPrimitiveType::Void.size_in_felts(), 0);
