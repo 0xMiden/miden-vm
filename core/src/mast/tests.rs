@@ -50,58 +50,6 @@ proptest! {
     }
 }
 
-// MAST FOREST COMPACTION TESTS
-// ================================================================================================
-
-/// Tests comprehensive mast forest compaction across duplicate nodes.
-#[test]
-fn test_mast_forest_compaction_comprehensive() {
-    let mut forest = MastForest::new();
-
-    let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(bb1);
-    forest.make_root(bb2);
-
-    assert_eq!(forest.num_procedures(), 2);
-    assert_eq!(forest.num_nodes(), 2);
-
-    let (forest, _root_map) = forest.compact();
-
-    assert_eq!(forest.num_nodes(), 1);
-    assert_eq!(forest.num_procedures(), 1);
-}
-
-#[test]
-fn test_compaction_independent() {
-    let mut forest = MastForest::new();
-
-    // Create two identical nodes.
-    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(node1);
-    forest.make_root(node2);
-
-    // Verify initial state has duplicate nodes
-    assert_eq!(forest.num_nodes(), 2);
-    assert_eq!(forest.num_procedures(), 2);
-
-    // Compact only (should merge the two identical nodes)
-    let (forest, _root_map) = forest.compact();
-
-    // Verify nodes were merged
-    assert_eq!(forest.num_nodes(), 1);
-    assert_eq!(forest.num_procedures(), 1);
-}
-
 #[test]
 fn test_commitment_caching() {
     let mut forest = MastForest::new();

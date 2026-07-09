@@ -515,7 +515,7 @@ fn mast_forest_merge_advice_maps_collision() {
 }
 
 #[test]
-fn compact_keeps_error_code_bearing_basic_blocks_distinct() {
+fn mast_forest_merge_keeps_error_code_bearing_basic_blocks_distinct() {
     let mut forest = MastForest::new();
     let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
         .add_to_forest(&mut forest)
@@ -528,20 +528,20 @@ fn compact_keeps_error_code_bearing_basic_blocks_distinct() {
 
     assert_eq!(forest[block_a].digest(), forest[block_b].digest());
 
-    let (compacted, root_map) = forest.compact();
+    let (merged, root_map) = MastForest::merge([&forest]).unwrap();
     let new_a = root_map.map_root(0, &block_a).unwrap();
     let new_b = root_map.map_root(0, &block_b).unwrap();
 
     assert_ne!(
         new_a, new_b,
-        "same-digest blocks with different runtime error codes must not compact together",
+        "same-digest blocks with different runtime error codes must not merge together",
     );
-    assert_eq!(first_error_code(compacted[new_a].unwrap_basic_block()), Felt::from_u32(1),);
-    assert_eq!(first_error_code(compacted[new_b].unwrap_basic_block()), Felt::from_u32(2),);
+    assert_eq!(first_error_code(merged[new_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(merged[new_b].unwrap_basic_block()), Felt::from_u32(2),);
 }
 
 #[test]
-fn compact_propagates_error_code_fingerprints_through_control_nodes() {
+fn mast_forest_merge_propagates_error_code_fingerprints_through_control_nodes() {
     let mut forest = MastForest::new();
     let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
         .add_to_forest(&mut forest)
@@ -558,7 +558,7 @@ fn compact_propagates_error_code_fingerprints_through_control_nodes() {
 
     assert_eq!(forest[call_a].digest(), forest[call_b].digest());
 
-    let (compacted, root_map) = forest.compact();
+    let (merged, root_map) = MastForest::merge([&forest]).unwrap();
     let new_call_a = root_map.map_root(0, &call_a).unwrap();
     let new_call_b = root_map.map_root(0, &call_b).unwrap();
 
@@ -567,8 +567,8 @@ fn compact_propagates_error_code_fingerprints_through_control_nodes() {
         "same-digest control nodes must stay distinct when their children differ by runtime error code",
     );
 
-    let new_block_a = compacted[new_call_a].unwrap_call().callee();
-    let new_block_b = compacted[new_call_b].unwrap_call().callee();
-    assert_eq!(first_error_code(compacted[new_block_a].unwrap_basic_block()), Felt::from_u32(1),);
-    assert_eq!(first_error_code(compacted[new_block_b].unwrap_basic_block()), Felt::from_u32(2),);
+    let new_block_a = merged[new_call_a].unwrap_call().callee();
+    let new_block_b = merged[new_call_b].unwrap_call().callee();
+    assert_eq!(first_error_code(merged[new_block_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(merged[new_block_b].unwrap_basic_block()), Felt::from_u32(2),);
 }
