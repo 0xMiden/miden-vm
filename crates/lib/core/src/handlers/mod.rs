@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 pub mod debug;
 pub mod falcon_div;
 pub mod precompiles;
+pub mod readonly;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u128_div;

@@ -29,7 +29,7 @@ use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     deferred::Tag,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
+    mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
 };

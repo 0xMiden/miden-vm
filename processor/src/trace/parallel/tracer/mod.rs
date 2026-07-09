@@ -660,7 +660,7 @@ where
 mod tests {
     use alloc::vec;
 
-    use miden_core::mast::{DynNodeBuilder, MastForestContributor};
+    use miden_core::mast::DynNodeBuilder;
 
     use super::*;
     use crate::{

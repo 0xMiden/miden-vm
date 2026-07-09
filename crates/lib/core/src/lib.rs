@@ -25,6 +25,7 @@ use crate::handlers::{
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
+    readonly::readonly_noop_handlers,
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -143,6 +144,7 @@ impl CoreLibrary {
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());
+        handlers.extend(readonly_noop_handlers());
         handlers
     }
 }

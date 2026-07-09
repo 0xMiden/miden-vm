@@ -9,7 +9,7 @@ use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
-    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{Kernel, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
