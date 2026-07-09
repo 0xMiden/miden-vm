@@ -330,17 +330,17 @@ impl UintMasmConfig {
     const fn new(domain: UintDomain) -> Self {
         match domain {
             UintDomain::U256 => Self {
-                path: "asm/math/u256.masm",
+                path: "asm/u256.masm",
                 title: "U256",
                 domain,
             },
             UintDomain::K1Base => Self {
-                path: "asm/math/field/k1_base.masm",
+                path: "asm/fields/k1_base.masm",
                 title: "SECP256K1 BASE-FIELD",
                 domain,
             },
             UintDomain::K1Scalar => Self {
-                path: "asm/math/field/k1_scalar.masm",
+                path: "asm/fields/k1_scalar.masm",
                 title: "SECP256K1 SCALAR-FIELD",
                 domain,
             },
@@ -361,7 +361,7 @@ impl CurveMasmConfig {
     const fn new(curve: CurveId) -> Self {
         match curve {
             CurveId::Secp256k1 => Self {
-                path: "asm/math/curve/secp256k1.masm",
+                path: "asm/curves/secp256k1.masm",
                 title: "SECP256K1",
                 base_field_module: "k1_base",
                 base_field_description: "secp256k1 base-field",
@@ -391,9 +391,9 @@ mod tests {
         write_to_dir(&out_dir).unwrap();
 
         assert_eq!(fs::read_to_string(&unrelated_file).unwrap(), "keep me");
-        assert!(out_dir.join("asm/math/u256.masm").exists());
-        assert!(out_dir.join("asm/math/field/k1_base.masm").exists());
-        assert!(out_dir.join("asm/math/curve/secp256k1.masm").exists());
+        assert!(out_dir.join("asm/u256.masm").exists());
+        assert!(out_dir.join("asm/fields/k1_base.masm").exists());
+        assert!(out_dir.join("asm/curves/secp256k1.masm").exists());
 
         fs::remove_dir_all(&out_dir).unwrap();
     }

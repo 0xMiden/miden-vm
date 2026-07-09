@@ -3,8 +3,10 @@
 #! Concrete precompile support modules live here and in submodules. The helper procedures in this
 #! module are shared by generated and hand-written wrappers.
 
-pub mod crypto
-pub mod math
+pub mod hashes
+pub mod fields
+pub mod curves
+pub mod u256
 
 # Framework data tag used for generic CHUNKS nodes: Tag::CHUNKS = [2, 0, 0, 0].
 const CHUNKS_TAG = [2, 0, 0, 0]

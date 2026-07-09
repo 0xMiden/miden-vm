@@ -472,9 +472,9 @@ impl<M: UintSpec> UintModule<M> {
 
     fn module_use_path(&self) -> String {
         if M::IS_PRIME_FIELD {
-            format!("miden::precompiles::math::field::{}", self.module)
+            format!("miden::precompiles::fields::{}", self.module)
         } else {
-            format!("miden::precompiles::math::{}", self.module)
+            format!("miden::precompiles::{}", self.module)
         }
     }
 }
@@ -492,8 +492,8 @@ pub fn assert_cross_modulus_children_rejected(lhs: &'static str, rhs: &'static s
 
     let source = format!(
         "
-        use miden::precompiles::math::field::{lhs}
-        use miden::precompiles::math::field::{rhs}
+        use miden::precompiles::fields::{lhs}
+        use miden::precompiles::fields::{rhs}
         begin
             exec.{rhs}::push_one_digest
             exec.{lhs}::push_one_digest

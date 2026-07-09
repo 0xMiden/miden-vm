@@ -139,8 +139,8 @@ fn core_library_package_exports_core_and_internal_precompiles() {
     }
 
     for path in [
-        "::miden::precompiles::math::u256::push_zero_digest",
-        "::miden::precompiles::crypto::hashes::keccak256::hash_bytes_mem",
+        "::miden::precompiles::u256::push_zero_digest",
+        "::miden::precompiles::hashes::keccak256::hash_bytes_mem",
     ] {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),

@@ -3,7 +3,7 @@
 #! These stack-returning core wrappers use bundled precompile-backed support internally for event
 #! handling and deferred verification.
 
-use miden::precompiles::crypto::hashes::keccak256
+use miden::precompiles::hashes::keccak256
 
 # ENCODING CONVENTIONS
 # ================================================================================================

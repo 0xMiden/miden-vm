@@ -12,7 +12,7 @@ use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError}
 
 /// Event used by generated field uint wrappers to request an inverse witness from the host.
 pub const UINT_FIELD_INV_EVENT_NAME: EventName =
-    EventName::new("miden::precompiles::math::field::field_inv");
+    EventName::new("miden::precompiles::fields::field_inv");
 
 /// Resolves the input uint value digest from deferred state, computes its inverse in the encoded
 /// prime-field domain, and pushes the inverse limbs onto the advice stack for MASM validation.

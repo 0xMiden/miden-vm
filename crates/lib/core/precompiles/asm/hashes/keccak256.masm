@@ -17,7 +17,7 @@ use miden::precompiles
 
 const PRECOMPILE_ID = 1416710563871706399
 const ASSERT_TAG_ID = 0
-const KECCAK256_DIGEST_EVENT = event("miden::precompiles::crypto::hashes::keccak256::digest")
+const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::digest")
 
 # PROCEDURES
 # ================================================================================================

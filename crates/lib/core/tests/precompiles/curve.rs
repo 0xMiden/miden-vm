@@ -66,8 +66,8 @@ fn assert_scalar_mul_wrappers(curve: CurveCase) {
     let scalar_module = curve.scalar_module;
     let source = format!(
         "
-        use miden::precompiles::math::curve::{module}
-        use miden::precompiles::math::field::{scalar_module}
+        use miden::precompiles::curves::{module}
+        use miden::precompiles::fields::{scalar_module}
         begin
             exec.{scalar_module}::push_zero_digest
             exec.{module}::push_generator
@@ -101,7 +101,7 @@ fn assert_eval_generator(curve: CurveCase) {
         "
         {TRUNCATE_STACK_TO_OUTPUT_PROC}
 
-        use miden::precompiles::math::curve::{module}
+        use miden::precompiles::curves::{module}
         begin
             exec.{module}::push_generator
             exec.{module}::eval
@@ -152,7 +152,7 @@ fn assert_constant_digests(curve: CurveCase) {
         "
         {TRUNCATE_STACK_TO_OUTPUT_PROC}
 
-        use miden::precompiles::math::curve::{module}
+        use miden::precompiles::curves::{module}
         begin
             exec.{module}::push_identity
             exec.{module}::push_generator
@@ -170,7 +170,7 @@ fn assert_constant_digests(curve: CurveCase) {
 fn run_curve_program(module: &str, body: &str, label: &str) {
     let source = format!(
         "
-        use miden::precompiles::math::curve::{module}
+        use miden::precompiles::curves::{module}
         begin
             {body}
         end
@@ -184,7 +184,7 @@ fn run_curve_program(module: &str, body: &str, label: &str) {
 fn expect_curve_trap(module: &str, body: &str) {
     let source = format!(
         "
-        use miden::precompiles::math::curve::{module}
+        use miden::precompiles::curves::{module}
         begin
             {body}
         end

@@ -1,3 +1,0 @@
-#! Cryptographic precompile support wrappers.
-
-pub mod hashes

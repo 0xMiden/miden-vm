@@ -13,10 +13,10 @@ use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError}
 
 use crate::handlers::read_memory_region;
 
-/// Event emitted by bundled `miden::precompiles::crypto::hashes::keccak256` wrappers to request a
+/// Event emitted by bundled `miden::precompiles::hashes::keccak256` wrappers to request a
 /// Keccak-256 digest witness from the host.
 pub const KECCAK256_DIGEST_EVENT_NAME: EventName =
-    EventName::new("miden::precompiles::crypto::hashes::keccak256::digest");
+    EventName::new("miden::precompiles::hashes::keccak256::digest");
 
 const BYTES_PER_U32: usize = size_of::<u32>();
 const KECCAK256_DIGEST_FELTS: usize = 8;
