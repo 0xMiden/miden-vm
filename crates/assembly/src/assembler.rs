@@ -1,5 +1,5 @@
 pub(super) mod debuginfo;
-mod error;
+pub(crate) mod error;
 mod product;
 
 use alloc::{
@@ -22,7 +22,7 @@ use miden_assembly_syntax::{
     module::ItemInfo,
 };
 use miden_core::{
-    Word,
+    WORD_SIZE, Word,
     mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     program::Kernel,
@@ -56,6 +56,14 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
+/// Maximum number of locals a single procedure may allocate.
+///
+/// When emitting the frame-pointer sequence, the local count is rounded up to the nearest multiple
+/// of word size. To keep that rounding from overflowing the u16 frame counter, the
+/// maximum must itself be a multiple of word size. This mirrors the limit the assembly parser
+/// enforces on the @locals(..) attribute.
+pub(crate) const MAX_PROC_LOCALS: u16 = (u16::MAX / WORD_SIZE as u16) * WORD_SIZE as u16;
 
 #[derive(Debug)]
 enum PendingPackageExport {
@@ -1271,8 +1279,8 @@ impl Assembler {
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )
-                    .with_num_locals(num_locals)
-                    .with_span(proc.span());
+                    .with_span(proc.span())
+                    .with_num_locals(num_locals)?;
 
                     // Compile this procedure
                     let procedure = self.compile_procedure(pctx, mast_forest_builder)?;
