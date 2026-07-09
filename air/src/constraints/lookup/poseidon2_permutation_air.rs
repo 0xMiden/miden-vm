@@ -14,7 +14,7 @@ use crate::{
     trace::chiplets::hasher::STATE_WIDTH,
 };
 
-/// Extension trait required by the Poseidon2 permutation lookup AIR.
+/// Marker trait required by the Poseidon2 permutation lookup AIR.
 pub(crate) trait Poseidon2PermutationLookupBuilder: LookupBuilder<F = Felt> {}
 
 /// Per-column fraction stride for the Poseidon2 permutation AIR.

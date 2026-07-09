@@ -19,8 +19,10 @@ pub const PROOF_ORDER_REGISTRY_DEPTH: usize = ceil_log2(PROOF_ORDER_COUNT);
 
 /// Proof-order AIR permutation.
 ///
-/// Proof order is sorted by `(log_trace_height, instance_index)`. The tag is the Lehmer rank of
-/// that permutation relative to [`AIRS`].
+/// The proof stores AIR commitments in ascending `(log_trace_height, instance_index)` order. That
+/// order can vary by statement, so the recursive verifier selects one ACE circuit from a small
+/// registry. The registry key is `tag`, the Lehmer rank of the AIR permutation relative to
+/// [`AIRS`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {
     airs: [MidenAir; MIDEN_AIR_COUNT],
@@ -28,12 +30,16 @@ pub struct ProofOrder {
 }
 
 impl ProofOrder {
+    /// Construct a proof order from an explicit AIR permutation.
+    ///
+    /// Panics if an AIR is missing or duplicated.
     pub fn new(airs: [MidenAir; MIDEN_AIR_COUNT]) -> Self {
         assert_is_air_permutation(airs);
         let tag = lehmer_rank(airs);
         Self { airs, tag }
     }
 
+    /// Construct a proof order from a slice containing every supported AIR exactly once.
     pub fn from_airs(airs: &[MidenAir]) -> Self {
         let Ok(airs) = airs.try_into() else {
             panic!("proof order must include every AIR exactly once");
@@ -41,19 +47,25 @@ impl ProofOrder {
         Self::new(airs)
     }
 
+    /// Return the canonical instance order from [`AIRS`].
     pub fn instance_order() -> Self {
         Self::new(AIRS)
     }
 
+    /// Return every supported proof order, sorted by tag.
     pub fn variants() -> Vec<Self> {
         (0..PROOF_ORDER_COUNT).map(Self::from_rank).collect()
     }
 
+    /// Decode a registry tag into a proof order.
     pub fn from_tag(tag: u32) -> Option<Self> {
         let rank = tag as usize;
         (rank < PROOF_ORDER_COUNT).then(|| Self::from_rank(rank))
     }
 
+    /// Sort AIRs by trace height, using instance order as the tie-breaker.
+    ///
+    /// `log_heights` must be in [`AIRS`] order.
     pub fn from_instance_log_heights(log_heights: &[u8]) -> Self {
         assert_eq!(log_heights.len(), AIRS.len(), "one log height is required per AIR");
 
@@ -68,14 +80,17 @@ impl ProofOrder {
         Self::new(airs)
     }
 
+    /// AIRs in the order used by the proof.
     pub fn airs(&self) -> &[MidenAir] {
         &self.airs
     }
 
+    /// Registry tag for this proof order.
     pub fn tag(&self) -> u32 {
         self.tag
     }
 
+    /// File stem for the generated ACE circuit for this order.
     pub fn file_stem(&self) -> String {
         let mut stem = String::from("constraints_eval_");
         for (i, air) in self.airs.iter().copied().enumerate() {
@@ -87,6 +102,7 @@ impl ProofOrder {
         stem
     }
 
+    /// Decode a Lehmer rank into its AIR permutation.
     fn from_rank(rank: usize) -> Self {
         debug_assert!(rank < PROOF_ORDER_COUNT);
         debug_assert!(rank <= u32::MAX as usize);
@@ -98,6 +114,7 @@ impl ProofOrder {
 
         for (i, slot) in airs.iter_mut().enumerate() {
             let factor = factorial(MIDEN_AIR_COUNT - 1 - i);
+            // The next Lehmer digit selects an AIR from the remaining ordered list.
             let index = rank / factor;
             rank %= factor;
             *slot = remaining.remove(index);
@@ -107,6 +124,7 @@ impl ProofOrder {
     }
 }
 
+/// Compute `n!`.
 const fn factorial(n: usize) -> usize {
     let mut result = 1;
     let mut factor = 2;
@@ -117,6 +135,7 @@ const fn factorial(n: usize) -> usize {
     result
 }
 
+/// Return the smallest `d` such that `2^d >= value`.
 const fn ceil_log2(value: usize) -> usize {
     assert!(value > 0, "ceil_log2 is undefined for zero");
 
@@ -129,6 +148,7 @@ const fn ceil_log2(value: usize) -> usize {
     result
 }
 
+/// Assert that `airs` contains every supported AIR exactly once.
 fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     let mut seen = [false; MIDEN_AIR_COUNT];
     for air in &airs {
@@ -138,9 +158,11 @@ fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     }
 }
 
+/// Return the Lehmer rank of an AIR permutation relative to [`AIRS`].
 fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
     let mut rank = 0;
     for i in 0..airs.len() {
+        // Lehmer digit: number of smaller instance indices to the right of position `i`.
         let smaller_after = airs[i + 1..]
             .iter()
             .filter(|air| air.instance_index() < airs[i].instance_index())

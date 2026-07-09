@@ -1,4 +1,4 @@
-//! Controller sub-chiplet constraints (dispatch side).
+//! Hasher controller constraints (dispatch side).
 //!
 //! The hasher controller records permutation requests as compact (input, output) row pairs and
 //! responds to the chiplets bus. The Poseidon2 permutation AIR enforces the requested
@@ -8,29 +8,29 @@
 //!
 //! ## Sub-modules
 //!
-//! - [`flags`]: Pure row-kind [`ControllerFlags`](flags::ControllerFlags) — compositions of `(s0,
-//!   s1, s2)` on current and next rows. Contains no chiplet-level scope; combined with
-//!   [`ChipletFlags`] at each call site.
+//! - [`flags`]: pure row-kind [`ControllerFlags`](flags::ControllerFlags), composed from `(s0, s1,
+//!   s2)` on current and next rows. Contains no chiplet-level scope; combined with [`ChipletFlags`]
+//!   at each call site.
 //!
 //! ## Constraint layout (narrative by operation lifetime)
 //!
 //! Constraints are organized in the order an operation walks through them:
 //!
-//! 1. **Trace skeleton** — first-row boundary, selector booleanity, adjacency/stability rules that
+//! 1. **Trace skeleton** - first-row boundary, selector booleanity, adjacency/stability rules that
 //!    don't depend on the operation kind. These are the trace-layout invariants.
-//! 2. **Operation start** — input is_boundary booleanity and the input→output adjacency law that
+//! 2. **Operation start** - input is_boundary booleanity and the input-to-output adjacency law that
 //!    every operation hits on its first row.
-//! 3. **Sponge operations** (LINEAR_HASH / 2-to-1 / HPERM) — input state pinning plus the respan
+//! 3. **Sponge operations** (LINEAR_HASH / 2-to-1 / HPERM) - input state pinning plus the respan
 //!    capacity preservation that glues multi-batch spans.
-//! 4. **Merkle operations** (MP / MV / MU) — per-level input state, cross-level transitions (index
+//! 4. **Merkle operations** (MP / MV / MU) - per-level input state, cross-level transitions (index
 //!    continuity, direction bit propagation, digest routing), and the MRUPDATE domain-separator
 //!    progression.
-//! 5. **Operation end** — output is_boundary booleanity and the HOUT / SOUT return-value
+//! 5. **Operation end** - output is_boundary booleanity and the HOUT / SOUT return-value
 //!    constraints.
 //!
 //! Every constraint takes both a [`ChipletFlags`] (scope: active / transition) and a
-//! [`ControllerFlags`] (row-kind: input/output/...), combined by multiplication at each
-//! gate site. With one exception — the sub-selector booleanity assertion below — no raw
+//! [`ControllerFlags`] (row-kind: input/output/padding), combined by multiplication at each
+//! gate site. With one exception - the sub-selector booleanity assertion below - no raw
 //! `cols.s0 / cols.s1 / cols.s2` columns are referenced in constraint gates.
 
 pub mod flags;
@@ -50,7 +50,7 @@ use crate::{
 // ENTRY POINT
 // ================================================================================================
 
-/// Enforce all controller sub-chiplet constraints.
+/// Enforce all hasher controller constraints.
 ///
 /// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The top-level chiplet
 /// selector is never referenced directly by constraint code.
@@ -89,7 +89,7 @@ pub fn enforce_controller_constraints<AB>(
     // s0, s1, s2 are binary on all controller rows.
     //
     // NOTE: these are the only direct references to the raw `s0/s1/s2` columns
-    // in the controller constraint body — booleanity is inherent to the columns
+    // in the controller constraint body. Booleanity is inherent to the columns
     // themselves and cannot be expressed through a composed row-kind flag.
     builder
         .when(chiplet.is_active.clone())
@@ -98,13 +98,13 @@ pub fn enforce_controller_constraints<AB>(
     // --- is_boundary booleanity on all controller rows ---
     // `is_boundary = 1` marks the first row of a new operation (sponge start
     // or Merkle path level 0); `is_boundary = 0` elsewhere. Hoisted to
-    // `when(is_active)` because input ∪ output ∪ padding covers every ctrl row
-    // — padding forces it to 0 (§1 below) and input/output use it as a bit.
+    // `when(is_active)` because input, output, and padding cover every controller row.
+    // Padding forces it to 0 in the trace-skeleton block, while input/output rows use it as a bit.
     builder.when(chiplet.is_active.clone()).assert_bool(cols.is_boundary);
 
     // --- Output non-adjacency ---
     // An output row cannot be followed by another output row. Combined with the
-    // input→output adjacency law (§2 below), this guarantees strictly alternating
+    // input-to-output adjacency law below, this guarantees strictly alternating
     // (input, output) pairs for every operation.
     //
     // Gated on `is_transition` so `cols_next.*` columns are read only when the
@@ -157,7 +157,7 @@ pub fn enforce_controller_constraints<AB>(
         .when(rows.is_output.clone())
         .assert_one(cols.is_boundary);
 
-    // --- Input→output adjacency on ctrl→ctrl transitions ---
+    // --- Input-to-output adjacency on controller-to-controller transitions ---
     // On a controller-to-controller transition from an input row, the next row must be an output
     // row. `is_transition` guarantees that the next row is also a controller row, so
     // `cols_next.s0/s1` are binary and `(1 - s0') * (1 - s1') = 1` forces both to 0. Combined
@@ -275,7 +275,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Direction bit forward propagation + digest routing ---
     //
-    // **Forward propagation.** On non-final output → next-input Merkle boundaries,
+    // **Forward propagation.** On non-final output-to-next-input Merkle boundaries,
     // the `direction_bit` on the output must equal the `direction_bit` on the next
     // input row. This makes `b_{i+1}` (the next step's direction bit) available on
     // the output row so the digest can be routed to the correct rate half.
@@ -319,7 +319,7 @@ pub fn enforce_controller_constraints<AB>(
     }
 
     // --- MRUPDATE domain separator (mrupdate_id progression) ---
-    // On controller→controller transitions:
+    // On controller-to-controller transitions:
     //   mrupdate_id_next = mrupdate_id + is_mv_input_next * is_boundary_next
     // i.e. the domain separator ticks forward exactly when the next row is an
     // MV boundary input (the start of an old-path MRUPDATE leg). This separates

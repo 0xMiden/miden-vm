@@ -2,10 +2,13 @@
 //!
 //! This module enforces:
 //! - chiplet selector constraints
-//! - controller sub-chiplet main-trace constraints
+//! - hasher controller main-trace constraints
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
+//!
+//! Poseidon2 permutation constraints are enforced by the separate
+//! [`crate::Poseidon2PermutationAir`].
 //!
 //! Chiplet LogUp lookup-argument constraints are emitted by
 //! [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] and wired

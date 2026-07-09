@@ -2,8 +2,8 @@
 //! [`ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
 //! Miden lookup-builder extension traits.
 //!
-//! Both traits require `LookupBuilder<F = Felt>`, so the impls live here
-//! (Miden-side) rather than alongside the adapters — the generic adapter
+//! These traits require `LookupBuilder<F = Felt>`, so the impls live here
+//! (Miden-side) rather than alongside the adapters; the generic adapter
 //! code itself is field-polymorphic.
 //!
 //! The constraint-path adapter and the two debug builders pick up the default
@@ -13,7 +13,7 @@
 //! [`LookupOpFlags::from_boolean_row`](super::buses::LookupOpFlags::from_boolean_row),
 //! which decodes the 7-bit opcode as a `u8` and flips exactly one flag per row
 //! instead of materialising the polynomial products the symbolic path needs.
-//! `build_chiplet_active` stays on the default — the chiplet selectors produce
+//! `build_chiplet_active` stays on the default; the chiplet selectors produce
 //! only six outputs via four subtractions, so the boolean shortcut is noise.
 
 use miden_core::field::ExtensionField;
@@ -58,7 +58,7 @@ where
     /// On the prover side `decoder.op_bits` are concrete 0/1 Felt values (enforced by the
     /// decoder's boolean constraint), so a `u8` opcode decode + single-field write replaces
     /// ~100 Felt multiplications in the shared prefix tree. Semantics match the default body
-    /// on any valid trace — a `debug_assertions` parity check inside `from_boolean_row`
+    /// on any valid trace; a `debug_assertions` parity check inside `from_boolean_row`
     /// surfaces divergences immediately.
     fn build_op_flags(
         &self,

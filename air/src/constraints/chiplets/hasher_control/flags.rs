@@ -1,4 +1,4 @@
-//! Semantic row-kind flags for the controller sub-chiplet.
+//! Semantic row-kind flags for hasher controller rows.
 //!
 //! [`ControllerFlags`] is a pure naming layer over compositions of the hasher-internal
 //! sub-selectors `(s0, s1, s2)` on the current and next rows. Each field gives a
@@ -29,7 +29,7 @@
 //! - **Sponge** (`is_sponge_input`): LINEAR_HASH (multi-batch span), single 2-to-1 hash, or HPERM.
 //!   In sponge mode, capacity is set once on the first input and carried through across
 //!   continuations; in tree mode (Merkle ops), capacity is zeroed at every level.
-//! - **MP**: MPVERIFY — read-only Merkle path check. Does not interact with the sibling table.
+//! - **MP**: MPVERIFY - read-only Merkle path check. Does not interact with the sibling table.
 //! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling table
 //!   via the hash_kernel bus.
 //! - **MU**: new-path leg of MRUPDATE. Each MU row removes a sibling from the virtual sibling
@@ -45,11 +45,11 @@ use crate::constraints::{chiplets::columns::ControllerCols, utils::BoolNot};
 /// Named compositions of the controller sub-selectors `(s0, s1, s2)` on the current
 /// and next rows.
 ///
-/// Pure row-kind layer — contains no chiplet-level scope. Combine with [`ChipletFlags`](
+/// Pure row-kind layer; contains no chiplet-level scope. Combine with [`ChipletFlags`](
 /// super::super::selectors::ChipletFlags) at the call site by multiplication.
 pub struct ControllerFlags<E> {
     // ========================================================================
-    // Current row — compositions of cols.{s0, s1, s2}
+    // Current row - compositions of cols.{s0, s1, s2}
     // ========================================================================
     /// Input row: `s0` (deg 1). Covers all input operations (sponge + Merkle variants).
     pub is_input: E,
@@ -75,7 +75,7 @@ pub struct ControllerFlags<E> {
     pub is_sout: E,
 
     // ========================================================================
-    // Next row — compositions of cols_next.{s0, s1, s2}
+    // Next row - compositions of cols_next.{s0, s1, s2}
     // ========================================================================
     /// Next row is an output row: `(1-s0')*(1-s1')` (deg 2).
     pub is_output_next: E,
@@ -83,13 +83,13 @@ pub struct ControllerFlags<E> {
     /// Next row is a padding row: `(1-s0')*s1'` (deg 2).
     pub is_padding_next: E,
 
-    /// Next row is a sponge input — LINEAR_HASH continuation: `s0'*(1-s1')*(1-s2')` (deg 3).
+    /// Next row is a sponge input - LINEAR_HASH continuation: `s0'*(1-s1')*(1-s2')` (deg 3).
     pub is_sponge_input_next: E,
 
     /// Next row is any Merkle input (MP/MV/MU): `s0'*(s1'+s2'-s1'*s2')` (deg 3).
     pub is_merkle_input_next: E,
 
-    /// Next row is an MV input — old-path MRUPDATE start: `s0'*s1'*(1-s2')` (deg 3).
+    /// Next row is an MV input - old-path MRUPDATE start: `s0'*s1'*(1-s2')` (deg 3).
     pub is_mv_input_next: E,
 }
 

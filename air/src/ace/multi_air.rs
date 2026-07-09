@@ -24,6 +24,7 @@ where
     EF: ExtensionField<Felt>,
     SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
 {
+    // Per-AIR main and aux regions are padded to this width before concatenation.
     const LMCS_ALIGNMENT: usize = 8;
 
     if config.num_airs != MIDEN_AIR_COUNT {
@@ -35,6 +36,8 @@ where
         });
     }
 
+    // Build each AIR in the local single-AIR input namespace first. The re-emission pass below
+    // maps those local inputs into the combined multi-AIR layout.
     let sub_config = AceConfig { num_airs: 1, ..config };
     let mut sub_dags = Vec::with_capacity(AIRS.len());
     for air in AIRS.iter().copied() {
@@ -69,6 +72,8 @@ where
         }
     }
 
+    // The final READ layout has one region for each input kind. Per-AIR main, aux, and boundary
+    // values are concatenated at the offsets computed for the requested proof order.
     let combined_counts = InputCounts {
         width: combined_main_w,
         aux_width: combined_aux_w,
@@ -89,11 +94,14 @@ where
 
     let offsets_by_air = air_offsets(&sub_dags, order)?;
     let mut builder = DagBuilder::<EF>::new();
-    let mut acc_by_air = [None; MIDEN_AIR_COUNT];
-    let mut shared_qv = None;
+    let mut constraint_acc_by_air = [None; MIDEN_AIR_COUNT];
+    // Each per-AIR DAG root has the form `acc - q*v`. The combined circuit folds the
+    // per-AIR accumulators in proof order and subtracts one shared quotient binding.
+    let mut shared_quotient_binding = None;
 
     for sub_dag in &sub_dags {
         let offsets = offsets_by_air[sub_dag.air.instance_index()];
+        // Re-emit the local DAG without its root; the final root is the proof-order fold below.
         let translation = reemit_dag_with_rewrite(
             &mut builder,
             &sub_dag.dag,
@@ -110,34 +118,37 @@ where
             true,
         );
 
-        let (acc, qv) = translated_acc_and_qv(sub_dag.air, &sub_dag.dag, &translation)?;
-        if let Some(previous_qv) = shared_qv {
-            if previous_qv != qv {
+        let (acc, quotient_binding) =
+            translated_acc_and_quotient_binding(sub_dag.air, &sub_dag.dag, &translation)?;
+        if let Some(previous_quotient_binding) = shared_quotient_binding {
+            if previous_quotient_binding != quotient_binding {
                 return Err(AceError::InvalidInputLayout {
                     message: "all AIR quotient bindings must share the same q*v node".into(),
                 });
             }
         } else {
-            shared_qv = Some(qv);
+            shared_quotient_binding = Some(quotient_binding);
         }
-        acc_by_air[sub_dag.air.instance_index()] = Some(acc);
+        constraint_acc_by_air[sub_dag.air.instance_index()] = Some(acc);
     }
-    let shared_qv = shared_qv.ok_or_else(|| AceError::InvalidInputLayout {
-        message: "multi-AIR circuit did not emit any AIR roots".into(),
-    })?;
+    let shared_quotient_binding =
+        shared_quotient_binding.ok_or_else(|| AceError::InvalidInputLayout {
+            message: "multi-AIR circuit did not emit any AIR roots".into(),
+        })?;
 
     let fold_beta = builder.input(InputKey::MultiAirFoldBeta);
+    // Fold accumulators in proof order so the circuit matches the proof's AIR ordering.
     let mut ordered = order.airs().iter().copied();
     let first_air = ordered.next().ok_or_else(|| AceError::InvalidInputLayout {
         message: "proof order must contain at least one AIR".into(),
     })?;
-    let mut combined_acc = acc_for_air(&acc_by_air, first_air)?;
+    let mut combined_acc = acc_for_air(&constraint_acc_by_air, first_air)?;
     for air in ordered {
         let scaled = builder.mul(combined_acc, fold_beta);
-        combined_acc = builder.add(scaled, acc_for_air(&acc_by_air, air)?);
+        combined_acc = builder.add(scaled, acc_for_air(&constraint_acc_by_air, air)?);
     }
 
-    let combined_constraint = builder.sub(combined_acc, shared_qv);
+    let combined_constraint = builder.sub(combined_acc, shared_quotient_binding);
 
     let combined_dag = builder.build(combined_constraint);
     miden_ace_codegen::emit_circuit(&combined_dag, combined_layout)
@@ -152,6 +163,7 @@ fn acc_for_air(
     })
 }
 
+/// Offsets of one AIR's local values inside the combined READ layout.
 #[derive(Copy, Clone)]
 struct SlotOffsets {
     main: usize,
@@ -159,6 +171,7 @@ struct SlotOffsets {
     boundary: usize,
 }
 
+/// Local DAG and layout metadata for one AIR before it is re-emitted into the combined circuit.
 struct AirSubDag<EF> {
     air: MidenAir,
     dag: AceDag<EF>,
@@ -169,6 +182,11 @@ struct AirSubDag<EF> {
     periodic_max: usize,
 }
 
+/// Extract the metadata needed to place one AIR in the combined layout.
+///
+/// `aligned_main` and `aligned_aux` are counted in logical columns, not extension-field
+/// coordinates. Aux alignment is applied to coordinates first so that each AIR starts on the same
+/// coordinate boundary in the flat READ section.
 fn build_air_sub_dag<EF>(
     air: MidenAir,
     artifacts: AceArtifacts<EF>,
@@ -200,6 +218,11 @@ where
     }
 }
 
+/// Compute where each AIR starts in the combined main, aux, and boundary regions.
+///
+/// The offsets follow `order`, while the returned array is indexed by `MidenAir::instance_index()`.
+/// This lets the re-emission loop process sub-DAGs in canonical order and still write inputs into
+/// the proof-order layout.
 fn air_offsets<EF>(
     sub_dags: &[AirSubDag<EF>],
     order: &ProofOrder,
@@ -233,6 +256,11 @@ fn air_offsets<EF>(
     Ok(offsets_by_air)
 }
 
+/// Check that each AIR's periodic domain can be evaluated from the shared `ZK` input.
+///
+/// If an AIR has a shorter periodic cycle than the global maximum, re-emission rewrites `ZK` by
+/// repeated squaring. This requires both lengths to be powers of two and the global length to be a
+/// multiple of the local length.
 fn validate_periodic_embedding<EF>(
     sub_dags: &[AirSubDag<EF>],
     global_periodic_max: usize,
@@ -258,6 +286,11 @@ fn validate_periodic_embedding<EF>(
     Ok(())
 }
 
+/// Map a local single-AIR input key into the combined multi-AIR input namespace.
+///
+/// Main, aux, and boundary inputs are shifted by the AIR's proof-order offsets. Row selectors are
+/// replaced by the per-AIR selector slots. Periodic `ZK` is lifted to the global period when the
+/// AIR uses a shorter periodic cycle.
 fn rewrite_air_input<EF>(
     builder: &mut DagBuilder<EF>,
     key: InputKey,
@@ -296,14 +329,18 @@ where
     }
 }
 
-fn translated_acc_and_qv<EF>(
+/// Return the translated accumulator and quotient binding from a re-emitted AIR root.
+///
+/// Single-AIR ACE roots are expected to have the form `acc - q*v`. The combined circuit keeps the
+/// accumulator for proof-order folding and subtracts one shared `q*v` binding at the end.
+fn translated_acc_and_quotient_binding<EF>(
     air: MidenAir,
     dag: &AceDag<EF>,
     translation: &[NodeId],
 ) -> Result<(NodeId, NodeId), AceError> {
     match dag.nodes[dag.root().index()] {
-        NodeKind::Sub(acc_id, qv_id) => {
-            Ok((translation[acc_id.index()], translation[qv_id.index()]))
+        NodeKind::Sub(acc_id, quotient_binding_id) => {
+            Ok((translation[acc_id.index()], translation[quotient_binding_id.index()]))
         },
         _ => Err(AceError::InvalidInputLayout {
             message: format!("{} sub-DAG root must be `Sub(acc, q*v)`", air.name()),
@@ -311,6 +348,11 @@ fn translated_acc_and_qv<EF>(
     }
 }
 
+/// Re-emit a DAG into `builder`, rewriting input nodes and preserving the source node order.
+///
+/// The returned vector maps each source node index to its new node id. When `skip_root` is true,
+/// the source root is omitted because the caller builds a different root expression from its
+/// children.
 fn reemit_dag_with_rewrite<EF, F>(
     builder: &mut DagBuilder<EF>,
     source: &AceDag<EF>,

@@ -441,7 +441,7 @@ impl BitwisePeriodicCols<Vec<Felt>> {
         Self { k_first, k_transition }
     }
 
-    /// Generate bitwise periodic columns as a flat vector.
+    /// Returns bitwise periodic columns in `BitwisePeriodicCols` layout order.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
         let BitwisePeriodicCols { k_first, k_transition } = Self::new();
         vec![k_first, k_transition]
@@ -449,10 +449,9 @@ impl BitwisePeriodicCols<Vec<Felt>> {
 }
 
 impl PeriodicCols<Vec<Felt>> {
-    /// Generate all chiplet periodic columns as a flat `Vec<Vec<Felt>>`.
+    /// Returns chiplet periodic columns in `PeriodicCols` layout order.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
-        vec![k_first, k_transition]
+        BitwisePeriodicCols::periodic_columns()
     }
 }
 
@@ -463,15 +462,6 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
     fn borrow(&self) -> &PeriodicCols<T> {
         debug_assert_eq!(self.len(), NUM_PERIODIC_COLUMNS);
         let (prefix, cols, suffix) = unsafe { self.align_to::<PeriodicCols<T>>() };
-        debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
-        &cols[0]
-    }
-}
-
-impl<T> Borrow<BitwisePeriodicCols<T>> for [T] {
-    fn borrow(&self) -> &BitwisePeriodicCols<T> {
-        debug_assert_eq!(self.len(), size_of::<BitwisePeriodicCols<u8>>());
-        let (prefix, cols, suffix) = unsafe { self.align_to::<BitwisePeriodicCols<T>>() };
         debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
         &cols[0]
     }

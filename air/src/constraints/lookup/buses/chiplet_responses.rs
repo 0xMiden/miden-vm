@@ -4,9 +4,9 @@
 //! all sharing one LogUp column.
 //!
 //! The 7 hasher response variants are gated on hasher controller rows
-//! (`chiplet_active.controller = 1`) via the per-variant `(s0, s1, s2, is_boundary)`
-//! combinations. Non-hasher variants (bitwise / memory / ACE init / kernel ROM) are gated
-//! by the matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
+//! (`chiplet_active.controller = 1`) using the controller-internal `(s0, s1, s2, is_boundary)`
+//! columns. Non-hasher variants (bitwise / memory / ACE init / kernel ROM) are gated by the
+//! matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
 //! rather than splitting into 4 per-label variants. This keeps the response-column
@@ -18,7 +18,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::columns::{BitwisePeriodicCols, ControllerCols},
+        chiplets::columns::{ControllerCols, PeriodicCols},
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
@@ -47,8 +47,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // Read the typed periodic column view (used for bitwise k_transition).
     let k_transition: LB::Expr = {
-        let periodic: &BitwisePeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        periodic.k_transition.into()
+        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+        periodic.bitwise.k_transition.into()
     };
 
     // Typed chiplet-data overlays.
@@ -64,8 +64,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let rate_1: [LB::Var; DIGEST_LEN] = array::from_fn(|i| ctrl.state[DIGEST_LEN + i]);
 
     // --- Hasher response flags ---
-    // All gated by `chiplet_active.controller`; composed with the per-row-type
-    // `(s0, s1, s2, is_boundary)` combinations.
+    // All gated by `chiplet_active.controller`; the row type is selected by the
+    // controller-internal `(s0, s1, s2, is_boundary)` columns.
     let controller_flag = ctx.chiplet_active.controller.clone();
     let hasher_flags = hasher_response_flags(controller_flag, ctrl);
 
@@ -128,8 +128,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
                     // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
                     // Each path has its own controller flag. All three encode
-                    // `leaf = (1-bit)·rate_0 + bit·rate_1` with `bit = node_index -
-                    // 2·node_index_next` (the current Merkle direction bit).
+                    // `leaf = (1-bit)*rate_0 + bit*rate_1` with
+                    // `bit = node_index - 2*node_index_next` (the current Merkle direction bit).
                     for (name, flag, kind) in [
                         ("mp_verify_input", hasher_flags.f_mp, BusId::HasherMerkleVerifyInit),
                         ("mr_update_old_input", hasher_flags.f_mv, BusId::HasherMerkleOldInit),
@@ -331,9 +331,9 @@ where
         * is_boundary.not();
 
     // Merkle tree input rows (is_boundary=1):
-    //   f_mp = ctrl · hs0 · (1-hs1) · hs2 · is_boundary
-    //   f_mv = ctrl · hs0 · hs1 · (1-hs2) · is_boundary
-    //   f_mu = ctrl · hs0 · hs1 · hs2 · is_boundary
+    //   f_mp = ctrl * hs0 * (1-hs1) * hs2 * is_boundary
+    //   f_mv = ctrl * hs0 * hs1 * (1-hs2) * is_boundary
+    //   f_mu = ctrl * hs0 * hs1 * hs2 * is_boundary
     let f_mp =
         controller_flag.clone() * hs0.clone() * not_hs1.clone() * hs2.clone() * is_boundary.clone();
     let f_mv =

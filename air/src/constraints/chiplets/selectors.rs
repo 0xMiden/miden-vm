@@ -28,31 +28,33 @@
 //! - `s0` is boolean
 //! - `s0 = 1 -> s0' = 1` (once outside the controller region, stay there)
 //!
-//! These force the trace ordering: `ctrl...ctrl, s0...s0`.
+//! This makes controller rows a prefix of the chiplets trace.
 //!
 //! ## Main-Constraint Flags
 //!
 //! The chiplets with main-trace constraints get a [`ChipletFlags`] struct with four flags:
 //! - `is_active`: 1 when this chiplet owns the current row
 //! - `is_transition`: active on both current and next row, including `is_transition()`
-//! - `is_last`: last row of this chiplet's section (`is_active * s_n'`)
-//! - `next_is_first`: next row is the first of this chiplet (`is_last[n-1] * (1 - s_n')`)
+//! - `is_last`: current row belongs to this chiplet and the next row has advanced past it
+//! - `next_is_first`: current row ends the previous chiplet section and the next row starts this
+//!   one
 //!
-//! For every chiplet, `is_active` is `prefix * (1 - s_n)`, written as
-//! `prefix - prefix * s_n`. The controller has an empty prefix and uses `1 - s0`.
+//! For each non-controller chiplet, `is_active` is `prefix * (1 - selector)`, where
+//! `selector` is the column that ends that chiplet's section. The code writes this as
+//! `prefix - prefix * selector`. The controller has an empty prefix and uses `1 - s0`.
 //!
 //! ## Constraints
 //!
 //! 1. **Partition**: `s0` is boolean
-//! 2. **Transition rules**: ctrl-to-ctrl/s0, s0-to-s0
+//! 2. **Transition rules**: once `s0` becomes 1, it remains 1
 //! 3. **Binary constraints**: `s1..s4` are binary when their prefix is active
 //! 4. **Stability constraints**: once `s1..s4` become 1, they stay 1
 //! 5. **Last-row invariant**: `s0 = s1 = s2 = s3 = s4 = 1` on the final row
 //!
 //! The last-row invariant ensures every chiplet's `is_active` flag is zero on the last
-//! row. Combined with the `(1 - s_n')` factor in the precomputed flags, this makes
-//! chiplet-gated constraints automatically vanish on the last row without needing
-//! explicit `when_transition()` guards.
+//! row. The precomputed flags also check that the next row has not advanced past the
+//! selected chiplet, so chiplet-gated constraints automatically vanish on the last row without
+//! needing explicit `when_transition()` guards.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
@@ -94,7 +96,7 @@ pub struct ChipletSelectors<E> {
 ///
 /// This enforces:
 /// 1. Partition constraints for `s0`
-/// 2. Transition rules (ctrl-to-ctrl/s0, s0-to-s0)
+/// 2. Transition rule: once `s0` becomes 1, it remains 1
 /// 3. Binary and stability constraints for `s1..s4` under `s0`
 /// 4. Last-row invariant (`s0..s4 = 1`)
 ///
@@ -135,7 +137,7 @@ where
 
     builder.assert_bool(s0.clone());
 
-    // Transition rules: enforce the trace ordering ctrl...ctrl, s0...s0.
+    // Once s0 becomes 1, it stays 1; controller rows form a prefix of the trace.
     {
         let builder = &mut builder.when_transition();
 
@@ -158,10 +160,10 @@ where
     builder.when(s012.clone()).assert_bool(s3.clone());
     builder.when(s0123.clone()).assert_bool(s4.clone());
 
-    // s1..s4 stability: once set to 1, they stay 1 (forbids 1→0 transitions).
+    // s1..s4 stability: once set to 1, they stay 1 (forbids 1 -> 0 transitions).
     // Gated by the cumulative product including the target selector, so the gate
-    // is only active when the selector is already 1 — permitting the 0→1
-    // transition at section boundaries while forbidding 1→0.
+    // is only active when the selector is already 1, permitting the 0 -> 1
+    // transition at section boundaries while forbidding 1 -> 0.
     let s01234 = s0123.clone() * s4.clone();
     {
         let builder = &mut builder.when_transition();
@@ -176,8 +178,8 @@ where
     // =========================================================================
     // On the last row: s0 = s1 = s2 = s3 = s4 = 1 (padding section).
     // This ensures every chiplet's is_active flag is zero on the last row.
-    // Combined with the (1 - s_n') factor in precomputed flags, chiplet-gated
-    // constraints automatically vanish without explicit when_transition() guards.
+    // The precomputed flags also check that the next row has not advanced past the selected
+    // chiplet, so chiplet-gated constraints vanish without explicit when_transition() guards.
     {
         let builder = &mut builder.when_last_row();
         builder.assert_one(s0.clone());
@@ -209,25 +211,28 @@ where
     let ctrl_is_last = not_s0 * s0_next;
     let ctrl_next_is_first = AB::Expr::ZERO; // controller is first section
 
-    // --- Chiplet active flags under s0: prefix * (1 - s_n) ---
+    // --- Non-controller active flags ---
     let is_bitwise = s0.clone() - s01.clone();
     let is_memory = s01.clone() - s012.clone();
     let is_ace = s012.clone() - s0123;
 
-    // --- Chiplet last-row flags under s0: is_active * s_n' ---
+    // --- Non-controller last-row flags ---
+    // A section ends when the current row is active and the next selector advances past it.
     let is_bitwise_last = is_bitwise.clone() * s1_next;
     let is_memory_last = is_memory.clone() * s2_next;
     let is_ace_last = is_ace.clone() * s3_next;
 
-    // --- Chiplet next-is-first flags under s0: is_last[n-1] * (1 - s_n') ---
+    // --- Non-controller next-is-first flags ---
+    // A section starts after the previous section ends, unless the next row has already advanced
+    // past the target selector.
     let next_is_bitwise_first = ctrl_is_last.clone() * not_s1_next.clone();
     let next_is_memory_first = is_bitwise_last.clone() * not_s2_next.clone();
     let next_is_ace_first = is_memory_last.clone() * not_s3_next.clone();
 
-    // --- Chiplet transition flags under s0 ---
+    // --- Non-controller transition flags ---
     // Each non-controller chiplet fires its transition flag when the current row is in that
     // chiplet's section (the prefix product) and the next row hasn't yet advanced
-    // past it (the `1 - s_n'` factor). The top-level transition rule enforces
+    // past that chiplet's selector. The top-level transition rule enforces
     // `s0 = 1 -> s0' = 1`, so no separate `s0'` factor is needed.
     let bitwise_transition = is_transition_flag.clone() * s0 * not_s1_next;
     let memory_transition = is_transition_flag.clone() * s01 * not_s2_next;
