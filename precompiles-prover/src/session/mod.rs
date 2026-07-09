@@ -459,51 +459,37 @@ impl Session {
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
-        let eval = trace_span!("build_precompile_trace_eval", eval_trace(self.eval, root));
-        let chunk = trace_span!("build_precompile_trace_chunk", chunk_trace(self.chunk));
-        let p2 = trace_span!("build_precompile_trace_poseidon2", p2_trace(self.p2));
-        let sponge = trace_span!("build_precompile_trace_keccak_sponge", sponge_trace(self.sponge));
-        let node = trace_span!("build_precompile_trace_keccak_node", keccak_node_trace(self.node));
-        let round = trace_span!(
-            "build_precompile_trace_keccak_round",
-            round_trace(self.round, &mut self.bw64, &mut self.bpl)
-        );
+        let eval = trace_span!("eval", eval_trace(self.eval, root));
+        let chunk = trace_span!("chunk", chunk_trace(self.chunk));
+        let p2 = trace_span!("poseidon2", p2_trace(self.p2));
+        let sponge = trace_span!("keccak_sponge", sponge_trace(self.sponge));
+        let node = trace_span!("keccak_node", keccak_node_trace(self.node));
+        let round =
+            trace_span!("keccak_round", round_trace(self.round, &mut self.bw64, &mut self.bpl));
         let bw64_active_rows = self.bw64.active_rows();
-        let bw64 = trace_span!("build_precompile_trace_bitwise64", bw64_trace(self.bw64));
+        let bw64 = trace_span!("bitwise64", bw64_trace(self.bw64));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
         // every Range16 consumer fires before BPL. (The EC add chiplet
         // consumes no UintVal — its predicates are ptr-level certificates
         // already routed by the uint relations.)
-        let add = trace_span!(
-            "build_precompile_trace_uint_add",
-            uint_add_trace(self.uint.add, &mut self.uint.store)
-        );
+        let add = trace_span!("uint_add", uint_add_trace(self.uint.add, &mut self.uint.store));
         let mul = trace_span!(
-            "build_precompile_trace_uint_mul",
+            "uint_mul",
             uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl)
         );
         // EcMsm routes its intros' literal-1 UintVal demand into the store,
         // so it runs before the store reads its provide ledger.
-        let msm = trace_span!(
-            "build_precompile_trace_ec_msm",
-            msm_trace(self.msm, &mut self.uint.store, &mut self.bpl)
-        );
-        let uint = trace_span!(
-            "build_precompile_trace_uint_store",
-            uint_trace(self.uint.store, &mut self.bpl)
-        );
+        let msm = trace_span!("ec_msm", msm_trace(self.msm, &mut self.uint.store, &mut self.bpl));
+        let uint = trace_span!("uint_store", uint_trace(self.uint.store, &mut self.bpl));
         // The add relation routes its EcGroup / EcPoint demand as it lays,
         // so it runs before the stores read their provide ledgers; it also
         // raises the closure-cert ptr-ordering Range16 requires into BPL
         // (which is traced last, below).
-        let ec_add = trace_span!(
-            "build_precompile_trace_ec_add",
-            ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl)
-        );
-        let (ec_groups, ec) =
-            trace_span!("build_precompile_trace_ec_store", ec_store_traces(self.ec.store));
-        let bpl = trace_span!("build_precompile_trace_byte_pair_lut", bpl_trace(self.bpl));
+        let ec_add =
+            trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
+        let (ec_groups, ec) = trace_span!("ec_store", ec_store_traces(self.ec.store));
+        let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
         SessionTraces {
             chunk,

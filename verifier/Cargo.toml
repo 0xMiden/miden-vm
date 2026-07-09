@@ -20,7 +20,6 @@ doctest = false
 [features]
 default = ["std"]
 std = [
-    "dep:miden-precompiles-prover",
     "miden-air/std",
     "miden-core/std",
     "miden-precompiles/std",
@@ -34,7 +33,7 @@ miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-precompiles.workspace = true
-miden-precompiles-prover = { workspace = true, optional = true }
+miden-precompiles-prover.workspace = true
 
 # External dependencies
 serde.workspace = true
