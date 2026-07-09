@@ -1,17 +1,25 @@
 # Changelog
 
-## v0.25.0 (TBD)
+## v0.25.0 (2026-07-08)
 
 #### Changes
 
 - Added a Blake3 pure execution benchmark axis and reduced processor benchmark compile time by relaxing forced inlining in execution helpers ([#3289](https://github.com/0xMiden/miden-vm/pull/3289)).
-- Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
+- Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
+- Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Tightened LogUp lookup AIR docs and comments, removed unused operation-flag accessors, and added block-hash/op-group selector coverage ([#3309](https://github.com/0xMiden/miden-vm/pull/3309)).
 - [BREAKING] Optimize constraint evaluation step by dropping redundant transition guards on op-flag-gated constraints ([#3319](https://github.com/0xMiden/miden-vm/pull/3319)).
-- Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
+- Fixed a panic (or silent miscompile in release builds) when assembling a procedure declaring more locals than the maximum representable during frame-pointer codegen; such procedures are now rejected with a diagnostic error ([#3332](https://github.com/0xMiden/miden-vm/pull/3332)).
+- [BREAKING] Bound dense `MastForest` and package digests to stored roots, external dependencies, and advice, rejected non-canonical dense forest payloads, and moved dense forest construction to `DenseMastForestBuilder` ([#3334](https://github.com/0xMiden/miden-vm/pull/3334)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
+- [BREAKING] Removed `MastForest::compact`; MAST construction should deduplicate through builders or explicit `MastForest::merge` calls instead ([#3318](https://github.com/0xMiden/miden-vm/pull/3318)).
 - [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
+
+## v0.24.2 (2026-07-01)
+
+- Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
+- Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
 
 ## v0.24.0 (2026-06-24)
 

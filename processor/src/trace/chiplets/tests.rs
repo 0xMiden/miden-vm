@@ -11,7 +11,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
-    mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest},
     program::{Program, StackInputs},
 };
 
