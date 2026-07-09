@@ -327,7 +327,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
 fn max_periodic_cycle_len_log() -> u32 {
     let max_len = AIRS
         .iter()
-        .flat_map(|air| <MidenAir as BaseAir<Felt>>::periodic_columns(air))
+        .flat_map(<MidenAir as BaseAir<Felt>>::periodic_columns)
         .map(|column| column.len())
         .max()
         .unwrap_or(1);

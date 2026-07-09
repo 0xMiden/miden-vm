@@ -294,8 +294,12 @@ pub(super) fn write_poseidon2_permutation_cycle(
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
 
-    for round in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
-        write_perm_row(&mut rows[round], &state, perm_id, zero_witnesses);
+    for (offset, row) in rows[INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END]
+        .iter_mut()
+        .enumerate()
+    {
+        let round = INITIAL_EXTERNAL_ROUND_START + offset;
+        write_perm_row(row, &state, perm_id, zero_witnesses);
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);

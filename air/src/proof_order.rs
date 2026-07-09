@@ -29,8 +29,8 @@ pub struct ProofOrder {
 
 impl ProofOrder {
     pub fn new(airs: [MidenAir; MIDEN_AIR_COUNT]) -> Self {
-        assert_is_air_permutation(&airs);
-        let tag = lehmer_rank(&airs);
+        assert_is_air_permutation(airs);
+        let tag = lehmer_rank(airs);
         Self { airs, tag }
     }
 
@@ -129,16 +129,16 @@ const fn ceil_log2(value: usize) -> usize {
     result
 }
 
-fn assert_is_air_permutation(airs: &[MidenAir; MIDEN_AIR_COUNT]) {
+fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     let mut seen = [false; MIDEN_AIR_COUNT];
-    for air in airs {
+    for air in &airs {
         let index = air.instance_index();
         assert!(!seen[index], "proof order contains duplicate AIR: {air:?}");
         seen[index] = true;
     }
 }
 
-fn lehmer_rank(airs: &[MidenAir; MIDEN_AIR_COUNT]) -> u32 {
+fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
     let mut rank = 0;
     for i in 0..airs.len() {
         let smaller_after = airs[i + 1..]

@@ -523,7 +523,7 @@ const _: () = assert!(HASHER_PERM_LINK_STATE_OFFSET + STATE_WIDTH <= MIDEN_MAX_M
 /// Hasher perm-link message: `perm_id` plus the full Poseidon2 state.
 ///
 /// The id ties a controller input/output row pair to the corresponding Poseidon2 permutation
-/// instance. `state` is encoded at [`HASHER_PERM_LINK_STATE_OFFSET`] to match full-state hasher
+/// instance. `state` is encoded at `HASHER_PERM_LINK_STATE_OFFSET` to match full-state hasher
 /// messages.
 #[derive(Clone, Debug)]
 pub enum HasherPermLinkMsg<E> {

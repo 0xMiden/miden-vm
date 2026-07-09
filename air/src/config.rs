@@ -30,7 +30,7 @@ use miden_crypto::{
     },
 };
 
-use crate::PROOF_ORDER_REGISTRY_DEPTH;
+use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH};
 
 // SHARED TYPES
 // ================================================================================================
@@ -111,6 +111,10 @@ pub const ACE_CIRCUIT_REGISTRY_DEPTH: usize = PROOF_ORDER_REGISTRY_DEPTH;
 
 /// Number of leaves in the ACE circuit registry tree.
 pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
+const _: () = assert!(
+    PROOF_ORDER_COUNT <= ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
+    "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
+);
 
 /// Leaves in the ACE circuit registry tree.
 ///
@@ -343,7 +347,7 @@ mod tests {
     use miden_core::{Felt, Word, crypto::hash::Poseidon2};
     use miden_crypto::merkle::MerkleTree;
 
-    use crate::{PROOF_ORDER_COUNT, ProofOrder, ace};
+    use crate::{ProofOrder, ace};
 
     const PROTOCOL_ID: u64 = 0;
     const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
@@ -364,10 +368,6 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        assert!(
-            PROOF_ORDER_COUNT <= super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
-            "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
-        );
         assert_eq!(
             super::ACE_CIRCUIT_REGISTRY_LEAVES.len(),
             super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT,

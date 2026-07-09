@@ -12,12 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-miden-assembly  = { workspace = true, features = ["std"] }
-miden-core      = { workspace = true, features = ["std"] }
-miden-core-lib  = { workspace = true, features = ["std"] }
 miden-processor = { workspace = true, features = ["concurrent"] }
-miden-prover    = { workspace = true, features = ["concurrent"] }
-miden-utils-testing = { workspace = true, features = ["std"] }
 miden-vm        = { path = "../../miden-vm", features = ["concurrent"] }
 serde           = { workspace = true, features = ["std"] }
 serde_json      = { workspace = true, features = ["std"] }
@@ -25,6 +20,11 @@ thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 codspeed-criterion-compat = { workspace = true }
+miden-assembly = { workspace = true, features = ["std"] }
+miden-core = { workspace = true, features = ["std"] }
+miden-core-lib = { workspace = true, features = ["std"] }
+miden-prover = { workspace = true, features = ["concurrent"] }
+miden-utils-testing = { workspace = true, features = ["std"] }
 
 [[bench]]
 name = "synthetic_bench"

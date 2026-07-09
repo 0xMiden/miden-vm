@@ -133,9 +133,7 @@ struct BenchConfig {
 
 impl BenchConfig {
     fn from_env() -> Option<Self> {
-        let Some(tx_masm_path) = env_path("RECURSION_BENCH_MASM") else {
-            return None;
-        };
+        let tx_masm_path = env_path("RECURSION_BENCH_MASM")?;
         let tx_masm_path = resolve_masm_path(tx_masm_path);
         let hash_name =
             std::env::var("RECURSION_BENCH_HASH").unwrap_or_else(|_| "poseidon2".to_string());

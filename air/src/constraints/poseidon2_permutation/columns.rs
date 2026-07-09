@@ -148,14 +148,14 @@ impl Poseidon2PermutationPeriodicCols<Vec<Felt>> {
         let mut is_int_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
 
         is_init_ext[CYCLE_INPUT_ROW] = Felt::ONE;
-        for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
-            is_ext[row] = Felt::ONE;
+        for value in &mut is_ext[INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END] {
+            *value = Felt::ONE;
         }
-        for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
-            is_ext[row] = Felt::ONE;
+        for value in &mut is_ext[TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END] {
+            *value = Felt::ONE;
         }
-        for row in PACKED_INTERNAL_ROUND_START..PACKED_INTERNAL_ROUND_END {
-            is_packed_int[row] = Felt::ONE;
+        for value in &mut is_packed_int[PACKED_INTERNAL_ROUND_START..PACKED_INTERNAL_ROUND_END] {
+            *value = Felt::ONE;
         }
         is_int_ext[INTERNAL_PLUS_EXTERNAL_ROW] = Felt::ONE;
 
@@ -163,8 +163,12 @@ impl Poseidon2PermutationPeriodicCols<Vec<Felt>> {
             let mut col = vec![Felt::ZERO; HASH_CYCLE_LEN];
 
             col[CYCLE_INPUT_ROW] = Hasher::ARK_EXT_INITIAL[0][lane];
-            for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
-                col[row] = Hasher::ARK_EXT_INITIAL[row][lane];
+            for (offset, value) in col[INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END]
+                .iter_mut()
+                .enumerate()
+            {
+                let row = INITIAL_EXTERNAL_ROUND_START + offset;
+                *value = Hasher::ARK_EXT_INITIAL[row][lane];
             }
 
             if lane < NUM_SBOX_WITNESSES {
@@ -175,8 +179,12 @@ impl Poseidon2PermutationPeriodicCols<Vec<Felt>> {
             }
 
             col[INTERNAL_PLUS_EXTERNAL_ROW] = Hasher::ARK_EXT_TERMINAL[0][lane];
-            for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
-                col[row] = Hasher::ARK_EXT_TERMINAL[row - INTERNAL_PLUS_EXTERNAL_ROW][lane];
+            for (offset, value) in col[TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END]
+                .iter_mut()
+                .enumerate()
+            {
+                let row = TERMINAL_EXTERNAL_ROUND_START + offset;
+                *value = Hasher::ARK_EXT_TERMINAL[row - INTERNAL_PLUS_EXTERNAL_ROW][lane];
             }
 
             col

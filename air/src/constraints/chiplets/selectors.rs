@@ -97,6 +97,7 @@ pub struct ChipletSelectors<E> {
 /// 2. Transition rules (ctrl-to-ctrl/s0, s0-to-s0)
 /// 3. Binary and stability constraints for `s1..s4` under `s0`
 /// 4. Last-row invariant (`s0..s4 = 1`)
+///
 /// Returns [`ChipletSelectors`] with precomputed flags for gating chiplet constraints.
 pub fn build_chiplet_selectors<AB>(
     builder: &mut AB,
@@ -196,7 +197,7 @@ where
 
     let is_transition_flag: AB::Expr = builder.is_transition();
 
-    let not_s0 = s0.clone().not();
+    let not_s0 = s0.not();
     let not_s0_next = s0_next.not();
 
     // --- Controller flags ---
