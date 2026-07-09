@@ -42,8 +42,9 @@ use crate::{
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{
-        DEFAULT_HASH_FUNCTION, blake3_256_config, keccak_config, observe_protocol_params,
-        pcs_params, poseidon2_config, rpo_config, rpx_config, test_challenger,
+        DEFAULT_HASH_FUNCTION, PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config,
+        observe_protocol_params, pcs_params, poseidon2_config, rpo_config, rpx_config,
+        test_challenger,
     },
     transcript::{
         eval::TranscriptEvalAir,
@@ -295,23 +296,23 @@ impl SessionTraces {
         let params = pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
-                let config = blake3_256_config(params);
+                let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
                 self.prove_stark_with_config(&config, hash_fn)
             },
             HashFunction::Rpo256 => {
-                let config = rpo_config(params);
+                let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
                 self.prove_stark_with_config(&config, hash_fn)
             },
             HashFunction::Rpx256 => {
-                let config = rpx_config(params);
+                let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
                 self.prove_stark_with_config(&config, hash_fn)
             },
             HashFunction::Poseidon2 => {
-                let config = poseidon2_config(params);
+                let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
                 self.prove_stark_with_config(&config, hash_fn)
             },
             HashFunction::Keccak => {
-                let config = keccak_config(params);
+                let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
                 self.prove_stark_with_config(&config, hash_fn)
             },
         }
@@ -383,23 +384,23 @@ pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), Ver
     let params = pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
-            let config = blake3_256_config(params);
+            let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(&config, proof.bytes(), public_root)
         },
         HashFunction::Rpo256 => {
-            let config = rpo_config(params);
+            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(&config, proof.bytes(), public_root)
         },
         HashFunction::Rpx256 => {
-            let config = rpx_config(params);
+            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(&config, proof.bytes(), public_root)
         },
         HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params);
+            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(&config, proof.bytes(), public_root)
         },
         HashFunction::Keccak => {
-            let config = keccak_config(params);
+            let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
             verify_stark_with_config(&config, proof.bytes(), public_root)
         },
     }
