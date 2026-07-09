@@ -1864,7 +1864,7 @@ mod tests {
                 .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
                 .unwrap();
             builder.mark_root(block);
-            let (forest, remapping) = builder.finish_with_id_map().unwrap();
+            let (forest, remapping) = builder.build_with_id_map().unwrap();
             let block = remapping.get(block).unwrap();
             (forest, block)
         }
@@ -2001,7 +2001,7 @@ mod tests {
             .unwrap();
         let call = builder.push_node(CallNodeBuilder::new(callee)).unwrap();
         builder.mark_root(call);
-        let (forest, remapping) = builder.finish_with_id_map().unwrap();
+        let (forest, remapping) = builder.build_with_id_map().unwrap();
         let callee = remapping.get(callee).unwrap();
         let call = remapping.get(call).unwrap();
 

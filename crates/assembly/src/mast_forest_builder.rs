@@ -12,11 +12,12 @@ use miden_core::{
     serde::Serializable,
     utils::{Idx, IndexVec, bytes_to_packed_u32_elements},
 };
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_mast_package::{ManifestValidationError, debug_info::PackageDebugInfo};
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
     diagnostics::{IntoDiagnostic, Report, WrapErr},
+    linker::LinkLibrary,
     report,
 };
 
@@ -115,7 +116,10 @@ pub(crate) struct StaticLibrary<'a> {
 }
 
 impl<'a> StaticLibrary<'a> {
-    pub(crate) fn new(mast: &'a MastForest, debug_info: Option<PackageDebugInfo>) -> Self {
+    pub(crate) fn from_mast_forest(
+        mast: &'a MastForest,
+        debug_info: Option<PackageDebugInfo>,
+    ) -> Self {
         Self {
             mast,
             debug_info,
@@ -125,6 +129,15 @@ impl<'a> StaticLibrary<'a> {
             source_library_commitment: mast.commitment(),
             alternate_source_library_commitment: None,
         }
+    }
+
+    pub(crate) fn from_link_library(
+        library: &'a LinkLibrary,
+        debug_info: Option<PackageDebugInfo>,
+    ) -> Result<Self, ManifestValidationError> {
+        Ok(Self::from_mast_forest(library.mast().as_ref(), debug_info)
+            .with_source_library_commitment(library.commitment())
+            .with_alternate_source_library_commitment(library.interface_digest()?))
     }
 
     pub(crate) fn with_source_library_commitment(
@@ -156,7 +169,9 @@ impl MastForestBuilder {
         static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         Self::new_with_static_libraries(
-            static_libraries.into_iter().map(|mast| StaticLibrary::new(mast, None)),
+            static_libraries
+                .into_iter()
+                .map(|mast| StaticLibrary::from_mast_forest(mast, None)),
         )
     }
 
@@ -2129,11 +2144,12 @@ mod tests {
         );
         let package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
 
-        let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
-            &static_forest,
-            Some(package_debug_info),
-        )])
-        .unwrap();
+        let mut builder =
+            MastForestBuilder::new_with_static_libraries([StaticLibrary::from_mast_forest(
+                &static_forest,
+                Some(package_debug_info),
+            )])
+            .unwrap();
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
@@ -2204,11 +2220,12 @@ mod tests {
             DebugSourceGraphSection::from_parts(package_source_nodes, package_source_roots),
         );
 
-        let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
-            &static_forest,
-            Some(package_debug_info),
-        )])
-        .unwrap();
+        let mut builder =
+            MastForestBuilder::new_with_static_libraries([StaticLibrary::from_mast_forest(
+                &static_forest,
+                Some(package_debug_info),
+            )])
+            .unwrap();
         let copied_block_ref = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_static_block].digest(),
@@ -2268,11 +2285,12 @@ mod tests {
             DebugSourceGraphSection::from_parts(package_source_nodes, package_source_roots),
         );
 
-        let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
-            &static_forest,
-            Some(package_debug_info),
-        )])
-        .unwrap();
+        let mut builder =
+            MastForestBuilder::new_with_static_libraries([StaticLibrary::from_mast_forest(
+                &static_forest,
+                Some(package_debug_info),
+            )])
+            .unwrap();
         let error = builder
             .ensure_external_link_with_source_ref(
                 static_forest[final_split].digest(),
@@ -2556,11 +2574,11 @@ mod tests {
 
         let source_b_debug_root = source_b_graph.roots()[0];
         let mut builder = MastForestBuilder::new_with_static_libraries([
-            StaticLibrary::new(
+            StaticLibrary::from_mast_forest(
                 &source_a_forest,
                 Some(package_debug_info_from_source_graph(&source_a_graph)),
             ),
-            StaticLibrary::new(
+            StaticLibrary::from_mast_forest(
                 &source_b_forest,
                 Some(package_debug_info_from_source_graph(&source_b_graph)),
             ),
@@ -2613,7 +2631,7 @@ mod tests {
         let package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
 
         let mut provenance_builder =
-            MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
+            MastForestBuilder::new_with_static_libraries([StaticLibrary::from_mast_forest(
                 &static_forest,
                 Some(package_debug_info),
             )])

@@ -12,7 +12,7 @@ use crate::{
 /// Construction surface for dense MAST forests.
 ///
 /// The builder may append nodes while a forest is under construction. The value returned by
-/// [`Self::finish`] is a finalized [`MastForest`] in final dense order: external nodes sorted by
+/// [`Self::build`] is a finalized [`MastForest`] in final dense order: external nodes sorted by
 /// digest, then basic blocks in construction order, then internal nodes with children before
 /// parents and construction order as the tie-breaker.
 #[derive(Debug, Default)]
@@ -64,13 +64,13 @@ impl DenseMastForestBuilder {
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
-    /// Finalizes this builder into a dense [`MastForest`].
-    pub fn finish(self) -> Result<MastForest, MastForestError> {
-        self.finish_with_id_map().map(|(forest, _remapping)| forest)
+    /// Builds this builder into a finalized dense [`MastForest`].
+    pub fn build(self) -> Result<MastForest, MastForestError> {
+        self.build_with_id_map().map(|(forest, _remapping)| forest)
     }
 
-    /// Finalizes this builder and returns the builder-local to final node ID map.
-    pub fn finish_with_id_map(
+    /// Builds this builder and returns the builder-local to final node ID map.
+    pub fn build_with_id_map(
         self,
     ) -> Result<(MastForest, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
         MastForest::from_parts_with_id_map(MastForestParts {
@@ -78,6 +78,18 @@ impl DenseMastForestBuilder {
             roots: self.roots,
             advice_map: self.advice_map,
         })
+    }
+
+    /// Finalizes this builder into a dense [`MastForest`].
+    pub fn finish(self) -> Result<MastForest, MastForestError> {
+        self.build()
+    }
+
+    /// Finalizes this builder and returns the builder-local to final node ID map.
+    pub fn finish_with_id_map(
+        self,
+    ) -> Result<(MastForest, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
+        self.build_with_id_map()
     }
 }
 

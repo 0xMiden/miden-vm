@@ -1397,7 +1397,7 @@ mod tests {
             .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .expect("failed to build basic block");
         builder.mark_root(node_id);
-        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let (forest, remapping) = builder.build_with_id_map().expect("failed to build forest");
         let node_id = remapping.get(node_id).expect("root node should be retained");
         (forest, node_id)
     }
@@ -1414,7 +1414,7 @@ mod tests {
             .push_node(SplitNodeBuilder::new([left_id, right_id]))
             .expect("failed to build split node");
         builder.mark_root(root_id);
-        let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+        let (forest, remapping) = builder.build_with_id_map().expect("failed to build forest");
         let root_id = remapping.get(root_id).expect("root node should be retained");
         let left_id = remapping.get(left_id).expect("left node should be retained");
         let right_id = remapping.get(right_id).expect("right node should be retained");
@@ -2305,7 +2305,7 @@ mod tests {
             .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .unwrap();
         concrete_builder.mark_root(concrete_root);
-        let (concrete_forest, concrete_remapping) = concrete_builder.finish_with_id_map().unwrap();
+        let (concrete_forest, concrete_remapping) = concrete_builder.build_with_id_map().unwrap();
         let concrete_root = concrete_remapping.get(concrete_root).unwrap();
         let concrete_digest = concrete_forest[concrete_root].digest();
 
@@ -2315,7 +2315,7 @@ mod tests {
             .unwrap();
         placeholder_builder.mark_root(placeholder_root);
         let (placeholder_forest, placeholder_remapping) =
-            placeholder_builder.finish_with_id_map().unwrap();
+            placeholder_builder.build_with_id_map().unwrap();
         let placeholder_root = placeholder_remapping.get(placeholder_root).unwrap();
 
         let placeholder_debug = debug_info_for_root(placeholder_root, "placeholder");

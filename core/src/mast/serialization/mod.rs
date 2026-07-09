@@ -340,7 +340,7 @@ pub enum MastForestReadView<'a> {
 /// let mut builder = DenseMastForestBuilder::new();
 /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
 /// builder.mark_root(block_id);
-/// let forest = builder.finish().unwrap();
+/// let forest = builder.build().unwrap();
 ///
 /// let mut bytes = Vec::new();
 /// forest.write_into(&mut bytes);
@@ -396,7 +396,7 @@ impl<'a> MastForestWireView<'a> {
     /// let mut builder = DenseMastForestBuilder::new();
     /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
     /// builder.mark_root(block_id);
-    /// let forest = builder.finish().unwrap();
+    /// let forest = builder.build().unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);
@@ -453,7 +453,7 @@ impl<'a> MastForestWireView<'a> {
     /// let mut builder = DenseMastForestBuilder::new();
     /// let block_id = builder.push_node(BasicBlockNodeBuilder::new(vec![Operation::Add])).unwrap();
     /// builder.mark_root(block_id);
-    /// let forest = builder.finish().unwrap();
+    /// let forest = builder.build().unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_into(&mut bytes);

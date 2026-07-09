@@ -24,7 +24,7 @@ fn build_forest() -> (MastForest, MastNodeId) {
         .expect("failed to build basic block");
     builder.mark_root(node_id);
 
-    let (forest, remapping) = builder.finish_with_id_map().expect("failed to build forest");
+    let (forest, remapping) = builder.build_with_id_map().expect("failed to build forest");
     let node_id = remapping.get(node_id).expect("root should be retained");
     (forest, node_id)
 }

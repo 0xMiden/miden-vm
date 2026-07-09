@@ -179,12 +179,13 @@ impl Linker {
                 reason: err.to_string(),
             }
         })?;
-        let library_interface_digest = library.package.interface_digest().map_err(|err| {
-            LinkerError::InvalidPackageModuleSurface {
-                package: library.package.name.to_string(),
-                reason: err.to_string(),
-            }
-        })?;
+        let library_interface_digest =
+            library
+                .interface_digest()
+                .map_err(|err| LinkerError::InvalidPackageModuleSurface {
+                    package: library.package.name.to_string(),
+                    reason: err.to_string(),
+                })?;
 
         let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
         let result = match self.libraries.entry(library_interface_digest) {
