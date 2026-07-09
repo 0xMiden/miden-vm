@@ -182,9 +182,9 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// Observes PCS protocol parameters into the challenger.
 ///
 /// Call on a challenger obtained from `config.challenger()` to complete the
-/// domain-separated transcript initialization. The config factories already bind
-/// RELATION_DIGEST into the prototype challenger; this function adds the remaining
-/// protocol parameters.
+/// domain-separated transcript initialization. The config factories bind the
+/// caller-supplied relation digest into the prototype challenger; this function
+/// adds the remaining protocol parameters.
 pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
     challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
@@ -232,42 +232,18 @@ pub type Poseidon2Config =
 /// Concrete STARK configuration type for RPX.
 pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
 
-/// Creates an RPO-based STARK configuration.
-pub fn rpo_config(params: PcsParams) -> RpoConfig {
-    rpo_config_with_relation_digest(params, RELATION_DIGEST)
-}
-
-/// Creates an RPO-based STARK configuration with a caller-supplied relation digest.
-pub fn rpo_config_with_relation_digest(
-    params: PcsParams,
-    relation_digest: RelationDigest,
-) -> RpoConfig {
+/// Creates an RPO-based STARK configuration bound to `relation_digest`.
+pub fn rpo_config(params: PcsParams, relation_digest: RelationDigest) -> RpoConfig {
     alg_config(params, RpoPermutation256, relation_digest)
 }
 
-/// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(params: PcsParams) -> Poseidon2Config {
-    poseidon2_config_with_relation_digest(params, RELATION_DIGEST)
-}
-
-/// Creates a Poseidon2-based STARK configuration with a caller-supplied relation digest.
-pub fn poseidon2_config_with_relation_digest(
-    params: PcsParams,
-    relation_digest: RelationDigest,
-) -> Poseidon2Config {
+/// Creates a Poseidon2-based STARK configuration bound to `relation_digest`.
+pub fn poseidon2_config(params: PcsParams, relation_digest: RelationDigest) -> Poseidon2Config {
     alg_config(params, Poseidon2Permutation256, relation_digest)
 }
 
-/// Creates an RPX-based STARK configuration.
-pub fn rpx_config(params: PcsParams) -> RpxConfig {
-    rpx_config_with_relation_digest(params, RELATION_DIGEST)
-}
-
-/// Creates an RPX-based STARK configuration with a caller-supplied relation digest.
-pub fn rpx_config_with_relation_digest(
-    params: PcsParams,
-    relation_digest: RelationDigest,
-) -> RpxConfig {
+/// Creates an RPX-based STARK configuration bound to `relation_digest`.
+pub fn rpx_config(params: PcsParams, relation_digest: RelationDigest) -> RpxConfig {
     alg_config(params, RpxPermutation256, relation_digest)
 }
 
@@ -319,16 +295,8 @@ type BlakeChallenger =
 /// Concrete STARK configuration type for Blake3.
 pub type Blake3Config = MidenStarkConfig<BlakeLmcs, BlakeChallenger>;
 
-/// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(params: PcsParams) -> Blake3Config {
-    blake3_256_config_with_relation_digest(params, RELATION_DIGEST)
-}
-
-/// Creates a Blake3_256-based STARK configuration with a caller-supplied relation digest.
-pub fn blake3_256_config_with_relation_digest(
-    params: PcsParams,
-    relation_digest: RelationDigest,
-) -> Blake3Config {
+/// Creates a Blake3_256-based STARK configuration bound to `relation_digest`.
+pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> Blake3Config {
     let lmcs = LmcsConfig::new(
         ChainingHasher::new(Blake3Hasher),
         CompressionFunctionFromHasher::new(Blake3Hasher),
@@ -374,18 +342,7 @@ pub type KeccakConfig = MidenStarkConfig<KeccakLmcs, KeccakChallenger>;
 ///
 /// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
 /// for SIMD parallelization.
-pub fn keccak_config(params: PcsParams) -> KeccakConfig {
-    keccak_config_with_relation_digest(params, RELATION_DIGEST)
-}
-
-/// Creates a Keccak-based STARK configuration with a caller-supplied relation digest.
-///
-/// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
-/// for SIMD parallelization.
-pub fn keccak_config_with_relation_digest(
-    params: PcsParams,
-    relation_digest: RelationDigest,
-) -> KeccakConfig {
+pub fn keccak_config(params: PcsParams, relation_digest: RelationDigest) -> KeccakConfig {
     let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
     let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
     let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));

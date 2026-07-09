@@ -244,7 +244,7 @@ fn prove_miden_vm_execution_trace(
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(params);
+            let config = config::blake3_256_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -255,7 +255,7 @@ fn prove_miden_vm_execution_trace(
             )
         },
         HashFunction::Keccak => {
-            let config = config::keccak_config(params);
+            let config = config::keccak_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -266,7 +266,7 @@ fn prove_miden_vm_execution_trace(
             )
         },
         HashFunction::Rpo256 => {
-            let config = config::rpo_config(params);
+            let config = config::rpo_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -277,7 +277,7 @@ fn prove_miden_vm_execution_trace(
             )
         },
         HashFunction::Poseidon2 => {
-            let config = config::poseidon2_config(params);
+            let config = config::poseidon2_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -288,7 +288,7 @@ fn prove_miden_vm_execution_trace(
             )
         },
         HashFunction::Rpx256 => {
-            let config = config::rpx_config(params);
+            let config = config::rpx_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
