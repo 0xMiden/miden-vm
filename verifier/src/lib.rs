@@ -246,23 +246,23 @@ fn verify_stark(
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(params);
+            let config = config::blake3_256_config(params, config::RELATION_DIGEST);
             verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
         },
         HashFunction::Rpo256 => {
-            let config = config::rpo_config(params);
+            let config = config::rpo_config(params, config::RELATION_DIGEST);
             verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
         },
         HashFunction::Rpx256 => {
-            let config = config::rpx_config(params);
+            let config = config::rpx_config(params, config::RELATION_DIGEST);
             verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
         },
         HashFunction::Poseidon2 => {
-            let config = config::poseidon2_config(params);
+            let config = config::poseidon2_config(params, config::RELATION_DIGEST);
             verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
         },
         HashFunction::Keccak => {
-            let config = config::keccak_config(params);
+            let config = config::keccak_config(params, config::RELATION_DIGEST);
             verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
         },
     }
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn verify_stark_proof_rejects_oversized_proof_bytes() {
         let params = config::pcs_params();
-        let config = config::poseidon2_config(params);
+        let config = config::poseidon2_config(params, config::RELATION_DIGEST);
         let proof_bytes = Vec::from_iter(core::iter::repeat_n(0, MAX_STARK_PROOF_BYTES + 1));
 
         let err = verify_stark_proof(&config, &[], &[], &proof_bytes).unwrap_err();

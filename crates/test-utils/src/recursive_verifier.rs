@@ -81,7 +81,7 @@ pub fn generate_advice_inputs(
     pub_inputs: PublicInputs,
 ) -> Result<VerifierData, VerifierError> {
     let params = config::pcs_params();
-    let config = config::poseidon2_config(params);
+    let config = config::poseidon2_config(params, config::RELATION_DIGEST);
 
     // 1. Deserialize STARK proof bytes.
     let proof_encoding_config = wincode::config::Configuration::default()

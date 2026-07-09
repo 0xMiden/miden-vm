@@ -394,7 +394,8 @@ mod fast_parallel {
         let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
 
         // Generate proof using Blake3_256
-        let blake3_config = config::blake3_256_config(config::pcs_params());
+        let blake3_config =
+            config::blake3_256_config(config::pcs_params(), config::RELATION_DIGEST);
         let proof_bytes =
             prove_stark(&blake3_config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
                 .expect("Proving failed");

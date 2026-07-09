@@ -5,13 +5,14 @@
 //!   PCS/security parameters; and
 //! - the legacy fast Poseidon2 test configuration used by local examples/tests.
 //!
-//! Production configs delegate to `miden_air::config` and bind
-//! [`PRECOMPILE_RELATION_DIGEST`]. Callers should observe protocol parameters with
-//! [`observe_protocol_params`] before proving or verifying.
+//! Production configs delegate to `miden_air::config`; callers pass the relation digest
+//! explicitly. Callers should observe protocol parameters with [`observe_protocol_params`]
+//! before proving or verifying.
 
 pub use miden_air::config::{
     Blake3Config, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
-    observe_protocol_params, pcs_params,
+    blake3_256_config, keccak_config, observe_protocol_params, pcs_params, poseidon2_config,
+    rpo_config, rpx_config,
 };
 use miden_core::Felt;
 use miden_crypto::{
@@ -53,34 +54,6 @@ pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [Felt::ZERO; 4];
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Poseidon2;
-
-// PRODUCTION HASH CONFIGS
-// ================================================================================================
-
-/// Creates an RPO-based STARK configuration.
-pub fn rpo_config(params: PcsParams) -> RpoConfig {
-    miden_air::config::rpo_config_with_relation_digest(params, PRECOMPILE_RELATION_DIGEST)
-}
-
-/// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(params: PcsParams) -> Poseidon2Config {
-    miden_air::config::poseidon2_config_with_relation_digest(params, PRECOMPILE_RELATION_DIGEST)
-}
-
-/// Creates an RPX-based STARK configuration.
-pub fn rpx_config(params: PcsParams) -> RpxConfig {
-    miden_air::config::rpx_config_with_relation_digest(params, PRECOMPILE_RELATION_DIGEST)
-}
-
-/// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(params: PcsParams) -> Blake3Config {
-    miden_air::config::blake3_256_config_with_relation_digest(params, PRECOMPILE_RELATION_DIGEST)
-}
-
-/// Creates a Keccak-based STARK configuration.
-pub fn keccak_config(params: PcsParams) -> KeccakConfig {
-    miden_air::config::keccak_config_with_relation_digest(params, PRECOMPILE_RELATION_DIGEST)
-}
 
 // LEGACY TEST CONFIG
 // ================================================================================================

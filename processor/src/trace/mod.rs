@@ -272,7 +272,7 @@ impl ExecutionTrace {
 
         // A deterministic challenger seeds the debug constraint check; this is a local
         // constraint debugger, not a full proof transcript, so any fixed challenge set works.
-        let config = config::poseidon2_config(config::pcs_params());
+        let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
         debug::check_constraints(&prover_statement, config.challenger());
     }
 
