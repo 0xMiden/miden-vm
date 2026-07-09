@@ -482,9 +482,10 @@ mod fast_parallel {
             "wire-backed partial proofs should be rejected by final verification, got {err:?}"
         );
 
-        let hydrated_state = Verifier::new()
+        let (security_level, hydrated_state) = Verifier::new()
             .verify_partial(program.to_info(), stack_inputs, stack_outputs, proof)
             .expect("wire-backed partial proof should verify and hydrate deferred state");
+        assert_eq!(security_level, 96);
         assert_eq!(hydrated_state.root(), expected_deferred_root);
         assert_eq!(
             hydrated_state.to_wire().expect("hydrated state should serialize to wire"),

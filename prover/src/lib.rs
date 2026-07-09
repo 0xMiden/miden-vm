@@ -54,14 +54,6 @@ impl TraceProvingInputs {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeferredProvingMode {
-    /// Produce final deferred proof material: `Empty` for no claims, or a precompile STARK proof.
-    Full,
-    /// Preserve wire-backed deferred proof material for delegated or batched precompile proving.
-    Partial,
-}
-
 // PROVER
 // ================================================================================================
 
@@ -91,7 +83,7 @@ pub async fn prove(
         .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = {
-        let _span = tracing::info_span!("execute_for_trace").entered();
+        let _span = tracing::info_span!("execute_miden_vm").entered();
         processor.execute_trace_inputs(program, host).await?
     };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -114,7 +106,7 @@ pub async fn prove_partial(
         .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = {
-        let _span = tracing::info_span!("execute_for_trace").entered();
+        let _span = tracing::info_span!("execute_miden_vm").entered();
         processor.execute_trace_inputs(program, host).await?
     };
     prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -134,7 +126,7 @@ pub fn prove_sync(
         .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = {
-        let _span = tracing::info_span!("execute_for_trace").entered();
+        let _span = tracing::info_span!("execute_miden_vm").entered();
         processor.execute_trace_inputs_sync(program, host)?
     };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -154,7 +146,7 @@ pub fn prove_partial_sync(
         .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = {
-        let _span = tracing::info_span!("execute_for_trace").entered();
+        let _span = tracing::info_span!("execute_miden_vm").entered();
         processor.execute_trace_inputs_sync(program, host)?
     };
     prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -171,10 +163,10 @@ pub fn prove_from_trace_sync(
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let (trace_inputs, options) = inputs.into_parts();
     let trace = {
-        let _span = tracing::info_span!("build_execution_trace").entered();
+        let _span = tracing::info_span!("build_miden_vm_trace").entered();
         build_trace(trace_inputs)?
     };
-    prove_execution_trace(trace, options, DeferredProvingMode::Full)
+    prove_final_execution_trace(trace, options)
 }
 
 /// Builds an execution trace from pre-executed trace inputs and proves it synchronously, preserving
@@ -187,16 +179,48 @@ pub fn prove_partial_from_trace_sync(
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let (trace_inputs, options) = inputs.into_parts();
     let trace = {
-        let _span = tracing::info_span!("build_execution_trace").entered();
+        let _span = tracing::info_span!("build_miden_vm_trace").entered();
         build_trace(trace_inputs)?
     };
-    prove_execution_trace(trace, options, DeferredProvingMode::Partial)
+    prove_partial_execution_trace(trace, options)
 }
 
-fn prove_execution_trace(
+fn prove_final_execution_trace(
     trace: ExecutionTrace,
     options: ProvingOptions,
-    deferred_mode: DeferredProvingMode,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let hash_fn = options.hash_fn();
+    let deferred_proof = {
+        let _span = tracing::info_span!("precompile_vm").entered();
+        miden_precompiles_prover::prove_deferred_state(trace.deferred_state(), hash_fn)
+            .map_err(|err| ExecutionError::ProvingError(err.to_string()))?
+    };
+
+    prove_miden_vm_execution_trace(trace, options, deferred_proof)
+}
+
+fn prove_partial_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let deferred_proof = {
+        let _precompile_vm_span = tracing::info_span!("precompile_vm").entered();
+        let _serialize_witness_span = tracing::info_span!("serialize_witness").entered();
+        let wire = trace
+            .deferred_state()
+            .to_wire()
+            .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
+        DeferredProof::Wire(wire)
+    };
+
+    prove_miden_vm_execution_trace(trace, options, deferred_proof)
+}
+
+#[instrument("miden_vm", skip_all)]
+fn prove_miden_vm_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+    deferred_proof: DeferredProof,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     tracing::event!(
         tracing::Level::INFO,
@@ -208,91 +232,39 @@ fn prove_execution_trace(
 
     let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
-    let deferred_proof = {
-        let _span = tracing::info_span!("prove_deferred_precompiles").entered();
-        prove_deferred(trace.deferred_state(), hash_fn, deferred_mode)?
-    };
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
-    let (core_matrix, chiplets_matrix) = {
-        let _span = tracing::info_span!("split_vm_trace_matrices").entered();
-        trace.into_core_chiplets_matrices()
-    };
+    let (core_matrix, chiplets_matrix) = trace.into_core_chiplets_matrices();
 
     let params = config::pcs_params();
-    let proof_bytes = {
-        let _span = tracing::info_span!("prove_vm_stark").entered();
-        match hash_fn {
-            HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(params);
-                prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-            },
-            HashFunction::Keccak => {
-                let config = config::keccak_config(params);
-                prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-            },
-            HashFunction::Rpo256 => {
-                let config = config::rpo_config(params);
-                prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-            },
-            HashFunction::Poseidon2 => {
-                let config = config::poseidon2_config(params);
-                prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-            },
-            HashFunction::Rpx256 => {
-                let config = config::rpx_config(params);
-                prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-            },
-        }
+    let proof_bytes = match hash_fn {
+        HashFunction::Blake3_256 => {
+            let config = config::blake3_256_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+        },
+        HashFunction::Keccak => {
+            let config = config::keccak_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+        },
+        HashFunction::Rpo256 => {
+            let config = config::rpo_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+        },
+        HashFunction::Poseidon2 => {
+            let config = config::poseidon2_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+        },
+        HashFunction::Rpx256 => {
+            let config = config::rpx_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+        },
     }?;
 
     let proof = ExecutionProof::from_parts(proof_bytes, hash_fn, deferred_proof);
 
     Ok((stack_outputs, proof))
-}
-
-fn prove_deferred(
-    state: &miden_core::deferred::DeferredState,
-    hash_fn: HashFunction,
-    mode: DeferredProvingMode,
-) -> Result<DeferredProof, ExecutionError> {
-    match mode {
-        DeferredProvingMode::Full => prove_deferred_full(state, hash_fn),
-        DeferredProvingMode::Partial => prove_deferred_partial(state),
-    }
-}
-
-fn prove_deferred_partial(
-    state: &miden_core::deferred::DeferredState,
-) -> Result<DeferredProof, ExecutionError> {
-    let wire = state.to_wire().map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
-    Ok(DeferredProof::Wire(wire))
-}
-
-#[cfg(feature = "std")]
-fn prove_deferred_full(
-    state: &miden_core::deferred::DeferredState,
-    hash_fn: HashFunction,
-) -> Result<DeferredProof, ExecutionError> {
-    miden_precompiles_prover::prove_deferred_state(state, hash_fn)
-        .map_err(|err| ExecutionError::ProvingError(err.to_string()))
-}
-
-#[cfg(not(feature = "std"))]
-fn prove_deferred_full(
-    state: &miden_core::deferred::DeferredState,
-    hash_fn: HashFunction,
-) -> Result<DeferredProof, ExecutionError> {
-    let _ = hash_fn;
-    if state.root() == miden_core::deferred::TRUE_DIGEST {
-        Ok(DeferredProof::Empty)
-    } else {
-        Err(ExecutionError::ProvingError(
-            "full deferred precompile proving requires the `std` feature".to_string(),
-        ))
-    }
 }
 
 // STARK PROOF GENERATION
@@ -301,8 +273,9 @@ fn prove_deferred_full(
 /// Generates a multi-AIR STARK proof for the (Core, Chiplets) trace pair and public values.
 ///
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
-/// statement `aux_inputs` (program hash, transcript state, and the concatenated kernel-procedure
+/// statement `aux_inputs` (program hash, final deferred root, and the concatenated kernel-procedure
 /// digests). Then delegates to the lifted multi-AIR prover.
+#[instrument("prove_stark", skip_all)]
 pub fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
@@ -317,24 +290,19 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    let prover_statement = {
-        let _span = tracing::info_span!("build_vm_prover_statement").entered();
-        // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-        // statement inputs read during observation/boundary correction.
-        let statement =
-            Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
-                .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-        ProverStatement::new(statement, vec![core_trace, chiplets_trace])
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
-    };
+    // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
+    // statement inputs read during observation/boundary correction.
+    let statement =
+        Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let prover_statement = ProverStatement::new(statement, vec![core_trace, chiplets_trace])
+        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
-    let output: StarkOutput<Felt, QuadFelt, SC> = {
-        let _span = tracing::info_span!("prove_vm_stark_inner").entered();
+    let output: StarkOutput<Felt, QuadFelt, SC> =
         ProverInstance::new(config, &prover_statement, None)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
-    };
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
     let proof_encoding_config = wincode::config::Configuration::default();
     let proof_bytes =
