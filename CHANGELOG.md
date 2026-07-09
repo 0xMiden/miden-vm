@@ -1,17 +1,26 @@
 # Changelog
 
-## v0.25.0 (TBD)
+## v0.25.0 (2026-07-08)
 
 #### Changes
 
 - Added a Blake3 pure execution benchmark axis and reduced processor benchmark compile time by relaxing forced inlining in execution helpers ([#3289](https://github.com/0xMiden/miden-vm/pull/3289)).
-- Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
 - Documented that `smt::peek` is a fast, untrusted advice lookup, and that caller code must verify the returned value before relying on it ([#3297](https://github.com/0xMiden/miden-vm/pull/3297)).
+- Clarified MAST node equality coverage by using structural `PartialEq` directly in merge tests ([#3298](https://github.com/0xMiden/miden-vm/pull/3298)).
+- Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
 - Tightened LogUp lookup AIR docs and comments, removed unused operation-flag accessors, and added block-hash/op-group selector coverage ([#3309](https://github.com/0xMiden/miden-vm/pull/3309)).
 - [BREAKING] Optimize constraint evaluation step by dropping redundant transition guards on op-flag-gated constraints ([#3319](https://github.com/0xMiden/miden-vm/pull/3319)).
-- Documented the `sorted_array` lookup sortedness contract and added linear assertion helpers for proving word, key, and half-key ordering ([#3308](https://github.com/0xMiden/miden-vm/pull/3308)).
+- Fixed a panic (or silent miscompile in release builds) when assembling a procedure declaring more locals than the maximum representable during frame-pointer codegen; such procedures are now rejected with a diagnostic error ([#3332](https://github.com/0xMiden/miden-vm/pull/3332)).
+- [BREAKING] Bound dense `MastForest` and package digests to stored roots, external dependencies, and advice, rejected non-canonical dense forest payloads, and moved dense forest construction to `DenseMastForestBuilder` ([#3334](https://github.com/0xMiden/miden-vm/pull/3334)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
 - [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#333](https://github.com/0xMiden/miden-vm/issues/3333)).
+- [BREAKING] Removed `MastForest::compact`; MAST construction should deduplicate through builders or explicit `MastForest::merge` calls instead ([#3318](https://github.com/0xMiden/miden-vm/pull/3318)).
+- [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
+
+## v0.24.2 (2026-07-01)
+
+- Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
+- Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
 
 ## v0.24.0 (2026-06-24)
 
@@ -64,6 +73,8 @@
 - [BREAKING] Removed the stripped `MastForest` serialization mode. Normal forest bytes now describe execution data only ([#3268](https://github.com/0xMiden/miden-vm/pull/3268)).
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
 - [BREAKING] Bump Plonky3 and miden-crypto related dependencies ([#3275](https://github.com/0xMiden/miden-vm/pull/3275)).
+- Imported `midenc-hir-type` as a released workspace crate.
+- Added release tooling for publishing selected workspace crates.
 
 #### Fixes
 
@@ -104,6 +115,114 @@
 
 - Preserved semantic struct and field names when emitting debug types, so debug dumps no longer fall back to anonymous struct metadata ([#3269](https://github.com/0xMiden/miden-vm/pull/3269)).
 - Fixed parallel trace generation for `while.true` loops that exit before entering the body and are followed by another block ([#3278](https://github.com/0xMiden/miden-vm/pull/3278)).
+
+#### midenc-hir-type history before import
+
+The following entries come from the standalone `midenc-hir-type` changelog before the crate moved into this workspace.
+
+##### 0.8.0
+
+- Updated `miden-serde-utils` to 0.27.0.
+
+##### 0.7.0 (2026-06-03)
+
+- Scoped the `miden-serde-utils` update to the dependency only.
+
+##### 0.6.1 (2026-05-04)
+
+- Updated `miden-serde-utils` to 0.25.0.
+
+##### 0.6.0 (2026-04-22)
+
+- Updated `Cargo.lock` for release.
+- Updated `miden-serde-utils` to 0.24.
+
+##### 0.5.4 (2026-04-21)
+
+- Updated `miden-serde-utils` to 0.24.
+
+##### 0.5.3 (2026-03-19)
+
+- Enforced the depth limit for nested enum type deserialization.
+- Added the missing deserialization path for `TypeRepr::BigEndian`.
+- Ensured `--locked` is used when installing `cargo-make`.
+- Installed `cargo-nextest` with `--locked` in CI.
+
+##### 0.5.2 (2026-03-16)
+
+- Implemented `miden-serde-utils` serialization for types.
+
+##### 0.5.1 (2026-03-13)
+
+- Fixed `format-rust` so it uses nightly.
+- Bumped the Rust toolchain to 1.92.
+- Set CI workflow permissions.
+
+##### 0.4.3 (2025-11-05)
+
+- Reverted docs migration changes from the compiler repo.
+- Added a README docs section.
+
+##### 0.4.2
+
+- Added `TypeRepr::BigEndian` as a temporary way to represent legacy protocol library types.
+
+##### 0.4.0 (2025-08-15)
+
+- Updated the Rust toolchain to nightly 2025-07-20.
+
+##### 0.0.8 (2025-04-24)
+
+- Cleaned up `hir-type` for use outside the compiler.
+- Implemented the pretty-print trait for `Symbol` and `Type`.
+- Treated warnings as compiler errors.
+- Updated the Rust toolchain and cleaned up dependencies.
+- Implemented HIR dialect ops and the remaining core IR infrastructure.
+
+##### 0.0.7 (2024-09-17)
+
+- Fixed new clippy warnings.
+
+##### 0.0.6 (2024-09-06)
+
+- Switched all crates to a single workspace version, 0.0.5.
+
+##### 0.0.3 (2024-08-30)
+
+- Fixed broken return via pointer transformation.
+
+##### 0.0.2 (2024-08-28)
+
+- Implemented the packaging prototype.
+
+##### 0.0.1 (2024-07-18)
+
+- Drafted Miden ABI function type encoding and retrieval.
+- Introduced Miden ABI component imports.
+- Introduced `CanonicalOptions` in IR and translated Wasm.
+- Implemented a new S-expression format for HIR.
+- Rewrote type layout code.
+- Refactored type layout primitives.
+- Defined type compatibility for operators.
+- Added the type representation enum.
+- Implemented inline assembly.
+- Distinguished signed and unsigned types.
+- Distinguished native and emulated pointers.
+- Fixed `i1` widening casts.
+- Fixed the felt representation mismatch between Rust and Miden.
+- Fixed wrong entries in the operand compatibility matrix.
+- Used stabilized `next_multiple_of` in `Alignable`.
+- Switched the text form of `MidenAbiFunctionType` to S-expressions.
+- Set crate versions to 0.0.0 and made test crates private.
+- Added the `miden-hir-type` crate description.
+- Prefixed the relevant crates with `midenc-`.
+- Added `FunctionType::abi` and removed the redundant function type.
+- Added Wasm component translation support to integration tests.
+- Added formatter config and formatted most crates.
+- Moved `LiftedFunctionType` to `miden-hir-type`.
+- Added guides for compiling Rust to MASM.
+- Split up the HIR crate.
+- Added initial usage instructions.
 
 ## v0.23.3 (2026-05-26)
 

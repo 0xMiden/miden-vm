@@ -4,14 +4,16 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
+use super::{
+    MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
+};
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     prettier::PrettyPrint,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // JOIN NODE
@@ -196,20 +198,20 @@ impl JoinNodeBuilder {
     }
 
     /// Builds the JoinNode.
-    pub fn build(self, mast_forest: &MastForest) -> Result<JoinNode, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if self.children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
-        }
+    pub fn build(self, context: &impl MastNodeContext) -> Result<JoinNode, MastForestError> {
+        let left_child = context.get_node_by_id(self.children[0]).ok_or_else(|| {
+            MastForestError::NodeIdOverflow(self.children[0], context.node_count())
+        })?;
+        let right_child = context.get_node_by_id(self.children[1]).ok_or_else(|| {
+            MastForestError::NodeIdOverflow(self.children[1], context.node_count())
+        })?;
 
         // Use the forced digest if provided, otherwise compute the digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let left_child_hash = mast_forest[self.children[0]].digest();
-            let right_child_hash = mast_forest[self.children[1]].digest();
+            let left_child_hash = left_child.digest();
+            let right_child_hash = right_child.digest();
 
             hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
@@ -225,51 +227,41 @@ impl JoinNodeBuilder {
     }
 }
 
-impl MastForestContributor for JoinNodeBuilder {
-    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Validate child node IDs
-        let forest_len = forest.nodes.len();
-        if self.children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
-        }
-
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let left_child_hash = forest[self.children[0]].digest();
-            let right_child_hash = forest[self.children[1]].digest();
-
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(JoinNode { children: self.children, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+#[cfg(any(test, feature = "arbitrary"))]
+impl JoinNodeBuilder {
+    /// Adds this builder to a mutable forest for test and arbitrary data construction.
+    pub fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let node = self.build(forest)?;
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
+}
 
+impl MastForestContributor for JoinNodeBuilder {
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
+        context: &impl MastNodeContext,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
     ) -> Result<Word, MastForestError> {
         let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
-            let left_child_hash = forest[self.children[0]].digest();
-            let right_child_hash = forest[self.children[1]].digest();
+            let left_child_hash = context
+                .get_node_by_id(self.children[0])
+                .ok_or_else(|| {
+                    MastForestError::NodeIdOverflow(self.children[0], context.node_count())
+                })?
+                .digest();
+            let right_child_hash = context
+                .get_node_by_id(self.children[1])
+                .ok_or_else(|| {
+                    MastForestError::NodeIdOverflow(self.children[1], context.node_count())
+                })?
+                .digest();
 
             hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
-        fingerprint_with_child_fingerprints(node_digest, &self.children, forest, hash_by_node_id)
+        fingerprint_with_child_fingerprints(node_digest, &self.children, context, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -288,51 +280,14 @@ impl MastForestContributor for JoinNodeBuilder {
     }
 }
 
-impl JoinNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(JoinNode { children: self.children, digest }.into())
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
-}
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for JoinNodeBuilder {
-    type Parameters = JoinNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<[MastNodeId; 2]>().prop_map(Self::new).boxed()
     }
 }
-
-/// Parameters for generating JoinNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct JoinNodeBuilderParams {}

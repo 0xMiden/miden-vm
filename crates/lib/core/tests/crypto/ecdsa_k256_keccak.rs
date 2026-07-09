@@ -17,7 +17,7 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SigningKey as SecretKey, hash::poseidon2::Poseidon2};
+use miden_crypto::{SequentialCommit, dsa::ecdsa_k256_keccak::SigningKey as SecretKey};
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -166,11 +166,7 @@ impl EventHandler for EcdsaSignatureHandler {
         let provided_pk_commitment = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
-        let pk_commitment = {
-            let pk = secret_key.public_key();
-            let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
-            Poseidon2::hash_elements(&pk_felts)
-        };
+        let pk_commitment = secret_key.public_key().to_commitment();
         assert_eq!(
             provided_pk_commitment, pk_commitment,
             "public key commitment mismatch: expected {pk_commitment:?}, got {provided_pk_commitment:?}"
@@ -197,10 +193,7 @@ fn test_ecdsa_verify_bis_wrapper() {
         Felt::new_unchecked(44),
     ]);
 
-    let pk_commitment = {
-        let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
-        Poseidon2::hash_elements(&pk_felts)
-    };
+    let pk_commitment = public_key.to_commitment();
 
     let source = format!(
         "
@@ -259,11 +252,11 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 /// Generates MASM code to store test data (pk, digest, sig) into memory as packed u32 values.
 ///
 /// Memory layout:
-/// - Public key: PK_ADDR (33 bytes)
+/// - Public key: PK_ADDR (`qx_le_u32[8] || qy_le_u32[8]`)
 /// - Digest: DIGEST_ADDR (32 bytes)
-/// - Signature: SIG_ADDR (66 bytes)
+/// - Signature: SIG_ADDR (65 bytes, padded to 17 packed-u32 felts)
 fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
-    let pk_words = bytes_to_packed_u32_elements(&request.pk().to_bytes());
+    let pk_words = request.pk().to_elements();
     let digest_words = bytes_to_packed_u32_elements(request.digest());
     let sig_words = bytes_to_packed_u32_elements(&request.sig().to_bytes());
 
