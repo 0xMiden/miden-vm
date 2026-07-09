@@ -230,6 +230,22 @@ fn test_hash_heavy_divergent_heights() {
     assert_prove_verify(source, HashFunction::Blake3_256, "Blake3", false, false);
 }
 
+/// Exercises the MASM recursive verifier when the Poseidon2 permutation AIR is taller than the
+/// core trace.
+#[test]
+fn test_hash_heavy_divergent_heights_recursive() {
+    let source = "
+        begin
+            padw padw padw
+            repeat.20
+                hperm
+            end
+            dropw dropw dropw
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+}
+
 /// Test end-to-end proving and verification with RPX
 #[test]
 fn test_rpx_prove_verify() {

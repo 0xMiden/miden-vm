@@ -349,6 +349,51 @@ mod tests {
     }
 
     #[test]
+    fn chiplets_bracket_miss_is_info_without_poseidon2_target() {
+        let target_breakdown = TraceBreakdown {
+            hasher_rows: 16_000,
+            bitwise_rows: 0,
+            memory_rows: 16_000,
+            kernel_rom_rows: 0,
+            ace_rows: 0,
+        };
+        let actual_breakdown = TraceBreakdown {
+            hasher_rows: 32_000,
+            bitwise_rows: 0,
+            memory_rows: 32_000,
+            kernel_rom_rows: 0,
+            ace_rows: 0,
+        };
+        let target = TraceShape::new(
+            TraceTotals {
+                core_rows: 100_000,
+                chiplets_rows: target_breakdown.chiplets_sum(),
+                poseidon2_permutation_rows: 0,
+                range_rows: 0,
+            },
+            target_breakdown,
+        );
+        let actual = TraceShape::new(
+            TraceTotals {
+                core_rows: 100_000,
+                chiplets_rows: actual_breakdown.chiplets_sum(),
+                poseidon2_permutation_rows: 0,
+                range_rows: 0,
+            },
+            actual_breakdown,
+        );
+        let r = VerificationReport::new(target, actual);
+
+        assert_eq!(target.totals.padded_core_side(), actual.totals.padded_core_side());
+        assert_eq!(target.totals.padded_total(), actual.totals.padded_total());
+        assert_ne!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
+        assert!(r.brackets_match());
+
+        let chiplets_delta = r.total_deltas.iter().find(|d| d.name == "chiplets_rows").unwrap();
+        assert_eq!(chiplets_delta.status, DeltaStatus::Informational);
+    }
+
+    #[test]
     fn range_dominates_is_warned() {
         let breakdown = TraceBreakdown {
             hasher_rows: 100,
