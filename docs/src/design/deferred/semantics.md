@@ -136,9 +136,10 @@ or dangling wire by requiring `state.to_wire() == wire`, then evaluates the impl
 `Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the wire nodes. Proof
 verification compares the returned `state.root()` to the externally committed deferred root.
 
-## Public API
+## Low-level framework API
 
-The preferred public `DeferredState` surface is small:
+The preferred low-level `miden_core::deferred::DeferredState` surface is small. These APIs are
+framework APIs, not the public proof-verifier policy surface:
 
 - `DeferredState::new(registry, max_elements)` for a state booted with precompile constants
 - `extend_precompiles(precompiles)` for additive setup
@@ -161,7 +162,8 @@ of the public contract.
 ## Scope note
 
 Deferred state is the proof-bound precompile witness model: proofs carry `DeferredStateWire`,
-verification rehydrates it under a supplied `PrecompileRegistry`, and the final deferred root is the
-public value checked by the STARK proof. The processor default registry is empty; callers install
-concrete production precompiles explicitly, and the `miden-vm` facade/CLI install the
-`miden-precompiles` registry.
+verification rehydrates it under the built-in `miden_precompiles::registry()` in the public
+VM/prover/verifier path, and the final deferred root is the public value checked by the STARK proof.
+The lower-level `DeferredState` APIs remain parameterized by `PrecompileRegistry` for framework
+construction, tests, and non-verifier wire validation. Public proof verification always uses the
+built-in `miden_precompiles::registry()` policy.

@@ -388,8 +388,8 @@ The `log_deferred` operation folds a verified statement digest `STMNT` into the 
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
 merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
 `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The final root is a public input;
-proofs carry `DeferredStateWire`, and verifiers rehydrate that wire under the supplied
-`PrecompileRegistry`. This section concentrates on the stack interaction and bus messages.
+proofs carry `DeferredStateWire`, and the public verifier rehydrates that wire under the built-in
+`miden_precompiles::registry()`. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 

@@ -39,11 +39,10 @@ content address; shared sub-computations are shared in the graph. When the frame
 accumulation, it represents it as a chain of semantic AND nodes whose root is a statement that must
 evaluate to `TRUE`.
 
-Crucially, the DAG is the language the Precompile VM already speaks. The way a precompile's
-operations and constraints are described in that VM is inherently a graph of canonical values,
-payloads, and joins — so by modelling deferred computation the same way, **a precompile's native
-(host) implementation comes to mirror its constraint implementation.** One structure drives both.
-This direction is developed in the draft specification in GitHub discussion #3005.
+The DAG is also intended to match the draft Precompile VM model. In that design, a precompile's
+operations and constraints are described as a graph of canonical values, payloads, and joins — so
+modelling deferred computation the same way lets a precompile's native host implementation mirror
+its eventual constraint implementation. This direction is developed in GitHub discussion #3005.
 
 ## The model
 
@@ -110,10 +109,9 @@ precompile's `id` is derived the same way event IDs are — the name hashed with
 into a single field element — but in its own domain-separated namespace, so a precompile and an
 event of the same name get different ids by construction. The registry rejects misconfigured or
 duplicate ids at construction. The default registry is empty and rejects every precompile-owned
-tag. A `DeferredState` carries the registry it evaluates under. The default registry is empty, so
-callers that want proof-bound precompiles must install the concrete registry they intend to trust;
-the `miden-vm` facade and CLI install the standard `miden-precompiles` registry for the bundled
-precompile package.
+tag. A `DeferredState` carries the registry it evaluates under. The default registry is empty;
+the public VM/prover/verifier path installs the standard `miden-precompiles` registry for bundled
+proof-bound precompiles.
 
 During evaluation the framework hands the precompile a `DeferredContext`, through which it can
 `get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
@@ -242,13 +240,14 @@ This framework is now the proof-bound precompile substrate. In its current form:
 - the final deferred root is threaded into the STARK public inputs;
 - `ExecutionProof` carries a canonical `DeferredStateWire`, which the verifier rehydrates under the
   built-in precompile registry before checking the STARK proof;
-- the `miden-precompiles` crate provides concrete hash, arithmetic, curve, and native signature
-  precompile implementations used by core-library facades and registry-based verification.
+- the `miden-precompiles` crate provides concrete hash, arithmetic, and curve precompile
+  implementations used by core-library facades and built-in verification.
 
 The proof format binds the final deferred root, not a registry name or version. For that reason,
 execution, trace generation, proof generation, and verification all use the built-in
 `miden_precompiles::registry()` policy. The public VM/prover/verifier APIs do not accept
-caller-supplied precompile registries.
+caller-supplied precompile registries. Use `verify_with_max_deferred_elements(...)` when verifying
+proofs produced with a non-default deferred-state budget.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

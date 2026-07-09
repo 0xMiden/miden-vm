@@ -4,7 +4,8 @@ Precompiles let Miden programs defer expensive computations to host-side impleme
 still binding the claimed result into the VM proof. The current proof-bound model is the
 content-addressed deferred DAG described in [Deferred computation](../deferred/index.md): programs
 register deferred nodes, log statement digests that evaluate to `TRUE`, proofs carry
-`DeferredStateWire`, and verifiers rehydrate that wire under a supplied `PrecompileRegistry`.
+`DeferredStateWire`, and the public verifier rehydrates that wire under the built-in
+`miden_precompiles::registry()`.
 
 Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
 modules are currently internal implementation detail used by core-library facades and tests.
@@ -16,7 +17,7 @@ modules are currently internal implementation detail used by core-library facade
 | `Tag` | A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`, semantic `AND`, and opaque framework `CHUNKS`; precompile ids are derived from precompile names and interpret the remaining three `args` felts locally. |
 | `Node` | A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework `TRUE` sentinel. |
 | `Precompile` | A host implementation that owns one precompile id, decodes the structural shape for its tags, evaluates nodes to canonical form, and optionally contributes canonical constants through `init()`. |
-| `PrecompileRegistry` | The verifier/host dispatcher for trusted precompile implementations. Verification must use the registry that corresponds to the proof-bound precompile set being accepted. |
+| `PrecompileRegistry` | The host/framework dispatcher for trusted precompile implementations. Public VM/prover/verifier APIs use the standard registry from `miden-precompiles`. |
 | `DeferredState` | The host-side DAG witness accumulated during execution. It tracks registered nodes, evaluates them under the registry, and maintains the rolling deferred root. |
 | `DeferredStateWire` | The canonical proof-carried wire format for the root-reachable deferred DAG. It is passive data until rehydrated and validated with `DeferredState::from_wire`. |
 | Deferred root | A single digest public value. Each logged statement appends `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. |
@@ -39,9 +40,11 @@ modules are currently internal implementation detail used by core-library facade
    host-side deferred state records the corresponding `AND` node.
 5. **Prover serializes the wire** – The prover serializes `trace.deferred_state().to_wire()` into
    `ExecutionProof` and uses the final deferred root as the STARK public input.
-6. **Verifier rehydrates and checks** – The verifier decodes `DeferredStateWire` with the caller's
-   `PrecompileRegistry`, rejects non-canonical or semantically false wires, compares the rehydrated
-   root to the public deferred root, and then verifies the STARK proof.
+6. **Verifier rehydrates and checks** – The public verifier decodes `DeferredStateWire` with the
+   built-in `miden_precompiles::registry()`, rejects non-canonical or semantically false wires,
+   compares the rehydrated root to the public deferred root, and then verifies the STARK proof. Use
+   `verify_with_max_deferred_elements(...)` for proofs produced with non-default deferred-state
+   budgets.
 
 ## Responsibilities
 
@@ -51,7 +54,7 @@ modules are currently internal implementation detail used by core-library facade
 | Host / advice provider | Maintains `DeferredState`, runs trusted precompile implementations, and supplies evaluation advice when wrappers request it. |
 | MASM wrapper | Registers concrete deferred nodes, computes node/statement digests from circuit-visible data, logs only registered statements that should evaluate to `TRUE`, and hides helper outputs from callers when appropriate. |
 | Prover | Includes the canonical `DeferredStateWire` in `ExecutionProof`. |
-| Verifier | Rehydrates `DeferredStateWire` under a supplied `PrecompileRegistry`, checks the final deferred root, and verifies the STARK proof. |
+| Verifier | Rehydrates `DeferredStateWire` under the built-in `miden_precompiles::registry()`, checks the final deferred root, and verifies the STARK proof. |
 
 ## Conventions
 
@@ -70,8 +73,8 @@ modules are currently internal implementation detail used by core-library facade
 - `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` where
   `STMNT` occupies stack offsets `4..8`. Wrappers usually drop the three output words after the root
   transition has been constrained.
-- Input and memory layouts are precompile-specific. The `miden-precompiles` wrappers define the
-  native formats for hash, arithmetic, curve, and signature precompiles.
+- Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
+  for hash facades and for arithmetic/curve support used by signature verification.
 
 ## Examples
 
