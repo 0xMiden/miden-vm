@@ -1,3 +1,0 @@
-#! Digital signature precompile wrappers.
-
-pub mod ecdsa_secp256k1

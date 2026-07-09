@@ -1,5 +1,7 @@
-use miden::precompiles::crypto::dsa::ecdsa_secp256k1
 use miden::precompiles::crypto::hashes::keccak256
+use miden::precompiles::math::curve::secp256k1
+use miden::precompiles::math::field::k1_base
+use miden::precompiles::math::field::k1_scalar
 use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS
@@ -30,20 +32,22 @@ use miden::core::crypto::hashes::poseidon2
 #! - `SIG_R[8]`, `SIG_S[8]`: native signature scalars as little-endian u32 limbs.
 #!
 #! Local memory layout (element addresses):
-#!   - loc[0 ..16] : native public key, QX[8] || QY[8]. Required by
-#!                   `ecdsa_secp256k1::assert_verify_prehash(pubkey_ptr, digest_ptr, sig_ptr)`.
-#!   - loc[16..32] : native signature, SIG_R[8] || SIG_S[8]. Required by the same precompile ABI.
-#!   - loc[32..40] : Keccak256 message/digest/prehash scratch buffer passed as `digest_ptr`.
+#!   - loc[0 ..16] : native public key, QX[8] || QY[8].
+#!   - loc[16..24] : Keccak256 message/digest scratch buffer.
 #!
-#! The 40 local elements are the minimal contiguous memory ABI needed for the raw verifier call:
-#! public key (16) + signature (16) + prehash output (8).
+#! No result word is pushed. The procedure traps on malformed native limbs, invalid/off-curve public
+#! keys, invalid signature scalars, or failed signature verification.
 #!
-#! Advice is untrusted. The wrapper binds QX/QY to `PK_COMM`, and the native verifier binds and
-#! validates the public key, reduced prehash, and signature scalars through precompile-backed
-#! deferred evaluation.
-@locals(40)
+#! Low-s note: the signature only needs to satisfy the ECDSA equation with canonical, nonzero scalar
+#! values; low-s normalization (`SIG_S <= n/2`) is not checked. Thus both `(r, s)` and `(r, n - s)`
+#! verify when otherwise valid. If the signature encoding is protocol-visible or must be unique,
+#! enforce `0 < s <= n/2` before calling or canonicalize upstream.
+#!
+#! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
+#! reduced Keccak prehash, and signature scalars through precompile-backed deferred evaluation.
+@locals(24)
 pub proc verify
-    # Load QX || QY from advice into the precompile public-key buffer while absorbing the same
+    # Load QX || QY from advice into the verifier public-key buffer while absorbing the same
     # two chunks into the Poseidon2 `hash_elements` state. Since there are exactly 16 elements,
     # the `hash_elements` capacity word is zero and no partial-block padding is required.
     # `adv_pipe` exposes each just-written chunk in the rate slots in the same order that
@@ -66,72 +70,169 @@ pub proc verify
     assert_eqw.err="invalid public key commitment"
     # => [write_ptr=loc[16], MSG, ...]
 
-    # Load SIG_R || SIG_S from advice into the precompile signature buffer. Keep a copy of sig_ptr
-    # under MSG so we don't need to recover it from digest_ptr after the pipes advance write_ptr.
-    dup movdn.5
-    # => [write_ptr=loc[16], MSG, sig_ptr=loc[16], ...]
-    padw padw padw
-    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[16], MSG, sig_ptr, ...]
-    adv_pipe
-    # => [SIG_R_RATE[8], C=0w, write_ptr=loc[24], MSG, ...]
-    adv_pipe
-    # => [SIG_S_RATE[8], C=0w, write_ptr=loc[32], MSG, ...]
-    dropw dropw dropw movdn.4
-    # => [MSG, digest_ptr=loc[32], sig_ptr=loc[16], ...]
+    movdn.4
+    # => [MSG, digest_ptr=loc[16], ...]
 
-    # Stage MSG[32] in loc[32..40], hash it in-place via the memory-oriented Keccak precompile,
-    # then convert the digest bytes into the native little-endian scalar limbs expected by
-    # `assert_verify_prehash`.
+    # Stage MSG[32] in loc[16..24], hash it in-place via the memory-oriented Keccak precompile,
+    # then convert the digest bytes into the native little-endian scalar limbs used as ECDSA z.
     exec.store_word_u32s_le
-    # => [digest_ptr, sig_ptr, ...]  (MSG_U32[8] written to loc[32..40])
+    # => [digest_ptr, ...]  (MSG_U32[8] written to loc[16..24])
 
     dup dup push.32 swap
-    # => [in_ptr=loc[32], len_bytes=32, out_ptr=loc[32], digest_ptr=loc[32], sig_ptr, ...]
+    # => [in_ptr=loc[16], len_bytes=32, out_ptr=loc[16], digest_ptr=loc[16], ...]
     exec.keccak256::hash_1_chunk_mem
-    # => [digest_ptr=loc[32], sig_ptr, ...]  (DIGEST_U32[8] written to loc[32..40])
+    # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    dup
-    # => [read_ptr=loc[32], digest_ptr=loc[32], sig_ptr, ...]
+    dup sub.16 swap
+    # => [read_ptr=loc[16], pubkey_ptr=loc[0], ...]
     repeat.8
         dup mem_load
         exec.reverse_u32_bytes
         swap add.1
     end
-    # => [read_ptr=loc[40], PREHASH_U32[8], digest_ptr, sig_ptr, ...]
+    # => [read_ptr=loc[24], PREHASH_U32[8], pubkey_ptr, ...]
     drop
-    # => [PREHASH_U32[8], digest_ptr, sig_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
-    dup.8 mem_storew_le dropw
-    dup.4 add.4 mem_storew_le dropw
-    # => [digest_ptr, sig_ptr, ...]
+    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 
-    dup.1 sub.16
-    # => [pubkey_ptr, digest_ptr, sig_ptr, ...]
-    exec.ecdsa_secp256k1::assert_verify_prehash
+    exec.prepare_verify_inputs
+    # => [U1, Q, U2, SIG_R, ...]
+    exec.secp256k1::push_generator
+    # => [G, U1, Q, U2, SIG_R, ...]
+    exec.secp256k1::msm2
+    # => [VERIFY_POINT, SIG_R, ...]
+    exec.assert_x_eq_scalar_k1
     # => [...]
 end
 
-#! Verifies a secp256k1 ECDSA signature over a pre-hashed message.
+# INTERNAL PROCEDURES — ECDSA
+# ================================================================================================
+
+#! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!
-#! Input:  [pubkey_ptr, digest_ptr, sig_ptr, ...]
+#! Input:  [Z_U32[8], pubkey_ptr, ...]
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#!
+#! Preconditions/provenance:
+#! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
+#! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by `verify`;
+#! - SIG_R/S advice is untrusted and validated by `load_signature_k1`.
+proc prepare_verify_inputs
+    exec.k1_scalar::load_reduced_256
+    # => [Z, pubkey_ptr, ...]
+
+    movup.4
+    # => [pubkey_ptr, Z, ...]
+    exec.secp256k1::load_mem
+    # => [Q, Z, ...]
+    swapw
+    # => [Z, Q, ...]
+
+    exec.load_signature_k1
+    # => [SIG_S, SIG_R, Z, Q, ...]
+
+    exec.k1_scalar::inv
+    # => [S_INV, SIG_R, Z, Q, ...]
+
+    dupw
+    movupw.3
+    exec.k1_scalar::mul
+    # => [U1 = Z*S_INV, S_INV, SIG_R, Q, ...]
+
+    dupw.1
+    dupw.3
+    exec.k1_scalar::mul
+    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
+
+    swapw.2
+    # => [S_INV, U1, U2, SIG_R, Q, ...]
+    dropw
+    # => [U1, U2, SIG_R, Q, ...]
+
+    movupw.3 swapw
+    # => [U1, Q, U2, SIG_R, ...]
+end
+
+#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests, checks SIG_R != 0,
+#! and returns SIG_S on top because callers immediately invert SIG_S.
+#!
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+proc load_signature_k1
+    exec.load_scalar_k1_from_advice
+    # => [SIG_R, ...]
+
+    exec.load_scalar_k1_from_advice
+    # => [SIG_S, SIG_R, ...]
+
+    # ECDSA requires SIG_R != 0 and SIG_S != 0.
+    # Check SIG_R here. We do not check SIG_S here because k1_scalar::inv(SIG_S) traps on SIG_S = 0
+    # and binds the inverse relation for nonzero SIG_S.
+    dupw.1
+    # => [SIG_R, SIG_S, SIG_R, ...]
+    exec.k1_scalar::push_zero_digest
+    eqw
+    # => [is_sig_r_zero, ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
+    assertz.err="invalid ECDSA signature: r is zero"
+    # => [ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
+    dropw dropw
+    # => [SIG_S, SIG_R, ...]
+end
+
+#! Loads one canonical k1 scalar from advice.
+#!
+#! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
+#! Output: [VALUE_SCALAR_DIGEST, ...]
+proc load_scalar_k1_from_advice
+    adv_pushw
+    # => [VALUE_LO_U32[4], ...]
+    adv_pushw
+    # => [VALUE_HI_U32[4], VALUE_LO_U32[4], ...]
+    swapw
+    # => [VALUE_LO_U32[4], VALUE_HI_U32[4], ...]
+    exec.k1_scalar::load
+    # => [VALUE_SCALAR_DIGEST, ...]
+end
+
+#! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
+#! compares the resulting scalar-field expression against SIG_R.
+#!
+#! Input:  [VERIFY_POINT_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
 #! Output: [...]
 #!
-#! Memory:
-#! - `pubkey_ptr[0..8]`: QX as little-endian u32 limbs.
-#! - `pubkey_ptr[8..16]`: QY as little-endian u32 limbs.
-#! - `digest_ptr[0..8]`: raw prehash z as little-endian u32 limbs.
-#! - `sig_ptr[0..8]`: SIG_R as little-endian u32 limbs.
-#! - `sig_ptr[8..16]`: SIG_S as little-endian u32 limbs.
-#!
-#! No result word is pushed. The procedure traps on malformed native limbs, invalid/off-curve public
-#! keys, invalid signature scalars, or failed signature verification.
-#!
-#! Low-s note: the signature at `sig_ptr` only needs to satisfy the ECDSA equation
-#! with canonical, nonzero scalar values; low-s normalization (`SIG_S <= n/2`) is
-#! not checked. Thus both `(r, s)` and `(r, n - s)` verify when otherwise valid.
-#! If the signature encoding is protocol-visible or must be unique, enforce
-#! `0 < s <= n/2` before calling or canonicalize upstream.
-pub proc verify_prehash
-    exec.ecdsa_secp256k1::assert_verify_prehash
+#! Preconditions/provenance:
+#! - SIG_R_SCALAR_VALUE_DIGEST is a canonical k1 scalar VALUE digest, e.g. from load_signature_k1;
+#! - secp256k1::eval binds VERIFY_POINT_DIGEST to the returned canonical curve VALUE payload;
+#! - after identity rejection succeeds, X_OR_TRUE_DIGEST/Y_OR_TRUE_DIGEST are real coordinate digests.
+proc assert_x_eq_scalar_k1
+    exec.secp256k1::eval
+    # => [VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    # Reject identity at the curve VALUE-digest level. `eval` returns the canonical VALUE digest
+    # alongside the coordinate payload, so direct comparison to the registered identity VALUE digest
+    # is sound and avoids a second curve evaluation.
+    exec.secp256k1::push_identity
+    # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    eqw
+    # => [is_identity, IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    assertz.err="invalid ECDSA verification point: identity"
+    # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    dropw dropw
+    # => [X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    swapw dropw
+    # => [X_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    exec.k1_base::eval
+    # => [X_U32[8], SIG_R_SCALAR_VALUE_DIGEST, ...]
+    exec.k1_scalar::load_reduced_256
+    # => [X_SCALAR_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+
+    swapw
+    # => [SIG_R_SCALAR_VALUE_DIGEST, X_SCALAR_DIGEST, ...]
+    exec.k1_scalar::is_eq_digest
+    # => [x_matches_sig_r, ...]
+    assert.err="ECDSA verification failed: x(VERIFY_POINT) != SIG_R"
+    # => [...]
 end
 
 # INTERNAL PROCEDURES — BYTE OPS

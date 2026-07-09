@@ -3,14 +3,19 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word, deferred::DeferredState};
 use miden_core_lib::{CoreLibrary, dsa::ecdsa_k256_keccak};
-use miden_crypto::dsa::ecdsa_k256_keccak::SigningKey;
+use miden_crypto::{
+    SequentialCommit,
+    dsa::ecdsa_k256_keccak::{PublicKey, SigningKey},
+};
+use miden_precompiles::K1Scalar;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
 };
+use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-const VERIFY_EXPECTED_CYCLES: u64 = 1_592;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_489;
 
 #[test]
 fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
@@ -36,6 +41,81 @@ fn core_ecdsa_k256_keccak_verify_traps_on_wrong_pk_comm() {
     tamper_felt(&mut fixture.pk_comm[0]);
 
     run_verify(&fixture).expect_err("wrong public key commitment must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_off_curve_public_key() {
+    let mut fixture = valid_fixture();
+    fixture.advice[8..16].copy_from_slice(&[Felt::from_u32(0); 8]);
+    fixture.pk_comm = Poseidon2::hash_elements(&fixture.advice[..16]);
+
+    run_verify(&fixture).expect_err("off-curve public key advice must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_non_u32_limb() {
+    let non_u32 = Felt::new(u32::MAX as u64 + 1).expect("2^32 must fit in the VM field");
+
+    let mut pubkey_fixture = valid_fixture();
+    pubkey_fixture.advice[0] = non_u32;
+    pubkey_fixture.pk_comm = Poseidon2::hash_elements(&pubkey_fixture.advice[..16]);
+    run_verify(&pubkey_fixture).expect_err("non-u32 public-key limb must trap");
+
+    let mut r_fixture = valid_fixture();
+    r_fixture.advice[16] = non_u32;
+    run_verify(&r_fixture).expect_err("non-u32 signature r limb must trap");
+
+    let mut s_fixture = valid_fixture();
+    s_fixture.advice[24] = non_u32;
+    run_verify(&s_fixture).expect_err("non-u32 signature s limb must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_noncanonical_signature_scalar() {
+    let mut r_fixture = valid_fixture();
+    set_r(&mut r_fixture, K1Scalar::MODULUS);
+    run_verify(&r_fixture).expect_err("noncanonical r scalar must trap");
+
+    let mut s_fixture = valid_fixture();
+    set_s(&mut s_fixture, K1Scalar::MODULUS);
+    run_verify(&s_fixture).expect_err("noncanonical s scalar must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_zero_signature_scalar() {
+    let mut r_fixture = valid_fixture();
+    r_fixture.advice[16..24].copy_from_slice(&[Felt::from_u32(0); 8]);
+    run_verify(&r_fixture).expect_err("zero r scalar must trap");
+
+    let mut s_fixture = valid_fixture();
+    s_fixture.advice[24..32].copy_from_slice(&[Felt::from_u32(0); 8]);
+    run_verify(&s_fixture).expect_err("zero s scalar must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_tampered_signature() {
+    let mut fixture = valid_fixture();
+    tamper_felt(&mut fixture.advice[16]);
+
+    run_verify(&fixture).expect_err("tampered signature must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_traps_on_valid_but_wrong_public_key() {
+    let mut fixture = valid_fixture();
+    let mut rng = ChaCha20Rng::from_seed([0xa5; 32]);
+    let wrong_public_key = SigningKey::with_rng(&mut rng).public_key();
+    let wrong_public_key_elements = public_key_elements(&wrong_public_key);
+    assert_ne!(
+        &fixture.advice[..16],
+        wrong_public_key_elements.as_slice(),
+        "deterministic wrong key should differ",
+    );
+
+    fixture.advice[..16].copy_from_slice(&wrong_public_key_elements);
+    fixture.pk_comm = ecdsa_k256_keccak::public_key_commitment(&wrong_public_key);
+
+    run_verify(&fixture).expect_err("valid signature under wrong public key must trap");
 }
 
 struct Fixture {
@@ -70,6 +150,25 @@ fn fixed_message() -> Word {
         Felt::new_unchecked(0x1011_1213_1415_1617),
         Felt::new_unchecked(0x1819_1a1b_1c1d_1e1f),
     ])
+}
+
+fn public_key_elements(public_key: &PublicKey) -> [Felt; 16] {
+    public_key
+        .to_elements()
+        .try_into()
+        .expect("public key must encode as QX[8] || QY[8]")
+}
+
+fn set_r(fixture: &mut Fixture, limbs: [u32; 8]) {
+    fixture.advice[16..24].copy_from_slice(&limbs_to_felts(limbs));
+}
+
+fn set_s(fixture: &mut Fixture, limbs: [u32; 8]) {
+    fixture.advice[24..32].copy_from_slice(&limbs_to_felts(limbs));
+}
+
+fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
+    limbs.map(Felt::from_u32)
 }
 
 fn run_verify(fixture: &Fixture) -> Result<ExecutionOutput, ExecutionError> {

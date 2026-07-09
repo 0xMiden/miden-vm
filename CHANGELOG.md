@@ -19,7 +19,8 @@
 - [BREAKING] Replaced precompile request count/calldata execution limits with deferred-state element budgeting. Use `ExecutionOptions::with_max_deferred_elements(...)` and `verify_with_max_deferred_elements(...)` for non-default deferred-state budgets.
 - [BREAKING] Removed the `miden::core::crypto::dsa::eddsa_ed25519` MASM module, Rust handler, docs, and tests. EdDSA support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
 - [BREAKING] Removed the `miden::core::crypto::hashes::sha512` MASM module, Rust handler, docs, and tests. SHA-512 support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
-- [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements, and changed `verify_prehash` to trap on invalid signatures instead of returning a result word. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
+- [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
+- [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
 
 ## v0.24.0 (2026-06-24)
 
