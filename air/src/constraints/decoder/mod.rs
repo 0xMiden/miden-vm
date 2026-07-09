@@ -161,10 +161,10 @@ pub fn enforce_main<AB>(
     builder.assert_bool(in_span);
 
     // After SPAN, next row enters a basic block.
-    builder.when_transition().when(op_flags.span()).assert_one(in_span_next);
+    builder.when(op_flags.span()).assert_one(in_span_next);
 
     // After RESPAN, next row stays in a basic block.
-    builder.when_transition().when(op_flags.respan()).assert_one(in_span_next);
+    builder.when(op_flags.respan()).assert_one(in_span_next);
 
     // =============================================
     // Op-bit binary constraints
@@ -259,7 +259,7 @@ pub fn enforce_main<AB>(
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
     // (h4) into the next row so the loop body can be re-entered.
     {
-        let gate = builder.is_transition() * op_flags.end() * op_flags.repeat_next();
+        let gate = op_flags.end() * op_flags.repeat_next();
         let builder = &mut builder.when(gate);
         for i in 0..5 {
             builder.assert_eq(hasher_state_next[i], hasher_state[i]);
@@ -293,7 +293,6 @@ pub fn enforce_main<AB>(
 
     // SPAN, RESPAN, and PUSH each consume exactly one group (delta_group_count = 1).
     builder
-        .when_transition()
         .when(op_flags.span() + op_flags.respan() + is_push.clone())
         .assert_one(delta_group_count.clone());
 
@@ -373,10 +372,7 @@ pub fn enforce_main<AB>(
         let new_group: AB::Expr = delta_group_count - is_push;
 
         // SPAN/RESPAN start a fresh batch, so op_index' = 0.
-        builder
-            .when_transition()
-            .when(op_flags.span() + op_flags.respan())
-            .assert_zero(op_index_next);
+        builder.when(op_flags.span() + op_flags.respan()).assert_zero(op_index_next);
 
         // When a new group starts inside a span, op_index' = 0.
         // Gated by in_span to exclude SPAN/RESPAN rows (which are handled above).
@@ -482,7 +478,6 @@ pub fn enforce_main<AB>(
 
     // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_PERMUTATION).
     builder
-        .when_transition()
         .when(op_flags.respan())
         .assert_eq(addr_next, addr + CONTROLLER_ROWS_PER_PERM_FELT);
 
@@ -505,8 +500,5 @@ pub fn enforce_main<AB>(
     // Last-row boundary: the final row must be HALT. The processor pads the trace with
     // HALT rows and the absorbing transition constraint keeps them there; this constraint
     // makes it explicit in the AIR.
-    //
-    // TODO: with HALT guaranteed on the last row, some `when_transition()` guards in this
-    // module may be redundant (HALT is absorbing and addr = 0). Audit which can be removed.
     builder.when_last_row().assert_one(op_flags.halt());
 }

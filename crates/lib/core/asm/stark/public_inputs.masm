@@ -3,50 +3,35 @@ use miden::core::stark::constants
 #! Processes the public inputs.
 #!
 #! This is a generic dispatch procedure that calls the instance-specific implementation
-#! via `dynexec`. The instance-specific implementation loads fixed-length and variable-length
-#! public inputs from the advice stack, reduces the variable-length inputs using auxiliary
-#! randomness, and stores everything into the ACE READ section.
+#! via `dynexec`. The instance-specific implementation populates the FLPI section of the ACE
+#! READ region with the fixed-length public inputs and absorbs every public input into the
+#! Fiat-Shamir transcript in a rate-aligned schedule (mirroring the Rust-side `MultiAir::observe`).
+#! The reduced variable-length public inputs (the `reduced_inputs` block) are staged by the
+#! instance's `verify_proof` before the transcript starts; this procedure only absorbs them.
 #!
-#! This involves:
+#! Memory layout populated (low -> high addresses):
 #!
-#! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
-#!    starting from the address pointed to by `public_inputs_address_ptr`.
-#! 2. Loading from the advice stack the variable-length public inputs, storing them temporarily
-#!    in memory, and then reducing them to an element in the challenge field using the auxiliary
-#!    randomness. This reduced value is then used to impose boundary conditions on the relevant
-#!    auxiliary columns.
+#!   reduced_inputs (16 felts, at a fixed standalone address, NOT in the ACE READ region)
+#!   [..., pi (FLPI EF, m base felts -> 2m slots),
+#!         beta0, beta1, alpha0, alpha1, <pad>, OOD-start, ...]
 #!
-#! Note that the fixed-length public inputs are stored as extension field elements while
-#! the variable-length ones are stored as base field elements, because the ACE circuit operates
-#! only on extension field elements and the latter inputs are not direct inputs to the circuit,
-#! i.e., only their reduced values are.
-#! Both fixed-length and variable-length public inputs are absorbed into the Fiat-Shamir
-#! transcript through the buffered duplex (`random_coin::observe_felt`), in `MultiAir::observe`
-#! order, after loading.
+#! where:
+#!   a) `reduced_inputs` holds [kernel_H (4) | program_digest (4) | transcript_state (4) |
+#!      zero_pad (4)] — the caller-facing summary of the variable-length public inputs.
+#!      `kernel_H` is the hash of all kernel-procedure digests; `program_digest` and
+#!      `transcript_state` are passed through unchanged. The trailing pad rate-aligns the FS
+#!      observation. This block lives at a fixed standalone address (see `stark/constants.masm`),
+#!      not contiguous with `pi`.
+#!   b) `pi` holds the fixed-length public inputs (stack i/o) as extension field elements.
+#!      Each base felt sits at `pi + 2*i`, with zero in the high coordinate.
+#!   c) `[beta0, beta1, alpha0, alpha1]` is the auxiliary randomness (loaded
+#!      non-deterministically, verified in step II).
+#!   d) `<pad>` is the codegen alignment word; OOD-start is the first felt of the OOD
+#!      evaluations section.
 #!
-#! It is worth noting that:
-#!
-#! 1. Only the fixed-length public inputs are stored for the lifetime of the verification
-#!    procedure. The variable-length public inputs are stored temporarily, as this simplifies
-#!    the task of reducing them using the auxiliary randomness. The resulting values from the
-#!    reductions are stored right after the fixed-length public inputs, in a word-aligned
-#!    manner and padded with zeros if needed.
-#! 2. The public inputs address is computed so that we end up with the following memory layout:
-#!
-#!    [..., a_0..a_{m-1}, b_0..b_{n-1}, beta0, beta1, alpha0, alpha1, OOD-start, ...]
-#!
-#!    where:
-#!
-#!    a) [a_0..a_{m-1}] are the fixed-length public inputs stored as extension field elements.
-#!       This section is double-word-aligned.
-#!    b) [b_0..b_{n-1}] are the results of reducing the variable-length public inputs using
-#!       auxiliary randomness. This section is word-aligned.
-#!    c) [beta0, beta1, alpha0, alpha1] is the auxiliary randomness.
-#!    d) OOD-start is the first field element of the section containing the OOD evaluations.
-#! 3. For each bus message in a group in the variable-length public inputs, each message is
-#!    expected to be padded to the next multiple of 8 and provided in reverse order. This has
-#!    the benefit of making the reduction using the auxiliary randomness more efficient using
-#!    `horner_eval_base`.
+#! The variable-length inputs are also folded into a running `c_total` accumulator (using
+#! the non-deterministically supplied alpha/beta), stored at `C_TOTAL_PTR` for the
+#! outer-LogUp boundary check in step II.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
@@ -68,123 +53,99 @@ end
 #! Hence the address where public inputs are stored is computed using a negative offset from the
 #! address where the OOD evaluations are stored.
 #!
-#! We compute two pointers:
-#!   var_len_ptr = OOD_EVALUATIONS_PTR - 4 - num_var_len_pi_groups * 4
-#!   pi_ptr      = var_len_ptr - num_fixed_len_pi * 2
+#! We compute one pointer:
+#!   pi_ptr = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
 #!
-#! The `* 4` for VLPI groups provides word-alignment (each group uses 4 base felts = 2 EF
-#! slots, even though the reduced value is only 1 EF). The `* 2` for FLPI converts the base
-#! felt count to EF slots (each base felt is stored as [val, 0]).
+#! The `* 2` converts the FLPI base-felt count to EF slots (each base felt is stored as
+#! `[val, 0]`). The `-8` skips the two words between FLPI and OOD: the auxiliary randomness word
+#! and the codegen alignment pad. The reduced-inputs block is no longer carved out of this region;
+#! it lives at the fixed standalone `REDUCED_INPUTS_PTR` (see `stark/constants.masm`), and this
+#! procedure publishes that fixed address into the reduced-inputs pointer cell.
 #!
-#! The `-4` accounts for the auxiliary randomness word [beta0, beta1, alpha0, alpha1] at
-#! AUX_RAND_ELEM_PTR (4 base felts between var_len_ptr and OOD_EVALUATIONS_PTR).
-#!
-#! The var_len_ptr is the region that will temporarily store the variable-length public inputs
-#! and permanently store the results of reducing them by the auxiliary randomness.
-#!
-#! Inputs:  [num_var_len_pi_groups, num_fixed_len_pi, ...]
+#! Inputs:  [num_fixed_len_pi, ...]
 #! Outputs: [...]
 #!
 #! Invocation: exec
 pub proc compute_and_store_public_inputs_address
-    # 1) Get a pointer to where OOD evaluations are stored
+    # 1) pi_ptr = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
     exec.constants::ood_evaluations_ptr
-    # => [ood_evals_ptr, num_var_len_pi_groups, num_fixed_len_pi, ...]
-
-    # 2) Compute the pointer to the reductions of the variable length public inputs
-    #
-    # We need to account for the number of variable-length public inputs groups.
-    # For each group we allocate a word (4 base elements = 2 EF slots) for word-alignment.
-    # We also need to account for the auxiliary randomness (4 base elements for alpha/beta).
-    sub.4
-    swap mul.4 sub      # subtract number of variable length public input groups, with padding for word-alignment
-    # => [res_var_len_pi_reductions_ptr, num_fixed_len_pi, ...]
-
-    # 3) Compute the pointer to the public inputs
-    #
-    # We need to account for the fact that fixed-length public inputs are stored as extension field
-    # elements.
-    dup
-    movup.2
-    mul.2
-    sub
-    # => [public_inputs_ptr, res_var_len_pi_reductions_ptr, ...]
-
-    # 4) Store both pointers
+    sub.8
+    # => [ood_evals_ptr - 8, num_fixed_len_pi, ...]
+    swap mul.2 sub
+    # => [pi_ptr, ...]
     exec.constants::public_inputs_address_ptr mem_store
-    exec.constants::variable_length_public_inputs_address_ptr mem_store
+
+    # 2) Publish the fixed reduced-inputs block address into the reduced-inputs pointer cell.
+    exec.constants::reduced_inputs_ptr
+    exec.constants::reduced_inputs_address_ptr mem_store
 end
 
-#! Loads 8 base field elements from the advice stack, stores them as extension field elements
-#! in memory, and returns the original base element words on the stack.
+#! Reads 8 base field elements from caller memory at `src`, stores them as extension field elements
+#! at `dst`, and returns the original base words in the rate positions for absorption by the caller
+#! via `poseidon2::permute`.
 #!
-#! Transcript absorption is handled separately (see `sys/vm/public_inputs::absorb_public_inputs`),
-#! so the caller discards the returned words `A0`/`A1`.
+#! The procedure does NOT absorb the elements into the transcript -- the caller is responsible
+#! for calling `poseidon2::permute` after this procedure to complete the absorption.
 #!
-#! Inputs:  [Y, Y, C, ptr, ...]
-#! Outputs: [A0, A1, C, ptr + 16, ..]
+#! Inputs:  [Y, Y, C, dst, src, ...]
+#! Outputs: [A0, A1, C, dst + 16, src + 8, ...]
 #!
-#! where A0 and A1 are the original base element words (from advice).
+#! where A0 and A1 are the original base element words (from memory), positioned in the rate slots
+#! so that a subsequent `poseidon2::permute` absorbs them into the sponge state.
 #!
 #! Invocation: exec
-pub proc load_base_store_extension_double_word
-    # 1) Load the first 4 base elements from the advice stack and save them temporarily
-    adv_loadw
+pub proc load_base_store_extension_double_word_from_mem
+    # 1) Load the first 4 base elements from `src` and save them temporarily; advance `src`.
+    dup.13 mem_loadw_le
     exec.constants::tmp1 mem_storew_le
+    movup.13 add.4 movdn.13
 
     # 2) Represent the first 4 base field elements as elements in the quadratic extension field
     swapw
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a3, a2, a1, a0, C, ptr, ...]
+    # => [0, 0, 0, 0, a3, a2, a1, a0, C, dst, src, ...]
     movdn.7
-    # => [0, 0, 0, a3, a2, a1, a0, 0, C, ptr, ...]
     movdn.5
-    # => [0, 0, a3, a2, a1, 0, a0, 0, C, ptr, ...]
     movdn.3
-    # => [0, a3, a2, 0, a1, 0, a0, 0, C, ptr, ...]
     swap
-    # => [a3, 0, a2, 0, a1, 0, a0, 0, C, ptr, ...]
+    # => [a3, 0, a2, 0, a1, 0, a0, 0, C, dst, src, ...]
 
     # 3) Save the first 2 extension field elements
     dup.12
     mem_storew_le
 
-    # 4) Load the second 4 base elements from the advice stack and save them temporarily
-    adv_loadw
+    # 4) Load the second 4 base elements from `src` and save them temporarily; advance `src`.
+    dup.13 mem_loadw_le
     exec.constants::tmp2 mem_storew_le
+    movup.13 add.4 movdn.13
     swapw
-    # => [a3, 0, a2, 0, a7, a6, a5, a4, C, ptr, ...]
+    # => [a3, 0, a2, 0, a7, a6, a5, a4, C, dst, src, ...]
 
     # 5) Save the second 2 extension field elements
     dup.12 add.4
     mem_storew_le
 
-
     # 6) Represent the second 4 base field elements as elements in the quadratic extension field
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a7, a6, a5, a4, C, ptr, ...]
     movdn.7
     movdn.5
     movdn.3
     swap
-    # => [a7, 0, a6, 0, a5, 0, a4, 0, C, ptr, ...]
+    # => [a7, 0, a6, 0, a5, 0, a4, 0, C, dst, src, ...]
 
-    # 7) Save the third 2 extension field elements
-    #    We also load the second 4 base elements into the R2 rate position.
+    # 7) Save the third 2 extension field elements; reload the second base word into R2.
     dup.12
     add.8
     mem_storew_le
     exec.constants::tmp2 mem_loadw_le
     swapw
 
-    # 8) Save the fourth 2 extension field elements
-    #    We also load the first 4 base elements into the R1 rate position and update the pointer.
-    #    This ordering (first word on top = R1, second word below = R2) matches the Rust
-    #    challenger's absorption order: first 4 elements -> rate[0..3], next 4 -> rate[4..7].
+    # 8) Save the fourth 2 extension field elements; reload the first base word into R1 and advance
+    #    `dst`. First word on top = R1, second word below = R2 (matches the challenger order).
     dup.12
     add.16 swap.13
     add.12
     mem_storew_le
     exec.constants::tmp1 mem_loadw_le
-    # => [a3, a2, a1, a0, a7, a6, a5, a4, C, ptr + 16, ...]
+    # => [a3, a2, a1, a0, a7, a6, a5, a4, C, dst + 16, src + 8, ...]
 end

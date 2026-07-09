@@ -19,7 +19,7 @@ use miden_core::{
     Felt, ONE, ZERO,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest,
-        MastForestContributor, MastNodeExt, SplitNodeBuilder,
+        MastNodeExt, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     program::Program,
@@ -824,11 +824,7 @@ fn op_group_span_two_batch_transition_inserts(
 fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     use std::sync::Arc;
 
-    use crate::{
-        MIN_STACK_DEPTH,
-        mast::{DynNodeBuilder, MastForestContributor},
-        operation::opcodes,
-    };
+    use crate::{MIN_STACK_DEPTH, mast::DynNodeBuilder, operation::opcodes};
 
     // Build exactly the same program shape as `dyncall_program()` in parallel/tests.rs:
     //   join(
@@ -913,10 +909,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     // the second-to-last entry), not the pre-pop address (the clock of the top entry).
     use std::sync::Arc;
 
-    use crate::{
-        mast::{DynNodeBuilder, MastForestContributor},
-        operation::opcodes,
-    };
+    use crate::{mast::DynNodeBuilder, operation::opcodes};
 
     const HASH_ADDR: Felt = Felt::new_unchecked(40);
 

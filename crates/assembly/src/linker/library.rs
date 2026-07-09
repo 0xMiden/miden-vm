@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::module::ModuleInfo;
+use miden_core::Word;
 use miden_mast_package::{ManifestValidationError, MastForest, Package};
 pub use miden_project::Linkage;
 
@@ -23,6 +24,12 @@ impl LinkLibrary {
     pub fn with_linkage(mut self, linkage: Linkage) -> Self {
         self.linkage = linkage;
         self
+    }
+
+    /// Returns the full MAST forest commitment used to identify static library inputs.
+    #[inline(always)]
+    pub fn commitment(&self) -> Word {
+        self.mast().commitment()
     }
 
     #[inline(always)]
