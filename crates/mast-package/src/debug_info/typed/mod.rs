@@ -7,9 +7,9 @@
 //! procedure expects on the stack, and lifts the felts a procedure returns back into a typed
 //! rendering.
 //!
-//! WIT scalar types that encode from a single token (e.g. `word`, `account-id`) are handled by
-//! [`WitScalarCodec`]s. The `word` codec is built in; codecs for types validated with rules
-//! defined outside this crate are registered by the consumer via
+//! WIT scalar types that encode from a single token (e.g. `word`, `felt`, `account-id`) are
+//! handled by [`WitScalarCodec`]s. The `word` and `felt` codecs are built in; codecs for types
+//! validated with rules defined outside this crate are registered by the consumer via
 //! [`TypedProcInfo::with_scalar_codec`].
 
 use alloc::{
@@ -55,7 +55,7 @@ pub(super) fn max_for_bits(bits: u32) -> u128 {
 }
 
 pub use self::{
-    codec::{WitScalarCodec, WordCodec},
+    codec::{FeltCodec, WitScalarCodec, WordCodec},
     errors::TypedDebugInfoError,
 };
 
@@ -95,8 +95,8 @@ impl TypedProcInfo {
     /// or broken. Since the "no signature" case stops here, a built `TypedProcInfo` always has a
     /// signature.
     ///
-    /// The returned info has the built-in [`WordCodec`]; add more scalar codecs with
-    /// [`Self::with_scalar_codec`].
+    /// The returned info has the built-in [`WordCodec`] and [`FeltCodec`]; add more scalar codecs
+    /// with [`Self::with_scalar_codec`].
     pub fn from_package(
         package: &Package,
         procedure_name: &str,
@@ -117,7 +117,10 @@ impl TypedProcInfo {
             name,
             return_type_idx: sig.return_type_idx,
             params,
-            codecs: alloc::vec![Box::new(WordCodec)],
+            codecs: alloc::vec![
+                Box::new(WordCodec) as Box<dyn WitScalarCodec>,
+                Box::new(FeltCodec),
+            ],
         }))
     }
 
@@ -349,7 +352,7 @@ mod tests {
             name: name.to_string(),
             return_type_idx,
             params,
-            codecs: vec![Box::new(WordCodec)],
+            codecs: vec![Box::new(WordCodec) as Box<dyn WitScalarCodec>, Box::new(FeltCodec)],
         }
     }
 
@@ -435,6 +438,117 @@ mod tests {
                 })
                 .collect(),
         })
+    }
+
+    /// A one-felt struct named like the WIT `felt`: a named struct with a single `inner` field,
+    /// which is how the compiler lowers it.
+    fn felt_struct_type(types: &mut DebugTypesSection) -> DebugTypeIdx {
+        let felt_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let felt_name = types.add_string(Arc::from("miden:base/core-types@1.0.0/felt"));
+        let inner_n = types.add_string(Arc::from("inner"));
+        types.add_type(DebugTypeInfo::Struct {
+            name_idx: felt_name,
+            size: 8,
+            fields: vec![DebugFieldInfo {
+                name_idx: inner_n,
+                type_idx: felt_t,
+                offset: 0,
+            }],
+        })
+    }
+
+    /// `point { x: felt, y: felt }`, where `felt` is the WIT struct, not the primitive.
+    fn point_type(types: &mut DebugTypesSection) -> DebugTypeIdx {
+        let felt_s = felt_struct_type(types);
+        let point_name = types.add_string(Arc::from("counter-contract:api/points/point"));
+        let x_n = types.add_string(Arc::from("x"));
+        let y_n = types.add_string(Arc::from("y"));
+        types.add_type(DebugTypeInfo::Struct {
+            name_idx: point_name,
+            size: 16,
+            fields: vec![
+                DebugFieldInfo {
+                    name_idx: x_n,
+                    type_idx: felt_s,
+                    offset: 0,
+                },
+                DebugFieldInfo {
+                    name_idx: y_n,
+                    type_idx: felt_s,
+                    offset: 8,
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn felt_struct_roundtrips_as_a_bare_value() {
+        // The built-in `FeltCodec` collapses the WIT `felt` record to its value: one token in, one
+        // felt out, and no `felt { inner: .. }` wrapper on the way back.
+        let mut types = DebugTypesSection::new();
+        let felt_idx = felt_struct_type(&mut types);
+        let proc = make_proc(
+            types,
+            "get-count",
+            Some(felt_idx),
+            vec![TypedParam {
+                name: "f".to_string(),
+                type_idx: felt_idx,
+            }],
+        );
+
+        assert_eq!(proc.expected_arg_token_count(), Some(1));
+        assert_eq!(encode_all(&proc, &["42"]), vec![felt(42)]);
+        assert_eq!(proc.output_felt_count(), Some(1));
+        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn felt_struct_rejects_an_out_of_range_token() {
+        let mut types = DebugTypesSection::new();
+        let felt_idx = felt_struct_type(&mut types);
+        let proc = make_proc(types, "get-count", Some(felt_idx), vec![]);
+
+        // `2^64 - 2^32 + 1` is the Goldilocks modulus: it fits a `u64` but is not a valid felt.
+        let mut tokens = ["18446744069414584321"].iter();
+        let err = proc.encode_arg(&mut tokens, felt_idx).unwrap_err();
+        assert!(matches!(err, TypedDebugInfoError::FeltOutOfRange(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn nested_felt_structs_render_without_the_inner_wrapper() {
+        // Regression: `add-points(3, 4, 5, 6)` used to render its result as
+        // `point { x: felt { inner: 8 }, y: felt { inner: 10 } }`.
+        let mut types = DebugTypesSection::new();
+        let point_idx = point_type(&mut types);
+        let proc = make_proc(
+            types,
+            "add-points",
+            Some(point_idx),
+            vec![
+                TypedParam {
+                    name: "arg1".to_string(),
+                    type_idx: point_idx,
+                },
+                TypedParam {
+                    name: "arg2".to_string(),
+                    type_idx: point_idx,
+                },
+            ],
+        );
+
+        assert_eq!(proc.expected_arg_token_count(), Some(4));
+        assert_eq!(
+            encode_all(&proc, &["3", "4", "5", "6"]),
+            vec![felt(3), felt(4), felt(5), felt(6)]
+        );
+
+        assert_eq!(proc.output_felt_count(), Some(2));
+        assert_eq!(
+            proc.decode_result(&[felt(8), felt(10)]).as_deref(),
+            Some("point { x: 8, y: 10 }")
+        );
+        assert_eq!(proc.to_string(), "add-points(arg1: point, arg2: point) -> point");
     }
 
     #[test]

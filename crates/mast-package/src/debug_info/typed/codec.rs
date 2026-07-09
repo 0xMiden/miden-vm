@@ -19,9 +19,9 @@ use super::{Felt, errors::TypedDebugInfoError};
 /// struct handling: one token in, [`felt_count`](Self::felt_count) felts out, and the reverse
 /// when rendering results.
 ///
-/// [`TypedProcInfo`](super::TypedProcInfo) registers the [`WordCodec`] by default. Codecs for
-/// types defined outside this crate (e.g. `account-id`, which is validated with protocol-level
-/// rules) are registered by the consumer via
+/// [`TypedProcInfo`](super::TypedProcInfo) registers the [`WordCodec`] and [`FeltCodec`] by
+/// default. Codecs for types defined outside this crate (e.g. `account-id`, which is validated
+/// with protocol-level rules) are registered by the consumer via
 /// [`TypedProcInfo::with_scalar_codec`](super::TypedProcInfo::with_scalar_codec).
 pub trait WitScalarCodec {
     /// Bare WIT type name this codec handles (e.g. `account-id`).
@@ -71,4 +71,39 @@ impl WitScalarCodec for WordCodec {
         let word = Word::from([felts[0], felts[1], felts[2], felts[3]]);
         Some(format!("word({})", word.to_hex()))
     }
+}
+
+/// Codec for the WIT `felt` struct: one decimal token, one felt.
+///
+/// The compiler lowers `felt` to a named struct with a single `inner` field. `felt` is a core
+/// type, so there is nothing worth showing but the value: this codec unwraps it, and a procedure
+/// returning it renders without the `felt` suffix that
+/// [`TypedProcInfo::decode_result`](super::TypedProcInfo::decode_result) adds to primitive
+/// returns.
+pub struct FeltCodec;
+
+impl WitScalarCodec for FeltCodec {
+    fn wit_name(&self) -> &str {
+        "felt"
+    }
+
+    fn felt_count(&self) -> usize {
+        1
+    }
+
+    fn encode(&self, token: &str) -> Result<Vec<Felt>, TypedDebugInfoError> {
+        Ok(alloc::vec![parse_felt_token(token)?])
+    }
+
+    fn decode(&self, felts: &[Felt]) -> Option<String> {
+        Some(felts.first()?.to_string())
+    }
+}
+
+/// Reads a decimal `felt` token. A Goldilocks felt is a value in `[0, p)` with
+/// `p = 2^64 - 2^32 + 1`, and `p < 2^64`, so every felt fits in a `u64`; `Felt::try_from` then
+/// rejects the values in `[p, 2^64)` that fit a `u64` but are not valid felts.
+fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
+    let v: u64 = s.parse().map_err(|_| TypedDebugInfoError::InvalidFelt(s.to_string()))?;
+    Felt::try_from(v).map_err(|_| TypedDebugInfoError::FeltOutOfRange(s.to_string()))
 }

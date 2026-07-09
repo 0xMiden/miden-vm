@@ -4,7 +4,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
-    Felt, MAX_TYPE_DEPTH, TypedDebugInfoError, TypedView, WitScalarCodec, WordCodec,
+    Felt, FeltCodec, MAX_TYPE_DEPTH, TypedDebugInfoError, TypedView, WitScalarCodec, WordCodec,
     lookup::{type_leaf_name, type_name_raw},
     max_for_bits,
     sizing::count_units,
@@ -98,9 +98,10 @@ pub(super) fn arg_token_count(view: &TypedView<'_>, idx: DebugTypeIdx) -> Option
 fn encode_primitive(token: &str, p: DebugPrimitiveType) -> Result<Vec<Felt>, TypedDebugInfoError> {
     let n = p.size_in_felts() as usize;
     match p {
-        // Compiler-built packages emit `word` as a struct handled by `WordCodec`; this arm fires
-        // only for a core `Word` primitive.
+        // Compiler-built packages emit `word` and `felt` as structs handled by `WordCodec` and
+        // `FeltCodec`; these two arms fire only for the core `Word` and `Felt` primitives.
         DebugPrimitiveType::Word => WordCodec.encode(token),
+        DebugPrimitiveType::Felt => FeltCodec.encode(token),
         DebugPrimitiveType::Void => Ok(Vec::new()),
         DebugPrimitiveType::Bool => {
             let v = match token.to_ascii_lowercase().as_str() {
@@ -110,7 +111,6 @@ fn encode_primitive(token: &str, p: DebugPrimitiveType) -> Result<Vec<Felt>, Typ
             };
             Ok(alloc::vec![Felt::from_u32(v)])
         },
-        DebugPrimitiveType::Felt => Ok(alloc::vec![parse_felt_token(token)?]),
         // Signed ints: check the range, then store as two's-complement 32-bit limbs (low first).
         DebugPrimitiveType::I8
         | DebugPrimitiveType::I16
@@ -190,14 +190,6 @@ fn parse_signed(
 
 fn int_out_of_range(token: &str, p: DebugPrimitiveType) -> TypedDebugInfoError {
     TypedDebugInfoError::IntOutOfRange { token: token.to_string(), ty: p }
-}
-
-/// Reads a decimal `felt` token. A Goldilocks felt is a value in `[0, p)` with
-/// `p = 2^64 - 2^32 + 1`, and `p < 2^64`, so every felt fits in a `u64`; `Felt::try_from` then
-/// rejects the values in `[p, 2^64)` that fit a `u64` but are not valid felts.
-fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
-    let v: u64 = s.parse().map_err(|_| TypedDebugInfoError::InvalidFelt(s.to_string()))?;
-    Felt::try_from(v).map_err(|_| TypedDebugInfoError::FeltOutOfRange(s.to_string()))
 }
 
 fn next_token<I>(tokens: &mut I) -> Result<I::Item, TypedDebugInfoError>
