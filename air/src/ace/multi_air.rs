@@ -48,7 +48,6 @@ where
     let combined_main_w: usize = sub_dags.iter().map(|air| air.aligned_main).sum();
     let combined_aux_w: usize = sub_dags.iter().map(|air| air.aligned_aux).sum();
     let total_aux_values: usize = sub_dags.iter().map(|air| air.aux_values).sum();
-    let total_periodic_columns: usize = sub_dags.iter().map(|air| air.counts.num_periodic).sum();
 
     let reference_counts =
         sub_dags
@@ -76,7 +75,6 @@ where
         num_aux_boundary: total_aux_values,
         num_public: reference_counts.num_public,
         num_randomness: 2,
-        num_periodic: total_periodic_columns,
         num_quotient_chunks: config.num_quotient_chunks,
     };
 

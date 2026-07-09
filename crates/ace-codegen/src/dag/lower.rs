@@ -118,7 +118,10 @@ where
                     builder.input(InputKey::Main { offset, index: v.index })
                 },
                 BaseEntry::Public => builder.input(InputKey::Public(v.index)),
-                BaseEntry::Periodic => periodic_nodes[v.index],
+                BaseEntry::Periodic => periodic_nodes
+                    .get(v.index)
+                    .copied()
+                    .unwrap_or_else(|| panic!("periodic column index {} is out of range", v.index)),
                 BaseEntry::Preprocessed { .. } => {
                     panic!("preprocessed trace entries are not supported")
                 },
@@ -225,14 +228,7 @@ where
 {
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
-        Some(data) => {
-            assert_eq!(
-                data.num_columns(),
-                layout.counts.num_periodic,
-                "periodic column count mismatch"
-            );
-            build_periodic_nodes(&mut builder, layout, data)
-        },
+        Some(data) => build_periodic_nodes(&mut builder, layout, data),
         None => Vec::new(),
     };
     let alpha = builder.input(InputKey::Alpha);

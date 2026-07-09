@@ -30,8 +30,6 @@ pub struct InputCounts {
     pub num_public: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
-    /// Number of periodic columns.
-    pub num_periodic: usize,
     /// Number of quotient chunks.
     pub num_quotient_chunks: usize,
 }
@@ -110,7 +108,7 @@ pub struct InputLayout {
     pub(crate) aux_rand_beta: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
-    /// Total number of inputs.
+    /// Total number of ACE READ inputs.
     pub total_inputs: usize,
     /// Counts used to derive the layout.
     pub counts: InputCounts,
@@ -145,6 +143,9 @@ impl InputLayout {
         }
 
         assert!(max_end <= self.total_inputs, "regions exceed total_inputs");
+
+        assert_eq!(self.regions.main_curr.width, self.counts.width, "main_curr width mismatch");
+        assert_eq!(self.regions.main_next.width, self.counts.width, "main_next width mismatch");
 
         let aux_coord_width = self.counts.aux_width * EXT_DEGREE;
         assert_eq!(self.regions.aux_curr.width, aux_coord_width, "aux_curr width mismatch");

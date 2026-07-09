@@ -24,7 +24,8 @@ fn core_air_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&air.periodic_columns(), z_k);
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&periodic_columns, z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,
@@ -33,7 +34,7 @@ fn core_air_dag_matches_manual_eval() {
         permutation_width: layout.counts.aux_width,
         num_permutation_challenges: layout.counts.num_randomness,
         num_permutation_values: LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
-        num_periodic_columns: layout.counts.num_periodic,
+        num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout);
     LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
@@ -234,14 +235,15 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
         num_airs: MIDEN_AIR_COUNT,
     };
 
-    let circuit =
-        build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &ProofOrder::instance_order())
+    for order in ProofOrder::variants() {
+        let circuit = build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order)
             .expect("multi-AIR ACE circuit");
-    let layout = circuit.layout();
+        let layout = circuit.layout();
 
-    // Fill all input slots with deterministic non-zero values. We don't expect the
-    // circuit to evaluate to zero for arbitrary inputs; this only checks that every
-    // DAG input reference is in range.
-    let inputs: Vec<QuadFelt> = fill_inputs(layout);
-    let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
+        // Fill all input slots with deterministic non-zero values. We don't expect the
+        // circuit to evaluate to zero for arbitrary inputs; this only checks that every
+        // DAG input reference is in range.
+        let inputs: Vec<QuadFelt> = fill_inputs(layout);
+        let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
+    }
 }

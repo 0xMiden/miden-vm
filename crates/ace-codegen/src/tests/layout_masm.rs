@@ -8,7 +8,6 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         num_aux_boundary: 2,
         num_public: 5,
         num_randomness: 2,
-        num_periodic: 1,
         num_quotient_chunks: 2,
     };
     let layout = InputLayout::new_masm(counts);
@@ -39,6 +38,15 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(stark_base % 2, 0);
     assert_eq!(layout.index(InputKey::AuxRandBeta), Some(rand_base));
     assert_eq!(layout.index(InputKey::AuxRandAlpha), Some(rand_base + 1));
+    assert!(public_base < rand_base);
+    assert!(rand_base < main_curr_base);
+    assert!(main_curr_base < aux_curr_base);
+    assert!(aux_curr_base < quotient_curr_base);
+    assert!(quotient_curr_base < main_next_base);
+    assert!(main_next_base < aux_next_base);
+    assert!(aux_next_base < quotient_next_base);
+    assert!(quotient_next_base < aux_bus_base);
+    assert!(aux_bus_base < stark_base);
 
     // EF values: slots 0-6
     let base = layout.index(InputKey::Alpha).unwrap();

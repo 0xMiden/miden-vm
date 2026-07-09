@@ -222,7 +222,6 @@ mod tests {
             num_aux_boundary: 3,
             num_public: 8,
             num_randomness: 2,
-            num_periodic: 0,
             num_quotient_chunks: 1,
         }
     }

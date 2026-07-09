@@ -93,6 +93,8 @@ pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> Result<AceCirc
 where
     EF: Field,
 {
+    layout.validate();
+
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();
     let mut operations = Vec::new();
