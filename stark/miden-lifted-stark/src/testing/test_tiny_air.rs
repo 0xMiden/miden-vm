@@ -37,10 +37,10 @@ struct TinyAir {
 }
 
 impl TinyAir {
-    fn new(periods: Vec<usize>) -> Self {
+    fn new(periods: impl IntoIterator<Item = usize>) -> Self {
         let periodic_cols = periods
-            .iter()
-            .map(|&p| {
+            .into_iter()
+            .map(|p| {
                 let mut col = vec![Felt::ZERO; p];
                 col[0] = Felt::ONE;
                 col[p - 1] = Felt::ONE;

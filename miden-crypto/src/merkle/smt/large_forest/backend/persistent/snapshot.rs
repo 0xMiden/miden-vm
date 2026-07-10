@@ -100,7 +100,7 @@ impl PersistentBackendReader {
         }
     }
 
-    fn load_subtree(&self, tree_key: SubtreeKey) -> Result<Option<Subtree>> {
+    fn load_subtree(&self, tree_key: &SubtreeKey) -> Result<Option<Subtree>> {
         let cf = self.subtree_cf(tree_key.index)?;
         let key_bytes = tree_key.to_bytes();
         let result = match self.inner.snapshot.get_cf(cf, key_bytes) {
@@ -155,7 +155,7 @@ impl BackendReader for PersistentBackendReader {
             lineage,
             key,
             |l, k| self.load_leaf_for(l, k),
-            |k| self.load_subtree(k),
+            |k| self.load_subtree(&k),
         )
     }
 

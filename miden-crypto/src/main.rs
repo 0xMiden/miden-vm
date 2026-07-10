@@ -333,19 +333,19 @@ fn prepare_database_directory(path: &Path, reset: bool) -> Result<(), LargeSmtEr
         }
 
         std::fs::remove_dir_all(path).map_err(|err| {
-            storage_io_error(format!("failed to reset database path {}", path.display()), err)
+            storage_io_error(&format!("failed to reset database path {}", path.display()), &err)
         })?;
     }
 
     std::fs::create_dir_all(path).map_err(|err| {
-        storage_io_error(format!("failed to create database path {}", path.display()), err)
+        storage_io_error(&format!("failed to create database path {}", path.display()), &err)
     })?;
 
     Ok(())
 }
 
 #[cfg(any(test, feature = "rocksdb"))]
-fn storage_io_error(message: String, err: std::io::Error) -> LargeSmtError {
+fn storage_io_error(message: &str, err: &std::io::Error) -> LargeSmtError {
     StorageError::Backend(Box::new(std::io::Error::new(err.kind(), format!("{message}: {err}"))))
         .into()
 }

@@ -194,7 +194,7 @@ impl BackendReader for PersistentBackend {
             lineage,
             key,
             |l, k| self.load_leaf_for(l, k),
-            |k| self.load_subtree(k),
+            |k| self.load_subtree(&k),
         )
     }
 
@@ -473,10 +473,10 @@ impl Backend for PersistentBackend {
         let final_batch = if lineage_count > MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE {
             batches
                 .into_par_iter()
-                .fold(WriteBatch::new, |l, r| merge_batches(l, &r))
-                .reduce(WriteBatch::new, |l, r| merge_batches(l, &r))
+                .fold(WriteBatch::new, |l, r| merge_batches(&l, &r))
+                .reduce(WriteBatch::new, |l, r| merge_batches(&l, &r))
         } else {
-            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(l, &r))
+            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(&l, &r))
         };
 
         // We first write the full atomic update to disk. If it errors, we bail.
@@ -682,7 +682,7 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if the backend cannot be started up properly.
     pub fn load(config: Config) -> Result<Self> {
         let db = Arc::new(Self::build_db_with_options(&config)?);
-        let lineages = Arc::new(Self::read_all_metadata(db.clone())?);
+        let lineages = Arc::new(Self::read_all_metadata(&db)?);
         let sync_writes = config.sync_writes;
 
         Ok(Self { db, lineages, sync_writes })
@@ -978,7 +978,7 @@ impl PersistentBackend {
 
         // We now unconditionally load the subtree from storage as all subtrees are stored on disk.
         let mut subtree = self
-            .load_subtree(SubtreeKey { lineage, index: subtree_root_index })?
+            .load_subtree(&SubtreeKey { lineage, index: subtree_root_index })?
             .unwrap_or_else(|| Subtree::new(subtree_root_index));
 
         // We then build the mutations for the subtree.
@@ -1067,7 +1067,7 @@ impl PersistentBackend {
                     EmptySubtreeRoots::get_inner_node(SMT_DEPTH, parent_index.depth())
                 });
 
-                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, parent_node);
+                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, &parent_node);
                 let combined_hash = combined_node.hash();
 
                 let &empty_hash = EmptySubtreeRoots::entry(SMT_DEPTH, current_depth);
@@ -1102,7 +1102,7 @@ impl PersistentBackend {
     /// # Errors
     ///
     /// - [`BackendError::Internal`] if the underlying database cannot be accessed.
-    fn load_subtree(&self, tree_key: SubtreeKey) -> Result<Option<Subtree>> {
+    fn load_subtree(&self, tree_key: &SubtreeKey) -> Result<Option<Subtree>> {
         let cf = self.subtree_cf(tree_key.index)?;
         let key_bytes = tree_key.to_bytes();
         let result = match self.db.get_cf(cf, key_bytes) {
@@ -1535,7 +1535,7 @@ impl PersistentBackend {
     ///
     /// - [`BackendError::CorruptedData`] if data corruption is discovered.
     /// - [`BackendError::Internal`] if the metadata cannot be read from disk.
-    fn read_all_metadata(db: Arc<DB>) -> Result<HashMap<LineageId, TreeMetadata>> {
+    fn read_all_metadata(db: &Arc<DB>) -> Result<HashMap<LineageId, TreeMetadata>> {
         let cf = db.cf_handle(METADATA_CF).ok_or_else(|| {
             BackendError::CorruptedData(format!("{METADATA_CF} column not found"))
         })?;

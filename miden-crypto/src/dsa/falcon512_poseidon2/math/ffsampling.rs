@@ -12,7 +12,7 @@ const SIGMIN: f64 = 1.2778336969128337;
 /// Computes the Gram matrix. The argument must be a 2x2 matrix
 /// whose elements are equal-length vectors of complex numbers,
 /// representing polynomials in FFT domain.
-pub fn gram(b: [Polynomial<Complex64>; 4]) -> [Polynomial<Complex64>; 4] {
+pub fn gram(b: &[Polynomial<Complex64>; 4]) -> [Polynomial<Complex64>; 4] {
     const N: usize = 2;
     let mut g: [Polynomial<Complex<f64>>; 4] =
         [Polynomial::zero(), Polynomial::zero(), Polynomial::zero(), Polynomial::zero()];
@@ -55,7 +55,7 @@ pub fn gram(b: [Polynomial<Complex64>; 4]) -> [Polynomial<Complex64>; 4] {
 /// 3. From position (1,1): l10·d00·conj(l10) + 1·d11·1 = `g[3]` → d11 = `g[3]` - l10·d00·conj(l10)
 ///    → **d11 = `g[3]` - |l10|²·`g[0]`**
 pub fn ldl(
-    g: [Polynomial<Complex64>; 4],
+    g: &[Polynomial<Complex64>; 4],
 ) -> (Polynomial<Complex64>, Polynomial<Complex64>, Polynomial<Complex64>) {
     // Compute l10 = g[2] / g[0]
     let l10 = g[2].hadamard_div(&g[0]);
@@ -126,7 +126,7 @@ impl ZeroizeOnDrop for LdlTree {}
 /// The argument is a 2x2 matrix of polynomials, given in FFT form.
 ///
 /// [1]: <https://falcon-sign.info/falcon.pdf>
-pub fn ffldl(gram_matrix: [Polynomial<Complex64>; 4]) -> LdlTree {
+pub fn ffldl(gram_matrix: &[Polynomial<Complex64>; 4]) -> LdlTree {
     let n = gram_matrix[0].coefficients.len();
     let (l10, d00, d11) = ldl(gram_matrix);
 
@@ -135,7 +135,7 @@ pub fn ffldl(gram_matrix: [Polynomial<Complex64>; 4]) -> LdlTree {
         let (d11_left, d11_right) = d11.split_fft();
         let g0 = [d00_left.clone(), d00_right.clone(), d00_right.map(Complex::conj), d00_left];
         let g1 = [d11_left.clone(), d11_right.clone(), d11_right.map(Complex::conj), d11_left];
-        LdlTree::Branch(l10, Box::new(ffldl(g0)), Box::new(ffldl(g1)))
+        LdlTree::Branch(l10, Box::new(ffldl(&g0)), Box::new(ffldl(&g1)))
     } else {
         LdlTree::Branch(
             l10,
@@ -299,7 +299,7 @@ mod tests {
             let g = random_hermitian_matrix(degree, &mut rng);
 
             // Compute LDL decomposition
-            let (l10, d00, d11) = ldl(g.clone());
+            let (l10, d00, d11) = ldl(&g);
 
             // Reconstruct G from L·D·L*
             let g_reconstructed = reconstruct_g(&l10, &d00, &d11);

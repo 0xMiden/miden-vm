@@ -179,7 +179,7 @@ impl SmtForest {
             if value == crate::EMPTY_WORD {
                 let _ = leaf.remove(key);
             } else {
-                leaf.insert(key, value).map_err(to_merkle_error)?;
+                leaf.insert(key, value).map_err(|err| to_merkle_error(&err))?;
             }
         }
 
@@ -249,9 +249,11 @@ impl SmtForest {
     }
 }
 
-fn to_merkle_error(err: SmtLeafError) -> MerkleError {
+fn to_merkle_error(err: &SmtLeafError) -> MerkleError {
     match err {
-        SmtLeafError::TooManyLeafEntries { actual } => MerkleError::TooManyLeafEntries { actual },
+        SmtLeafError::TooManyLeafEntries { actual } => {
+            MerkleError::TooManyLeafEntries { actual: *actual }
+        },
         _ => unreachable!("other SmtLeafError variants should not be possible here"),
     }
 }

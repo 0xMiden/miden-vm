@@ -85,7 +85,7 @@ xclippy = [
   # -Wclippy::match_wildcard_for_single_variants (2 warnings)
   # -Wclippy::needless_continue           (6 warnings)
   # -Wclippy::needless_for_each           (10 warnings)
-  # -Wclippy::needless_pass_by_value      (37 warnings)
+  # -Wclippy::needless_pass_by_value      (8 warnings)
   # -Wclippy::ptr_as_ptr                  (12 warnings)
   # -Wclippy::semicolon_if_nothing_returned (159 warnings)
   # -Wclippy::single_match_else           (16 warnings)

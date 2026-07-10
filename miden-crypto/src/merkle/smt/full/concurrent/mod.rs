@@ -197,7 +197,7 @@ impl Smt {
                 // the tree.
                 let parent_index = NodeIndex::new_unchecked(next_depth, first_leaf.col).parent();
                 let parent_node = self.get_inner_node(parent_index);
-                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, parent_node);
+                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, &parent_node);
                 let combined_hash = combined_node.hash();
 
                 let &empty_hash = EmptySubtreeRoots::entry(tree_depth, current_depth);
@@ -674,7 +674,7 @@ pub(crate) fn build_subtree(
 pub(crate) fn fetch_sibling_pair(
     iter: &mut core::iter::Peekable<alloc::vec::Drain<SubtreeLeaf>>,
     first_leaf: SubtreeLeaf,
-    parent_node: InnerNode,
+    parent_node: &InnerNode,
 ) -> InnerNode {
     let is_right_node = first_leaf.col.is_odd();
 

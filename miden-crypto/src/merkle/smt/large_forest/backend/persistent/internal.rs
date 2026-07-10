@@ -40,7 +40,7 @@ use crate::merkle::smt::large_forest::backend::persistent::WriteBatch;
 ///
 /// - If the data for either the left or right batch is corrupt, as this indicates a bug in the
 ///   underlying RocksDB implementation and should not be continued with.
-pub fn merge_batches(left: WriteBatch, right: &WriteBatch) -> WriteBatch {
+pub fn merge_batches(left: &WriteBatch, right: &WriteBatch) -> WriteBatch {
     const SEQUENCE_SIZE: usize = size_of::<u64>();
     const COUNT_SIZE: usize = size_of::<u32>();
     const HEADER_SIZE: usize = SEQUENCE_SIZE + COUNT_SIZE;

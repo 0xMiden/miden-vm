@@ -1005,7 +1005,7 @@ mod keys_serialization_tests {
     use super::*;
     use crate::{dsa::ecdsa_k256_keccak::KeyExchangeKey, utils::ByteReader};
 
-    fn assert_roundtrip(sealing_key: SealingKey) {
+    fn assert_roundtrip(sealing_key: &SealingKey) {
         let expected_scheme = sealing_key.scheme();
         let expected_tag = expected_scheme as u8;
 
@@ -1015,19 +1015,19 @@ mod keys_serialization_tests {
 
         let decoded = <SealingKey as Deserializable>::read_from_bytes(&bytes)
             .expect("failed to deserialize sealing key");
-        assert_eq!(decoded, sealing_key);
+        assert_eq!(&decoded, sealing_key);
         assert_eq!(decoded.scheme(), expected_scheme);
 
         // also confirm direct reader usage consumes all data
         let mut reader = SliceReader::new(&bytes);
         let decoded_via_reader =
             SealingKey::read_from(&mut reader).expect("failed to deserialize sealing key");
-        assert_eq!(decoded_via_reader, sealing_key);
+        assert_eq!(&decoded_via_reader, sealing_key);
         assert_eq!(decoded_via_reader.scheme(), expected_scheme);
         assert!(!reader.has_more_bytes());
     }
 
-    fn assert_unsealing_roundtrip(unsealing_key: UnsealingKey) {
+    fn assert_unsealing_roundtrip(unsealing_key: &UnsealingKey) {
         let expected_scheme = unsealing_key.scheme();
         let expected_tag = expected_scheme as u8;
 
@@ -1073,14 +1073,14 @@ mod keys_serialization_tests {
     #[test]
     fn sealing_keys_roundtrip() {
         for key in sample_sealing_keys() {
-            assert_roundtrip(key);
+            assert_roundtrip(&key);
         }
     }
 
     #[test]
     fn unsealing_keys_roundtrip() {
         for key in sample_unsealing_keys() {
-            assert_unsealing_roundtrip(key);
+            assert_unsealing_roundtrip(&key);
         }
     }
 

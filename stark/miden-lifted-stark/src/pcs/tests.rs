@@ -44,7 +44,7 @@ fn test_params() -> PcsParams {
 
 /// Run the full prover+verifier roundtrip for the given trees and params.
 /// On success, also checks that the transcript is fully consumed.
-fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(), PcsError> {
+fn run_pcs_case(params: &PcsParams, trees: &[TestTree], seed: u64) -> Result<(), PcsError> {
     let rng = &mut SmallRng::seed_from_u64(seed);
     let lmcs = test_lmcs();
 
@@ -152,7 +152,7 @@ fn test_pcs_cases() {
     let rng = &mut SmallRng::seed_from_u64(42);
     let matrix = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![matrix.bit_reverse_rows()]);
-    run_pcs_case(&params, vec![tree], 100).expect("single-tree roundtrip");
+    run_pcs_case(&params, &[tree], 100).expect("single-tree roundtrip");
 
     // Case 2: two separate trees with different column counts.
     let rng = &mut SmallRng::seed_from_u64(24);
@@ -160,14 +160,14 @@ fn test_pcs_cases() {
     let mat_b = random_lde_matrix(rng, 6, log_blowup, 4, lde_shift);
     let tree_a = lmcs.build_aligned_tree(vec![mat_a.bit_reverse_rows()]);
     let tree_b = lmcs.build_aligned_tree(vec![mat_b.bit_reverse_rows()]);
-    run_pcs_case(&params, vec![tree_a, tree_b], 200).expect("multi-tree roundtrip");
+    run_pcs_case(&params, &[tree_a, tree_b], 200).expect("multi-tree roundtrip");
 
     // Case 3: mixed heights in one commitment group (LMCS upsampling).
     let rng = &mut SmallRng::seed_from_u64(99);
     let short = random_lde_matrix(rng, 4, log_blowup, 2, lde_shift);
     let tall = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![short.bit_reverse_rows(), tall.bit_reverse_rows()]);
-    run_pcs_case(&params, vec![tree], 300).expect("mixed-height roundtrip");
+    run_pcs_case(&params, &[tree], 300).expect("mixed-height roundtrip");
 
     // Case 4: random (non-low-degree) data — FRI should reject.
     let rng = &mut SmallRng::seed_from_u64(77);
@@ -185,7 +185,7 @@ fn test_pcs_cases() {
     let matrix = RowMajorMatrix::<Felt>::rand(rng, height, 3);
     let tree = lmcs.build_aligned_tree(vec![matrix.bit_reverse_rows()]);
     assert!(
-        run_pcs_case(&reject_params, vec![tree], 400).is_err(),
+        run_pcs_case(&reject_params, &[tree], 400).is_err(),
         "should reject high-degree polynomial"
     );
 }

@@ -105,9 +105,9 @@ impl SecretKey {
         // FFT each polynomial of the short basis.
         let basis_fft = to_complex_fft(&basis);
         // compute the Gram matrix.
-        let gram_fft = gram(basis_fft);
+        let gram_fft = gram(&basis_fft);
         // construct the LDL tree of the Gram matrix.
-        let mut tree = ffldl(gram_fft);
+        let mut tree = ffldl(&gram_fft);
         // normalize the leaves of the LDL tree.
         normalize_tree(&mut tree, SIGMA);
         Self { secret_key: basis, tree }
@@ -155,7 +155,7 @@ impl SecretKey {
 
         let h = self.compute_pub_key_poly();
         let c = hash_to_point_poseidon2(message, &nonce);
-        let s2 = self.sign_helper(c, rng);
+        let s2 = self.sign_helper(&c, rng);
 
         Signature::new(nonce, h, s2)
     }
@@ -184,7 +184,7 @@ impl SecretKey {
         let c = hash_to_point_shake256(message, &nonce);
 
         let mut chacha_prng = ChaCha::new(rng);
-        let s2 = self.sign_helper(c, &mut chacha_prng);
+        let s2 = self.sign_helper(&c, &mut chacha_prng);
 
         Signature::new(nonce, h, s2)
     }
@@ -207,7 +207,7 @@ impl SecretKey {
     ///
     /// Takes a randomness generator implementing `Rng` and message polynomial representing `c`
     /// the hash-to-point of the message to be signed. It outputs a signature polynomial `s2`.
-    fn sign_helper<R: Rng>(&self, c: Polynomial<FalconFelt>, rng: &mut R) -> SignaturePoly {
+    fn sign_helper<R: Rng>(&self, c: &Polynomial<FalconFelt>, rng: &mut R) -> SignaturePoly {
         let one_over_q = 1.0 / (MODULUS as f64);
         let c_over_q_fft = c.map(|cc| Complex::new(one_over_q * cc.value() as f64, 0.0)).fft();
 

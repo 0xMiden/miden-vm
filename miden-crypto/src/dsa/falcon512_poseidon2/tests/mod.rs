@@ -28,7 +28,7 @@ fn test_signature_gen_reference_impl() {
     // the reference implementation uses SHAKE256 for generating:
     // 1. The nonce for the hash-to-point algorithm.
     // 2. The seed used for initializing the ChaCha20 PRNG which is used in signature generation.
-    let mut rng_shake = Shake256Testing::new(seed.to_vec());
+    let mut rng_shake = Shake256Testing::new(seed);
 
     // the test vectors in the reference implementation include test vectors for signatures with
     // parameter N = 2^i for i = 1..10, where N is the exponent of the monic irreducible polynomial

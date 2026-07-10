@@ -48,7 +48,7 @@ fn arb_updates(
     min_updates: usize,
     max_updates: usize,
 ) -> impl Strategy<Value = Vec<(Word, Word)>> {
-    let existing_keys: Vec<Word> = existing_entries.iter().map(|(k, _)| *k).collect();
+    let existing_keys: Vec<Word> = existing_entries.into_iter().map(|(k, _)| k).collect();
     let has_existing = !existing_keys.is_empty();
 
     // Generate raw update params: (is_new_key, is_deletion, idx_seed, random_key, random_val)

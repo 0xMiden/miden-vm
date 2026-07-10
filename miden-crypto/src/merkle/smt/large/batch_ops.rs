@@ -250,7 +250,7 @@ impl<S: SmtStorage> LargeSmt<S> {
                 } else {
                     self.get_inner_node(parent_index)
                 };
-                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, parent_node);
+                let combined_node = fetch_sibling_pair(&mut iter, first_leaf, &parent_node);
                 let combined_hash = combined_node.hash();
 
                 let &empty_hash = EmptySubtreeRoots::entry(tree_depth, current_depth);
