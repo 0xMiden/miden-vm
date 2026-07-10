@@ -12,19 +12,18 @@ mod tests;
 // FRI OPERATIONS
 // ================================================================================================
 
-/// Performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2
-/// extension of the base field. Additionally, performs several computations which simplify
-/// FRI verification procedure.
+/// Performs one factor-4 FRI layer fold over the quadratic extension field and writes the
+/// loop state used by the recursive verifier.
 ///
 /// Specifically:
-/// - Folds 4 query values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1).
+/// - Folds 4 leaf values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1).
 /// - Computes new value of the domain generator power: poe' = poe^4.
 /// - Increments layer pointer (cptr) by 8.
 /// - Checks that the previous folding was done correctly.
 /// - Shifts the stack to the left to move an item from the overflow table to stack position 15.
 ///
 /// Bit-reversal handling:
-/// - Query values exist on the stack in bit-reversed order.
+/// - Leaf values are stored on the stack in bit-reversed order.
 /// - `coset` on the stack is the natural coset index in the four-element folded row. The
 ///   instruction bit-reverses it only for selecting the row element used in the consistency check.
 ///
@@ -43,8 +42,7 @@ mod tests;
 /// To keep the degree of the constraints low, a number of intermediate values are used.
 /// Specifically, the operation relies on all 6 helper registers, and also uses the first 8
 /// elements of the stack at the next state for degree reduction purposes. Thus, once the
-/// operation has been executed, the top 8 elements of the stack can be considered to be
-/// "garbage".
+/// operation has been executed, callers should treat the top 8 stack elements as scratch.
 #[inline(always)]
 pub(super) fn op_fri_ext2fold4<P>(
     processor: &mut P,
@@ -54,7 +52,7 @@ where
 {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
-    // Reorder from bit-reversed to natural for fold4.
+    // Reorder the leaf values from stack order to natural order for fold4.
     let query_values_reordered = reorder_bitrev4(query_values);
     // The natural coset selects the tau factor. Its bit-reversal selects the row element because
     // the four opened values are committed in bit-reversed order.
@@ -65,28 +63,28 @@ where
         )));
     }
     let folded_pos = processor.stack().get(8);
-    // the power of the domain generator which can be used to determine current domain value x
+    // Power of the domain generator at the queried source-domain position.
     let poe = processor.stack().get(10);
     if poe.is_zero() {
         return Err(OperationError::FriError("domain size was 0".into()));
     }
-    // the result of the previous layer folding
+    // Previous layer's folded value.
     let prev_value = {
         let pe0 = processor.stack().get(11);
         let pe1 = processor.stack().get(12);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [pe0, pe1][i])
     };
-    // the verifier challenge for the current layer
+    // Current FRI layer challenge.
     let alpha = {
         let a0 = processor.stack().get(13);
         let a1 = processor.stack().get(14);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [a0, a1][i])
     };
-    // the memory address of the current layer
+    // Current FRI layer pointer.
     let layer_ptr = processor.stack().get(15);
 
-    // --- make sure the previous folding was done correctly --------------
-    // Consistency check: query_values[row_idx] == prev_value.
+    // --- check cross-layer consistency ---------------------------------
+    // prev_value = q_coset.
     let row_idx = bit_reverse_coset(coset as usize);
     if query_values[row_idx] != prev_value {
         return Err(OperationError::FriError(format!(
