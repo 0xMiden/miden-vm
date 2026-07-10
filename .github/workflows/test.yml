@@ -87,6 +87,12 @@ jobs:
             -p miden-serde-utils \
             -p miden-crypto-wycheproof-tests \
             --features miden-crypto/concurrent,miden-crypto/testing,miden-field/testing
+          cargo nextest run \
+            --profile ci \
+            --cargo-profile test-dev \
+            -p miden-crypto \
+            --test rocksdb_large_smt \
+            --features miden-crypto/rocksdb
           make test-lifted-stark
 
   doc-tests:
