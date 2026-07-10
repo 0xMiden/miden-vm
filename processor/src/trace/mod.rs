@@ -41,8 +41,8 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
 ///
-/// Its binary form is trusted replay data. Sparse MAST hashes inside the trace generation context
-/// are not validated against untrusted senders; see
+/// Its binary form is trusted replay data. Sparse MAST node and digest maps inside the trace
+/// generation context are not checked against a source `MastForest` commitment; see
 /// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
@@ -90,7 +90,9 @@ impl Deserializable for TraceBuildOutput {
             &deferred_wire,
             DEFAULT_MAX_DEFERRED_ELEMENTS,
         )
-        .map_err(|err| DeserializationError::InvalidValue(format!("invalid deferred state: {err}")))?;
+        .map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid deferred state: {err}"))
+        })?;
 
         Ok(Self { stack_outputs, deferred_state })
     }
@@ -128,7 +130,7 @@ impl TraceBuildInputs {
 
     // Kept for mismatch and edge-case tests that mutate replay inputs directly.
     #[cfg(any(test, feature = "testing"))]
-    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
+    #[expect(dead_code, reason = "used only by replay-mutation tests")]
     fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
         (self.trace_output, self.trace_generation_context, self.program_info)
     }
@@ -147,6 +149,7 @@ impl TraceBuildInputs {
     }
 
     #[cfg(test)]
+    #[expect(dead_code, reason = "used only by replay-mutation tests")]
     fn from_parts(
         trace_output: TraceBuildOutput,
         trace_generation_context: TraceGenerationContext,

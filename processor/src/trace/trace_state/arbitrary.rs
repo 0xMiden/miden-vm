@@ -31,11 +31,11 @@ impl Arbitrary for SystemState {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (arb_row_index(), any::<ContextId>(), any::<Word>(), any::<Word>())
-            .prop_map(|(clk, ctx, fn_hash, pc_transcript_state)| Self {
+            .prop_map(|(clk, ctx, fn_hash, deferred_root)| Self {
                 clk,
                 ctx,
                 fn_hash,
-                pc_transcript_state,
+                deferred_root,
             })
             .boxed()
     }

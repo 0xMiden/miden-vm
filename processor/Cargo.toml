@@ -48,7 +48,7 @@ miden-utils-indexing.workspace = true
 itertools.workspace = true
 paste.workspace = true
 proptest = { workspace = true, optional = true }
-rayon = { version = "1.10", default-features = false }
+rayon.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 

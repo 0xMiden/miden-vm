@@ -64,8 +64,9 @@ pub struct TraceGenerationContext {
     /// `MastForestResolutionReplay`, and `HasherOp::HashBasicBlock` are encoded as
     /// [`MastForestId`]s into this vector.
     ///
-    /// Serialized entries are trusted sparse replay data. Their sparse MAST hashes are not
-    /// recomputed on read; see <https://github.com/0xMiden/miden-vm/issues/3303>.
+    /// Serialized entries are trusted sparse replay data. Their node and digest maps are not
+    /// checked against a source [`MastForest`] commitment on read; see
+    /// <https://github.com/0xMiden/miden-vm/issues/3303>.
     pub mast_forest_store: Vec<Arc<SparseMastForest>>,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
@@ -1219,7 +1220,7 @@ impl Default for HasherChipletShim {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
-    use crate::mast::{BasicBlockNodeBuilder, MastForestContributor};
+    use crate::mast::BasicBlockNodeBuilder;
 
     fn empty_trace_generation_context(
         fragment_size: usize,

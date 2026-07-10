@@ -49,7 +49,8 @@ const TRACE_PROVING_INPUTS_ALLOCATION_BUDGET_MULTIPLIER: usize = 4;
 ///
 /// Its binary form is a VM-owned trusted remote proving input containing trace replay data and
 /// proof-generation options. Deserialization checks malformed structure and bounded allocation, but
-/// sparse MAST hashes are accepted as replay data.
+/// sparse MAST node and digest maps are accepted as replay data and are not checked against a
+/// source [`miden_core::mast::MastForest`] commitment.
 ///
 /// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
 #[derive(Debug)]
@@ -71,7 +72,8 @@ impl TraceProvingInputs {
 
     /// Deserializes trusted remote proving inputs using the supplied byte budget.
     ///
-    /// The budget bounds parsing. It does not validate sparse MAST hashes from untrusted senders.
+    /// The budget bounds parsing. It does not validate sparse MAST replay data from untrusted
+    /// senders.
     /// This function reads one standalone payload and rejects trailing bytes. Readers for a larger
     /// wrapper object should call [`TraceProvingInputs::read_from`] and let the wrapper own the
     /// trailing-byte check.
