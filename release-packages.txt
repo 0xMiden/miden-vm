@@ -1,7 +1,8 @@
 # Publish order for the next miden-vm crate release.
 #
-# Keep this list in dependency order. Remove crates that are not part of a
-# given release, or use the workflow_dispatch packages input to override this
+# Keep this list in topological dependency order: publishable non-dev workspace
+# dependencies must appear before dependents. Remove crates that are not part of
+# a given release, or use the workflow_dispatch packages input to override this
 # file.
 miden-utils-core-derive
 miden-utils-indexing
@@ -18,9 +19,9 @@ miden-mast-package
 miden-package-registry
 miden-project
 miden-assembly
-miden-processor
 miden-precompiles
 miden-precompiles-prover
+miden-processor
 miden-prover
 miden-verifier
 miden-core-lib-codegen
