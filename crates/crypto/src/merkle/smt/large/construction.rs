@@ -1,17 +1,17 @@
 use alloc::vec::Vec;
-use core::mem;
 
 use p3_maybe_rayon::prelude::*;
 
 use super::{
     CONSTRUCTION_SUBTREE_BATCH_SIZE, IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, NUM_IN_MEMORY_NODES,
-    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, SmtStorageReader, StorageError, Subtree,
+    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, SmtStorageReader, StorageError, StorageUpdates,
+    Subtree, SubtreeUpdate,
 };
 use crate::{
     EMPTY_WORD, Word,
     hash::poseidon2::Poseidon2,
     merkle::smt::{
-        EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
+        EmptySubtreeRoots, InnerNode, Map, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
         SparseMerkleTreeReader,
         full::concurrent::{
             PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
@@ -253,63 +253,38 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         let leaf_count = initial_leaves.len();
         let entry_count = initial_leaves.values().map(SmtLeaf::num_entries).sum();
-
-        // Store the initial leaves
-        self.storage.set_leaves(initial_leaves)?;
-        self.leaf_count = leaf_count;
-        self.entry_count = entry_count;
+        let mut subtree_updates = Vec::with_capacity(CONSTRUCTION_SUBTREE_BATCH_SIZE);
 
         // build deep (disk-backed) subtrees
-        leaf_subtrees = std::thread::scope(|scope| -> LargeSmtResult<Vec<Vec<SubtreeLeaf>>> {
-            let (sender, receiver) = flume::bounded(CONSTRUCTION_SUBTREE_BATCH_SIZE);
-            let storage = &mut self.storage;
+        for bottom_depth in (IN_MEMORY_DEPTH + SUBTREE_DEPTH..=SMT_DEPTH)
+            .step_by(SUBTREE_DEPTH as usize)
+            .rev()
+        {
+            let subtree_results: Vec<(SubtreeLeaf, SubtreeUpdate)> = leaf_subtrees
+                .into_par_iter()
+                .map(|subtree_leaves| {
+                    debug_assert!(subtree_leaves.is_sorted());
+                    debug_assert!(!subtree_leaves.is_empty());
+                    let (nodes, subtree_root) =
+                        build_subtree(subtree_leaves, SMT_DEPTH, bottom_depth);
 
-            let writer = scope.spawn(move || -> LargeSmtResult<()> {
-                let mut subtrees: Vec<Subtree> =
-                    Vec::with_capacity(CONSTRUCTION_SUBTREE_BATCH_SIZE);
-                for subtree in receiver.iter() {
-                    subtrees.push(subtree);
-                    if subtrees.len() == CONSTRUCTION_SUBTREE_BATCH_SIZE {
-                        let subtrees_clone = mem::take(&mut subtrees);
-                        storage.set_subtrees(subtrees_clone)?;
+                    let subtree_root_index =
+                        NodeIndex::new(bottom_depth - SUBTREE_DEPTH, subtree_root.col).unwrap();
+                    let mut subtree = Subtree::new(subtree_root_index);
+                    for (index, node) in nodes {
+                        subtree.insert_inner_node(index, node);
                     }
-                }
-                storage.set_subtrees(subtrees)?;
-                Ok(())
-            });
-
-            for bottom_depth in (IN_MEMORY_DEPTH + SUBTREE_DEPTH..=SMT_DEPTH)
-                .step_by(SUBTREE_DEPTH as usize)
-                .rev()
-            {
-                let mut subtree_roots: Vec<SubtreeLeaf> = leaf_subtrees
-                    .into_par_iter()
-                    .map(|subtree_leaves| {
-                        debug_assert!(subtree_leaves.is_sorted());
-                        debug_assert!(!subtree_leaves.is_empty());
-                        let (nodes, subtree_root) =
-                            build_subtree(subtree_leaves, SMT_DEPTH, bottom_depth);
-
-                        let subtree_root_index =
-                            NodeIndex::new(bottom_depth - SUBTREE_DEPTH, subtree_root.col).unwrap();
-                        let mut subtree = Subtree::new(subtree_root_index);
-                        for (index, node) in nodes {
-                            subtree.insert_inner_node(index, node);
-                        }
-                        let _ = sender.send(subtree);
-                        subtree_root
-                    })
-                    .collect();
-                leaf_subtrees = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
-                debug_assert!(!leaf_subtrees.is_empty());
+                    (subtree_root, SubtreeUpdate::Store { index: subtree_root_index, subtree })
+                })
+                .collect();
+            let mut subtree_roots = Vec::with_capacity(subtree_results.len());
+            for (subtree_root, subtree_update) in subtree_results {
+                subtree_roots.push(subtree_root);
+                subtree_updates.push(subtree_update);
             }
-
-            drop(sender);
-            writer.join().map_err(|_| {
-                MerkleError::InternalError("subtree writer thread panicked".into())
-            })??;
-            Ok(leaf_subtrees)
-        })?;
+            leaf_subtrees = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
+            debug_assert!(!leaf_subtrees.is_empty());
+        }
 
         // build top of the tree (in-memory only, normal insert)
         for bottom_depth in (SUBTREE_DEPTH..=IN_MEMORY_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
@@ -331,6 +306,18 @@ impl<S: SmtStorage> LargeSmt<S> {
             }
         }
         self.set_root(self.get_inner_node(NodeIndex::root()).hash());
+
+        let leaf_updates = initial_leaves.into_iter().map(|(index, leaf)| (index, Some(leaf)));
+        let updates = StorageUpdates::from_parts(
+            leaf_updates.collect(),
+            subtree_updates,
+            leaf_count as isize,
+            entry_count as isize,
+        );
+        self.storage.apply(updates)?;
+        self.leaf_count = leaf_count;
+        self.entry_count = entry_count;
+
         Ok(())
     }
 
