@@ -28,6 +28,9 @@ use crate::{
 
 mod serde;
 
+#[cfg(test)]
+mod serialization_tests;
+
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
 

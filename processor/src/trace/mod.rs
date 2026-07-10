@@ -219,6 +219,16 @@ impl VmWitness {
     pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
     }
+
+    /// Returns the number of sparse MAST forests captured in the replay.
+    ///
+    /// Available under the `testing` feature for external tests that check which replay data a
+    /// serialized witness preserves.
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub fn mast_forest_count(&self) -> usize {
+        self.trace.mast_forest_store.len()
+    }
 }
 
 impl Serializable for VmWitness {

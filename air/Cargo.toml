@@ -22,7 +22,7 @@ default = ["std"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "thiserror/std"]
 concurrent = ["std"]
-testing = []
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies

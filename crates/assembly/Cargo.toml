@@ -30,7 +30,7 @@ std = [
     "tempfile/getrandom",
     "thiserror/std",
 ]
-testing = ["logging", "miden-assembly-syntax/testing"]
+testing = ["arbitrary", "logging", "miden-assembly-syntax/testing"]
 logging = ["dep:env_logger"]
 
 [dependencies]
