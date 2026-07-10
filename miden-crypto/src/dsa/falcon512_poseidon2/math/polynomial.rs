@@ -627,7 +627,7 @@ impl Polynomial<FalconFelt> {
 impl Polynomial<Felt> {
     /// Returns the coefficients of this polynomial as Miden field elements.
     pub fn to_elements(&self) -> Vec<Felt> {
-        self.coefficients.to_vec()
+        self.coefficients.clone()
     }
 }
 

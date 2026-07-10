@@ -30,6 +30,7 @@ xclippy = [
   "-Wclippy::float_cmp_const",
   "-Wclippy::fn_params_excessive_bools",
   "-Wclippy::if_let_mutex",
+  "-Wclippy::implicit_clone",
   "-Wclippy::imprecise_flops",
   "-Wclippy::inefficient_to_string",
   "-Wclippy::invalid_upcast_comparisons",
@@ -60,6 +61,7 @@ xclippy = [
   "-Wclippy::same_functions_in_if_condition",
   "-Wclippy::string_add",
   "-Wclippy::string_add_assign",
+  "-Wclippy::string_lit_as_bytes",
   "-Wclippy::todo",
   "-Wclippy::trait_duplication_in_bounds",
   "-Wclippy::unimplemented",
@@ -75,7 +77,6 @@ xclippy = [
   # -Wclippy::fallible_impl_from          (4 warnings)
   # -Wclippy::flat_map_option             (1 warning)
   # -Wclippy::from_iter_instead_of_collect (6 warnings)
-  # -Wclippy::implicit_clone              (2 warnings)
   # -Wclippy::map_err_ignore              (138 warnings)
   # -Wclippy::map_unwrap_or               (17 warnings)
   # -Wclippy::manual_assert               (6 warnings)
@@ -88,7 +89,6 @@ xclippy = [
   # -Wclippy::ptr_as_ptr                  (12 warnings)
   # -Wclippy::semicolon_if_nothing_returned (159 warnings)
   # -Wclippy::single_match_else           (16 warnings)
-  # -Wclippy::string_lit_as_bytes         (1 warning)
   # -Wclippy::unnecessary_wraps           (9 warnings)
   # -Wclippy::unused_self                 (8 warnings)
   # -Wclippy::cast_lossless               (158 warnings)
@@ -123,6 +123,7 @@ xclippy-fix = [
   "-Wclippy::float_cmp_const",
   "-Wclippy::fn_params_excessive_bools",
   "-Wclippy::if_let_mutex",
+  "-Wclippy::implicit_clone",
   "-Wclippy::imprecise_flops",
   "-Wclippy::inefficient_to_string",
   "-Wclippy::invalid_upcast_comparisons",
@@ -153,6 +154,7 @@ xclippy-fix = [
   "-Wclippy::same_functions_in_if_condition",
   "-Wclippy::string_add",
   "-Wclippy::string_add_assign",
+  "-Wclippy::string_lit_as_bytes",
   "-Wclippy::todo",
   "-Wclippy::trait_duplication_in_bounds",
   "-Wclippy::unimplemented",

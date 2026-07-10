@@ -156,7 +156,7 @@ fn build_preversioned_fixed_nonce() -> [u8; PREVERSIONED_NONCE_LEN] {
 
     let mut result = [0_u8; 39];
     result[0] = LOG_N;
-    let domain_separator = "FALCON-POSEIDON2-DET".as_bytes();
+    let domain_separator = b"FALCON-POSEIDON2-DET";
 
     result
         .iter_mut()
