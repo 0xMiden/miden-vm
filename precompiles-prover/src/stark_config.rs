@@ -11,8 +11,8 @@
 
 pub use miden_air::config::{
     Blake3Config, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
-    blake3_256_config, keccak_config, observe_protocol_params, pcs_params, poseidon2_config,
-    rpo_config, rpx_config,
+    blake3_256_config, keccak_config, observe_protocol_params, poseidon2_config, rpo_config,
+    rpx_config,
 };
 use miden_core::Felt;
 use miden_crypto::{
@@ -41,6 +41,34 @@ const COMPRESSION_INPUTS: usize = 2;
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Poseidon2;
+
+// PRECOMPILE PCS PARAMETERS
+// ================================================================================================
+
+/// PCS parameters for the precompile chiplet stack.
+///
+/// Every chiplet AIR in [`ChipletAir`](crate::session::ChipletAir) closes at
+/// `log_quotient_degree <= 2` (see the `log_quotient_degrees_fit_the_blowup` test), so
+/// the stack only needs `log_blowup = 2` (blowup = 4), unlike the core VM's
+/// `miden_air::config::pcs_params`, which is fixed at `log_blowup = 3` for its own
+/// degree-8 constraints.
+///
+/// The remaining FRI parameters (folding arity, final degree, PoW bits, query count)
+/// mirror `miden_air::config::pcs_params` as-is; they have not been independently
+/// re-derived for this lower blowup and should get a dedicated security review before
+/// this config is relied on outside benchmarking.
+pub fn precompile_pcs_params() -> PcsParams {
+    PcsParams::new(
+        3,  // log_blowup (must be >= log_quotient_degree)
+        2,  // log_folding_arity
+        7,  // log_final_degree
+        4,  // folding_pow_bits
+        12, // deep_pow_bits
+        27, // num_queries
+        16, // query_pow_bits
+    )
+    .expect("invalid precompile PCS parameters")
+}
 
 // LEGACY TEST CONFIG
 // ================================================================================================
