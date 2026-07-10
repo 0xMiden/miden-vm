@@ -47,4 +47,5 @@ jobs:
           mode: "dry-run"
           verify-main-head: "false"
           packages: ${{ github.event.inputs.packages || '' }}
+          allow_existing: "true"
           # ref left blank: uses the pushed ref
