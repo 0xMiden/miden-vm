@@ -701,7 +701,7 @@ where
             _ if inputs.root.path() != target.namespace.inner().as_ref() => {
                 Err(Report::msg(format!(
                     "requested target namespace is '{}', but root module provided to assembler for '{}' is '{}'",
-                    &target.namespace,
+                    target.namespace,
                     project.name(),
                     inputs.root.path()
                 )))
