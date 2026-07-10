@@ -20,6 +20,7 @@ arbitrary = ["std", "dep:proptest"]
 default = ["std"]
 std = ["proptest?/std"]
 serde = ["dep:serde"]
+testing = ["arbitrary"]
 
 [dependencies]
 # Required dependencies
