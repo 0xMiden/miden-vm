@@ -216,7 +216,7 @@ impl AsRef<str> for Ident {
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if Self::requires_quoting(&self.name) {
-            write!(f, "\"{}\"", &self.name.escape_debug())
+            write!(f, "\"{}\"", self.name.escape_debug())
         } else {
             f.write_str(&self.name)
         }
