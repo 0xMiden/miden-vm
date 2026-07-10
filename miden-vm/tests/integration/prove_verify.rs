@@ -335,24 +335,23 @@ mod fast_parallel {
 
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::{
+        Word,
         mast::{
             BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
         },
         operations::Operation,
         proof::{DeferredProof, ExecutionProof, HashFunction},
-        Word,
     };
     use miden_processor::{
         DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, StackInputs,
-        advice::AdviceInputs,
-        trace::build_trace,
+        advice::AdviceInputs, trace::build_trace,
     };
     use miden_prover::{
         ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync,
         prove_partial_from_trace_sync, prove_stark,
         serde::{Deserializable, Serializable},
     };
-    use miden_verifier::{VerificationError, Verifier, verify};
+    use miden_verifier::{VerificationError, Verifier};
     use miden_vm::{Program, TraceBuildInputs};
 
     /// Default fragment size for parallel trace generation
@@ -575,7 +574,9 @@ mod fast_parallel {
         let (stack_outputs, proof) =
             prove_from_trace_sync(restored_proving_inputs).expect("prove_from_trace_sync failed");
 
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        Verifier::new()
+            .verify(program.into(), stack_inputs, stack_outputs, proof)
+            .expect("Verification failed");
     }
 
     #[test]
