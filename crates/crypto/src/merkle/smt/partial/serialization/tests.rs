@@ -60,6 +60,24 @@ mod unique_nodes {
 
         assert_eq!(UniqueNodes::read_from_bytes(&value.to_bytes()), Ok(value))
     }
+
+    #[test]
+    fn unique_nodes_with_empty_roots_roundtrips_with_exact_budget() {
+        let mut value = UniqueNodes::empty();
+        value.nodes.insert(
+            12,
+            vec![
+                (0, NodeValue::EmptySubtreeRoot),
+                (1, NodeValue::EmptySubtreeRoot),
+                (2, NodeValue::EmptySubtreeRoot),
+                (3, NodeValue::EmptySubtreeRoot),
+            ],
+        );
+
+        let bytes = value.to_bytes();
+
+        assert_eq!(UniqueNodes::read_from_bytes_with_budget(&bytes, bytes.len()), Ok(value));
+    }
 }
 
 mod node_value {

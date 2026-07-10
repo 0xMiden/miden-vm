@@ -9,7 +9,7 @@
 use alloc::vec::Vec;
 use core::{
     iter::{Product, Sum},
-    mem::ManuallyDrop,
+    mem::{ManuallyDrop, align_of, size_of},
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 

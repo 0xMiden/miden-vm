@@ -5,6 +5,7 @@ pub mod property_tests;
 mod tests;
 
 use alloc::{string::ToString, vec::Vec};
+use core::mem::size_of;
 
 use miden_field::{Felt, FeltFromIntError, Word};
 use miden_serde_utils::{
@@ -197,6 +198,10 @@ impl Serializable for NodeValue {
 }
 
 impl Deserializable for NodeValue {
+    fn min_serialized_size() -> usize {
+        size_of::<u64>()
+    }
+
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let first_value = source.read_u64()?;
 
