@@ -297,16 +297,14 @@ impl Deserializable for SignaturePoly {
         //
         // [1]: https://falcon-sign.info/falcon.pdf
         for c in coefficients.iter_mut() {
-            acc = (acc << 8) | (input[input_idx] as u32);
-            input_idx += 1;
+            acc = (acc << 8) | (next_sig_poly_byte(&input, &mut input_idx)? as u32);
             let b = acc >> acc_len;
             let s = b & 128;
             let mut m = b & 127;
 
             loop {
                 if acc_len == 0 {
-                    acc = (acc << 8) | (input[input_idx] as u32);
-                    input_idx += 1;
+                    acc = (acc << 8) | (next_sig_poly_byte(&input, &mut input_idx)? as u32);
                     acc_len = 8;
                 }
                 acc_len -= 1;
@@ -341,6 +339,19 @@ impl Deserializable for SignaturePoly {
 
 // HELPER FUNCTIONS
 // ================================================================================================
+
+fn next_sig_poly_byte(
+    input: &[u8; SIG_POLY_BYTE_LEN],
+    input_idx: &mut usize,
+) -> Result<u8, DeserializationError> {
+    let byte = input.get(*input_idx).copied().ok_or_else(|| {
+        DeserializationError::InvalidValue(
+            "Failed to decode signature: compressed polynomial ended early".to_string(),
+        )
+    })?;
+    *input_idx += 1;
+    Ok(byte)
+}
 
 /// Takes the hash-to-point polynomial `c` of a message, the signature polynomial over
 /// the message `s2` and a public key polynomial and returns `true` is the signature is a valid
@@ -401,5 +412,13 @@ mod tests {
         assert_eq!(serialized.len(), SIG_SERIALIZED_LEN);
         let deserialized = Signature::read_from_bytes(&serialized).unwrap();
         assert_eq!(signature.sig_poly(), deserialized.sig_poly());
+    }
+
+    #[test]
+    fn signature_poly_rejects_unterminated_compressed_payload() {
+        let encoded = [1u8; SIG_POLY_BYTE_LEN];
+        let err = SignaturePoly::read_from_bytes(&encoded).unwrap_err();
+
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
     }
 }

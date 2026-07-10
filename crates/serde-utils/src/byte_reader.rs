@@ -418,105 +418,44 @@ impl<'a> ReadAdapter<'a> {
     /// Takes the next `N` bytes from the input as an array, returning an error if the operation
     /// fails
     fn read_exact<const N: usize>(&mut self) -> Result<[u8; N], DeserializationError> {
-        let buf = self.buffer();
         let mut output = [0; N];
-        match buf.len() {
-            0 => {
-                let buf = self.non_empty_reader_buffer_mut()?;
-                if buf.len() < N {
-                    return Err(DeserializationError::UnexpectedEOF);
-                }
-                // SAFETY: This copy is guaranteed to be safe, as we have validated above
-                // that `buf` has at least N bytes, and `output` is defined to be exactly
-                // N bytes.
+        let buf = self.buffer();
+
+        if buf.len() >= N {
+            output.copy_from_slice(&buf[..N]);
+            self.pos += N;
+
+            if self.buffer().is_empty() {
                 unsafe {
-                    core::ptr::copy_nonoverlapping(buf.as_ptr(), output.as_mut_ptr(), N);
+                    self.buf.set_len(0);
                 }
-                self.reader.get_mut().consume(N);
-            },
-            n if n >= N => {
-                // SAFETY: This copy is guaranteed to be safe, as we have validated above
-                // that `buf` has at least N bytes, and `output` is defined to be exactly
-                // N bytes.
-                unsafe {
-                    core::ptr::copy_nonoverlapping(buf.as_ptr(), output.as_mut_ptr(), N);
-                }
-                self.pos += N;
-            },
-            n => {
-                // We have to fill from both the local and reader buffers
-                self.non_empty_reader_buffer_mut()?;
-                let reader_buf = self.reader_buffer();
-                match reader_buf.len() {
-                    #[cfg(debug_assertions)]
-                    0 => unreachable!("expected reader buffer to be non-empty to reach here"),
-                    #[cfg(not(debug_assertions))]
-                    // SAFETY: The call to `non_empty_reader_buffer_mut` will return an error
-                    // if `reader_buffer` is non-empty, as a result is is impossible to reach
-                    // here with a length of 0.
-                    0 => unsafe { core::hint::unreachable_unchecked() },
-                    // We got enough in one request
-                    m if m + n >= N => {
-                        let needed = N - n;
-                        let dst = output.as_mut_ptr();
-                        // SAFETY: Both copies are guaranteed to be in-bounds:
-                        //
-                        // * `output` is defined to be exactly N bytes
-                        // * `buf` is guaranteed to be < N bytes
-                        // * `reader_buf` is guaranteed to have the remaining bytes needed,
-                        // and we only copy exactly that many bytes
-                        unsafe {
-                            core::ptr::copy_nonoverlapping(self.buffer().as_ptr(), dst, n);
-                            core::ptr::copy_nonoverlapping(reader_buf.as_ptr(), dst.add(n), needed);
-                            drop(reader_buf);
-                        }
-                        self.pos += n;
-                        self.reader.get_mut().consume(needed);
-                    },
-                    // We didn't get enough, but haven't necessarily reached eof yet, so fall back
-                    // to filling `self.buf`
-                    m => {
-                        let needed = N - (m + n);
-                        drop(reader_buf);
-                        self.buffer_at_least(needed)?;
-                        debug_assert!(
-                            self.buffer().len() >= N,
-                            "expected buffer to be at least {N} bytes after call to buffer_at_least"
-                        );
-                        // SAFETY: This is guaranteed to be an in-bounds copy
-                        unsafe {
-                            core::ptr::copy_nonoverlapping(
-                                self.buffer().as_ptr(),
-                                output.as_mut_ptr(),
-                                N,
-                            );
-                        }
-                        self.pos += N;
-                        return Ok(output);
-                    },
-                }
-            },
+            }
+
+            return Ok(output);
         }
 
-        // Check if we should reset our internal buffer
-        if self.buffer().is_empty() && self.pos > 0 {
-            unsafe {
-                self.buf.set_len(0);
+        if buf.is_empty() {
+            let reader_buf = self.non_empty_reader_buffer_mut()?;
+            if reader_buf.len() >= N {
+                output.copy_from_slice(&reader_buf[..N]);
+                self.reader.get_mut().consume(N);
+                return Ok(output);
             }
         }
 
+        output.copy_from_slice(<Self as ByteReader>::read_slice(self, N)?);
         Ok(output)
     }
 
     /// Fill `self.buf` with `count` bytes
     ///
     /// This should only be called when we can't read from the reader directly
-    fn buffer_at_least(&mut self, mut count: usize) -> Result<(), DeserializationError> {
+    fn buffer_at_least(&mut self, count: usize) -> Result<(), DeserializationError> {
         // Read until we have at least `count` bytes, or until we reach end-of-file,
         // which ever comes first.
         loop {
             // If we have successfully read `count` bytes, we're done
-            if count == 0 || self.buffer().len() >= count {
+            if self.buffer().len() >= count {
                 break Ok(());
             }
 
@@ -532,7 +471,6 @@ impl<'a> ReadAdapter<'a> {
             let consumed = buf.len();
             self.buf.extend_from_slice(buf);
             reader.consume(consumed);
-            count = count.saturating_sub(consumed);
         }
     }
 }
@@ -915,10 +853,32 @@ impl<R: ByteReader> ByteReader for BudgetedReader<R> {
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use core::mem::size_of;
-    use std::io::Cursor;
+    use std::io::{Cursor, Read};
 
     use super::*;
     use crate::ByteWriter;
+
+    struct ChunkedReader {
+        data: Vec<u8>,
+        pos: usize,
+        chunk_size: usize,
+    }
+
+    impl ChunkedReader {
+        fn new(data: Vec<u8>, chunk_size: usize) -> Self {
+            Self { data, pos: 0, chunk_size }
+        }
+    }
+
+    impl Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let remaining = &self.data[self.pos..];
+            let len = remaining.len().min(buf.len()).min(self.chunk_size);
+            buf[..len].copy_from_slice(&remaining[..len]);
+            self.pos += len;
+            Ok(len)
+        }
+    }
 
     #[test]
     fn read_adapter_empty() {
@@ -957,6 +917,27 @@ mod tests {
         assert!(!adapter.has_more_bytes());
         assert_eq!(adapter.peek_u8(), Err(DeserializationError::UnexpectedEOF));
         assert_eq!(adapter.read_u8(), Err(DeserializationError::UnexpectedEOF));
+    }
+
+    #[test]
+    fn read_adapter_large_array_from_chunked_reader() {
+        let data = (0..897).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let expected: [u8; 897] = data.clone().try_into().unwrap();
+        let mut chunked = ChunkedReader::new(data.clone(), 128);
+        let mut adapter = ReadAdapter::new(&mut chunked);
+
+        assert_eq!(adapter.read_array::<897>().unwrap(), expected);
+    }
+
+    #[test]
+    fn read_adapter_large_array_after_buffered_prefix() {
+        let data = (0..700).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let expected: [u8; 625] = data[17..642].try_into().unwrap();
+        let mut chunked = ChunkedReader::new(data.clone(), 128);
+        let mut adapter = ReadAdapter::new(&mut chunked);
+
+        assert_eq!(adapter.read_slice(17).unwrap(), &data[..17]);
+        assert_eq!(adapter.read_array::<625>().unwrap(), expected);
     }
 
     #[test]
