@@ -89,7 +89,7 @@ end
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
-#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
+#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 ignored elements)
 #!
 #! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.
@@ -146,7 +146,7 @@ end
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
-#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
+#! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 ignored elements)
 #!
 #! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.

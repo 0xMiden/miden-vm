@@ -284,7 +284,7 @@ fn enforce_hornerext_constraints<AB>(
 ///   s[6..8]    (q3_0, q3_1)  leaf value q3
 ///   s[8]       folded_pos    Merkle leaf index and next-layer query index
 ///   s[9]       coset         source-domain coset index for the queried value
-///   s[10]      poe           power of initial domain generator
+///   s[10]      poe           power of the current source-domain generator
 ///   s[11..13]  prev_eval     previous layer's folded value (for consistency check)
 ///   s[13..15]  (alpha0, alpha1) verifier challenge for this FRI layer
 ///   s[15]      layer_ptr     memory address of current FRI layer data
@@ -350,8 +350,7 @@ fn enforce_frie2f4_constraints<AB>(
     let coset_flag_0 =
         AB::Expr::ONE - coset_flag_1.clone() - coset_flag_2.clone() - coset_flag_3.clone();
 
-    // Coset flags must be binary. Since flag0 is derived as 1 - (flag1 + flag2 + flag3), this also
-    // enforces that exactly one flag is active.
+    // One-hot coset encoding.
     builder.assert_bools([
         coset_flag_0.clone(),
         coset_flag_1.clone(),
@@ -359,15 +358,13 @@ fn enforce_frie2f4_constraints<AB>(
         coset_flag_3.clone(),
     ]);
 
-    // Bind the input coset to the one-hot flags:
-    //   flag0 -> 0, flag1 -> 1, flag2 -> 2, flag3 -> 3.
+    // coset = 0*flag0 + 1*flag1 + 2*flag2 + 3*flag3.
     let folded_pos_next = s_next[11];
     let expected_coset =
         coset_flag_1.clone() + coset_flag_2.clone() * F_2 + coset_flag_3.clone() * F_3;
     builder.assert_eq(coset, expected_coset);
 
-    // Each coset corresponds to a power of tau^-1.
-    // The one-hot flags select the appropriate power.
+    // tau_factor = tau^-coset.
     let expected_tau = coset_flag_0.clone()
         + coset_flag_1.clone() * TAU_INV
         + coset_flag_2.clone() * TAU2_INV
@@ -384,7 +381,7 @@ fn enforce_frie2f4_constraints<AB>(
     // The prover supplies these nondeterministically via helper registers.
     // Constraining the relations here forces the prover to provide correct values.
 
-    // domain_point = poe * tau_factor, with a verified inverse.
+    // domain_point = poe * tau_factor.
     let domain_point = helpers[4];
     let domain_point_inv = helpers[5];
     builder.assert_eq(domain_point, poe * expected_tau);
@@ -405,7 +402,7 @@ fn enforce_frie2f4_constraints<AB>(
     // domain points. If f(z) = g(z^2) + z * h(z^2), then:
     //   f(x) + f(-x) = 2 * g(x^2)
     //   f(x) - f(-x) = 2 * x * h(x^2)
-    // Combining: fold2(f(x), f(-x), alpha / x) = g(x^2) + (alpha / x) * h(x^2)
+    // Combining: fold2(f(x), f(-x), alpha / x) = g(x^2) + alpha * h(x^2)
     //
     // Formula: fold2(a, b, ep) = ((a + b) + (a - b) * ep) / 2.
     // Constraint form: 2 * result = (a + b) + (a - b) * ep.
@@ -416,7 +413,7 @@ fn enforce_frie2f4_constraints<AB>(
                          ep: QuadFeltExpr<AB::Expr>|
      -> QuadFeltExpr<AB::Expr> { (a.clone() + b.clone()) + (a - b) * ep };
 
-    // Intermediate fold results stored in the next row for degree reduction.
+    // Degree-reduction intermediates.
     let fold_mid0 = QuadFeltExpr::new(s_next[0], s_next[1]);
     let fold_mid1 = QuadFeltExpr::new(s_next[2], s_next[3]);
     let fold_result = QuadFeltExpr::new(s_next[12], s_next[13]);
@@ -440,11 +437,9 @@ fn enforce_frie2f4_constraints<AB>(
     // Phase 4: Cross-layer consistency and state updates
     // ==========================================================================
 
-    // The previous layer's folded value must equal the leaf value at natural position `coset`.
     // Stack order is [q0, q2, q1, q3], so natural position 0 maps to s[0..2], 1 maps to
     // s[4..6], 2 maps to s[2..4], and 3 maps to s[6..8].
-    //
-    // Use raw stack positions because the QuadFeltExpr values were consumed by fold2 above.
+    // Enforce prev_eval = q_coset.
     let selected_component_0 = AB::Expr::from(s[0]) * coset_flag_0.clone()
         + AB::Expr::from(s[4]) * coset_flag_1.clone()
         + AB::Expr::from(s[2]) * coset_flag_2.clone()
