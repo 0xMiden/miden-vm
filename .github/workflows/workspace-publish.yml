@@ -16,15 +16,15 @@ on:
         required: true
         type: string
       packages:
-        description: "Comma, space, or newline separated packages to publish. Empty uses packages_file."
+        description: "Comma, space, or newline separated packages to publish. Empty publishes all publishable workspace packages."
         required: false
         default: ""
         type: string
-      packages_file:
-        description: "Package list file used when packages is empty."
+      allow_existing:
+        description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
         required: false
-        default: "release-packages.txt"
-        type: string
+        default: false
+        type: boolean
   release:
     types: [published]
 
@@ -238,7 +238,7 @@ jobs:
           mode: "publish"
           verify-main-head: "true"
           packages: ${{ github.event.inputs.packages || '' }}
-          packages_file: ${{ github.event.inputs.packages_file || 'release-packages.txt' }}
+          allow_existing: ${{ github.event.inputs.allow_existing || 'false' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
