@@ -120,9 +120,10 @@ impl Randomizable for TreeId {
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
         const LINEAGE_SIZE: usize = size_of::<LineageId>();
         const VERSION_SIZE: usize = size_of::<VersionId>();
-        let domain = Randomizable::from_random_bytes(&source[0..LINEAGE_SIZE])?;
-        let version =
-            Randomizable::from_random_bytes(&source[LINEAGE_SIZE..LINEAGE_SIZE + VERSION_SIZE])?;
+        let domain = Randomizable::from_random_bytes(source.get(..LINEAGE_SIZE)?)?;
+        let version = Randomizable::from_random_bytes(
+            source.get(LINEAGE_SIZE..LINEAGE_SIZE + VERSION_SIZE)?,
+        )?;
         Some(Self::new(domain, version))
     }
 }

@@ -30,11 +30,8 @@ impl Randomizable for u128 {
     const VALUE_SIZE: usize = 16;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        if let Ok(bytes) = source[..Self::VALUE_SIZE].try_into() {
-            Some(u128::from_le_bytes(bytes))
-        } else {
-            None
-        }
+        let bytes = source.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        Some(u128::from_le_bytes(bytes))
     }
 }
 
@@ -42,11 +39,8 @@ impl Randomizable for u64 {
     const VALUE_SIZE: usize = 8;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        if let Ok(bytes) = source[..Self::VALUE_SIZE].try_into() {
-            Some(u64::from_le_bytes(bytes))
-        } else {
-            None
-        }
+        let bytes = source.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        Some(u64::from_le_bytes(bytes))
     }
 }
 
@@ -54,11 +48,8 @@ impl Randomizable for u32 {
     const VALUE_SIZE: usize = 4;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        if let Ok(bytes) = source[..Self::VALUE_SIZE].try_into() {
-            Some(u32::from_le_bytes(bytes))
-        } else {
-            None
-        }
+        let bytes = source.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
     }
 }
 
@@ -66,11 +57,8 @@ impl Randomizable for u16 {
     const VALUE_SIZE: usize = 2;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        if let Ok(bytes) = source[..Self::VALUE_SIZE].try_into() {
-            Some(u16::from_le_bytes(bytes))
-        } else {
-            None
-        }
+        let bytes = source.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        Some(u16::from_le_bytes(bytes))
     }
 }
 
@@ -78,7 +66,7 @@ impl Randomizable for u8 {
     const VALUE_SIZE: usize = 1;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        Some(source[0])
+        source.first().copied()
     }
 }
 
@@ -86,14 +74,11 @@ impl Randomizable for Felt {
     const VALUE_SIZE: usize = 8;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        if let Ok(bytes) = source[..Self::VALUE_SIZE].try_into() {
-            let value = u64::from_le_bytes(bytes);
-            // Ensure the value is within the field modulus
-            if value < Felt::ORDER {
-                Some(Felt::new_unchecked(value))
-            } else {
-                None
-            }
+        let bytes = source.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        let value = u64::from_le_bytes(bytes);
+        // Ensure the value is within the field modulus
+        if value < Felt::ORDER {
+            Some(Felt::new_unchecked(value))
         } else {
             None
         }
@@ -104,12 +89,8 @@ impl Randomizable for Word {
     const VALUE_SIZE: usize = Word::SERIALIZED_SIZE;
 
     fn from_random_bytes(bytes: &[u8]) -> Option<Self> {
-        let bytes_array: Option<[u8; 32]> = bytes.try_into().ok();
-        if let Some(bytes_array) = bytes_array {
-            Self::try_from(bytes_array).ok()
-        } else {
-            None
-        }
+        let bytes_array: [u8; 32] = bytes.get(..Self::VALUE_SIZE)?.try_into().ok()?;
+        Self::try_from(bytes_array).ok()
     }
 }
 
@@ -117,10 +98,7 @@ impl<const N: usize> Randomizable for [u8; N] {
     const VALUE_SIZE: usize = N;
 
     fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        let mut result = [Default::default(); N];
-        result.copy_from_slice(source);
-
-        Some(result)
+        source.get(..N)?.try_into().ok()
     }
 }
 
@@ -160,4 +138,22 @@ pub fn random_felt() -> Felt {
 #[cfg(feature = "std")]
 pub fn random_word() -> Word {
     Word::new([random_felt(), random_felt(), random_felt(), random_felt()])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Randomizable;
+    use crate::{Felt, Word};
+
+    #[test]
+    fn randomizable_short_inputs_return_none() {
+        assert!(u128::from_random_bytes(&[0; 15]).is_none());
+        assert!(u64::from_random_bytes(&[0; 7]).is_none());
+        assert!(u32::from_random_bytes(&[0; 3]).is_none());
+        assert!(u16::from_random_bytes(&[0; 1]).is_none());
+        assert!(u8::from_random_bytes(&[]).is_none());
+        assert!(Felt::from_random_bytes(&[0; 7]).is_none());
+        assert!(Word::from_random_bytes(&[0; 31]).is_none());
+        assert!(<[u8; 4]>::from_random_bytes(&[0; 3]).is_none());
+    }
 }

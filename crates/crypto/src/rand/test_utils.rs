@@ -41,8 +41,12 @@ pub fn seeded_rng(seed: [u8; 32]) -> ChaCha20Rng {
 /// Generates a random value of type T from an RNG.
 fn rng_value<T: Randomizable>(rng: &mut impl Rng) -> T {
     let mut bytes = vec![0u8; T::VALUE_SIZE];
-    rng.fill(&mut bytes[..]);
-    T::from_random_bytes(&bytes).expect("failed to generate random value")
+    loop {
+        rng.fill(&mut bytes[..]);
+        if let Some(value) = T::from_random_bytes(&bytes) {
+            return value;
+        }
+    }
 }
 
 /// Generates a random value of type T using the thread-local random number generator.
