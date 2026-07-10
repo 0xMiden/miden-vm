@@ -35,6 +35,11 @@ impl ResumeContext {
         &self.current_forest
     }
 
+    /// Returns a reference to the debug info associated with the current forest, if available
+    pub fn debug_info(&self) -> Option<Arc<PackageDebugInfo>> {
+        self.package_debug_info.clone()
+    }
+
     /// Returns a reference to the kernel being currently executed.
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
