@@ -148,6 +148,18 @@ fn hash_elements_vs_hash_elements_in_domain() {
 }
 
 #[test]
+fn hash_empty_elements_in_domain() {
+    let elements: &[Felt] = &[];
+
+    let plain = Rpx256::hash_elements(elements);
+    let zero_domain = Rpx256::hash_elements_in_domain(elements, ZERO);
+    let one_domain = Rpx256::hash_elements_in_domain(elements, ONE);
+
+    assert_eq!(plain, zero_domain);
+    assert_ne!(plain, one_domain);
+}
+
+#[test]
 fn hash_empty() {
     let elements: Vec<Felt> = vec![];
 

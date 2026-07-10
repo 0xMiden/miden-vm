@@ -237,7 +237,7 @@ where
     // if we absorbed some elements but didn't apply a permutation to them (would happen when
     // the number of elements is not a multiple of RATE_WIDTH), apply the permutation after
     // padding by as many 0 as necessary to make the input length a multiple of the RATE_WIDTH.
-    if i > 0 {
+    if i > 0 || (total_len == 0 && state[CAPACITY_RANGE.start + 1] != ZERO) {
         while i != RATE_WIDTH {
             state[RATE_RANGE.start + i] = ZERO;
             i += 1;

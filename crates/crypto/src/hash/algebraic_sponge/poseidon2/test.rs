@@ -1,7 +1,7 @@
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 
 use super::*;
-use crate::{ZERO, hash::poseidon2::Poseidon2};
+use crate::{ONE, ZERO, hash::poseidon2::Poseidon2};
 
 #[test]
 fn permutation_test_vector() {
@@ -126,6 +126,18 @@ fn test_poseidon2_hash_elements_vs_hash_elements_in_domain() {
         Poseidon2::hash_elements(&input16),
         Poseidon2::hash_elements_in_domain(&input16, Felt::ONE)
     );
+}
+
+#[test]
+fn test_poseidon2_hash_empty_elements_in_domain() {
+    let elements: &[Felt] = &[];
+
+    let plain = Poseidon2::hash_elements(elements);
+    let zero_domain = Poseidon2::hash_elements_in_domain(elements, ZERO);
+    let one_domain = Poseidon2::hash_elements_in_domain(elements, ONE);
+
+    assert_eq!(plain, zero_domain);
+    assert_ne!(plain, one_domain);
 }
 
 #[test]
