@@ -113,6 +113,10 @@ fn enforce_cryptostream_constraints<AB>(
 ///   s[13]      alpha_ptr    memory address of α
 ///   s[14..16]  (acc₀, acc₁) accumulator (quadratic extension element)
 ///
+/// Preservation of s[0..14] is enforced by the general stack transition constraints
+/// (HORNERBASE is a no-shift op at depths 0..14); only the accumulator update is
+/// constrained here.
+///
 /// Helper registers:
 ///   h[0..2]    (α₀, α₁)       evaluation point (read from alpha_ptr)
 ///   h[4..6]    (tmp0₀, tmp0₁) first intermediate result
@@ -135,11 +139,6 @@ fn enforce_hornerbase_constraints<AB>(
     let s = &local.stack.top;
     let s_next = &next.stack.top;
     let helpers = local.decoder.user_op_helpers();
-
-    // Stack registers preserved.
-    for i in 0..14 {
-        horner_builder.assert_eq(s_next[i], s[i]);
-    }
 
     // Extension element alpha and its powers.
     let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0], helpers[1]);
@@ -196,6 +195,10 @@ fn enforce_hornerbase_constraints<AB>(
 /// Horner steps:
 ///   tmp  = acc · α² + (c0·α + c1)
 ///   acc' = tmp · α² + (c2·α + c3)
+///
+/// Preservation of s[0..14] is enforced by the general stack transition constraints
+/// (HORNEREXT is a no-shift op at depths 0..14); only the accumulator update is
+/// constrained here.
 fn enforce_hornerext_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -209,11 +212,6 @@ fn enforce_hornerext_constraints<AB>(
     let s = &local.stack.top;
     let s_next = &next.stack.top;
     let helpers = local.decoder.user_op_helpers();
-
-    // Stack registers preserved.
-    for i in 0..14 {
-        horner_builder.assert_eq(s_next[i], s[i]);
-    }
 
     // Extension element alpha and its square.
     let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0], helpers[1]);

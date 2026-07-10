@@ -3,10 +3,10 @@ use core::assert_matches;
 use super::*;
 use crate::{
     Felt, ONE, Word,
+    advice::AdviceMap,
     mast::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
-        ExternalNodeBuilder, LoopNodeBuilder, OpBatch,
-        node::{MastForestContributor, MastNodeExt},
+        ExternalNodeBuilder, LoopNodeBuilder, OpBatch, node::MastNodeExt,
     },
     operations::Operation,
     utils::Idx,
@@ -173,7 +173,7 @@ fn mast_node_partial_eq_is_structural_for_same_digest_blocks() {
 /// +
 /// [Block(bar), Call(bar)]
 /// =
-/// [Block(foo), Call(foo), Block(bar), Call(bar)]
+/// [Block(foo), Block(bar), Call(foo), Call(bar)]
 #[test]
 fn mast_forest_merge_remap() {
     let mut forest_a = MastForest::new();
@@ -194,15 +194,20 @@ fn mast_forest_merge_remap() {
     assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
         if merged_block == &expected_foo_block);
 
-    assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
-
     let expected_bar_block = block_bar().build().unwrap();
-    assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
+    assert_matches!(&merged.nodes()[1], MastNode::Block(merged_block)
         if merged_block == &expected_bar_block);
-    assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
-    assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
-    assert_eq!(u32::from(root_maps.map_root(1, &id_call_b).unwrap()), 3u32);
+    let mapped_call_a = root_maps.map_root(0, &id_call_a).unwrap();
+    let mapped_call_b = root_maps.map_root(1, &id_call_b).unwrap();
+
+    assert_matches!(&merged[mapped_call_a], MastNode::Call(call_node)
+        if 0u32 == u32::from(call_node.callee()));
+    assert_matches!(&merged[mapped_call_b], MastNode::Call(call_node)
+        if 1u32 == u32::from(call_node.callee()));
+
+    assert_child_id_lt_parent_id(&merged);
+    merged.validate_dense_node_order().unwrap();
 
     assert_child_id_lt_parent_id(&merged);
 }
@@ -457,7 +462,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a.advice_map_mut().insert(key_a, value_a.clone());
+    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a.clone())]));
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -470,7 +475,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(1),
     ]);
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b.advice_map_mut().insert(key_b, value_b.clone());
+    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b.clone())]));
 
     let (merged, _root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
@@ -494,7 +499,7 @@ fn mast_forest_merge_advice_maps_collision() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a.advice_map_mut().insert(key_a, value_a);
+    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a)]));
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -503,14 +508,14 @@ fn mast_forest_merge_advice_maps_collision() {
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b.advice_map_mut().insert(key_b, value_b);
+    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b)]));
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
 }
 
 #[test]
-fn compact_keeps_error_code_bearing_basic_blocks_distinct() {
+fn mast_forest_merge_keeps_error_code_bearing_basic_blocks_distinct() {
     let mut forest = MastForest::new();
     let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
         .add_to_forest(&mut forest)
@@ -523,20 +528,20 @@ fn compact_keeps_error_code_bearing_basic_blocks_distinct() {
 
     assert_eq!(forest[block_a].digest(), forest[block_b].digest());
 
-    let (compacted, root_map) = forest.compact();
+    let (merged, root_map) = MastForest::merge([&forest]).unwrap();
     let new_a = root_map.map_root(0, &block_a).unwrap();
     let new_b = root_map.map_root(0, &block_b).unwrap();
 
     assert_ne!(
         new_a, new_b,
-        "same-digest blocks with different runtime error codes must not compact together",
+        "same-digest blocks with different runtime error codes must not merge together",
     );
-    assert_eq!(first_error_code(compacted[new_a].unwrap_basic_block()), Felt::from_u32(1),);
-    assert_eq!(first_error_code(compacted[new_b].unwrap_basic_block()), Felt::from_u32(2),);
+    assert_eq!(first_error_code(merged[new_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(merged[new_b].unwrap_basic_block()), Felt::from_u32(2),);
 }
 
 #[test]
-fn compact_propagates_error_code_fingerprints_through_control_nodes() {
+fn mast_forest_merge_propagates_error_code_fingerprints_through_control_nodes() {
     let mut forest = MastForest::new();
     let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
         .add_to_forest(&mut forest)
@@ -553,7 +558,7 @@ fn compact_propagates_error_code_fingerprints_through_control_nodes() {
 
     assert_eq!(forest[call_a].digest(), forest[call_b].digest());
 
-    let (compacted, root_map) = forest.compact();
+    let (merged, root_map) = MastForest::merge([&forest]).unwrap();
     let new_call_a = root_map.map_root(0, &call_a).unwrap();
     let new_call_b = root_map.map_root(0, &call_b).unwrap();
 
@@ -562,8 +567,8 @@ fn compact_propagates_error_code_fingerprints_through_control_nodes() {
         "same-digest control nodes must stay distinct when their children differ by runtime error code",
     );
 
-    let new_block_a = compacted[new_call_a].unwrap_call().callee();
-    let new_block_b = compacted[new_call_b].unwrap_call().callee();
-    assert_eq!(first_error_code(compacted[new_block_a].unwrap_basic_block()), Felt::from_u32(1),);
-    assert_eq!(first_error_code(compacted[new_block_b].unwrap_basic_block()), Felt::from_u32(2),);
+    let new_block_a = merged[new_call_a].unwrap_call().callee();
+    let new_block_b = merged[new_call_b].unwrap_call().callee();
+    assert_eq!(first_error_code(merged[new_block_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(merged[new_block_b].unwrap_basic_block()), Felt::from_u32(2),);
 }

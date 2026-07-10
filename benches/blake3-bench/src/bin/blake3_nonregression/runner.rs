@@ -9,7 +9,7 @@ use std::{
 use miden_vm_blake3_bench::SpanRecord;
 use serde::Serialize;
 
-use crate::criterion_results::collect_result;
+use crate::criterion_results::{CollectionContext, collect_result};
 
 pub(crate) fn cmd_run(
     repo_root: &Path,
@@ -19,6 +19,8 @@ pub(crate) fn cmd_run(
     light_sample_size: Option<usize>,
     measurement_time_secs: Option<u64>,
     warm_up_time_secs: Option<u64>,
+    light_measurement_time_secs: Option<u64>,
+    light_warm_up_time_secs: Option<u64>,
     bench_axes: &str,
     git_ref: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -37,6 +39,18 @@ pub(crate) fn cmd_run(
     }
     if let Some(warm_up_time_secs) = warm_up_time_secs {
         envs.insert("BLAKE3_WARM_UP_TIME_SECS".to_string(), warm_up_time_secs.to_string());
+    }
+    if let Some(light_measurement_time_secs) = light_measurement_time_secs {
+        envs.insert(
+            "BLAKE3_LIGHT_MEASUREMENT_TIME_SECS".to_string(),
+            light_measurement_time_secs.to_string(),
+        );
+    }
+    if let Some(light_warm_up_time_secs) = light_warm_up_time_secs {
+        envs.insert(
+            "BLAKE3_LIGHT_WARM_UP_TIME_SECS".to_string(),
+            light_warm_up_time_secs.to_string(),
+        );
     }
     if !bench_axes.trim().is_empty() {
         envs.insert("BLAKE3_BENCH_AXES".to_string(), bench_axes.to_string());
@@ -140,15 +154,19 @@ pub(crate) fn cmd_run(
 
     let result = collect_result(
         repo_root,
-        git_ref,
-        Some(bench_wall_ms),
-        span_collection_wall_ms,
-        Some(rayon_num_threads),
-        bench_axes,
-        sample_size,
-        light_sample_size,
-        measurement_time_secs,
-        warm_up_time_secs,
+        CollectionContext {
+            git_ref,
+            bench_wall_ms: Some(bench_wall_ms),
+            span_collection_wall_ms,
+            rayon_num_threads: Some(rayon_num_threads),
+            bench_axes,
+            sample_size,
+            light_sample_size,
+            measurement_time_secs,
+            warm_up_time_secs,
+            light_measurement_time_secs,
+            light_warm_up_time_secs,
+        },
         spans,
     )?;
     write_json(&output_dir.join("result.json"), &result)?;

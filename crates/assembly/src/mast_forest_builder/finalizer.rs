@@ -182,33 +182,50 @@ impl MastForestFinalizer {
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
         advice_map: AdviceMap,
     ) -> Result<BuiltMastForest, Report> {
+        let MastForestFinalizer { nodes, mut node_id_by_ref } = self;
+
         let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in procedure_root_refs {
-            let root_id = *self.node_id_by_ref.get(&root_ref).ok_or_else(|| {
+            let root_id = *node_id_by_ref.get(&root_ref).ok_or_else(|| {
                 Report::new(MastForestBuilderError::MissingProcedureRoot { root_ref })
             })?;
             roots.push(root_id);
         }
 
-        let (source_graph, source_id_by_ref) = self.finalize_source_graph(
+        let (mast_forest, final_id_remapping) =
+            MastForest::from_raw_parts_with_id_map(nodes, roots, advice_map)
+                .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
+
+        // Source/debug references were recorded against builder-local node IDs. Rewrite them to
+        // the finalized dense IDs before constructing the debug graph.
+        for node_id in node_id_by_ref.values_mut() {
+            *node_id = final_id_remapping.get(*node_id).ok_or_else(|| {
+                Report::new(MastForestBuilderError::FinalizeForest {
+                    source: MastForestError::NodeIdOverflow(*node_id, final_id_remapping.len()),
+                })
+            })?;
+        }
+
+        let (source_graph, source_id_by_ref) = Self::finalize_source_graph(
+            &mast_forest,
+            &node_id_by_ref,
             procedure_source_root_refs,
             source_nodes,
             asm_op_by_ref,
             debug_vars,
         )?;
-        let mast_forest = MastForest::from_raw_parts(self.nodes, roots, advice_map)
-            .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
         Ok(BuiltMastForest {
             mast_forest,
             source_graph,
-            node_id_by_ref: self.node_id_by_ref,
+            node_id_by_ref,
             source_id_by_ref,
         })
     }
 
     fn finalize_source_graph(
-        &self,
+        mast_forest: &MastForest,
+        node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
         procedure_source_root_refs: &[SourceNodeRef],
         source_nodes: &IndexVec<SourceNodeRef, PendingSourceNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
@@ -219,7 +236,7 @@ impl MastForestFinalizer {
             .iter()
             .enumerate()
             .filter_map(|(index, source_node)| {
-                self.node_id_by_ref
+                node_id_by_ref
                     .contains_key(&source_node.exec_ref)
                     .then_some(SourceNodeRef::from(index as u32))
             })
@@ -234,7 +251,7 @@ impl MastForestFinalizer {
         for &source_ref in &live_source_refs {
             let pending_source_node = &source_nodes[source_ref];
             let exec_node =
-                *self.node_id_by_ref.get(&pending_source_node.exec_ref).ok_or_else(|| {
+                *node_id_by_ref.get(&pending_source_node.exec_ref).ok_or_else(|| {
                     Report::new(MastForestBuilderError::MissingFinalSourceExec {
                         source_ref,
                         exec_ref: pending_source_node.exec_ref,
@@ -252,7 +269,7 @@ impl MastForestFinalizer {
                     })
                 })
                 .collect::<Result<Vec<_>, Report>>()?;
-            let node = &self.nodes[exec_node];
+            let node = &mast_forest[exec_node];
             let (_, asm_op_refs) =
                 compute_operations_and_adjust_mappings(node, pending_source_node.asm_ops.clone());
             let asm_ops = asm_op_refs

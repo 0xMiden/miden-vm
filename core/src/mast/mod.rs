@@ -40,15 +40,21 @@
 //!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
-#[cfg(test)]
-use alloc::collections::BTreeSet;
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 use core::{fmt, ops::Index};
 
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "serde")]
+use crate::serde::{Deserializable, SliceReader};
 
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -57,17 +63,16 @@ pub(crate) use node::collect_immediate_placements;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DynNode, DynNodeBuilder,
     ExternalNode, ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
-    OpBatch, SplitNode, SplitNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeContext, MastNodeExt, OP_BATCH_SIZE,
+    OP_GROUP_SIZE, OpBatch, SplitNode, SplitNodeBuilder,
 };
 
-#[cfg(feature = "serde")]
-use crate::serde::{Deserializable, Serializable, SliceReader};
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    serde::{ByteWriter, DeserializationError},
-    utils::{Idx, IndexVec, hash_string_to_word},
+    crypto::hash::Poseidon2,
+    serde::{ByteWriter, DeserializationError, Serializable},
+    utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
 
 mod serialization;
@@ -75,6 +80,9 @@ pub use serialization::{
     AdviceMapView, AdviceValueView, MastForestReadMode, MastForestReadView, MastForestView,
     MastForestWireView, MastNodeEntry, MastNodeInfo,
 };
+
+mod dense_builder;
+pub use dense_builder::DenseMastForestBuilder;
 
 mod untrusted;
 pub use untrusted::{UntrustedMastForest, UntrustedMastForestReadOptions};
@@ -102,6 +110,18 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
 /// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
+///
+/// Finalized dense forests keep nodes in final dense order:
+/// - external nodes first, sorted by digest, with no duplicate external digests;
+/// - basic blocks next, in the input order seen by finalization;
+/// - internal nodes last, with every child before its parent and finalization input order as the
+///   tie-breaker.
+///
+/// Serialization expects this in-memory order and validates it before writing.
+///
+/// Normal construction goes through builders. Once finalized, a `MastForest` exposes no append API;
+/// code that changes dense nodes must rebuild and finalize a new forest so ordering, root, and
+/// commitment invariants stay in sync.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
@@ -117,8 +137,33 @@ pub struct MastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Commitment to this MAST forest (commitment to all roots).
+    /// Commitments to this MAST forest's roots, external dependencies, and advice map.
+    commitment: MastForestCommitment,
+}
+
+/// Commitment values derived from a MAST forest.
+///
+/// Commitment roles:
+/// - [`MastForest::interface_commitment`] identifies the public procedure roots only.
+/// - [`MastForest::dependency_commitment`] identifies the external dependency digests only.
+/// - [`MastForest::advice_commitment`] identifies the stored advice map only.
+/// - [`MastForest::commitment`] identifies the stored dense forest data: public roots, external
+///   dependencies, and advice. Direct forest-backed static libraries use this value as their source
+///   identity. Package-backed static libraries use the package digest, which is derived from this
+///   forest commitment.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct MastForestCommitment {
+    /// Commitment to the forest's roots, external dependencies, and advice map.
     commitment: Word,
+
+    /// Commitment to this MAST forest's public procedure roots.
+    interface_commitment: Word,
+
+    /// Commitment to this MAST forest's external dependencies.
+    dependency_commitment: Word,
+
+    /// Commitment to this MAST forest's advice map.
+    advice_commitment: Word,
 }
 
 /// Complete parts needed to construct a finalized [`MastForest`].
@@ -142,6 +187,8 @@ impl MastForest {
     }
 
     /// Builds a [`MastForest`] from raw parts and validates local structure.
+    ///
+    /// This is hidden because raw dense parts are not a stable public construction API.
     #[doc(hidden)]
     pub fn from_raw_parts(
         nodes: IndexVec<MastNodeId, MastNode>,
@@ -151,51 +198,304 @@ impl MastForest {
         Self::from_parts(MastForestParts { nodes, roots, advice_map })
     }
 
+    /// Builds a [`MastForest`] from raw parts and returns the node ID remapping applied during
+    /// canonicalization.
+    ///
+    /// This is hidden because raw dense parts and builder-local ID remapping are only used by
+    /// internal builders and tests.
+    #[doc(hidden)]
+    pub fn from_raw_parts_with_id_map(
+        nodes: IndexVec<MastNodeId, MastNode>,
+        roots: Vec<MastNodeId>,
+        advice_map: AdviceMap,
+    ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
+        Self::from_parts_with_id_map(MastForestParts { nodes, roots, advice_map })
+    }
+
     /// Builds a [`MastForest`] from completed parts.
     pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
-        if parts.nodes.len() > Self::MAX_NODES {
-            return Err(MastForestError::TooManyNodes);
-        }
+        Self::from_parts_with_id_map(parts).map(|(forest, _remapping)| forest)
+    }
 
-        let node_count = parts.nodes.len();
-        for &root_id in &parts.roots {
-            if root_id.to_usize() >= node_count {
-                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
-            }
-        }
+    pub(crate) fn from_parts_with_id_map(
+        parts: MastForestParts,
+    ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
+        validate_mast_forest_parts_bounds(&parts)?;
+        let (parts, id_remapping) = canonicalize_parts(parts)?;
 
         let forest = Self {
-            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(
+                &parts.nodes,
+                &parts.roots,
+                &parts.advice_map,
+            ),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
         };
 
+        forest.validate_dense_node_order()?;
         forest.validate()?;
         forest.validate_node_hashes()?;
-        Ok(forest)
+        Ok((forest, id_remapping))
     }
 
     pub(in crate::mast) fn from_trusted_deserialization_parts(
         parts: MastForestParts,
     ) -> Result<Self, MastForestError> {
-        if parts.nodes.len() > Self::MAX_NODES {
-            return Err(MastForestError::TooManyNodes);
-        }
-
-        let node_count = parts.nodes.len();
-        for &root_id in &parts.roots {
-            if root_id.to_usize() >= node_count {
-                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
-            }
-        }
+        validate_mast_forest_parts_bounds(&parts)?;
+        // Trusted dense serialization is expected to have checked this already. Re-check the
+        // cheap ordering invariant here as a precaution before accepting the finalized forest.
+        validate_dense_node_order(&parts.nodes)?;
         Ok(Self {
-            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            commitment: compute_mast_forest_commitment(
+                &parts.nodes,
+                &parts.roots,
+                &parts.advice_map,
+            ),
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
         })
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Dense forest validation and canonicalization
+
+fn validate_mast_forest_parts_bounds(parts: &MastForestParts) -> Result<(), MastForestError> {
+    if parts.nodes.len() > MastForest::MAX_NODES {
+        return Err(MastForestError::TooManyNodes);
+    }
+
+    let node_count = parts.nodes.len();
+    for &root_id in &parts.roots {
+        if root_id.to_usize() >= node_count {
+            return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+        }
+    }
+
+    Ok(())
+}
+
+/// Canonicalizes dense forest parts and returns the old-to-new node ID remapping.
+///
+/// The final node order is external nodes sorted by digest, then basic blocks in construction
+/// order, then internal nodes with children before parents and construction order as the
+/// tie-breaker.
+fn canonicalize_parts(
+    parts: MastForestParts,
+) -> Result<(MastForestParts, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
+    let node_count = parts.nodes.len();
+    let ordered_ids = final_dense_node_order(&parts.nodes)?;
+
+    let mut remapping = DenseIdMap::with_len(node_count);
+    for (new_index, old_id) in ordered_ids.iter().copied().enumerate() {
+        remapping.insert(old_id, MastNodeId::new_unchecked(new_index as u32));
+    }
+
+    if ordered_ids
+        .iter()
+        .enumerate()
+        .all(|(index, &old_id)| old_id == MastNodeId::new_unchecked(index as u32))
+    {
+        debug_assert!(validate_dense_node_order(&parts.nodes).is_ok());
+        return Ok((parts, remapping));
+    }
+
+    let mut nodes = IndexVec::with_capacity(node_count);
+    let empty_forest = MastForest::new();
+    for old_id in ordered_ids {
+        let node = parts.nodes[old_id].clone();
+        let remapped_node =
+            node.to_builder(&empty_forest).remap_children(&remapping).build_linked()?;
+        nodes
+            .push(remapped_node)
+            .expect("canonicalized node count was validated before remapping");
+    }
+
+    let roots = parts
+        .roots
+        .into_iter()
+        .map(|root_id| {
+            remapping
+                .get(root_id)
+                .ok_or(MastForestError::NodeIdOverflow(root_id, node_count))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    debug_assert!(validate_dense_node_order(&nodes).is_ok());
+
+    Ok((
+        MastForestParts {
+            nodes,
+            roots,
+            advice_map: parts.advice_map,
+        },
+        remapping,
+    ))
+}
+
+fn final_dense_node_order(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+) -> Result<Vec<MastNodeId>, MastForestError> {
+    let node_count = nodes.len();
+    let mut external_ids = Vec::new();
+    let mut basic_block_ids = Vec::new();
+    let mut internal_ids = Vec::new();
+
+    for (index, node) in nodes.iter().enumerate() {
+        let node_id = MastNodeId::new_unchecked(index as u32);
+        match node.order_class() {
+            MastNodeOrderClass::External => external_ids.push(node_id),
+            MastNodeOrderClass::BasicBlock => basic_block_ids.push(node_id),
+            MastNodeOrderClass::Internal => internal_ids.push(node_id),
+        }
+    }
+
+    external_ids.sort_by(|&left_id, &right_id| {
+        nodes[left_id]
+            .digest()
+            .cmp(&nodes[right_id].digest())
+            .then(left_id.0.cmp(&right_id.0))
+    });
+
+    // External nodes are identified only by digest, so duplicate external digests would create two
+    // IDs for the same dependency. Reject them before building the final order.
+    let mut previous_external_digest = None;
+    for &node_id in &external_ids {
+        let digest = nodes[node_id].digest();
+        if let Some(previous_digest) = previous_external_digest
+            && previous_digest >= digest
+        {
+            return Err(MastForestError::InvalidNodeOrder {
+                node_id,
+                reason: "external node digests must be strictly increasing".into(),
+            });
+        }
+        previous_external_digest = Some(digest);
+    }
+
+    let mut ordered_ids = external_ids;
+    let mut ordered = vec![false; node_count];
+    ordered_ids.extend(basic_block_ids);
+    for &node_id in &ordered_ids {
+        ordered[node_id.to_usize()] = true;
+    }
+
+    // Internal nodes are emitted once all children already appear in the final order. The ready set
+    // is keyed by original node ID, so construction order remains the tie-breaker among all
+    // currently-ready internal nodes.
+    let mut unresolved_child_counts = vec![0usize; node_count];
+    let mut parents_by_child = vec![Vec::new(); node_count];
+    for &node_id in &internal_ids {
+        nodes[node_id].for_each_child(|child_id| {
+            if child_id.to_usize() < node_count && !ordered[child_id.to_usize()] {
+                unresolved_child_counts[node_id.to_usize()] += 1;
+                parents_by_child[child_id.to_usize()].push(node_id);
+            }
+        });
+    }
+
+    for &node_id in &internal_ids {
+        let mut invalid_child = None;
+        nodes[node_id].for_each_child(|child_id| {
+            if child_id.to_usize() >= node_count {
+                invalid_child = Some(child_id);
+            }
+        });
+
+        if let Some(child_id) = invalid_child {
+            return Err(MastForestError::NodeIdOverflow(child_id, node_count));
+        }
+    }
+
+    let mut ready_internal_ids = BTreeSet::new();
+    for &node_id in &internal_ids {
+        if unresolved_child_counts[node_id.to_usize()] == 0 {
+            ready_internal_ids.insert(node_id);
+        }
+    }
+
+    let mut ordered_internal_count = 0;
+    while let Some(node_id) = ready_internal_ids.pop_first() {
+        ordered[node_id.to_usize()] = true;
+        ordered_ids.push(node_id);
+        ordered_internal_count += 1;
+
+        for parent_id in core::mem::take(&mut parents_by_child[node_id.to_usize()]) {
+            let count = &mut unresolved_child_counts[parent_id.to_usize()];
+            *count = count.checked_sub(1).expect("ready child must have a pending parent");
+            if *count == 0 {
+                ready_internal_ids.insert(parent_id);
+            }
+        }
+    }
+
+    if ordered_internal_count != internal_ids.len() {
+        let node_id = internal_ids
+            .into_iter()
+            .find(|node_id| !ordered[node_id.to_usize()])
+            .expect("internal cycle must contain a pending node");
+        return Err(MastForestError::InvalidNodeOrder {
+            node_id,
+            reason: "internal nodes must form an acyclic child-before-parent graph".into(),
+        });
+    }
+
+    Ok(ordered_ids)
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(in crate::mast) enum MastNodeOrderClass {
+    External,
+    BasicBlock,
+    Internal,
+}
+
+fn validate_dense_node_order(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+) -> Result<(), MastForestError> {
+    let mut previous_class = MastNodeOrderClass::External;
+    let mut previous_external_digest = None;
+
+    for (node_index, node) in nodes.iter().enumerate() {
+        let node_id = MastNodeId::new_unchecked(node_index as u32);
+        let node_class = node.order_class();
+
+        if node_class < previous_class {
+            return Err(MastForestError::InvalidNodeOrder {
+                node_id,
+                reason: format!("node class {node_class:?} appears after {previous_class:?}"),
+            });
+        }
+        previous_class = node_class;
+
+        if let MastNode::External(external_node) = node {
+            let digest = external_node.digest();
+            if let Some(previous_digest) = previous_external_digest
+                && previous_digest >= digest
+            {
+                return Err(MastForestError::InvalidNodeOrder {
+                    node_id,
+                    reason: "external node digests must be strictly increasing".into(),
+                });
+            }
+            previous_external_digest = Some(digest);
+        }
+
+        let mut forward_child = None;
+        node.for_each_child(|child_id| {
+            if child_id.0 >= node_id.0 {
+                forward_child = Some(child_id);
+            }
+        });
+        if let Some(child_id) = forward_child {
+            return Err(MastForestError::ForwardReference(node_id, child_id));
+        }
+    }
+
+    Ok(())
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -216,17 +516,6 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
-    // Kept private so callers cannot mutate roots arbitrarily, but shared with the merger so it
-    // can rebuild the root set while remapping nodes into the merged forest.
-    fn mark_root(&mut self, new_root_id: MastNodeId) {
-        assert!(new_root_id.to_usize() < self.nodes.len());
-
-        if !self.roots.contains(&new_root_id) {
-            self.roots.push(new_root_id);
-            self.commitment = self.compute_nodes_commitment(&self.roots);
-        }
-    }
-
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -236,7 +525,12 @@ impl MastForest {
     ///   clearly doesn't belong to this MAST forest).
     #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
-        self.mark_root(new_root_id);
+        assert!(new_root_id.to_usize() < self.nodes.len());
+
+        if !self.roots.contains(&new_root_id) {
+            self.roots.push(new_root_id);
+            self.commitment = self.compute_mast_forest_commitment();
+        }
     }
 
     /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
@@ -264,41 +558,9 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        self.commitment = self.compute_nodes_commitment(&self.roots);
+        self.commitment = self.compute_mast_forest_commitment();
 
         id_remappings
-    }
-
-    /// Compacts the forest by merging duplicate nodes.
-    ///
-    /// This operation performs node deduplication by merging the forest with itself.
-    /// This method consumes the forest and returns a new compacted forest.
-    ///
-    /// The process works by:
-    /// 1. Merging the forest with itself to deduplicate identical nodes
-    /// 2. Updating internal node references and remappings
-    /// 3. Returning the compacted forest and root map
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let forest = MastForest::new();
-    /// // Add nodes to the forest
-    ///
-    /// // Compact the forest (consumes the original)
-    /// let (compacted_forest, root_map) = forest.compact();
-    ///
-    /// // compacted_forest is now compacted with duplicate nodes merged
-    /// ```
-    pub fn compact(self) -> (MastForest, MastForestRootMap) {
-        // Merge with itself to deduplicate nodes
-        // Note: This cannot fail for a self-merge under normal conditions.
-        // The only possible failure (TooManyNodes) would require the original forest to be at a
-        // capacity limit, at which point compaction wouldn't help.
-        MastForest::merge([&self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge")
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -392,7 +654,8 @@ impl MastForest {
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
         for live_node_builder in node_builders {
-            live_node_builder.remap_children(id_remappings).add_to_forest(self).unwrap();
+            let node = live_node_builder.remap_children(id_remappings).build_linked().unwrap();
+            self.nodes.push(node).unwrap();
         }
     }
 
@@ -410,7 +673,7 @@ impl MastForest {
 
         for old_root_id in old_root_ids {
             if let Some(new_root_id) = id_remappings.get(&old_root_id).copied() {
-                self.mark_root(new_root_id);
+                self.make_root(new_root_id);
             }
         }
     }
@@ -443,8 +706,11 @@ fn remove_nodes(
     (retained_nodes, id_remappings)
 }
 
-fn empty_mast_forest_commitment() -> Word {
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[])
+fn empty_mast_forest_commitment() -> MastForestCommitment {
+    let interface_commitment = Poseidon2::merge_many(&[]);
+    let dependency_commitment = Poseidon2::merge_many(&[]);
+    let advice_commitment = AdviceMap::default().commitment();
+    MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
 fn compute_nodes_commitment(
@@ -453,7 +719,48 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+    Poseidon2::merge_many(&digests)
+}
+
+fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
+    let mut digests: Vec<Word> = nodes
+        .iter()
+        .filter(|node| node.is_external())
+        .map(MastNodeExt::digest)
+        .collect();
+    digests.sort_unstable();
+    Poseidon2::merge_many(&digests)
+}
+
+impl MastForestCommitment {
+    fn new(
+        interface_commitment: Word,
+        dependency_commitment: Word,
+        advice_commitment: Word,
+    ) -> Self {
+        let commitment = Poseidon2::merge_many(&[
+            interface_commitment,
+            dependency_commitment,
+            advice_commitment,
+        ]);
+        Self {
+            commitment,
+            interface_commitment,
+            dependency_commitment,
+            advice_commitment,
+        }
+    }
+}
+
+fn compute_mast_forest_commitment(
+    nodes: &IndexVec<MastNodeId, MastNode>,
+    roots: &[MastNodeId],
+    advice_map: &AdviceMap,
+) -> MastForestCommitment {
+    let interface_commitment = compute_nodes_commitment(nodes, roots);
+    let dependency_commitment = compute_dependency_commitment(nodes);
+    let advice_commitment = advice_map.commitment();
+    MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -528,15 +835,38 @@ impl MastForest {
         compute_nodes_commitment(&self.nodes, &node_ids)
     }
 
+    /// Returns the commitment to this MAST forest's public procedure roots.
+    ///
+    /// The commitment is computed as the sequential hash of all procedure root digests after
+    /// sorting them by digest.
+    pub fn interface_commitment(&self) -> Word {
+        self.commitment.interface_commitment
+    }
+
+    /// Returns the commitment to this MAST forest's external dependencies.
+    ///
+    /// The commitment is computed as the sequential hash of all external node digests after
+    /// sorting them by digest.
+    pub fn dependency_commitment(&self) -> Word {
+        self.commitment.dependency_commitment
+    }
+
+    /// Returns the commitment to this MAST forest's advice map.
+    ///
+    /// The commitment is computed over advice entries in key order.
+    pub fn advice_commitment(&self) -> Word {
+        self.commitment.advice_commitment
+    }
+
+    fn compute_mast_forest_commitment(&self) -> MastForestCommitment {
+        compute_mast_forest_commitment(&self.nodes, &self.roots, &self.advice_map)
+    }
+
     /// Returns the commitment to this MAST forest.
     ///
-    /// The commitment is computed as the sequential hash of all procedure roots in the forest.
-    ///
-    /// The commitment uniquely identifies the forest's structure, as each root's digest
-    /// transitively includes all of its descendants. Therefore, a commitment to all roots
-    /// is a commitment to the entire forest.
+    /// The commitment is computed from the interface, dependency, and advice commitments.
     pub fn commitment(&self) -> Word {
-        self.commitment
+        self.commitment.commitment
     }
 
     /// Returns the number of nodes in this MAST forest.
@@ -556,12 +886,8 @@ impl MastForest {
     /// Returns this forest with `advice_map` entries added.
     pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
         self.advice_map.extend(advice_map);
+        self.commitment = self.compute_mast_forest_commitment();
         self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn advice_map_mut(&mut self) -> &mut AdviceMap {
-        &mut self.advice_map
     }
 
     // SERIALIZATION
@@ -581,6 +907,10 @@ impl MastForest {
 
 /// Validation methods
 impl MastForest {
+    pub(in crate::mast) fn validate_dense_node_order(&self) -> Result<(), MastForestError> {
+        validate_dense_node_order(&self.nodes)
+    }
+
     fn validate_basic_block_invariants(&self) -> Result<(), MastForestError> {
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
@@ -838,7 +1168,6 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -904,6 +1233,12 @@ impl Idx for MastNodeId {}
 impl From<MastNodeId> for u32 {
     fn from(value: MastNodeId) -> Self {
         value.0
+    }
+}
+
+impl Serializable for MastNodeId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        Serializable::write_into(&self.0, target);
     }
 }
 
@@ -982,6 +1317,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("invalid node order at {node_id:?}: {reason}")]
+    InvalidNodeOrder { node_id: MastNodeId, reason: String },
     #[error(
         "node {0:?} references child {1:?} which comes after it in the forest (forward reference)"
     )]

@@ -43,6 +43,10 @@ enum Commands {
         measurement_time_secs: Option<u64>,
         #[arg(long)]
         warm_up_time_secs: Option<u64>,
+        #[arg(long)]
+        light_measurement_time_secs: Option<u64>,
+        #[arg(long)]
+        light_warm_up_time_secs: Option<u64>,
         #[arg(long, default_value = "")]
         bench_axes: String,
         #[arg(long, default_value = "")]
@@ -80,6 +84,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             light_sample_size,
             measurement_time_secs,
             warm_up_time_secs,
+            light_measurement_time_secs,
+            light_warm_up_time_secs,
             bench_axes,
             git_ref,
         } => {
@@ -91,6 +97,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 light_sample_size,
                 measurement_time_secs,
                 warm_up_time_secs,
+                light_measurement_time_secs,
+                light_warm_up_time_secs,
                 &bench_axes,
                 &git_ref,
             )?;
@@ -238,6 +246,8 @@ mod tests {
             light_sample_size: None,
             measurement_time_secs: None,
             warm_up_time_secs: None,
+            light_measurement_time_secs: None,
+            light_warm_up_time_secs: None,
             primary_metric: name.to_string(),
             metrics,
             spans: Vec::new(),

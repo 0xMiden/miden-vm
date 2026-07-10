@@ -29,7 +29,7 @@ use miden_project::Linkage;
 
 use crate::{
     Assembler, PathBuf,
-    assembler::MAX_CONTROL_FLOW_NESTING,
+    assembler::{MAX_CONTROL_FLOW_NESTING, MAX_PROC_LOCALS},
     ast::{Module, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
     fmp::fmp_initialization_sequence,
@@ -4523,10 +4523,9 @@ fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
     assert_diagnostic!(err, "invalid syscall: callee must be resolvable to kernel module");
 }
 
-/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
-/// forest is compacted via self-merge.
+/// Reproduces issue #3035: a MAST with padded basic blocks must not grow during self-merge.
 #[test]
-fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
     let context = TestContext::default();
     let module = context.parse_module(source_file!(
         &context,
@@ -4562,21 +4561,21 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         bytes.len()
     };
     let original_nodes = forest.nodes().len();
-    let (compacted, _) = forest.compact();
-    let compacted_size = compacted.to_bytes().len();
-    let compacted_explicit_size = {
+    let (merged, _) = MastForest::merge([&forest]).into_diagnostic()?;
+    let merged_size = merged.to_bytes().len();
+    let merged_explicit_size = {
         let mut bytes = Vec::new();
-        compacted.write_into(&mut bytes);
+        merged.write_into(&mut bytes);
         bytes.len()
     };
-    let compacted_nodes = compacted.nodes().len();
+    let merged_nodes = merged.nodes().len();
 
     assert!(
-        compacted_size <= original_size,
-        "MastForest::compact increased serialized execution size: \
-         original={original_size}, compacted={compacted_size}, \
-         explicit={explicit_size}, compacted_explicit={compacted_explicit_size}, \
-         original_nodes={original_nodes}, compacted_nodes={compacted_nodes}"
+        merged_size <= original_size,
+        "MastForest self-merge increased serialized execution size: \
+         original={original_size}, merged={merged_size}, \
+         explicit={explicit_size}, merged_explicit={merged_explicit_size}, \
+         original_nodes={original_nodes}, merged_nodes={merged_nodes}"
     );
 
     Ok(())
@@ -7602,4 +7601,57 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     let _ = assembler.assemble_library("lib", a_lib, [b_lib])?;
 
     Ok(())
+}
+
+/// Parses a single-procedure module that uses a local (so codegen emits the frame-pointer
+/// sequence), overrides the procedure's local count via the public AST API - bypassing the parser's
+/// `@locals` cap - and assembles it into a library.
+fn assemble_library_with_num_locals(
+    context: &TestContext,
+    num_locals: u16,
+) -> Result<Box<Package>, Report> {
+    let source = source_file!(
+        &context,
+        "  namespace test::repro
+          @locals(1)
+          pub proc foo
+              loc_load.0
+              drop
+          end
+          "
+    );
+
+    let mut module = context.parse_module(source)?;
+    for proc in module.procedures_mut() {
+        proc.set_num_locals(num_locals);
+    }
+
+    Assembler::new(context.source_manager()).assemble_library("test", module, None::<Box<Module>>)
+}
+
+#[test]
+fn test_num_locals_above_max_is_rejected() {
+    let context = TestContext::default();
+
+    // Assembly must reject this gracefully (return Err), not overflow or panic.
+    let err = assemble_library_with_num_locals(&context, 65535)
+        .expect_err("assembling a procedure with 65535 locals should fail, not panic");
+    assert_diagnostic!(&err, "number of procedure locals 65535 exceeds the maximum of 65532");
+}
+
+#[test]
+fn test_num_locals_at_max_is_accepted() {
+    let context = TestContext::default();
+
+    // Assembly must succeed (return Ok) as long as the number of locals is up to the maximum.
+    assemble_library_with_num_locals(&context, MAX_PROC_LOCALS)
+        .expect("assembling a procedure with MAX_PROC_LOCALS should succeed");
+}
+
+#[test]
+fn test_num_locals_one_above_max_is_rejected() {
+    let context = TestContext::default();
+    let err = assemble_library_with_num_locals(&context, MAX_PROC_LOCALS + 1)
+        .expect_err("assembling a procedure with MAX_PROC_LOCALS + 1 should fail");
+    assert_diagnostic!(&err, "number of procedure locals 65533 exceeds the maximum of 65532");
 }

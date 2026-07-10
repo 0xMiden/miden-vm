@@ -9,7 +9,7 @@ use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     events::EventId,
-    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},

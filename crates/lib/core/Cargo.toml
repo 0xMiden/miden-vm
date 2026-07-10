@@ -1,6 +1,6 @@
 [package]
 name = "miden-core-lib"
-version.workspace = true
+version = "0.25.0"
 description = "Miden VM core library"
 documentation = "https://docs.rs/miden-core-lib"
 readme = "README.md"
