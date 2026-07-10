@@ -49,7 +49,7 @@ use crate::{
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{
         DEFAULT_HASH_FUNCTION, RelationDigest, blake3_256_config, keccak_config,
-        observe_protocol_params, pcs_params, poseidon2_config, rpo_config, rpx_config,
+        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
         test_challenger,
     },
     transcript::{
@@ -303,7 +303,7 @@ impl SessionTraces {
     /// than being cloned.
     #[tracing::instrument("prove_stark", skip_all)]
     pub fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
-        let params = pcs_params();
+        let params = precompile_pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
                 let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
@@ -396,7 +396,7 @@ pub fn verify_deferred(proof: &DeferredProof) -> Result<DeferredRoot, VerifyErro
 /// `Ok(())` iff the verifier accepts, including the `Σ σ = 0`
 /// cross-chiplet identity via `eval_external`.
 pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), VerifyError> {
-    let params = pcs_params();
+    let params = precompile_pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
             let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
