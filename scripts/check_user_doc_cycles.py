@@ -153,11 +153,17 @@ def check_assembly_fixtures() -> list[str]:
             errors.append(f"{doc_path}: missing marker {marker!r}")
             continue
 
-        window_start = content.index(marker)
-        window = content[window_start : window_start + 500]
-        if expected not in window:
+        marker_at = content.index(marker)
+        # Compare against the marked table row only (not a loose substring window).
+        row_start = content.rfind("\n", 0, marker_at) + 1
+        row_end = content.find("\n", marker_at)
+        if row_end == -1:
+            row_end = len(content)
+        row = content[row_start:row_end]
+        # Reject larger numbers that contain the expected digits (e.g. 138 vs 38).
+        if re.search(rf"(?<!\d){re.escape(expected)}(?!\d)", row) is None:
             errors.append(
-                f"{doc_path}: marker {case_id!r} is not followed by expected text {expected!r}"
+                f"{doc_path}: marker {case_id!r} row does not contain exact cycle text {expected!r}"
             )
 
     return errors
