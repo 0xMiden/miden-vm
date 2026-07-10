@@ -1,5 +1,7 @@
 #![allow(unused_qualifications)]
 
+extern crate alloc;
+
 use miden_crypto_derive::WordWrapper;
 
 mod qualified {
@@ -63,5 +65,25 @@ mod unqualified {
         let elements: &[Felt] = wrapper.as_elements();
         assert_eq!(elements, word.as_elements());
         assert_eq!(wrapper.as_word(), word);
+    }
+}
+
+mod no_implicit_prelude {
+    #![no_implicit_prelude]
+
+    extern crate alloc;
+    extern crate core;
+    extern crate miden_crypto_derive;
+    extern crate miden_field;
+
+    #[derive(miden_crypto_derive::WordWrapper)]
+    pub struct NoPreludeWord(miden_field::Word);
+
+    #[test]
+    fn derives_to_hex_without_string_in_scope() {
+        let word = <miden_field::Word as core::default::Default>::default();
+        let wrapper = NoPreludeWord::from_raw(word);
+
+        let _: alloc::string::String = wrapper.to_hex();
     }
 }

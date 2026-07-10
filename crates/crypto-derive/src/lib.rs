@@ -88,7 +88,7 @@ pub fn silent_display(input: TokenStream) -> TokenStream {
 /// - `from_raw(Word) -> Self` - Construct without further checks
 /// - `as_elements(&self) -> &[Felt]` - Returns the elements representation
 /// - `as_bytes(&self) -> [u8; 32]` - Returns the byte representation
-/// - `to_hex(&self) -> String` - Returns a big-endian, hex-encoded string
+/// - `to_hex(&self) -> ::alloc::string::String` - Returns a big-endian, hex-encoded string
 /// - `as_word(&self) -> Word` - Returns the underlying Word
 ///
 /// Note: This macro does NOT generate `From` trait implementations. If you need conversions
@@ -123,7 +123,7 @@ pub fn silent_display(input: TokenStream) -> TokenStream {
 ///         self.0.as_bytes()
 ///     }
 ///
-///     pub fn to_hex(&self) -> String {
+///     pub fn to_hex(&self) -> ::alloc::string::String {
 ///         self.0.to_hex()
 ///     }
 ///
@@ -228,7 +228,7 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
             }
 
             /// Returns a big-endian, hex-encoded string.
-            pub fn to_hex(&self) -> String {
+            pub fn to_hex(&self) -> ::alloc::string::String {
                 self.0.to_hex()
             }
 
