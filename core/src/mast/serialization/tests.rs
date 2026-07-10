@@ -851,7 +851,6 @@ fn sparse_mast_round_trip_writes_map_sections_in_node_id_order() {
 fn sparse_reader_rejects_non_increasing_full_node_ids() {
     let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
     let mut bytes = Vec::new();
-    2usize.write_into(&mut bytes);
     0usize.write_into(&mut bytes);
     2usize.write_into(&mut bytes);
     write_sparse_block_entry(MastNodeId::from(1), &block, &mut bytes);
@@ -867,7 +866,6 @@ fn sparse_reader_rejects_non_increasing_full_node_ids() {
 fn sparse_reader_rejects_non_increasing_digest_only_ids() {
     let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
     let mut bytes = Vec::new();
-    3usize.write_into(&mut bytes);
     0usize.write_into(&mut bytes);
     1usize.write_into(&mut bytes);
     write_sparse_block_entry(MastNodeId::from(0), &block, &mut bytes);
@@ -886,7 +884,6 @@ fn sparse_reader_rejects_non_increasing_digest_only_ids() {
 fn sparse_reader_rejects_trailing_bytes() {
     let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
     let mut bytes = Vec::new();
-    1usize.write_into(&mut bytes);
     0usize.write_into(&mut bytes);
     1usize.write_into(&mut bytes);
     write_sparse_block_entry(MastNodeId::from(0), &block, &mut bytes);
@@ -911,20 +908,20 @@ fn sparse_reader_rejects_dense_payloads() {
 }
 
 #[test]
-fn sparse_reader_rejects_oversized_source_node_count_before_sections() {
+fn sparse_reader_rejects_oversized_node_id_before_sections() {
     let mut bytes = Vec::new();
-    (MastForest::MAX_NODES + 1).write_into(&mut bytes);
+    1usize.write_into(&mut bytes);
+    MastNodeId::from(MastForest::MAX_NODES as u32).write_into(&mut bytes);
 
     let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
 
-    assert!(err.to_string().contains("sparse source node count"));
-    assert!(err.to_string().contains("exceeds maximum allowed"));
+    assert!(err.to_string().contains("procedure root id"));
+    assert!(err.to_string().contains("number of nodes in the forest"));
 }
 
 #[test]
 fn sparse_reader_rejects_oversized_section_count_before_allocation() {
     let mut bytes = Vec::new();
-    1usize.write_into(&mut bytes);
     usize::MAX.write_into(&mut bytes);
 
     let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
@@ -945,7 +942,6 @@ fn sparse_serialized_parts_reject_missing_child_digest() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests,
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
@@ -967,7 +963,6 @@ fn sparse_serialized_parts_reject_duplicate_full_ids() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests,
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
@@ -990,7 +985,6 @@ fn sparse_serialized_parts_reject_duplicate_digest_only_ids() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests,
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
@@ -1012,7 +1006,6 @@ fn sparse_serialized_parts_reject_full_digest_overlap() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests,
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
@@ -1026,7 +1019,7 @@ fn sparse_serialized_parts_reject_full_digest_overlap() {
 #[test]
 fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
     let (_source, sparse, true_branch, false_branch, _root) = sparse_split_fixture();
-    let out_of_range = MastNodeId::from(sparse.num_nodes() as u32);
+    let out_of_range = MastNodeId::from(MastForest::MAX_NODES as u32);
 
     let mut nodes: Vec<_> = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
     nodes.push((out_of_range, sparse.get_node_by_id(true_branch).unwrap().clone()));
@@ -1035,14 +1028,13 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests.clone(),
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("full node id")
-            && msg.contains("out of range")
+            && msg.contains("exceeds maximum")
     );
 
     let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
@@ -1051,14 +1043,13 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         out_of_range_digests,
-        sparse.num_nodes(),
         sparse.procedure_roots().to_vec(),
         sparse.advice_map().clone(),
     );
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("digest-only node id")
-            && msg.contains("out of range")
+            && msg.contains("exceeds maximum")
     );
 
     let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
@@ -1066,14 +1057,13 @@ fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
     let result = SparseMastForest::from_serialized_parts(
         nodes,
         digests,
-        sparse.num_nodes(),
         vec![out_of_range],
         sparse.advice_map().clone(),
     );
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("procedure root id")
-            && msg.contains("out of range")
+            && msg.contains("exceeds maximum")
     );
 }
 
@@ -1096,7 +1086,6 @@ fn write_sparse_block_entry<W: ByteWriter>(
 
 fn sparse_payload_ids(bytes: &[u8]) -> (Vec<MastNodeId>, Vec<MastNodeId>) {
     let mut reader = SliceReader::new(bytes);
-    let _num_nodes = reader.read_usize().unwrap();
 
     let root_count = reader.read_usize().unwrap();
     for _ in 0..root_count {

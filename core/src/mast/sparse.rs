@@ -52,12 +52,6 @@ pub struct SparseMastForest {
     /// full-node entry implicitly carries its own digest via [`MastNodeExt::digest`].
     digests: BTreeMap<MastNodeId, Word>,
 
-    /// Upper bound for [`MastNodeId`] values from the source [`MastForest`].
-    ///
-    /// This is not `nodes.len()`. The trusted reader uses it to reject IDs outside the source
-    /// forest's ID space, not as an independent proof of the source forest's size.
-    num_nodes: usize,
-
     /// Roots of procedures defined within the original MAST forest.
     roots: Vec<MastNodeId>,
 
@@ -72,11 +66,18 @@ impl SparseMastForest {
         &self.nodes
     }
 
-    /// Returns the total number of nodes in the source [`MastForest`] from which this sparse
-    /// forest was built. This is *not* the number of visited (i.e. present) nodes — see
-    /// [`Self::nodes`] for that.
+    /// Returns the minimum node count needed to cover all IDs retained in this sparse replay view.
+    ///
+    /// This is *not* the number of visited nodes and may be smaller than the source
+    /// [`MastForest`]'s node count when high source IDs were not needed during replay.
     pub fn num_nodes(&self) -> usize {
-        self.num_nodes
+        self.nodes
+            .keys()
+            .chain(self.digests.keys())
+            .chain(self.roots.iter())
+            .map(|id| id.to_usize() + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Returns the roots of procedures defined within this sparse forest.
@@ -98,17 +99,14 @@ impl SparseMastForest {
     pub(in crate::mast) fn from_serialized_parts(
         nodes: Vec<(MastNodeId, MastNode)>,
         digests: Vec<(MastNodeId, Word)>,
-        num_nodes: usize,
         roots: Vec<MastNodeId>,
         advice_map: AdviceMap,
     ) -> Result<Self, DeserializationError> {
-        validate_sparse_node_bound(num_nodes)?;
-
-        let nodes = collect_unique_nodes(nodes, num_nodes)?;
-        let digests = collect_unique_digests(digests, num_nodes)?;
+        let nodes = collect_unique_nodes(nodes)?;
+        let digests = collect_unique_digests(digests)?;
 
         for &root in &roots {
-            validate_sparse_id(root, num_nodes, "procedure root")?;
+            validate_sparse_id(root, "procedure root")?;
         }
 
         for node_id in nodes.keys() {
@@ -120,37 +118,18 @@ impl SparseMastForest {
             }
         }
 
-        validate_full_node_child_digests(&nodes, &digests, num_nodes)?;
+        validate_full_node_child_digests(&nodes, &digests)?;
 
-        Ok(Self {
-            nodes,
-            digests,
-            num_nodes,
-            roots,
-            advice_map,
-        })
+        Ok(Self { nodes, digests, roots, advice_map })
     }
 }
 
-fn validate_sparse_node_bound(num_nodes: usize) -> Result<(), DeserializationError> {
-    if num_nodes > MastForest::MAX_NODES {
+fn validate_sparse_id(id: MastNodeId, label: &str) -> Result<(), DeserializationError> {
+    if id.to_usize() >= MastForest::MAX_NODES {
         return Err(DeserializationError::InvalidValue(format!(
-            "sparse source node count {num_nodes} exceeds maximum allowed {}",
-            MastForest::MAX_NODES
-        )));
-    }
-    Ok(())
-}
-
-fn validate_sparse_id(
-    id: MastNodeId,
-    num_nodes: usize,
-    label: &str,
-) -> Result<(), DeserializationError> {
-    if id.to_usize() >= num_nodes {
-        return Err(DeserializationError::InvalidValue(format!(
-            "{label} id {} is out of range for sparse source node count {num_nodes}",
-            id.0
+            "{label} id {} exceeds maximum sparse MAST node id {}",
+            id.0,
+            MastForest::MAX_NODES - 1
         )));
     }
     Ok(())
@@ -158,11 +137,10 @@ fn validate_sparse_id(
 
 fn collect_unique_nodes(
     nodes: Vec<(MastNodeId, MastNode)>,
-    num_nodes: usize,
 ) -> Result<BTreeMap<MastNodeId, MastNode>, DeserializationError> {
     let mut result = BTreeMap::new();
     for (id, node) in nodes {
-        validate_sparse_id(id, num_nodes, "full node")?;
+        validate_sparse_id(id, "full node")?;
         if result.insert(id, node).is_some() {
             return Err(DeserializationError::InvalidValue(format!(
                 "duplicate sparse full-node id {}",
@@ -175,11 +153,10 @@ fn collect_unique_nodes(
 
 fn collect_unique_digests(
     digests: Vec<(MastNodeId, Word)>,
-    num_nodes: usize,
 ) -> Result<BTreeMap<MastNodeId, Word>, DeserializationError> {
     let mut result = BTreeMap::new();
     for (id, digest) in digests {
-        validate_sparse_id(id, num_nodes, "digest-only node")?;
+        validate_sparse_id(id, "digest-only node")?;
         if result.insert(id, digest).is_some() {
             return Err(DeserializationError::InvalidValue(format!(
                 "duplicate sparse digest-only id {}",
@@ -195,10 +172,9 @@ fn collect_unique_digests(
 fn validate_full_node_child_digests(
     nodes: &BTreeMap<MastNodeId, MastNode>,
     digests: &BTreeMap<MastNodeId, Word>,
-    num_nodes: usize,
 ) -> Result<(), DeserializationError> {
     for (&node_id, node) in nodes {
-        validate_sparse_id(node_id, num_nodes, "full node")?;
+        validate_sparse_id(node_id, "full node")?;
 
         match node {
             MastNode::Block(block) => {
@@ -211,18 +187,18 @@ fn validate_full_node_child_digests(
             },
             MastNode::External(_) | MastNode::Dyn(_) => {},
             MastNode::Join(join) => {
-                require_child_digest(node_id, join.first(), nodes, digests, num_nodes)?;
-                require_child_digest(node_id, join.second(), nodes, digests, num_nodes)?;
+                require_child_digest(node_id, join.first(), nodes, digests)?;
+                require_child_digest(node_id, join.second(), nodes, digests)?;
             },
             MastNode::Split(split) => {
-                require_child_digest(node_id, split.on_true(), nodes, digests, num_nodes)?;
-                require_child_digest(node_id, split.on_false(), nodes, digests, num_nodes)?;
+                require_child_digest(node_id, split.on_true(), nodes, digests)?;
+                require_child_digest(node_id, split.on_false(), nodes, digests)?;
             },
             MastNode::Loop(loop_node) => {
-                require_child_digest(node_id, loop_node.body(), nodes, digests, num_nodes)?;
+                require_child_digest(node_id, loop_node.body(), nodes, digests)?;
             },
             MastNode::Call(call) => {
-                require_child_digest(node_id, call.callee(), nodes, digests, num_nodes)?;
+                require_child_digest(node_id, call.callee(), nodes, digests)?;
             },
         }
     }
@@ -234,9 +210,8 @@ fn require_child_digest(
     child_id: MastNodeId,
     nodes: &BTreeMap<MastNodeId, MastNode>,
     digests: &BTreeMap<MastNodeId, Word>,
-    num_nodes: usize,
 ) -> Result<(), DeserializationError> {
-    validate_sparse_id(child_id, num_nodes, "child")?;
+    validate_sparse_id(child_id, "child")?;
     if !nodes.contains_key(&child_id) && !digests.contains_key(&child_id) {
         return Err(DeserializationError::InvalidValue(format!(
             "sparse full node {} references child {} without a full node or digest-only entry",
@@ -308,10 +283,6 @@ pub struct SparseMastForestBuilder {
     /// The source forest whose nodes are being collected.
     source: Arc<MastForest>,
 
-    /// Total number of nodes in the source forest, captured at construction time. Propagated to
-    /// the finalized [`SparseMastForest`] so consumers know the original [`MastNodeId`] space.
-    num_nodes: usize,
-
     /// IDs of nodes that were entered during execution. Their full [`MastNode`] is copied into the
     /// finalized forest's `nodes` map.
     full_visits: BTreeSet<MastNodeId>,
@@ -325,10 +296,8 @@ pub struct SparseMastForestBuilder {
 impl SparseMastForestBuilder {
     /// Creates a new builder for the given source forest.
     pub fn new(source: Arc<MastForest>) -> Self {
-        let num_nodes = source.nodes().len();
         Self {
             source,
-            num_nodes,
             full_visits: BTreeSet::new(),
             digest_only_visits: BTreeSet::new(),
         }
@@ -358,12 +327,7 @@ impl SparseMastForestBuilder {
     /// from the source forest. The roots, advice map, and debug info are cloned from the source
     /// in full (they are not yet trimmed to visited nodes only).
     pub fn finalize(self) -> SparseMastForest {
-        let SparseMastForestBuilder {
-            source,
-            num_nodes,
-            full_visits,
-            digest_only_visits,
-        } = self;
+        let SparseMastForestBuilder { source, full_visits, digest_only_visits } = self;
 
         let mut nodes = BTreeMap::new();
         for node_id in &full_visits {
@@ -387,7 +351,6 @@ impl SparseMastForestBuilder {
         SparseMastForest {
             nodes,
             digests,
-            num_nodes,
             roots: source.procedure_roots().to_vec(),
             advice_map: source.advice_map().clone(),
         }
