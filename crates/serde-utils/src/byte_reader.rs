@@ -427,6 +427,7 @@ impl<'a> ReadAdapter<'a> {
                 unsafe {
                     self.buf.set_len(0);
                 }
+                self.pos = 0;
             }
 
             return Ok(output);
@@ -951,6 +952,18 @@ mod tests {
     }
 
     #[test]
+    fn read_adapter_exact_array_resets_empty_local_buffer() {
+        let data = (0..300).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let expected: [u8; 111] = data[17..128].try_into().unwrap();
+        let mut chunked = ChunkedReader::new(data.clone(), 128);
+        let mut adapter = ReadAdapter::new(&mut chunked);
+
+        assert_eq!(adapter.read_slice(17).unwrap(), &data[..17]);
+        assert_eq!(adapter.read_array::<111>().unwrap(), expected);
+        assert_eq!(adapter.read_slice(8).unwrap(), &data[128..136]);
+    }
+
+    #[test]
     fn read_adapter_roundtrip() {
         const VALUE: usize = 2048;
 
@@ -1043,7 +1056,8 @@ mod tests {
         assert_eq!(reader.pos, 509);
         assert_eq!(reader.read_u32().unwrap(), 0xbeef);
         // Now we have
-        assert_eq!(reader.pos, 513);
+        assert_eq!(reader.buf.len(), 0);
+        assert_eq!(reader.pos, 0);
         assert!(!reader.has_more_bytes(), "expected there to be no more data in the input");
     }
 
