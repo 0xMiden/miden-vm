@@ -673,9 +673,8 @@ impl Smt {
     pub fn fuzz_compute_mutations_sequential(
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
-    ) -> MutationSet<SMT_DEPTH, Word, Word> {
+    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, MerkleError> {
         <Self as SparseMerkleTreeReader<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
-            .expect("Failed to compute mutations in fuzzing")
     }
 }
 

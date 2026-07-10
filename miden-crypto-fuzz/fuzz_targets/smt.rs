@@ -64,25 +64,32 @@ fn run_fuzz_smt(fuzz_input: FuzzInput) {
 
             let sequential_mutations =
                 sequential_smt.fuzz_compute_mutations_sequential(fuzz_input.updates.clone());
-            let parallel_mutations = parallel_smt
-                .compute_mutations(fuzz_input.updates)
-                .expect("Failed to compute mutations for parallel");
+            let parallel_mutations = parallel_smt.compute_mutations(fuzz_input.updates);
 
-            assert_eq!(
-                sequential_mutations.root(),
-                parallel_mutations.root(),
-                "Mismatch in mutation results!"
-            );
-            assert_eq!(
-                sequential_mutations.node_mutations(),
-                parallel_mutations.node_mutations(),
-                "Node mutations mismatch!"
-            );
-            assert_eq!(
-                sequential_mutations.new_pairs(),
-                parallel_mutations.new_pairs(),
-                "New pairs mismatch!"
-            );
+            match (sequential_mutations, parallel_mutations) {
+                (Ok(sequential_mutations), Ok(parallel_mutations)) => {
+                    assert_eq!(
+                        sequential_mutations.root(),
+                        parallel_mutations.root(),
+                        "Mismatch in mutation results!"
+                    );
+                    assert_eq!(
+                        sequential_mutations.node_mutations(),
+                        parallel_mutations.node_mutations(),
+                        "Node mutations mismatch!"
+                    );
+                    assert_eq!(
+                        sequential_mutations.new_pairs(),
+                        parallel_mutations.new_pairs(),
+                        "New pairs mismatch!"
+                    );
+                },
+                (Err(e1), Err(e2)) => {
+                    assert_eq!(format!("{:?}", e1), format!("{:?}", e2), "Different errors returned");
+                },
+                (Ok(_), Err(e)) => panic!("Sequential succeeded but parallel failed with: {:?}", e),
+                (Err(e), Ok(_)) => panic!("Parallel succeeded but sequential failed with: {:?}", e),
+            }
         },
         (Err(e1), Err(e2)) => {
             assert_eq!(format!("{:?}", e1), format!("{:?}", e2), "Different errors returned");
