@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.25.1 (2026-07-10)
+
+#### Fixes
+
+- `ResumeContext` now makes the debug info it carries available to users beyond the `miden-processor` crate itself ([#3355](https://github.com/0xMiden/miden-vm/pull/3355))
+
 ## v0.25.0 (2026-07-08)
 
 #### Changes
