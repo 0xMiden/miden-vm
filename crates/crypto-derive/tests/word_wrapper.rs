@@ -1,7 +1,5 @@
 #![allow(unused_qualifications)]
 
-extern crate alloc;
-
 use miden_crypto_derive::WordWrapper;
 
 mod qualified {

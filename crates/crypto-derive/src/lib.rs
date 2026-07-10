@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, PathArguments, Type, parse_macro_input};
+use syn2 as syn;
 
 // SILENT DEBUG MACRO
 // ================================================================================================
@@ -88,7 +89,7 @@ pub fn silent_display(input: TokenStream) -> TokenStream {
 /// - `from_raw(Word) -> Self` - Construct without further checks
 /// - `as_elements(&self) -> &[Felt]` - Returns the elements representation
 /// - `as_bytes(&self) -> [u8; 32]` - Returns the byte representation
-/// - `to_hex(&self) -> ::alloc::string::String` - Returns a big-endian, hex-encoded string
+/// - `to_hex(&self) -> alloc::string::String` - Returns a big-endian, hex-encoded string
 /// - `as_word(&self) -> Word` - Returns the underlying Word
 ///
 /// Note: This macro does NOT generate `From` trait implementations. If you need conversions
@@ -123,7 +124,7 @@ pub fn silent_display(input: TokenStream) -> TokenStream {
 ///         self.0.as_bytes()
 ///     }
 ///
-///     pub fn to_hex(&self) -> ::alloc::string::String {
+///     pub fn to_hex(&self) -> alloc::string::String {
 ///         self.0.to_hex()
 ///     }
 ///
@@ -206,37 +207,41 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #impl_generics #name #ty_generics #where_clause {
-            /// Construct without further checks from a given `Word`.
-            ///
-            /// # Warning
-            ///
-            /// This requires the caller to uphold the guarantees/invariants of this type (if any).
-            /// Check the type-level documentation for guarantees/invariants.
-            pub fn from_raw(word: #word_type) -> Self {
-                Self(word)
-            }
+        const _: () = {
+            extern crate alloc;
 
-            /// Returns the elements representation of this value.
-            pub fn as_elements(&self) -> &[<#word_type as ::core::ops::Index<usize>>::Output] {
-                self.0.as_elements()
-            }
+            impl #impl_generics #name #ty_generics #where_clause {
+                /// Construct without further checks from a given `Word`.
+                ///
+                /// # Warning
+                ///
+                /// This requires the caller to uphold the guarantees/invariants of this type (if any).
+                /// Check the type-level documentation for guarantees/invariants.
+                pub fn from_raw(word: #word_type) -> Self {
+                    Self(word)
+                }
 
-            /// Returns the byte representation of this value.
-            pub fn as_bytes(&self) -> [u8; 32] {
-                self.0.as_bytes()
-            }
+                /// Returns the elements representation of this value.
+                pub fn as_elements(&self) -> &[<#word_type as ::core::ops::Index<usize>>::Output] {
+                    self.0.as_elements()
+                }
 
-            /// Returns a big-endian, hex-encoded string.
-            pub fn to_hex(&self) -> ::alloc::string::String {
-                self.0.to_hex()
-            }
+                /// Returns the byte representation of this value.
+                pub fn as_bytes(&self) -> [u8; 32] {
+                    self.0.as_bytes()
+                }
 
-            /// Returns the underlying word of this value.
-            pub fn as_word(&self) -> #word_type {
-                self.0
+                /// Returns a big-endian, hex-encoded string.
+                pub fn to_hex(&self) -> alloc::string::String {
+                    self.0.to_hex()
+                }
+
+                /// Returns the underlying word of this value.
+                pub fn as_word(&self) -> #word_type {
+                    self.0
+                }
             }
-        }
+        };
     };
 
     TokenStream::from(expanded)
