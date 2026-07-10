@@ -18,8 +18,8 @@ miden-mast-package
 miden-package-registry
 miden-project
 miden-assembly
-miden-processor
 miden-precompiles
+miden-processor
 miden-prover
 miden-verifier
 miden-core-lib-codegen
