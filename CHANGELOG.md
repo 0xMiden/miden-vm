@@ -13,7 +13,7 @@
 - Fixed a panic (or silent miscompile in release builds) when assembling a procedure declaring more locals than the maximum representable during frame-pointer codegen; such procedures are now rejected with a diagnostic error ([#3332](https://github.com/0xMiden/miden-vm/pull/3332)).
 - [BREAKING] Bound dense `MastForest` and package digests to stored roots, external dependencies, and advice, rejected non-canonical dense forest payloads, and moved dense forest construction to `DenseMastForestBuilder` ([#3334](https://github.com/0xMiden/miden-vm/pull/3334)).
 - Made `make clippy` and `make lint` deny warnings so local linting fails on the same Clippy warnings as CI ([#3257](https://github.com/0xMiden/miden-vm/issues/3257)).
-- [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#333](https://github.com/0xMiden/miden-vm/issues/3333)).
+- [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#3333](https://github.com/0xMiden/miden-vm/issues/3333)).
 - [BREAKING] Removed `MastForest::compact`; MAST construction should deduplicate through builders or explicit `MastForest::merge` calls instead ([#3318](https://github.com/0xMiden/miden-vm/pull/3318)).
 - [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
 
