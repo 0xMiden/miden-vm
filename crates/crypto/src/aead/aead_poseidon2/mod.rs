@@ -16,6 +16,7 @@ use rand::{
     Rng, RngExt,
     distr::{Distribution, StandardUniform, Uniform},
 };
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::{
@@ -23,8 +24,8 @@ use crate::{
     aead::{AeadScheme, DataType, EncryptionError},
     hash::poseidon2::Poseidon2,
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
         padded_elements_to_bytes, read_sensitive_array,
         zeroize::{Zeroize, ZeroizeOnDrop},
     },
@@ -758,18 +759,58 @@ fn unpad(mut plaintext: Vec<Felt>) -> Result<Vec<Felt>, EncryptionError> {
 /// Poseidon2-based AEAD scheme implementation
 pub struct AeadPoseidon2;
 
+fn derive_secret_key_from_bytes(bytes: &[u8]) -> Result<SecretKey, EncryptionError> {
+    if bytes.len() != SK_SIZE_BYTES {
+        return Err(EncryptionError::FailedOperation);
+    }
+
+    let mut elements = Vec::with_capacity(SECRET_KEY_SIZE);
+    let mut counter = 0u32;
+
+    while elements.len() < SECRET_KEY_SIZE {
+        let mut hasher = Sha256::new();
+        hasher.update(b"miden-crypto/aead-poseidon2/key-from-bytes/v1");
+        hasher.update(bytes);
+        hasher.update(counter.to_le_bytes());
+
+        for chunk in hasher.finalize().chunks_exact(Felt::NUM_BYTES) {
+            let value =
+                u64::from_le_bytes(chunk.try_into().map_err(|_| EncryptionError::FailedOperation)?);
+            if value < Felt::ORDER {
+                elements.push(Felt::new_unchecked(value));
+                if elements.len() == SECRET_KEY_SIZE {
+                    break;
+                }
+            }
+        }
+
+        counter = counter.checked_add(1).ok_or(EncryptionError::FailedOperation)?;
+    }
+
+    let elements: [Felt; SECRET_KEY_SIZE] =
+        elements.try_into().map_err(|_| EncryptionError::FailedOperation)?;
+    Ok(SecretKey(elements))
+}
+
+fn read_encrypted_data_strict(ciphertext: &[u8]) -> Result<EncryptedData, EncryptionError> {
+    let mut reader = BudgetedReader::new(SliceReader::new(ciphertext), ciphertext.len());
+    let encrypted_data =
+        EncryptedData::read_from(&mut reader).map_err(|_| EncryptionError::FailedOperation)?;
+
+    if reader.has_more_bytes() {
+        return Err(EncryptionError::FailedOperation);
+    }
+
+    Ok(encrypted_data)
+}
+
 impl AeadScheme for AeadPoseidon2 {
     const KEY_SIZE: usize = SK_SIZE_BYTES;
 
     type Key = SecretKey;
 
     fn key_from_bytes(bytes: &[u8]) -> Result<Self::Key, EncryptionError> {
-        if bytes.len() != SK_SIZE_BYTES {
-            return Err(EncryptionError::FailedOperation);
-        }
-
-        SecretKey::read_from_bytes_with_budget(bytes, SK_SIZE_BYTES)
-            .map_err(|_| EncryptionError::FailedOperation)
+        derive_secret_key_from_bytes(bytes)
     }
 
     fn encrypt_bytes<R: rand::CryptoRng>(
@@ -791,9 +832,7 @@ impl AeadScheme for AeadPoseidon2 {
         ciphertext: &[u8],
         associated_data: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
-        let encrypted_data =
-            EncryptedData::read_from_bytes_with_budget(ciphertext, ciphertext.len())
-                .map_err(|_| EncryptionError::FailedOperation)?;
+        let encrypted_data = read_encrypted_data_strict(ciphertext)?;
 
         key.decrypt_bytes_with_associated_data(&encrypted_data, associated_data)
     }
@@ -820,9 +859,7 @@ impl AeadScheme for AeadPoseidon2 {
         ciphertext: &[u8],
         associated_data: &[Felt],
     ) -> Result<Vec<Felt>, EncryptionError> {
-        let encrypted_data =
-            EncryptedData::read_from_bytes_with_budget(ciphertext, ciphertext.len())
-                .map_err(|_| EncryptionError::FailedOperation)?;
+        let encrypted_data = read_encrypted_data_strict(ciphertext)?;
 
         key.decrypt_elements_with_associated_data(&encrypted_data, associated_data)
     }

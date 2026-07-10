@@ -181,6 +181,39 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
+fn test_key_from_bytes_accepts_noncanonical_key_material() {
+    let bytes = [0xff; SK_SIZE_BYTES];
+
+    let key1 = AeadPoseidon2::key_from_bytes(&bytes).unwrap();
+    let key2 = AeadPoseidon2::key_from_bytes(&bytes).unwrap();
+
+    assert_eq!(key1, key2);
+}
+
+#[test]
+fn test_decrypt_rejects_trailing_ciphertext_bytes() {
+    let seed = [0_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    let key = SecretKey::with_rng(&mut rng);
+
+    let mut encrypted_bytes =
+        AeadPoseidon2::encrypt_bytes(&key, &mut rng, b"hello", b"associated").unwrap();
+    encrypted_bytes.push(0);
+    assert!(
+        AeadPoseidon2::decrypt_bytes_with_associated_data(&key, &encrypted_bytes, b"associated")
+            .is_err()
+    );
+
+    let mut encrypted_elements =
+        AeadPoseidon2::encrypt_elements(&key, &mut rng, &[ONE], &[ZERO]).unwrap();
+    encrypted_elements.push(0);
+    assert!(
+        AeadPoseidon2::decrypt_elements_with_associated_data(&key, &encrypted_elements, &[ZERO],)
+            .is_err()
+    );
+}
+
+#[test]
 fn test_nonce_creation() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

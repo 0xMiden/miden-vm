@@ -170,6 +170,18 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
+fn test_decrypt_rejects_trailing_ciphertext_bytes() {
+    let seed = [0_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    let key = SecretKey::with_rng(&mut rng);
+
+    let mut encrypted = XChaCha::encrypt_bytes(&key, &mut rng, b"hello", b"associated").unwrap();
+    encrypted.push(0);
+
+    assert!(XChaCha::decrypt_bytes_with_associated_data(&key, &encrypted, b"associated").is_err());
+}
+
+#[test]
 fn test_secret_key_serialization() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

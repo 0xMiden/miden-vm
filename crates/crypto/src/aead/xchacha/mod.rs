@@ -24,8 +24,8 @@ use crate::{
     Felt,
     aead::{AeadScheme, DataType, EncryptionError},
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_elements_exact, elements_to_bytes,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, bytes_to_elements_exact, elements_to_bytes,
         zeroize::{Zeroize, ZeroizeOnDrop},
     },
 };
@@ -91,6 +91,18 @@ impl PartialEq for SecretKey {
 
 #[cfg(any(test, feature = "testing"))]
 impl Eq for SecretKey {}
+
+fn read_encrypted_data_strict(ciphertext: &[u8]) -> Result<EncryptedData, EncryptionError> {
+    let mut reader = BudgetedReader::new(SliceReader::new(ciphertext), ciphertext.len());
+    let encrypted_data =
+        EncryptedData::read_from(&mut reader).map_err(|_| EncryptionError::FailedOperation)?;
+
+    if reader.has_more_bytes() {
+        return Err(EncryptionError::FailedOperation);
+    }
+
+    Ok(encrypted_data)
+}
 
 impl SecretKey {
     // CONSTRUCTORS
@@ -347,9 +359,7 @@ impl AeadScheme for XChaCha {
         ciphertext: &[u8],
         associated_data: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
-        let encrypted_data =
-            EncryptedData::read_from_bytes_with_budget(ciphertext, ciphertext.len())
-                .map_err(|_| EncryptionError::FailedOperation)?;
+        let encrypted_data = read_encrypted_data_strict(ciphertext)?;
 
         key.decrypt_bytes_with_associated_data(&encrypted_data, associated_data)
             .map_err(|_| EncryptionError::FailedOperation)
