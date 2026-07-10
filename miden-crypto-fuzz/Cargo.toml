@@ -12,7 +12,6 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 miden-crypto  = { features = ["concurrent", "fuzzing"], path = "../crates/crypto" }
-rand          = { default-features = false, version = "0.10" }
 
 # Existing SMT fuzz target (for sequential vs parallel consistency)
 [[bin]]

@@ -734,8 +734,8 @@ impl ByteReader for SliceReader<'_> {
 /// data.extend_from_slice(&1_000_000_000u64.to_le_bytes());
 /// data.extend_from_slice(&[0u8; 16]);
 ///
-/// // SliceReader returns usize::MAX from max_alloc, so direct low-level use accepts
-/// // any length. Public read_from_bytes wraps it in BudgetedReader.
+/// // SliceReader and read_from_bytes are unbudgeted. Use read_from_bytes_with_budget
+/// // or wrap SliceReader in BudgetedReader when reading untrusted input.
 /// let reader = SliceReader::new(&data);
 /// assert_eq!(reader.max_alloc(8), usize::MAX);
 /// ```
