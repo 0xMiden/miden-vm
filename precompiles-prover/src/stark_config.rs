@@ -37,19 +37,6 @@ pub type PackedFelt = <Felt as Field>::Packing;
 /// Number of inputs to the Merkle compression function.
 const COMPRESSION_INPUTS: usize = 2;
 
-// DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
-// ================================================================================================
-
-/// Placeholder relation digest for the precompile chiplet AIR set.
-///
-/// The VM binds `RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID,
-/// CIRCUIT_COMMITMENT])`. The precompile prover does not yet have a generated
-/// relation/circuit commitment, so for the serialized-proof surface we bind an
-/// explicit empty placeholder digest, `[Felt::ZERO; 4]`, instead of reusing the
-/// VM digest. Replace this with the generated precompile relation digest before
-/// treating proofs as production-secure across AIR upgrades.
-pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [Felt::ZERO; 4];
-
 /// Default hash function for compatibility APIs such as
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
