@@ -79,10 +79,10 @@
 //! - [`MastForest::read_from_bytes`]: trusted dense execution payload, no hashless support.
 //! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless and legacy
 //!   debug-bearing payloads.
-//! - [`crate::mast::SparseMastForest::read_from_bytes`] /
-//!   [`crate::mast::SparseMastForest::read_from_bytes_with_options`]: separate trusted sparse
-//!   replay payloads for serialized trace-generation inputs. Sparse payloads currently carry
-//!   full-node digests and do not recompute them on read.
+//! - [`crate::mast::SparseMastForest::read_from_bytes`]: separate trusted sparse replay payloads
+//!   for serialized trace-generation inputs. Sparse payloads preserve the sparse node and digest
+//!   maps produced by tracing; they do not share the dense `MastForest` wire format and are not an
+//!   untrusted validation boundary.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
@@ -117,7 +117,6 @@ pub(super) use layout::ForestLayout;
 use layout::{OffsetTrackingReader, TrackingReader, WireFlags, read_header_and_scan_layout};
 
 mod sparse;
-pub use sparse::SparseMastForestReadOptions;
 
 mod resolved;
 use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};

@@ -1,106 +1,117 @@
-use alloc::{format, string::ToString, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::ToString, vec::Vec};
 
-use super::{
-    MastNodeEntry,
-    basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder},
-    layout::{OffsetTrackingReader, TrackingReader},
-};
+use super::basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
 use crate::{
     Word,
     advice::AdviceMap,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId, SparseMastForest},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeExt, MastNodeId,
+        SparseMastForest, SplitNodeBuilder,
+    },
     serde::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader,
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
 
-// CONSTANTS
-// ================================================================================================
-
-const SPARSE_MAGIC: &[u8; 4] = b"SMST";
-const SPARSE_VERSION: [u8; 3] = [0, 0, 0];
-
-// HELPERS
-// ================================================================================================
-
-fn sparse_mast_forest_min_serialized_size() -> usize {
-    SPARSE_MAGIC.len()
-        + SPARSE_VERSION.len()
-        + usize::min_serialized_size() * 7
-        + Word::min_serialized_size()
-        + usize::min_serialized_size()
-}
+const SPARSE_BLOCK: u8 = 0;
+const SPARSE_JOIN: u8 = 1;
+const SPARSE_SPLIT: u8 = 2;
+const SPARSE_LOOP: u8 = 3;
+const SPARSE_CALL: u8 = 4;
+const SPARSE_SYSCALL: u8 = 5;
+const SPARSE_DYN: u8 = 6;
+const SPARSE_DYNCALL: u8 = 7;
+const SPARSE_EXTERNAL: u8 = 8;
 
 // WRITER
 // ================================================================================================
 
-/// Serializes a [`SparseMastForest`] in trusted sparse replay form.
+/// Writes trusted sparse trace replay data.
 ///
-/// This format carries the digest for each full node and accepts those digests on read. It is
-/// suitable for trusted remote proving inputs, not as an untrusted hashless validation path.
-///
-/// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
+/// This format preserves the sparse maps produced by execution tracing. It does not prove that
+/// this sparse view is a subset of a committed [`MastForest`], and it does not share the dense
+/// [`MastForest`] wire format. Callers must only read these bytes from a trusted producer, or after
+/// an outer transport/authentication layer has accepted them.
 fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
-    let mut basic_block_data_builder = BasicBlockDataBuilder::new();
-    let mut full_ids = Vec::with_capacity(forest.nodes().len());
-    let mut entries = Vec::with_capacity(forest.nodes().len());
-    let mut full_digests = Vec::with_capacity(forest.nodes().len());
-
-    for (&node_id, node) in forest.nodes() {
-        let ops_offset = if let MastNode::Block(basic_block) = node {
-            basic_block_data_builder.encode_basic_block(basic_block)
-        } else {
-            0
-        };
-
-        full_ids.push(node_id);
-        entries.push(MastNodeEntry::new(node, ops_offset));
-        full_digests.push(node.digest());
-    }
-
-    let basic_block_data = basic_block_data_builder.finalize();
-    let external_full_node_count =
-        entries.iter().filter(|entry| matches!(entry, MastNodeEntry::External)).count();
-    let non_external_count =
-        entries.iter().filter(|entry| !matches!(entry, MastNodeEntry::External)).count();
-
-    target.write_bytes(SPARSE_MAGIC);
-    target.write_bytes(&SPARSE_VERSION);
-
-    target.write_usize(forest.procedure_roots().len());
-    target.write_usize(forest.num_nodes());
-    target.write_usize(full_ids.len());
-    target.write_usize(forest.digest_entries().len());
-    target.write_usize(external_full_node_count);
-    target.write_usize(non_external_count);
-    target.write_usize(basic_block_data.len());
-
-    for &root in forest.procedure_roots() {
-        root.0.write_into(target);
-    }
-
-    forest.commitment().write_into(target);
-    target.write_bytes(&basic_block_data);
-
-    for id in full_ids {
-        id.0.write_into(target);
-    }
-
-    for entry in entries {
-        entry.write_into(target);
-    }
-
-    for digest in full_digests {
-        digest.write_into(target);
-    }
-
-    for (&id, &digest) in forest.digest_entries() {
-        id.0.write_into(target);
-        digest.write_into(target);
-    }
-
+    forest.num_nodes().write_into(target);
+    write_node_ids(forest.procedure_roots(), target);
+    write_sparse_nodes(forest.nodes(), target);
+    write_digest_entries(forest.digest_entries(), target);
     forest.advice_map().write_into(target);
+}
+
+fn write_node_ids<W: ByteWriter>(ids: &[MastNodeId], target: &mut W) {
+    target.write_usize(ids.len());
+    for id in ids {
+        id.write_into(target);
+    }
+}
+
+fn write_sparse_nodes<W: ByteWriter>(nodes: &BTreeMap<MastNodeId, MastNode>, target: &mut W) {
+    target.write_usize(nodes.len());
+    for (&id, node) in nodes {
+        id.write_into(target);
+        write_sparse_node(node, target);
+    }
+}
+
+fn write_digest_entries<W: ByteWriter>(digests: &BTreeMap<MastNodeId, Word>, target: &mut W) {
+    target.write_usize(digests.len());
+    for (&id, &digest) in digests {
+        id.write_into(target);
+        digest.write_into(target);
+    }
+}
+
+fn write_sparse_node<W: ByteWriter>(node: &MastNode, target: &mut W) {
+    match node {
+        MastNode::Block(block) => {
+            target.write_u8(SPARSE_BLOCK);
+            node.digest().write_into(target);
+
+            let mut basic_block_data = BasicBlockDataBuilder::new();
+            let ops_offset = basic_block_data.encode_basic_block(block);
+            debug_assert_eq!(ops_offset, 0);
+            let basic_block_data = basic_block_data.finalize();
+            target.write_usize(basic_block_data.len());
+            target.write_bytes(&basic_block_data);
+        },
+        MastNode::Join(join) => {
+            target.write_u8(SPARSE_JOIN);
+            node.digest().write_into(target);
+            join.first().write_into(target);
+            join.second().write_into(target);
+        },
+        MastNode::Split(split) => {
+            target.write_u8(SPARSE_SPLIT);
+            node.digest().write_into(target);
+            split.on_true().write_into(target);
+            split.on_false().write_into(target);
+        },
+        MastNode::Loop(loop_node) => {
+            target.write_u8(SPARSE_LOOP);
+            node.digest().write_into(target);
+            loop_node.body().write_into(target);
+        },
+        MastNode::Call(call) => {
+            target.write_u8(if call.is_syscall() { SPARSE_SYSCALL } else { SPARSE_CALL });
+            node.digest().write_into(target);
+            call.callee().write_into(target);
+        },
+        MastNode::Dyn(dyn_node) => {
+            target.write_u8(if dyn_node.is_dyncall() {
+                SPARSE_DYNCALL
+            } else {
+                SPARSE_DYN
+            });
+            node.digest().write_into(target);
+        },
+        MastNode::External(_) => {
+            target.write_u8(SPARSE_EXTERNAL);
+            node.digest().write_into(target);
+        },
+    }
 }
 
 // TRAIT IMPLS
@@ -113,119 +124,43 @@ impl Serializable for SparseMastForest {
 }
 
 impl Deserializable for SparseMastForest {
-    /// Reads a trusted sparse replay payload.
-    ///
-    /// Full-node digests are accepted from the payload. This is not the untrusted hash-validation
-    /// path from <https://github.com/0xMiden/miden-vm/issues/3303>.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         read_sparse_from(source)
     }
 
     fn min_serialized_size() -> usize {
-        sparse_mast_forest_min_serialized_size()
+        usize::min_serialized_size()
     }
 
-    /// Reads trusted sparse replay bytes and rejects trailing bytes.
+    /// Reads one trusted sparse replay payload and rejects trailing bytes.
+    ///
+    /// This is not an untrusted input format. The reader performs cheap structural checks, but a
+    /// producer controls collection lengths and can drive allocation. Callers must only read these
+    /// bytes from a trusted producer, or after an outer transport/authentication layer has accepted
+    /// them.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        SparseMastForest::read_from_bytes(bytes)
+        let mut reader = SliceReader::new(bytes);
+        let forest = read_sparse_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after SparseMastForest payload".to_string(),
+            ));
+        }
+        Ok(forest)
     }
 }
 
 // READER
 // ================================================================================================
 
-/// Reads a trusted sparse replay payload.
-///
-/// The payload carries full-node digests and digest-only entries as replay data. It does not
-/// rebuild those hashes from node structure.
 fn read_sparse_from<R: ByteReader>(
     source: &mut R,
 ) -> Result<SparseMastForest, DeserializationError> {
-    let mut reader = TrackingReader::new(source);
-    read_and_validate_sparse_header(&mut reader)?;
-
-    let root_count = read_bounded_count(&mut reader, size_of::<u32>(), "procedure root count")?;
-    let source_node_count = reader.read_usize()?;
-    if source_node_count > MastForest::MAX_NODES {
-        return Err(DeserializationError::InvalidValue(format!(
-            "source node count {source_node_count} exceeds maximum allowed {}",
-            MastForest::MAX_NODES
-        )));
-    }
-
-    let full_node_count = read_bounded_count(
-        &mut reader,
-        MastNodeEntry::SERIALIZED_SIZE + Word::min_serialized_size(),
-        "full node count",
-    )?;
-    let digest_only_count = read_bounded_count(
-        &mut reader,
-        size_of::<u32>() + Word::min_serialized_size(),
-        "digest-only node count",
-    )?;
-    let external_full_node_count = read_bounded_count(
-        &mut reader,
-        MastNodeEntry::SERIALIZED_SIZE,
-        "external full-node count",
-    )?;
-    let non_external_full_node_count = read_bounded_count(
-        &mut reader,
-        MastNodeEntry::SERIALIZED_SIZE,
-        "non-external full-node count",
-    )?;
-    let basic_block_data_len = read_bounded_count(&mut reader, 1, "basic-block data length")?;
-
-    let counted_full = external_full_node_count
-        .checked_add(non_external_full_node_count)
-        .ok_or_else(|| {
-            DeserializationError::InvalidValue("full node count overflow".to_string())
-        })?;
-    if counted_full != full_node_count {
-        return Err(DeserializationError::InvalidValue(format!(
-            "sparse header full node count {full_node_count} does not match external + non-external count {counted_full}"
-        )));
-    }
-
-    let roots = read_id_section(&mut reader, root_count, source_node_count, "procedure root")?;
-    let commitment = Word::read_from(&mut reader)?;
-    let basic_block_data = reader.read_slice(basic_block_data_len)?.to_vec();
-    let full_ids = read_id_section(&mut reader, full_node_count, source_node_count, "full node")?;
-    validate_strictly_increasing_ids(&full_ids, "full node")?;
-
-    let mut entries = Vec::with_capacity(full_node_count);
-    for _ in 0..full_node_count {
-        entries.push(MastNodeEntry::read_from(&mut reader)?);
-    }
-
-    let counted_external =
-        entries.iter().filter(|entry| matches!(entry, MastNodeEntry::External)).count();
-    if counted_external != external_full_node_count {
-        return Err(DeserializationError::InvalidValue(format!(
-            "sparse header external full-node count {external_full_node_count} does not match {counted_external} external entries"
-        )));
-    }
-
-    let mut full_digests = Vec::with_capacity(full_node_count);
-    for _ in 0..full_node_count {
-        full_digests.push(Word::read_from(&mut reader)?);
-    }
-
-    let mut digest_entries = Vec::with_capacity(digest_only_count);
-    for _ in 0..digest_only_count {
-        let id = read_node_id(&mut reader, source_node_count, "digest-only node")?;
-        let digest = Word::read_from(&mut reader)?;
-        digest_entries.push((id, digest));
-    }
-    validate_strictly_increasing_entry_ids(&digest_entries, "digest-only node")?;
-
-    let advice_map = AdviceMap::read_from(&mut reader)?;
-    let nodes = materialize_sparse_nodes(
-        &full_ids,
-        &entries,
-        &full_digests,
-        source_node_count,
-        &basic_block_data,
-    )?;
+    let source_node_count = source.read_usize()?;
+    let roots = read_node_ids(source, source_node_count, "procedure root")?;
+    let nodes = read_sparse_nodes(source, source_node_count)?;
+    let digest_entries = read_digest_entries(source, source_node_count)?;
+    let advice_map = AdviceMap::read_from(source)?;
 
     SparseMastForest::from_serialized_parts(
         nodes,
@@ -233,35 +168,133 @@ fn read_sparse_from<R: ByteReader>(
         source_node_count,
         roots,
         advice_map,
-        commitment,
     )
 }
 
-// HELPER FUNCTIONS
-// ================================================================================================
-
-fn read_and_validate_sparse_header<R: ByteReader>(
+fn read_node_ids<R: ByteReader>(
     source: &mut R,
-) -> Result<(), DeserializationError> {
-    let magic: [u8; 4] = source.read_array()?;
-    if magic != *SPARSE_MAGIC {
-        return Err(DeserializationError::InvalidValue(format!(
-            "Invalid sparse MAST magic bytes. Expected '{:?}', got '{:?}'",
-            *SPARSE_MAGIC, magic
-        )));
+    source_node_count: usize,
+    label: &str,
+) -> Result<Vec<MastNodeId>, DeserializationError> {
+    let count = read_bounded_count(source, u32::min_serialized_size(), label)?;
+    let mut ids = Vec::with_capacity(count);
+    for _ in 0..count {
+        ids.push(read_node_id(source, source_node_count, label)?);
     }
-
-    let version: [u8; 3] = source.read_array()?;
-    if version != SPARSE_VERSION {
-        return Err(DeserializationError::InvalidValue(format!(
-            "Unsupported sparse MAST version. Got '{version:?}', but only '{SPARSE_VERSION:?}' is supported",
-        )));
-    }
-
-    Ok(())
+    Ok(ids)
 }
 
-fn read_bounded_count<R: OffsetTrackingReader>(
+fn read_sparse_nodes<R: ByteReader>(
+    source: &mut R,
+    source_node_count: usize,
+) -> Result<Vec<(MastNodeId, MastNode)>, DeserializationError> {
+    let count = read_bounded_count(source, sparse_node_min_size(), "full node count")?;
+    let mut nodes = Vec::with_capacity(count);
+    let mut previous_id = None;
+
+    for _ in 0..count {
+        let id = read_node_id(source, source_node_count, "full node")?;
+        validate_strictly_increasing_id(previous_id, id, "full node")?;
+        let node = read_sparse_node(source, source_node_count, id)?;
+        nodes.push((id, node));
+        previous_id = Some(id);
+    }
+
+    Ok(nodes)
+}
+
+fn read_digest_entries<R: ByteReader>(
+    source: &mut R,
+    source_node_count: usize,
+) -> Result<Vec<(MastNodeId, Word)>, DeserializationError> {
+    let count =
+        read_bounded_count(source, sparse_digest_entry_min_size(), "digest-only node count")?;
+    let mut digests = Vec::with_capacity(count);
+    let mut previous_id = None;
+
+    for _ in 0..count {
+        let id = read_node_id(source, source_node_count, "digest-only node")?;
+        validate_strictly_increasing_id(previous_id, id, "digest-only node")?;
+        let digest = Word::read_from(source)?;
+        digests.push((id, digest));
+        previous_id = Some(id);
+    }
+
+    Ok(digests)
+}
+
+fn read_sparse_node<R: ByteReader>(
+    source: &mut R,
+    source_node_count: usize,
+    node_id: MastNodeId,
+) -> Result<MastNode, DeserializationError> {
+    let tag = source.read_u8()?;
+    let digest = Word::read_from(source)?;
+
+    let result = match tag {
+        SPARSE_BLOCK => {
+            let len = read_bounded_count(source, 1, "basic block data length")?;
+            let data = source.read_vec(len)?;
+            let decoder = BasicBlockDataDecoder::new(&data);
+            let op_batches = decoder.decode_operations(0)?;
+            BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
+                .build()
+                .map(Into::into)
+        },
+        SPARSE_JOIN => {
+            let first = read_node_id(source, source_node_count, "join first child")?;
+            let second = read_node_id(source, source_node_count, "join second child")?;
+            JoinNodeBuilder::new([first, second])
+                .with_digest(digest)
+                .build_linked()
+                .map(Into::into)
+        },
+        SPARSE_SPLIT => {
+            let on_true = read_node_id(source, source_node_count, "split true child")?;
+            let on_false = read_node_id(source, source_node_count, "split false child")?;
+            SplitNodeBuilder::new([on_true, on_false])
+                .with_digest(digest)
+                .build_linked()
+                .map(Into::into)
+        },
+        SPARSE_LOOP => {
+            let body = read_node_id(source, source_node_count, "loop body")?;
+            LoopNodeBuilder::new(body).with_digest(digest).build_linked().map(Into::into)
+        },
+        SPARSE_CALL | SPARSE_SYSCALL => {
+            let callee = read_node_id(source, source_node_count, "call callee")?;
+            let builder = if tag == SPARSE_SYSCALL {
+                CallNodeBuilder::new_syscall(callee)
+            } else {
+                CallNodeBuilder::new(callee)
+            };
+            builder.with_digest(digest).build_linked().map(Into::into)
+        },
+        SPARSE_DYN | SPARSE_DYNCALL => {
+            let builder = if tag == SPARSE_DYNCALL {
+                DynNodeBuilder::new_dyncall()
+            } else {
+                DynNodeBuilder::new_dyn()
+            };
+            Ok(builder.with_digest(digest).build().into())
+        },
+        SPARSE_EXTERNAL => Ok(ExternalNodeBuilder::new(digest).build().into()),
+        _ => {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid sparse MAST node tag {tag}"
+            )));
+        },
+    };
+
+    result.map_err(|err| {
+        DeserializationError::InvalidValue(format!(
+            "failed to build sparse MAST node {}: {}",
+            node_id.0, err
+        ))
+    })
+}
+
+fn read_bounded_count<R: ByteReader>(
     source: &mut R,
     element_size: usize,
     label: &str,
@@ -276,17 +309,12 @@ fn read_bounded_count<R: OffsetTrackingReader>(
     Ok(count)
 }
 
-fn read_id_section<R: ByteReader>(
-    source: &mut R,
-    count: usize,
-    node_count: usize,
-    label: &str,
-) -> Result<Vec<MastNodeId>, DeserializationError> {
-    let mut ids = Vec::with_capacity(count);
-    for _ in 0..count {
-        ids.push(read_node_id(source, node_count, label)?);
-    }
-    Ok(ids)
+fn sparse_node_min_size() -> usize {
+    u32::min_serialized_size() + u8::min_serialized_size() + Word::min_serialized_size()
+}
+
+fn sparse_digest_entry_min_size() -> usize {
+    u32::min_serialized_size() + Word::min_serialized_size()
 }
 
 fn read_node_id<R: ByteReader>(
@@ -300,119 +328,15 @@ fn read_node_id<R: ByteReader>(
     })
 }
 
-fn validate_strictly_increasing_ids(
-    ids: &[MastNodeId],
+fn validate_strictly_increasing_id(
+    previous: Option<MastNodeId>,
+    current: MastNodeId,
     label: &str,
 ) -> Result<(), DeserializationError> {
-    for pair in ids.windows(2) {
-        if pair[0].0 >= pair[1].0 {
-            return Err(DeserializationError::InvalidValue(format!(
-                "{label} ids must be strictly increasing"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn validate_strictly_increasing_entry_ids(
-    entries: &[(MastNodeId, Word)],
-    label: &str,
-) -> Result<(), DeserializationError> {
-    for pair in entries.windows(2) {
-        if pair[0].0.0 >= pair[1].0.0 {
-            return Err(DeserializationError::InvalidValue(format!(
-                "{label} ids must be strictly increasing"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn materialize_sparse_nodes(
-    full_ids: &[MastNodeId],
-    entries: &[MastNodeEntry],
-    full_digests: &[Word],
-    source_node_count: usize,
-    basic_block_data: &[u8],
-) -> Result<Vec<(MastNodeId, MastNode)>, DeserializationError> {
-    let basic_block_data_decoder = BasicBlockDataDecoder::new(basic_block_data);
-    if full_digests.len() != full_ids.len() {
+    if previous.is_some_and(|previous| previous >= current) {
         return Err(DeserializationError::InvalidValue(format!(
-            "sparse full digest count {} does not match full node count {}",
-            full_digests.len(),
-            full_ids.len()
+            "{label} ids must be strictly increasing"
         )));
     }
-
-    let mut nodes = Vec::with_capacity(entries.len());
-    for ((&node_id, &entry), &digest) in full_ids.iter().zip(entries).zip(full_digests) {
-        let node = entry
-            .try_into_mast_node_builder(source_node_count, &basic_block_data_decoder, digest)?
-            .build_linked()
-            .map_err(|err| {
-                DeserializationError::InvalidValue(format!(
-                    "failed to build sparse MAST node {}: {err}",
-                    node_id.0
-                ))
-            })?;
-        nodes.push((node_id, node));
-    }
-
-    Ok(nodes)
-}
-
-impl SparseMastForest {
-    /// Deserializes trusted sparse MAST replay bytes using default parse budgets.
-    ///
-    /// This reader bounds parsing, but accepts sparse MAST hashes from the payload.
-    pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        Self::read_from_bytes_with_options(bytes, SparseMastForestReadOptions::default())
-    }
-
-    /// Deserializes trusted sparse MAST replay bytes using explicit read options.
-    ///
-    /// See <https://github.com/0xMiden/miden-vm/issues/3303> for the planned untrusted reader.
-    pub fn read_from_bytes_with_options(
-        bytes: &[u8],
-        options: SparseMastForestReadOptions,
-    ) -> Result<Self, DeserializationError> {
-        let wire_byte_budget = options.wire_byte_budget(bytes.len());
-        if wire_byte_budget < bytes.len() {
-            return Err(DeserializationError::InvalidValue(
-                "SparseMastForest wire byte budget is smaller than payload length".to_string(),
-            ));
-        }
-        let allocation_budget = wire_byte_budget.min(bytes.len().saturating_mul(4));
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), allocation_budget);
-        let forest = read_sparse_from(&mut reader)?;
-        if reader.has_more_bytes() {
-            return Err(DeserializationError::InvalidValue(
-                "extra bytes after SparseMastForest payload".to_string(),
-            ));
-        }
-        Ok(forest)
-    }
-}
-
-/// Options for reading a [`SparseMastForest`] from bytes.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SparseMastForestReadOptions {
-    wire_byte_budget: Option<usize>,
-}
-
-impl SparseMastForestReadOptions {
-    /// Creates options that use the default sparse read budgets.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets the maximum number of serialized bytes consumed while parsing wire data.
-    pub fn with_wire_byte_budget(mut self, budget: usize) -> Self {
-        self.wire_byte_budget = Some(budget);
-        self
-    }
-
-    fn wire_byte_budget(self, bytes_len: usize) -> usize {
-        self.wire_byte_budget.unwrap_or(bytes_len)
-    }
+    Ok(())
 }

@@ -63,9 +63,6 @@ pub struct SparseMastForest {
 
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
-
-    /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
-    commitment_cache: Word,
 }
 
 impl SparseMastForest {
@@ -97,23 +94,13 @@ impl SparseMastForest {
         &self.digests
     }
 
-    /// Returns the commitment to this sparse forest, computed from the procedure roots.
-    ///
-    /// The commitment value is derived from the digests of the procedure roots in the original
-    /// forest; it is therefore equal to the commitment of the source [`MastForest`] from which
-    /// this sparse forest was built.
-    pub fn commitment(&self) -> Word {
-        self.commitment_cache
-    }
-
-    /// Builds a sparse forest from parts decoded from the sparse wire format.
+    /// Builds a sparse forest from trusted replay parts.
     pub(in crate::mast) fn from_serialized_parts(
         nodes: Vec<(MastNodeId, MastNode)>,
         digests: Vec<(MastNodeId, Word)>,
         num_nodes: usize,
         roots: Vec<MastNodeId>,
         advice_map: AdviceMap,
-        commitment_cache: Word,
     ) -> Result<Self, DeserializationError> {
         validate_sparse_node_bound(num_nodes)?;
 
@@ -141,7 +128,6 @@ impl SparseMastForest {
             num_nodes,
             roots,
             advice_map,
-            commitment_cache,
         })
     }
 }
@@ -404,7 +390,6 @@ impl SparseMastForestBuilder {
             num_nodes,
             roots: source.procedure_roots().to_vec(),
             advice_map: source.advice_map().clone(),
-            commitment_cache: source.commitment(),
         }
     }
 }

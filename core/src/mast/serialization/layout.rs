@@ -457,7 +457,7 @@ fn validate_budgeted_count<R: ByteReader>(
     Ok(())
 }
 
-pub(super) fn read_and_validate_header<R: ByteReader>(
+fn read_and_validate_header<R: ByteReader>(
     source: &mut R,
 ) -> Result<(u8, [u8; 3]), DeserializationError> {
     let magic: [u8; 4] = source.read_array()?;
