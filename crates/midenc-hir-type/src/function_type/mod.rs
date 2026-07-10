@@ -76,7 +76,7 @@ impl miden_formatting::prettier::PrettyPrint for FunctionType {
 
         use miden_formatting::prettier::*;
 
-        let abi = const_text("extern") + text(format!(" \"{}\" ", &self.abi));
+        let abi = const_text("extern") + text(format!(" \"{}\" ", self.abi));
 
         let params = self.params.iter().enumerate().fold(const_text("("), |acc, (i, param)| {
             if i > 0 {
