@@ -38,12 +38,14 @@ use crate::{
 /// This type implements `ZeroizeOnDrop` because the inner `k256::ecdh::SharedSecret`
 /// implements it, ensuring the shared secret is securely wiped from memory when dropped.
 pub struct SharedSecret {
-    pub(crate) inner: k256::ecdh::SharedSecret,
+    bytes: [u8; 32],
 }
 
 impl SharedSecret {
     pub(crate) fn new(inner: k256::ecdh::SharedSecret) -> SharedSecret {
-        Self { inner }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(inner.raw_secret_bytes());
+        Self { bytes }
     }
 
     /// Returns a HKDF (HMAC-based Extract-and-Expand Key Derivation Function) that can be used
@@ -52,39 +54,19 @@ impl SharedSecret {
     /// This basically converts a shared secret into uniformly random values that are appropriate
     /// for use as key material.
     pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256> {
-        self.inner.extract(salt)
+        Hkdf::new(salt, &self.bytes)
     }
 }
 
 impl AsRef<[u8]> for SharedSecret {
     fn as_ref(&self) -> &[u8] {
-        self.inner.raw_secret_bytes()
+        &self.bytes
     }
 }
 
 impl Zeroize for SharedSecret {
-    /// Securely clears the shared secret from memory.
-    ///
-    /// # Security
-    ///
-    /// This implementation follows the same security methodology as the `zeroize` crate to ensure
-    /// that sensitive cryptographic material is reliably cleared from memory:
-    ///
-    /// - **Volatile writes**: Uses `ptr::write_volatile` to prevent dead store elimination and
-    ///   other compiler optimizations that might remove the zeroing operation.
-    /// - **Memory ordering**: Includes a sequentially consistent compiler fence (`SeqCst`) to
-    ///   prevent instruction reordering that could expose the secret data after this function
-    ///   returns.
     fn zeroize(&mut self) {
-        let bytes = self.inner.raw_secret_bytes();
-        for byte in
-            unsafe { core::slice::from_raw_parts_mut(bytes.as_ptr() as *mut u8, bytes.len()) }
-        {
-            unsafe {
-                core::ptr::write_volatile(byte, 0u8);
-            }
-        }
-        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        self.bytes.zeroize();
     }
 }
 
@@ -129,7 +111,7 @@ impl EphemeralSecretKey {
     pub fn diffie_hellman(&self, pk_other: PublicKey) -> SharedSecret {
         let shared_secret_inner = self.inner.diffie_hellman(&pk_other.inner.into());
 
-        SharedSecret { inner: shared_secret_inner }
+        SharedSecret::new(shared_secret_inner)
     }
 }
 
@@ -252,10 +234,7 @@ mod test {
         let shared_secret_key_2 = sk.get_shared_secret(pk_e);
 
         // Check that the computed shared secret keys are equal
-        assert_eq!(
-            shared_secret_key_1.inner.raw_secret_bytes(),
-            shared_secret_key_2.inner.raw_secret_bytes()
-        );
+        assert_eq!(shared_secret_key_1.as_ref(), shared_secret_key_2.as_ref());
     }
 
     #[test]

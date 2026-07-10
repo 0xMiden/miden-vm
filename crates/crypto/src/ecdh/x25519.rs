@@ -35,42 +35,22 @@ use crate::{
 /// This type implements `ZeroizeOnDrop` because the inner `x25519_dalek::SharedSecret`
 /// implements it, ensuring the shared secret is securely wiped from memory when dropped.
 pub struct SharedSecret {
-    pub(crate) inner: x25519_dalek::SharedSecret,
+    bytes: [u8; 32],
 }
 impl SharedSecret {
     pub(crate) fn new(inner: x25519_dalek::SharedSecret) -> SharedSecret {
-        Self { inner }
+        Self { bytes: inner.to_bytes() }
     }
 
     /// Returns a HKDF that can be used to derive uniform keys from the shared secret.
     pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256> {
-        Hkdf::new(salt, self.inner.as_bytes())
+        Hkdf::new(salt, &self.bytes)
     }
 }
 
 impl Zeroize for SharedSecret {
-    /// Securely clears the shared secret from memory.
-    ///
-    /// # Security
-    ///
-    /// This implementation follows the same security methodology as the `zeroize` crate to ensure
-    /// that sensitive cryptographic material is reliably cleared from memory:
-    ///
-    /// - **Volatile writes**: Uses `ptr::write_volatile` to prevent dead store elimination and
-    ///   other compiler optimizations that might remove the zeroing operation.
-    /// - **Memory ordering**: Includes a sequentially consistent compiler fence (`SeqCst`) to
-    ///   prevent instruction reordering that could expose the secret data after this function
-    ///   returns.
     fn zeroize(&mut self) {
-        let bytes = self.inner.as_bytes();
-        for byte in
-            unsafe { core::slice::from_raw_parts_mut(bytes.as_ptr() as *mut u8, bytes.len()) }
-        {
-            unsafe {
-                core::ptr::write_volatile(byte, 0u8);
-            }
-        }
-        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        self.bytes.zeroize();
     }
 }
 
@@ -79,7 +59,7 @@ impl ZeroizeOnDrop for SharedSecret {}
 
 impl AsRef<[u8]> for SharedSecret {
     fn as_ref(&self) -> &[u8] {
-        self.inner.as_bytes()
+        &self.bytes
     }
 }
 
@@ -260,7 +240,7 @@ mod tests {
         let shared_secret_key_2 = sk.get_shared_secret(pk_e);
 
         // Check that the computed shared secret keys are equal
-        assert_eq!(shared_secret_key_1.inner.to_bytes(), shared_secret_key_2.inner.to_bytes());
+        assert_eq!(shared_secret_key_1.as_ref(), shared_secret_key_2.as_ref());
     }
 
     #[test]

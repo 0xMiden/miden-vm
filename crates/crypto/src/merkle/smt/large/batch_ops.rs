@@ -45,7 +45,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         &self,
         subtree_leaves: Vec<SubtreeLeaf>,
         subtree_root_depth: u8,
-    ) -> (NodeMutations, SubtreeLeaf, Option<SubtreeUpdate>) {
+    ) -> LargeSmtResult<(NodeMutations, SubtreeLeaf, Option<SubtreeUpdate>)> {
         debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
 
         let subtree_root_index =
@@ -57,8 +57,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         } else {
             Some(
                 self.storage
-                    .get_subtree(subtree_root_index)
-                    .expect("Storage error getting subtree in insert_batch")
+                    .get_subtree(subtree_root_index)?
                     .unwrap_or_else(|| Subtree::new(subtree_root_index)),
             )
         };
@@ -95,7 +94,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             (NodeMutations::default(), update)
         };
 
-        (in_memory_mutations, root, subtree_update)
+        Ok((in_memory_mutations, root, subtree_update))
     }
 
     /// Helper function to load leaves from storage for a set of key-value pairs.
@@ -399,37 +398,23 @@ impl<S: SmtStorage> LargeSmt<S> {
             };
             let updates_capacity = if is_in_memory { 0 } else { subtree_count };
 
-            let (in_memory_mutations, mut subtree_roots, modified_subtrees) = leaves
+            let processed_subtrees = leaves
                 .into_par_iter()
                 .map(|subtree_leaves| {
                     self.process_subtree_for_depth(subtree_leaves, subtree_root_depth)
                 })
-                .fold(
-                    || {
-                        (
-                            Vec::with_capacity(mutations_capacity),
-                            Vec::with_capacity(subtree_count),
-                            Vec::with_capacity(updates_capacity),
-                        )
-                    },
-                    |(mut muts, mut roots, mut subtrees), (mem_muts, root, subtree_update)| {
-                        muts.extend(mem_muts);
-                        roots.push(root);
-                        if let Some(update) = subtree_update {
-                            subtrees.push(update);
-                        }
-                        (muts, roots, subtrees)
-                    },
-                )
-                .reduce(
-                    || (Vec::new(), Vec::new(), Vec::new()),
-                    |(mut m1, mut r1, mut s1), (m2, r2, s2)| {
-                        m1.extend(m2);
-                        r1.extend(r2);
-                        s1.extend(s2);
-                        (m1, r1, s1)
-                    },
-                );
+                .collect::<LargeSmtResult<Vec<_>>>()?;
+
+            let mut in_memory_mutations = Vec::with_capacity(mutations_capacity);
+            let mut subtree_roots = Vec::with_capacity(subtree_count);
+            let mut modified_subtrees = Vec::with_capacity(updates_capacity);
+            for (mem_muts, root, subtree_update) in processed_subtrees {
+                in_memory_mutations.extend(mem_muts);
+                subtree_roots.push(root);
+                if let Some(update) = subtree_update {
+                    modified_subtrees.push(update);
+                }
+            }
 
             // Apply in-memory mutations
             for (index, mutation) in in_memory_mutations {
@@ -752,7 +737,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             (0..=SMT_DEPTH - SUBTREE_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
         {
             // Parallel processing of each subtree to generate mutations and roots
-            let (mutations_per_subtree, mut subtree_roots): (Vec<_>, Vec<_>) = leaves
+            let processed_subtrees = leaves
                 .into_par_iter()
                 .map(|subtree_leaves| {
                     let subtree_opt = if subtree_root_depth < IN_MEMORY_DEPTH {
@@ -763,19 +748,20 @@ impl<S: SmtStorage> LargeSmt<S> {
                             subtree_root_depth,
                             subtree_leaves[0].col >> SUBTREE_DEPTH,
                         );
-                        self.storage
-                            .get_subtree(subtree_root_index)
-                            .expect("Storage error getting subtree in compute_mutations")
+                        self.storage.get_subtree(subtree_root_index)?
                     };
                     debug_assert!(subtree_leaves.is_sorted() && !subtree_leaves.is_empty());
-                    self.build_subtree_mutations(
+                    Ok(self.build_subtree_mutations(
                         subtree_leaves,
                         SMT_DEPTH,
                         subtree_root_depth,
                         subtree_opt.as_ref(),
-                    )
+                    ))
                 })
-                .unzip();
+                .collect::<LargeSmtResult<Vec<_>>>()?;
+
+            let (mutations_per_subtree, mut subtree_roots): (Vec<_>, Vec<_>) =
+                processed_subtrees.into_iter().unzip();
 
             // Prepare leaves for the next depth level
             leaves = SubtreeLeavesIter::from_leaves(&mut subtree_roots).collect();
