@@ -11,15 +11,15 @@ on:
         default: "main"
         type: string
       packages:
-        description: "Comma, space, or newline separated packages to publish. Empty uses packages_file."
+        description: "Comma, space, or newline separated packages to publish. Empty publishes all publishable workspace packages."
         required: false
         default: ""
         type: string
-      packages_file:
-        description: "Package list file used when packages is empty."
+      allow_existing:
+        description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
         required: false
-        default: "release-packages.txt"
-        type: string
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -110,9 +110,164 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
           RELEASE_PACKAGES: ${{ github.event.inputs.packages || '' }}
-          RELEASE_PACKAGES_FILE: ${{ github.event.inputs.packages_file || 'release-packages.txt' }}
+          RELEASE_ALLOW_EXISTING: ${{ github.event.inputs.allow_existing || 'false' }}
         run: |
-          scripts/release-selected.sh \
-            --mode publish \
-            --packages "$RELEASE_PACKAGES" \
-            --packages-file "$RELEASE_PACKAGES_FILE"
+          set -euo pipefail
+
+          case "$RELEASE_ALLOW_EXISTING" in
+            true | false) ;;
+            *)
+              echo "error: unsupported allow_existing value '$RELEASE_ALLOW_EXISTING'; expected true or false" >&2
+              exit 2
+              ;;
+          esac
+
+          for cmd in cargo jq; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "error: required command '$cmd' is not installed or not in PATH" >&2
+              exit 1
+            fi
+          done
+
+          metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
+          selected_packages=()
+
+          add_packages() {
+            local line word
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="${line//,/ }"
+              for word in $line; do
+                selected_packages+=("$word")
+              done
+            done
+          }
+
+          add_packages <<< "$RELEASE_PACKAGES"
+
+          all_publishable_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select((.id as $id | $m.workspace_members | index($id)) and .publish != [])
+                | .name
+              '
+          }
+
+          all_workspace_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select(.id as $id | $m.workspace_members | index($id))
+                | .name
+              '
+          }
+
+          package_version() {
+            local package="$1"
+            printf '%s' "$metadata_json" \
+              | jq -er --arg package "$package" '
+                . as $m
+                | $m.packages[]
+                | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
+                | select(.publish != [])
+                | .version
+              '
+          }
+
+          is_selected_package() {
+            local package="$1"
+            local selected
+
+            for selected in "${selected_packages[@]}"; do
+              if [[ "$selected" == "$package" ]]; then
+                return 0
+              fi
+            done
+
+            return 1
+          }
+
+          is_release_package() {
+            local package="$1"
+
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              is_selected_package "$package"
+              return
+            fi
+
+            package_version "$package" >/dev/null
+          }
+
+          selected_packages_for_checks() {
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              printf '%s\n' "${selected_packages[@]}"
+            else
+              all_publishable_packages
+            fi
+          }
+
+          duplicate_packages="$(
+            selected_packages_for_checks | sort | uniq -d
+          )"
+          if [[ -n "$duplicate_packages" ]]; then
+            echo "error: duplicate package(s) selected:" >&2
+            printf '%s\n' "$duplicate_packages" | sed 's/^/  - /' >&2
+            exit 1
+          fi
+
+          for package in "${selected_packages[@]}"; do
+            if ! package_version "$package" >/dev/null; then
+              echo "error: '$package' is not a publishable workspace package" >&2
+              echo "publishable packages:" >&2
+              all_publishable_packages | sed 's/^/  - /' >&2
+              exit 1
+            fi
+          done
+
+          echo "Release mode: publish"
+          echo "Selected packages:"
+          remaining_packages=()
+          already_published_packages=()
+
+          while IFS= read -r package; do
+            version="$(package_version "$package")"
+
+            if cargo info --quiet --registry crates-io "${package}@${version}" >/dev/null 2>&1; then
+              if [[ "$RELEASE_ALLOW_EXISTING" == "true" ]]; then
+                echo "  - $package v$version already exists on crates.io; excluding it."
+                already_published_packages+=("$package")
+              else
+                echo "error: $package v$version already exists on crates.io" >&2
+                echo "Bump its version, remove it from the selected packages, or rerun with allow_existing=true to resume a partial publish." >&2
+                exit 1
+              fi
+            else
+              echo "  - $package v$version"
+              remaining_packages+=("$package")
+            fi
+          done < <(selected_packages_for_checks)
+
+          if [[ ${#remaining_packages[@]} -eq 0 ]]; then
+            echo "All selected publishable crates already exist on crates.io."
+            exit 0
+          fi
+
+          echo "Publishing crates that are not yet on crates.io:"
+          printf '  %s\n' "${remaining_packages[@]}"
+
+          publish_cmd=(cargo publish --workspace --locked)
+
+          while IFS= read -r package; do
+            if ! is_release_package "$package"; then
+              publish_cmd+=(--exclude "$package")
+            fi
+          done < <(all_workspace_packages)
+
+          for package in "${already_published_packages[@]}"; do
+            publish_cmd+=(--exclude "$package")
+          done
+
+          "${publish_cmd[@]}"

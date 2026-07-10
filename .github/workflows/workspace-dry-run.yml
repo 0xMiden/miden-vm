@@ -8,14 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       packages:
-        description: "Comma, space, or newline separated packages to dry-run. Empty uses packages_file."
+        description: "Comma, space, or newline separated packages to dry-run. Empty dry-runs all publishable workspace packages."
         required: false
         default: ""
-        type: string
-      packages_file:
-        description: "Package list file used when packages is empty."
-        required: false
-        default: "release-packages.txt"
         type: string
 
 permissions:
@@ -90,9 +85,149 @@ jobs:
         shell: bash
         env:
           RELEASE_PACKAGES: ${{ github.event.inputs.packages || '' }}
-          RELEASE_PACKAGES_FILE: ${{ github.event.inputs.packages_file || 'release-packages.txt' }}
         run: |
-          scripts/release-selected.sh \
-            --mode dry-run \
-            --packages "$RELEASE_PACKAGES" \
-            --packages-file "$RELEASE_PACKAGES_FILE"
+          set -euo pipefail
+
+          for cmd in cargo jq; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "error: required command '$cmd' is not installed or not in PATH" >&2
+              exit 1
+            fi
+          done
+
+          metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
+          selected_packages=()
+
+          add_packages() {
+            local line word
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="${line//,/ }"
+              for word in $line; do
+                selected_packages+=("$word")
+              done
+            done
+          }
+
+          add_packages <<< "$RELEASE_PACKAGES"
+
+          all_publishable_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select((.id as $id | $m.workspace_members | index($id)) and .publish != [])
+                | .name
+              '
+          }
+
+          all_workspace_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select(.id as $id | $m.workspace_members | index($id))
+                | .name
+              '
+          }
+
+          package_version() {
+            local package="$1"
+            printf '%s' "$metadata_json" \
+              | jq -er --arg package "$package" '
+                . as $m
+                | $m.packages[]
+                | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
+                | select(.publish != [])
+                | .version
+              '
+          }
+
+          is_selected_package() {
+            local package="$1"
+            local selected
+
+            for selected in "${selected_packages[@]}"; do
+              if [[ "$selected" == "$package" ]]; then
+                return 0
+              fi
+            done
+
+            return 1
+          }
+
+          is_release_package() {
+            local package="$1"
+
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              is_selected_package "$package"
+              return
+            fi
+
+            package_version "$package" >/dev/null
+          }
+
+          selected_packages_for_checks() {
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              printf '%s\n' "${selected_packages[@]}"
+            else
+              all_publishable_packages
+            fi
+          }
+
+          duplicate_packages="$(
+            selected_packages_for_checks | sort | uniq -d
+          )"
+          if [[ -n "$duplicate_packages" ]]; then
+            echo "error: duplicate package(s) selected:" >&2
+            printf '%s\n' "$duplicate_packages" | sed 's/^/  - /' >&2
+            exit 1
+          fi
+
+          for package in "${selected_packages[@]}"; do
+            if ! package_version "$package" >/dev/null; then
+              echo "error: '$package' is not a publishable workspace package" >&2
+              echo "publishable packages:" >&2
+              all_publishable_packages | sed 's/^/  - /' >&2
+              exit 1
+            fi
+          done
+
+          echo "Release mode: dry-run"
+          echo "Selected packages:"
+          remaining_packages=()
+          already_published_packages=()
+
+          while IFS= read -r package; do
+            version="$(package_version "$package")"
+
+            if cargo info --quiet --registry crates-io "${package}@${version}" >/dev/null 2>&1; then
+              echo "  - $package v$version already exists on crates.io; excluding it."
+              already_published_packages+=("$package")
+            else
+              echo "  - $package v$version"
+              remaining_packages+=("$package")
+            fi
+          done < <(selected_packages_for_checks)
+
+          if [[ ${#remaining_packages[@]} -eq 0 ]]; then
+            echo "All selected publishable crates already exist on crates.io."
+            exit 0
+          fi
+
+          echo "Dry-running crates that are not yet on crates.io:"
+          printf '  %s\n' "${remaining_packages[@]}"
+
+          publish_cmd=(cargo publish --workspace --locked --dry-run)
+
+          while IFS= read -r package; do
+            if ! is_release_package "$package"; then
+              publish_cmd+=(--exclude "$package")
+            fi
+          done < <(all_workspace_packages)
+
+          for package in "${already_published_packages[@]}"; do
+            publish_cmd+=(--exclude "$package")
+          done
+
+          "${publish_cmd[@]}"
