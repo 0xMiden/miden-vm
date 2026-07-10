@@ -764,6 +764,10 @@ fn derive_secret_key_from_bytes(bytes: &[u8]) -> Result<SecretKey, EncryptionErr
         return Err(EncryptionError::FailedOperation);
     }
 
+    if let Ok(key) = SecretKey::read_from_bytes_with_budget(bytes, SK_SIZE_BYTES) {
+        return Ok(key);
+    }
+
     let mut elements = Vec::with_capacity(SECRET_KEY_SIZE);
     let mut counter = 0u32;
 
