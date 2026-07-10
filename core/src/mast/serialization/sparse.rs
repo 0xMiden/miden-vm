@@ -1,16 +1,20 @@
 use alloc::{collections::BTreeMap, format, string::ToString, vec::Vec};
 
-use super::basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
+use super::{
+    TRUSTED_BYTE_READ_BUDGET_MULTIPLIER,
+    basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder},
+};
 use crate::{
     Word,
     advice::AdviceMap,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeExt, MastNodeId,
-        SparseMastForest, SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
+        MastNodeId, SparseMastForest, SplitNodeBuilder,
     },
     serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, read_bounded_len,
     },
 };
 
@@ -139,7 +143,8 @@ impl Deserializable for SparseMastForest {
     /// bytes from a trusted producer, or after an outer transport/authentication layer has accepted
     /// them.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        let mut reader = SliceReader::new(bytes);
+        let budget = bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
         let forest = read_sparse_from(&mut reader)?;
         if reader.has_more_bytes() {
             return Err(DeserializationError::InvalidValue(
@@ -157,6 +162,13 @@ fn read_sparse_from<R: ByteReader>(
     source: &mut R,
 ) -> Result<SparseMastForest, DeserializationError> {
     let source_node_count = source.read_usize()?;
+    if source_node_count > MastForest::MAX_NODES {
+        return Err(DeserializationError::InvalidValue(format!(
+            "sparse source node count {source_node_count} exceeds maximum allowed {}",
+            MastForest::MAX_NODES
+        )));
+    }
+
     let roots = read_node_ids(source, source_node_count, "procedure root")?;
     let nodes = read_sparse_nodes(source, source_node_count)?;
     let digest_entries = read_digest_entries(source, source_node_count)?;
@@ -299,14 +311,7 @@ fn read_bounded_count<R: ByteReader>(
     element_size: usize,
     label: &str,
 ) -> Result<usize, DeserializationError> {
-    let count = source.read_usize()?;
-    let max_count = source.max_alloc(element_size);
-    if count > max_count {
-        return Err(DeserializationError::InvalidValue(format!(
-            "{label} {count} exceeds reader allocation bound {max_count} for {element_size}-byte elements"
-        )));
-    }
-    Ok(count)
+    read_bounded_len(source, label, element_size)
 }
 
 fn sparse_node_min_size() -> usize {
