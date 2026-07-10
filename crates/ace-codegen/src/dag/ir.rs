@@ -57,37 +57,58 @@ pub enum NodeKind<EF> {
     Neg(NodeId),
 }
 
+/// A nonzero evaluation-domain value of a periodic column, together with the
+/// doubling-basis twiddle powers needed to evaluate its Lagrange contribution
+/// at an arbitrary point `x` via `value * Π_i (1 + twiddle[i] * x^(2^i))`.
+///
+/// This is the sparse dual of the dense monomial-basis coefficients: an IDFT
+/// turns a sparse evaluation vector into dense coefficients, but the Lagrange
+/// form stays sparse in the number of nonzero evaluations.
+#[derive(Debug, Clone)]
+pub(crate) struct SparseTerm<EF> {
+    /// The evaluation-domain value, pre-scaled by the domain-size inverse.
+    pub(crate) scaled_value: EF,
+    /// `omega^(-j * 2^i)` for `i = 0..log2(period)`, where `j` is this term's domain index.
+    pub(crate) twiddles: Vec<EF>,
+}
+
 /// Precomputed periodic column data for DAG construction.
 #[derive(Debug, Clone)]
 pub struct PeriodicColumnData<EF> {
-    /// Per-column coefficient vectors (highest-degree first).
+    /// Per-column coefficient vectors (highest-degree first), for dense Horner evaluation.
     coeffs: Vec<Vec<EF>>,
+    /// Per-column nonzero terms, for sparse Lagrange evaluation.
+    sparse: Vec<Vec<SparseTerm<EF>>>,
 }
 
 impl<EF> PeriodicColumnData<EF> {
     /// Convert periodic columns (evaluations) into coefficient form for DAG building.
     ///
     /// Applies an inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
+    /// Also retains a sparse Lagrange-form representation of the nonzero evaluations,
+    /// letting the lowering pick whichever form is cheaper per column.
     pub fn from_periodic_columns<F>(periodic_columns: Vec<Vec<F>>) -> Self
     where
         F: TwoAdicField,
         EF: From<F>,
     {
         if periodic_columns.is_empty() {
-            return Self { coeffs: Vec::new() };
+            return Self { coeffs: Vec::new(), sparse: Vec::new() };
         }
 
         let dft = NaiveDft;
         let mut coeffs = Vec::with_capacity(periodic_columns.len());
+        let mut sparse = Vec::with_capacity(periodic_columns.len());
         for col in periodic_columns {
             assert!(!col.is_empty(), "periodic column must not be empty");
             assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
+            sparse.push(sparse_terms::<F, EF>(&col));
             let values = dft.idft(col);
             let coeff_row = values.into_iter().map(EF::from).collect();
             coeffs.push(coeff_row);
         }
 
-        Self { coeffs }
+        Self { coeffs, sparse }
     }
 
     /// Number of periodic columns.
@@ -104,6 +125,53 @@ impl<EF> PeriodicColumnData<EF> {
     pub fn columns(&self) -> &[Vec<EF>] {
         &self.coeffs
     }
+
+    /// Iterate over the per-column sparse (nonzero-value) terms.
+    pub(crate) fn sparse_terms(&self) -> &[Vec<SparseTerm<EF>>] {
+        &self.sparse
+    }
+}
+
+/// Build the sparse Lagrange-form terms for one periodic column's nonzero evaluations.
+///
+/// For a column of length `P = 2^m` with evaluation-domain generator `omega`, the
+/// coefficient-form value at a point `x` equals
+/// `(1/P) * sum_j v_j * D(x * omega^(-j))`, where `D(t) = sum_{k=0}^{P-1} t^k`. This
+/// is the same identity underlying the dense IDFT + Horner path, reordered so terms
+/// with `v_j == 0` drop out entirely and `D` is computed division-free via the
+/// doubling product `D(t) = Π_{i=0}^{m-1} (1 + t^(2^i))`.
+fn sparse_terms<F, EF>(col: &[F]) -> Vec<SparseTerm<EF>>
+where
+    F: TwoAdicField,
+    EF: From<F>,
+{
+    let log_len = col.len().ilog2();
+    let omega_inv = F::two_adic_generator(log_len as usize).inverse();
+
+    let mut domain_size = F::ZERO;
+    for _ in 0..col.len() {
+        domain_size += F::ONE;
+    }
+    let p_inv = domain_size.inverse();
+
+    let mut omega_inv_pow = F::ONE;
+    let mut terms = Vec::new();
+    for &v in col {
+        if v != F::ZERO {
+            let mut twiddles = Vec::with_capacity(log_len as usize);
+            let mut base = omega_inv_pow;
+            for _ in 0..log_len {
+                twiddles.push(EF::from(base));
+                base *= base;
+            }
+            terms.push(SparseTerm {
+                scaled_value: EF::from(v * p_inv),
+                twiddles,
+            });
+        }
+        omega_inv_pow *= omega_inv;
+    }
+    terms
 }
 
 /// A built DAG with a designated root.
