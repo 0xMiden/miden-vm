@@ -326,7 +326,7 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<13>(&[
+        let no_shift_depth0 = E::sum_array::<15>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
@@ -353,6 +353,10 @@ where
             op4(opcodes::END) * (E::ONE - is_loop_end),
             // +EVALCIRCUIT  - asserts an ACE evaluation without changing the stack.
             op5(opcodes::EVALCIRCUIT),
+            // +HORNERBASE   - Horner step rewrites only the accumulator (s14, s15).
+            op5(opcodes::HORNERBASE),
+            // +HORNEREXT    - Horner step rewrites only the accumulator (s14, s15).
+            op5(opcodes::HORNEREXT),
         ]);
 
         // +opcodes[0..8] –NOOP — unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
@@ -436,8 +440,8 @@ where
             no_shift_depth12,
             // +MSTREAM/PIPE   - preserve s13..s15 after skipping the incremented s12.
             stream_word_ops,
-            // d=14 (unchanged)
-            E::ZERO,
+            // -HORNERBASE/HORNEREXT - s14, s15 hold the Horner accumulator, updated each step.
+            -(op5(opcodes::HORNERBASE) + op5(opcodes::HORNEREXT)),
             // d=15 (unchanged)
             E::ZERO,
         ]);
