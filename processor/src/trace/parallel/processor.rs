@@ -7,7 +7,7 @@ use miden_core::{
     field::PrimeField64,
     mast::SparseMastForest,
     precompile::PrecompileTranscriptState,
-    program::{Kernel, MIN_STACK_DEPTH},
+    program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::range,
 };
 use miden_mast_package::debug_info::DebugSourceNodeId;
@@ -109,7 +109,7 @@ impl ReplayProcessor {
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
         current_forest: &mut Arc<SparseMastForest>,
-        kernel: &Kernel,
+        kernel: &KernelDescriptor,
         tracer: &mut T,
     ) -> Result<(), ExecutionError>
     where
@@ -140,7 +140,7 @@ impl ReplayProcessor {
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
         current_forest: &mut Arc<SparseMastForest>,
-        kernel: &Kernel,
+        kernel: &KernelDescriptor,
         tracer: &mut T,
     ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>>
     where

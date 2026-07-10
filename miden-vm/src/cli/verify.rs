@@ -7,7 +7,7 @@ use miden_assembly::{
 };
 use miden_mast_package::Package;
 use miden_prover::serde::Deserializable;
-use miden_vm::{Kernel, ProgramInfo, internal::InputFile};
+use miden_vm::{KernelDescriptor, ProgramInfo, internal::InputFile};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
 
@@ -69,7 +69,7 @@ impl VerifyCmd {
             }
             load_kernel(kernel_path)?
         } else {
-            Kernel::default()
+            KernelDescriptor::default()
         };
         let program_info = ProgramInfo::new(program_hash, kernel);
 
@@ -101,8 +101,8 @@ impl VerifyCmd {
     }
 }
 
-/// Loads a kernel from a file (.masm or .masp) and returns the Kernel.
-fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
+/// Loads a kernel from a file (.masm or .masp) and returns the KernelDescriptor.
+fn load_kernel(kernel_path: &PathBuf) -> Result<KernelDescriptor, Report> {
     // Determine file type based on extension
     let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 

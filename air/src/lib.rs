@@ -13,7 +13,7 @@ use miden_core::{
     WORD_SIZE, Word,
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
-    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
+    program::{KernelDescriptor, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::{
     air::{ReductionError, WindowAccess},
@@ -145,7 +145,8 @@ impl PublicInputs {
 
     /// Returns the canonical commitment to the kernel of the verified statement: the value the
     /// recursive verifier observes into the transcript in place of the raw kernel-procedure
-    /// digest list. See [`Kernel::commitment`](miden_core::program::Kernel::commitment).
+    /// digest list. See
+    /// [`KernelDescriptor::commitment`](miden_core::program::KernelDescriptor::commitment).
     pub fn kernel_commitment(&self) -> Word {
         self.program_info.kernel_commitment()
     }
@@ -205,7 +206,7 @@ impl Arbitrary for PublicInputs {
         }
 
         let program_info = word_strategy()
-            .prop_map(|program_hash| ProgramInfo::new(program_hash, Kernel::default()));
+            .prop_map(|program_hash| ProgramInfo::new(program_hash, KernelDescriptor::default()));
         let stack_inputs = proptest::collection::vec(felt_strategy(), 0..=MIN_STACK_DEPTH)
             .prop_map(|values| StackInputs::new(&values).expect("generated stack inputs fit"));
         let stack_outputs = proptest::collection::vec(felt_strategy(), 0..=MIN_STACK_DEPTH)
@@ -656,8 +657,8 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     fn max_aux_inputs(&self) -> usize {
         // aux_inputs = program hash (1 word) + transcript state (1 word) + the var-len
         // kernel-digest group: one `Word` per kernel procedure, capped at
-        // `Kernel::MAX_NUM_PROCEDURES`.
-        AUX_KERNEL_DIGESTS + Kernel::MAX_NUM_PROCEDURES * WORD_SIZE
+        // `KernelDescriptor::MAX_NUM_PROCEDURES`.
+        AUX_KERNEL_DIGESTS + KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE
     }
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
@@ -755,7 +756,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
 /// Computes `kernel_H`, the fixed-size commitment to the kernel-procedure digests.
 ///
-/// This is the canonical [`Kernel::commitment`] value expressed over the flattened digest
+/// This is the canonical [`KernelDescriptor::commitment`] value expressed over the flattened digest
 /// felts: the linear hash (`hash_elements`) of `kernel_felts`. The empty digest list yields
 /// `hash_elements(&[])`.
 ///

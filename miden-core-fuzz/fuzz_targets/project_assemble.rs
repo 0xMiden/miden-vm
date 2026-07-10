@@ -278,7 +278,7 @@ fn validate_package(package: &MastPackage) {
         },
         TargetType::Kernel => {
             let _ = package.to_kernel();
-            let _ = package.kernel_module_info();
+            let _ = package.kernel_module_descriptor();
         },
         _ if package.is_library() => {
             let _ = package.kernel_runtime_dependency();

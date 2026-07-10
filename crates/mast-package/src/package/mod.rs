@@ -22,7 +22,7 @@ use alloc::{
 use miden_assembly_syntax::{
     Path, Report,
     ast::{self, QualifiedProcedureName},
-    module::ModuleInfo,
+    module::ModuleDescriptor,
 };
 #[cfg(feature = "std")]
 use miden_core::serde::DeserializationError;
@@ -31,7 +31,7 @@ use miden_core::{
     advice::AdviceMap,
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    program::Kernel,
+    program::KernelDescriptor,
     serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
 
@@ -322,9 +322,10 @@ impl Package {
             .and_then(|procedure| procedure.source_node)
     }
 
-    /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
-    pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
-        self.try_module_infos()
+    /// Get the [ModuleDescriptor] corresponding to the kernel module, if this package contains the
+    /// kernel
+    pub fn kernel_module_descriptor(&self) -> Result<ModuleDescriptor, Report> {
+        self.try_module_descriptors()
             .map_err(Report::msg)?
             .into_iter()
             .find(|mi| mi.path().is_kernel_path())
@@ -434,21 +435,21 @@ impl Package {
             })
     }
 
-    /// Returns an iterator over the module infos of the library.
-    pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
+    /// Returns an iterator over the module descriptors of the library.
+    pub fn module_descriptors(&self) -> impl Iterator<Item = ModuleDescriptor> {
         let source_library_commitment =
             self.interface_digest().expect("package manifest exports were validated");
-        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleDescriptor> = BTreeMap::new();
 
         for module in self.manifest.modules() {
-            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            let mut module_descriptor = ModuleDescriptor::new(module.path.clone(), None);
             for submodule in module.submodules() {
-                module_info.add_submodule(ast::SubmoduleDecl {
+                module_descriptor.add_submodule(ast::SubmoduleDecl {
                     visibility: ast::Visibility::Public,
                     name: submodule.name.clone(),
                 });
             }
-            modules_by_path.insert(module.path.clone(), module_info);
+            modules_by_path.insert(module.path.clone(), module_descriptor);
         }
 
         for export in self.manifest.exports() {
@@ -456,7 +457,7 @@ impl Package {
                 Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
             let module = modules_by_path
                 .entry(Arc::clone(&module_name))
-                .or_insert_with(|| ModuleInfo::new(module_name, None));
+                .or_insert_with(|| ModuleDescriptor::new(module_name, None));
             match export {
                 PackageExport::Procedure(ProcedureExport {
                     node,
@@ -491,24 +492,25 @@ impl Package {
         modules_by_path.into_values()
     }
 
-    /// Returns module infos after validating that manifest module-surface metadata is complete.
+    /// Returns module descriptors after validating that manifest module-surface metadata is
+    /// complete.
     ///
-    /// Unlike [`Self::module_infos`], this method does not synthesize missing module surfaces from
-    /// item export paths. Link-time resolution relies on explicit module metadata so that modules
-    /// remain distinct from exported items.
-    pub fn try_module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+    /// Unlike [`Self::module_descriptors`], this method does not synthesize missing module surfaces
+    /// from item export paths. Link-time resolution relies on explicit module metadata so that
+    /// modules remain distinct from exported items.
+    pub fn try_module_descriptors(&self) -> Result<Vec<ModuleDescriptor>, ManifestValidationError> {
         let source_library_commitment = self.interface_digest()?;
-        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleDescriptor> = BTreeMap::new();
 
         for module in self.manifest.modules() {
-            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            let mut module_descriptor = ModuleDescriptor::new(module.path.clone(), None);
             for submodule in module.submodules() {
-                module_info.add_submodule(ast::SubmoduleDecl {
+                module_descriptor.add_submodule(ast::SubmoduleDecl {
                     visibility: ast::Visibility::Public,
                     name: submodule.name.clone(),
                 });
             }
-            modules_by_path.insert(module.path.clone(), module_info);
+            modules_by_path.insert(module.path.clone(), module_descriptor);
         }
 
         for module in self.manifest.modules() {
@@ -1037,8 +1039,8 @@ where
 
 /// Conversions
 impl Package {
-    /// Get a [Kernel] from this package, if this package contains one.
-    pub fn to_kernel(&self) -> Result<Kernel, Report> {
+    /// Get a [KernelDescriptor] from this package, if this package contains one.
+    pub fn to_kernel(&self) -> Result<KernelDescriptor, Report> {
         let exports = self
             .manifest
             .exports()
@@ -1057,7 +1059,8 @@ impl Package {
                 "invalid kernel package: does not export any kernel procedures",
             ));
         }
-        Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
+        KernelDescriptor::new(&exports)
+            .map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
     }
 
     // TODO(pauls): This function can be removed when we remove Program
