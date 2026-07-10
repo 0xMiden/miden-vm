@@ -6,15 +6,17 @@ pub mod optimized {
     use crate::{Felt, hash::algebraic_sponge::rescue::STATE_WIDTH};
 
     mod ffi {
+        use core::ffi::c_ulong;
+
         #[link(name = "rpo_sve", kind = "static")]
         unsafe extern "C" {
             pub fn add_constants_and_apply_sbox(
-                state: *mut std::ffi::c_ulong,
-                constants: *const std::ffi::c_ulong,
+                state: *mut c_ulong,
+                constants: *const c_ulong,
             ) -> bool;
             pub fn add_constants_and_apply_inv_sbox(
-                state: *mut std::ffi::c_ulong,
-                constants: *const std::ffi::c_ulong,
+                state: *mut c_ulong,
+                constants: *const c_ulong,
             ) -> bool;
         }
     }

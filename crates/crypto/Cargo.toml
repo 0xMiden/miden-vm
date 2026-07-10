@@ -89,7 +89,7 @@ internal          = ["concurrent"]
 persistent-forest = ["rocksdb", "serde"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
-std               = ["blake3/std", "dep:cc", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
+std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["arbitrary"]
 
 [dependencies]
@@ -147,7 +147,7 @@ shake          = { workspace = true }
 tempfile       = { workspace = true }
 
 [build-dependencies]
-cc = { features = ["parallel"], optional = true, workspace = true }
+cc = { features = ["parallel"], workspace = true }
 
 [lints]
 workspace = true
