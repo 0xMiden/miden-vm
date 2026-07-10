@@ -14,6 +14,10 @@
 - [BREAKING] Removed the `miden::core::crypto::hashes::sha512` MASM module, Rust handler, docs, and tests. SHA-512 support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
 - [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
 - [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
+- Added the `miden-precompiles-prover` crate and integrated STARK-backed deferred precompile proofs into the standard proving and verification flow.
+- Added partial deferred-proof APIs in `miden-prover` (`prove_partial`, `prove_partial_sync`, and `prove_partial_from_trace_sync`) and `Verifier::verify_partial`.
+- [BREAKING] Reworked `ExecutionProof` into separate `StarkProof` and `DeferredProof` envelopes. The old public fields, `deferred_state()` and `stark_proof()` accessors, `into_parts()`, and three-argument `ExecutionProof::new` constructor were removed, and proof serialization changed.
+- [BREAKING] Replaced the free `verify_with_max_deferred_elements` functions in `miden-verifier` and `miden-vm` with the configurable `Verifier` API. Use `Verifier::with_max_deferred_elements(...)` followed by `verify(...)` or `verify_partial(...)`.
 
 #### Fixes
 
