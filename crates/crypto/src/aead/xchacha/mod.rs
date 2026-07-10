@@ -16,6 +16,7 @@ use chacha20poly1305::{
     XChaCha20Poly1305,
     aead::{Aead, KeyInit, Payload},
 };
+use miden_crypto_derive::SilentDebug;
 use rand::CryptoRng;
 #[cfg(any(test, feature = "testing"))]
 use subtle::ConstantTimeEq;
@@ -25,8 +26,8 @@ use crate::{
     aead::{AeadScheme, DataType, EncryptionError},
     utils::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, bytes_to_elements_exact, elements_to_bytes,
-        zeroize::{Zeroize, ZeroizeOnDrop},
+        SliceReader, bytes_to_elements_exact, elements_to_bytes, read_sensitive_array,
+        zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
 
@@ -78,7 +79,7 @@ impl Nonce {
 }
 
 /// A 256-bit secret key
-#[derive(Debug)]
+#[derive(SilentDebug)]
 pub struct SecretKey([u8; SK_SIZE_BYTES]);
 
 #[cfg(any(test, feature = "testing"))]
@@ -118,9 +119,9 @@ impl SecretKey {
 
     /// Creates a new random secret key using the provided random number generator
     pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut key = [0u8; SK_SIZE_BYTES];
-        rng.fill_bytes(&mut key);
-        Self(key)
+        let mut key = Zeroizing::new([0u8; SK_SIZE_BYTES]);
+        rng.fill_bytes(key.as_mut());
+        Self(*key)
     }
 
     // BYTE ENCRYPTION
@@ -377,9 +378,9 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let inner: [u8; SK_SIZE_BYTES] = source.read_array()?;
+        let inner = read_sensitive_array::<SK_SIZE_BYTES, _>(source)?;
 
-        Ok(SecretKey(inner))
+        Ok(SecretKey(*inner))
     }
 }
 

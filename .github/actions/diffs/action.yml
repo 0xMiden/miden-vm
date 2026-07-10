@@ -92,17 +92,22 @@ runs:
           docs:
             - 'docs/**'
             - '**/*.md'
+          non-docs:
+            - '**'
+            - '!docs/**'
+            - '!**/*.md'
     - id: docs-only
       shell: bash
       env:
         DIFFS_DOCS: ${{ steps.filter.outputs.docs }}
+        DIFFS_NON_DOCS: ${{ steps.filter.outputs.non-docs }}
         DIFFS_CRYPTO: ${{ steps.filter.outputs.crypto }}
         DIFFS_VM: ${{ steps.filter.outputs.vm }}
         DIFFS_RUST_WORKSPACE: ${{ steps.filter.outputs.rust-workspace }}
         DIFFS_FUZZ: ${{ steps.filter.outputs.fuzz }}
         DIFFS_RELEASE: ${{ steps.filter.outputs.release }}
       run: |
-        if [[ "$DIFFS_DOCS" == "true" && "$DIFFS_CRYPTO" != "true" && "$DIFFS_VM" != "true" && "$DIFFS_RUST_WORKSPACE" != "true" && "$DIFFS_FUZZ" != "true" && "$DIFFS_RELEASE" != "true" ]]; then
+        if [[ "$DIFFS_DOCS" == "true" && "$DIFFS_NON_DOCS" != "true" && "$DIFFS_CRYPTO" != "true" && "$DIFFS_VM" != "true" && "$DIFFS_RUST_WORKSPACE" != "true" && "$DIFFS_FUZZ" != "true" && "$DIFFS_RELEASE" != "true" ]]; then
           echo "value=true" >> "$GITHUB_OUTPUT"
         else
           echo "value=false" >> "$GITHUB_OUTPUT"
