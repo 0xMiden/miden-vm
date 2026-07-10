@@ -170,11 +170,12 @@ fn hash_empty() {
 
 #[test]
 fn hash_empty_bytes() {
-    let bytes: Vec<u8> = vec![];
+    let bytes: &[u8] = &[];
+    let elements: &[Felt] = &[];
 
-    let zero_digest = Word::default();
-    let h_result = Rpx256::hash(&bytes);
-    assert_eq!(zero_digest, h_result);
+    let h_result = Rpx256::hash(bytes);
+    assert_ne!(Word::default(), h_result);
+    assert_ne!(Rpx256::hash_elements(elements), h_result);
 }
 
 #[test]

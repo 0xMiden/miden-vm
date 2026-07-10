@@ -87,6 +87,13 @@ pub(crate) trait AlgebraicSponge {
         // initialize a buffer to receive the little-endian elements.
         let mut buf = [0_u8; 8];
 
+        if bytes.is_empty() {
+            state[RATE_RANGE.start] = Felt::ONE;
+            Self::apply_permutation(&mut state);
+
+            return Word::new(state[DIGEST_RANGE].try_into().unwrap());
+        }
+
         // iterate the chunks of bytes, creating a field element from each chunk and copying it
         // into the state.
         //
