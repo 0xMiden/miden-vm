@@ -106,8 +106,9 @@ pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDT
 /// the size of the domain identifier space, including for padding, is less than 2^128.
 ///
 /// ## Hashing of empty input
-/// The current implementation hashes empty input to the zero digest [0, 0, 0, 0]. This has
-/// the benefit of requiring no calls to the Poseidon2 permutation when hashing empty input.
+/// The current implementation hashes empty field-element input to the zero digest [0, 0, 0, 0]
+/// when no domain is set. Empty byte input is different: it absorbs the byte-hash padding block
+/// and applies the Poseidon2 permutation.
 #[allow(rustdoc::private_intra_doc_links)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Poseidon2();
