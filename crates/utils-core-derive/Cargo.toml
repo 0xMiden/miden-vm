@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-core-derive"
-version = "0.25.2"
+version = "0.26.0"
 description = "Proc macro to derive enum dispatch trait implementations on miden-core structs"
 readme = "README.md"
 categories = ["development-tools::procedural-macro-helpers", "no-std"]
