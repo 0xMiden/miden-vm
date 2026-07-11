@@ -333,6 +333,11 @@ impl Deserializable for SignaturePoly {
                 "Failed to decode signature: Non-zero unused bits in the last byte".to_string(),
             ));
         }
+        if input[input_idx..].iter().any(|&byte| byte != 0) {
+            return Err(DeserializationError::InvalidValue(
+                "Failed to decode signature: Non-zero trailing bytes".to_string(),
+            ));
+        }
         Ok(Polynomial::new(coefficients.to_vec()).into())
     }
 }
@@ -417,6 +422,19 @@ mod tests {
     #[test]
     fn signature_poly_rejects_unterminated_compressed_payload() {
         let encoded = [1u8; SIG_POLY_BYTE_LEN];
+        let err = SignaturePoly::read_from_bytes(&encoded).unwrap_err();
+
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn signature_poly_rejects_nonzero_trailing_bytes() {
+        let coefficients = [0i16; N];
+        let poly = SignaturePoly::try_from(&coefficients).unwrap();
+        let mut encoded = (&poly).to_bytes();
+        assert!(SignaturePoly::read_from_bytes(&encoded).is_ok());
+
+        *encoded.last_mut().unwrap() = 1;
         let err = SignaturePoly::read_from_bytes(&encoded).unwrap_err();
 
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
