@@ -163,9 +163,20 @@ fn read_sparse_from<R: ByteReader>(
     let roots = read_node_ids(source, "procedure root")?;
     let nodes = read_sparse_nodes(source)?;
     let digest_entries = read_digest_entries(source)?;
-    let advice_map = AdviceMap::read_from(source)?;
+    let advice_map = read_empty_advice_map(source)?;
 
     SparseMastForest::from_serialized_parts(nodes, digest_entries, roots, advice_map)
+}
+
+fn read_empty_advice_map<R: ByteReader>(source: &mut R) -> Result<AdviceMap, DeserializationError> {
+    let count = source.read_usize()?;
+    if count != 0 {
+        return Err(DeserializationError::InvalidValue(
+            "sparse MAST replay payload must not carry advice map entries".to_string(),
+        ));
+    }
+
+    Ok(AdviceMap::default())
 }
 
 fn read_node_ids<R: ByteReader>(

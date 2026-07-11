@@ -873,19 +873,12 @@ fn sparse_mast_drops_source_advice_map() {
 }
 
 #[test]
-fn sparse_reader_rejects_non_empty_advice_map() {
-    let advice_key = Word::new([
-        Felt::new_unchecked(21),
-        Felt::new_unchecked(22),
-        Felt::new_unchecked(23),
-        Felt::new_unchecked(24),
-    ]);
-    let advice_values = vec![Felt::new_unchecked(25), Felt::new_unchecked(26)];
+fn sparse_reader_rejects_non_empty_advice_map_count() {
     let mut bytes = Vec::new();
     0usize.write_into(&mut bytes);
     0usize.write_into(&mut bytes);
     0usize.write_into(&mut bytes);
-    AdviceMap::from_iter([(advice_key, advice_values)]).write_into(&mut bytes);
+    1usize.write_into(&mut bytes);
 
     let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
 
