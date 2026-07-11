@@ -448,10 +448,10 @@ fn get_module_by_path() {
         .assemble_library("test", foo, None::<Box<Module>>)
         .unwrap();
 
-    let foo_module_info = bundle.module_infos().next().unwrap();
-    assert_eq!(foo_module_info.path(), &PathBuf::new("::test::foo").unwrap());
+    let foo_module_descriptor = bundle.module_descriptors().next().unwrap();
+    assert_eq!(foo_module_descriptor.path(), &PathBuf::new("::test::foo").unwrap());
 
-    let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
+    let (_, foo_proc) = foo_module_descriptor.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
 }
 
@@ -4419,7 +4419,7 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
-    assert_eq!(kernel_lib.to_kernel().ok().map(|k| k.proc_hashes().len()), Some(1));
+    assert_eq!(kernel_lib.to_kernel_descriptor().ok().map(|k| k.proc_hashes().len()), Some(1));
 
     Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
         .assemble_program("program", PROGRAM)?;

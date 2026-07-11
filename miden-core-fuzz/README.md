@@ -59,13 +59,13 @@ cargo +nightly fuzz run program_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run program_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`kernel_deserialize`** — Tests `Kernel::read_from_bytes`.
+**`kernel_deserialize`** — Tests `KernelDescriptor::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run kernel_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`kernel_serde_deserialize`** — Tests `Kernel` JSON deserialization via `serde_json`.
+**`kernel_serde_deserialize`** — Tests `KernelDescriptor` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run kernel_serde_deserialize --fuzz-dir miden-core-fuzz

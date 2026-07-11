@@ -10,7 +10,7 @@ use miden_air::trace::{
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
 };
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{mast::OpBatch, program::KernelDescriptor};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -149,8 +149,8 @@ pub struct Chiplets {
 impl Chiplets {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Returns a new [Chiplets] component instantiated with the provided Kernel.
-    pub fn new(kernel: Kernel) -> Self {
+    /// Returns a new [Chiplets] component instantiated with the provided KernelDescriptor.
+    pub fn new(kernel: KernelDescriptor) -> Self {
         Self {
             hasher: Hasher::default(),
             bitwise: Bitwise::default(),

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.0 (unreleased)
+
+#### Changes
+
+- [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
+
 ## v0.25.0 (2026-07-08)
 
 #### Changes

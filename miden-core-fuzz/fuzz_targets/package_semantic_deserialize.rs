@@ -30,8 +30,8 @@ fuzz_target!(|data: &[u8]| {
             let _ = package.try_into_program();
         },
         TargetType::Kernel => {
-            let _ = package.kernel_module_info();
-            let _ = package.to_kernel();
+            let _ = package.kernel_module_descriptor();
+            let _ = package.to_kernel_descriptor();
         },
         _ => (),
     }
