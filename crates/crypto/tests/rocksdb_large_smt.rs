@@ -3,8 +3,9 @@ use miden_crypto::{
     merkle::{
         InnerNodeInfo,
         smt::{
-            LargeSmt, LargeSmtError, LargeSmtResult, RocksDbConfig, RocksDbSnapshotStorage,
-            RocksDbStorage, SmtStorageReader, StorageError,
+            LargeSmt, LargeSmtError, LargeSmtResult, MAX_LEAF_ENTRIES, RocksDbConfig,
+            RocksDbSnapshotStorage, RocksDbStorage, SmtLeafError, SmtStorage, SmtStorageReader,
+            StorageError,
         },
     },
 };
@@ -92,6 +93,31 @@ fn rocksdb_sanity_insert_and_get() {
     let prev = smt.insert(key, val).unwrap();
     assert_eq!(prev, EMPTY_WORD);
     assert_eq!(smt.get_value(&key), val);
+}
+
+#[test]
+fn rocksdb_insert_value_returns_leaf_error_when_leaf_is_full() {
+    let (mut storage, temp_dir_guard) = setup_storage();
+    let index = 0;
+
+    for i in 0..MAX_LEAF_ENTRIES {
+        let key = Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE]);
+        let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(i as u64)]);
+        assert_eq!(storage.insert_value(index, key, value).unwrap(), None);
+    }
+
+    let extra_key = Word::new([ONE, ONE, Felt::new_unchecked(MAX_LEAF_ENTRIES as u64), ONE]);
+    let extra_value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(MAX_LEAF_ENTRIES as u64)]);
+    assert!(matches!(
+        storage.insert_value(index, extra_key, extra_value),
+        Err(StorageError::Leaf(SmtLeafError::TooManyLeafEntries { actual }))
+            if actual == MAX_LEAF_ENTRIES + 1
+    ));
+    assert_eq!(storage.leaf_count().unwrap(), 1);
+    assert_eq!(storage.entry_count().unwrap(), MAX_LEAF_ENTRIES);
+
+    drop(storage);
+    drop(temp_dir_guard);
 }
 
 #[test]
