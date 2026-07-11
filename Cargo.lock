@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "miden-bench"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "miden-lifted-stark",
@@ -1643,7 +1643,7 @@ dependencies = [
  "flume",
  "hex",
  "hkdf",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "k256",
  "miden-crypto-derive",
  "miden-field",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-smt-codspeed-bench"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-crypto",
@@ -1697,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-wycheproof-tests"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "ed25519-dalek",
  "hex",
