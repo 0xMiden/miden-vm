@@ -848,6 +848,51 @@ fn sparse_mast_round_trip_writes_map_sections_in_node_id_order() {
 }
 
 #[test]
+fn sparse_mast_drops_source_advice_map() {
+    let mut source = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    source.make_root(root);
+    let advice_key = Word::new([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+    ]);
+    let advice_values = vec![Felt::new_unchecked(15), Felt::new_unchecked(16)];
+    let source = source.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values)]));
+
+    let mut builder = SparseMastForestBuilder::new(Arc::new(source));
+    builder.record_visit(root, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+
+    assert!(sparse.advice_map().is_empty());
+    assert!(restored.advice_map().is_empty());
+}
+
+#[test]
+fn sparse_reader_rejects_non_empty_advice_map() {
+    let advice_key = Word::new([
+        Felt::new_unchecked(21),
+        Felt::new_unchecked(22),
+        Felt::new_unchecked(23),
+        Felt::new_unchecked(24),
+    ]);
+    let advice_values = vec![Felt::new_unchecked(25), Felt::new_unchecked(26)];
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
+    AdviceMap::from_iter([(advice_key, advice_values)]).write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+
+    assert!(err.to_string().contains("must not carry advice map entries"));
+}
+
+#[test]
 fn sparse_reader_rejects_non_increasing_full_node_ids() {
     let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
     let mut bytes = Vec::new();

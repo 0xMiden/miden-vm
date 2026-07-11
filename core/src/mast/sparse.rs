@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     sync::Arc,
     vec::Vec,
 };
@@ -85,7 +86,10 @@ impl SparseMastForest {
         &self.roots
     }
 
-    /// Returns the advice map associated with this sparse forest.
+    /// Returns the empty advice map associated with this sparse forest.
+    ///
+    /// Sparse replay uses `AdviceReplay` for advice reads; this map remains empty to satisfy the
+    /// shared [`ExecutableMastForest`] interface.
     pub fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
     }
@@ -102,6 +106,12 @@ impl SparseMastForest {
         roots: Vec<MastNodeId>,
         advice_map: AdviceMap,
     ) -> Result<Self, DeserializationError> {
+        if !advice_map.is_empty() {
+            return Err(DeserializationError::InvalidValue(
+                "sparse MAST replay payload must not carry advice map entries".to_string(),
+            ));
+        }
+
         let nodes = collect_unique_nodes(nodes)?;
         let digests = collect_unique_digests(digests)?;
 
@@ -120,7 +130,12 @@ impl SparseMastForest {
 
         validate_full_node_child_digests(&nodes, &digests)?;
 
-        Ok(Self { nodes, digests, roots, advice_map })
+        Ok(Self {
+            nodes,
+            digests,
+            roots,
+            advice_map: AdviceMap::default(),
+        })
     }
 }
 
@@ -324,8 +339,8 @@ impl SparseMastForestBuilder {
     }
 
     /// Consumes the builder and produces a [`SparseMastForest`] containing only the visited nodes
-    /// from the source forest. The roots, advice map, and debug info are cloned from the source
-    /// in full (they are not yet trimmed to visited nodes only).
+    /// from the source forest. The roots are cloned from the source in full. Advice data is not
+    /// copied because sparse replay uses `AdviceReplay`.
     pub fn finalize(self) -> SparseMastForest {
         let SparseMastForestBuilder { source, full_visits, digest_only_visits } = self;
 
@@ -352,7 +367,7 @@ impl SparseMastForestBuilder {
             nodes,
             digests,
             roots: source.procedure_roots().to_vec(),
-            advice_map: source.advice_map().clone(),
+            advice_map: AdviceMap::default(),
         }
     }
 }
