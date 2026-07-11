@@ -1,5 +1,7 @@
 ## 0.29.0 (TBD)
 
+- Updated `miden-bench` Keccak trace summaries to report padded trace rows separately from active Keccak rows ([#1065](https://github.com/0xMiden/crypto/pull/1065)).
+
 ## 0.28.0 (2026-07-03)
 
 - Added a zeroizing read helper for deserializing sensitive material, fixing secret-key read buffers that were not wiped on error paths (ECDSA) or at all (Falcon, Poseidon2 AEAD) ([#1057](https://github.com/0xMiden/crypto/pull/1057)).

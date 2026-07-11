@@ -115,13 +115,12 @@ fn print_config(cli: &Cli, specs: &[TraceSpec], traces: &[RowMajorMatrix<Felt>],
     for (i, (spec, trace)) in specs.iter().zip(traces).enumerate() {
         let label = if i == 0 { "traces:" } else { "" };
         eprintln!(
-            "{:<20} {}:{} (width={}, 2^{} = {} rows)",
+            "{:<20} {}:{} (width={}, {})",
             label,
             spec.air_type,
             spec.log_height,
             trace.width(),
-            spec.log_height,
-            trace.height(),
+            trace_row_summary(spec, trace.height()),
         );
     }
     eprintln!("{:<20} {}", "log_blowup:", log_blowup);
@@ -149,7 +148,7 @@ fn generate_traces(
             info_span!("generate trace", air = %spec.air_type, log_height = spec.log_height)
                 .in_scope(|| match spec.air_type {
                     AirType::Keccak => {
-                        let n = (1usize << spec.log_height) / KECCAK_ROWS_PER_HASH;
+                        let n = keccak_hash_count(spec.log_height);
                         let inputs: Vec<[u64; 25]> = (0..n).map(|_| rng.random()).collect();
                         generate_keccak_trace(inputs)
                     },
@@ -325,6 +324,23 @@ fn init_tracing(verbose: bool) {
         .init();
 }
 
+fn keccak_hash_count(log_height: u8) -> usize {
+    (1usize << log_height) / KECCAK_ROWS_PER_HASH
+}
+
+fn trace_row_summary(spec: &TraceSpec, trace_height: usize) -> String {
+    if spec.air_type == AirType::Keccak {
+        let hashes = keccak_hash_count(spec.log_height);
+        let active_rows = hashes * KECCAK_ROWS_PER_HASH;
+        format!(
+            "2^{} = {trace_height} padded rows, {hashes} hashes = {active_rows} active rows",
+            spec.log_height,
+        )
+    } else {
+        format!("2^{} = {trace_height} rows", spec.log_height)
+    }
+}
+
 pub(crate) fn format_bytes(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
@@ -332,5 +348,37 @@ pub(crate) fn format_bytes(bytes: usize) -> String {
         format!("{:.1} KiB", bytes as f64 / 1024.0)
     } else {
         format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keccak_trace_summary_reports_active_rows_separately_from_padded_rows() {
+        let spec = TraceSpec {
+            air_type: AirType::Keccak,
+            log_height: 18,
+            width: 0,
+            num_aux_cols: 0,
+        };
+
+        assert_eq!(
+            trace_row_summary(&spec, 262_144),
+            "2^18 = 262144 padded rows, 10922 hashes = 262128 active rows",
+        );
+    }
+
+    #[test]
+    fn non_keccak_trace_summary_keeps_power_of_two_rows() {
+        let spec = TraceSpec {
+            air_type: AirType::Poseidon2,
+            log_height: 19,
+            width: 0,
+            num_aux_cols: 0,
+        };
+
+        assert_eq!(trace_row_summary(&spec, 524_288), "2^19 = 524288 rows");
     }
 }
