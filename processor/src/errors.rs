@@ -22,6 +22,7 @@ use crate::{
 // EXECUTION ERROR
 // ================================================================================================
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]

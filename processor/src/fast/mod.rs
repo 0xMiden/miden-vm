@@ -284,8 +284,8 @@ impl FastProcessor {
 
     /// Returns the resume context to be used with the first call to `step_sync()`.
     ///
-    /// This function asserts that `package` is not of executable type - callers should ensure that
-    /// it is before calling
+    /// This function asserts that `package` is of executable type - callers should ensure that it
+    /// is before calling.
     pub fn get_initial_resume_context_for_package(
         &mut self,
         package: Arc<Package>,
