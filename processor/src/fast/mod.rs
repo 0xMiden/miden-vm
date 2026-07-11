@@ -9,6 +9,7 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
+use miden_mast_package::Package;
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
@@ -278,6 +279,27 @@ impl FastProcessor {
             saved_overflow_len: 0,
             options,
             pc_transcript: PrecompileTranscript::new(),
+        })
+    }
+
+    /// Returns the resume context to be used with the first call to `step_sync()`.
+    ///
+    /// This function asserts that `package` is not of executable type - callers should ensure that
+    /// it is before calling
+    pub fn get_initial_resume_context_for_package(
+        &mut self,
+        package: Arc<Package>,
+    ) -> Result<ResumeContext, ExecutionError> {
+        let program = package.unwrap_program();
+        let package_debug_info = package.debug_info()?.map(Arc::new);
+        let current_forest = program.mast_forest().clone();
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        Ok(ResumeContext {
+            current_forest,
+            continuation_stack: ContinuationStack::new(&program),
+            kernel: program.kernel().clone(),
+            package_debug_info,
         })
     }
 
