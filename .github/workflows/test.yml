@@ -31,7 +31,7 @@ jobs:
   test:
     name: test on warpbuild
     needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
