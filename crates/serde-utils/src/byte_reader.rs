@@ -70,7 +70,8 @@ pub trait ByteReader {
     ///
     /// The default implementation returns `usize::MAX`, meaning no limit is enforced.
     /// [`BudgetedReader`] overrides this to return `remaining_budget / element_size`,
-    /// providing tight, adaptive limits based on the caller's budget.
+    /// providing tight, adaptive limits based on the caller's budget. For zero-sized serialized
+    /// elements, [`BudgetedReader`] returns zero so non-empty collections are rejected.
     ///
     /// # Arguments
     /// * `element_size` - The serialized size of one element, from
@@ -842,7 +843,7 @@ impl<R: ByteReader> ByteReader for BudgetedReader<R> {
 
     fn max_alloc(&self, element_size: usize) -> usize {
         if element_size == 0 {
-            return usize::MAX; // ZSTs don't consume budget
+            return 0;
         }
         self.remaining / element_size
     }
@@ -921,7 +922,7 @@ mod tests {
     fn read_adapter_large_array_from_chunked_reader() {
         let data = (0..897).map(|i| (i % 251) as u8).collect::<Vec<_>>();
         let expected: [u8; 897] = data.clone().try_into().unwrap();
-        let mut chunked = ChunkedReader::new(data.clone(), 128);
+        let mut chunked = ChunkedReader::new(data, 128);
         let mut adapter = ReadAdapter::new(&mut chunked);
 
         assert_eq!(adapter.read_array::<897>().unwrap(), expected);
@@ -1150,8 +1151,8 @@ mod tests {
         // 64 bytes budget / 16 bytes per u128 = 4 elements max
         assert_eq!(reader.max_alloc(16), 4);
 
-        // ZSTs (0 bytes) return usize::MAX
-        assert_eq!(reader.max_alloc(0), usize::MAX);
+        // Budgeted readers reject non-empty ZST collections because they cannot charge budget.
+        assert_eq!(reader.max_alloc(0), 0);
     }
 
     #[test]
@@ -1162,6 +1163,16 @@ mod tests {
         assert_eq!(reader.max_alloc(1), usize::MAX);
         assert_eq!(reader.max_alloc(8), usize::MAX);
         assert_eq!(reader.max_alloc(0), usize::MAX);
+    }
+
+    #[test]
+    fn budgeted_reader_rejects_non_empty_zst_collections() {
+        let data = [];
+        let inner = SliceReader::new(&data);
+        let mut reader = BudgetedReader::new(inner, 64);
+
+        assert!(reader.read_many_iter::<()>(0).is_ok());
+        assert!(reader.read_many_iter::<()>(1).is_err());
     }
 
     #[test]
