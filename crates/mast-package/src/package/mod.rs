@@ -435,7 +435,7 @@ impl Package {
             })
     }
 
-    /// Returns an iterator over the module descriptors of the library.
+    /// Returns an iterator over the module descriptors of the package.
     pub fn module_descriptors(&self) -> impl Iterator<Item = ModuleDescriptor> {
         let source_library_commitment =
             self.interface_digest().expect("package manifest exports were validated");
@@ -1040,7 +1040,7 @@ where
 /// Conversions
 impl Package {
     /// Get a [KernelDescriptor] from this package, if this package contains one.
-    pub fn to_kernel(&self) -> Result<KernelDescriptor, Report> {
+    pub fn to_kernel_descriptor(&self) -> Result<KernelDescriptor, Report> {
         let exports = self
             .manifest
             .exports()
@@ -1082,9 +1082,11 @@ impl Package {
             let mast_forest = self.mast.clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_package()?, kernel_dependency) {
-                (Some(kernel_package), _) => {
-                    Ok(Program::with_kernel(mast_forest, entrypoint, kernel_package.to_kernel()?))
-                },
+                (Some(kernel_package), _) => Ok(Program::with_kernel(
+                    mast_forest,
+                    entrypoint,
+                    kernel_package.to_kernel_descriptor()?,
+                )),
                 (None, Some(kernel_dependency)) => Err(Report::msg(format!(
                     "package '{}' declares kernel runtime dependency '{}@{}#{}', but does not embed the kernel package required to reconstruct a program",
                     self.name,
@@ -1828,7 +1830,7 @@ mod tests {
     }
 
     #[test]
-    fn to_kernel_rejects_empty_kernel_exports() {
+    fn to_kernel_descriptor_rejects_empty_kernel_exports() {
         let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
         package.manifest = PackageManifest {
             exports: Default::default(),
@@ -1838,7 +1840,7 @@ mod tests {
         };
 
         let error = package
-            .to_kernel()
+            .to_kernel_descriptor()
             .expect_err("kernel packages without exported procedures should be rejected");
 
         assert!(

@@ -411,7 +411,7 @@ impl Linker {
         if !kernel_package.is_kernel() {
             return Err(Report::msg("invalid kernel package: not a kernel"));
         }
-        let kernel = kernel_package.to_kernel()?;
+        let kernel = kernel_package.to_kernel_descriptor()?;
         if kernel.is_empty() {
             return Err(Report::msg("invalid kernel package: kernel cannot be empty"));
         }

@@ -12,6 +12,7 @@ use crate::{
 // MODULE DESCRIPTOR
 // ================================================================================================
 
+/// Describes a MASM module surface, including its path, version, exports, and declared submodules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleDescriptor {
     path: Arc<Path>,

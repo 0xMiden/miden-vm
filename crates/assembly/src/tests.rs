@@ -4419,7 +4419,7 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
-    assert_eq!(kernel_lib.to_kernel().ok().map(|k| k.proc_hashes().len()), Some(1));
+    assert_eq!(kernel_lib.to_kernel_descriptor().ok().map(|k| k.proc_hashes().len()), Some(1));
 
     Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
         .assemble_program("program", PROGRAM)?;

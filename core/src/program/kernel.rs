@@ -15,7 +15,7 @@ use crate::{
 /// A list of exported kernel procedure hashes defining a VM kernel.
 ///
 /// The internally-stored list always has a consistent order, regardless of the order of procedure
-/// list used to instantiate a kernel.
+/// list used to instantiate a descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

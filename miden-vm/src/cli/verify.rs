@@ -67,7 +67,7 @@ impl VerifyCmd {
                     kernel_path.display()
                 )));
             }
-            load_kernel(kernel_path)?
+            load_kernel_descriptor(kernel_path)?
         } else {
             KernelDescriptor::default()
         };
@@ -101,8 +101,8 @@ impl VerifyCmd {
     }
 }
 
-/// Loads a kernel from a file (.masm or .masp) and returns the KernelDescriptor.
-fn load_kernel(kernel_path: &PathBuf) -> Result<KernelDescriptor, Report> {
+/// Loads a kernel descriptor from a file (.masm or .masp).
+fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Report> {
     // Determine file type based on extension
     let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
@@ -143,8 +143,8 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<KernelDescriptor, Report> {
         },
     };
 
-    // Extract kernel from kernel library
-    kernel_pkg.to_kernel()
+    // Extract the kernel descriptor from the kernel package.
+    kernel_pkg.to_kernel_descriptor()
 }
 
 #[cfg(test)]
