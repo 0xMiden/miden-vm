@@ -19,8 +19,83 @@ use super::{
     DebugFunctionsSection, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceGraphSection,
     DebugSourceInlineCall, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
     DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
-    DebugVariantInfo,
+    DebugVariantInfo, PackageDebugInfo,
 };
+
+// PACKAGE DEBUG INFO SERIALIZATION
+// ================================================================================================
+
+impl Serializable for PackageDebugInfo {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_bool(self.types.is_some());
+        if let Some(types) = self.types.as_ref() {
+            types.write_into(target);
+        }
+        target.write_bool(self.sources.is_some());
+        if let Some(sources) = self.sources.as_ref() {
+            sources.write_into(target);
+        }
+        target.write_bool(self.functions.is_some());
+        if let Some(functions) = self.functions.as_ref() {
+            functions.write_into(target);
+        }
+        target.write_bool(self.source_graph.is_some());
+        if let Some(source_graph) = self.source_graph.as_ref() {
+            source_graph.write_into(target);
+        }
+        target.write_bool(self.source_map.is_some());
+        if let Some(source_map) = self.source_map.as_ref() {
+            source_map.write_into(target);
+        }
+        target.write_bool(self.error_messages.is_some());
+        if let Some(error_messages) = self.error_messages.as_ref() {
+            error_messages.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for PackageDebugInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let types = if source.read_bool()? {
+            Some(DebugTypesSection::read_from(source)?)
+        } else {
+            None
+        };
+        let sources = if source.read_bool()? {
+            Some(DebugSourcesSection::read_from(source)?)
+        } else {
+            None
+        };
+        let functions = if source.read_bool()? {
+            Some(DebugFunctionsSection::read_from(source)?)
+        } else {
+            None
+        };
+        let source_graph = if source.read_bool()? {
+            Some(DebugSourceGraphSection::read_from(source)?)
+        } else {
+            None
+        };
+        let source_map = if source.read_bool()? {
+            Some(DebugSourceMapSection::read_from(source)?)
+        } else {
+            None
+        };
+        let error_messages = if source.read_bool()? {
+            Some(DebugErrorMessagesSection::read_from(source)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            types,
+            sources,
+            functions,
+            source_graph,
+            source_map,
+            error_messages,
+        })
+    }
+}
 
 // DEBUG TYPES SECTION SERIALIZATION
 // ================================================================================================
