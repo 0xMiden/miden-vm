@@ -92,7 +92,7 @@ miden-serde-utils = { version = "0.28", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
-wincode       = { version = "0.4.2", default-features = false, features = ["alloc"] }
+wincode       = { version = "0.5.5", default-features = false, features = ["alloc"] }
 
 # Third-party crates
 clap            = { version = "4.5", features = ["derive"] }
