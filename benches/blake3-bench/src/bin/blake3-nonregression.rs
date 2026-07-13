@@ -69,6 +69,8 @@ enum Commands {
         json_out: PathBuf,
         #[arg(long)]
         threshold_pct: f64,
+        #[arg(long, default_value_t = 1.0)]
+        min_regression_ms: f64,
         #[arg(long)]
         github_output: Option<PathBuf>,
     },
@@ -113,11 +115,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             summary_out,
             json_out,
             threshold_pct,
+            min_regression_ms,
             github_output,
         } => {
             let baseline: BenchmarkResult = serde_json::from_str(&fs::read_to_string(&baseline)?)?;
             let current: BenchmarkResult = serde_json::from_str(&fs::read_to_string(&current)?)?;
-            let comparison = compare_results(&baseline, &current, threshold_pct)?;
+            let comparison =
+                compare_results(&baseline, &current, threshold_pct, min_regression_ms)?;
             write_json(&json_out, &comparison)?;
             write_text(&summary_out, &summary_markdown(&comparison))?;
             if let Some(github_output) = github_output {
@@ -191,6 +195,7 @@ mod tests {
             &result_with_metric("base", "e2e_prove", 1_000.0),
             &result_with_metric("head", "e2e_prove", 1_100.0),
             5.0,
+            1.0,
         )
         .unwrap();
         let summary = summary_markdown(&comparison);
@@ -212,9 +217,48 @@ mod tests {
             metric("build_trace", "criterion", Some(120.0), None),
         );
 
-        let comparison = compare_results(&baseline, &current, 5.0).unwrap();
+        let comparison = compare_results(&baseline, &current, 5.0, 1.0).unwrap();
 
         assert!(comparison.regression);
+    }
+
+    #[test]
+    fn comparison_ignores_tiny_secondary_axis_delta() {
+        let mut baseline = result_with_metric("base", "e2e_prove", 1_000.0);
+        baseline.metrics.insert(
+            "to_row_major_matrix".to_string(),
+            metric("to_row_major_matrix", "span", None, Some(0.01)),
+        );
+        let mut current = result_with_metric("head", "e2e_prove", 1_010.0);
+        current.metrics.insert(
+            "to_row_major_matrix".to_string(),
+            metric("to_row_major_matrix", "span", None, Some(0.25)),
+        );
+
+        let comparison = compare_results(&baseline, &current, 5.0, 1.0).unwrap();
+
+        assert!(!comparison.regression);
+        assert!(comparison.regression_rows.is_empty());
+    }
+
+    #[test]
+    fn comparison_reports_tracing_spans_without_failing() {
+        let mut baseline = result_with_metric("base", "e2e_prove", 1_000.0);
+        baseline.metrics.insert(
+            "commit_to_quotient_poly_chunks".to_string(),
+            metric("commit_to_quotient_poly_chunks", "tracing-span", None, Some(1_429.53)),
+        );
+        let mut current = result_with_metric("head", "e2e_prove", 1_010.0);
+        current.metrics.insert(
+            "commit_to_quotient_poly_chunks".to_string(),
+            metric("commit_to_quotient_poly_chunks", "tracing-span", None, Some(1_546.65)),
+        );
+
+        let comparison = compare_results(&baseline, &current, 5.0, 1.0).unwrap();
+
+        assert!(!comparison.regression);
+        assert!(comparison.regression_rows.is_empty());
+        assert_eq!(comparison.top_slowdowns[0].name, "commit_to_quotient_poly_chunks");
     }
 
     fn metric(name: &str, source: &str, mean_ms: Option<f64>, duration_ms: Option<f64>) -> Metric {
