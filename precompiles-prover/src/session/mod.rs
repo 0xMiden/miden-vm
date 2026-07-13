@@ -71,10 +71,8 @@ use crate::{
         },
     },
     uint::{
-        UintStores,
-        add::trace::generate_trace as uint_add_trace,
-        mul::trace::generate_trace as uint_mul_trace,
-        trace::{UintPtr, generate_trace as uint_trace},
+        UintStores, add::trace::generate_trace as uint_add_trace,
+        store_mul::trace::generate_trace as uint_trace, trace::UintPtr,
     },
 };
 
@@ -86,7 +84,7 @@ pub mod strategies;
 pub use prove::{ChipletAir, ChipletMultiAir, VerifyError, verify_deferred, verify_stark};
 
 /// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
-pub const NUM_CHIPLETS: usize = 15;
+pub const NUM_CHIPLETS: usize = 14;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -475,14 +473,15 @@ impl Session {
         // consumes no UintVal — its predicates are ptr-level certificates
         // already routed by the uint relations.)
         let add = trace_span!("uint_add", uint_add_trace(self.uint.add, &mut self.uint.store));
-        let mul = trace_span!(
-            "uint_mul",
-            uint_mul_trace(self.uint.mul, &mut self.uint.store, &mut self.bpl)
-        );
         // EcMsm routes its intros' literal-1 UintVal demand into the store,
         // so it runs before the store reads its provide ledger.
         let msm = trace_span!("ec_msm", msm_trace(self.msm, &mut self.uint.store, &mut self.bpl));
-        let uint = trace_span!("uint_store", uint_trace(self.uint.store, &mut self.bpl));
+        // Mul routes its own store demand internally, ahead of the store
+        // reading its ledger — see `uint::store_mul::trace::generate_trace`.
+        let uint = trace_span!(
+            "uint_store_mul",
+            uint_trace(self.uint.store, self.uint.mul, &mut self.bpl)
+        );
         // The add relation routes its EcGroup / EcPoint demand as it lays,
         // so it runs before the stores read their provide ledgers; it also
         // raises the closure-cert ptr-ordering Range16 requires into BPL
@@ -503,7 +502,6 @@ impl Session {
             eval,
             uint,
             add,
-            mul,
             ec_groups,
             ec,
             ec_add,
@@ -535,7 +533,6 @@ pub struct SessionTraces {
     eval: RowMajorMatrix<Felt>,
     uint: RowMajorMatrix<Felt>,
     add: RowMajorMatrix<Felt>,
-    mul: RowMajorMatrix<Felt>,
     ec_groups: RowMajorMatrix<Felt>,
     ec: RowMajorMatrix<Felt>,
     ec_add: RowMajorMatrix<Felt>,
@@ -548,9 +545,9 @@ pub struct SessionTraces {
 impl SessionTraces {
     /// The fourteen main traces in canonical chiplet order: chunk,
     /// poseidon2, round, bitwise64, byte_pair_lut, sponge, keccak-node,
-    /// eval, uint, uint-add, uint-mul, ec-groups, ec-points, ec-add. The
-    /// AIRs, provers, and public values a caller assembles must line up
-    /// with this order.
+    /// eval, uint-store-mul, uint-add, ec-groups, ec-points, ec-add,
+    /// ec-msm. The AIRs, provers, and public values a caller assembles
+    /// must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk,
@@ -563,7 +560,6 @@ impl SessionTraces {
             &self.eval,
             &self.uint,
             &self.add,
-            &self.mul,
             &self.ec_groups,
             &self.ec,
             &self.ec_add,
@@ -571,7 +567,7 @@ impl SessionTraces {
         ]
     }
 
-    /// The fifteen main traces by value in [`mains`](Self::mains) order,
+    /// The fourteen main traces by value in [`mains`](Self::mains) order,
     /// consuming the bundle — lets the prover take ownership rather than
     /// clone the (potentially large) traces.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
@@ -586,7 +582,6 @@ impl SessionTraces {
             self.eval,
             self.uint,
             self.add,
-            self.mul,
             self.ec_groups,
             self.ec,
             self.ec_add,

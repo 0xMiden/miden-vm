@@ -1,6 +1,6 @@
 //! Multi-AIR proving for the chiplet stack.
 //!
-//! [`ChipletAir`] wraps the fifteen heterogeneous AIRs into one enum (the
+//! [`ChipletAir`] wraps the fourteen heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
@@ -56,10 +56,10 @@ use crate::{
         eval::TranscriptEvalAir,
         poseidon2::{P2Digest, Poseidon2Air},
     },
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
+    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
-/// The fifteen chiplet AIRs wrapped into one enum — the heterogeneous
+/// The fourteen chiplet AIRs wrapped into one enum — the heterogeneous
 /// `MultiAir::Air` type. Variant order is the canonical
 /// [`SessionTraces::mains`] order.
 #[derive(Clone, Debug)]
@@ -72,9 +72,8 @@ pub enum ChipletAir {
     KeccakSponge,
     KeccakNode,
     TranscriptEval,
-    UintStore,
+    UintStoreMul,
     UintAdd,
-    UintMul,
     EcGroups,
     EcPointStore,
     EcGroupAdd,
@@ -92,9 +91,8 @@ macro_rules! delegate {
             ChipletAir::KeccakSponge => KeccakSpongeAir.$method($($arg),*),
             ChipletAir::KeccakNode => KeccakNodeAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
-            ChipletAir::UintStore => UintStoreAir.$method($($arg),*),
+            ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
-            ChipletAir::UintMul => UintMulAir.$method($($arg),*),
             ChipletAir::EcGroups => EcGroupsAir.$method($($arg),*),
             ChipletAir::EcPointStore => EcPointStoreAir.$method($($arg),*),
             ChipletAir::EcGroupAdd => EcGroupAddAir.$method($($arg),*),
@@ -112,7 +110,7 @@ where
 }
 
 impl ChipletAir {
-    /// The fifteen AIRs in canonical [`SessionTraces::mains`] order.
+    /// The fourteen AIRs in canonical [`SessionTraces::mains`] order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::Chunk,
@@ -123,9 +121,8 @@ impl ChipletAir {
             ChipletAir::KeccakSponge,
             ChipletAir::KeccakNode,
             ChipletAir::TranscriptEval,
-            ChipletAir::UintStore,
+            ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,
-            ChipletAir::UintMul,
             ChipletAir::EcGroups,
             ChipletAir::EcPointStore,
             ChipletAir::EcGroupAdd,
@@ -181,9 +178,8 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             ChipletAir::KeccakSponge => eval_lifted(&KeccakSpongeAir, builder),
             ChipletAir::KeccakNode => eval_lifted(&KeccakNodeAir, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
-            ChipletAir::UintStore => eval_lifted(&UintStoreAir, builder),
+            ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
             ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
-            ChipletAir::UintMul => eval_lifted(&UintMulAir, builder),
             ChipletAir::EcGroups => eval_lifted(&EcGroupsAir, builder),
             ChipletAir::EcPointStore => eval_lifted(&EcPointStoreAir, builder),
             ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
@@ -192,7 +188,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     }
 }
 
-/// The chiplet stack as a [`MultiAir`]: owns the fifteen AIRs (in canonical
+/// The chiplet stack as a [`MultiAir`]: owns the fourteen AIRs (in canonical
 /// order) and closes the cross-chiplet LogUp identity — `Σ σ = 0` over
 /// every AIR's committed residue — in [`eval_external`](Self::eval_external).
 #[derive(Debug, Clone)]
@@ -267,7 +263,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
 
 impl SessionTraces {
     /// Build the [`ProverStatement`]: the [`ChipletMultiAir`] + the shared
-    /// `air_inputs` (the transcript root) + the fifteen main traces in
+    /// `air_inputs` (the transcript root) + the fourteen main traces in
     /// canonical [`mains`](Self::mains) order.
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
         let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
