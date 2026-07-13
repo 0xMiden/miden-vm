@@ -65,7 +65,8 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Build for Miden target
         run: |
-          rustup toolchain install --no-self-update --target wasm32-wasip2
+          rustup toolchain install --no-self-update
+          rustup target add wasm32-wasip2
           make build-target-miden
 
   fuzz-check:

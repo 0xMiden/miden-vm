@@ -16,6 +16,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
     "RUSTSEC-2024-0436", # paste is unmaintained but no alternative available
+    "RUSTSEC-2021-0139", # ansi_term is pulled by tracing-forest; no patched release exists
 ]
 
 # License configuration
@@ -27,8 +28,10 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
+    "ISC",
     "Unicode-3.0",
-    "MPL-2.0"
+    "MPL-2.0",
+    "Zlib",
 ]
 exceptions = [
     # Each entry is the crate and version constraint, and its specific allowed licenses
@@ -54,7 +57,9 @@ skip = [
     { name = "rand_core" },
     { name = "rand_chacha" },
     # Allow duplicate itertools versions
-    { name = "itertools" }
+    { name = "itertools" },
+    # Allow duplicate shlex versions from bindgen/librocksdb-sys and cc
+    { name = "shlex" },
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand

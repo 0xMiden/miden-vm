@@ -106,7 +106,6 @@ clap             = { features = ["derive"], optional = true, workspace = true }
 curve25519-dalek = { workspace = true }
 der              = { workspace = true }
 ed25519-dalek    = { features = ["alloc", "zeroize"], workspace = true }
-flume            = { workspace = true }
 hkdf             = { workspace = true }
 k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
 num              = { features = ["alloc", "libm"], workspace = true }

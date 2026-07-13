@@ -18,7 +18,7 @@ test       = false
 
 [dependencies]
 quote = { workspace = true }
-syn   = { version = "2.0", features = ["full"] }
+syn2  = { workspace = true }
 
 [dev-dependencies]
 miden-field = { workspace = true }

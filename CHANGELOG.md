@@ -5,6 +5,7 @@
 #### Changes
 
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
+- Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
 - Added the `miden-precompiles` crate with the official deferred precompile registry used by the VM/prover/verifier path.
 - [BREAKING] Migrated proof-bound precompiles to the deferred-DAG proof wire. `ExecutionProof` now carries a `DeferredStateWire`, proof serialization is incompatible with previous proof-bound precompile requests, and verification rehydrates the wire under the built-in `miden_precompiles::registry()` before binding the resulting deferred root to the STARK public inputs.

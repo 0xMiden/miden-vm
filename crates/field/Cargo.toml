@@ -27,11 +27,11 @@ p3-challenger.workspace = true
 p3-field.workspace      = true
 p3-goldilocks.workspace = true
 p3-util.workspace       = true
-paste                   = { version = "1.0.15" }
-proptest                = { default-features = false, features = ["alloc", "std"], optional = true, version = "1.7" }
-rand                    = { default-features = false, version = "0.10" }
-serde                   = { default-features = false, features = ["derive"], version = "1.0" }
-subtle                  = { default-features = false, version = "2.6" }
+paste                   = { workspace = true }
+proptest                = { features = ["alloc", "std"], optional = true, workspace = true }
+rand                    = { workspace = true }
+serde                   = { features = ["derive"], workspace = true }
+subtle                  = { workspace = true }
 
 [features]
 arbitrary = ["dep:proptest"]
@@ -40,7 +40,7 @@ testing   = ["arbitrary"]
 
 [dev-dependencies]
 proptest = { features = ["alloc", "std"], workspace = true }
-rand     = { default-features = false, version = "0.10" }
+rand     = { workspace = true }
 rstest   = { workspace = true }
 
 [lints]

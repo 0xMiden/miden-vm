@@ -10,7 +10,7 @@ rust-version.workspace = true
 version.workspace      = true
 
 [dev-dependencies]
-criterion    = { package = "codspeed-criterion-compat", version = "=4.6.0" }
+codspeed-criterion-compat = { workspace = true }
 miden-crypto = { default-features = false, features = ["rocksdb"], workspace = true }
 tempfile     = { workspace = true }
 

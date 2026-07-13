@@ -1,5 +1,6 @@
 use std::{hint::black_box, time::Duration};
 
+use codspeed_criterion_compat as criterion;
 use criterion::{
     BatchSize, BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group, criterion_main,
 };

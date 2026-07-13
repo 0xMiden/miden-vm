@@ -60,8 +60,8 @@ miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
-num = { version = "0.4" }
-rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+num = { workspace = true }
+rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
 
