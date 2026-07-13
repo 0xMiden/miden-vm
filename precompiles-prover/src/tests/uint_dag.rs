@@ -111,10 +111,10 @@ fn horner_sign_alternation_full_stack() {
     // 22 eval rows (AND + zero + 6 leaves + 13 value ops + Is) pad to 32; fixed
     // uints live only in the store and verifier boundary correction, not eval rows.
     // The add relation count is unchanged; mul no longer has its own main
-    // (shares the store's merged trace at index 8).
+    // (shares the store's merged trace at index 7).
     let mains = traces.mains();
-    assert_eq!(mains[7].height(), 32, "eval: 22 rows pad to 32");
-    assert_eq!(mains[9].height(), 32, "uint-add: 7 blocks pad to 8");
+    assert_eq!(mains[6].height(), 32, "eval: 22 rows pad to 32");
+    assert_eq!(mains[8].height(), 32, "uint-add: 7 blocks pad to 8");
 
     traces.check();
     assert_balanced(&traces, &mut rng);
@@ -153,9 +153,9 @@ fn op_dedup_collapses_repeated_nodes() {
 
     // Two recorded add ops (r once, w once), not three.
     let mains = traces.mains();
-    assert_eq!(mains[9].height(), 8, "uint-add: exactly two blocks");
+    assert_eq!(mains[8].height(), 8, "uint-add: exactly two blocks");
     // r's single row carries out_mult 2 (consumed twice by w).
-    let eval = mains[7];
+    let eval = mains[6];
     let r_row = (0..eval.height())
         .find(|row| {
             eval.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] == Felt::ONE
@@ -261,12 +261,12 @@ fn forged_result_ptr_unbalances() {
     let mut rng = StdRng::seed_from_u64(0xf043_0001);
     let traces = mul_statement(&mut rng);
 
-    let mut tampered = traces.mains()[7].clone();
+    let mut tampered = traces.mains()[6].clone();
     let row = find_op_row(&tampered, COL_IS_MUL);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_PTR] += Felt::ONE;
 
     let mut mains = traces.mains();
-    mains[7] = &tampered;
+    mains[6] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);
@@ -296,7 +296,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
-    let mut tampered = traces.mains()[7].clone();
+    let mut tampered = traces.mains()[6].clone();
     let row = find_op_row(&tampered, COL_IS_ADD);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
@@ -308,7 +308,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
 
     // …but the bus refuses the re-encoded cap + re-wired relation.
     let mut mains = traces.mains();
-    mains[7] = &tampered;
+    mains[6] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);

@@ -8,5 +8,6 @@
 //! their own address sub-namespaces.
 
 pub mod chunk;
+pub mod chunk_node;
 pub mod keccak;
 pub mod memory64;

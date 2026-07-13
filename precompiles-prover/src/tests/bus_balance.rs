@@ -12,8 +12,8 @@ use miden_lifted_air::LiftedAir;
 use crate::{
     ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
     hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
+        chunk_node::ChunkNodeAir,
+        keccak::{round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
     logup::LookupMessage,
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
@@ -94,13 +94,12 @@ pub(crate) fn session_stack_residual(
             .find_map(|(replacement_idx, main)| (*replacement_idx == idx).then_some(*main))
             .unwrap_or(mains[idx]);
         match air {
-            ChipletAir::Chunk => fold_balance(&ChunkAir, main, challenges, &mut net),
+            ChipletAir::ChunkNode => fold_balance(&ChunkNodeAir, main, challenges, &mut net),
             ChipletAir::Poseidon2 => fold_balance(&Poseidon2Air, main, challenges, &mut net),
             ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
             ChipletAir::Bitwise64 => fold_balance(&Bitwise64Air, main, challenges, &mut net),
             ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
             ChipletAir::KeccakSponge => fold_balance(&KeccakSpongeAir, main, challenges, &mut net),
-            ChipletAir::KeccakNode => fold_balance(&KeccakNodeAir, main, challenges, &mut net),
             ChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },
