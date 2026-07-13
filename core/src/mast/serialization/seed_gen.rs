@@ -11,7 +11,7 @@ use crate::{
     deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
-    program::{Kernel, Program, StackInputs, StackOutputs},
+    program::{KernelDescriptor, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
     serde::{ByteWriter, Serializable},
 };
@@ -180,15 +180,15 @@ fn generate_fuzz_seeds() {
             Felt::new_unchecked(12),
         ]
         .into();
-        let kernel = Kernel::from_hashes_unchecked(vec![a, a]);
+        let kernel = KernelDescriptor::from_hashes_unchecked(vec![a, a]);
         let program = Program::with_kernel(Arc::new(forest), block_id, kernel);
 
         write_seed("program_deserialize", "program_with_duplicate_kernel.bin", &program.to_bytes());
     }
 
-    // Kernel seed
+    // KernelDescriptor seed
     {
-        let kernel = Kernel::default();
+        let kernel = KernelDescriptor::default();
         write_seed("kernel_deserialize", "empty_kernel.bin", &kernel.to_bytes());
 
         let a: Word = [
@@ -206,7 +206,7 @@ fn generate_fuzz_seeds() {
         ]
         .into();
 
-        let non_empty = Kernel::new(&[a]).expect("failed to build non-empty kernel");
+        let non_empty = KernelDescriptor::new(&[a]).expect("failed to build non-empty kernel");
         write_seed("kernel_deserialize", "single_kernel.bin", &non_empty.to_bytes());
 
         let max_kernel: Vec<Word> = (0u64..=254)
@@ -220,11 +220,12 @@ fn generate_fuzz_seeds() {
                 .into()
             })
             .collect();
-        let max_kernel = Kernel::new(&max_kernel).expect("failed to build max-size kernel");
+        let max_kernel =
+            KernelDescriptor::new(&max_kernel).expect("failed to build max-size kernel");
         write_seed("kernel_deserialize", "max_kernel_255.bin", &max_kernel.to_bytes());
 
         // Invalid seed: duplicate hashes should deserialize to Err (never panic).
-        let duplicate_kernel = Kernel::from_hashes_unchecked(vec![b, a, a]);
+        let duplicate_kernel = KernelDescriptor::from_hashes_unchecked(vec![b, a, a]);
         write_seed("kernel_deserialize", "duplicate_kernel.bin", &duplicate_kernel.to_bytes());
 
         // Serde kernel seeds (JSON payloads) used by kernel_serde_deserialize fuzz target.

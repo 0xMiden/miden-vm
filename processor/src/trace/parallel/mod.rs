@@ -14,7 +14,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     mast::{ExecutableMastForest, MastForestId, MastNode, SparseMastForest},
     operations::opcodes,
-    program::{Kernel, MIN_STACK_DEPTH},
+    program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
 use rayon::prelude::*;
@@ -226,7 +226,7 @@ fn pad_to_trace_length(logical_len: usize) -> usize {
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
 fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
-    kernel: Kernel,
+    kernel: KernelDescriptor,
     fragment_size: usize,
     mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
@@ -451,7 +451,7 @@ fn initialize_range_checker(
 /// Replays recorded operations to populate chiplet traces. Results were already used during
 /// execution; this pass only needs the trace-recording side effects.
 fn initialize_chiplets(
-    kernel: Kernel,
+    kernel: KernelDescriptor,
     core_trace_contexts: &[CoreTraceFragmentContext],
     memory_writes: MemoryWritesReplay,
     bitwise: BitwiseReplay,

@@ -16,7 +16,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Kernel, operation::Operation,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, KernelDescriptor,
+    operation::Operation,
 };
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
@@ -48,7 +49,7 @@ fn hasher_chiplet_trace() {
     // Total: 4 controller rows padded to 16, 2 unique perms (32 perm rows) = 48 hasher rows.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
     let operations = vec![Operation::HPerm];
-    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, KernelDescriptor::default());
 
     let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + HPerm
     let unique_perms = 2;
@@ -64,7 +65,7 @@ fn bitwise_chiplet_trace() {
     // This produces: 1 span hash (2 controller rows, 1 perm) = 32 hasher rows, then 8 bitwise.
     let stack = [4, 8];
     let operations = vec![Operation::U32xor];
-    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, KernelDescriptor::default());
 
     let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION; // span hash only
     let unique_perms = 1;
@@ -83,7 +84,7 @@ fn memory_chiplet_trace() {
     let addr = Felt::from_u32(4);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
-    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, _trace_len) = build_trace(&stack, operations, KernelDescriptor::default());
 
     let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION;
     let unique_perms = 1;
@@ -154,7 +155,7 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
         let entry = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
         forest.make_root(entry);
 
-        Program::with_kernel(forest.into(), entry, Kernel::default())
+        Program::with_kernel(forest.into(), entry, KernelDescriptor::default())
     };
 
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
@@ -165,16 +166,16 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn build_kernel() -> Kernel {
+fn build_kernel() -> KernelDescriptor {
     let proc_hash1 = Word::from([1_u32, 0, 1, 0]);
     let proc_hash2 = Word::from([1_u32, 1, 1, 1]);
-    Kernel::new(&[proc_hash1, proc_hash2]).unwrap()
+    KernelDescriptor::new(&[proc_hash1, proc_hash2]).unwrap()
 }
 
 fn build_trace(
     stack_inputs: &[u64],
     operations: Vec<Operation>,
-    kernel: Kernel,
+    kernel: KernelDescriptor,
 ) -> (ChipletsTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new_unchecked(*v)).collect();
     let processor = FastProcessor::new_with_options(

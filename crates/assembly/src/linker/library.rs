@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::module::ModuleInfo;
+use miden_assembly_syntax::module::ModuleDescriptor;
 use miden_core::Word;
 use miden_mast_package::{ManifestValidationError, MastForest, Package};
 pub use miden_project::Linkage;
@@ -38,7 +38,7 @@ impl LinkLibrary {
     }
 
     #[inline]
-    pub fn module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
-        self.package.try_module_infos()
+    pub fn module_descriptors(&self) -> Result<Vec<ModuleDescriptor>, ManifestValidationError> {
+        self.package.try_module_descriptors()
     }
 }

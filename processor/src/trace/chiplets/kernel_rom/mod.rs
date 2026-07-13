@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec};
 use miden_air::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{ChipletTraceFragment, Felt, Kernel, Word as Digest, ZERO};
+use super::{ChipletTraceFragment, Felt, KernelDescriptor, Word as Digest, ZERO};
 use crate::errors::OperationError;
 
 #[cfg(test)]
@@ -33,17 +33,17 @@ type ProcHashBytes = [u8; 32];
 #[derive(Debug)]
 pub struct KernelRom {
     access_map: BTreeMap<ProcHashBytes, ProcAccessInfo>,
-    kernel: Kernel,
+    kernel: KernelDescriptor,
 }
 
 impl KernelRom {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Returns a new [KernelRom] instantiated from the specified Kernel.
+    /// Returns a new [KernelRom] instantiated from the specified KernelDescriptor.
     ///
     /// The kernel ROM is populated with all procedures from the provided kernel. For each
     /// procedure the access count is set to 0.
-    pub fn new(kernel: Kernel) -> Self {
+    pub fn new(kernel: KernelDescriptor) -> Self {
         let mut access_map = BTreeMap::new();
         for &proc_hash in kernel.proc_hashes() {
             access_map.insert(proc_hash.into(), ProcAccessInfo::new(proc_hash));
@@ -111,7 +111,7 @@ impl KernelRom {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the underlying kernel for this ROM.
-    pub const fn kernel(&self) -> &Kernel {
+    pub const fn kernel(&self) -> &KernelDescriptor {
         &self.kernel
     }
 }

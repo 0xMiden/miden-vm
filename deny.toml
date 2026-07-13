@@ -27,7 +27,6 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "Zlib",
     "Unicode-3.0",
     "MPL-2.0"
 ]
@@ -48,31 +47,26 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0" },
 ]
 skip = [
-    # Allow duplicate spin cpufeatures
-    { name = "cpufeatures" },
     # Allow duplicate spin versions - transitively pulled by p3-dft and flume
     { name = "spin" },
     # Allow duplicate rand versions - miden-crypto uses 0.10, proptest pulls 0.9
     { name = "rand" },
     { name = "rand_core" },
     { name = "rand_chacha" },
-    # chacha20 0.10 is pulled by rand 0.10; chacha20 0.9 by chacha20poly1305
-    { name = "chacha20" },
+    # Allow duplicate itertools versions
+    { name = "itertools" }
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
     { name = "getrandom", version = "=0.2.17" },
     # Allow getrandom v0.3.x for now - will be updated when miden-crypto upgrades
     { name = "getrandom", version = "=0.3.4" },
-    # Allow rand_core v0.6.x for now - legacy dependency
-    { name = "rand_core", version = "=0.6.4" },
     # Allow rustc_version v0.2.x - build dependency
     { name = "rustc_version", version = "=0.2.3" },
     # Allow unicode-width v0.1.x - miden-miette vs miden-formatting conflict (complex to fix)
     { name = "unicode-width", version = "=0.1.14" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
-    { name = "syn", version = "=2.0.117" },
 ]
 
 # Sources configuration

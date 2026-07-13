@@ -206,9 +206,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.66"
+version = "1.2.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5d6cac793997bd970000024b2934968efe83b382de4fdcf4fcb46b6ee4ad996"
+checksum = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1164,6 +1164,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1308,7 +1317,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1317,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
@@ -1332,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "env_logger",
  "insta",
@@ -1352,7 +1361,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "env_logger",
  "log",
@@ -1376,7 +1385,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -1387,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1411,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "criterion",
  "env_logger",
@@ -1498,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1536,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "miden-format"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
@@ -1597,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -1649,7 +1658,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1665,7 +1674,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry-local"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax",
@@ -1690,10 +1699,10 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "insta",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "miden-air",
  "miden-assembly",
  "miden-core",
@@ -1715,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1734,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-air",
  "miden-assembly",
@@ -1827,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1836,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1845,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-crypto",
  "miden-test-serde-macros",
@@ -1857,7 +1866,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "lock_api",
  "loom",
@@ -1867,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -1881,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1911,7 +1920,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm-blake3-bench"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "codspeed-criterion-compat",
@@ -1926,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm-synthetic-bench"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-processor",
@@ -2499,7 +2508,7 @@ checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bitflags 2.13.0",
  "num-traits",
- "rand 0.9.4",
+ "rand 0.9.5",
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax",
@@ -2554,9 +2563,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -2648,9 +2657,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.12.4"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1292b7759ae1cb9ec195452d1390a074f0cd8541ab7a5a8c31cd6db45d4a6ba"
+checksum = "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -2660,9 +2669,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.14"
+version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f"
+checksum = "1f388202e4b80542a0921078cc23b6333bcf1409c1e3f86404cae4766a6131db"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -2847,9 +2856,9 @@ dependencies = [
 
 [[package]]
 name = "serde-wincode"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a62dfa6ae65cb073dfe001fb076eaf827fd4267fcba7eb3be2fee4f1e69ccb5"
+checksum = "9aa9d3a86c66cf10ce79df36f555a5a4c8d72a82515d9ea8ca420e02c925c30f"
 dependencies = [
  "serde",
  "thiserror",
@@ -3186,9 +3195,9 @@ dependencies = [
 
 [[package]]
 name = "thread_local"
-version = "1.1.9"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
 ]
@@ -3370,9 +3379,9 @@ dependencies = [
 
 [[package]]
 name = "trybuild"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0710d4dfbeae4f9c390baa784c49858a7468fa433f3fe5d0ec5ebef651cf59f9"
+checksum = "06649c6f63d86604ba0c8950d5a1829fc9a17afd70fc6629f481d75b6a624c78"
 dependencies = [
  "dissimilar",
  "glob",
@@ -3588,9 +3597,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "wincode"
-version = "0.4.9"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "657690780ce23e6f66576a782ffd88eb353512381817029cc1d7a99154bb6d1f"
+checksum = "66d967db7705dc29120bb6e8ce5b5a2e27734ed5976d1c904e95bd238d1c3c5a"
 dependencies = [
  "pastey",
  "proc-macro2",
