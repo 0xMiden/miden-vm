@@ -169,8 +169,19 @@ impl ChunkRequires {
 /// `perm_seq_id` continuing `+1` to satisfy the relaxed chain on
 /// dead rows. Returns a 12-column trace.
 pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, 0)
+}
+
+/// Same as [`generate_trace`], but the trace height is at least `min_height`
+/// (still rounded up to a power of two) — lets a caller sharing this
+/// chiplet's row range with another AIR (see `hash::chunk_node`) pad chunk's
+/// trace up to match the other side's height.
+pub(crate) fn generate_trace_padded_to(
+    requires: ChunkRequires,
+    min_height: usize,
+) -> RowMajorMatrix<Felt> {
     let total_chunks = requires.total_chunks() as usize;
-    let height = total_chunks.next_power_of_two().max(2);
+    let height = total_chunks.next_power_of_two().max(2).max(min_height);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 

@@ -73,7 +73,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
     let root = session.assert_and(root1, eq);
 
     let traces = session.finish(root);
-    let eval = traces.mains()[7];
+    let eval = traces.mains()[6];
     let row_value = |row: usize, col: usize| eval.values[row * EVAL_NUM_MAIN_COLS + col];
 
     let pin_row = (0..eval.height())
