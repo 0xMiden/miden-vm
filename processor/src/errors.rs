@@ -5,10 +5,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::program::MIN_STACK_DEPTH;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_mast_package::{
-    PackageDebugInfoError,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
-};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
@@ -111,8 +108,6 @@ pub enum ExecutionError {
     ProvingError(String),
     #[error(transparent)]
     HostError(#[from] HostError),
-    #[error(transparent)]
-    PackageDebugInfoError(#[from] PackageDebugInfoError),
 }
 
 impl ExecutionError {

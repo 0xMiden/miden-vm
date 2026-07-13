@@ -163,17 +163,24 @@ impl OverflowTable {
 
     /// Restores the specified context.
     ///
-    /// # Panics
-    /// - if there is no overflow stack for the current context.
-    /// - if the overflow stack for the current context is not empty.
+    /// # Errors
+    /// Returns `OperationError::OverflowTableEmpty` if there is no overflow stack for the current
+    /// context (i.e., `start_context` was never called).
+    /// Returns `OperationError::Internal` if the overflow stack for the current context is not empty.
     ///   - i.e. this should be checked before calling this function.
-    pub fn restore_context(&mut self) {
+    pub fn restore_context(&mut self) -> Result<(), OperationError> {
         // 1. pop the last overflow stack for the current context, and make sure it is empty.
-        let overflow_stack_for_ctx = self.overflow.swap_remove(self.overflow.len() - 1);
-        assert!(
-            overflow_stack_for_ctx.is_empty(),
-            "the overflow stack for the current context should be empty when restoring a context"
-        );
+        let len = self.overflow.len();
+        if len == 0 {
+            return Err(OperationError::OverflowTableEmpty);
+        }
+        let overflow_stack_for_ctx = self.overflow.swap_remove(len - 1);
+        if !overflow_stack_for_ctx.is_empty() {
+            return Err(OperationError::Internal(
+                "the overflow stack for the current context should be empty when restoring a context"
+            ));
+        }
+        Ok(())
     }
 
     // HELPERS
@@ -184,17 +191,20 @@ impl OverflowTable {
     /// Specifically, this is a reference to the more recent overflow stack in the list of overflow
     /// stacks for the current context. Recall that for all contexts other than the root context,
     /// there is at most one overflow stack, but for the root context, there can be two.
-    fn get_current_overflow_stack(&self) -> &OverflowStack {
+    fn get_current_overflow_stack(&self) -> Result<&OverflowStack, OperationError> {
         self.overflow
             .as_slice()
             .last()
-            .expect("The current context should always have an overflow stack initialized")
+            .ok_or(OperationError::OverflowTableEmpty)
     }
 
     /// Mutable version of `get_current_overflow_stack()`.
-    fn get_current_overflow_stack_mut(&mut self) -> &mut OverflowStack {
+    fn get_current_overflow_stack_mut(&mut self) -> Result<&mut OverflowStack, OperationError> {
         let len = self.overflow.len();
-        &mut self.overflow[RowIndex::from(len - 1)]
+        if len == 0 {
+            return Err(OperationError::OverflowTableEmpty);
+        }
+        Ok(&mut self.overflow[RowIndex::from(len - 1)])
     }
 }
 
