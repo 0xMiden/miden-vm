@@ -239,7 +239,7 @@ fn ec_dag_double_proves() {
 // the cross-chiplet bus: a mismatched or dangling provide.
 // ============================================================================
 
-/// Net unmatched LogUp denominators across the full fourteen-chiplet
+/// Net unmatched LogUp denominators across the full thirteen-chiplet
 /// stack (0 ⟺ every bus closes), with the `eval` main replaced by
 /// `eval_main`.
 fn dag_residual(
@@ -247,7 +247,7 @@ fn dag_residual(
     eval_main: &RowMajorMatrix<Felt>,
     rng: &mut impl Rng,
 ) -> usize {
-    dag_residual_with(traces, eval_main, traces.mains()[12], rng)
+    dag_residual_with(traces, eval_main, traces.mains()[11], rng)
 }
 
 /// [`dag_residual`] with the `EcGroupAdd` (ec_add) main also overridden —
@@ -261,7 +261,7 @@ fn dag_residual_with(
 ) -> usize {
     let mains = traces.mains();
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    session_stack_residual(&mains, &[(7, eval_main), (12, add_main)], &challenges).len()
+    session_stack_residual(&mains, &[(6, eval_main), (11, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this
@@ -316,7 +316,7 @@ fn dag_pai_payload_must_be_true_true() {
     // A PAI VALUE node has no coordinate children. Its canonical payload is
     // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both rate halves.
     let traces = ec_dag_pai_traces();
-    let eval = traces.mains()[7];
+    let eval = traces.mains()[6];
     let row = first_row_with_flag(eval, COL_IS_EC_PAI);
     let forged = tamper(eval, row, &[(COL_LHS_BEGIN, Felt::ONE)]);
 
@@ -332,7 +332,7 @@ fn dag_finite_forged_as_pai_unbalances() {
     // consumer, and the coord children / Poseidon2 messages dangle.
     let traces = ec_dag_3g_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f01);
-    let eval = traces.mains()[7];
+    let eval = traces.mains()[6];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
     let row = first_row_with_flag(eval, COL_IS_EC_CREATE);
@@ -365,7 +365,7 @@ fn dag_sub_result_forged_unbalances() {
     // `ec_is` consumer — the rearrangement is load-bearing, not decorative.
     let traces = ec_dag_sub_from_pai_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f03);
-    let eval = traces.mains()[7];
+    let eval = traces.mains()[6];
     assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
 
     let row = first_ec_op_row(eval, COL_IS_SUB);

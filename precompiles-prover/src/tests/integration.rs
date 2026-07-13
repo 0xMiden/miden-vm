@@ -433,7 +433,7 @@ fn keccak_node_distinct_invocations_lay_disjoint_rows() {
 // FULL STACK — eight chiplets, end-to-end
 // ============================================================================
 
-use crate::hash::keccak::round::KeccakRoundAir;
+use crate::hash::{chunk_node::ChunkNodeAir, keccak::round::KeccakRoundAir};
 
 /// Single Keccak invocation driven through the entire eight-chiplet stack
 /// via [`Session`] — chunk, Poseidon2, round, Bitwise64, BytePairLut,
@@ -454,19 +454,18 @@ fn full_stack_chiplets_validate_under_shared_challenges() {
     // Per-AIR `check_local` over the whole stack (mains in canonical
     // `SessionTraces::mains()` order) — catches local-constraint
     // regressions the cross-chiplet balance check below can't see.
-    crate::tests::check_local(ChunkAir, mains[0]);
+    crate::tests::check_local(ChunkNodeAir, mains[0]);
     crate::tests::check_local(Poseidon2Air, mains[1]);
     crate::tests::check_local(KeccakRoundAir, mains[2]);
     crate::tests::check_local(Bitwise64Air, mains[3]);
     crate::tests::check_local(BytePairLutAir, mains[4]);
     crate::tests::check_local(KeccakSpongeAir, mains[5]);
-    crate::tests::check_local(KeccakNodeAir, mains[6]);
     crate::tests::check_local_inputs(
         TranscriptEvalAir,
-        mains[7],
+        mains[6],
         traces.public_root().as_array().to_vec(),
     );
-    crate::tests::check_local(UintStoreMulAir, mains[8]);
+    crate::tests::check_local(UintStoreMulAir, mains[7]);
 }
 
 // ============================================================================

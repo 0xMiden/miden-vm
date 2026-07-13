@@ -1,6 +1,6 @@
 //! Multi-AIR proving for the chiplet stack.
 //!
-//! [`ChipletAir`] wraps the fourteen heterogeneous AIRs into one enum (the
+//! [`ChipletAir`] wraps the thirteen heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
@@ -41,8 +41,8 @@ use crate::{
     ProveError,
     ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
     hash::{
-        chunk::ChunkAir,
-        keccak::{node::KeccakNodeAir, round::KeccakRoundAir, sponge::KeccakSpongeAir},
+        chunk_node::ChunkNodeAir,
+        keccak::{round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
@@ -59,18 +59,17 @@ use crate::{
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
-/// The fourteen chiplet AIRs wrapped into one enum — the heterogeneous
+/// The thirteen chiplet AIRs wrapped into one enum — the heterogeneous
 /// `MultiAir::Air` type. Variant order is the canonical
 /// [`SessionTraces::mains`] order.
 #[derive(Clone, Debug)]
 pub enum ChipletAir {
-    Chunk,
+    ChunkNode,
     Poseidon2,
     KeccakRound,
     Bitwise64,
     BytePairLut,
     KeccakSponge,
-    KeccakNode,
     TranscriptEval,
     UintStoreMul,
     UintAdd,
@@ -83,13 +82,12 @@ pub enum ChipletAir {
 macro_rules! delegate {
     ($self:ident, $method:ident $(, $arg:expr)*) => {
         match $self {
-            ChipletAir::Chunk => ChunkAir.$method($($arg),*),
+            ChipletAir::ChunkNode => ChunkNodeAir.$method($($arg),*),
             ChipletAir::Poseidon2 => Poseidon2Air.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
             ChipletAir::Bitwise64 => Bitwise64Air.$method($($arg),*),
             ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
             ChipletAir::KeccakSponge => KeccakSpongeAir.$method($($arg),*),
-            ChipletAir::KeccakNode => KeccakNodeAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
             ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
@@ -110,16 +108,15 @@ where
 }
 
 impl ChipletAir {
-    /// The fourteen AIRs in canonical [`SessionTraces::mains`] order.
+    /// The thirteen AIRs in canonical [`SessionTraces::mains`] order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
-            ChipletAir::Chunk,
+            ChipletAir::ChunkNode,
             ChipletAir::Poseidon2,
             ChipletAir::KeccakRound,
             ChipletAir::Bitwise64,
             ChipletAir::BytePairLut,
             ChipletAir::KeccakSponge,
-            ChipletAir::KeccakNode,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,
@@ -170,13 +167,12 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
-            ChipletAir::Chunk => eval_lifted(&ChunkAir, builder),
+            ChipletAir::ChunkNode => eval_lifted(&ChunkNodeAir, builder),
             ChipletAir::Poseidon2 => eval_lifted(&Poseidon2Air, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
             ChipletAir::Bitwise64 => eval_lifted(&Bitwise64Air, builder),
             ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
             ChipletAir::KeccakSponge => eval_lifted(&KeccakSpongeAir, builder),
-            ChipletAir::KeccakNode => eval_lifted(&KeccakNodeAir, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
             ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
             ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
@@ -188,7 +184,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     }
 }
 
-/// The chiplet stack as a [`MultiAir`]: owns the fourteen AIRs (in canonical
+/// The chiplet stack as a [`MultiAir`]: owns the thirteen AIRs (in canonical
 /// order) and closes the cross-chiplet LogUp identity — `Σ σ = 0` over
 /// every AIR's committed residue — in [`eval_external`](Self::eval_external).
 #[derive(Debug, Clone)]
@@ -263,7 +259,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
 
 impl SessionTraces {
     /// Build the [`ProverStatement`]: the [`ChipletMultiAir`] + the shared
-    /// `air_inputs` (the transcript root) + the fourteen main traces in
+    /// `air_inputs` (the transcript root) + the thirteen main traces in
     /// canonical [`mains`](Self::mains) order.
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
         let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
