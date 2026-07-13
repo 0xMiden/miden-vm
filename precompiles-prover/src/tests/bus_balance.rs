@@ -19,7 +19,7 @@ use crate::{
     primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
     transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
-    uint::{UintStoreAir, add::UintAddAir, mul::UintMulAir},
+    uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
 /// Fold one chiplet's per-denominator balance into the cross-chiplet accumulator.
@@ -104,9 +104,8 @@ pub(crate) fn session_stack_residual(
             ChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },
-            ChipletAir::UintStore => fold_balance(&UintStoreAir, main, challenges, &mut net),
+            ChipletAir::UintStoreMul => fold_balance(&UintStoreMulAir, main, challenges, &mut net),
             ChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
-            ChipletAir::UintMul => fold_balance(&UintMulAir, main, challenges, &mut net),
             ChipletAir::EcGroups => fold_balance(&EcGroupsAir, main, challenges, &mut net),
             ChipletAir::EcPointStore => fold_balance(&EcPointStoreAir, main, challenges, &mut net),
             ChipletAir::EcGroupAdd => fold_balance(&EcGroupAddAir, main, challenges, &mut net),

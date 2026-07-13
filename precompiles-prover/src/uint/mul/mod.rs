@@ -306,7 +306,7 @@ const AUX_WIDTH: usize = 14;
 const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 
 /// The γ sign offset `2³¹` (carries are committed as `γ + 2³¹`).
-const GAMMA_OFFSET: u32 = 1 << 31;
+pub(crate) const GAMMA_OFFSET: u32 = 1 << 31;
 
 // AIR
 // ================================================================================================

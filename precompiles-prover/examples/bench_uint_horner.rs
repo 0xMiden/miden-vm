@@ -102,12 +102,12 @@ fn main() {
         "sponge   ",
         "kn       ",
         "eval     ",
-        "uint     ",
+        "uintstmul",
         "uintadd  ",
-        "uintmul  ",
         "ec_groups",
         "ec_points",
         "ec_add   ",
+        "ec_msm   ",
     ];
 
     // Each chiplet commits `base` main columns plus `ext` extension-field

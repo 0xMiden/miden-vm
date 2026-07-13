@@ -56,7 +56,7 @@ fn fixed_environment_emits_no_default_transcript_claims() {
 fn tampered_fixed_group_scalar_bound_ptr_unbalances() {
     let curve = CurveId::ALL[0];
     let traces = empty_root_traces();
-    let mut forged = traces.mains()[11].clone();
+    let mut forged = traces.mains()[10].clone();
     forged.values[fixed_group_row(curve) + G_COL_SBOUND_PTR] =
         Felt::from(curve.base_domain().bound_ptr());
 

@@ -239,14 +239,15 @@ fn ec_dag_double_proves() {
 // the cross-chiplet bus: a mismatched or dangling provide.
 // ============================================================================
 
-/// Net unmatched LogUp denominators across the full 15-chiplet stack
-/// (0 ⟺ every bus closes), with the `eval` main replaced by `eval_main`.
+/// Net unmatched LogUp denominators across the full fourteen-chiplet
+/// stack (0 ⟺ every bus closes), with the `eval` main replaced by
+/// `eval_main`.
 fn dag_residual(
     traces: &SessionTraces,
     eval_main: &RowMajorMatrix<Felt>,
     rng: &mut impl Rng,
 ) -> usize {
-    dag_residual_with(traces, eval_main, traces.mains()[13], rng)
+    dag_residual_with(traces, eval_main, traces.mains()[12], rng)
 }
 
 /// [`dag_residual`] with the `EcGroupAdd` (ec_add) main also overridden —
@@ -260,7 +261,7 @@ fn dag_residual_with(
 ) -> usize {
     let mains = traces.mains();
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    session_stack_residual(&mains, &[(7, eval_main), (13, add_main)], &challenges).len()
+    session_stack_residual(&mains, &[(7, eval_main), (12, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this

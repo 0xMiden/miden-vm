@@ -64,6 +64,7 @@
 pub mod add;
 pub mod mul;
 pub mod require;
+pub mod store_mul;
 pub mod trace;
 
 use alloc::{vec, vec::Vec};
