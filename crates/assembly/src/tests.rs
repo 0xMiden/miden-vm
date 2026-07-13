@@ -70,6 +70,8 @@ fn assert_package_has_source_asm_ops(package: &Package, message: &str) {
     assert!(has_source_asm_ops, "{message}");
 }
 
+mod package;
+
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
 //
 // - For tests against expected values that can't be expressed as a string literal, we still use
@@ -3918,6 +3920,7 @@ fn assert_diagnostic_lines_rejects_missing_actual_lines() {
 fn assert_diagnostic_lines_rejects_extra_actual_lines() {
     assert_diagnostic_lines!(report!("the first line\nthe second line"), "the first line");
 }
+
 // MAST TESTS
 // ================================================================================================
 
