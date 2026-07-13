@@ -14,9 +14,9 @@ pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    FutureMaybeSend, Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost, TraceBuildInputs,
-    TraceGenerationContext, ZERO, advice, crypto, execute, field, operation::Operation, serde,
-    trace, trace::ExecutionTrace, utils,
+    FutureMaybeSend, Host, KernelDescriptor, Program, ProgramInfo, StackInputs, SyncHost,
+    TraceBuildInputs, TraceGenerationContext, ZERO, advice, crypto, execute, field,
+    operation::Operation, serde, trace, trace::ExecutionTrace, utils,
 };
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_family = "wasm"))]

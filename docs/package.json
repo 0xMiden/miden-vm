@@ -7,10 +7,11 @@
     "serve:dev": "docusaurus serve build"
   },
   "dependencies": {
-    "@docusaurus/core": "3.8.1",
-    "@docusaurus/preset-classic": "3.8.1",
-    "@docusaurus/theme-mermaid": "3.8.1",
+    "@docusaurus/core": "3.10.1",
+    "@docusaurus/preset-classic": "3.10.1",
+    "@docusaurus/theme-mermaid": "3.10.1",
     "@mdx-js/react": "^3.1.1",
+    "@mermaid-js/layout-elk": "0.1.9",
     "katex": "^0.16.22",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -24,7 +25,8 @@
     "mermaid": "11.15.0",
     "serialize-javascript": "7.0.5",
     "webpack": "5.104.1",
-    "webpack-dev-server": "5.2.4",
-    "ws": "8.20.1"
+    "webpack-dev-server": "5.2.6",
+    "ws": "8.21.0",
+    "uuid": "11.1.1"
   }
 }

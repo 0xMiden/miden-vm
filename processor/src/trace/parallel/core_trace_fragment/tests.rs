@@ -30,7 +30,7 @@ use miden_core::{
         MastForest, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    program::{Kernel, Program, StackInputs},
+    program::{KernelDescriptor, Program, StackInputs},
 };
 use miden_utils_testing::rand::rand_value;
 
@@ -801,7 +801,7 @@ fn test_call_decoding() {
         .unwrap();
     let foo_root = mast_forest[foo_root_id].clone();
     mast_forest.make_root(foo_root_id);
-    let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
+    let kernel = KernelDescriptor::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
     let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
@@ -1096,7 +1096,7 @@ fn test_syscall_decoding() {
         .unwrap();
     let foo_root = mast_forest[foo_root_id].clone();
     mast_forest.make_root(foo_root_id);
-    let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
+    let kernel = KernelDescriptor::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
     let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])

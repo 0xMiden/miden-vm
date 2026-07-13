@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{mast::MastForest, program::Kernel};
+use miden_core::{mast::MastForest, program::KernelDescriptor};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
 pub struct ResumeContext {
     pub(crate) current_forest: Arc<MastForest>,
     pub(crate) continuation_stack: ContinuationStack<Arc<MastForest>>,
-    pub(crate) kernel: Kernel,
+    pub(crate) kernel: KernelDescriptor,
     pub(crate) package_debug_info: Option<Arc<PackageDebugInfo>>,
 }
 
@@ -35,8 +35,13 @@ impl ResumeContext {
         &self.current_forest
     }
 
+    /// Returns a reference to the debug info associated with the current forest, if available
+    pub fn debug_info(&self) -> Option<Arc<PackageDebugInfo>> {
+        self.package_debug_info.clone()
+    }
+
     /// Returns a reference to the kernel being currently executed.
-    pub fn kernel(&self) -> &Kernel {
+    pub fn kernel(&self) -> &KernelDescriptor {
         &self.kernel
     }
 }

@@ -24,7 +24,7 @@ mod exports {
     pub use miden_core::{
         Word,
         deferred::{DeferredState, IntegrityError},
-        program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
     pub mod math {

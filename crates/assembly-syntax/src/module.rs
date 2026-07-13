@@ -9,11 +9,12 @@ use crate::{
     ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName, SubmoduleDecl},
 };
 
-// MODULE INFO
+// MODULE DESCRIPTOR
 // ================================================================================================
 
+/// Describes a MASM module surface, including its path, version, exports, and declared submodules.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleInfo {
+pub struct ModuleDescriptor {
     path: Arc<Path>,
     /// When specified, multiple modules with the same name can be present, so long as they are
     /// disambiguated by version.
@@ -22,12 +23,13 @@ pub struct ModuleInfo {
     submodules: Vec<SubmoduleDecl>,
 }
 
-impl ModuleInfo {
+impl ModuleDescriptor {
     pub(crate) fn raw_items(&self) -> &[ItemInfo] {
         &self.items
     }
 
-    /// Returns a new [`ModuleInfo`] instantiated by library path and optional semantic version.
+    /// Returns a new [`ModuleDescriptor`] instantiated by library path and optional semantic
+    /// version.
     ///
     /// The semantic version is optional, as currently the assembler allows assembling artifacts
     /// without providing one.
@@ -177,7 +179,7 @@ impl ModuleInfo {
     }
 }
 
-impl Index<ItemIndex> for ModuleInfo {
+impl Index<ItemIndex> for ModuleDescriptor {
     type Output = ItemInfo;
 
     fn index(&self, index: ItemIndex) -> &Self::Output {

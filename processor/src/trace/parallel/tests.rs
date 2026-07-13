@@ -14,7 +14,7 @@ use miden_core::{
         SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    program::{Kernel, Program, StackInputs},
+    program::{KernelDescriptor, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
 use pretty_assertions::assert_eq;
@@ -755,7 +755,7 @@ fn syscall_program() -> Program {
     Program::with_kernel(
         Arc::new(program),
         root_join_node,
-        Kernel::new(&[kernel_proc_digest]).unwrap(),
+        KernelDescriptor::new(&[kernel_proc_digest]).unwrap(),
     )
 }
 
