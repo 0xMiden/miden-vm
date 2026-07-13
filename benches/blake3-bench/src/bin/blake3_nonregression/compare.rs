@@ -6,6 +6,7 @@ pub(crate) fn compare_results(
     baseline: &BenchmarkResult,
     current: &BenchmarkResult,
     threshold_pct: f64,
+    min_regression_ms: f64,
 ) -> Result<Comparison, Box<dyn std::error::Error>> {
     let primary = current.primary_metric.clone();
     let baseline_primary = baseline
@@ -50,7 +51,11 @@ pub(crate) fn compare_results(
     rows.sort_by(|a, b| b.delta_pct.partial_cmp(&a.delta_pct).unwrap_or(std::cmp::Ordering::Equal));
     let regression_rows = rows
         .iter()
-        .filter(|row| row.delta_pct > threshold_pct)
+        .filter(|row| {
+            row.source == "criterion"
+                && row.delta_pct > threshold_pct
+                && row.delta_ms > min_regression_ms
+        })
         .cloned()
         .collect::<Vec<_>>();
     let top_slowdowns = rows.iter().filter(|row| row.delta_pct > 0.0).take(5).cloned().collect();
@@ -59,6 +64,7 @@ pub(crate) fn compare_results(
         status: if regression { "regression" } else { "ok" }.to_string(),
         regression,
         threshold_pct,
+        min_regression_ms,
         primary_metric: primary,
         baseline_sha: baseline.git_sha.clone(),
         current_sha: current.git_sha.clone(),
