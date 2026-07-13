@@ -110,11 +110,11 @@ fn horner_sign_alternation_full_stack() {
 
     // 22 eval rows (AND + zero + 6 leaves + 13 value ops + Is) pad to 32; fixed
     // uints live only in the store and verifier boundary correction, not eval rows.
-    // The add/mul relation counts are unchanged.
+    // The add relation count is unchanged; mul no longer has its own main
+    // (shares the store's merged trace at index 8).
     let mains = traces.mains();
     assert_eq!(mains[7].height(), 32, "eval: 22 rows pad to 32");
     assert_eq!(mains[9].height(), 32, "uint-add: 7 blocks pad to 8");
-    assert_eq!(mains[10].height(), 128, "uint-mul: 6 blocks pad to 8");
 
     traces.check();
     assert_balanced(&traces, &mut rng);

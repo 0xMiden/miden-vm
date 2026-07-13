@@ -466,7 +466,7 @@ fn full_stack_chiplets_validate_under_shared_challenges() {
         mains[7],
         traces.public_root().as_array().to_vec(),
     );
-    crate::tests::check_local(UintStoreAir, mains[8]);
+    crate::tests::check_local(UintStoreMulAir, mains[8]);
 }
 
 // ============================================================================
@@ -558,6 +558,7 @@ use crate::{
     transcript::eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
     uint::{
         UintStoreAir,
+        store_mul::UintStoreMulAir,
         trace::{UintStoreRequires, generate_trace as uint_trace},
     },
 };

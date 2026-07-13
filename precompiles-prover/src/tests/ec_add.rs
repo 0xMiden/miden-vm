@@ -44,16 +44,14 @@ use crate::{
     stark_config::{test_challenger, test_config},
     tests::bus_balance::fold_balance,
     uint::{
-        UintRequire, UintStoreAir,
+        UintRequire,
         add::{
             UintAddAir,
             trace::{UintAddRequires, generate_trace as uint_add_trace},
         },
-        mul::{
-            UintMulAir,
-            trace::{UintMulRequires, generate_trace as uint_mul_trace},
-        },
-        trace::{UintPtr, UintStoreRequires, generate_trace as uint_trace},
+        mul::trace::UintMulRequires,
+        store_mul::{UintStoreMulAir, trace::generate_trace as uint_store_mul_trace},
+        trace::{UintPtr, UintStoreRequires},
     },
 };
 
@@ -79,9 +77,8 @@ const FP: u32 = 1000;
 
 /// The arithmetic + EC chiplet subset, in canonical
 /// [`SessionTraces::mains`](crate::session::SessionTraces::mains) order:
-/// byte-pair LUT, uint store, uint add, uint mul, EC groups, EC points,
-/// EC add.
-const NUM_STACK: usize = 7;
+/// byte-pair LUT, uint store+mul, uint add, EC groups, EC points, EC add.
+const NUM_STACK: usize = 6;
 
 /// Bare-requires stack over the arithmetic + EC chiplet subset — the EC
 /// layer's analogue of the Session sweep, driven through [`EcRequire`].
@@ -134,15 +131,14 @@ impl EcStack {
     /// accumulator and routes the demand its rows consume, so relations
     /// run before the store / EC stores read their provide ledgers and
     /// every `Range16` consumer fires before the LUT — and bundle the
-    /// seven main traces in [`NUM_STACK`] order.
+    /// six main traces in [`NUM_STACK`] order.
     fn traces(mut self) -> EcStackTraces {
         let mut bpl = BytePairLutRequires::new();
         let add = uint_add_trace(self.adds, &mut self.store);
-        let mul = uint_mul_trace(self.muls, &mut self.store, &mut bpl);
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut bpl);
-        let uint = uint_trace(self.store, &mut bpl);
+        let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
         let (ec_groups, ec_points) = ec_store_traces(self.ec);
-        EcStackTraces([bpl_trace(bpl), uint, add, mul, ec_groups, ec_points, ec_add])
+        EcStackTraces([bpl_trace(bpl), uint, add, ec_groups, ec_points, ec_add])
     }
 }
 
@@ -154,9 +150,8 @@ struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 fn stack_airs() -> [ChipletAir; NUM_STACK] {
     [
         ChipletAir::BytePairLut,
-        ChipletAir::UintStore,
+        ChipletAir::UintStoreMul,
         ChipletAir::UintAdd,
-        ChipletAir::UintMul,
         ChipletAir::EcGroups,
         ChipletAir::EcPointStore,
         ChipletAir::EcGroupAdd,
@@ -201,18 +196,18 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
 
 impl EcStackTraces {
     fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_STACK] {
-        let [a, b, c, d, e, f, g] = &self.0;
-        [a, b, c, d, e, f, g]
+        let [a, b, c, d, e, f] = &self.0;
+        [a, b, c, d, e, f]
     }
 
     /// The EcGroupAdd main — the tamper tests' target.
     fn ec_add_main(&self) -> &RowMajorMatrix<Felt> {
-        &self.0[6]
+        &self.0[5]
     }
 
     /// The EcPointStore main — the closure-cert necessity tests' target.
     fn ec_points_main(&self) -> &RowMajorMatrix<Felt> {
-        &self.0[5]
+        &self.0[4]
     }
 
     /// Per-chiplet local-constraint check (one AIR at a time, no
@@ -278,12 +273,11 @@ fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
     fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
-    fold_balance(&UintStoreAir, mains[1], &challenges, &mut net);
+    fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
     fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
-    fold_balance(&UintMulAir, mains[3], &challenges, &mut net);
-    fold_balance(&EcGroupsAir, mains[4], &challenges, &mut net);
-    fold_balance(&EcPointStoreAir, mains[5], &challenges, &mut net);
-    fold_balance(&EcGroupAddAir, mains[6], &challenges, &mut net);
+    fold_balance(&EcGroupsAir, mains[3], &challenges, &mut net);
+    fold_balance(&EcPointStoreAir, mains[4], &challenges, &mut net);
+    fold_balance(&EcGroupAddAir, mains[5], &challenges, &mut net);
     net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
 }
 
@@ -657,7 +651,7 @@ fn double_forged_as_generic_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[6] = &forged;
+    mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -715,7 +709,7 @@ fn finite_forged_as_pai_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[6] = &forged;
+    mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -738,7 +732,7 @@ fn double_forged_as_cancel_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[6] = &forged;
+    mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -771,7 +765,7 @@ fn ed25519_torsion_forged_as_double_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[6] = &forged;
+    mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -794,7 +788,7 @@ fn forged_result_ptr_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[6] = &forged;
+    mains[5] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -859,6 +853,6 @@ fn cert_point_forged_as_trio_unbalances() {
     let forged = tamper_ec_points(traces.ec_points_main(), r.addr() as usize - 1, COL_IS_CERT, 0);
     let mut rng = StdRng::seed_from_u64(0xecad_dce3);
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }

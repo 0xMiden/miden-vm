@@ -277,9 +277,9 @@ impl Default for UintStoreRequires {
 /// `UintVal` consumer, so it nets out on the bus; its self bound-ref is
 /// laid by [`generate_trace`] directly rather than through the demand
 /// ledger.
-fn padded_blocks(requires: &UintStoreRequires) -> Vec<Uint> {
+fn padded_blocks(requires: &UintStoreRequires, min_blocks: usize) -> Vec<Uint> {
     let n_real = requires.uints.len();
-    let n_padded = n_real.next_power_of_two().max(1);
+    let n_padded = n_real.next_power_of_two().max(1).max(min_blocks);
     let next_ptr = requires.uints.last_key_value().map_or(1, |(&ptr, _)| ptr.0 + 1);
     let pad = (0..n_padded - n_real).map(|i| {
         let ptr = UintPtr(next_ptr + i as u32);
@@ -313,9 +313,21 @@ pub fn generate_trace(
     requires: UintStoreRequires,
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, bpl, 0)
+}
+
+/// As [`generate_trace`], but the block count is additionally floored at
+/// `min_blocks` (still rounded to a power of two) — lets a caller
+/// sharing this trace's row range with another chiplet (see
+/// [`crate::uint::store_mul`]) force a shared height.
+pub(crate) fn generate_trace_padded_to(
+    requires: UintStoreRequires,
+    bpl: &mut BytePairLutRequires,
+    min_blocks: usize,
+) -> RowMajorMatrix<Felt> {
     let requires = &requires;
     let n_real = requires.uints.len();
-    let blocks = padded_blocks(requires);
+    let blocks = padded_blocks(requires, min_blocks);
     let demand = &requires.demand;
 
     let mut vals = Vec::with_capacity(blocks.len() * PERIOD * NUM_MAIN_COLS);
