@@ -7,6 +7,10 @@
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
 
+#### Fixes
+
+- Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
+
 ## v0.25.2 (2026-07-11)
 
 - Support constructing initial `ResumeContext` for execution stepping from a `Package`, in order to ensure debug context is correctly initialized
@@ -45,6 +49,7 @@
 
 - Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
 - Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
+- Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 
 ## v0.24.0 (2026-06-24)
 
