@@ -576,8 +576,10 @@ end
 #! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a << n) mod 2^64.
-#! This takes 21 cycles.
+#! This takes 27 cycles.
 pub proc shl(n: u32, a: u64) -> u64
+    dup u32lt.64 assert.err="shift amount must be in the range [0, 64)"
+
     pow2            # [2^n, a_lo, a_hi]
     u32split        # [pow_lo, pow_hi, a_lo, a_hi]
     movup.2         # [a_lo, pow_lo, pow_hi, a_hi]
@@ -591,8 +593,11 @@ end
 #! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >> n.
-#! This takes 60 or 61 cycles, depending on n.
+#! This takes 66 or 67 cycles, depending on n.
 pub proc shr(n: u32, a: u64) -> u64
+    # validate shift amount is in [0, 64)
+    dup u32lt.64 assert.err="shift amount must be in the range [0, 64)"
+
     # ==========================================================================
     # RIGHT SHIFT: Computes a >> n where a is 64-bit and n is shift amount
     # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
@@ -735,8 +740,11 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a <<< n (rotate left).
-#! This takes 46 cycles.
+#! This takes 52 cycles.
 pub proc rotl(n: u32, a: u64) -> u64
+    # validate rotation amount is in [0, 64)
+    dup u32lt.64 assert.err="shift amount must be in the range [0, 64)"
+
     # ==========================================================================
     # LEFT ROTATION: Computes a <<< n (rotate left by n bits)
     # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
@@ -827,8 +835,11 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >>> n (rotate right).
-#! This takes 60 cycles.
+#! This takes 66 cycles.
 pub proc rotr(n: u32, a: u64) -> u64
+    # validate rotation amount is in [0, 64)
+    dup u32lt.64 assert.err="shift amount must be in the range [0, 64)"
+
     # ==========================================================================
     # RIGHT ROTATION: Computes a >>> n (rotate right by n bits)
     # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
