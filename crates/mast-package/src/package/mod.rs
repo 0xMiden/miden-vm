@@ -1650,8 +1650,11 @@ mod tests {
         ));
 
         let mut functions = DebugFunctionsSection::new();
+        let node = package.get_export_node_id("app::entry");
         let name_idx = functions.add_string(Arc::from("app::entry"));
         functions.add_function(DebugFunctionInfo::new(
+            node,
+            None,
             name_idx,
             0,
             LineNumber::new(1).unwrap(),
@@ -1673,7 +1676,10 @@ mod tests {
 
         let mut functions = DebugFunctionsSection::new();
         let name_idx = functions.add_string(Arc::from("app::entry"));
+        let node = MastNodeId::new_unchecked(0);
         functions.add_function(DebugFunctionInfo::new(
+            node,
+            None,
             name_idx,
             0,
             LineNumber::new(1).unwrap(),
@@ -1681,7 +1687,7 @@ mod tests {
         ));
 
         let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceNode::new(MastNodeId::new_unchecked(0), vec![], 0, 1)],
+            vec![DebugSourceNode::new(node, vec![], 0, 1)],
             vec![source_node],
         );
         let source_map = DebugSourceMapSection::from_parts_with_inline_calls(

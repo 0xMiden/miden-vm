@@ -424,8 +424,9 @@ impl Assembler {
             .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a library [`Package`] from the set of modules reachable from `root`.
@@ -453,8 +454,9 @@ impl Assembler {
         // Derive the package name from the namespace of the root module
         let name = root.path().as_str().replace("::", "-");
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assembles the provided module into a kernel package.
@@ -468,8 +470,9 @@ impl Assembler {
         root: Box<ast::Module>,
         support: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<Box<Package>, Report> {
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -501,8 +504,9 @@ impl Assembler {
             self.warnings_as_errors,
         )?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -599,7 +603,16 @@ impl Assembler {
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         let modules = self.package_modules(module_indices);
-        self.finish_library_product(name, mast_forest, source_graph, exports, modules, kind)
+        self.finish_library_product(
+            name,
+            mast_forest,
+            source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
+            exports,
+            modules,
+            kind,
+        )
     }
 
     fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
@@ -662,6 +675,7 @@ impl Assembler {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => ResolvedProcedure {
                         node: proc.body_node_ref(),
+                        source_node: proc.source_node_ref(),
                         signature: proc.signature(),
                     },
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -677,11 +691,16 @@ impl Assembler {
                             item.source_debug_root_id().map(DebugSourceNodeId::from),
                             mast_forest_builder,
                         )?;
-                        ResolvedProcedure { node, signature: item.signature.clone() }
+                        let source_node = mast_forest_builder.latest_source_ref_for_node_ref(node);
+                        ResolvedProcedure {
+                            node,
+                            source_node,
+                            signature: item.signature.clone(),
+                        }
                     },
                 };
                 let digest = item.digest;
-                let ResolvedProcedure { node, signature } = resolved;
+                let ResolvedProcedure { node, source_node, signature } = resolved;
                 let attributes = item.attributes.clone();
                 let pctx = ProcedureContext::new(
                     gid,
@@ -693,7 +712,7 @@ impl Assembler {
                     self.source_manager.clone(),
                 );
 
-                let procedure = pctx.into_procedure(digest, node);
+                let procedure = pctx.into_procedure(digest, node, source_node);
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
                 PendingPackageExport::Procedure(PendingProcedureExport {
@@ -798,7 +817,9 @@ impl Assembler {
             ));
         }
 
-        self.assemble_executable_modules(name.into(), program, [])?.into_artifact()
+        let emit_debug_info = self.emit_debug_info;
+        self.assemble_executable_modules(name.into(), program, [])?
+            .into_artifact(emit_debug_info)
     }
 
     pub(crate) fn assemble_library_modules(
@@ -1065,7 +1086,7 @@ impl Assembler {
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
 
-        let (mast_forest, node_id_by_ref, source_graph, _) =
+        let (mast_forest, node_id_by_ref, source_graph, source_id_by_ref) =
             mast_forest_builder.build()?.into_parts_with_source_graph();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
@@ -1076,6 +1097,8 @@ impl Assembler {
             namespace,
             mast_forest,
             source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
             entry_node_id,
             self.linker.kernel_package(),
         )
@@ -1086,6 +1109,8 @@ impl Assembler {
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
         source_graph: SourceDebugGraph,
+        source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
+        node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
         kind: TargetType,
@@ -1103,7 +1128,7 @@ impl Assembler {
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
+        let debug_info = if self.emit_debug_info {
             #[cfg_attr(not(feature = "std"), expect(unused_mut))]
             let mut debug_info = self.debug_info.clone();
             #[cfg(feature = "std")]
@@ -1111,12 +1136,24 @@ impl Assembler {
                 debug_info.trim_paths(&trimmer);
             }
             debug_info
-        });
+        } else {
+            self.debug_info.clone()
+        };
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+        let source_graph = if self.emit_debug_info {
+            self.apply_source_debug_options(source_graph)
+        } else {
+            source_graph
+        };
 
-        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
+        Ok(AssemblyProduct::new(
+            package,
+            None,
+            debug_info,
+            source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
+        ))
     }
 
     fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
@@ -1148,6 +1185,8 @@ impl Assembler {
         namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
         source_graph: SourceDebugGraph,
+        source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
+        node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
@@ -1171,7 +1210,7 @@ impl Assembler {
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
+        let debug_info = if self.emit_debug_info {
             #[cfg_attr(not(feature = "std"), expect(unused_mut))]
             let mut debug_info = self.debug_info.clone();
             #[cfg(feature = "std")]
@@ -1179,12 +1218,24 @@ impl Assembler {
                 debug_info.trim_paths(&trimmer);
             }
             debug_info
-        });
+        } else {
+            self.debug_info.clone()
+        };
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+        let source_graph = if self.emit_debug_info {
+            self.apply_source_debug_options(source_graph)
+        } else {
+            source_graph
+        };
 
-        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
+        Ok(AssemblyProduct::new(
+            package,
+            kernel,
+            debug_info,
+            source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
+        ))
     }
 
     fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
@@ -1361,10 +1412,12 @@ impl Assembler {
         let proc_body_ref =
             self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
+        let source_node_ref = mast_forest_builder.latest_source_ref_for_node_ref(proc_body_ref);
+
         let proc_mast_root = mast_forest_builder
             .mast_root_for_ref(proc_body_ref)
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref))
+        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref, source_node_ref))
     }
 
     /// Creates assembly operation metadata for control flow nodes.
@@ -1627,12 +1680,14 @@ impl Assembler {
                     None,
                     mast_forest_builder,
                 )?;
-                Ok(ResolvedProcedure { node, signature: None })
+                let source_node = mast_forest_builder.latest_source_ref_for_node_ref(node);
+                Ok(ResolvedProcedure { node, source_node, signature: None })
             },
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(ResolvedProcedure {
                         node: proc.body_node_ref(),
+                        source_node: proc.source_node_ref(),
                         signature: proc.signature(),
                     }),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1648,7 +1703,13 @@ impl Assembler {
                                 p.source_debug_root_id().map(DebugSourceNodeId::from),
                                 mast_forest_builder,
                             )?;
-                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
+                            let source_node =
+                                mast_forest_builder.latest_source_ref_for_node_ref(node);
+                            Ok(ResolvedProcedure {
+                                node,
+                                source_node,
+                                signature: p.signature.clone(),
+                            })
                         },
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
@@ -1760,5 +1821,6 @@ pub(crate) struct BodyWrapper {
 
 pub(super) struct ResolvedProcedure {
     pub node: MastNodeRef,
+    pub source_node: Option<SourceNodeRef>,
     pub signature: Option<Arc<FunctionType>>,
 }

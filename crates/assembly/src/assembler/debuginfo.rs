@@ -1,15 +1,16 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 #[cfg(feature = "std")]
 use std::{
     path::{Path, PathBuf},
     string::ToString,
 };
 
+use miden_assembly_syntax::debuginfo::{ColumnNumber, LineNumber};
 #[cfg(feature = "std")]
 use miden_assembly_syntax::debuginfo::{FileLineCol, Location, Uri};
 use miden_mast_package::debug_info::{
-    DebugFieldInfo, DebugFunctionsSection, DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx,
-    DebugTypeInfo, DebugTypesSection, DebugVariantInfo,
+    DebugFieldInfo, DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo,
+    DebugTypesSection, DebugVariantInfo,
 };
 
 use crate::{
@@ -20,6 +21,7 @@ use crate::{
     },
     debuginfo::SourceManager,
     diagnostics::Report,
+    mast_forest_builder::{MastNodeRef, SourceNodeRef},
 };
 
 // DEBUG INFO SECTIONS
@@ -27,8 +29,11 @@ use crate::{
 
 #[derive(Clone)]
 pub struct DebugInfoSections {
-    /// The debug function section maintained by the assembler during assembly
-    pub debug_functions_section: DebugFunctionsSection,
+    /// The set of strings for the debug function section maintained by the assembler during
+    /// assembly
+    pub debug_function_strings: Vec<Arc<str>>,
+    /// The debug function records section maintained by the assembler during assembly
+    pub debug_function_infos: Vec<PendingDebugFunctionInfo>,
     /// The debug type section maintained by the assembler during assembly
     pub debug_types_section: DebugTypesSection,
     /// The debug sources section maintained by the assembler during assembly
@@ -38,11 +43,32 @@ pub struct DebugInfoSections {
 impl Default for DebugInfoSections {
     fn default() -> Self {
         Self {
-            debug_functions_section: DebugFunctionsSection::new(),
+            debug_function_strings: Default::default(),
+            debug_function_infos: Default::default(),
             debug_types_section: DebugTypesSection::new(),
             debug_sources_section: DebugSourcesSection::new(),
         }
     }
+}
+
+#[derive(Clone)]
+pub struct PendingDebugFunctionInfo {
+    /// The execution node that owns this function info.
+    pub node: MastNodeRef,
+    /// Source/debug occurrence linked to this function info.
+    pub source_node: Option<SourceNodeRef>,
+    /// Name of the function (index into string table)
+    pub name_idx: u32,
+    /// Linkage name / mangled name (index into string table, optional)
+    pub linkage_name_idx: Option<u32>,
+    /// File containing this function (index into file table)
+    pub file_idx: u32,
+    /// Line number where the function starts (1-indexed)
+    pub line: LineNumber,
+    /// Column number where the function starts (1-indexed)
+    pub column: ColumnNumber,
+    /// Type of this function (index into type table, optional)
+    pub type_idx: Option<DebugTypeIdx>,
 }
 
 impl DebugInfoSections {
@@ -54,12 +80,12 @@ impl DebugInfoSections {
         if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
             let path_id =
                 self.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
-            let file_id = self
+            let file_idx = self
                 .debug_sources_section
                 .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
             let name = Arc::<str>::from(procedure.path().as_str());
-            let name_id = self.debug_functions_section.add_string(name.clone());
-            let type_index = if let Some(signature) = procedure.signature() {
+            let name_idx = self.add_debug_function_string(name.clone());
+            let type_idx = if let Some(signature) = procedure.signature() {
                 Some(register_debug_type(
                     &mut self.debug_types_section,
                     Some(name),
@@ -69,19 +95,17 @@ impl DebugInfoSections {
             } else {
                 None
             };
-            let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
-                name_id,
-                file_id,
-                file_line_col.line,
-                file_line_col.column,
-            )
-            .with_mast_root(procedure.mast_root());
-            let func_info = if let Some(type_index) = type_index {
-                func_info.with_type(type_index)
-            } else {
-                func_info
+            let func_info = PendingDebugFunctionInfo {
+                node: procedure.body_node_ref(),
+                source_node: procedure.source_node_ref(),
+                name_idx,
+                linkage_name_idx: None,
+                file_idx,
+                line: file_line_col.line,
+                column: file_line_col.column,
+                type_idx,
             };
-            self.debug_functions_section.add_function(func_info);
+            self.debug_function_infos.push(func_info);
         }
 
         Ok(())
@@ -92,6 +116,17 @@ impl DebugInfoSections {
         for path in self.debug_sources_section.strings.iter_mut() {
             *path = trimmer.trim_path_string(path.as_ref());
         }
+    }
+
+    /// Adds a string to the debug functions string table and returns its index.
+    fn add_debug_function_string(&mut self, s: Arc<str>) -> u32 {
+        if let Some(idx) = self.debug_function_strings.iter().position(|existing| **existing == *s)
+        {
+            return idx as u32;
+        }
+        let idx = self.debug_function_strings.len() as u32;
+        self.debug_function_strings.push(s);
+        idx
     }
 }
 

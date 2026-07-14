@@ -6,6 +6,7 @@
 
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
+- `DebugFunctionInfo` records are now linked to MAST node/source node, rather than MAST roots, as the latter lack sufficient precision for debug info purposes. ()
 
 #### Fixes
 

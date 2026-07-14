@@ -12,16 +12,20 @@ use crate::mast_forest_builder::SourceDebugGraph;
 pub struct AssemblyProduct {
     package: Box<Package>,
     kernel_package: Option<Arc<Package>>,
-    debug_info: Option<DebugInfoSections>,
-    source_graph: Option<SourceDebugGraph>,
+    debug_info: DebugInfoSections,
+    source_graph: SourceDebugGraph,
+    source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
+    node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
 }
 
 impl AssemblyProduct {
     pub(super) fn new(
         package: Box<Package>,
         kernel: Option<Arc<Package>>,
-        debug_info: Option<DebugInfoSections>,
-        source_graph: Option<SourceDebugGraph>,
+        debug_info: DebugInfoSections,
+        source_graph: SourceDebugGraph,
+        source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
+        node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
     ) -> Self {
         assert!(
             kernel.is_none() || !package.is_kernel(),
@@ -32,6 +36,8 @@ impl AssemblyProduct {
             kernel_package: kernel,
             debug_info,
             source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
         }
     }
 
@@ -47,12 +53,14 @@ impl AssemblyProduct {
         Ok(())
     }
 
-    pub fn into_artifact(self) -> Result<Box<Package>, Report> {
+    pub fn into_artifact(self, emit_debug_info: bool) -> Result<Box<Package>, Report> {
         let Self {
             mut package,
             kernel_package,
             debug_info,
             source_graph,
+            source_id_by_ref,
+            node_id_by_ref,
         } = self;
         // Section: embedded kernel package
         if package.is_program()
@@ -86,39 +94,68 @@ impl AssemblyProduct {
             }
         }
 
+        if !emit_debug_info {
+            return Ok(package);
+        }
+
         // Section: debug info
-        if let Some(DebugInfoSections {
+        let DebugInfoSections {
             debug_sources_section,
-            debug_functions_section,
+            debug_function_infos,
+            debug_function_strings,
             debug_types_section,
-        }) = debug_info
+        } = debug_info;
         {
-            package
-                .sections
-                .push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
+            let mut debug_functions_section =
+                miden_mast_package::debug_info::DebugFunctionsSection::new();
+            debug_functions_section.strings = debug_function_strings;
+            debug_functions_section.functions.reserve_exact(debug_function_infos.len());
+            debug_functions_section
+                .functions
+                .extend(debug_function_infos.into_iter().map(|pfi| {
+                    let node = node_id_by_ref[&pfi.node];
+                    let source_node = pfi
+                        .source_node
+                        .map(|sn| u32::from(source_id_by_ref[&sn]))
+                        .map(DebugSourceNodeId::from);
+                    miden_mast_package::debug_info::DebugFunctionInfo {
+                        node,
+                        source_node,
+                        name_idx: pfi.name_idx,
+                        linkage_name_idx: pfi.linkage_name_idx,
+                        file_idx: pfi.file_idx,
+                        line: pfi.line,
+                        column: pfi.column,
+                        type_idx: pfi.type_idx,
+                    }
+                }));
             package
                 .sections
                 .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));
             package
                 .sections
+                .push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
+            package
+                .sections
                 .push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
         }
-        if let Some(source_graph) = source_graph {
-            package.sections.push(Section::new(
-                SectionId::DEBUG_SOURCE_GRAPH,
-                source_graph_section(&source_graph)?.to_bytes(),
-            ));
-            package.sections.push(Section::new(
-                SectionId::DEBUG_SOURCE_MAP,
-                source_map_section(&source_graph)?.to_bytes(),
-            ));
-            let error_messages = error_messages_section(&source_graph);
-            if !error_messages.is_empty() {
-                package
-                    .sections
-                    .push(Section::new(SectionId::DEBUG_ERROR_MESSAGES, error_messages.to_bytes()));
-            }
+
+        package.sections.push(Section::new(
+            SectionId::DEBUG_SOURCE_GRAPH,
+            source_graph_section(&source_graph)?.to_bytes(),
+        ));
+        package.sections.push(Section::new(
+            SectionId::DEBUG_SOURCE_MAP,
+            source_map_section(&source_graph)?.to_bytes(),
+        ));
+
+        let error_messages = error_messages_section(&source_graph);
+        if !error_messages.is_empty() {
+            package
+                .sections
+                .push(Section::new(SectionId::DEBUG_ERROR_MESSAGES, error_messages.to_bytes()));
         }
+
         Ok(package)
     }
 }
