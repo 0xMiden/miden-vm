@@ -101,9 +101,11 @@ are structural.
 
 ## Constraints
 
-All main-trace (Phase 1) constraints are degree ≤ 2 (the cross-product of
-a degree-1 periodic selector with a degree-1 main expression), replicated
-per lane over its disjoint column band. Listed in `LiftedAir::eval` order.
+Main-trace (Phase 1) constraints are degree ≤ 4 (the rotation
+limb-decomposition binding below is the only degree-4 pair; the rest are
+degree ≤ 2, the cross-product of a degree-1 periodic selector with a
+degree-1 main expression), replicated per lane over its disjoint column
+band. Listed in `LiftedAir::eval` order.
 
 ### Instruction pointer (per lane)
 
@@ -128,6 +130,19 @@ per lane over its disjoint column band. Listed in `LiftedAir::eval` order.
 There is no separate booleanity constraint on the periodic `is_*`
 selectors, `dst_mult`, or `k`: those are preprocessed (verifier-computed)
 columns, fixed by `round_program()`, not committed witness.
+
+### Rotation limb-decomposition binding (per lane)
+
+| # | Constraint | Deg | Rationale |
+|---|-----------|-----|-----------|
+| 6 | `act · is_rol · ((r_lo + 2^32)·k − pack_le(rot_limbs[0..4], 2^16)) = 0` | 4 | binds `rot_limbs`' low half to the decomposition of `r`'s low half — without it `rot_limbs` is only Range16-checked and the value `memory_provide_c` writes to the Memory64 bus (reconstructed from `rot_limbs`) is unconstrained on ROL rows |
+| 7 | `act · is_rol · ((r_hi + 2^32)·k − pack_le(rot_limbs[4..8], 2^16)) = 0` | 4 | same, for `r`'s high half |
+
+Gated by `act · is_rol`, not `is_rol` alone: `is_rol` is a periodic
+column and keeps firing on this row's periodic slot through the dead
+round and trace-tail padding, where `push_row` writes an all-zero row
+(`rot_limbs = 0`, `r = 0`) — an `is_rol`-only gate would wrongly demand
+`2^32·k = 0` there and break completeness.
 
 ## Buses & lookups (per lane)
 

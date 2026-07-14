@@ -40,7 +40,7 @@ use crate::{
         BytePairLutMsg, BytePairLutRequires, BytePairOp, Range16Msg, require_logic64,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, halves_le, next_main},
+    utils::{current_main, halves_le, next_main, pack_le},
 };
 
 // MAIN COLUMN LAYOUT
@@ -215,6 +215,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         let p_last: AB::Expr = periodic[PCOL_P_LAST].into();
         let is_xor: AB::Expr = periodic[PCOL_IS_XOR].into();
         let is_andnot: AB::Expr = periodic[PCOL_IS_ANDNOT].into();
+        let is_rol: AB::Expr = periodic[PCOL_IS_ROL].into();
+        let k: AB::Expr = periodic[PCOL_K].into();
+        let two_32 = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 fits"));
 
         for lane in 0..NUM_LANES {
             let base = lane_base(lane);
@@ -250,8 +253,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] which slot 1 must consume, so no boundary is needed.
-            builder
-                .assert_zero((AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act));
+            builder.assert_zero(
+                (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
+            );
 
             // Passthrough pin: on rows with no logic op active (pure-ROL and
             // NOP rows), `r = a`. Byte-wise so it matches the byte-level
@@ -267,6 +271,33 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
                     no_logic.clone() * (AB::Expr::from(r_byte) - AB::Expr::from(a_byte)),
                 );
             }
+
+            // Rotation limb-decomposition binding: on an active ROL row,
+            // `rot_limbs` must be the 16-bit limb decomposition of
+            // `(r_half + 2^32)·k` for each half of this row's own `r`
+            // (byte-committed above) — the same identity a rotate
+            // chiplet's ROL row enforces, applied to `r` instead of a
+            // value read from elsewhere. Without this, `rot_limbs` is
+            // only Range16-checked (see `eval`'s lookup half) and
+            // `rotated_halves` — which `memory_provide_c` uses to derive
+            // the value written to memory — can be driven to any result.
+            //
+            // Gated by `act · is_rol`, not `is_rol` alone: `is_rol` is a
+            // periodic column and keeps firing on this row's periodic
+            // slot through the dead round and trace-tail padding, but
+            // `push_row` writes an all-Nop, all-zero row there (`rot_limbs
+            // = 0`, `r = 0`) — an `is_rol`-only gate would wrongly demand
+            // `2^32·k = 0` on those padding rows and break completeness.
+            let r_bytes: [AB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
+            let rot_limbs: [AB::Var; 8] =
+                array::from_fn(|i| local[base + ROT_LIMBS_RANGE.start + i]);
+            let [r_lo, r_hi] = halves_le(&r_bytes, 256);
+            let lo_decomp: AB::Expr = pack_le(&rot_limbs[0..4], 1u64 << 16);
+            let hi_decomp: AB::Expr = pack_le(&rot_limbs[4..8], 1u64 << 16);
+            let rol_gate = act.clone() * is_rol.clone();
+            builder
+                .assert_zero(rol_gate.clone() * ((r_lo + two_32.clone()) * k.clone() - lo_decomp));
+            builder.assert_zero(rol_gate * ((r_hi + two_32.clone()) * k.clone() - hi_decomp));
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
