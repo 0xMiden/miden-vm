@@ -422,3 +422,35 @@ fn prove_deferred_state_proves_non_empty_root() {
     assert_eq!(P2Digest::from(public_root), synthetic.root);
     verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
 }
+
+/// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
+/// (`session::preprocessed_cache`, keyed by LMCS type). Proving and
+/// verifying twice per hash function exercises both the cold path (first
+/// call in the process, builds and caches the bundle) and the warm path
+/// (later calls, reused from cache) for every slot, guarding against a
+/// mismatched or stale cached bundle being reused across hash functions.
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn prove_deferred_state_round_trips_for_every_hash_function() {
+    let synthetic = synthetic_keccak_state(b"abc");
+    let hash_fns = [
+        HashFunction::Blake3_256,
+        HashFunction::Rpo256,
+        HashFunction::Rpx256,
+        HashFunction::Poseidon2,
+        HashFunction::Keccak,
+    ];
+
+    for hash_fn in hash_fns {
+        for pass in 0..2 {
+            let proof = prove_deferred_state(&synthetic.state, hash_fn)
+                .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should prove: {e}"));
+            let Some((_, public_root)) = proof.as_stark() else {
+                panic!("{hash_fn:?} pass {pass}: non-empty deferred state should be STARK-backed");
+            };
+            assert_eq!(P2Digest::from(public_root), synthetic.root, "{hash_fn:?} pass {pass}");
+            verify_deferred(&proof)
+                .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should verify: {e}"));
+        }
+    }
+}

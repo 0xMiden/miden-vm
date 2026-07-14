@@ -76,6 +76,7 @@ use crate::{
 };
 
 mod fixed;
+mod preprocessed_cache;
 mod prove;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
