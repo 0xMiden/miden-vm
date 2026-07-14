@@ -77,22 +77,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Run crypto tests
-        run: |
-          cargo nextest run \
-            --profile ci \
-            --cargo-profile test-dev \
-            -p miden-crypto \
-            -p miden-crypto-derive \
-            -p miden-field \
-            -p miden-serde-utils \
-            -p miden-crypto-wycheproof-tests \
-            --features miden-crypto/concurrent,miden-crypto/testing,miden-field/testing
-          cargo nextest run \
-            --profile ci \
-            --cargo-profile test-dev \
-            -p miden-crypto \
-            --features miden-crypto/persistent-forest
-          make test-lifted-stark
+        run: make test-crypto
 
   doc-tests:
     name: doc-tests

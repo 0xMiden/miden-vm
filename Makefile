@@ -15,6 +15,7 @@ help:
 	@printf "  make test-assembly-syntax        # Test assembly-syntax crate\n"
 	@printf "  make test-core                   # Test core crate\n"
 	@printf "  make test-vm                     # Test miden-vm crate\n"
+	@printf "  make test-crypto                 # Test imported crypto crates\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
@@ -39,6 +40,8 @@ ALL_FEATURES             := --all-features
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
 FAST_TEST_FEATURES       := concurrent,testing
+CRYPTO_TEST_PACKAGES     := -p miden-crypto -p miden-crypto-derive -p miden-field -p miden-serde-utils -p miden-crypto-wycheproof-tests
+CRYPTO_TEST_FEATURES     := miden-crypto/concurrent,miden-crypto/testing,miden-field/testing
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
@@ -82,8 +85,7 @@ xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
 
 
 .PHONY: fix
-fix: ## Runs Fix with configs (alias for xclippy-fix)
-	cargo +stable xclippy-fix
+fix: xclippy-fix format ## Applies automatic lint and format fixes
 
 .PHONY: xclippy-fix
 xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
@@ -104,7 +106,7 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
 .PHONY: lint
-lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
+lint: xclippy format-check shear ## Runs all lint checks without modifying files
 
 # --- docs ----------------------------------------------------------------------------------------
 
@@ -175,6 +177,20 @@ test-build: ## Build the test binaries for the workspace (no run)
 .PHONY: test
 test: ## Run all tests for the workspace
 	$(MAKE) core-test NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
+
+.PHONY: test-crypto
+test-crypto: ## Run imported crypto crate tests and crypto-specific feature tests
+	cargo nextest run \
+		--profile ci \
+		--cargo-profile test-dev \
+		$(CRYPTO_TEST_PACKAGES) \
+		--features $(CRYPTO_TEST_FEATURES)
+	cargo nextest run \
+		--profile ci \
+		--cargo-profile test-dev \
+		-p miden-crypto \
+		--features miden-crypto/persistent-forest
+	$(MAKE) test-lifted-stark
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
