@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -58,13 +58,13 @@ jobs:
           fi
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # pin@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # pin@v1
         with:
           cache: false
           rustflags: ""
 
       - name: Cache cargo registry and git index
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # pin@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pin@v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -77,7 +77,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@b8be7f5e140177087325943c4a8e169d01c59b3d # pin@v2
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2
         with:
           tool: cargo-binstall
 
@@ -103,7 +103,7 @@ jobs:
 
       - name: Authenticate with crates.io
         id: crates-io-auth
-        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # pin@v1
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # pin@v1
 
       - name: Publish selected packages
         shell: bash
