@@ -1,6 +1,7 @@
 mod masm;
 
 use miden_assembly_syntax::debuginfo::SourceManager;
+use miden_package_registry::PackageRegistryAndProvider;
 use miden_project::ProjectDependencyGraph;
 
 pub use self::masm::MasmSourceProvider;
@@ -25,6 +26,8 @@ pub struct TargetAssemblyContext<'a> {
     pub dependency_graph: &'a ProjectDependencyGraph,
     /// The current source manager
     pub source_manager: Arc<dyn SourceManager>,
+    /// The current package store of the assembler
+    pub package_registry: &'a dyn PackageRegistryAndProvider,
     /// The assembler-wide `warnings_as_errors` flag
     pub warnings_as_errors: bool,
 }
@@ -36,6 +39,7 @@ impl<'a> TargetAssemblyContext<'a> {
         target: &'a Target,
         profile: &'a Profile,
         dependency_graph: &'a ProjectDependencyGraph,
+        package_registry: &'a dyn PackageRegistryAndProvider,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Self, Report> {
         let project_root = manifest_path.parent().ok_or_else(|| {
@@ -64,6 +68,7 @@ impl<'a> TargetAssemblyContext<'a> {
             profile,
             dependency_graph,
             source_manager,
+            package_registry,
             warnings_as_errors: false,
         })
     }

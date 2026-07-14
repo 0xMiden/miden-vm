@@ -210,6 +210,15 @@ pub trait PackageProvider {
     ) -> Result<Arc<MastPackage>, Report>;
 }
 
+/// A marker trait for types implementing both [PackageRegistry] and [PackageProvider], which make
+/// them capable of both resolving packages and loading their associated artifacts.
+///
+/// This trait does not need to be directly implemented - it has a blanket impl for all types that
+/// implement both [PackageRegistry] and [PackageProvider]
+pub trait PackageRegistryAndProvider: PackageRegistry + PackageProvider {}
+
+impl<T: ?Sized + PackageProvider + PackageRegistry> PackageRegistryAndProvider for T {}
+
 /// A writable metadata index for package records.
 pub trait PackageIndex: PackageRegistry {
     type Error: fmt::Display;
@@ -222,7 +231,7 @@ pub trait PackageIndex: PackageRegistry {
 }
 
 /// A writable package cache used to store assembled package artifacts resolved during assembly.
-pub trait PackageCache: PackageRegistry + PackageProvider {
+pub trait PackageCache: PackageRegistryAndProvider {
     type Error: fmt::Display;
 
     /// Cache `package`, returning the fully-qualified stored version.

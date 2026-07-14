@@ -43,7 +43,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
         self.for_project_at_path_with_providers(manifest_path, store, [masm_provider])
@@ -57,7 +57,7 @@ impl Assembler {
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
@@ -82,7 +82,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
         self.for_project_with_providers(project, store, [masm_provider])
@@ -96,7 +96,7 @@ impl Assembler {
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let source_manager = self.source_manager();
         let dependency_graph =
@@ -187,7 +187,7 @@ impl SourceProviderRegistry {
     }
 }
 
-pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
+pub struct ProjectAssembler<'a, S: PackageCache> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
@@ -197,7 +197,7 @@ pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
 
 impl<'a, S> ProjectAssembler<'a, S>
 where
-    S: PackageCache + ?Sized,
+    S: PackageCache,
 {
     pub fn with_source_provider(
         &mut self,
@@ -324,6 +324,7 @@ where
             target,
             profile_name,
             &self.source_provider,
+            &*self.store,
         )? {
             sections.push(provenance.to_section());
         }
@@ -595,6 +596,7 @@ where
             origin,
             manifest_path,
             &self.source_provider,
+            self.store,
         )?;
 
         match PackageBuildProvenance::from_package(&package)? {
@@ -671,6 +673,7 @@ where
             target,
             profile,
             self.dependency_graph.as_ref(),
+            self.store,
             self.assembler.source_manager(),
         )?;
         context.with_warnings_as_errors(self.assembler.warnings_as_errors());
