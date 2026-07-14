@@ -189,7 +189,7 @@ mod tests {
             if args != [ZERO; 3] {
                 return None;
             }
-            Some(NodeType::value())
+            Some(NodeType::Data)
         }
         fn evaluate(
             &self,
@@ -237,8 +237,8 @@ mod tests {
         let mut registry = PrecompileRegistry::default().with_precompile(a);
         registry.merge(PrecompileRegistry::default().with_precompile(b));
 
-        assert_eq!(registry.decode_precompile_tag(tag_a).unwrap(), NodeType::value());
-        assert_eq!(registry.decode_precompile_tag(tag_b).unwrap(), NodeType::value());
+        assert_eq!(registry.decode_precompile_tag(tag_a).unwrap(), NodeType::Data);
+        assert_eq!(registry.decode_precompile_tag(tag_b).unwrap(), NodeType::Data);
     }
 
     #[test]
@@ -333,8 +333,8 @@ mod tests {
         let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
         // Use the framework's evaluation path so we exercise dispatch end-to-end.
         let digest = state.register(node.clone()).unwrap();
-        let canonical = state.evaluate_digest(digest).unwrap();
-        assert_eq!(canonical, node.digest());
-        assert_eq!(state.get_node(&canonical), Some(&node));
+        let (canonical_digest, canonical_node) = state.require_canonical_node(digest).unwrap();
+        assert_eq!(canonical_digest, node.digest());
+        assert_eq!(canonical_node, &node);
     }
 }

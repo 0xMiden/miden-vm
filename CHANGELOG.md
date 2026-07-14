@@ -6,6 +6,7 @@
 
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
+- Clarified that the ECDSA K256 Keccak verifier accepts high-s because signature scalars are uncommitted advice; adapters for committed or canonical Ethereum signatures must bind the exact encoding inside the VM and enforce low-s on that bound value.
 
 #### Fixes
 

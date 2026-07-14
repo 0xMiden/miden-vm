@@ -11,6 +11,7 @@
 #! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
 use miden::core::crypto::hashes::poseidon2
+use miden::core::word
 
 # Constants
 # ================================================================================================
@@ -429,7 +430,7 @@ pub proc decrypt
     mem_loadw_le    # load expected tag from memory
     # => [expected_tag(4), computed_tag(4), ...]
 
-    eqw assert.err="AEAD tag mismatch"
-    dropw dropw     # clean up stack
+    exec.word::eq
+    assert.err="AEAD tag mismatch"
     # => []
 end

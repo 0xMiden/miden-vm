@@ -28,12 +28,15 @@ modules are currently internal implementation detail used by core-library facade
    stack or in memory and emits `adv.register_deferred` / `adv.register_deferred_data`.
    Registration stores the node in host-side `DeferredState`, checks structural child closure, and
    evaluates the node immediately under the installed registry.
-2. **Wrapper binds digests in-circuit** – The wrapper computes any proof-relevant node digest from the
-   same stack or memory data visible to the circuit. A digest supplied only by advice is not a sound
-   proof binding.
+2. **Wrapper binds digests inside the VM** – Registration arguments are visible in the VM execution
+   trace, but the event does not constrain the host-side `DeferredState` update. Memory-backed
+   registration additionally performs direct host reads without adding AIR memory accesses. The
+   wrapper computes each proof-relevant digest with VM instructions from the exact same tag and
+   stack payload or ordered memory chunk sequence.
 3. **Wrapper evaluates only through explicit predicates** – When a wrapper uses
-   `adv.evaluate_deferred*` to obtain host-computed canonical data, it must re-bind that advice output
-   to circuit-visible data and log a statement digest that the verifier can re-evaluate.
+   `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
+   relate that advice to values established independently of it, then log a statement digest that
+   the verifier can re-evaluate.
 4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
    `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
    Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
@@ -52,7 +55,7 @@ modules are currently internal implementation detail used by core-library facade
 | ----------- | ---------------- |
 | VM | Executes deferred advice events and `log_deferred`, maintains the rolling deferred root, and exposes the final root as a public value. |
 | Host / advice provider | Maintains `DeferredState`, runs trusted precompile implementations, and supplies evaluation advice when wrappers request it. |
-| MASM wrapper | Registers concrete deferred nodes, computes node/statement digests from circuit-visible data, logs only registered statements that should evaluate to `TRUE`, and hides helper outputs from callers when appropriate. |
+| MASM wrapper | Registers concrete deferred nodes, computes node/statement digests with VM instructions from exact stack payloads or memory reads, logs only registered statements that should evaluate to `TRUE`, and hides helper outputs from callers when appropriate. |
 | Prover | Includes the canonical `DeferredStateWire` in `ExecutionProof`. |
 | Verifier | Rehydrates `DeferredStateWire` under the built-in `miden_precompiles::registry()`, checks the final deferred root, and verifies the STARK proof. |
 

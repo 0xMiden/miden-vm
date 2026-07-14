@@ -4,6 +4,7 @@
 
 use miden::precompiles
 use miden::precompiles::fields::{{BASE_FIELD_MODULE}}
+use miden::core::word
 
 # {{TITLE}} CURVE PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
@@ -178,10 +179,7 @@ end
 #! Output: [MSM_POINT_DIGEST, ...]
 #! Memory layout: pair i at ptr + 8*i is `[POINT_DIGEST, SCALAR_DIGEST]`.
 pub proc msm_mem
-    push.0
-    push.0
-    push.MSM_OP_ID
-    push.PRECOMPILE_ID
+    push.MSM_TAG
     # => [TAG(MSM), ptr, n, ...]
     exec.precompiles::register_mem
     # => [MSM_POINT_DIGEST, ...]
@@ -304,9 +302,7 @@ pub proc is_eq
     # => [RHS_DIGEST, LHS_VALUE_DIGEST, ...]
     exec.eval_digest
     # => [RHS_VALUE_DIGEST, LHS_VALUE_DIGEST, ...]
-    eqw
-    # => [is_equal, RHS_VALUE_DIGEST, LHS_VALUE_DIGEST, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [is_equal, ...]
 end
 
@@ -318,9 +314,7 @@ pub proc is_eq_digest
     # => [EXPR_DIGEST, TARGET_DIGEST, ...]
     exec.eval_digest
     # => [VALUE_DIGEST, TARGET_DIGEST, ...]
-    eqw
-    # => [is_equal, VALUE_DIGEST, TARGET_DIGEST, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [is_equal, ...]
 end
 
@@ -358,12 +352,9 @@ pub proc assert_not_identity
     # => [VALUE_DIGEST, ...]
     push.IDENTITY_DIGEST
     # => [IDENTITY_DIGEST, VALUE_DIGEST, ...]
-    eqw
-    # => [is_identity, IDENTITY_DIGEST, VALUE_DIGEST, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [is_identity, ...]
-    not
-    assert
+    assertz
 end
 
 #! Negates a point by computing O - P.

@@ -67,7 +67,7 @@ impl UintOp {
 
     const fn node_type(self) -> NodeType {
         match self {
-            Self::Value(_) => NodeType::value(),
+            Self::Value(_) => NodeType::Data,
             Self::Binary(_) | Self::Eq => NodeType::Join,
         }
     }
@@ -146,14 +146,21 @@ impl UintPrecompile {
             .expect("uint precompile id is not framework-reserved")
     }
 
-    /// Builds a canonical uint operation tag. Operand `VALUE` nodes carry the concrete domain.
+    /// Builds a uint operation tag from `op_id`.
+    ///
+    /// Known operation ids decode to their declared shapes; unknown ids produce a tag that this
+    /// precompile rejects. Operand `VALUE` nodes carry the concrete domain.
     pub fn op_tag(op_id: u64) -> Tag {
         let op_id = Felt::new(op_id).expect("uint op id must fit in a felt");
         Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
             .expect("uint precompile id is not framework-reserved")
     }
 
-    /// Builds a canonical value node.
+    /// Builds a uint `VALUE` node from trusted canonical limbs.
+    ///
+    /// Callers must ensure `limbs` is canonical for `domain`. Debug builds assert this
+    /// precondition; registration and evaluation validate nodes constructed from untrusted
+    /// limbs.
     pub fn value_node(domain: UintDomain, limbs: Limbs) -> Node {
         debug_assert!(domain.is_canonical(&limbs));
         Node::value(Self::value_tag(domain), limbs.map(Felt::from_u32))
@@ -319,11 +326,10 @@ mod tests {
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {
         let digest = state.register(node)?;
-        let canonical = state.evaluate_digest(digest)?;
-        state.get_node(&canonical).cloned().ok_or(PrecompileError::InvalidNode)
+        state.require_canonical_node(digest).map(|(_, node)| node.clone())
     }
 
-    fn assert_invalid_payload(result: Result<Node, PrecompileError>) {
+    fn assert_invalid_payload<T>(result: Result<T, PrecompileError>) {
         let Err(error) = result else {
             panic!("expected invalid payload");
         };
@@ -351,7 +357,7 @@ mod tests {
         );
         assert_eq!(
             precompile.decode(UintPrecompile::value_tag(domain).args()),
-            Some(NodeType::value())
+            Some(NodeType::Data)
         );
 
         assert_eq!(
@@ -366,6 +372,7 @@ mod tests {
         let mut add_with_bound = UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID).args();
         add_with_bound[1] = bound_ptr;
         assert_eq!(precompile.decode(add_with_bound), None);
+        assert_eq!(precompile.decode(UintPrecompile::op_tag(99).args()), None);
 
         assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99), ZERO]), None);
         assert_eq!(precompile.decode([Felt::from_u32(0), ZERO, ZERO]), None);
@@ -374,6 +381,19 @@ mod tests {
             precompile.decode([Felt::from_u32(0), Felt::new_unchecked(u32::MAX as u64 + 1), ZERO,]),
             None
         );
+    }
+
+    #[test]
+    fn data_shape_does_not_bypass_one_chunk_value_semantics() {
+        let domain = UintDomain::K1Base;
+        let tag = UintPrecompile::value_tag(domain);
+        let node = Node::try_data(tag, alloc::vec![[ZERO; 8], [ZERO; 8]])
+            .expect("multi-chunk data is structurally valid");
+        let precompile = UintPrecompile;
+        assert_eq!(precompile.decode(tag.args()), Some(NodeType::Data));
+
+        let mut state = state();
+        assert_invalid_payload(state.register(node));
     }
 
     #[test]

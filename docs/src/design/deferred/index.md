@@ -127,50 +127,56 @@ transparent to precompile implementations and is not serialized as trusted state
 
 A program grows and evaluates the DAG through deferred system events. Each event mutates only the
 *host-side* `DeferredState`; no register event hands a digest back through advice. Code that later
-uses or logs that digest must derive it **in-circuit** from the same operand-stack or memory data in
-a precompile-specific assembly procedure.
+uses or logs that digest must derive it inside the VM from the same operand-stack payload or ordered
+memory chunk sequence in a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
-| `register_deferred_data`   | `[TAG, ptr, n_chunks, …]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. Data tags read exactly `n_chunks` 8-felt chunks from word-aligned memory at `ptr`; pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs; join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit from the same `TAG` and memory range using the digest rule for the decoded payload shape. |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. If the tag arguments define a different required data or pair-list arity, precompile evaluation rejects the node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` computes it inside the VM with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, n_chunks, …]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. For data and pair-list tags, `n_chunks` determines the non-empty payload length; when tag arguments define an exact arity, precompile evaluation checks it. Pair-list chunks are interpreted as `lhs_digest || rhs_digest` pairs. Join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it inside the VM from the same `TAG` and ordered chunk sequence. |
 | `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
 | `evaluate_deferred_tag`    | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
 | `evaluate_deferred_payload` | `[NODE_DIGEST, …]`              | Payload-only compatibility event. Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
-`register_*` validate the tag's shape and child closure for structural payloads. They store the
-original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
-fails.
+`register_*` validate the decoded shape, require non-empty data and pair lists, and check child
+closure for structural payloads. Exact data or pair-list arity is enforced only when the tag's
+precompile-specific semantics define one. Registration stores the original node under its digest,
+evaluates it immediately, and fails immediately if semantic evaluation fails.
 
-### Why the digest is computed in-circuit
+### Why the digest is computed inside the VM
 
-A system event is an unconstrained advice hook: the honest handler can compute a digest, but the
-AIR has no constraint tying an advice-supplied digest to the operand-stack payload or to memory at
-`ptr`. If a digest folded into the deferred root commitment came from advice, a prover could attest
-a node over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the
-gap, and it composes with the verifier:
+A system event is a host hook. Its stack arguments are visible in the VM execution trace, but its
+host-side state changes are not constrained by the AIR. In particular, a memory-backed register
+event reads `n_chunks` chunks at `ptr` without adding AIR memory accesses that bind the registered
+contents to those cells. A proof-relevant digest must therefore be derived with VM instructions:
+`hperm` for a stack payload, or `mem_stream` plus `hperm` for the same tag and ordered memory chunk
+sequence.
 
-- the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
-- once the deferred root is threaded into proof public inputs, the **deferred-root match** will
-  bind that digest to the wire the verifier rehydrates;
-- `DeferredState::from_wire` then rehydrates the canonical wire opening and evaluates the expected
-  root from wire data.
+This composes with the verifier:
+
+- the **VM-computed hash** binds the digest to the exact operand-stack values or memory reads
+  consumed by those instructions;
+- once the deferred root is threaded into proof public inputs, the **deferred-root match** binds
+  that digest to the wire the verifier rehydrates;
+- `DeferredState::from_wire` rehydrates the canonical wire opening and evaluates the expected root
+  from wire data.
 
 Once the root is public, these pieces bind the wire — and therefore every evaluation the verifier
-re-checks — to the data the circuit actually committed to.
+re-checks — to data committed by the VM execution trace.
 
 ### Why `evaluate_deferred` is a bare event
 
-A deferred-evaluation event's output is a *deferred evaluation* the circuit cannot perform, so it
-must come through advice — but that makes it an **unbound host hint**. Using it soundly requires
-re-hashing the returned payload (and, for the full event, checking the returned tag) in-circuit and
-logging a predicate that `from_wire` re-checks; an in-circuit `eq`/`assert` over two raw evaluate
-results proves nothing. Because that obligation is precompile-specific (which predicate to log is
-the precompile's business), deferred evaluation is intentionally *not* exposed as a generic safe
-`sys` procedure. A precompile-specific assembly procedure must bind the raw event output to the
-circuit data it cares about. The same ownership applies to registration: a precompile-specific
-procedure can make a raw register event safe by computing the node digest in-circuit from the
-operand stack or memory, so the worst a misuse can do is make the verifier reject.
+A deferred-evaluation event delegates work the VM does not perform and returns the result through
+advice, making it an **unbound host hint**. Using it soundly requires re-hashing the returned payload
+with VM instructions (and, for the full event, checking the returned tag) and logging a predicate
+that `from_wire` re-checks; a VM `eq`/`assert` over two raw advice results proves nothing about their
+correctness. Because that obligation is precompile-specific (which predicate to log is the
+precompile's business), deferred evaluation is intentionally *not* exposed as a generic safe `sys`
+procedure. A precompile-specific assembly procedure must use VM instructions to relate the raw event
+output to stack or memory values established independently of that advice. Registration has the
+same binding obligation: the wrapper must compute the node digest from the exact stack payload or
+ordered memory chunk sequence supplied to the event. A mismatch cannot support a proof-relevant
+claim about the registered node.
 
 Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node like any
 other successful predicate. `evaluate_deferred_payload` emits no advice for `TRUE` because `TRUE`

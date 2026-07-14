@@ -224,16 +224,17 @@ Deferred DAG details:
 
   `TRUE` is not accepted by this instruction. Tags that semantically require more data chunks or
   pairs fail during precompile evaluation. Code that later uses the node digest must compute it
-  in-circuit from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
-- `adv.register_deferred_data` accepts data, pair-list, and join tags. Its stack input includes an
-  explicit `n_chunks` count, and the host reads the same memory range that in-circuit digest code must
-  hash.
+  inside the VM from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
+- `adv.register_deferred_data` accepts data, pair-list, and join tags. Its stack-supplied `TAG`,
+  `ptr`, and `n_chunks` are visible in the VM execution trace, but the event does not AIR-bind the
+  host-read contents to memory.
   - Data tags read exactly `n_chunks` 8-felt chunks from word-aligned `ptr`.
   - Pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs.
   - Join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
 
-  `TRUE` is not accepted. Code that later uses the node digest must compute it in-circuit from the
-  same `TAG`, `ptr`, and `n_chunks` using the digest rule for the decoded payload shape.
+  `TRUE` is not accepted. Code that later relies on the node must compute its digest with VM
+  instructions from the same `TAG` and ordered chunk sequence. The `register_mem` wrapper does this
+  by hashing the exact range `[ptr, ptr + 8 * n_chunks)` with one absorption per chunk.
 - `adv.evaluate_deferred` requires `NODE_DIGEST` to be already registered. It pushes the canonical
   tag followed by the canonical payload in advice-pop order. For a single 8-felt payload,
   `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack.
@@ -247,8 +248,9 @@ Deferred DAG details:
   - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
     after two `adv_pushw`s.
   - `TRUE` emits no advice.
-- Deferred-evaluation advice values are host-provided hints, so proof-relevant code must bind them
-  to circuit-visible data before relying on them.
+- All `adv.evaluate_deferred*` outputs, including tag-only output, are host-provided hints. Before
+  proof-relevant use, code must relate them with VM instructions to values established independently
+  of that advice.
 
 _Insert into Advice Map:_
 

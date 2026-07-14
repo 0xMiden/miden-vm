@@ -95,7 +95,8 @@ pub fn curve_coefficients() -> [CurveCoefficient; 2] {
 pub enum CurvePoint {
     /// The identity point.
     Identity,
-    /// Affine coordinates represented as canonical little-endian base-field limbs.
+    /// Affine coordinate limbs. Raw values remain untrusted until checked by curve evaluation or a
+    /// checked [`CurveSpec`] boundary.
     Affine { x: Limbs, y: Limbs },
 }
 
@@ -506,7 +507,10 @@ impl CurvePrecompile {
             .expect("curve precompile id is not framework-reserved")
     }
 
-    /// Builds a canonical curve operation tag for join operations.
+    /// Builds a curve operation tag from `op_id`.
+    ///
+    /// Known operation ids decode to their declared shapes; unknown ids produce a tag that this
+    /// precompile rejects.
     pub fn op_tag(op_id: u64) -> Tag {
         let op_id = Felt::new(op_id).expect("curve op id must fit in a felt");
         Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
@@ -518,7 +522,10 @@ impl CurvePrecompile {
         Self::op_tag(Self::MSM_OP_ID)
     }
 
-    /// Builds a point VALUE node from a point value.
+    /// Builds a structural point `VALUE` node from point data.
+    ///
+    /// This does not validate raw affine coordinates; registration and evaluation perform that
+    /// validation before producing a canonical curve value.
     pub fn value_node(curve: CurveId, point: CurvePoint) -> Node {
         match point {
             CurvePoint::Identity => Self::identity_node(curve),
@@ -830,8 +837,7 @@ mod tests {
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {
         let digest = state.register(node)?;
-        let canonical = state.evaluate_digest(digest)?;
-        state.get_node(&canonical).cloned().ok_or(PrecompileError::InvalidNode)
+        state.require_canonical_node(digest).map(|(_, node)| node.clone())
     }
 
     fn assert_invalid_payload<T>(result: Result<T, PrecompileError>) {
@@ -1058,7 +1064,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_affine_point_rejects() {
+    fn off_curve_affine_value_fails_at_registration() {
         let curve = CurveId::Secp256k1;
         let x = UintPrecompile::value_node(curve.base_domain(), [1, 0, 0, 0, 0, 0, 0, 0]);
         let y = UintPrecompile::value_node(curve.base_domain(), [1, 0, 0, 0, 0, 0, 0, 0]);
@@ -1067,7 +1073,7 @@ mod tests {
         state.register(x).expect("x coordinate must register");
         state.register(y).expect("y coordinate must register");
 
-        assert_invalid_payload(evaluate(&mut state, point));
+        assert_invalid_payload(state.register(point));
     }
 
     #[test]

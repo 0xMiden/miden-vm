@@ -3,6 +3,7 @@
 # Regenerate with: {{REGENERATE_COMMAND}}
 
 use miden::precompiles
+use miden::core::word
 
 # {{TITLE}} {{DOMAIN_KIND}} PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
@@ -160,20 +161,15 @@ pub proc is_eq
     exec.eval
     # => [RHS_LO, RHS_HI, LHS_LO, LHS_HI, ...]
 
-    # Compare the two {{VALUE_KIND}} values one word at a time. `eqw` preserves both input words under
-    # the returned bit, so each comparison must explicitly drop its operands before `and`.
+    # Compare the two {{VALUE_KIND}} values one word at a time, consuming each compared pair.
     movupw.2
     # => [LHS_LO, RHS_LO, RHS_HI, LHS_HI, ...]
-    eqw
-    # => [lo_equal, LHS_LO, RHS_LO, RHS_HI, LHS_HI, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [lo_equal, RHS_HI, LHS_HI, ...]
 
     movdn.8
     # => [RHS_HI, LHS_HI, lo_equal, ...]
-    eqw
-    # => [hi_equal, RHS_HI, LHS_HI, lo_equal, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [hi_equal, lo_equal, ...]
     and
     # => [is_equal, ...]
@@ -260,10 +256,39 @@ pub proc is_eq_digest
     exec.precompiles::log_deferred
     # => [VALUE_DIGEST, TARGET_DIGEST, ...]
 
-    eqw
-    # => [is_equal, VALUE_DIGEST, TARGET_DIGEST, ...]
-    movdn.8 dropw dropw
+    exec.word::eq
     # => [is_equal, ...]
+end
+
+#! Opens an already proof-bound canonical {{VALUE_KIND}} VALUE digest and returns its eight
+#! little-endian u32 limbs.
+#! Input:  [VALUE_DIGEST, ...]
+#! Output: [VALUE_U32[8], ...]
+#!
+#! Advice is untrusted, so this re-hashes the advised payload with this module's VALUE_TAG and
+#! asserts raw digest equality in the VM. This does not evaluate arbitrary expression digests or
+#! independently prove registration or canonicity; callers must establish that VALUE_DIGEST is an
+#! already proof-bound canonical VALUE node for this domain.
+pub proc open_value
+    adv.evaluate_deferred_payload
+    # => [VALUE_DIGEST, ...]
+
+    adv_pushw adv_pushw
+    # => [VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
+
+    # Hash the advised payload with VALUE_TAG while preserving the payload for the return.
+    push.VALUE_TAG
+    # => [TAG(VALUE), VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
+    dupw.2 dupw.2
+    # => [VALUE_LO, VALUE_HI, TAG(VALUE), VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
+    hperm
+    swapw.2 dropw dropw
+    # => [ADVISED_VALUE_DIGEST, VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
+
+    movupw.3
+    # => [VALUE_DIGEST, ADVISED_VALUE_DIGEST, VALUE_LO, VALUE_HI, ...]
+    assert_eqw.err="open_value: advised payload does not match VALUE digest"
+    # => [VALUE_LO, VALUE_HI, ...]
 end
 
 #! Evaluates a {{VALUE_KIND}} expression digest and returns its eight little-endian u32 limbs on the stack.

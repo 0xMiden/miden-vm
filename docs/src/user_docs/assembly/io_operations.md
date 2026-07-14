@@ -91,9 +91,11 @@ Registration interprets payloads by the decoded tag shape:
   - pair-list tags interpret them as `lhs_digest || rhs_digest` pairs;
   - join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
 
-Neither register instruction returns the node digest, so proof-relevant code that later uses it must
-compute the digest in-circuit from the same tag and payload or from the same `ptr`/`n_chunks` memory
-range.
+The register arguments are visible in the VM execution trace, but the event does not constrain the
+host-side registration. `adv.register_deferred_data` additionally performs direct host reads without
+adding AIR memory accesses. Neither register instruction returns the node digest, so proof-relevant
+code must compute it with VM instructions from the exact same tag and stack payload or ordered memory
+chunk sequence.
 
 Evaluation advice is also shape-dependent:
 
@@ -108,8 +110,8 @@ Evaluation advice is also shape-dependent:
   - `TRUE` emits no payload advice.
 - `TRUE` emits `Tag::TRUE` for tag-only/full evaluation.
 
-These advice values are host hints and must be bound to circuit-visible data before being used in
-proof-relevant claims.
+All deferred-evaluation outputs, including tag-only output, are host hints. Before proof-relevant
+use, code must relate them with VM instructions to values established independently of that advice.
 
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

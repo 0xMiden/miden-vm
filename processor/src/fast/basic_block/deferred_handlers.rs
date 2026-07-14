@@ -35,7 +35,9 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // onto the advice stack. Payload chunks are arranged for `adv_pushw adv_pushw` ergonomics: the two
 // pushes leave the chunk's LOW word on top of the operand stack, with HIGH beneath it. The full
 // event emits the tag first in advice-pop order, so `adv_pushw adv_pushw adv_pushw` leaves
-// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` for a single 8-felt payload.
+// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` for a single 8-felt payload. All `DeferredEvaluate*` outputs
+// are unbound host hints; proof-relevant callers must relate them with VM instructions to values
+// established independently of that advice.
 
 /// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -76,9 +78,10 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
 /// data chunk or pair still form a
 /// one-chunk/one-pair node here; precompile-specific evaluation rejects the semantic length
 /// mismatch. Registration is delegated to [`miden_core::deferred::DeferredState::register`], so
-/// semantic failures, including false predicates, surface immediately. This event does not return
-/// the node digest; any proof-relevant caller must compute that digest in-circuit from the same tag
-/// and payload.
+/// semantic failures, including false predicates, surface immediately. The stack arguments are
+/// part of the VM execution trace, but the event does not constrain the host-side registration.
+/// This event does not return the node digest; any proof-relevant caller must compute it with VM
+/// instructions from the exact same tag and payload.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -141,9 +144,7 @@ pub(super) fn handle_deferred_evaluate_tag(
 /// are LIFO, each chunk is placed on advice as HIGH then LOW (and chunks are processed in reverse
 /// before front-pushing) so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack
 /// for that chunk. Join payloads use the same convention for their two words, leaving
-/// `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice. These advice values are
-/// intentionally unbound: proof-relevant callers must bind
-/// them to circuit-visible data before relying on them.
+/// `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice.
 pub(super) fn handle_deferred_evaluate_payload(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -194,12 +195,15 @@ fn push_evaluated_payload(
 /// (`[2, 0, 0, 0]`) registers those chunks as framework-owned opaque data, while other data tags
 /// remain precompile-owned. Pair-list nodes interpret chunks as `lhs || rhs` pairs. Join nodes
 /// require `n_chunks == 1` and interpret the one chunk as `lhs || rhs`. TRUE is not accepted. After
-/// checking word alignment, address bounds, and a cheap
-/// state-size precheck, registration and semantic evaluation are delegated to
-/// [`miden_core::deferred::DeferredState::register`], so registration failures surface during this
-/// event. This event does not return the node digest; any proof-relevant caller must compute that
-/// digest in-circuit from the same tag and memory range using the digest rule for the decoded
-/// payload shape.
+/// checking word alignment, address bounds, and a cheap state-size precheck, registration and
+/// semantic evaluation are delegated to [`miden_core::deferred::DeferredState::register`], so
+/// registration failures surface during this event.
+///
+/// The stack-supplied tag, pointer, and chunk count are visible in the VM execution trace, but the
+/// direct host memory reads below do not add AIR memory constraints. Thus, the event alone does not
+/// tie the registered chunks to VM memory. Any proof-relevant caller must compute the node digest
+/// with VM instructions from the same tag and ordered chunk sequence; the shared `register_mem`
+/// MASM wrapper does so by hashing the exact same range.
 pub(super) fn handle_deferred_register_data(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {

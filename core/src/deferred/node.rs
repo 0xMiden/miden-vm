@@ -483,7 +483,7 @@ impl Node {
         felts
     }
 
-    /// Computes the canonical digest used by both host code and in-circuit wrappers.
+    /// Computes the canonical digest used by both host code and Miden VM programs.
     pub fn digest(&self) -> Digest {
         if matches!(&self.payload.0, PayloadRepr::True) {
             assert_eq!(self.tag, Tag::TRUE, "TRUE payload is only valid for Node::TRUE");
@@ -508,9 +508,9 @@ impl Node {
 ///
 /// The shape tells registration and wire validation whether a body is non-empty opaque data, two
 /// child digests, or a non-empty list of digest pairs. It intentionally does not carry
-/// data/pair-list arity: semantic lengths such as hash preimage byte
-/// length or MSM pair count belong to precompile-specific tag arguments and are checked during
-/// precompile evaluation. `True` is the framework sentinel owned exclusively by [`Tag::TRUE`];
+/// data/pair-list arity. Any semantic length encoded by a precompile's tag, such as a hash preimage
+/// byte length, is checked during precompile evaluation. `True` is the framework sentinel owned
+/// exclusively by [`Tag::TRUE`];
 /// precompiles never declare it. Predicate status is not a shape; predicates succeed by evaluating
 /// to [`Node::TRUE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -526,21 +526,6 @@ pub enum NodeType {
 }
 
 impl NodeType {
-    /// Shape for a value-like single-chunk data node.
-    pub const fn value() -> Self {
-        Self::Data
-    }
-
-    /// Shape for a data node with a non-zero semantic chunk count.
-    pub fn data_chunks(n: u32) -> Option<Self> {
-        (n != 0).then_some(Self::Data)
-    }
-
-    /// Shape for a pair-list node with a non-zero semantic pair count.
-    pub fn pair_list(n: u32) -> Option<Self> {
-        (n != 0).then_some(Self::PairList)
-    }
-
     /// Validates that a node's payload matches this declared framework shape.
     pub(crate) fn validate_node(self, node: &Node) -> Result<(), DeferredError> {
         match self {
@@ -633,8 +618,6 @@ mod tests {
         let node = Node::try_data(TAG_A, alloc::vec![block(1), block(9)]).unwrap();
         assert_eq!(node.payload().as_data().unwrap(), &[block(1), block(9)][..]);
         assert!(NodeType::Data.validate_node(&node).is_ok());
-        assert!(NodeType::data_chunks(2).unwrap().validate_node(&node).is_ok());
-        assert_eq!(NodeType::data_chunks(0), None);
     }
 
     #[test]
@@ -702,8 +685,9 @@ mod tests {
     }
 
     #[test]
-    fn data_with_many_chunks_is_not_a_value() {
+    fn data_shape_does_not_imply_one_chunk() {
         let node = Node::try_data(TAG_A, alloc::vec![block(1), block(9)]).unwrap();
+        assert!(NodeType::Data.validate_node(&node).is_ok());
         assert!(node.payload().as_value().is_err());
         assert_eq!(node.payload().as_data().unwrap().len(), 2);
         assert_eq!(node.felt_len(), Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN * 2);
@@ -746,6 +730,7 @@ mod tests {
     fn pair_list_is_non_empty() {
         assert!(Payload::try_pair_list(Vec::<(Digest, Digest)>::new()).is_err());
         assert!(Node::try_pair_list(TAG_A, Vec::<(Digest, Digest)>::new()).is_err());
+        assert!(Node::try_pair_list_chunks(TAG_A, Vec::<DataChunk>::new()).is_err());
 
         let lhs = Node::value(TAG_A, block(1)).unwrap().digest();
         let rhs = Node::value(TAG_A, block(2)).unwrap().digest();
@@ -787,9 +772,6 @@ mod tests {
         let data_node = Node::try_data(TAG_B, alloc::vec![chunk_0, chunk_1]).unwrap();
         assert_eq!(node.digest(), data_node.digest(), "pair-list digest uses chunk hash layout");
 
-        assert_eq!(NodeType::pair_list(2), Some(NodeType::PairList));
-        assert_eq!(NodeType::pair_list(1), Some(NodeType::PairList));
-        assert_eq!(NodeType::pair_list(0), None);
         assert!(NodeType::PairList.validate_node(&node).is_ok());
         assert!(NodeType::Data.validate_node(&node).is_err());
     }

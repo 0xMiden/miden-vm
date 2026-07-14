@@ -129,6 +129,81 @@ fn test_decrypt_documented_stack_contract() {
 }
 
 #[test]
+fn test_decrypt_rejects_tampered_final_tag() {
+    let seed = [14_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+    let plaintext = vec![
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+    ];
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("encryption failed");
+
+    let mut tampered_tag = encrypted.auth_tag().to_elements();
+    tampered_tag[3] += Felt::new_unchecked(1);
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let ciphertext = encrypted.ciphertext();
+
+    let source = format!(
+        "
+    use miden::core::crypto::aead
+
+    begin
+        push.{ciphertext_0:?} push.1000 mem_storew_le dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_le dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_le dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_le dropw
+        push.{tampered_tag:?} push.1016 mem_storew_le dropw
+
+        push.1
+        push.2000
+        push.1000
+        push.{nonce_elements:?}
+        push.{key_elements:?}
+        exec.aead::decrypt
+    end
+    ",
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
+    );
+
+    let mut test = build_test!(source.as_str(), &[]);
+    let valid_plaintext = plaintext;
+    let malicious_handler: Arc<dyn EventHandler> =
+        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
+            Ok(vec![AdviceMutation::extend_stack(valid_plaintext.clone())])
+        });
+
+    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
+    let mut replaced_default_handler = false;
+    for (event, handler) in &mut test.handlers {
+        if event.to_event_id() == decrypt_event_id {
+            *handler = malicious_handler.clone();
+            replaced_default_handler = true;
+        }
+    }
+    assert!(
+        replaced_default_handler,
+        "AEAD decrypt handler should be registered by build_test"
+    );
+
+    expect_assert_error_code_from_msg!(test, "AEAD tag mismatch");
+}
+
+#[test]
 fn test_encrypt_with_known_values() {
     let seed = [2_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -172,7 +247,7 @@ fn test_encrypt_with_known_values() {
         push.2000        # dst_ptr
         push.1000        # src_ptr
         push.{nonce_elements:?}     # nonce
-  
+
         push.{key_elements:?}     # key
 
         exec.aead::encrypt

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, Word, deferred::DeferredState};
+use miden_core::{Felt, Word, deferred::DeferredState, serde::Serializable};
 use miden_core_lib::{CoreLibrary, dsa::ecdsa_k256_keccak};
 use miden_crypto::{
     SequentialCommit,
-    dsa::ecdsa_k256_keccak::{PublicKey, SigningKey},
+    dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
 };
 use miden_precompiles::K1Scalar;
 use miden_processor::{
@@ -15,7 +15,9 @@ use miden_processor::{
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-const VERIFY_EXPECTED_CYCLES: u64 = 1_489;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_425;
+const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
+const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 
 #[test]
 fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
@@ -23,6 +25,35 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
 
     let output = run_verify(&fixture).expect("valid core ECDSA K256/Keccak signature must verify");
     assert_deferred_state_round_trips(&output);
+
+    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
+    assert_eq!(wire.entries.len(), VERIFY_EXPECTED_WIRE_ENTRIES);
+    assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_accepts_high_s_untrusted_witness() {
+    let mut fixture = valid_fixture();
+    let low_s = core::array::from_fn(|i| {
+        fixture.advice[24 + i]
+            .as_canonical_u64()
+            .try_into()
+            .expect("signature limbs are u32")
+    });
+    assert!(!is_high_s(low_s), "miden-crypto signer must produce low-s");
+
+    let high_s = negate_scalar_mod_n(low_s);
+    assert!(is_high_s(high_s), "n - low_s must be high-s");
+
+    let high_s_signature = signature_with_s(&fixture.signature, high_s);
+    assert!(
+        !fixture.public_key.verify(fixture.message, &high_s_signature),
+        "miden-crypto Rust verification must reject high-s",
+    );
+
+    set_s(&mut fixture, high_s);
+    run_verify(&fixture)
+        .expect("high-s remains an equivalent witness when signature advice is not committed");
 }
 
 #[test]
@@ -119,6 +150,8 @@ fn core_ecdsa_k256_keccak_verify_traps_on_valid_but_wrong_public_key() {
 }
 
 struct Fixture {
+    public_key: PublicKey,
+    signature: Signature,
     pk_comm: Word,
     message: Word,
     advice: Vec<Felt>,
@@ -136,10 +169,15 @@ fn valid_fixture() -> Fixture {
         "Rust fixture signature must verify before passing it to MASM",
     );
 
+    let pk_comm = ecdsa_k256_keccak::public_key_commitment(&public_key);
+    let advice = ecdsa_k256_keccak::encode_signature(&public_key, &signature);
+
     Fixture {
-        pk_comm: ecdsa_k256_keccak::public_key_commitment(&public_key),
+        public_key,
+        signature,
+        pk_comm,
         message,
-        advice: ecdsa_k256_keccak::encode_signature(&public_key, &signature),
+        advice,
     }
 }
 
@@ -169,6 +207,43 @@ fn set_s(fixture: &mut Fixture, limbs: [u32; 8]) {
 
 fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
     limbs.map(Felt::from_u32)
+}
+
+fn is_high_s(value: [u32; 8]) -> bool {
+    let negated = negate_scalar_mod_n(value);
+    value.iter().rev().cmp(negated.iter().rev()).is_gt()
+}
+
+fn signature_with_s(signature: &Signature, s: [u32; 8]) -> Signature {
+    let mut sec1 = signature.to_sec1_bytes();
+    sec1[32..].copy_from_slice(&le_limbs_to_be_bytes(s));
+    Signature::from_sec1_bytes_and_recovery_id(sec1, signature.v() ^ 1)
+        .expect("canonical high-s scalar and recovery ID must encode")
+}
+
+fn le_limbs_to_be_bytes(limbs: [u32; 8]) -> [u8; 32] {
+    let mut bytes = [0; 32];
+    for (i, limb) in limbs.iter().rev().enumerate() {
+        bytes[i * 4..(i + 1) * 4].copy_from_slice(&limb.to_be_bytes());
+    }
+    bytes
+}
+
+fn negate_scalar_mod_n(value: [u32; 8]) -> [u32; 8] {
+    let mut borrow = 0u64;
+    let result = core::array::from_fn(|i| {
+        let modulus_limb = K1Scalar::MODULUS[i] as u64;
+        let subtrahend = value[i] as u64 + borrow;
+        let (limb, next_borrow) = if modulus_limb >= subtrahend {
+            (modulus_limb - subtrahend, 0)
+        } else {
+            ((1u64 << 32) + modulus_limb - subtrahend, 1)
+        };
+        borrow = next_borrow;
+        limb as u32
+    });
+    assert_eq!(borrow, 0, "canonical scalar must be less than the modulus");
+    result
 }
 
 fn run_verify(fixture: &Fixture) -> Result<ExecutionOutput, ExecutionError> {

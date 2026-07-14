@@ -3,6 +3,7 @@ use miden::precompiles::curves::secp256k1
 use miden::precompiles::fields::k1_base
 use miden::precompiles::fields::k1_scalar
 use miden::core::crypto::hashes::poseidon2
+use miden::core::word
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -15,7 +16,9 @@ use miden::core::crypto::hashes::poseidon2
 # PROCEDURES
 # ================================================================================================
 
-#! Verifies a secp256k1 ECDSA signature using the `miden-crypto::ecdsa_k256_keccak` message format.
+#! Verifies a secp256k1 ECDSA witness using the `miden-crypto::ecdsa_k256_keccak` message,
+#! public-key commitment, and signature-scalar conventions, encoded in the native limb ABI below.
+#! Acceptance intentionally differs from the Rust verifier: high-s witnesses are accepted.
 #!
 #! Inputs:
 #!   Operand stack: [PK_COMM, MSG, ...]
@@ -38,10 +41,10 @@ use miden::core::crypto::hashes::poseidon2
 #! No result word is pushed. The procedure traps on malformed native limbs, invalid/off-curve public
 #! keys, invalid signature scalars, or failed signature verification.
 #!
-#! Low-s note: the signature only needs to satisfy the ECDSA equation with canonical, nonzero scalar
-#! values; low-s normalization (`SIG_S <= n/2`) is not checked. Thus both `(r, s)` and `(r, n - s)`
-#! verify when otherwise valid. If the signature encoding is protocol-visible or must be unique,
-#! enforce `0 < s <= n/2` before calling or canonicalize upstream.
+#! Low-s is intentionally not enforced: this procedure proves that some untrusted advice satisfies
+#! the ECDSA equation, and `(r, s)` and `(r, n - s)` are equivalent witnesses. An adaptation that
+#! verifies a committed or canonical Ethereum signature must bind the exact signature encoding inside
+#! the VM and enforce low-s on that bound value.
 #!
 #! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
 #! reduced Keccak prehash, and signature scalars through precompile-backed deferred evaluation.
@@ -171,11 +174,10 @@ proc load_signature_k1
     dupw.1
     # => [SIG_R, SIG_S, SIG_R, ...]
     exec.k1_scalar::push_zero_digest
-    eqw
-    # => [is_sig_r_zero, ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
-    assertz.err="invalid ECDSA signature: r is zero"
     # => [ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
-    dropw dropw
+    exec.word::eq
+    # => [is_sig_r_zero, SIG_S, SIG_R, ...]
+    assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, ...]
 end
 
@@ -213,16 +215,16 @@ proc assert_x_eq_scalar_k1
     # is sound and avoids a second curve evaluation.
     exec.secp256k1::push_identity
     # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-    eqw
-    # => [is_identity, IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    exec.word::eq
+    # => [is_identity, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
     assertz.err="invalid ECDSA verification point: identity"
-    # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-    dropw dropw
     # => [X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
     swapw dropw
     # => [X_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
-    exec.k1_base::eval
+    # X_DIGEST is a canonical k1-base VALUE child of the proof-bound curve VALUE above. Open that
+    # commitment directly; ordinary `eval` remains necessary for arbitrary expression digests.
+    exec.k1_base::open_value
     # => [X_U32[8], SIG_R_SCALAR_VALUE_DIGEST, ...]
     exec.k1_scalar::load_reduced_256
     # => [X_SCALAR_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]

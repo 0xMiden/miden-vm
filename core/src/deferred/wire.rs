@@ -50,11 +50,14 @@ pub const TRUE_INDEX: u32 = 0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WireEntry {
-    /// Non-empty data payload interpreted by the tag's precompile; a one-chunk entry is a value.
+    /// Raw data payload interpreted by the tag's precompile.
+    ///
+    /// Rehydration requires at least one chunk. A tag's precompile may assign value semantics to a
+    /// one-chunk payload, but the wire shape itself does not.
     Data { tag: Tag, chunks: Vec<DataChunk> },
     /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
     Join { tag: Tag, lhs: u32, rhs: u32 },
-    /// One or more structural child-reference pairs.
+    /// Raw structural child-reference pairs. Rehydration requires at least one pair.
     PairList { tag: Tag, pairs: Vec<(u32, u32)> },
 }
 
@@ -569,8 +572,44 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
+        deferred::{DeferredContext, Payload, Precompile, precompile_id},
         serde::{ByteWriter, Serializable},
     };
+
+    #[derive(Debug, Clone, Copy)]
+    struct PairListFixture;
+
+    impl PairListFixture {
+        const NAME: &'static str = "wire-pair-list-fixture";
+
+        fn tag() -> Tag {
+            Tag::precompile(precompile_id(Self::NAME), [ZERO; 3])
+                .expect("fixture id is precompile-owned")
+        }
+    }
+
+    impl Precompile for PairListFixture {
+        fn name(&self) -> &'static str {
+            Self::NAME
+        }
+
+        fn id(&self) -> Felt {
+            precompile_id(Self::NAME)
+        }
+
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            (args == [ZERO; 3]).then_some(NodeType::PairList)
+        }
+
+        fn evaluate(
+            &self,
+            _args: [Felt; 3],
+            _payload: &Payload,
+            _context: &mut DeferredContext<'_>,
+        ) -> Result<Node, PrecompileError> {
+            Ok(Node::TRUE)
+        }
+    }
 
     fn felts(seed: u64) -> [Felt; 8] {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
@@ -600,6 +639,29 @@ mod tests {
 
         assert_eq!(entries, alloc::vec![(node.digest(), node.clone())]);
         assert_eq!(root, node.digest());
+    }
+
+    #[test]
+    fn rehydration_rejects_empty_data_and_pair_list_entries() {
+        let empty_data =
+            wire(alloc::vec![WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() }]);
+        assert!(matches!(
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &empty_data, usize::MAX,),
+            Err(IntegrityError::InvalidStructure)
+        ));
+
+        let empty_pairs = wire(alloc::vec![WireEntry::PairList {
+            tag: PairListFixture::tag(),
+            pairs: Vec::new(),
+        }]);
+        assert!(matches!(
+            DeferredState::from_wire(
+                Arc::new(PrecompileRegistry::new().with_precompile(PairListFixture)),
+                &empty_pairs,
+                usize::MAX,
+            ),
+            Err(IntegrityError::InvalidStructure)
+        ));
     }
 
     #[test]

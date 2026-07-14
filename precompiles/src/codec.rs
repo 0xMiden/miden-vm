@@ -1,7 +1,6 @@
-//! Shared chunk ↔ byte codec for the core precompiles. Each precompile's `evaluate` consumes its
-//! data body as a flat byte buffer, checks the semantic chunk count carried by its tag arguments,
-//! and this codec strips the trailing zero pad back down to the declared `n_bytes` after validating
-//! that the discarded pad bytes are zero.
+//! Shared chunk ↔ byte codec for hash precompiles. Hash evaluation consumes framework-owned chunk
+//! list children, derives the expected chunk count from the assertion's declared byte length, and
+//! uses this codec to validate and strip trailing zero padding back to `n_bytes`.
 
 use alloc::vec::Vec;
 use core::num::NonZeroU32;

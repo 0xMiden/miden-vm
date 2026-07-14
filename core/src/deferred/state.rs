@@ -163,6 +163,10 @@ impl DeferredState {
         self.remaining_elements = max_elements.saturating_sub(used_elements);
     }
 
+    /// Recognizes `tag` under the installed registry and returns its declared outer payload shape.
+    ///
+    /// This does not inspect a payload, validate structural child references, or evaluate
+    /// precompile semantics. [`Self::register`] performs those checks for a complete node.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         self.registry.decode_node_type(tag)
     }
@@ -401,5 +405,56 @@ impl<'a> DeferredContext<'a> {
     /// evaluation. Helper registration follows the same eager semantics as ordinary registration.
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         self.state.register(node)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Felt, ZERO,
+        deferred::{Payload, Precompile, precompile_id},
+    };
+
+    #[derive(Debug, Clone, Copy)]
+    struct RejectingPrecompile;
+
+    impl Precompile for RejectingPrecompile {
+        fn name(&self) -> &'static str {
+            "rejecting-registration-fixture"
+        }
+
+        fn id(&self) -> Felt {
+            precompile_id(self.name())
+        }
+
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            (args == [ZERO; 3]).then_some(NodeType::Data)
+        }
+
+        fn evaluate(
+            &self,
+            _args: [Felt; 3],
+            _payload: &Payload,
+            _context: &mut DeferredContext<'_>,
+        ) -> Result<Node, PrecompileError> {
+            Err(PrecompileError::AssertionFailed)
+        }
+    }
+
+    #[test]
+    fn register_eagerly_propagates_precompile_evaluation_errors() {
+        let precompile = RejectingPrecompile;
+        let tag =
+            Tag::precompile(precompile.id(), [ZERO; 3]).expect("fixture id is precompile-owned");
+        let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
+        let mut state = DeferredState::new(registry, usize::MAX).unwrap();
+        let node = Node::value(tag, [ZERO; 8]).unwrap();
+        let digest = node.digest();
+
+        let error = state.register(node).unwrap_err();
+
+        assert!(matches!(error.root(), PrecompileError::AssertionFailed));
+        assert_eq!(state.get_canonical_digest(digest), None);
     }
 }

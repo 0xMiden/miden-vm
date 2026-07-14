@@ -18,22 +18,23 @@ const CHUNKS_TAG = [2, 0, 0, 0]
 # assembled inside the aggregate core package. They should be deduplicated against a single shared
 # source once the precompile proof-model migration settles.
 #
-# `register_value` / `register_mem` are safe by default: they derive the node digest in-circuit,
-# so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
-# proc here — deferred evaluation returns an *unbound* host hint (`adv.evaluate_deferred_payload`
-# for payload-only callers, or `adv.evaluate_deferred` when the canonical tag is also needed), and
-# using it soundly requires re-hashing in-circuit and logging a predicate the verifier re-checks.
+# `register_value` / `register_mem` bind their registration inputs by deriving the node digest with
+# VM instructions from the exact same tag and payload. There is intentionally no `evaluate` proc
+# here — deferred evaluation returns an *unbound* host hint (`adv.evaluate_deferred_payload` for
+# payload-only callers, or `adv.evaluate_deferred` when the canonical tag is also needed), and using
+# it soundly requires re-hashing with VM instructions and logging a predicate the verifier
+# re-checks.
 # That discipline is precompile-specific, so each precompile wraps the raw event itself rather than
 # calling a deceptively "safe" shared helper.
 
 #! Registers the expression node currently laid out in Poseidon2 sponge order and returns its
 #! content-addressed digest.
 #!
-#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
-#! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
-#! by advice. The helper expects the stack in Poseidon2 sponge layout — `[R0=PAYLOAD_LO,
-#! R1=PAYLOAD_HI, C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0
-#! word (`state[0..4]`), matching `Node::digest`.
+#! `adv.register_deferred` interns the node host-side (no stack or advice output); `hperm` then
+#! derives the digest inside the VM from the same operand-stack payload. The helper expects the
+#! stack in Poseidon2 sponge layout — `[R0=PAYLOAD_LO, R1=PAYLOAD_HI, C=TAG]` — so one `hperm`
+#! produces the permuted state and the digest is its rate0 word (`state[0..4]`), matching
+#! `Node::digest`.
 #!
 #! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
 #! Output: [NODE_DIGEST, ...]
@@ -69,12 +70,13 @@ end
 #! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
 #! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
-#! `adv.register_deferred_data` interns the node host-side (reading `8n` felts from memory at
-#! `ptr`, where `n` is the stack-supplied `n_chunks`); it produces no stack or advice output. The
-#! digest is then derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity
-#! = `TAG`, one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather
-#! than supplied by advice, and the rate0 word matches `Node::digest`. Empty data bodies are
-#! forbidden, so `n ≥ 1` and the linear-hash loop always runs at least one permutation.
+#! `adv.register_deferred_data` interns the node host-side by reading `8n` felts from memory at
+#! `ptr`, where `n` is the stack-supplied `n_chunks`; it produces no stack or advice output. The
+#! event leaves those stack arguments unchanged, but its direct host read adds no AIR memory access.
+#! This wrapper binds the registration input by applying a Poseidon2 linear hash with VM instructions
+#! to the exact same `TAG` and ordered chunk sequence, using `TAG` as the initial capacity and one
+#! `hperm` per 8-felt block loaded by `mem_stream`. The rate0 word matches `Node::digest`. Empty data
+#! bodies are forbidden, so `n ≥ 1` and the linear-hash loop always runs at least one permutation.
 #!
 #! Input:  [TAG, ptr, n_chunks, ...]
 #! Output: [NODE_DIGEST, ...]

@@ -28,6 +28,7 @@ fn supported_curves_satisfy_public_contract() {
         assert_arithmetic_assertions(curve.module);
         assert_scalar_mul_wrappers(curve);
         assert_eval_generator(curve);
+        assert_predicates_have_expected_polarity(curve.module);
         assert_identity_assertions_have_expected_polarity(curve.module);
     }
 }
@@ -114,6 +115,44 @@ fn assert_eval_generator(curve: CurveCase) {
 
     assert_stack_words(&read_stack_felts(&output, 12), &[generator.digest(), x_digest, y_digest]);
     assert_deferred_state_round_trips(&output);
+}
+
+fn assert_predicates_have_expected_polarity(module: &str) {
+    run_curve_program(
+        module,
+        &format!(
+            "
+            exec.{module}::push_generator
+            exec.{module}::push_generator
+            exec.{module}::is_eq
+            assert
+
+            exec.{module}::push_identity
+            exec.{module}::push_generator
+            exec.{module}::is_eq
+            assertz
+
+            exec.{module}::push_generator
+            exec.{module}::push_generator
+            exec.{module}::is_eq_digest
+            assert
+
+            exec.{module}::push_identity
+            exec.{module}::push_generator
+            exec.{module}::is_eq_digest
+            assertz
+
+            exec.{module}::push_identity
+            exec.{module}::is_identity
+            assert
+
+            exec.{module}::push_generator
+            exec.{module}::is_identity
+            assertz
+            ",
+        ),
+        "curve predicate polarity",
+    );
 }
 
 fn assert_identity_assertions_have_expected_polarity(module: &str) {

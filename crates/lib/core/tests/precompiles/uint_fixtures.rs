@@ -1,8 +1,11 @@
 use std::marker::PhantomData;
 
-use miden_core::Felt;
+use miden_core::{
+    Felt,
+    deferred::{DeferredError, PrecompileError, TRUE_DIGEST},
+};
 use miden_precompiles::UintSpec;
-use miden_processor::ExecutionOutput;
+use miden_processor::{ExecutionError, ExecutionOutput};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_deferred_state_round_trips, assert_memory_u32x8,
@@ -17,6 +20,16 @@ const ZERO: U32x8 = [0, 0, 0, 0, 0, 0, 0, 0];
 const ONE: U32x8 = [1, 0, 0, 0, 0, 0, 0, 0];
 const TWO: U32x8 = [2, 0, 0, 0, 0, 0, 0, 0];
 const MAX: U32x8 = [u32::MAX; 8];
+
+fn assert_invalid_payload_error(error: ExecutionError) {
+    let ExecutionError::DeferredError { err, .. } = error else {
+        panic!("expected deferred invalid-payload error, got {error:?}");
+    };
+    assert!(
+        matches!(err.root(), PrecompileError::Other(DeferredError::InvalidPayload)),
+        "expected invalid payload, got {err:?}",
+    );
+}
 
 #[derive(Clone, Copy)]
 struct BinaryCase {
@@ -121,6 +134,8 @@ impl<M: UintSpec> UintModule<M> {
 
     fn assert_common_uint_contract(&self, binary_cases: &[BinaryCase]) {
         self.assert_load_eval_and_memory([1, 2, 3, 4, 5, 6, 7, 8], [0, 1, 0, 2, 0, 3, 0, 4]);
+        self.assert_open_value([7, 6, 5, 4, 3, 2, 1, 0]);
+        self.expect_open_expression_digest_trap();
         self.assert_load_mem_stream_advances_pointer([8, 7, 6, 5, 4, 3, 2, 1]);
         self.assert_common_constants_eval();
         self.assert_binary_cases(binary_cases);
@@ -161,6 +176,49 @@ impl<M: UintSpec> UintModule<M> {
         assert_stack_u32x8(&output, stack_value);
         assert_memory_u32x8(&output, OUT_PTR, memory_value);
         assert_deferred_state_round_trips(&output);
+    }
+
+    fn assert_open_value(&self, expected: U32x8) {
+        let proof_bound_value = format!(
+            "
+            {value}
+            exec.{module}::load
+            dupw dupw
+            exec.{module}::assert_eq
+            ",
+            module = self.module,
+            value = masm_push_u32x8(expected),
+        );
+
+        let baseline =
+            self.run(&format!("{proof_bound_value}\ndropw"), "proof-bound VALUE baseline");
+        let opened = self.run_stack(
+            &format!("{proof_bound_value}\nexec.{}::open_value", self.module),
+            expected,
+            "open_value",
+        );
+
+        assert_ne!(
+            baseline.deferred_state.root(),
+            TRUE_DIGEST,
+            "open_value test input must be proof-bound by a nonempty deferred root",
+        );
+        assert_eq!(
+            opened.deferred_state.root(),
+            baseline.deferred_state.root(),
+            "open_value must not advance the deferred root",
+        );
+        assert_eq!(
+            opened.deferred_state.to_wire().expect("opened wire must encode"),
+            baseline.deferred_state.to_wire().expect("baseline wire must encode"),
+            "open_value must not add deferred wire entries",
+        );
+    }
+
+    fn expect_open_expression_digest_trap(&self) {
+        self.expect_trap(
+            "exec.{module}::push_one_digest\nexec.{module}::push_two_digest\nexec.{module}::add\nexec.{module}::open_value",
+        );
     }
 
     fn assert_load_mem_stream_advances_pointer(&self, expected: U32x8) {
@@ -317,7 +375,9 @@ impl<M: UintSpec> UintModule<M> {
     }
 
     fn expect_non_u32_limb_trap(&self) {
-        self.expect_trap("push.0.0.0.0.0.0.0.4294967296\nexec.{module}::load\nexec.{module}::eval");
+        self.expect_invalid_payload_registration_trap(
+            "push.0.0.0.0.0.0.0.4294967296\nexec.{module}::load",
+        );
     }
 
     fn assert_prime_field_specific_contract(&self) {
@@ -398,11 +458,9 @@ impl<M: UintSpec> UintModule<M> {
     }
 
     fn expect_modulus_as_noncanonical_value_trap(&self) {
-        self.expect_trap(&format!(
-            "{}\nexec.{}::load\nexec.{}::eval",
-            masm_push_u32x8(M::ENCODED_MODULUS),
-            self.module,
-            self.module
+        self.expect_invalid_payload_registration_trap(&format!(
+            "{}\npush.{MEM_PTR}\nexec.{{module}}::load_mem",
+            masm_store_u32x8(M::ENCODED_MODULUS, MEM_PTR),
         ));
     }
 
@@ -458,6 +516,12 @@ impl<M: UintSpec> UintModule<M> {
         expect_precompile_trap(&self.program(&body));
     }
 
+    fn expect_invalid_payload_registration_trap(&self, body: &str) {
+        let body = body.replace("{module}", self.module);
+        let error = expect_precompile_trap(&self.program(&body));
+        assert_invalid_payload_error(error);
+    }
+
     fn program(&self, body: &str) -> String {
         format!(
             "
@@ -498,7 +562,24 @@ pub fn assert_cross_modulus_children_rejected(lhs: &'static str, rhs: &'static s
             exec.{rhs}::push_one_digest
             exec.{lhs}::push_one_digest
             exec.{lhs}::add
-            exec.{lhs}::eval
+        end
+        "
+    );
+
+    let error = expect_precompile_trap(&source);
+    assert_invalid_payload_error(error);
+}
+
+pub fn assert_cross_modulus_open_rejected(expected: &'static str, actual: &'static str) {
+    assert_ne!(expected, actual, "cross-modulus opening requires two distinct modules");
+
+    let source = format!(
+        "
+        use miden::precompiles::fields::{expected}
+        use miden::precompiles::fields::{actual}
+        begin
+            exec.{actual}::push_one_digest
+            exec.{expected}::open_value
         end
         "
     );

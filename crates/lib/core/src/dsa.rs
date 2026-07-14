@@ -15,8 +15,10 @@
 
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
-/// Functions in this module generate the public-key commitment and native advice elements expected
-/// by the `ecdsa_k256_keccak::verify` ABI.
+/// Functions in this module generate the public-key commitment and native advice witness expected
+/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
+/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
+/// Rust verifier, the MASM verifier intentionally accepts high-s values.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
@@ -31,9 +33,10 @@ pub mod ecdsa_k256_keccak {
     /// Signs the provided message with the supplied secret key and encodes the resulting signature
     /// and public key into the native advice-stack format expected by `ecdsa_k256_keccak::verify`.
     ///
-    /// See [`encode_signature()`] for the advice encoding. Use [`public_key_commitment()`] to
-    /// derive the `PK_COMM` word that must be provided on the operand stack alongside the
-    /// message.
+    /// The `miden-crypto` signer produces a low-s signature, but the returned elements are
+    /// uncommitted advice witness data and the MASM verifier does not require low-s. See
+    /// [`encode_signature()`] for the advice encoding. Use [`public_key_commitment()`] to derive
+    /// the `PK_COMM` word that must be provided on the operand stack alongside the message.
     pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
         let pk = sk.public_key();
         let sig = sk.sign(msg);
@@ -45,9 +48,12 @@ pub mod ecdsa_k256_keccak {
     ///
     /// The encoding is the structural order consumed from the advice stack:
     /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. The public-key elements come from
-    /// [`SequentialCommit::to_elements()`], matching the commitment returned by
-    /// [`public_key_commitment()`].
+    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
+    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
+    /// to the supplied signature encoding.
+    ///
+    /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
+    /// commitment returned by [`public_key_commitment()`].
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         let pk_elements = pk.to_elements();
         assert_eq!(

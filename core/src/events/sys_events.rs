@@ -307,8 +307,10 @@ pub enum SystemEvent {
     /// evaluation. Registration is performed by [`crate::deferred::DeferredState::register`], so
     /// semantic failures surface immediately.
     ///
-    /// This event does not push advice and does not return the node digest. Assembly code that
-    /// later uses that digest must compute it in-circuit from the same `TAG` and payload.
+    /// This event does not push advice or return the node digest. The stack arguments are visible
+    /// in the VM execution trace, but the host-side registration is not constrained by the event.
+    /// Assembly code that later relies on the digest must compute it inside the VM from the same
+    /// `TAG` and payload.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -329,9 +331,9 @@ pub enum SystemEvent {
     /// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack for a single 8-felt payload. Data
     /// payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving canonical
     /// chunk order. Join payloads use the same two-word LIFO convention, leaving
-    /// `[lhs, rhs, TAG, ...]`. `TRUE` pushes only `Tag::TRUE`. These felts are an unbound host
-    /// hint, so proof-relevant code must bind
-    /// them to circuit-visible data before relying on them.
+    /// `[lhs, rhs, TAG, ...]`. `TRUE` pushes only `Tag::TRUE`. These felts are unbound host hints.
+    /// Before proof-relevant use, assembly code must relate them with VM instructions to values
+    /// established independently of that advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -345,7 +347,9 @@ pub enum SystemEvent {
     /// Evaluates a registered deferred node and pushes only its canonical tag as advice.
     ///
     /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
-    /// state. `TRUE` pushes `Tag::TRUE`.
+    /// state. `TRUE` pushes `Tag::TRUE`. The returned tag is an unbound host hint; before
+    /// proof-relevant use, assembly code must relate it with VM instructions to a value established
+    /// independently of that advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -361,9 +365,9 @@ pub enum SystemEvent {
     /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
     /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join payloads use
     /// the same two-word LIFO convention, leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE`
-    /// pushes no advice. These felts are an unbound host hint, so proof-relevant code must bind
-    /// them to circuit-visible
-    /// data before relying on them.
+    /// pushes no advice. These felts are unbound host hints. Before proof-relevant use, assembly
+    /// code must relate them with VM instructions to values established independently of that
+    /// advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -375,20 +379,26 @@ pub enum SystemEvent {
 
     /// Registers and eagerly evaluates a memory-backed deferred node.
     ///
-    /// `TAG` is one word (4 field elements). The installed registry decodes `TAG` to determine the
-    /// memory-backed payload shape. The stack-supplied `n_chunks` determines the memory range and
-    /// is shared with any in-circuit digest loop. Data tags read exactly `n_chunks` 8-felt
-    /// [`crate::deferred::DataChunk`] values from memory starting at `ptr`; exact
-    /// [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) registers those chunks as framework-owned
-    /// opaque data, while other data tags remain precompile-owned. Malformed id-2 tags are rejected
-    /// during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs. Join tags require
-    /// `n_chunks == 1` and interpret the single chunk as `lhs || rhs`. `TRUE` is not accepted. The
-    /// handler performs a cheap budget pre-check before allocating or reading memory,
-    /// then delegates registration to [`crate::deferred::DeferredState::register`].
+    /// `TAG` is one word (4 field elements), and the installed registry decodes it to determine the
+    /// memory-backed payload shape. The stack-supplied `ptr` and `n_chunks` are visible in the VM
+    /// execution trace and select the range `[ptr, ptr + 8 * n_chunks)`. The host reads `n_chunks`
+    /// 8-felt [`crate::deferred::DataChunk`] values from that range, but this event adds no AIR
+    /// constraint tying the registered contents to those memory cells.
     ///
-    /// This event does not push advice and does not return the node digest. Assembly code that
-    /// later uses that digest must compute it in-circuit from the same `TAG` and memory range
-    /// using the digest rule for the decoded payload shape.
+    /// Exact [`crate::deferred::Tag::CHUNKS`] (`[2, 0, 0, 0]`) registers the chunks as
+    /// framework-owned opaque data, while other data tags remain precompile-owned. Malformed id-2
+    /// tags are rejected during tag decode. Pair-list tags interpret chunks as `lhs || rhs` pairs.
+    /// Join tags require `n_chunks == 1` and interpret the single chunk as `lhs || rhs`. `TRUE` is
+    /// not accepted. The handler performs a cheap budget pre-check before allocating or reading
+    /// memory, then delegates registration to [`crate::deferred::DeferredState::register`].
+    ///
+    /// This event does not push advice or return the node digest. A program that relies on the
+    /// registered node must compute its digest with VM instructions from the same `TAG` and ordered
+    /// chunk sequence. The `register_mem` MASM wrapper does this by applying a Poseidon2 linear
+    /// hash to the same range, with one absorption per chunk and `TAG` as the initial capacity
+    /// word. If the event and the VM hash different chunk sequences, the VM-computed digest
+    /// does not identify the host-registered node and cannot bind that registration into a
+    /// proof-relevant deferred claim.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, n_chunks, ...]
