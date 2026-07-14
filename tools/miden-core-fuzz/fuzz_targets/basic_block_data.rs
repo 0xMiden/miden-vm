@@ -7,7 +7,7 @@
 //!
 //! This is exercised through the full MastForest deserialization path.
 //!
-//! Run with: cargo +nightly fuzz run basic_block_data --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run basic_block_data --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

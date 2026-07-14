@@ -16,27 +16,27 @@ libfuzzer-sys = "0.4"
 serde_json = "1.0"
 
 [dependencies.miden-core]
-path = "../core"
+path = "../../core"
 features = ["std", "serde"]
 
 [dependencies.miden-assembly-syntax]
-path = "../crates/assembly-syntax"
+path = "../../crates/assembly-syntax"
 features = ["std", "serde"]
 
 [dependencies.miden-assembly]
-path = "../crates/assembly"
+path = "../../crates/assembly"
 features = ["std"]
 
 [dependencies.miden-mast-package]
-path = "../crates/mast-package"
+path = "../../crates/mast-package"
 features = ["std"]
 
 [dependencies.miden-package-registry]
-path = "../crates/package-registry"
+path = "../../crates/package-registry"
 features = ["std", "serde", "resolver"]
 
 [dependencies.miden-project]
-path = "../crates/project"
+path = "../../crates/project"
 features = ["std", "serde"]
 
 [dependencies.toml]

@@ -4,7 +4,7 @@
 //! kernel project layouts. It also reads emitted debug sections and converts assembled executable
 //! and kernel packages through the public package APIs.
 //!
-//! Run with: cargo +nightly fuzz run project_assemble --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run project_assemble --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

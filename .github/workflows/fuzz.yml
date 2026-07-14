@@ -84,11 +84,11 @@ jobs:
           ')"
           test -n "$FUZZ_TARGET"
           # Build the fuzz target first
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir miden-core-fuzz "$TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-core-fuzz "$TARGET"
           # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
-          FUZZ_BIN="miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          FUZZ_BIN="tools/miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
-          CORPUS_DIR="miden-core-fuzz/corpus/$TARGET"
+          CORPUS_DIR="tools/miden-core-fuzz/corpus/$TARGET"
           if [ -d "$CORPUS_DIR" ]; then
             "$FUZZ_BIN" "$CORPUS_DIR" -max_total_time=60 -runs=10000
           else
@@ -138,8 +138,8 @@ jobs:
             }
           ')"
           test -n "$FUZZ_TARGET"
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir miden-crypto-fuzz "$TARGET"
-          FUZZ_BIN="miden-crypto-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-crypto-fuzz "$TARGET"
+          FUZZ_BIN="tools/miden-crypto-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
           "$FUZZ_BIN" -max_total_time=60 -runs=10000
 
@@ -182,7 +182,7 @@ jobs:
             }
           ')"
           test -n "$FUZZ_TARGET"
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir miden-serde-utils-fuzz "$TARGET"
-          FUZZ_BIN="miden-serde-utils-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-serde-utils-fuzz "$TARGET"
+          FUZZ_BIN="tools/miden-serde-utils-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
           "$FUZZ_BIN" -max_total_time=60 -runs=10000

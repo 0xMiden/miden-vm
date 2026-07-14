@@ -3,7 +3,7 @@
 //! Package-owned debug info contains source/type/function sections and source-keyed MAST
 //! occurrence metadata.
 //!
-//! Run with: cargo +nightly fuzz run debug_info --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run debug_info --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

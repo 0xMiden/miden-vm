@@ -1,6 +1,6 @@
 //! Fuzz target for ExecutionProof deserialization.
 //!
-//! Run with: cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

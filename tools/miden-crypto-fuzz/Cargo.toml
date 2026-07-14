@@ -11,7 +11,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-miden-crypto  = { features = ["concurrent", "fuzzing"], path = "../crates/crypto" }
+miden-crypto  = { features = ["concurrent", "fuzzing"], path = "../../crates/crypto" }
 
 # Existing SMT fuzz target (for sequential vs parallel consistency)
 [[bin]]

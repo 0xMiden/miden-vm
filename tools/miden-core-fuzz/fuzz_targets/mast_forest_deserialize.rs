@@ -3,7 +3,7 @@
 //! This target feeds arbitrary byte sequences to MastForest::read_from_bytes
 //! to find panics, crashes, or undefined behavior in the deserialization path.
 //!
-//! Run with: cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

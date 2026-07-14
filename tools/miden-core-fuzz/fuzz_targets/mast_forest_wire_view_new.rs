@@ -4,7 +4,7 @@
 //! `MastForestWireView::new()`. It exercises layout scanning and cheap random-access helpers
 //! without going through full trusted or untrusted materialization.
 //!
-//! Run with: cargo +nightly fuzz run mast_forest_wire_view_new --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run mast_forest_wire_view_new --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

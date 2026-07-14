@@ -7,7 +7,7 @@
 //!
 //! The validation path should never panic on any input.
 //!
-//! Run with: cargo +nightly fuzz run mast_forest_validate --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run mast_forest_validate --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

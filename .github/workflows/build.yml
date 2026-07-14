@@ -82,12 +82,12 @@ jobs:
         run: rustup toolchain install --no-self-update
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
-          # We need to explicitly cache the miden-core-fuzz workspace, as only the root workspace is
+          # We need to explicitly cache the tools/miden-core-fuzz workspace, as only the root workspace is
           # cached by default.
           workspaces: |
             .
-            miden-core-fuzz
-            miden-crypto-fuzz
-            miden-serde-utils-fuzz
+            tools/miden-core-fuzz
+            tools/miden-crypto-fuzz
+            tools/miden-serde-utils-fuzz
       - name: Check fuzz workspaces
         run: make check-fuzz

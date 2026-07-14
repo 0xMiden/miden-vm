@@ -40,8 +40,8 @@ runs:
             - 'tests/wycheproof/**'
             - 'benches/miden-bench/**'
             - 'benches/smt-codspeed/**'
-            - 'miden-crypto-fuzz/**'
-            - 'miden-serde-utils-fuzz/**'
+            - 'tools/miden-crypto-fuzz/**'
+            - 'tools/miden-serde-utils-fuzz/**'
           vm:
             - 'air/**'
             - 'core/**'
@@ -69,7 +69,7 @@ runs:
             - 'crates/utils-sync/**'
             - 'benches/blake3-bench/**'
             - 'benches/synthetic-bench/**'
-            - 'miden-core-fuzz/**'
+            - 'tools/miden-core-fuzz/**'
           rust-workspace:
             - '.github/actions/**'
             - '.github/workflows/**'
@@ -81,9 +81,9 @@ runs:
             - 'rustfmt.toml'
             - 'scripts/**'
           fuzz:
-            - 'miden-core-fuzz/**'
-            - 'miden-crypto-fuzz/**'
-            - 'miden-serde-utils-fuzz/**'
+            - 'tools/miden-core-fuzz/**'
+            - 'tools/miden-crypto-fuzz/**'
+            - 'tools/miden-serde-utils-fuzz/**'
             - '.github/workflows/fuzz.yml'
           release:
             - '.github/actions/workspace-release/**'

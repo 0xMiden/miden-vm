@@ -3,7 +3,7 @@
 //! This target starts from binary `Package` deserialization, then exercises package APIs that
 //! interpret decoded sections, runtime dependencies, and package kind.
 //!
-//! Run with: cargo +nightly fuzz run package_semantic_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run package_semantic_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

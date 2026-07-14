@@ -4,7 +4,7 @@
 //! This target exercises `MastNodeEntry` decoding plus `MastNodeInfo` materialization through the
 //! trusted wire-view API.
 //!
-//! Run with: cargo +nightly fuzz run mast_node_info --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run mast_node_info --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

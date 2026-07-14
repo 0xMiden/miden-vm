@@ -1,6 +1,6 @@
 //! Fuzz target for Program deserialization.
 //!
-//! Run with: cargo +nightly fuzz run program_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run program_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

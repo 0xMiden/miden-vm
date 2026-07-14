@@ -1,6 +1,6 @@
 //! Fuzz target for KernelDescriptor deserialization.
 //!
-//! Run with: cargo +nightly fuzz run kernel_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run kernel_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

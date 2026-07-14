@@ -3,7 +3,7 @@
 //! This target fuzzes the `miden_project::ast::MidenProject` TOML parsing,
 //! which is used to parse `miden-project.toml` manifest files.
 //!
-//! Run with: cargo +nightly fuzz run project_toml_parse --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run project_toml_parse --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

@@ -3,7 +3,7 @@
 //! This target exercises `Package::load` and `Project::load`, including workspace-member loading
 //! and workspace inheritance. It does not assemble MASM sources.
 //!
-//! Run with: cargo +nightly fuzz run project_load --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run project_load --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 

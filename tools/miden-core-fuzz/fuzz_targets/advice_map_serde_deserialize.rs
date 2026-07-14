@@ -1,6 +1,6 @@
 //! Fuzz target for AdviceMap serde deserialization.
 //!
-//! Run with: cargo +nightly fuzz run advice_map_serde_deserialize --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run advice_map_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 
 #![no_main]
 
