@@ -8,6 +8,8 @@
 
 #### Changes
 
+- Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
+
 #### Fixes
 
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
