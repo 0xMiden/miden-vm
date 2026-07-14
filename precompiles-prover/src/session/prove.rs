@@ -1,6 +1,6 @@
 //! Multi-AIR proving for the chiplet stack.
 //!
-//! [`ChipletAir`] wraps the thirteen heterogeneous AIRs into one enum (the
+//! [`ChipletAir`] wraps the twelve heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
@@ -45,7 +45,7 @@ use crate::{
         keccak::{round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    primitives::byte_pair_lut::BytePairLutAir,
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{
         DEFAULT_HASH_FUNCTION, RelationDigest, blake3_256_config, keccak_config,
@@ -59,7 +59,7 @@ use crate::{
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
-/// The thirteen chiplet AIRs wrapped into one enum — the heterogeneous
+/// The twelve chiplet AIRs wrapped into one enum — the heterogeneous
 /// `MultiAir::Air` type. Variant order is the canonical
 /// [`SessionTraces::mains`] order.
 #[derive(Clone, Debug)]
@@ -67,7 +67,6 @@ pub enum ChipletAir {
     ChunkNode,
     Poseidon2,
     KeccakRound,
-    Bitwise64,
     BytePairLut,
     KeccakSponge,
     TranscriptEval,
@@ -85,7 +84,6 @@ macro_rules! delegate {
             ChipletAir::ChunkNode => ChunkNodeAir.$method($($arg),*),
             ChipletAir::Poseidon2 => Poseidon2Air.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
-            ChipletAir::Bitwise64 => Bitwise64Air.$method($($arg),*),
             ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
             ChipletAir::KeccakSponge => KeccakSpongeAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
@@ -108,13 +106,12 @@ where
 }
 
 impl ChipletAir {
-    /// The thirteen AIRs in canonical [`SessionTraces::mains`] order.
+    /// The twelve AIRs in canonical [`SessionTraces::mains`] order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::ChunkNode,
             ChipletAir::Poseidon2,
             ChipletAir::KeccakRound,
-            ChipletAir::Bitwise64,
             ChipletAir::BytePairLut,
             ChipletAir::KeccakSponge,
             ChipletAir::TranscriptEval,
@@ -170,7 +167,6 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             ChipletAir::ChunkNode => eval_lifted(&ChunkNodeAir, builder),
             ChipletAir::Poseidon2 => eval_lifted(&Poseidon2Air, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
-            ChipletAir::Bitwise64 => eval_lifted(&Bitwise64Air, builder),
             ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
             ChipletAir::KeccakSponge => eval_lifted(&KeccakSpongeAir, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),

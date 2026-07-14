@@ -223,6 +223,33 @@ impl BytePairLutRequires {
     }
 }
 
+/// Verify a 64-bit `op(a, b)` byte-by-byte against 8 [`BytePairLutMsg`]
+/// requires (implicitly range-checking each byte), returning the result.
+/// Shared by every caller that commits 64-bit operands as bytes and needs
+/// their logic result range-checked without a chain trick or an
+/// intermediate chiplet — each caller commits its own `a`/`b`/result bytes
+/// and drives this same 8-request pattern to pin them.
+pub fn require_logic64(bpl_req: &mut BytePairLutRequires, op: BytePairOp, a: u64, b: u64) -> u64 {
+    let a_bytes = a.to_le_bytes();
+    let b_bytes = b.to_le_bytes();
+    for i in 0..8 {
+        bpl_req.require(op, a_bytes[i], b_bytes[i]);
+    }
+    op.apply_u64(a, b)
+}
+
+impl BytePairOp {
+    /// 64-bit lift of [`Self::apply`] (byte-wise AndNot/Xor commute with
+    /// the u64 split, so the whole-value result equals the byte-wise
+    /// result recombined).
+    fn apply_u64(self, a: u64, b: u64) -> u64 {
+        match self {
+            BytePairOp::AndNot => (!a) & b,
+            BytePairOp::Xor => a ^ b,
+        }
+    }
+}
+
 // PREPROCESSED TABLE
 // ================================================================================================
 

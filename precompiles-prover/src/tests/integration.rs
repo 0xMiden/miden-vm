@@ -9,9 +9,8 @@ use std::{eprintln, string::String, vec, vec::Vec};
 use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::Matrix};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-use crate::primitives::{
-    bitwise64::{Bitwise64Air, Bitwise64Requires, Logic64Op, generate_trace as bw64_trace},
-    byte_pair_lut::{BytePairLutAir, BytePairLutRequires, BytePairOp, generate_trace as bpl_trace},
+use crate::primitives::byte_pair_lut::{
+    BytePairLutAir, BytePairLutRequires, BytePairOp, generate_trace as bpl_trace,
 };
 
 /// Generate random challenges for LogUp arguments.
@@ -74,136 +73,6 @@ fn bpl_constraints_hold_on_saturated_table() {
     assert_eq!(main.height(), 1 << 16, "saturated table should have 2^16 rows");
 
     crate::tests::check_local(BytePairLutAir, &main);
-}
-
-// ============================================================================
-// Bitwise64 integration tests
-// ============================================================================
-
-#[test]
-fn bw64_constraints_hold_on_random_logic_ops() {
-    let mut rng = StdRng::seed_from_u64(0xb164);
-    let mut bpl = BytePairLutRequires::new();
-    let mut requires = Bitwise64Requires::new();
-
-    for _ in 0..100 {
-        let a = rng.random::<u64>();
-        let b = rng.random::<u64>();
-        let op = if rng.random::<bool>() {
-            Logic64Op::AndNot
-        } else {
-            Logic64Op::Xor
-        };
-        requires.require(&mut bpl, op, a, b);
-    }
-
-    let main = bw64_trace(requires);
-
-    crate::tests::check_local(Bitwise64Air, &main);
-}
-
-#[test]
-fn bw64_constraints_hold_on_chained_logic() {
-    // Test chaining: each op's output feeds the next op's input.
-    let mut rng = StdRng::seed_from_u64(0xc4a1);
-    let mut bpl = BytePairLutRequires::new();
-    let mut requires = Bitwise64Requires::new();
-
-    let mut val = rng.random::<u64>();
-    for _ in 0..50 {
-        let b = rng.random::<u64>();
-        let op = if rng.random::<bool>() {
-            Logic64Op::Xor
-        } else {
-            Logic64Op::AndNot
-        };
-        val = requires.require(&mut bpl, op, val, b);
-    }
-
-    let main = bw64_trace(requires);
-
-    crate::tests::check_local(Bitwise64Air, &main);
-}
-
-#[test]
-fn bw64_constraints_hold_on_logic_then_rol() {
-    // Test LOGIC → ROL chains (the natural Keccak pattern).
-    let mut rng = StdRng::seed_from_u64(0x801);
-    let mut bpl = BytePairLutRequires::new();
-    let mut requires = Bitwise64Requires::new();
-
-    for _ in 0..30 {
-        let a = rng.random::<u64>();
-        let b = rng.random::<u64>();
-        // LOGIC to establish chain.
-        let c = requires.require(&mut bpl, Logic64Op::Xor, a, b);
-        // ROL on the result (k must be power of two < 2^31; see
-        // `Bitwise64Requires::require_rol` for the bound's derivation).
-        let s = rng.random_range(0u32..31);
-        let k = 1u64 << s;
-        requires.require_rol(&mut bpl, c, k);
-        // After ROL, chain is broken — next iteration starts fresh.
-    }
-
-    let main = bw64_trace(requires);
-
-    crate::tests::check_local(Bitwise64Air, &main);
-}
-
-#[test]
-fn bw64_constraints_hold_on_all_rotation_amounts() {
-    // Test all in-range rotation amounts (k = 2^s for s in 0..31; see
-    // `Bitwise64Requires::require_rol` for the bound's derivation).
-    let mut rng = StdRng::seed_from_u64(0xa11807);
-    let mut bpl = BytePairLutRequires::new();
-    let mut requires = Bitwise64Requires::new();
-
-    for s in 0..31 {
-        let a = rng.random::<u64>();
-        // Establish chain via identity XOR.
-        let c = requires.require(&mut bpl, Logic64Op::Xor, a, 0);
-        let k = 1u64 << s;
-        requires.require_rol(&mut bpl, c, k);
-    }
-
-    let main = bw64_trace(requires);
-
-    crate::tests::check_local(Bitwise64Air, &main);
-}
-
-#[test]
-fn bw64_constraints_hold_on_edge_case_values() {
-    // Test edge cases: 0, max u64, alternating bits, etc.
-    let mut bpl = BytePairLutRequires::new();
-    let mut requires = Bitwise64Requires::new();
-
-    let edge_values = [
-        0u64,
-        u64::MAX,
-        0x5555_5555_5555_5555, // alternating bits
-        0xaaaa_aaaa_aaaa_aaaa,
-        0x0000_0000_ffff_ffff, // low half set
-        0xffff_ffff_0000_0000, // high half set
-        1,
-        u64::MAX - 1,
-    ];
-
-    for &a in &edge_values {
-        for &b in &edge_values {
-            requires.require(&mut bpl, Logic64Op::Xor, a, b);
-            requires.require(&mut bpl, Logic64Op::AndNot, a, b);
-        }
-    }
-
-    // Also test ROL on edge values.
-    for &a in &edge_values {
-        let c = requires.require(&mut bpl, Logic64Op::Xor, a, 0);
-        requires.require_rol(&mut bpl, c, 1 << 16); // k = 2^16
-    }
-
-    let main = bw64_trace(requires);
-
-    crate::tests::check_local(Bitwise64Air, &main);
 }
 
 // ============================================================================
@@ -336,19 +205,16 @@ fn keccak_node_intern_collapses_identical_invocations() {
     let mut p2 = Poseidon2Requires::new();
     let mut chunk = ChunkRequires::new();
     let mut round = RoundRequires::new();
-    let mut bw64 = Bitwise64Requires::new();
     let mut bpl = BytePairLutRequires::new();
     let mut sponge = SpongeRequires::new();
     let mut node = KeccakNodeRequires::new();
 
-    let out_a =
-        node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2);
+    let out_a = node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bpl, &mut p2);
     let chunk_rows_after_a = chunk.total_chunks();
     let sponge_rows_after_a = sponge.total_active_rows();
     let p2_cycles_after_a = p2.total_cycles();
 
-    let out_b =
-        node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2);
+    let out_b = node.require(&input, &mut sponge, &mut chunk, &mut round, &mut bpl, &mut p2);
 
     // Dedup at the node layer.
     assert_eq!(node.total_rows(), 1);
@@ -398,16 +264,13 @@ fn keccak_node_distinct_invocations_lay_disjoint_rows() {
     let mut p2 = Poseidon2Requires::new();
     let mut chunk = ChunkRequires::new();
     let mut round = RoundRequires::new();
-    let mut bw64 = Bitwise64Requires::new();
     let mut bpl = BytePairLutRequires::new();
     let mut sponge = SpongeRequires::new();
     let mut node = KeccakNodeRequires::new();
 
     let outs: Vec<_> = inputs
         .iter()
-        .map(|input| {
-            node.require(input, &mut sponge, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2)
-        })
+        .map(|input| node.require(input, &mut sponge, &mut chunk, &mut round, &mut bpl, &mut p2))
         .collect();
 
     assert_eq!(node.total_rows(), 3);
@@ -430,17 +293,17 @@ fn keccak_node_distinct_invocations_lay_disjoint_rows() {
     crate::tests::check_local(Poseidon2Air, &p2_main);
 }
 
-// FULL STACK — eight chiplets, end-to-end
+// FULL STACK — seven chiplets, end-to-end
 // ============================================================================
 
 use crate::hash::{chunk_node::ChunkNodeAir, keccak::round::KeccakRoundAir};
 
-/// Single Keccak invocation driven through the entire eight-chiplet stack
-/// via [`Session`] — chunk, Poseidon2, round, Bitwise64, BytePairLut,
-/// sponge, Keccak-node, eval. Each AIR's local + LogUp constraints
-/// validate, catching address-formula bugs and any cross-chiplet witness
-/// mismatch. (`Session::finish` owns the trace-gen dependency order the
-/// chiplets impose.)
+/// Single Keccak invocation driven through the entire seven-chiplet stack
+/// via [`Session`] — chunk, Poseidon2, round, BytePairLut, sponge,
+/// Keccak-node, eval. Each AIR's local + LogUp constraints validate,
+/// catching address-formula bugs and any cross-chiplet witness mismatch.
+/// (`Session::finish` owns the trace-gen dependency order the chiplets
+/// impose.)
 #[test]
 fn full_stack_chiplets_validate_under_shared_challenges() {
     let input: Vec<u8> = (0..23).map(|i| (i ^ 0x5a) as u8).collect();
@@ -457,15 +320,14 @@ fn full_stack_chiplets_validate_under_shared_challenges() {
     crate::tests::check_local(ChunkNodeAir, mains[0]);
     crate::tests::check_local(Poseidon2Air, mains[1]);
     crate::tests::check_local(KeccakRoundAir, mains[2]);
-    crate::tests::check_local(Bitwise64Air, mains[3]);
-    crate::tests::check_local(BytePairLutAir, mains[4]);
-    crate::tests::check_local(KeccakSpongeAir, mains[5]);
+    crate::tests::check_local(BytePairLutAir, mains[3]);
+    crate::tests::check_local(KeccakSpongeAir, mains[4]);
     crate::tests::check_local_inputs(
         TranscriptEvalAir,
-        mains[6],
+        mains[5],
         traces.public_root().as_array().to_vec(),
     );
-    crate::tests::check_local(UintStoreMulAir, mains[7]);
+    crate::tests::check_local(UintStoreMulAir, mains[6]);
 }
 
 // ============================================================================
@@ -495,7 +357,7 @@ use crate::{
 
 #[test]
 fn full_stack_bus_balance_closes() {
-    // Full eight-chiplet stack, including the transcript eval chip so the
+    // Full seven-chiplet stack, including the transcript eval chip so the
     // `Binding` bus closes. `n = 3` invocations leave the keccak-node trace
     // one row short of a power of two and the Poseidon2 trace short of a
     // power-of-two cycle count, so the *ungated* `Range16(0)` padding
@@ -528,7 +390,7 @@ fn full_stack_bus_balance_closes() {
 #[test]
 fn full_stack_bus_balance_closes_with_empty_input() {
     // A zero-length invocation (one pad block + one canonical zero chunk)
-    // mixed with a normal one, through the full eight-chiplet stack +
+    // mixed with a normal one, through the full seven-chiplet stack +
     // eval chip. This is the cross-chiplet guard for the empty-input fix: it
     // confirms the keccak-node's `H_input_chunks` read at the n_chunks=1 chain
     // tail has a provider, and that the chunk / sponge / P2 buses close

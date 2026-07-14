@@ -15,8 +15,8 @@
 //!
 //! - `base = 2` — bit decomposition reconstruction (e.g.
 //!   [`byte_pair_lut`](crate::primitives::byte_pair_lut)'s 8-bit operand reconstruction).
-//! - `base = 256` — byte-into-32-bit-half packing (e.g.
-//!   [`bitwise64`](crate::primitives::bitwise64)'s 64-bit lane split).
+//! - `base = 256` — byte-into-32-bit-half packing (e.g. the `KeccakRound` bitwise chiplet's 64-bit
+//!   lane split).
 
 use core::array;
 
@@ -86,7 +86,7 @@ where
 ///
 /// `lo = x & 0xFFFF_FFFF`, `hi = x >> 32`. Useful when the halves feed
 /// into further `u64` arithmetic before becoming `Felt`s — e.g.
-/// `(lo + 2^32)·k` in [`bitwise64`](crate::primitives::bitwise64)'s ROL row
+/// `(lo + 2^32)·k` in the `KeccakRound` bitwise chiplet's ROL row
 /// construction, where doing the multiply in `u64` then converting is
 /// cheaper than going through `Felt` mid-stream.
 pub fn split_u64_u32(x: u64) -> [u64; 2] {

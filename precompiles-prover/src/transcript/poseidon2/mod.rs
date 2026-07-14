@@ -105,7 +105,7 @@ pub const COL_CAPACITY_BEGIN: usize = COL_STATE_BEGIN + 8;
 /// - col 1: `in_rate1` + `out_rate0` (gated `is_init_ext` / `p_last_in_cycle` respectively).
 /// - col 2: `in_cap`, gated `is_init_ext`.
 ///
-/// Following [`bitwise64`](crate::primitives::bitwise64) and
+/// Following the `KeccakRound` bitwise chiplet and
 /// [`keccak::sponge`](crate::hash::keccak::sponge), col 0 is the running σ
 /// and hosts the chiplet's only group.
 pub const NUM_AUX_COLS: usize = 3;

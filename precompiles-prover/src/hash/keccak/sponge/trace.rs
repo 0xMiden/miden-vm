@@ -29,19 +29,18 @@ use crate::{
             reference::{KECCAK_RC, keccak_f1600, keccak_round},
             round::{NUM_ROUNDS, RoundRequires},
             sponge::{
-                COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT, COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO,
-                COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO,
-                COL_SPONGE_SEQ_ID, COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO,
-                KeccakSpongeAir, NUM_MAIN_COLS, SPONGE_PERIOD,
+                CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
+                COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO, COL_IS_CHUNK_AVAIL,
+                COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO, COL_SPONGE_SEQ_ID,
+                COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO, KeccakSpongeAir,
+                NUM_MAIN_COLS, PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
+                STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
     },
     logup::build_logup_aux_trace,
-    primitives::{
-        bitwise64::{Bitwise64Requires, Logic64Op},
-        byte_pair_lut::BytePairLutRequires,
-    },
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, require_logic64},
     transcript::poseidon2::{
         digest::P2Digest,
         trace::{PermSpan, Poseidon2Requires},
@@ -202,15 +201,14 @@ impl SpongeRequires {
     /// still binds a real P2 chain tail.
     ///
     /// Drives the supplied `round_req` for the 24 rounds of each
-    /// block's Keccak permutation, and `bw64_req` / `bpl_req` for
-    /// the per-row Logic64 messages on rate-XORin / pad / lane-16
-    /// 0x80 rows (matching what the sponge AIR consumes).
+    /// block's Keccak permutation, and `bpl_req` for the per-row
+    /// `BytePairLut` byte requires on rate-XORin / pad / lane-16 0x80
+    /// rows (matching what the sponge AIR consumes).
     pub fn require(
         &mut self,
         inv: &Invocation,
         chunk_req: &mut ChunkRequires,
         round_req: &mut RoundRequires,
-        bw64_req: &mut Bitwise64Requires,
         bpl_req: &mut BytePairLutRequires,
         p2: &mut Poseidon2Requires,
     ) -> SpongeOutput {
@@ -224,7 +222,7 @@ impl SpongeRequires {
             (chunk_out.chunk_head, chunk_out.digest, chunk_out.perm_span);
 
         let layout = InvocationLayout::of(inv);
-        let blocks = compute_block_snapshots_driving(inv, &layout, round_req, bw64_req, bpl_req);
+        let blocks = compute_block_snapshots_driving(inv, &layout, round_req, bpl_req);
         let keccak_digest =
             KeccakDigest::from_state(&blocks.last().expect("≥1 block per invocation").perm_out);
 
@@ -271,15 +269,14 @@ pub fn keccak_oracle(input: &[u8]) -> KeccakDigest {
 
 /// Same as [`compute_block_snapshots`] but also drives the supplied
 /// `round_req` (24 `require_round` calls per block, threading state
-/// through `keccak_round` + `KECCAK_RC`) and `bw64_req` / `bpl_req`
-/// for the per-row Logic64 emissions the sponge AIR consumes:
-/// rate-XORin (verbatim Xor or 3-message pad-row AndNot/Xor/Xor) and
+/// through `keccak_round` + `KECCAK_RC`) and `bpl_req` for the per-row
+/// `BytePairLut` byte requires the sponge AIR consumes directly:
+/// rate-XORin (verbatim Xor, or the pad row's AndNot/Xor/Xor chain) and
 /// the lane-16 0x80 Xor on last blocks.
 fn compute_block_snapshots_driving(
     inv: &Invocation,
     layout: &InvocationLayout,
     round_req: &mut RoundRequires,
-    bw64_req: &mut Bitwise64Requires,
     bpl_req: &mut BytePairLutRequires,
 ) -> Vec<BlockSnapshot> {
     let mut state = [0u64; 25];
@@ -295,25 +292,23 @@ fn compute_block_snapshots_driving(
                 let is_verbatim = !is_last_block || k < layout.pad_lane_idx;
                 let is_pad_row = is_last_block && k == layout.pad_lane_idx;
                 if is_verbatim {
-                    bw64_req.require(bpl_req, Logic64Op::Xor, *lane, chunk_lane);
-                    *lane ^= chunk_lane;
+                    *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, chunk_lane);
                 } else if is_pad_row {
                     let andnot_mask_val = andnot_mask(layout.byte_offset);
                     let padding_mask_val = padding_mask(layout.byte_offset);
                     let cleared =
-                        bw64_req.require(bpl_req, Logic64Op::AndNot, andnot_mask_val, chunk_lane);
+                        require_logic64(bpl_req, BytePairOp::AndNot, andnot_mask_val, chunk_lane);
                     let padded =
-                        bw64_req.require(bpl_req, Logic64Op::Xor, cleared, padding_mask_val);
-                    let state_new = bw64_req.require(bpl_req, Logic64Op::Xor, *lane, padded);
-                    *lane = state_new;
+                        require_logic64(bpl_req, BytePairOp::Xor, cleared, padding_mask_val);
+                    *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, padded);
                 }
-                // past-pad: no XOR, no Logic64 emission.
+                // past-pad: no XOR, no BytePairLut emission.
             }
 
             let post_xorin = state;
             if is_last_block {
-                bw64_req.require(bpl_req, Logic64Op::Xor, state[LANE_16], PAD_CONST);
-                state[LANE_16] ^= PAD_CONST;
+                state[LANE_16] =
+                    require_logic64(bpl_req, BytePairOp::Xor, state[LANE_16], PAD_CONST);
             }
 
             // 24 round submissions per block, evolving state via the
@@ -340,7 +335,7 @@ fn compute_block_snapshots_driving(
 /// [`keccak_oracle`] (digest-only pre-check); the
 /// [`SpongeRequires::require`] path uses
 /// [`compute_block_snapshots_driving`] instead so it can drive the
-/// round / bw64 / bpl ledgers alongside.
+/// round / bpl ledgers alongside.
 fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<BlockSnapshot> {
     let mut state = [0u64; 25];
     let mut tape = pack_chunk_tape(inv);
@@ -384,7 +379,8 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 /// Build the sponge chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping
 /// `SPONGE_PERIOD` rows per block; trailing rows up to the next power
-/// of two are inactive (`act = 0`). Returns a 27-column trace.
+/// of two are inactive (`act = 0`). Returns a [`NUM_MAIN_COLS`]-column
+/// trace.
 pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_active_rows() as usize;
     let height = active_rows.next_power_of_two().max(SPONGE_PERIOD);
@@ -451,7 +447,7 @@ pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
                 }
 
                 let chunk_lane = if consume { tape.next().unwrap_or(0) } else { 0 };
-                write_u64(&mut r, COL_CHUNK_LO, chunk_lane);
+                write_u64_with_bytes(&mut r, COL_CHUNK_LO, CHUNK_BYTES_RANGE.start, chunk_lane);
 
                 fill_state_lane_row(
                     &mut r,
@@ -545,7 +541,7 @@ fn fill_state_lane_row(
 
     if is_rate_slot {
         let state_prev = state_at_block_start[slot];
-        write_u64(r, COL_STATE_PREV_LO, state_prev);
+        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
         let (state_new, cleared, padded) = if is_last_block && slot == layout.pad_lane_idx {
             // Pad row.
             let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
@@ -558,9 +554,9 @@ fn fill_state_lane_row(
             // Verbatim XORin.
             (state_prev ^ chunk_lane, 0, 0)
         };
-        write_u64(r, COL_STATE_NEW_LO, state_new);
-        write_u64(r, COL_CLEARED_LO, cleared);
-        write_u64(r, COL_PADDED_LO, padded);
+        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
+        write_u64_with_bytes(r, COL_CLEARED_LO, CLEARED_BYTES_RANGE.start, cleared);
+        write_u64_with_bytes(r, COL_PADDED_LO, PADDED_BYTES_RANGE.start, padded);
         if is_last_block {
             // Squeeze provides the perm-`last`'s output for
             // non-digest lanes (slots [4, 17) of the last block).
@@ -572,8 +568,8 @@ fn fill_state_lane_row(
     } else if is_capacity_slot {
         // Capacity passthrough: state_new = state_prev.
         let state_prev = state_at_block_start[slot];
-        write_u64(r, COL_STATE_PREV_LO, state_prev);
-        write_u64(r, COL_STATE_NEW_LO, state_prev);
+        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_prev);
         if is_last_block {
             write_u64(r, COL_STATE_OUT_LO, perm_out_last_block[slot]);
         }
@@ -584,17 +580,17 @@ fn fill_state_lane_row(
         // matches the lane-16 rate-XORin row's provide at the same
         // Memory64 address (`100·sponge_seq_id − 2484`), so the
         // post-XORin value pinned here must match what the rate
-        // row produced. The Logic64 mult is gated by
+        // row produced. The `xor-lane16` mult is gated by
         // `is_last_block_period`, but trace generation fills the
         // values uniformly for layout consistency.
         let state_prev = post_xorin_this_block[LANE_16];
-        write_u64(r, COL_STATE_PREV_LO, state_prev);
+        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
         let state_new = if is_last_block {
             state_prev ^ PAD_CONST
         } else {
             state_prev
         };
-        write_u64(r, COL_STATE_NEW_LO, state_new);
+        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
     }
     // Slots 26..32 (NOP slack): all column values left at zero.
 }
@@ -603,6 +599,17 @@ fn write_u64(row: &mut [Felt], col_lo: usize, value: u64) {
     let [lo, hi] = split_u64(value);
     row[col_lo] = lo;
     row[col_lo + 1] = hi;
+}
+
+/// Like [`write_u64`], but also fills `value`'s 8-byte little-endian
+/// shadow decomposition starting at `bytes_start` (see `sponge`'s
+/// "Byte-shadow columns" — the `eval` side links the two
+/// representations with an ungated local constraint).
+fn write_u64_with_bytes(row: &mut [Felt], col_lo: usize, bytes_start: usize, value: u64) {
+    write_u64(row, col_lo, value);
+    for (i, b) in value.to_le_bytes().into_iter().enumerate() {
+        row[bytes_start + i] = Felt::from(b);
+    }
 }
 
 /// `0xFFFF_FFFF_FFFF_FFFF << (8·byte_offset)` — zeroes the low

@@ -17,8 +17,6 @@
 //! |-------|-----------------|---------------------------------|-------------------------------------------------------------|
 //! | 0     | `BytePairLut`   | `byte_pair_lut::BytePairLutAir` | `(op, a, b, c)`, `c = op(a, b)`                             |
 //! | 1     | `Range16`       | `byte_pair_lut::BytePairLutAir` | `(w,)`, where `w ∈ [0, 2^16)`                               |
-//! | 2     | `Logic64`       | `bitwise64::Bitwise64Air`       | `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)`, 32-bit halves   |
-//! | 3     | `Rol64`         | `bitwise64::Bitwise64Air`       | `(a_lo, a_hi, b_lo, b_hi, k)`, `b = rol_64(a, log2(k))`     |
 //! | 4     | `Memory64`      | external (sponge / miniVM)      | `(addr, lo, hi)`, 64-bit cell — multiset, see `memory64`    |
 //! | 5     | `KeccakSponge`  | external (transcript chiplet)   | `(sponge_seq_id, chunk_ptr, len_bytes)`, per-invocation request — see `keccak::sponge` |
 //! | 6     | `Poseidon2In`   | `poseidon2::Poseidon2Air`       | `(perm_seq_id, tag, c0, c1, c2, c3)`, `tag ∈ {0, 1, 2}` for rate0/rate1/cap |
@@ -36,7 +34,6 @@
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
 //! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
-//! | 21    | `XorRol64`     | `bitwise64::Bitwise64Air`     | `(a_lo, a_hi, b_lo, b_hi, c_lo, c_hi, k)` — fused `c = rol_64(a ⊕ b, log2(k))`; provided once per θ-apply+ρ pair (from the pair's LOGIC row, reading the ROL row's output) so the keccak round consumes one tuple instead of `Logic64 + Rol64` and drops its `r` columns |
 //!
 //! ## Adding a new relation
 //!
@@ -55,8 +52,6 @@
 pub enum BusId {
     BytePairLut = 0,
     Range16 = 1,
-    Logic64 = 2,
-    Rol64 = 3,
     Memory64 = 4,
     KeccakSponge = 5,
     Poseidon2In = 6,
@@ -74,13 +69,14 @@ pub enum BusId {
     MsmTerm = 18,
     MsmExpr = 19,
     MsmClaimTerm = 20,
-    XorRol64 = 21,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
-/// exactly one prefix per [`BusId`] variant.
-pub const NUM_BUS_IDS: usize = 22;
+/// exactly one prefix per [`BusId`] variant (indices 0..=20; `Logic64`/
+/// `Rol64`'s old slots at 2/3 are retired gaps, harmless since ids only
+/// need uniqueness, not contiguity).
+pub const NUM_BUS_IDS: usize = 21;
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
