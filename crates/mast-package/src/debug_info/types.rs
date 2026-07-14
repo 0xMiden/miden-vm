@@ -18,7 +18,6 @@
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    Word,
     mast::{MastForestRootMap, MastNodeId},
     operations::DebugVarInfo,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -482,26 +481,42 @@ impl PackageDebugInfo {
         let mut saw_error_messages = false;
 
         for (forest_index, debug_info) in inputs {
-            let type_map = merge_debug_types(forest_index, debug_info.types.as_ref(), &mut types)?;
-            saw_types |= debug_info.types.is_some();
-            let source_file_map =
-                merge_debug_sources(forest_index, debug_info.sources.as_ref(), &mut sources)?;
-            saw_sources |= debug_info.sources.is_some();
-            let function_map = merge_debug_functions(
-                forest_index,
-                debug_info.functions.as_ref(),
-                &mut functions,
-                &source_file_map,
-                &type_map,
-            )?;
-            saw_functions |= debug_info.functions.is_some();
-
             let source_graph = debug_info.source_graph.as_ref();
             let source_map = debug_info.source_map.as_ref();
             if source_graph.is_none() && source_map.is_some_and(|source_map| !source_map.is_empty())
             {
                 return Err(PackageDebugInfoMergeError::SourceMapWithoutGraph { forest_index });
             }
+
+            let type_map = merge_debug_types(forest_index, debug_info.types.as_ref(), &mut types)?;
+            saw_types |= debug_info.types.is_some();
+            let source_file_map =
+                merge_debug_sources(forest_index, debug_info.sources.as_ref(), &mut sources)?;
+            saw_sources |= debug_info.sources.is_some();
+
+            let source_id_map = if let Some(source_graph) = source_graph.as_ref() {
+                let mut source_id_map = BTreeMap::new();
+                for old_source_idx in 0..source_graph.nodes().len() {
+                    source_id_map.insert(
+                        DebugSourceNodeId::from(old_source_idx as u32),
+                        DebugSourceNodeId::from(nodes.len() as u32 + old_source_idx as u32),
+                    );
+                }
+                Some(source_id_map)
+            } else {
+                None
+            };
+
+            let function_map = merge_debug_functions(
+                forest_index,
+                debug_info.functions.as_ref(),
+                &mut functions,
+                root_map,
+                source_id_map.as_ref(),
+                &source_file_map,
+                &type_map,
+            )?;
+            saw_functions |= debug_info.functions.is_some();
 
             if let Some(section) = debug_info.error_messages.as_ref() {
                 saw_error_messages = true;
@@ -514,14 +529,7 @@ impl PackageDebugInfo {
                 continue;
             };
             saw_source_graph = true;
-
-            let mut source_id_map = BTreeMap::new();
-            for old_source_idx in 0..source_graph.nodes().len() {
-                source_id_map.insert(
-                    DebugSourceNodeId::from(old_source_idx as u32),
-                    DebugSourceNodeId::from(nodes.len() as u32 + old_source_idx as u32),
-                );
-            }
+            let source_id_map = source_id_map.unwrap();
 
             for (old_source_idx, source_node) in source_graph.nodes().iter().enumerate() {
                 let exec_node = root_map.map_node(forest_index, &source_node.exec_node).ok_or(
@@ -820,6 +828,8 @@ fn merge_debug_functions(
     forest_index: usize,
     section: Option<&DebugFunctionsSection>,
     output: &mut DebugFunctionsSection,
+    root_map: &MastForestRootMap,
+    source_id_map: Option<&BTreeMap<DebugSourceNodeId, DebugSourceNodeId>>,
     source_file_map: &BTreeMap<u32, u32>,
     type_map: &BTreeMap<u32, DebugTypeIdx>,
 ) -> Result<BTreeMap<u32, u32>, PackageDebugInfoMergeError> {
@@ -865,14 +875,25 @@ fn merge_debug_functions(
             .map(|idx| remap_type_idx(forest_index, idx, type_map))
             .transpose()?;
         let new_idx = output.functions.len() as u32;
+
+        let node = root_map.map_node(forest_index, &function.node).ok_or(
+            PackageDebugInfoMergeError::MissingExecNodeMapping {
+                forest_index,
+                exec_node: function.node,
+            },
+        )?;
+        let source_node = source_id_map
+            .zip(function.source_node)
+            .map(|(source_id_map, source_node)| source_id_map[&source_node]);
         output.add_function(DebugFunctionInfo {
+            node,
+            source_node,
             name_idx,
             linkage_name_idx,
             file_idx,
             line: function.line,
             column: function.column,
             type_idx,
-            mast_root: function.mast_root,
         });
         function_map.insert(old_idx as u32, new_idx);
     }
@@ -1650,6 +1671,37 @@ impl DebugPrimitiveType {
             _ => None,
         }
     }
+
+    /// Converts this debug type info to the corresponding HIR type.
+    ///
+    /// Returns `None` if the input type is `Void`
+    pub fn to_hir_type(&self) -> Option<miden_assembly_syntax::ast::types::Type> {
+        use miden_assembly_syntax::ast::types::{ArrayType, Type};
+        Some(match self {
+            Self::Void => return None,
+            Self::Bool => Type::I1,
+            Self::I8 => Type::I8,
+            Self::U8 => Type::U8,
+            Self::I16 => Type::I16,
+            Self::U16 => Type::U16,
+            Self::I32 => Type::I32,
+            Self::U32 => Type::U32,
+            Self::I64 => Type::I64,
+            Self::U64 => Type::U64,
+            Self::I128 => Type::I128,
+            Self::U128 => Type::U128,
+            // NOTE(pauls): This is intentional, as HIR does not have a 32-bit float type, but
+            // our primary use for converting from debug type to IR type is ABI details, which are
+            // the same for u32/f32
+            //
+            // A future release will add F32 to the HIR type system to close this gap
+            Self::F32 => Type::U32,
+            Self::F64 => Type::F64,
+            Self::Felt => Type::Felt,
+            Self::Word => Type::Array(Arc::new(ArrayType::new(Type::Felt, 4))),
+            Self::U256 => Type::U256,
+        })
+    }
 }
 
 /// Field information within a struct type.
@@ -1721,6 +1773,10 @@ impl DebugFileInfo {
 /// Links source-level function information to the compiled MAST representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugFunctionInfo {
+    /// The execution node linked to this function info
+    pub node: MastNodeId,
+    /// Source/debug occurrence linked to this function info.
+    pub source_node: Option<DebugSourceNodeId>,
     /// Name of the function (index into string table)
     pub name_idx: u32,
     /// Linkage name / mangled name (index into string table, optional)
@@ -1733,22 +1789,27 @@ pub struct DebugFunctionInfo {
     pub column: ColumnNumber,
     /// Type of this function (index into type table, optional)
     pub type_idx: Option<DebugTypeIdx>,
-    /// MAST root digest of this function (if known).
-    /// This links the debug info to the compiled code.
-    pub mast_root: Option<Word>,
 }
 
 impl DebugFunctionInfo {
     /// Creates a new function info.
-    pub fn new(name_idx: u32, file_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
+    pub fn new(
+        node: MastNodeId,
+        source_node: Option<DebugSourceNodeId>,
+        name_idx: u32,
+        file_idx: u32,
+        line: LineNumber,
+        column: ColumnNumber,
+    ) -> Self {
         Self {
+            node,
+            source_node,
             name_idx,
             linkage_name_idx: None,
             file_idx,
             line,
             column,
             type_idx: None,
-            mast_root: None,
         }
     }
 
@@ -1761,12 +1822,6 @@ impl DebugFunctionInfo {
     /// Sets the type index.
     pub fn with_type(mut self, type_idx: DebugTypeIdx) -> Self {
         self.type_idx = Some(type_idx);
-        self
-    }
-
-    /// Sets the MAST root digest.
-    pub fn with_mast_root(mut self, mast_root: Word) -> Self {
-        self.mast_root = Some(mast_root);
         self
     }
 }
@@ -1881,6 +1936,8 @@ mod tests {
             let mut functions = DebugFunctionsSection::new();
             let name_idx = functions.add_string(Arc::from(alloc::format!("{context}_callee")));
             functions.add_function(DebugFunctionInfo::new(
+                block,
+                Some(source_node),
                 name_idx,
                 file_idx,
                 LineNumber::new(7).unwrap(),

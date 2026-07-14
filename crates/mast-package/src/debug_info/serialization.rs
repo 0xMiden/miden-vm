@@ -3,7 +3,6 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    Word,
     mast::MastNodeId,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -841,6 +840,14 @@ impl Deserializable for DebugFileInfo {
 
 impl Serializable for DebugFunctionInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.node.into());
+        if let Some(source_node) = self.source_node {
+            target.write_bool(true);
+            source_node.write_into(target);
+        } else {
+            target.write_bool(false);
+        }
+
         target.write_u32(self.name_idx);
 
         target.write_bool(self.linkage_name_idx.is_some());
@@ -856,16 +863,17 @@ impl Serializable for DebugFunctionInfo {
         if let Some(idx) = self.type_idx {
             target.write_u32(idx.as_u32());
         }
-
-        target.write_bool(self.mast_root.is_some());
-        if let Some(root) = &self.mast_root {
-            root.write_into(target);
-        }
     }
 }
 
 impl Deserializable for DebugFunctionInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let node = MastNodeId::new_unchecked(source.read_u32()?);
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceNodeId::read_from(source)?)
+        } else {
+            None
+        };
         let name_idx = source.read_u32()?;
 
         let has_linkage_name = source.read_bool()?;
@@ -888,21 +896,15 @@ impl Deserializable for DebugFunctionInfo {
             None
         };
 
-        let has_mast_root = source.read_bool()?;
-        let mast_root = if has_mast_root {
-            Some(Word::read_from(source)?)
-        } else {
-            None
-        };
-
         Ok(Self {
+            node,
+            source_node,
             name_idx,
             linkage_name_idx,
             file_idx,
             line,
             column,
             type_idx,
-            mast_root,
         })
     }
 }
@@ -1104,11 +1106,13 @@ mod tests {
     fn test_debug_functions_section_roundtrip() {
         let mut section = DebugFunctionsSection::new();
 
+        let node = MastNodeId::new_unchecked(0);
+        let source_node = Some(DebugSourceNodeId::from(42u32));
         let name_idx = section.add_string(Arc::from("test_function"));
 
         let line = LineNumber::new(10).unwrap();
         let column = ColumnNumber::new(1).unwrap();
-        let func = DebugFunctionInfo::new(name_idx, 0, line, column);
+        let func = DebugFunctionInfo::new(node, source_node, name_idx, 0, line, column);
         section.add_function(func);
 
         roundtrip(&section);
@@ -1316,18 +1320,6 @@ mod tests {
     fn test_file_info_with_checksum_roundtrip() {
         let file = DebugFileInfo::new(0).with_checksum([42u8; 32]);
         roundtrip(&file);
-    }
-
-    #[test]
-    fn test_function_with_mast_root_roundtrip() {
-        let line1 = LineNumber::new(1).unwrap();
-        let col1 = ColumnNumber::new(1).unwrap();
-        let func = DebugFunctionInfo::new(0, 0, line1, col1)
-            .with_linkage_name(1)
-            .with_type(DebugTypeIdx::from(2))
-            .with_mast_root(Word::default());
-
-        roundtrip(&func);
     }
 
     #[test]

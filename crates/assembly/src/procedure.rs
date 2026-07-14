@@ -12,6 +12,7 @@ use super::{
     assembler::{MAX_PROC_LOCALS, error::AssemblerError},
     mast_forest_builder::MastNodeRef,
 };
+use crate::mast_forest_builder::SourceNodeRef;
 
 // PROCEDURE CONTEXT
 // ================================================================================================
@@ -136,7 +137,12 @@ impl ProcedureContext {
     /// `mast_root` and `body_node` must be consistent. That is, `body_node` must resolve to a MAST
     /// node whose digest equals `mast_root`.
     /// </div>
-    pub(crate) fn into_procedure(self, mast_root: Word, body_node_ref: MastNodeRef) -> Procedure {
+    pub(crate) fn into_procedure(
+        self,
+        mast_root: Word,
+        body_node_ref: MastNodeRef,
+        source_node_ref: Option<SourceNodeRef>,
+    ) -> Procedure {
         let is_syscall = self.is_kernel && self.visibility.is_public();
         Procedure::new(
             self.path,
@@ -146,6 +152,7 @@ impl ProcedureContext {
             self.num_locals as u32,
             mast_root,
             body_node_ref,
+            source_node_ref,
         )
         .with_span(self.span)
     }
@@ -181,6 +188,8 @@ pub struct Procedure {
     mast_root: Word,
     /// The assembly-time node reference which resolves to the above MAST root.
     body_node_ref: MastNodeRef,
+    /// The assembly-time source node reference for this procedure
+    source_node_ref: Option<SourceNodeRef>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -194,6 +203,7 @@ impl Procedure {
         num_locals: u32,
         mast_root: Word,
         body_node_ref: MastNodeRef,
+        source_node_ref: Option<SourceNodeRef>,
     ) -> Self {
         Self {
             span: SourceSpan::default(),
@@ -204,6 +214,7 @@ impl Procedure {
             num_locals,
             mast_root,
             body_node_ref,
+            source_node_ref,
         }
     }
 
@@ -260,6 +271,11 @@ impl Procedure {
     /// Returns the assembly-time node reference of this procedure.
     pub(crate) fn body_node_ref(&self) -> MastNodeRef {
         self.body_node_ref
+    }
+
+    /// Returns the assembly-time source node reference of this procedure.
+    pub(crate) fn source_node_ref(&self) -> Option<SourceNodeRef> {
+        self.source_node_ref
     }
 }
 
