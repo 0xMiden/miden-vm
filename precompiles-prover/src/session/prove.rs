@@ -29,6 +29,8 @@ use miden_lifted_stark::{
 use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
 
+use super::preprocessed_cache;
+
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 /// Temporary relation digest for the precompile chiplet AIR set.
@@ -295,23 +297,28 @@ impl SessionTraces {
         match hash_fn {
             HashFunction::Blake3_256 => {
                 let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
-                self.prove_stark_with_config(&config, hash_fn)
+                let preprocessed = preprocessed_cache::blake3(&config);
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpo256 => {
                 let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
-                self.prove_stark_with_config(&config, hash_fn)
+                let preprocessed = preprocessed_cache::rpo(&config);
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpx256 => {
                 let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
-                self.prove_stark_with_config(&config, hash_fn)
+                let preprocessed = preprocessed_cache::rpx(&config);
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Poseidon2 => {
                 let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
-                self.prove_stark_with_config(&config, hash_fn)
+                let preprocessed = preprocessed_cache::poseidon2(&config);
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
                 let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
-                self.prove_stark_with_config(&config, hash_fn)
+                let preprocessed = preprocessed_cache::keccak(&config);
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }
     }
@@ -329,6 +336,7 @@ impl SessionTraces {
     fn prove_stark_with_config<SC>(
         self,
         config: &SC,
+        preprocessed: &Preprocessed<Felt, SC::Lmcs>,
         hash_fn: HashFunction,
     ) -> Result<StarkProof, ProveError>
     where
@@ -340,20 +348,11 @@ impl SessionTraces {
         let prover_statement = ProverStatement::new(statement, self.into_mains())
             .expect("chiplet trace shapes are valid");
 
-        // BytePairLut declares preprocessed columns (its fixed `(a,b,c)`
-        // table), so this must be `Some`; built deterministically from the AIR
-        // list and borrowed by the prover instance.
-        let preprocessed = {
-            let _span = tracing::info_span!("build_preprocessed_trace").entered();
-            Preprocessed::build(prover_statement.statement(), config)
-                .ok_or(ProveError::MissingPreprocessed)?
-        };
-
         let mut challenger = config.challenger();
         observe_protocol_params(&mut challenger);
 
         let output: StarkOutput<Felt, QuadFelt, SC> =
-            ProverInstance::new(config, &prover_statement, Some(&preprocessed))?
+            ProverInstance::new(config, &prover_statement, Some(preprocessed))?
                 .prove(challenger)?;
 
         let proof_encoding_config = wincode::config::Configuration::default();
@@ -388,29 +387,35 @@ pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), Ver
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
             let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
-            verify_stark_with_config(&config, proof.bytes(), public_root)
+            let preprocessed = preprocessed_cache::blake3(&config);
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpo256 => {
             let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
-            verify_stark_with_config(&config, proof.bytes(), public_root)
+            let preprocessed = preprocessed_cache::rpo(&config);
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpx256 => {
             let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
-            verify_stark_with_config(&config, proof.bytes(), public_root)
+            let preprocessed = preprocessed_cache::rpx(&config);
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Poseidon2 => {
             let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
-            verify_stark_with_config(&config, proof.bytes(), public_root)
+            let preprocessed = preprocessed_cache::poseidon2(&config);
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Keccak => {
             let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
-            verify_stark_with_config(&config, proof.bytes(), public_root)
+            let preprocessed = preprocessed_cache::keccak(&config);
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
     }
 }
 
 fn verify_stark_with_config<SC>(
     config: &SC,
+    preprocessed: &Preprocessed<Felt, SC::Lmcs>,
     proof_bytes: &[u8],
     public_root: P2Digest,
 ) -> Result<(), VerifyError>
@@ -436,12 +441,6 @@ where
     let statement =
         Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
             .expect("chiplet statement inputs are valid");
-
-    // Rebuild the preprocessed bundle (fixed circuit data, deterministic from
-    // the AIR list) to recover its commitment — the verifier trusts it like the
-    // AIR list itself.
-    let preprocessed =
-        Preprocessed::build(&statement, config).ok_or(VerifyError::MissingPreprocessed)?;
 
     let mut challenger = config.challenger();
     observe_protocol_params(&mut challenger);
