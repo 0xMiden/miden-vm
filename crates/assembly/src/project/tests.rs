@@ -194,7 +194,7 @@ end
         .expect("kernel build should succeed");
 
     assert_eq!(package.kind, TargetType::Kernel);
-    assert!(package.to_kernel().is_ok());
+    assert!(package.to_kernel_descriptor().is_ok());
 }
 
 #[test]
@@ -2462,7 +2462,7 @@ fn executable_packages_preserve_kernel_when_converted_back_to_program() {
         .assemble_library_package(&manifest_path, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .to_kernel()
+        .to_kernel_descriptor()
         .expect("kernel package should round-trip as a kernel library");
     let package = context
         .assemble_executable_package(&manifest_path, Some("main"), None)
@@ -2504,7 +2504,7 @@ fn executable_packages_preserve_transitive_kernel_when_converted_back_to_program
         .expect("kernel package build should succeed");
     assert!(kernel_package.is_kernel());
     let expected_kernel = kernel_package
-        .to_kernel()
+        .to_kernel_descriptor()
         .expect("kernel package should round-trip as a kernel library");
     let package = context
         .assemble_executable_package(&root_manifest, Some("main"), None)
@@ -2567,7 +2567,7 @@ fn preassembled_libraries_prefer_store_kernel_over_embedded_copy() {
         .assemble_library_package(&kernel_manifest, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .to_kernel()
+        .to_kernel_descriptor()
         .expect("kernel package should round-trip as a kernel library");
     let mut mid_package = MastPackage::read_from_bytes(
         &build_context
@@ -2653,7 +2653,7 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
         .assemble_library_package(&kernel_manifest, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .to_kernel()
+        .to_kernel_descriptor()
         .expect("kernel package should round-trip as a kernel library");
     let kernel_version = miden_package_registry::Version::new(
         kernel_package.version.clone(),

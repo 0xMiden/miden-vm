@@ -12,7 +12,8 @@ pub(crate) fn summary_markdown(result: &Comparison) -> String {
         "## Blake3 1-to-1 Non-Regression".to_string(),
         String::new(),
         format!("Status: **{status}**"),
-        format!("Threshold: `{:.2}%`", result.threshold_pct),
+        format!("Criterion failure threshold: `{:.2}%`", result.threshold_pct),
+        format!("Minimum absolute slowdown: `{}`", fmt_ms(Some(result.min_regression_ms))),
         format!("Primary metric: `{}`", result.primary_metric),
         format!("Baseline: `{baseline}` ({})", fmt_ms(Some(result.baseline_primary_ms))),
         format!("Current: `{current}` ({})", fmt_ms(Some(result.current_primary_ms))),
@@ -37,14 +38,14 @@ pub(crate) fn summary_markdown(result: &Comparison) -> String {
         ));
     }
     if !result.regression_rows.is_empty() {
-        lines.extend([String::new(), "Regressions over threshold:".to_string()]);
+        lines.extend([String::new(), "Criterion regressions over threshold:".to_string()]);
         for row in &result.regression_rows {
             lines.push(format!(
                 "- `{}` moved by {} ({}) against a {:.2}% threshold.",
                 row.name,
                 fmt_delta(Some(row.delta_ms)),
                 fmt_pct(Some(row.delta_pct)),
-                result.threshold_pct
+                result.threshold_pct,
             ));
         }
     }

@@ -25,7 +25,7 @@ mod exports {
         precompile::{
             PrecompileTranscriptState, PrecompileVerificationError, PrecompileVerifierRegistry,
         },
-        program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
     pub mod math {
