@@ -13,7 +13,7 @@ import unittest.mock as mock
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MIN_REGRESSION_MS = 1.0
+DEFAULT_MIN_REGRESSION_MS = 5.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -493,12 +493,28 @@ class Tests(unittest.TestCase):
         self.assertTrue(result["regression"])
         self.assertEqual(result["max_delta_metric"], "bench-tx/a/verify")
 
-    def test_compare_ignores_sub_millisecond_noise(self) -> None:
+    def test_compare_ignores_small_absolute_delta(self) -> None:
         baseline = {"metrics": {"bench-tx/a/trace_prep": {"estimate_ms": 6.46}}}
         current = {"metrics": {"bench-tx/a/trace_prep": {"estimate_ms": 6.94}}}
         result = compare_results(baseline, current, 5.0)
         self.assertFalse(result["regression"])
         self.assertEqual(result["max_delta_metric"], "bench-tx/a/trace_prep")
+        self.assertEqual(result["regression_rows"], [])
+
+    def test_compare_ignores_trace_prep_delta_below_absolute_floor(self) -> None:
+        baseline = {
+            "metrics": {
+                "bench-tx/consume-b2agg-note-bridge-out/trace_prep": {"estimate_ms": 55.26591584210527}
+            }
+        }
+        current = {
+            "metrics": {
+                "bench-tx/consume-b2agg-note-bridge-out/trace_prep": {"estimate_ms": 58.434953205555544}
+            }
+        }
+        result = compare_results(baseline, current, 5.0)
+        self.assertFalse(result["regression"])
+        self.assertEqual(result["max_delta_metric"], "bench-tx/consume-b2agg-note-bridge-out/trace_prep")
         self.assertEqual(result["regression_rows"], [])
 
     def test_summary_markdown_uses_requested_report_shape(self) -> None:
@@ -529,7 +545,7 @@ class Tests(unittest.TestCase):
         self.assertIn("- Baseline: `1764d66ca1c6`", summary)
         self.assertIn("- Current: `1234567890ab`", summary)
         self.assertIn("- Threshold: `5.00%`", summary)
-        self.assertIn("- Minimum absolute slowdown: `1.00 ms`", summary)
+        self.assertIn("- Minimum absolute slowdown: `5.00 ms`", summary)
         self.assertIn("- Bench wall: 145,000.00 ms -> 152,000.00 ms (+7,000.00 ms, +4.83%)", summary)
         self.assertIn("### Result", summary)
         self.assertIn("- Status: **REGRESSION**", summary)
