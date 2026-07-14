@@ -88,7 +88,7 @@ impl DependencyGraph {
     pub fn build_source_provenance(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
@@ -119,7 +119,7 @@ impl DependencyGraph {
     pub fn expected_source_provenance(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
@@ -144,7 +144,7 @@ impl DependencyGraph {
     fn expected_source_provenance_with_visited(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
@@ -173,7 +173,7 @@ impl DependencyGraph {
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
                 let source_manager = self.source_manager.clone();
                 let context = TargetAssemblyContext::new(
-                    project,
+                    project.clone(),
                     manifest_path,
                     target,
                     profile,
@@ -279,7 +279,7 @@ impl DependencyGraph {
                     })?;
                 let provenance = self.expected_source_provenance_with_visited(
                     package_id,
-                    &project,
+                    project,
                     &target,
                     profile_name,
                     origin,

@@ -10,7 +10,7 @@ use super::*;
 /// implementations of the [ProjectSourceProvider] trait.
 pub struct TargetAssemblyContext<'a> {
     /// The package manifest for the target being assembled
-    pub package: &'a ProjectPackage,
+    pub package: Arc<ProjectPackage>,
     /// The resolved/canonicalized package manifest path
     pub manifest_path: &'a std::path::Path,
     /// The resolved/canonicalized path to the directory containing `manifest_path`
@@ -31,7 +31,7 @@ pub struct TargetAssemblyContext<'a> {
 
 impl<'a> TargetAssemblyContext<'a> {
     pub fn new(
-        package: &'a ProjectPackage,
+        package: Arc<ProjectPackage>,
         manifest_path: &'a std::path::Path,
         target: &'a Target,
         profile: &'a Profile,

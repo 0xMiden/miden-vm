@@ -310,7 +310,7 @@ where
         }
 
         let ProjectSourceInputs { root, support } =
-            self.load_target_sources(project.as_ref(), target, profile)?;
+            self.load_target_sources(project.clone(), target, profile)?;
 
         // Collect specific well-known custom sections produced by the project assembler
         let mut sections = Vec::new();
@@ -320,7 +320,7 @@ where
         // This is produced before actual assembly, while we still have the sources on hand
         if let Some(provenance) = self.dependency_graph.build_source_provenance(
             &package_id,
-            project.as_ref(),
+            project.clone(),
             target,
             profile_name,
             &self.source_provider,
@@ -410,7 +410,7 @@ where
                 match self.try_reuse_registered_source_package(
                     package_id,
                     &node_version,
-                    &project,
+                    project.clone(),
                     &target,
                     profile_name,
                     origin,
@@ -571,7 +571,7 @@ where
         &self,
         package_id: &PackageId,
         version: &miden_project::SemVer,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
@@ -660,13 +660,13 @@ where
 
     fn load_target_sources(
         &self,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile: &Profile,
     ) -> Result<ProjectSourceInputs, Report> {
         let manifest_path = project.expect_manifest_path()?;
         let mut context = TargetAssemblyContext::new(
-            project,
+            project.clone(),
             manifest_path,
             target,
             profile,
