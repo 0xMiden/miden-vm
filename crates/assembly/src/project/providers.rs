@@ -80,16 +80,17 @@ impl<'a> TargetAssemblyContext<'a> {
     }
 }
 
-/// This trait provides source file inputs for a Miden Assembly project, regardless of the source
-/// language it was derived from.
+/// This trait provides source file inputs and package post-processing hooks for a Miden Assembly
+/// project, regardless of the source language it was derived from.
 ///
 /// For Miden Assembly source projects this is straightforward, see [MasmSourceProvider].
 ///
 /// For languages other than MASM, which require a compilation step to produce Miden Assembly AST
-/// from the source language prior to assembly, this trait provides the necessary hooks so that
-/// the project assembler can request compilation of a project in source form on-demand.
-/// Implementors are given all available information needed to compile to MASM, and are expected
-/// to return requested artifacts to the project assembler.
+/// from the source language prior to assembly, and may have differing means for providing package
+/// metadata (advice data, account component metadata, custom sections), this trait provides the
+/// necessary hooks so that the project assembler can request compilation of a project in source
+/// form on-demand. Implementors are given all available information needed to compile to MASM, and
+/// are expected to return requested artifacts to the project assembler.
 ///
 /// Source providers are registered by the file type (i.e. file extension used by the source file)
 /// with the assembler when it is created. Only one source provider per-file-type is allowed.
@@ -119,4 +120,20 @@ pub trait ProjectSourceProvider {
         &self,
         context: &TargetAssemblyContext<'_>,
     ) -> Result<ProjectSourceProvenanceInputs, Report>;
+
+    /// Called after a project target - whose sources were provided via this trait- has been
+    /// assembled to a package, so that the provider can do any language-specific post-processing
+    /// of the assembled package before it is frozen and submitted to the package cache/registry.
+    ///
+    /// The default implementation is a no-op.
+    ///
+    /// The `context` given is the same as given to [`ProjectSourceProvider::provide_sources`].
+    #[allow(unused_variables)]
+    fn post_process_package(
+        &self,
+        package: &mut MastPackage,
+        context: &TargetAssemblyContext<'_>,
+    ) -> Result<(), Report> {
+        Ok(())
+    }
 }

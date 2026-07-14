@@ -358,6 +358,9 @@ where
         package.version = project.version().into_inner().clone();
         package.description = project.description().map(|description| description.to_string());
         package.sections.extend(sections);
+
+        self.apply_post_assembly_hooks(&mut package, project.clone(), target, profile)?;
+
         let package = Arc::from(package);
 
         let resolved = ResolvedPackage {
@@ -666,27 +669,9 @@ where
         target: &Target,
         profile: &Profile,
     ) -> Result<ProjectSourceInputs, Report> {
-        let manifest_path = project.expect_manifest_path()?;
-        let mut context = TargetAssemblyContext::new(
-            project.clone(),
-            manifest_path,
-            target,
-            profile,
-            self.dependency_graph.as_ref(),
-            self.store,
-            self.assembler.source_manager(),
-        )?;
-        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
+        let (provider, context) =
+            self.get_provider_and_target_assembly_context(&project, target, profile)?;
 
-        let extension = context.resolved_target_root.extension().ok_or_else(|| {
-            Report::msg(format!(
-                "invalid target 'path' {}: path must have an extension",
-                context.resolved_target_root.display()
-            ))
-        })?;
-        let extension = extension.to_string_lossy();
-
-        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
         let inputs = provider.provide_sources(&context)?;
         match target.ty {
             TargetType::Executable if !inputs.root.kind().is_executable() => {
@@ -711,6 +696,52 @@ where
             },
             _ => Ok(inputs),
         }
+    }
+
+    fn apply_post_assembly_hooks(
+        &self,
+        package: &mut MastPackage,
+        project: Arc<ProjectPackage>,
+        target: &Target,
+        profile: &Profile,
+    ) -> Result<(), Report> {
+        let (provider, context) =
+            self.get_provider_and_target_assembly_context(&project, target, profile)?;
+
+        provider.post_process_package(package, &context)?;
+
+        Ok(())
+    }
+
+    fn get_provider_and_target_assembly_context<'this>(
+        &'this self,
+        project: &'this Arc<ProjectPackage>,
+        target: &'this Target,
+        profile: &'this Profile,
+    ) -> Result<(&'this dyn ProjectSourceProvider, TargetAssemblyContext<'this>), Report> {
+        let manifest_path = project.expect_manifest_path()?;
+        let mut context = TargetAssemblyContext::new(
+            project.clone(),
+            manifest_path,
+            target,
+            profile,
+            self.dependency_graph.as_ref(),
+            self.store,
+            self.assembler.source_manager(),
+        )?;
+        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
+
+        let extension = context.resolved_target_root.extension().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target 'path' {}: path must have an extension",
+                context.resolved_target_root.display()
+            ))
+        })?;
+        let extension = extension.to_string_lossy();
+
+        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
+
+        Ok((provider, context))
     }
 }
 

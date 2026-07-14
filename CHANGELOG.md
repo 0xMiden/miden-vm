@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.25.3 (2026-07-14)
+
+- Add package post-processing hooks to the `ProjectSourceProvider` trait ([#3375](https://github.com/0xMiden/miden-vm/pull/3375)).
+
 ## v0.25.2 (2026-07-12)
 
 - Update `wincode` dependency to v0.5.5.
