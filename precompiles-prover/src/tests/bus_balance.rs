@@ -16,7 +16,7 @@ use crate::{
         keccak::{round::KeccakRoundAir, sponge::KeccakSpongeAir},
     },
     logup::LookupMessage,
-    primitives::{bitwise64::Bitwise64Air, byte_pair_lut::BytePairLutAir},
+    primitives::byte_pair_lut::BytePairLutAir,
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
     transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
@@ -97,7 +97,6 @@ pub(crate) fn session_stack_residual(
             ChipletAir::ChunkNode => fold_balance(&ChunkNodeAir, main, challenges, &mut net),
             ChipletAir::Poseidon2 => fold_balance(&Poseidon2Air, main, challenges, &mut net),
             ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
-            ChipletAir::Bitwise64 => fold_balance(&Bitwise64Air, main, challenges, &mut net),
             ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
             ChipletAir::KeccakSponge => fold_balance(&KeccakSpongeAir, main, challenges, &mut net),
             ChipletAir::TranscriptEval => {

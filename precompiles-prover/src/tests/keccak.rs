@@ -6,14 +6,14 @@
 
 use std::{vec, vec::Vec};
 
-use miden_core::utils::Matrix;
+use miden_core::{Felt, utils::Matrix};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::hash::keccak::{
     reference::{KECCAK_RC, keccak_f1600, keccak_round},
     round::{
-        KeccakRoundAir, NUM_ROUNDS, PERM_CYCLE, extract_output, extract_outputs,
-        generate_trace_from_states,
+        KeccakRoundAir, NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, ROT_LIMBS_RANGE, extract_output,
+        extract_outputs, generate_trace_from_states, program::SLOT_D_ROL_BEGIN,
     },
 };
 
@@ -234,39 +234,23 @@ fn keccak_round_multi_perm_oracle_and_constraints() {
     crate::tests::check_local(KeccakRoundAir, &main);
 }
 
+// NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption.
+// ================================================================================================
+
+/// Corrupting a `rot_limbs` cell on an active ROL row must now be
+/// rejected by the rotation limb-decomposition binding constraint:
+/// without it, `rot_limbs` was only Range16-range-checked, and the
+/// value `memory_provide_c` reconstructs from it (written to the
+/// Memory64 bus as this row's rotated result) could be driven to any
+/// value the prover chose. `SLOT_D_ROL_BEGIN` (round 0, lane 0) is an
+/// active `Op::Rol` row, so `is_rol = act = 1` there.
 #[test]
-fn bw64_per_perm_floor_holds() {
-    // Regression pin on the bitwise64 chain-packing + round-program operand
-    // chaining: one perm lowers to this many bw64 rows — the optimum for
-    // this input, since the greedy ROL-first claim is a maximum matching
-    // (it recovers every recyclable carrier). Full-range rotation (the
-    // half-swap that drops the ρ>30 additive-split trailing rows and the
-    // ZERO-slot Andnot) brought this down from 3769. The exact count sits in
-    // a narrow, input-dependent band (value collisions shift the matching),
-    // so we pin one fixed pseudo-random state. A chaining or round-program
-    // regression moves the count and trips this.
-    use crate::{
-        hash::keccak::round::{RoundRequires, generate_trace},
-        primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
-    };
-
-    let mut rng = StdRng::seed_from_u64(0x00b1_7c64);
-    let init: [u64; 25] = std::array::from_fn(|_| rng.random());
-
-    let mut round = RoundRequires::new();
-    let mut state = init;
-    for &rc in KECCAK_RC.iter().take(NUM_ROUNDS) {
-        round.require_round(state);
-        keccak_round(&mut state, rc);
-    }
-
-    let mut bw64 = Bitwise64Requires::new();
-    let mut bpl = BytePairLutRequires::new();
-    let _ = generate_trace(round, &mut bw64, &mut bpl);
-
-    assert_eq!(
-        bw64.active_rows(),
-        3145,
-        "per-perm bw64 floor regressed (chaining or round program changed)",
-    );
+#[should_panic(expected = "constraint not satisfied")]
+fn corruption_rot_limb_breaks_rotation_decomposition_binding() {
+    let state = [0u64; 25];
+    let mut main = generate_trace_from_states(&[state], &KECCAK_RC);
+    let row = SLOT_D_ROL_BEGIN;
+    let col = ROT_LIMBS_RANGE.start;
+    main.values[row * NUM_MAIN_COLS + col] += Felt::from(1u8);
+    crate::tests::check_local(KeccakRoundAir, &main);
 }

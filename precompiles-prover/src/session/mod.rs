@@ -8,9 +8,10 @@
 //! (which drive their own Poseidon2 absorptions and the
 //! [`UintRequire`](crate::uint::UintRequire) relation recording) — and
 //! owns the dependency-ordered trace-gen sweep (eval before its
-//! Poseidon2 / BPL demand; round before bitwise64 and BPL; the
-//! arithmetic ops' store demand before the store; BPL last, since every
-//! chiplet feeds it). Callers [`keccak`](Session::keccak) inputs into
+//! Poseidon2 / BPL demand; round before BPL (round drives its per-row
+//! `BytePairLut` byte-check demand directly); the arithmetic ops' store
+//! demand before the store; BPL last, since every chiplet feeds it).
+//! Callers [`keccak`](Session::keccak) inputs into
 //! [`Truthy`] claim handles, fold them into the transcript with
 //! [`assert_and`](Session::assert_and) /
 //! [`assert_and_fold`](Session::assert_and_fold), and
@@ -59,10 +60,7 @@ use crate::{
         },
     },
     math::{U256, from_limbs32, to_limbs32},
-    primitives::{
-        bitwise64::{Bitwise64Requires, generate_trace as bw64_trace},
-        byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
-    },
+    primitives::byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
     transcript::{
         eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
         nodes::UintOpId,
@@ -85,7 +83,7 @@ pub mod strategies;
 pub use prove::{ChipletAir, ChipletMultiAir, VerifyError, verify_deferred, verify_stark};
 
 /// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
-pub const NUM_CHIPLETS: usize = 13;
+pub const NUM_CHIPLETS: usize = 12;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -97,7 +95,6 @@ pub struct Session {
     p2: Poseidon2Requires,
     chunk: ChunkRequires,
     round: RoundRequires,
-    bw64: Bitwise64Requires,
     bpl: BytePairLutRequires,
     sponge: SpongeRequires,
     node: KeccakNodeRequires,
@@ -113,7 +110,6 @@ impl Session {
             p2: Poseidon2Requires::new(),
             chunk: ChunkRequires::new(),
             round: RoundRequires::new(),
-            bw64: Bitwise64Requires::new(),
             bpl: BytePairLutRequires::new(),
             sponge: SpongeRequires::new(),
             node: KeccakNodeRequires::new(),
@@ -158,7 +154,6 @@ impl Session {
             &mut self.sponge,
             &mut self.chunk,
             &mut self.round,
-            &mut self.bw64,
             &mut self.bpl,
             &mut self.p2,
         );
@@ -442,9 +437,9 @@ impl Session {
     /// consumed — the eval chip's `generate_trace` panics otherwise.
     ///
     /// The sweep runs in dependency order — eval first (its `out_mult`
-    /// checks feed BPL), round before bitwise64 (round drives bw64's
-    /// per-row Logic64 / Rol64 demand), the uint store's Range16 before BPL,
-    /// BPL last (every chiplet feeds it). `finish` owns that order so callers
+    /// checks feed BPL), the uint store's Range16 before BPL, BPL last
+    /// (every chiplet feeds it, including round and sponge's per-row byte
+    /// checks, driven directly). `finish` owns that order so callers
     /// can't transpose it; each trace-gen consumes its accumulator, so a
     /// chiplet can't be laid twice.
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
@@ -462,11 +457,7 @@ impl Session {
         let chunk_node = trace_span!("chunk_node", chunk_node_trace(self.chunk, self.node));
         let p2 = trace_span!("poseidon2", p2_trace(self.p2));
         let sponge = trace_span!("keccak_sponge", sponge_trace(self.sponge));
-        let round =
-            trace_span!("keccak_round", round_trace(self.round, &mut self.bw64, &mut self.bpl));
-        let bw64_active_rows = self.bw64.active_rows();
-        let bw64_populated_rows = self.bw64.populated_rows();
-        let bw64 = trace_span!("bitwise64", bw64_trace(self.bw64));
+        let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
         // every Range16 consumer fires before BPL. (The EC add chiplet
@@ -495,7 +486,6 @@ impl Session {
             chunk_node,
             p2,
             round,
-            bw64,
             bpl,
             sponge,
             eval,
@@ -506,8 +496,6 @@ impl Session {
             ec_add,
             msm,
             public_root,
-            bw64_active_rows,
-            bw64_populated_rows,
         }
     }
 }
@@ -518,14 +506,13 @@ impl Default for Session {
     }
 }
 
-/// The thirteen chiplet main traces plus the transcript root, ready to
+/// The twelve chiplet main traces plus the transcript root, ready to
 /// feed `prove_multi` or a bus-balance check.
 #[derive(Debug)]
 pub struct SessionTraces {
     chunk_node: RowMajorMatrix<Felt>,
     p2: RowMajorMatrix<Felt>,
     round: RowMajorMatrix<Felt>,
-    bw64: RowMajorMatrix<Felt>,
     bpl: RowMajorMatrix<Felt>,
     sponge: RowMajorMatrix<Felt>,
     eval: RowMajorMatrix<Felt>,
@@ -536,22 +523,18 @@ pub struct SessionTraces {
     ec_add: RowMajorMatrix<Felt>,
     msm: RowMajorMatrix<Felt>,
     public_root: P2Digest,
-    bw64_active_rows: usize,
-    bw64_populated_rows: usize,
 }
 
 impl SessionTraces {
-    /// The thirteen main traces in canonical chiplet order: chunk-node,
-    /// poseidon2, round, bitwise64, byte_pair_lut, sponge, eval,
-    /// uint-store-mul, uint-add, ec-groups, ec-points, ec-add, ec-msm. The
-    /// AIRs, provers, and public values a caller assembles must line up
-    /// with this order.
+    /// The twelve main traces in canonical chiplet order: chunk-node,
+    /// poseidon2, round, byte_pair_lut, sponge, eval, uint-store-mul,
+    /// uint-add, ec-groups, ec-points, ec-add, ec-msm. The AIRs, provers,
+    /// and public values a caller assembles must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node,
             &self.p2,
             &self.round,
-            &self.bw64,
             &self.bpl,
             &self.sponge,
             &self.eval,
@@ -564,7 +547,7 @@ impl SessionTraces {
         ]
     }
 
-    /// The thirteen main traces by value in [`mains`](Self::mains) order,
+    /// The twelve main traces by value in [`mains`](Self::mains) order,
     /// consuming the bundle — lets the prover take ownership rather than
     /// clone the (potentially large) traces.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
@@ -572,7 +555,6 @@ impl SessionTraces {
             self.chunk_node,
             self.p2,
             self.round,
-            self.bw64,
             self.bpl,
             self.sponge,
             self.eval,
@@ -596,17 +578,5 @@ impl SessionTraces {
     /// The transcript root committed by the eval chip.
     pub fn public_root(&self) -> P2Digest {
         self.public_root
-    }
-
-    /// Total logical bitwise64 row count (lane-independent) — a trace-density
-    /// diagnostic; the chiplet's other dimensions come from `mains()`.
-    pub fn bw64_active_rows(&self) -> usize {
-        self.bw64_active_rows
-    }
-
-    /// Populated (pre-power-of-two-pad) bitwise64 trace height — the busiest
-    /// chain-lane's row count, ≈ `active_rows / NUM_LANES`.
-    pub fn bw64_populated_rows(&self) -> usize {
-        self.bw64_populated_rows
     }
 }

@@ -6,6 +6,12 @@
 //! cleanly in one trace (and the sponge AIR uses the bus's multiset
 //! semantics to overwrite state at absorb boundaries).
 //!
+//! Each row carries its operands and result as byte/limb decompositions
+//! and verifies them directly against the [`BytePairLut`](crate::primitives::byte_pair_lut)
+//! chiplet (byte-wise op results via `BytePairLutMsg`, 16-bit range checks
+//! via `Range16Msg`) — no separate logic/rotate chiplet or intermediate
+//! bus is needed.
+//!
 //! See the design notes for the design rationale (slot
 //! layout, sponge contract, address-space layout, decomposition for
 //! `ρ > 30`).
@@ -13,11 +19,11 @@
 pub mod program;
 
 use alloc::{vec, vec::Vec};
-use core::array;
+use core::{array, ops::Range};
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
@@ -30,12 +36,11 @@ use crate::{
         LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
         frac_col,
     },
-    primitives::{
-        bitwise64::{Bitwise64Requires, Logic64Msg, Logic64Op, Rol64Msg, XorRol64Msg},
-        byte_pair_lut::BytePairLutRequires,
+    primitives::byte_pair_lut::{
+        BytePairLutMsg, BytePairLutRequires, BytePairOp, Range16Msg, require_logic64,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main, split_u64},
+    utils::{current_main, halves_le, next_main, pack_le},
 };
 
 // MAIN COLUMN LAYOUT
@@ -45,35 +50,45 @@ use crate::{
 /// trace's first row (sponge addresses [0, 25) hold the round-0 lane
 /// inputs).
 pub const COL_IP: usize = 0;
-/// Source A value as 32-bit halves (matched against the memory bus).
-pub const COL_A_LO: usize = 1;
-pub const COL_A_HI: usize = 2;
-/// Source B value (unused on pure-ROL rows).
-pub const COL_B_LO: usize = 3;
-pub const COL_B_HI: usize = 4;
-/// Destination value: `c = ROL(a OP b, s)`. The logic intermediate `r`
-/// is no longer committed — the bitwise64 buses (`Logic64`/`Rol64`/the
-/// fused `XorRol64`) relate `a`, `b`, `c` directly, so the round carries
-/// only the operands and the result.
-pub const COL_C_LO: usize = 5;
-pub const COL_C_HI: usize = 6;
+/// Source A value, byte-decomposed LSB-first. Range-checked (and, on
+/// rows that read a real logic op, verified against `b_bytes`/`r_bytes`)
+/// via the [`BytePairLutMsg`] requires this chiplet issues directly —
+/// see [`R_BYTES_RANGE`].
+pub const A_BYTES_RANGE: Range<usize> = 1..9;
+/// Source B value, byte-decomposed LSB-first. Real second operand only
+/// on rows with `is_xor | is_andnot` active; on pure-ROL and NOP rows
+/// the effective operand is gated to 0 at the message level (the raw
+/// column may hold anything).
+pub const B_BYTES_RANGE: Range<usize> = 9..17;
+/// Logic result `r = a OP b`, byte-decomposed — or the passthrough
+/// `r = a` on rows with no logic op active (pinned by a local
+/// constraint). This is the value ROL rotates, and — when `is_rol = 0`
+/// — the value written to `ip` on the Memory64 bus.
+pub const R_BYTES_RANGE: Range<usize> = 17..25;
+/// 16-bit limbs of `(r_half + 2^32)·k` for `r`'s low and high halves
+/// (first 4 limbs: low half; next 4: high half), populated iff
+/// `is_rol = 1`. Same construction as a rotate chiplet's ROL row, but
+/// rotating this row's own `r` rather than a value read from elsewhere.
+/// Range-checked via [`Range16Msg`] requires. See `memory_provide_c`
+/// for how the rotated 64-bit value is reconstructed from these limbs.
+pub const ROT_LIMBS_RANGE: Range<usize> = 25..33;
 /// Active indicator. 1 on active rounds, 0 on each cycle's dead round
 /// (the 25th round of every perm cycle) and on trace-tail padding.
 /// Constant within each round (changes only at round boundaries —
 /// gated by the `p_last` periodic indicator). Every bus multiplicity
 /// is multiplied by `act`, so dead rounds and padding rows contribute
-/// nothing to either Memory64 or Bitwise64 buses. The sponge AIR
+/// nothing to the Memory64 or BytePairLut buses. The sponge AIR
 /// σ-matches the chiplet's active-rows-only residue; it also forces
-/// `act = 1` at row 0 by providing `RC[0]`, which the chiplet's slot 1
-/// must consume.
-pub const COL_ACT: usize = 7;
+/// `act = 1` at row 0 by providing `RC[0]`, which the chiplet's
+/// slot 1 must consume.
+pub const COL_ACT: usize = 33;
 
-// All COL_* indices above are **lane-local** (within one [`LANE_WIDTH`]-wide
-// band); the absolute main-trace index is `lane * LANE_WIDTH + local`, via
-// [`lane_base`].
+// All COL_* / *_RANGE indices above are **lane-local** (within one
+// [`LANE_WIDTH`]-wide band); the absolute main-trace index is
+// `lane * LANE_WIDTH + local`, via [`lane_base`].
 
 /// Width of one permutation-lane's column band.
-pub const LANE_WIDTH: usize = 8;
+pub const LANE_WIDTH: usize = 34;
 /// Number of permutation-lanes packed side-by-side per row. Each lane runs a
 /// contiguous block of permutations in its own column band while sharing the
 /// (preprocessed, free) periodic program, so the row count is ~`1/NUM_LANES`
@@ -111,18 +126,19 @@ fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMa
 // AUX COLUMN LAYOUT
 // ================================================================================================
 
-/// FLATTENED to lqd 1, repeated per lane: each lane's 4-column band holds
-/// five fractions (all degree-2 multiplicities) split ≤ 2 per column, the
+/// FLATTENED to lqd 1, repeated per lane: each lane's 10-column band holds
+/// 19 fractions (all degree-≤2 multiplicities) split ≤ 2 per column, the
 /// band's col 0 a single fraction:
 /// - band col 0: memory64 dst provide.
 /// - band col 1: memory64 `src_a` + `src_b` requires.
-/// - band col 2: bitwise64 `Logic64` (pure-logic) + `Rol64` (pure-ROL) requires.
-/// - band col 3: bitwise64 fused `XorRol64` require (θ-apply+ρ rows).
+/// - band cols 2–5: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
+///   rows — see [`R_BYTES_RANGE`]), two per column.
+/// - band cols 6–9: 8 `Range16` requires on `rot_limbs`, two per column.
 ///
 /// Aux column 0 (lane 0's dst provide) is the running sum; every later
 /// fraction column — including each later lane's dst provide — is folded into
 /// it by the col-0 recurrence.
-pub const NUM_AUX_COLS: usize = 4 * NUM_LANES;
+pub const NUM_AUX_COLS: usize = 10 * NUM_LANES;
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; col 0's recurrence aggregating both
@@ -146,7 +162,8 @@ pub use program::{
 
 /// Keccak-round chiplet AIR. Period-128 program drives a TAM-style row
 /// `c = ROL(a OP b, s)` against the [`Memory64`](crate::hash::memory64)
-/// bus and the Bitwise64 chiplet's Logic64/Rol64 buses.
+/// bus, verifying each row's operands and result directly against
+/// [`BytePairLut`](crate::primitives::byte_pair_lut).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakRoundAir;
 
@@ -196,6 +213,11 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
 
         let periodic = builder.periodic_values();
         let p_last: AB::Expr = periodic[PCOL_P_LAST].into();
+        let is_xor: AB::Expr = periodic[PCOL_IS_XOR].into();
+        let is_andnot: AB::Expr = periodic[PCOL_IS_ANDNOT].into();
+        let is_rol: AB::Expr = periodic[PCOL_IS_ROL].into();
+        let k: AB::Expr = periodic[PCOL_K].into();
+        let two_32 = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 fits"));
 
         for lane in 0..NUM_LANES {
             let base = lane_base(lane);
@@ -231,15 +253,52 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] which slot 1 must consume, so no boundary is needed.
-            builder
-                .assert_zero((AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act));
-        }
+            builder.assert_zero(
+                (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
+            );
 
-        // No `c`-pinning constraints: the bitwise64 buses relate `a`, `b`,
-        // `c` directly — `Logic64(op, a, b, c)` (pure-logic), `Rol64(a, c, k)`
-        // (pure-ROL), and `XorRol64(a, b, c, k)` (fused) each pin `c` on the
-        // rows that provide memory. NOP rows touch no bus (and write no
-        // memory), so their `c` is free.
+            // Passthrough pin: on rows with no logic op active (pure-ROL and
+            // NOP rows), `r = a`. Byte-wise so it matches the byte-level
+            // range check `r_bytes` inherits below (see `eval`'s lookup
+            // half): `(1 − is_xor − is_andnot) · (r_bytes[i] − a_bytes[i]) =
+            // 0` for each byte `i`.
+            let logic_active = is_xor.clone() + is_andnot.clone();
+            let no_logic = AB::Expr::ONE - logic_active;
+            for i in 0..8 {
+                let a_byte = local[base + A_BYTES_RANGE.start + i];
+                let r_byte = local[base + R_BYTES_RANGE.start + i];
+                builder.assert_zero(
+                    no_logic.clone() * (AB::Expr::from(r_byte) - AB::Expr::from(a_byte)),
+                );
+            }
+
+            // Rotation limb-decomposition binding: on an active ROL row,
+            // `rot_limbs` must be the 16-bit limb decomposition of
+            // `(r_half + 2^32)·k` for each half of this row's own `r`
+            // (byte-committed above) — the same identity a rotate
+            // chiplet's ROL row enforces, applied to `r` instead of a
+            // value read from elsewhere. Without this, `rot_limbs` is
+            // only Range16-checked (see `eval`'s lookup half) and
+            // `rotated_halves` — which `memory_provide_c` uses to derive
+            // the value written to memory — can be driven to any result.
+            //
+            // Gated by `act · is_rol`, not `is_rol` alone: `is_rol` is a
+            // periodic column and keeps firing on this row's periodic
+            // slot through the dead round and trace-tail padding, but
+            // `push_row` writes an all-Nop, all-zero row there (`rot_limbs
+            // = 0`, `r = 0`) — an `is_rol`-only gate would wrongly demand
+            // `2^32·k = 0` on those padding rows and break completeness.
+            let r_bytes: [AB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
+            let rot_limbs: [AB::Var; 8] =
+                array::from_fn(|i| local[base + ROT_LIMBS_RANGE.start + i]);
+            let [r_lo, r_hi] = halves_le(&r_bytes, 256);
+            let lo_decomp: AB::Expr = pack_le(&rot_limbs[0..4], 1u64 << 16);
+            let hi_decomp: AB::Expr = pack_le(&rot_limbs[4..8], 1u64 << 16);
+            let rol_gate = act.clone() * is_rol.clone();
+            builder
+                .assert_zero(rol_gate.clone() * ((r_lo + two_32.clone()) * k.clone() - lo_decomp));
+            builder.assert_zero(rol_gate * ((r_hi + two_32.clone()) * k.clone() - hi_decomp));
+        }
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =
@@ -248,15 +307,60 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
     }
 }
 
+/// Reconstruct the rotated 64-bit value's `(lo, hi)` halves from
+/// `rot_limbs`, the periodic `k` (the *reduced* rotation multiplier,
+/// `≤ 2^30` — see [`program::rol_decompose`]), and `swap` (1 on fused
+/// slots whose *true* rotation `ρ ≥ 32`, where the reduced shift is
+/// `ρ − 32` and the true output's 32-bit halves are the reduced
+/// output's halves swapped). Same limb-pairing formula a rotate
+/// chiplet's ROL row uses (`c0 = limb0+limb6`, …), applied to this
+/// row's own `rot_limbs` instead of a value read from elsewhere.
+fn rotated_halves<E: Algebra<Felt>, V: Copy + Into<E>>(
+    rot_limbs: &[V; 8],
+    k: E,
+    swap: E,
+) -> [E; 2] {
+    let two_16 = E::from(Felt::from(1u32 << 16));
+    let limb: [E; 8] = array::from_fn(|i| rot_limbs[i].into());
+    let c0 = limb[0].clone() + limb[6].clone();
+    let c1 = limb[1].clone() + limb[7].clone();
+    let c2 = limb[2].clone() + limb[4].clone();
+    let c3 = limb[3].clone() + limb[5].clone();
+    let lo = c0 + c1 * two_16.clone() - k.clone();
+    let hi = c2 + c3 * two_16 - k;
+    // Full-range rotation: for ρ ≥ 32 the reduced rotation's halves are
+    // half-swapped to recover the true `ROL(r, ρ)` (`ROL(x, ρ) =
+    // halfswap(ROL(x, ρ − 32))`).
+    let lo_final = lo.clone() + swap.clone() * (hi.clone() - lo.clone());
+    let hi_final = hi.clone() + swap * (lo - hi);
+    [lo_final, hi_final]
+}
+
+/// The value this row writes to `ip` on the Memory64 bus: the rotated
+/// value (reconstructed from `rot_limbs`) when `is_rol = 1`, else the
+/// passthrough logic result `r` (packed from `r_bytes`).
+fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
+    r_bytes: &[V; 8],
+    rot_limbs: &[V; 8],
+    k: E,
+    swap: E,
+    is_rol: E,
+) -> [E; 2] {
+    let [r_lo, r_hi] = halves_le(r_bytes, 256);
+    let [rot_lo, rot_hi] = rotated_halves(rot_limbs, k, swap);
+    let lo = r_lo.clone() + is_rol.clone() * (rot_lo - r_lo);
+    let hi = r_hi.clone() + is_rol * (rot_hi - r_hi);
+    [lo, hi]
+}
+
 // LOOKUP AIR
 // ================================================================================================
 
 /// Aux column shape (FLATTENED to lqd 1), repeated per lane (band-local):
-/// - band col 0: memory64 dst provide (one degree-2 fraction; lane 0's is the running sum, the
-///   gated σ-close at degree 3).
+/// - band col 0: memory64 dst provide (one degree-≤3 fraction; lane 0's is the running sum).
 /// - band col 1: memory64 `src_a` + `src_b` requires.
-/// - band col 2: Bitwise64 Logic64 + Rol64 requires.
-/// - band col 3: Bitwise64 fused XorRol64 require.
+/// - band cols 2–5: 8 `BytePairLut` byte requires, two per column.
+/// - band cols 6–9: 8 `Range16` requires on `rot_limbs`, two per column.
 ///
 /// Every closing constraint is degree ≤ 3, so `log_quotient_degree = 1`
 /// (aux blowup factor = 2). Width disregarded.
@@ -266,9 +370,8 @@ const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
     let mut shape = [2usize; NUM_AUX_COLS];
     let mut lane = 0;
     while lane < NUM_LANES {
-        // Band-local cols 0 and 3 are single fractions.
-        shape[lane * 4] = 1;
-        shape[lane * 4 + 3] = 1;
+        // Band-local col 0 is a single fraction (dst provide).
+        shape[lane * 10] = 1;
         lane += 1;
     }
     shape
@@ -307,31 +410,39 @@ where
         let back_b: LB::Expr = periodic[PCOL_BACK_B].into();
         let k: LB::Expr = periodic[PCOL_K].into();
         let dst_mult: LB::Expr = periodic[PCOL_DST_MULT].into();
-        // Half-swap flag for full-range rotation: on `ρ ≥ 32` XORROL slots the
-        // chiplet provides `ROL(a⊕b, ρ−32)` = halfswap of the round's committed
-        // `c`, so the XorRol64 message sends `c` with its 32-bit halves swapped.
         let swap: LB::Expr = periodic[PCOL_SWAP].into();
+        // Byte-pair-LUT op tag: the real op tag on XOR/ANDNOT rows, and
+        // defaults to Xor (tag 1) on rows with no logic active — combined
+        // with `gated_b` below (forced to 0 there), this issues
+        // `BPL(Xor, a, 0, r)` on those rows, which range-checks `a_bytes`
+        // and (redundantly with the passthrough pin in `KeccakRoundAir::eval`)
+        // forces `r = a`. This is what replaces a rotate chiplet's
+        // chain-trick range check now that every row commits its own bytes.
+        let bpl_op = LB::Expr::ONE - is_andnot.clone();
+        let logic_active = is_xor.clone() + is_andnot.clone();
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let triple_deg = Deg { v: 3, u: 3 };
         let pair_deg = Deg { v: 2, u: 2 };
+        let dst_deg = Deg { v: 5, u: 2 };
 
-        // Each lane emits its own 4-column band over its disjoint data
-        // columns, reading the shared periodic gates. Lane 0's dst provide is
-        // the running sum (aux col 0); every later lane's fractions — its dst
-        // provide included — are ordinary fraction columns the col-0
-        // recurrence folds in. The bus contribution is the union over lanes
-        // (an unchanged multiset), so the single σ matches a single stream.
+        // Each lane emits its own 10-column band of fractions over its
+        // disjoint data columns, reading the shared periodic gates. Lane 0's
+        // dst provide is the running sum (aux col 0); every later lane's
+        // fractions — its dst provide included — are ordinary fraction
+        // columns the col-0 recurrence folds in. The bus contribution is the
+        // union over lanes (an unchanged multiset), so the single σ matches
+        // a single stream.
         for lane in 0..NUM_LANES {
             let base = lane_base(lane);
             let ip: LB::Expr = local[base + COL_IP].into();
-            let a_lo: LB::Expr = local[base + COL_A_LO].into();
-            let a_hi: LB::Expr = local[base + COL_A_HI].into();
-            let b_lo: LB::Expr = local[base + COL_B_LO].into();
-            let b_hi: LB::Expr = local[base + COL_B_HI].into();
-            let c_lo: LB::Expr = local[base + COL_C_LO].into();
-            let c_hi: LB::Expr = local[base + COL_C_HI].into();
             let act: LB::Expr = local[base + COL_ACT].into();
+
+            let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + A_BYTES_RANGE.start + i]);
+            let b_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + B_BYTES_RANGE.start + i]);
+            let r_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
+            let rot_limbs: [LB::Var; 8] =
+                array::from_fn(|i| local[base + ROT_LIMBS_RANGE.start + i]);
 
             // Multiplicity expressions, all gated by this lane's `act` so
             // dead-round / padding rows contribute nothing to the bus.
@@ -339,123 +450,125 @@ where
             // `is_active`: row reads `src_a` (every non-NOP op does, once). A
             // fused XORROL row sets both `is_xor` and `is_rol`, so subtracting
             // the one-hot `is_xorrol` recovers one read per row at degree 1.
+            // This same gate now also drives the row's `BytePairLut` byte
+            // requires — every row that reads `a` at all range-checks it.
             let is_active = act.clone()
                 * (is_xor.clone() + is_andnot.clone() + is_rol.clone() - is_xorrol.clone());
             // `reads_b`: XOR / ANDNOT / fused XORROL all read `src_b`.
             let reads_b = act.clone() * (is_xor.clone() + is_andnot.clone());
-            // bitwise64 consume gates: pure-logic, pure-ROL, fused — disjoint,
-            // summing to `is_active`.
-            let pure_logic = act.clone() * (is_xor.clone() + is_andnot.clone() - is_xorrol.clone());
-            let pure_rol = act.clone() * (is_rol.clone() - is_xorrol.clone());
-            let xorrol_act = act.clone() * is_xorrol.clone();
+            let rol_act = act.clone() * is_rol.clone();
             let dst_mult_act = act.clone() * dst_mult.clone();
 
             // band col 0: memory64 dst provide. Mixed-sign multiplicities:
             // `mult = -dst_mult` for the provide (signed via `g.insert`, since
             // `g.remove` hard-codes mult = -1 and would mis-account multi-value
-            // writes — `dst_mult ∈ {1, 2, 3, 5, 12}`). Gated by `act`.
+            // writes — `dst_mult ∈ {1, 2, 3, 5, 12}`). Gated by `act`. The
+            // written value is this row's own `r` (passthrough) or its
+            // rotated form (reconstructed from `rot_limbs`), muxed by `is_rol`
+            // — see `memory_provide_c`.
+            let [c_lo, c_hi] =
+                memory_provide_c(&r_bytes, &rot_limbs, k.clone(), swap.clone(), is_rol.clone());
             let neg_dst_mult: LB::Expr = LB::Expr::ZERO - dst_mult_act;
             frac_col!(
                 builder,
                 "memory64",
-                triple_deg,
+                dst_deg,
                 (
                     "dst",
                     neg_dst_mult,
-                    Memory64Msg {
-                        addr: ip.clone(),
-                        lo: c_lo.clone(),
-                        hi: c_hi.clone()
-                    },
+                    Memory64Msg { addr: ip.clone(), lo: c_lo, hi: c_hi },
                     interaction_deg
                 ),
             );
             // band col 1: memory64 src_a + src_b requires.
+            let [a_lo, a_hi] = halves_le(&a_bytes, 256);
+            let [b_lo, b_hi] = halves_le(&b_bytes, 256);
             frac_col!(
                 builder,
                 "memory64",
                 triple_deg,
                 (
                     "src_a",
-                    is_active,
+                    is_active.clone(),
                     Memory64Msg {
                         addr: ip.clone() - back_a.clone(),
-                        lo: a_lo.clone(),
-                        hi: a_hi.clone()
+                        lo: a_lo,
+                        hi: a_hi
                     },
                     interaction_deg
                 ),
                 (
                     "src_b",
-                    reads_b,
+                    reads_b.clone(),
                     Memory64Msg {
                         addr: ip - back_b.clone(),
-                        lo: b_lo.clone(),
-                        hi: b_hi.clone()
+                        lo: b_lo,
+                        hi: b_hi
                     },
                     interaction_deg
                 ),
             );
-            // band col 2: bitwise64 pure-logic `Logic64(op, a, b, c)` + pure-ROL
-            // `Rol64(a, c, k)`. `c` is the row's committed output, pinned by the
-            // relation. `op = is_xor` (AndNot tag 0, Xor tag 1).
-            frac_col!(
-                builder,
-                "bitwise64",
-                pair_deg,
-                (
-                    "logic64",
-                    pure_logic,
-                    Logic64Msg {
-                        op: is_xor.clone(),
-                        a_lo: a_lo.clone(),
-                        a_hi: a_hi.clone(),
-                        b_lo: b_lo.clone(),
-                        b_hi: b_hi.clone(),
-                        c_lo: c_lo.clone(),
-                        c_hi: c_hi.clone()
-                    },
-                    interaction_deg
-                ),
-                (
-                    "rol64",
-                    pure_rol,
-                    Rol64Msg {
-                        a_lo: a_lo.clone(),
-                        a_hi: a_hi.clone(),
-                        b_lo: c_lo.clone(),
-                        b_hi: c_hi.clone(),
-                        k: k.clone()
-                    },
-                    interaction_deg
-                ),
-            );
-            // band col 3: bitwise64 fused `XorRol64(a, b, c, k)` for θ-apply+ρ
-            // rows — `c = rol(a ⊕ b, k)` in one consume. On swap slots the
-            // chiplet provides ROL(a⊕b, ρ−32) = halfswap(committed c), so the
-            // message's c halves are swapped (`swap ∈ {0,1}`); `k` already
-            // carries `2^(ρ−32)` from the periodic program.
-            let xc_lo = c_lo.clone() + swap.clone() * (c_hi.clone() - c_lo.clone());
-            let xc_hi = c_hi.clone() + swap.clone() * (c_lo.clone() - c_hi.clone());
-            frac_col!(
-                builder,
-                "bitwise64",
-                interaction_deg,
-                (
-                    "xorrol64",
-                    xorrol_act,
-                    XorRol64Msg {
-                        a_lo,
-                        a_hi,
-                        b_lo,
-                        b_hi,
-                        c_lo: xc_lo,
-                        c_hi: xc_hi,
-                        k: k.clone()
-                    },
-                    interaction_deg
-                ),
-            );
+            // band cols 2–5: 8 BytePairLut byte requires verifying
+            // `r_bytes[i] = op(a_bytes[i], gated_b_bytes[i])`. `gated_b`
+            // forces the effective second operand to 0 on rows with no real
+            // logic op (message-field gating, not a column constraint — the
+            // raw `b_bytes` column may hold anything there since its
+            // contribution is zeroed regardless).
+            for pair in 0..4 {
+                let i0 = pair * 2;
+                let i1 = i0 + 1;
+                let gated_b0 = logic_active.clone() * LB::Expr::from(b_bytes[i0]);
+                let gated_b1 = logic_active.clone() * LB::Expr::from(b_bytes[i1]);
+                frac_col!(
+                    builder,
+                    "byte-pair-lut",
+                    pair_deg,
+                    (
+                        "byte-req",
+                        is_active.clone(),
+                        BytePairLutMsg {
+                            op: bpl_op.clone(),
+                            a: a_bytes[i0].into(),
+                            b: gated_b0,
+                            c: r_bytes[i0].into()
+                        },
+                        interaction_deg
+                    ),
+                    (
+                        "byte-req",
+                        is_active.clone(),
+                        BytePairLutMsg {
+                            op: bpl_op.clone(),
+                            a: a_bytes[i1].into(),
+                            b: gated_b1,
+                            c: r_bytes[i1].into()
+                        },
+                        interaction_deg
+                    ),
+                );
+            }
+            // band cols 6–9: 8 Range16 requires on rot_limbs, two per column.
+            for pair in 0..4 {
+                let i0 = pair * 2;
+                let i1 = i0 + 1;
+                frac_col!(
+                    builder,
+                    "range16",
+                    pair_deg,
+                    (
+                        "limb",
+                        rol_act.clone(),
+                        Range16Msg { w: rot_limbs[i0].into() },
+                        interaction_deg
+                    ),
+                    (
+                        "limb",
+                        rol_act.clone(),
+                        Range16Msg { w: rot_limbs[i1].into() },
+                        interaction_deg
+                    ),
+                );
+            }
         }
     }
 }
@@ -479,6 +592,111 @@ pub const NUM_ROUNDS: usize = 24;
 /// Rows per perm cycle: 24 active rounds + 1 dead round.
 pub const PERM_CYCLE: usize = (NUM_ROUNDS + 1) * ROUND_PERIOD;
 
+/// Split the logic result computation from the (optional) rotate, since
+/// the merged row needs both `r` (byte-committed, BPL-checked) and the
+/// final `c` (written to memory) separately.
+fn simulate_logic(op: Op, a: u64, b: u64) -> u64 {
+    match op {
+        Op::Nop | Op::Rol(_) => a,
+        Op::Xor | Op::XorRol(_) => a ^ b,
+        Op::Andnot => (!a) & b,
+    }
+}
+
+fn simulate_rotate(op: Op, r: u64) -> u64 {
+    match op {
+        Op::Rol(s) | Op::XorRol(s) => r.rotate_left(s),
+        _ => r,
+    }
+}
+
+/// Decompose a `u64` into 8 little-endian bytes as `Felt`s.
+fn bytes_le(x: u64) -> [Felt; 8] {
+    x.to_le_bytes().map(Felt::from)
+}
+
+/// `rot_limbs` for rotating `r` by the *reduced* shift `2^shift` (`shift
+/// ≤ 30` — see [`program::rol_decompose`]): 16-bit limbs of
+/// `(r_half + 2^32)·k`, low half first. Mirrors a rotate chiplet's ROL
+/// row construction. Returned as raw `u16`s (for driving the
+/// `Range16` requires) alongside their `Felt` form (for the trace row).
+fn rot_limbs_for(r: u64, shift: u32) -> [u16; 8] {
+    let k = 1u64 << shift;
+    let r_lo = r & 0xffff_ffff;
+    let r_hi = r >> 32;
+    let lo_offset_k = (r_lo + (1u64 << 32)).wrapping_mul(k);
+    let hi_offset_k = (r_hi + (1u64 << 32)).wrapping_mul(k);
+    let lo_limbs = u64_as_four_u16_limbs(lo_offset_k);
+    let hi_limbs = u64_as_four_u16_limbs(hi_offset_k);
+    [
+        lo_limbs[0],
+        lo_limbs[1],
+        lo_limbs[2],
+        lo_limbs[3],
+        hi_limbs[0],
+        hi_limbs[1],
+        hi_limbs[2],
+        hi_limbs[3],
+    ]
+}
+
+/// Decompose a `u64` into four 16-bit limbs LSB-first.
+fn u64_as_four_u16_limbs(x: u64) -> [u16; 4] {
+    [
+        (x & 0xffff) as u16,
+        ((x >> 16) & 0xffff) as u16,
+        ((x >> 32) & 0xffff) as u16,
+        ((x >> 48) & 0xffff) as u16,
+    ]
+}
+
+/// Build one row's `LANE_WIDTH` field elements and drive the
+/// `BytePairLutRequires` ledger for its byte/limb checks. `spec` is the
+/// slot's program entry; `a`, `b` are the (already-read) source operand
+/// values; `act` gates whether this row's bus interactions fire.
+fn push_row(
+    trace: &mut Vec<Felt>,
+    bpl_req: &mut BytePairLutRequires,
+    ip: u64,
+    spec: &Slot,
+    a: u64,
+    b: u64,
+    act: bool,
+) {
+    let is_andnot = matches!(spec.op, Op::Andnot);
+    let logic_active = matches!(spec.op, Op::Xor | Op::Andnot | Op::XorRol(_));
+    // Matches the AIR's `is_active = act·(is_xor+is_andnot+is_rol-is_xorrol)`
+    // gate exactly: every non-NOP op reads `src_a` once, so `is_active`
+    // reduces to `act && reads_a` (NOP is the only op that reads nothing).
+    let reads_a = !matches!(spec.op, Op::Nop);
+    let is_rol = matches!(spec.op, Op::Rol(_) | Op::XorRol(_));
+    let b_eff = if logic_active { b } else { 0 };
+    let r = simulate_logic(spec.op, a, b_eff);
+    if act && reads_a {
+        let bpl_op = if is_andnot { BytePairOp::AndNot } else { BytePairOp::Xor };
+        require_logic64(bpl_req, bpl_op, a, b_eff);
+    }
+
+    let mut rot_limbs = [0u16; 8];
+    if let Op::Rol(s) | Op::XorRol(s) = spec.op {
+        let (shift, _swap) = program::rol_decompose(s);
+        rot_limbs = rot_limbs_for(r, shift);
+        if act {
+            for limb in rot_limbs {
+                bpl_req.require_range16(limb);
+            }
+        }
+    }
+
+    trace.push(Felt::new(ip).expect("ip fits in canonical Goldilocks"));
+    trace.extend(bytes_le(a));
+    trace.extend(bytes_le(b_eff));
+    trace.extend(bytes_le(r));
+    trace.extend(rot_limbs.map(Felt::from));
+    trace.push(Felt::from(act as u8));
+    let _ = is_rol;
+}
+
 /// Build the main trace for `states.len()` stacked Keccak-f\[1600]
 /// permutations, each starting from its own initial state. All perms
 /// share the same 24-round constant schedule.
@@ -488,23 +706,25 @@ pub const PERM_CYCLE: usize = (NUM_ROUNDS + 1) * ROUND_PERIOD;
 /// then the trace is padded to the next power of two. Inactive rows
 /// (each cycle's dead round + the trace tail beyond N cycles) still
 /// walk the period-128 program for witness consistency (IP keeps
-/// incrementing, r- and c-pinning still satisfied) but carry
-/// `act = 0`, zeroing their bus contribution.
+/// incrementing) but carry `act = 0`, zeroing their bus contribution.
 ///
-/// Perm n's round-0 input addresses are `[n·3200, n·3200 + 25)`
-/// (disjoint from perm n−1's last-perm outputs at
-/// `[(n−1)·3200 + 3072, (n−1)·3200 + 3097)`); each perm's initial
-/// state is seeded into those address slots before the simulation
-/// walks the program. The chiplet alone does not chain perm n's
-/// outputs into perm n+1's inputs — that's the sponge AIR's role in
-/// a full proof.
-///
-/// Standalone-test entry point. The integrated stack uses
-/// [`generate_trace`] (`&RoundRequires`-driven, also drives Bitwise64
-/// / BytePairLut requires).
+/// Standalone-test entry point: unlike [`generate_trace`], this does not
+/// drive a [`BytePairLutRequires`] ledger — the byte/limb columns are
+/// populated directly from the computed values, sufficient for row-local
+/// `check_constraints` (the `BytePairLut` interaction is a cross-AIR bus
+/// concern, checked separately by the session-level bus-balance tests).
 pub fn generate_trace_from_states(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
+) -> RowMajorMatrix<Felt> {
+    let mut scratch = BytePairLutRequires::new();
+    generate_trace_from_states_inner(states, rcs, &mut scratch)
+}
+
+fn generate_trace_from_states_inner(
+    states: &[[u64; 25]],
+    rcs: &[u64; NUM_ROUNDS],
+    bpl_req: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
     assert!(!states.is_empty(), "at least one perm required");
     let num_perms = states.len();
@@ -541,7 +761,20 @@ pub fn generate_trace_from_states(
             let row_in_cycle = r % PERM_CYCLE;
 
             if perm_in_lane >= lane_perms {
-                push_row(&mut cells, ip, 0, 0, 0, false);
+                push_row(
+                    &mut cells,
+                    bpl_req,
+                    ip,
+                    &Slot {
+                        op: Op::Nop,
+                        back_a: 0,
+                        back_b: 0,
+                        dst_mult: 0,
+                    },
+                    0,
+                    0,
+                    false,
+                );
                 continue;
             }
 
@@ -560,50 +793,19 @@ pub fn generate_trace_from_states(
             } else {
                 0
             };
-            let c_val = simulate_op(spec.op, a, b);
+            let r_val = simulate_logic(spec.op, a, b);
+            let c_val = simulate_rotate(spec.op, r_val);
 
             if act && spec.dst_mult > 0 {
                 memory[ip as usize] = c_val;
             }
 
-            push_row(&mut cells, ip, a, b, c_val, act);
+            push_row(&mut cells, bpl_req, ip, &spec, a, b, act);
         }
         cells
     });
 
     interleave_lanes(&lane_cells, height)
-}
-
-/// Execute one slot's operation, returning the destination value
-/// `c = rol(a OP b, s)` (the logic result, then the rotate; `OP`/`s`
-/// degenerate to identity per op). The intermediate `r` is no longer
-/// committed, so it is not returned.
-fn simulate_op(op: Op, a: u64, b: u64) -> u64 {
-    let r = match op {
-        Op::Nop | Op::Rol(_) => a,
-        Op::Xor | Op::XorRol(_) => a ^ b,
-        Op::Andnot => (!a) & b,
-    };
-    match op {
-        Op::Nop | Op::Xor | Op::Andnot => r,
-        Op::Rol(s) | Op::XorRol(s) => r.rotate_left(s),
-    }
-}
-
-fn push_row(trace: &mut Vec<Felt>, ip: u64, a: u64, b: u64, c: u64, act: bool) {
-    let [a_lo, a_hi] = split_u64(a);
-    let [b_lo, b_hi] = split_u64(b);
-    let [c_lo, c_hi] = split_u64(c);
-    trace.extend([
-        Felt::new(ip).expect("ip fits in canonical Goldilocks"),
-        a_lo,
-        a_hi,
-        b_lo,
-        b_hi,
-        c_lo,
-        c_hi,
-        Felt::from(act as u8),
-    ]);
 }
 
 /// Read the post-permutation states from each of N Keccak-f
@@ -655,7 +857,8 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
         } else {
             0
         };
-        let c = simulate_op(spec.op, a, b);
+        let r = simulate_logic(spec.op, a, b);
+        let c = simulate_rotate(spec.op, r);
         if spec.dst_mult > 0 {
             memory[ip as usize] = c;
         }
@@ -747,8 +950,8 @@ impl RoundRequires {
 }
 
 /// Build the chiplet trace from a [`RoundRequires`] ledger, driving
-/// the supplied `bw64_req` / `bpl_req` accumulators for the Logic64
-/// and Rol64 emissions each active row makes.
+/// the supplied `bpl_req` accumulator for the byte/limb checks each
+/// active row makes.
 ///
 /// Internal `KECCAK_RC` is used; no RC parameter — sponge doesn't
 /// supply it. Trace height = `next_pow2(num_perms · PERM_CYCLE)`,
@@ -757,7 +960,6 @@ impl RoundRequires {
 /// for witness consistency but emit no bus mults (`act = 0`).
 pub fn generate_trace(
     requires: RoundRequires,
-    bw64_req: &mut Bitwise64Requires,
     bpl_req: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
     assert!(
@@ -792,8 +994,8 @@ pub fn generate_trace(
     }
 
     // Lay each lane into its own band. `array::from_fn` runs lanes in index
-    // order, so the Bitwise64/BPL requires are driven in perm order
-    // (0, 1, 2, …) exactly as a single stream would — bitwise64 is unaffected.
+    // order, so the BytePairLut requires are driven in perm order
+    // (0, 1, 2, …) exactly as a single stream would.
     let lane_cells: [Vec<Felt>; NUM_LANES] = array::from_fn(|lane| {
         let base_perm = lane * perms_per_lane;
         let lane_perms = num_perms.saturating_sub(base_perm).min(perms_per_lane);
@@ -809,7 +1011,20 @@ pub fn generate_trace(
             // incrementing (for the per-lane `ip' = ip + 1` constraint) but
             // the row reads no memory and emits no bus mults (`act = 0`).
             if perm_in_lane >= lane_perms {
-                push_row(&mut cells, ip, 0, 0, 0, false);
+                push_row(
+                    &mut cells,
+                    bpl_req,
+                    ip,
+                    &Slot {
+                        op: Op::Nop,
+                        back_a: 0,
+                        back_b: 0,
+                        dst_mult: 0,
+                    },
+                    0,
+                    0,
+                    false,
+                );
                 continue;
             }
 
@@ -828,38 +1043,14 @@ pub fn generate_trace(
             } else {
                 0
             };
-            let c_val = simulate_op(spec.op, a, b);
+            let r_val = simulate_logic(spec.op, a, b);
+            let c_val = simulate_rotate(spec.op, r_val);
 
             if act && spec.dst_mult > 0 {
                 memory[ip as usize] = c_val;
             }
 
-            // Drive Bitwise64 / BPL for the per-row emissions. A fused XORROL
-            // issues one `require_xorrol` (the XOR then a fused ROL on its
-            // result), so bitwise64 provides one `XorRol64` instead of a
-            // `Logic64 + Rol64` pair.
-            if act {
-                match spec.op {
-                    Op::Xor => {
-                        bw64_req.require(bpl_req, Logic64Op::Xor, a, b);
-                    },
-                    Op::Andnot => {
-                        bw64_req.require(bpl_req, Logic64Op::AndNot, a, b);
-                    },
-                    Op::Rol(s) => {
-                        bw64_req.require_rol(bpl_req, a, 1u64 << s);
-                    },
-                    Op::XorRol(s) => {
-                        // bitwise64 sees the reduced shift (≤ 30); the round's
-                        // half-swap recovers the full rotation for ρ ≥ 32.
-                        let (shift, _) = program::rol_decompose(s);
-                        bw64_req.require_xorrol(bpl_req, a, b, 1u64 << shift);
-                    },
-                    Op::Nop => {},
-                }
-            }
-
-            push_row(&mut cells, ip, a, b, c_val, act);
+            push_row(&mut cells, bpl_req, ip, &spec, a, b, act);
         }
         cells
     });

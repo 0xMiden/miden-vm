@@ -29,7 +29,7 @@ use crate::{
         },
     },
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
+    primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::poseidon2::trace::Poseidon2Requires,
 };
@@ -40,11 +40,10 @@ fn build_sponge_requires(
     let mut p2 = Poseidon2Requires::new();
     let mut chunk = ChunkRequires::new();
     let mut round = RoundRequires::new();
-    let mut bw64 = Bitwise64Requires::new();
     let mut bpl = BytePairLutRequires::new();
     let mut sponge = SpongeRequires::new();
     for inv in invs {
-        sponge.require(inv, &mut chunk, &mut round, &mut bw64, &mut bpl, &mut p2);
+        sponge.require(inv, &mut chunk, &mut round, &mut bpl, &mut p2);
     }
     (sponge, chunk, p2)
 }
@@ -111,15 +110,17 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_partitions_27_indices() {
-    // The 27 main witness columns are partitioned into:
+fn main_column_layout_partitions_67_indices() {
+    // The 67 main witness columns are partitioned into:
     //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block, chunk_ptr (indices 0..4).
     //   - padding-state machine (10): is_zero_p, is_chunk_avail, b_0..b_7 (indices 5..14).
     //   - per-row lane values (12): chunk, state_prev, state_new, state_out, cleared, padded — all
     //     u32-lo/hi (indices 15..26).
+    //   - byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
+    //     little-endian decomposition (indices 27..66).
     //
-    // The boundary checks below pin the 5/10/12 split so that any
-    // future column shuffling fails fast.
+    // The boundary checks below pin the split so that any future column
+    // shuffling fails fast.
 
     // Structural block starts at sponge_seq_id = 0 and the b_j block starts
     // immediately after it.
@@ -129,10 +130,10 @@ fn main_column_layout_partitions_27_indices() {
     // The b_j run is 8 consecutive indices.
     assert_eq!(NUM_B_SELECTORS, 8);
     assert_eq!(COL_B_RANGE, COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS));
-    // Lane-value block ends at PADDED_HI = NUM_MAIN_COLS - 1.
-    assert_eq!(COL_PADDED_HI, NUM_MAIN_COLS - 1);
+    // Lane-value block ends at PADDED_HI = 26, the byte-shadow block's start.
+    assert_eq!(COL_PADDED_HI, 26);
     // Total matches the spec.
-    assert_eq!(NUM_MAIN_COLS, 27);
+    assert_eq!(NUM_MAIN_COLS, 67);
     // `BaseAir::width()` agrees.
     assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
 }
@@ -169,12 +170,12 @@ fn periodic_columns_match_program() {
 #[test]
 fn log_quotient_degree_matches_design_target() {
     // The mutex outer flags are folded into each insert's multiplicity and the
-    // 13 fractions are partitioned across 6 columns (≤ 3 each, the degree-4
-    // multiplicities `squeeze` / `chunk-consume` kept low-arity), so every
-    // closing constraint is degree ≤ 5 → `log_quotient_degree = 2`. The
-    // degree-4 multiplicities are the floor; lqd 1 would need them
-    // witness-decomposed. See
-    // the design notes §"Aux columns and σ exposure".
+    // 48 fractions are partitioned across 24 columns (≤ 3 each on cols 0-2,
+    // the degree-4 multiplicities `squeeze` / `chunk-consume` kept
+    // low-arity; ≤ 2 each on the byte-request columns), so every closing
+    // constraint is degree ≤ 5 → `log_quotient_degree = 2`. The degree-4
+    // multiplicities are the floor; lqd 1 would need them witness-decomposed.
+    // See the design notes §"Aux columns and σ exposure".
     let air = KeccakSpongeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }

@@ -6,7 +6,6 @@
 
 mod aux_register;
 mod binding;
-mod bitwise64;
 mod bootstrap;
 mod bus_balance;
 mod byte_pair_lut;
