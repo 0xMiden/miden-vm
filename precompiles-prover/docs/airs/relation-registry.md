@@ -1,6 +1,6 @@
 # Relation (bus) registry
 
-> **Scope.** The cross-cutting reference for all 21 LogUp buses: tuple
+> **Scope.** The cross-cutting reference for all 19 LogUp buses: tuple
 > shape, provider(s), and consumer(s). Per-chiplet provide/consume gating
 > is detailed in each [AIR doc](README.md); the LogUp mechanism itself in
 > [../lookup-argument.md](../lookup-argument.md).
@@ -52,10 +52,8 @@ powers of `β`; encoding stays linear.
 
 | # | Bus | Tuple | Provider(s) | Consumer(s) |
 |---|-----|-------|-------------|-------------|
-| 0 | [BytePairLut](#0--bytepairlut) | `(op, a, b, c)` | BytePairLut | Bitwise64 |
-| 1 | [Range16](#1--range16) | `(w)` | BytePairLut | Bitwise64, UintStore, UintMul, EcGroupAdd, EcMsm |
-| 2 | [Logic64](#2--logic64) | `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` | Bitwise64 | KeccakRound, KeccakSponge |
-| 3 | [Rol64](#3--rol64) | `(a_lo, a_hi, b_lo, b_hi, k)` | Bitwise64 | KeccakRound |
+| 0 | [BytePairLut](#0--bytepairlut) | `(op, a, b, c)` | BytePairLut | KeccakRound, KeccakSponge |
+| 1 | [Range16](#1--range16) | `(w)` | BytePairLut | KeccakRound, UintStore, UintMul, EcGroupAdd, EcMsm |
 | 4 | [Memory64](#4--memory64) | `(addr, lo, hi)` | Chunk, KeccakRound, KeccakSponge | KeccakRound, KeccakSponge, KeccakNode |
 | 5 | [KeccakSponge](#5--keccaksponge) | `(sponge_seq_id, chunk_ptr, len_bytes)` | KeccakNode | KeccakSponge |
 | 6 | [Poseidon2In](#6--poseidon2in) | `(perm_seq_id, tag, c0..c3)` | Poseidon2 | Chunk, KeccakNode, TranscriptEval |
@@ -83,8 +81,10 @@ powers of `β`; encoding stays linear.
 - **Provider** — [BytePairLut](byte-pair-lut.md): the fully-enumerated 8×8
   table; each of the two op rows is provided at `−mult_op` (its consumer
   count) on every row.
-- **Consumer** — [Bitwise64](bitwise64.md): 8 byte-wise lookups per
-  64-bit LOGIC row, gated by `is_logic`.
+- **Consumers** — [KeccakRound](keccak-round.md) (8 byte-wise lookups per
+  operand-reading row, verifying `r = op(a, b)` byte-by-byte directly —
+  no intermediate chiplet), [KeccakSponge](keccak-sponge.md) (the same
+  8-byte-request pattern for its own pad/absorb XOR/ANDNOT ops).
 
 ## 1 — Range16
 
@@ -92,27 +92,12 @@ powers of `β`; encoding stays linear.
 
 - **Provider** — [BytePairLut](byte-pair-lut.md): the range value packed
   as `w = a + 256·b`, provided at `−mult_range16`.
-- **Consumers** — [Bitwise64](bitwise64.md) (8 limbs per ROL row),
+- **Consumers** — [KeccakRound](keccak-round.md) (8 limbs per rotating
+  row, verifying its own `rot_limbs` directly),
   [UintStore](uint-store.md) (every value/comp limb + the ptr gap),
   [UintMul](uint-mul.md) (the 17 quotient limbs, 62 γ halves, 2 κ cells),
   [EcGroupAdd](ec-group-add.md) (4 ptr-ordering limbs of mint ops),
   [EcMsm](ec-msm.md) (4 ptr-ordering limbs at expression boundaries).
-
-## 2 — Logic64
-
-`(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` — a 64-bit XOR / AndNot over
-32-bit halves, `c = op(a, b)`.
-
-- **Provider** — [Bitwise64](bitwise64.md): one per LOGIC row at `−is_logic`.
-- **Consumers** — [KeccakRound](keccak-round.md) (the θ/χ bitwise step),
-  [KeccakSponge](keccak-sponge.md) (padding / state combination).
-
-## 3 — Rol64
-
-`(a_lo, a_hi, b_lo, b_hi, k)` with `b = rol₆₄(a, log₂ k)`, `k` a power of two.
-
-- **Provider** — [Bitwise64](bitwise64.md): one per ROL row at `−is_rol`.
-- **Consumer** — [KeccakRound](keccak-round.md): the ρ rotation step.
 
 ## 4 — Memory64
 

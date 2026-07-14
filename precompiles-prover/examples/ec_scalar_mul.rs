@@ -145,7 +145,6 @@ fn main() {
         "chunk    ",
         "poseidon2",
         "round    ",
-        "bitwise64",
         "bpl      ",
         "sponge   ",
         "kn       ",
@@ -178,7 +177,7 @@ fn main() {
     println!();
     println!(
         "EC ops (naive)   : {naive_ops} over {n} scalar muls  (ec_add trace {} rows)",
-        mains[13].height(),
+        mains[10].height(),
     );
     println!("trace gen        : {gen_elapsed:?}");
 

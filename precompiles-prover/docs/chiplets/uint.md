@@ -22,7 +22,7 @@ A uint is **16 little-endian 16-bit limbs**, `value = Σ vᵢ · (2¹⁶)ⁱ`.
 16-bit limbs keep limb *products* `< 2³²` (mul-ready) and range-check
 against the existing [`Range16`](byte_pair_lut.md) relation — the
 UintStore is a [BytePairLut](byte_pair_lut.md) consumer, like
-[Bitwise64](bitwise64.md).
+[KeccakRound](keccak.md).
 
 The store *provides* two views of each uint:
 

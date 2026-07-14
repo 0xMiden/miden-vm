@@ -30,30 +30,44 @@ Tests: [`src/tests/keccak.rs`](../../src/tests/keccak.rs).
   round-0 inputs, creating the address gap that the sponge writes
   fresh state into.
 - **Fused TAM operation per row**: `c = ROL(a OP b, s)` where OP is
-  XOR or ANDNOT and `s ∈ [0, 30]`. Both the logic and the ROL parts are
-  optional — `k = 0` means no rotation, `is_xor = is_andnot = 0` means
-  no logic. One row format covers six op shapes:
+  XOR or ANDNOT and `s` is the row's *true* rotation (any amount FIPS 202
+  needs — the chiplet's own byte-level rotate machinery handles `s ≥ 32`
+  via a half-swap, see below). Both the logic and the ROL parts are
+  optional — `is_rol = 0` means no rotation, `is_xor = is_andnot = 0`
+  means no logic. One row format covers six op shapes:
 
-  | is_xor | is_andnot | k | meaning |
+  | is_xor | is_andnot | is_rol | meaning |
   | --- | --- | --- | --- |
   | 0 | 0 | 0 | NOP |
-  | 0 | 0 | >0 | pure ROL: `c = ROL(a, s)` |
+  | 0 | 0 | 1 | pure ROL: `c = ROL(a, s)` |
   | 1 | 0 | 0 | pure XOR: `c = a ⊕ b` |
   | 0 | 1 | 0 | pure ANDNOT: `c = andnot(a, b)` |
-  | 1 | 0 | >0 | XORROL: `c = ROL(a ⊕ b, s)` |
-  | 0 | 1 | >0 | ANDNOTROL: `c = ROL(andnot(a, b), s)` |
+  | 1 | 0 | 1 | XORROL: `c = ROL(a ⊕ b, s)` |
+  | 0 | 1 | 1 | ANDNOTROL: `c = ROL(andnot(a, b), s)` |
 
-- **Global IP** column, increments by 1 every row. Boundary `ip = 25`
-  at row 0.
+- **`NUM_LANES = 2` parallel column bands**, each running a contiguous
+  block of permutations in its own disjoint band while sharing the
+  (preprocessed, free) periodic program — the row count is ~1/2 of a
+  single stream. Lane 0 keeps the explicit `ip = 25` anchor; a later
+  lane's absolute `ip` frame is pinned by the Memory64 bus instead (its
+  round-0 reads of the sponge-provided initial state).
+- **Global IP** column per lane, increments by 1 every row.
 - **Source addresses are IP-relative back-offsets** stored in
-  preprocessed period-128 columns (`back_a`, `back_b`). Destinations
-  always write to `ip`. NOP slots set selectors and `dst_mult` to 0,
-  leaving their IP unclaimed for an external producer (the sponge
-  chiplet) to fill.
-- **Bitwise64 unchanged.** Bitwise64 still supports `k = 2^s` for
-  `s ∈ [0, 30]`. Each ρ > 30 in Keccak's rotation table is decomposed
-  into 2 or 3 chained ROLs (one fused XORROL leading row + trailing
-  pure-ROL rows).
+  preprocessed period-128 columns (`back_a`, `back_b`), shared across
+  lanes. Destinations always write to `ip`. NOP slots set selectors and
+  `dst_mult` to 0, leaving their IP unclaimed for an external producer
+  (the sponge chiplet) to fill.
+- **No intermediate chiplet.** Every row commits its own operands
+  (`a_bytes`, `b_bytes`), logic result (`r_bytes`), and — on rotating
+  rows — rotate limbs (`rot_limbs`) as byte/limb decompositions, and
+  verifies them directly against [`BytePairLut`](byte_pair_lut.md) (byte
+  requires + `Range16` requires), reusing the exact `+2^32` offset limb
+  construction a rotate chiplet used to do in its own separate table.
+  For `ρ ≥ 32`, the chiplet certifies the *reduced* rotation `ρ − 32 ≤
+  30` (the byte/limb mechanism's soundness bound) and reconstructs the
+  true rotated value by half-swapping the reduced output's 32-bit
+  halves — `ROL(x, ρ) = halfswap(ROL(x, ρ − 32))` — for both the
+  Memory64 provide and the true output every downstream row reads.
 - **Sponge chiplet** provides round-0 lane inputs (all 25 lanes, into
   the dead-round IP gap) and per-round RCs, consumes round-23
   outputs (all 25 lanes — rate and capacity uniformly). Same memory
@@ -61,35 +75,36 @@ Tests: [`src/tests/keccak.rs`](../../src/tests/keccak.rs).
 
 ## Per-row format
 
-**Main columns (10):**
+**Main columns, per lane (34), `NUM_MAIN_COLS = 68` total:**
 
 | col | role |
 | --- | --- |
 | `ip` | row counter, transition `ip' − ip − 1 = 0` |
-| `a_lo, a_hi` | source A value (matched against memory bus) |
-| `b_lo, b_hi` | source B value (matched against memory bus) |
-| `r_lo, r_hi` | logic intermediate (`r = a OP b` if logic, else `r = a`) |
-| `c_lo, c_hi` | destination value (`c = ROL(r, s)` if ROL, else `c = r`) |
+| `a_bytes[0..8]` | source A, byte-decomposed (matched against memory bus) |
+| `b_bytes[0..8]` | source B, byte-decomposed (real operand only when `is_xor \| is_andnot`; gated to 0 at the message level otherwise) |
+| `r_bytes[0..8]` | logic result `r = a OP b`, or the passthrough `r = a` when no logic op is active |
+| `rot_limbs[0..8]` | populated iff `is_rol = 1`: 16-bit limbs of `(r_half + 2^32)·k` for `r`'s halves |
 | `act` | 1 on active rounds, 0 on the dead round of each cycle and on trace-tail padding; constant within each round (changes only at round boundaries). Every bus multiplicity is multiplied by `act`. |
 
-**Preprocessed columns (9), period 128:**
+**Preprocessed columns (10), period 128, shared across lanes:**
 
 | col | role |
 | --- | --- |
 | `is_xor` | binary, 1 if XOR present |
 | `is_andnot` | binary, 1 if ANDNOT present (`is_xor + is_andnot ≤ 1`) |
-| `is_rol` | binary, 1 if ROL present (= preprocessed `k ≠ 0` indicator) |
+| `is_rol` | binary, 1 if ROL present |
 | `is_xorrol` | binary, 1 exactly on fused XORROL rows (= `is_xor · is_rol`); subtracted from the selector sum so a fused row's `src_a` read counts once, not twice |
 | `back_a` | source A back-offset (`src_a_addr = ip − back_a`) |
 | `back_b` | source B back-offset (unused for pure ROL, set 0) |
-| `k` | ROL shift multiplier `2^s`, `s ∈ [0, 30]` (0 if `is_rol = 0`) |
+| `k` | the *reduced* ROL shift multiplier `2^shift`, `shift ≤ 30` (0 if `is_rol = 0`) |
 | `dst_mult` | destination provide multiplicity |
 | `p_last` | 1 at slot 127 of each round, 0 elsewhere (gates `act` round-boundary toggles) |
+| `swap` | 1 on fused slots whose *true* rotation `ρ ≥ 32` |
 
 Destinations always write to `ip` — no `dst_back_off` column. NOP slots
 (including the RC slot at position 0) have `dst_mult = 0`.
 
-## Local constraints (per row)
+## Local constraints (per row, per lane)
 
 Active gating:
 
@@ -108,39 +123,40 @@ multiplier is also zero, so the wrap to row 0 imposes no constraint.
 `act = 1` at row 0 through its RC[0] provide, which the chiplet's
 slot 1 must consume.
 
-Beyond the bus interactions, the row pins down `r` and `c` on
-degenerate ops:
+Beyond the bus interactions, the row pins `r` on rows with no logic op,
+byte-wise for each `i ∈ [0, 8)`:
 
 ```
-(1 − is_xor − is_andnot) · (r_lo − a_lo) = 0     (r = a when no logic)
-(1 − is_xor − is_andnot) · (r_hi − a_hi) = 0
-(1 − is_rol)             · (c_lo − r_lo) = 0     (c = r when no ROL)
-(1 − is_rol)             · (c_hi − r_hi) = 0
+(1 − is_xor − is_andnot) · (r_bytes[i] − a_bytes[i]) = 0     (r = a when no logic)
 ```
 
-All deg 2. Plus the IP transition `ip' − ip − 1 = 0` (deg 2,
+Deg 2. Plus the IP transition `ip' − ip − 1 = 0` (deg 2,
 `when_transition`) and the boundary `ip = 25` at row 0
-(`when_first_row`).
+(`when_first_row`, lane 0 only).
 
-## Bus interactions per row
+## Bus interactions per row (per lane)
 
 All multiplicities below are *also* multiplied by `act`, so trace-tail
 padding rows (with `act = 0`) contribute nothing on either bus.
 
 | bus | direction | mult | message |
 | --- | --- | --- | --- |
-| memory64 | require | `act · (is_xor + is_andnot + is_rol − is_xorrol)` | `(ip − back_a, a_lo, a_hi)` |
+| memory64 | require | `is_active = act · (is_xor + is_andnot + is_rol − is_xorrol)` | `(ip − back_a, a_lo, a_hi)` |
 | memory64 | require | `act · (is_xor + is_andnot)` | `(ip − back_b, b_lo, b_hi)` |
-| memory64 | provide | `act · dst_mult` | `(ip, c_lo, c_hi)` |
-| bitwise64 | require | `act · (is_xor + is_andnot)` | `Logic64Msg(is_xor, a, b, r)` |
-| bitwise64 | require | `act · is_rol` | `Rol64Msg(r, c, k)` |
+| memory64 | provide | `act · dst_mult` | `(ip, c_lo, c_hi)` — muxed: `is_rol` selects `rotated(rot_limbs)` (half-swapped if `swap`), else `packed(r_bytes)` |
+| BytePairLut | require, ×8 | `is_active` | `(bpl_op, a_bytes[i], gated_b_bytes[i], r_bytes[i])` — `bpl_op = 1 − is_andnot` |
+| Range16 | require, ×8 | `act · is_rol` | `(rot_limbs[i])` |
 
-Up to 5 bus interactions on an active fused-op row, 0 on NOP rows or
-padding rows.
+Up to 19 bus interactions on an active fused-op row (2 memory64 + 8 BPL +
+8 Range16 + provide), 0 on NOP rows or padding rows — all packed into 10
+aux columns per lane (2 fractions/column, the provide alone in the
+running-sum column).
 
-The Logic64 `op` slot uses `is_xor` (not `is_andnot`) because
-`Logic64Op::AndNot` has tag 0 and `Xor` has tag 1 — matching
-`is_xor`'s 0/1 binary encoding.
+The `BytePairLut` `op` field uses `1 − is_andnot` (not `is_xor` directly)
+because on pure-ROL rows (`is_xor = is_andnot = 0`) it must default to
+Xor (tag 1) so the request resolves to `BPL(Xor, a, 0, r)` — range-checking
+`a_bytes` and forcing `r = a`, the replacement for a chain-trick range
+check now that every row commits its own bytes.
 
 The memory provide uses `g.insert(flag=ONE, multiplicity=-dst_mult)`
 rather than `g.remove(flag=dst_mult)`: the convenience `g.remove`
@@ -156,23 +172,28 @@ paths agree.
 | θ C-comp | 20 | 5 × balanced 4-XOR tree |
 | θ D-ROL | 5 | one ROL(1) per x |
 | θ D-XOR | 5 | `D[x] = C[(x−1) mod 5] ⊕ ROL(C[(x+1) mod 5], 1)` |
-| θ-apply + ρπ | 37 | fused XORROLs (leading + trailing-with-zero) |
+| θ-apply + ρπ | 25 | one fused XORROL per non-(0,0) lane (24, full-range via half-swap) + 1 plain XOR (lane (0,0), ρ=0); occupies 25 of the 37 reserved slot positions `[32, 69)`, the other 12 are NOP |
 | χ ANDNOTs | 25 | one per output lane |
 | χ XORs | 25 | 24 final outputs + 1 intermediate for (0,0) |
 | ι | 1 | `A_final[0][0] = chi_00 ⊕ RC[r]` |
-| ZERO slot | 1 | `Andnot(RC[r], RC[r]) = 0`, mult 12 |
-| NOPs | 9 | 1 RC slot + 8 trailing slackers |
+| RC slot | 1 | NOP; sponge writes `RC[r]` at this IP |
+| NOP | 21 | 12 unused apply+ρπ slot positions + 1 ZERO slot + 8 trailing slackers |
 | **total** | **128** | |
 
 ### ρ decomposition
 
-Bitwise64 supports `s ∈ [0, 30]` in one ROL row. For ρ > 30 the
-chiplet chains a leading XORROL with one or two **trailing XORROL**
-rows — *not* pure ROL rows. The trailing rows take `src_b` from the
-ZERO slot so `r = a ⊕ 0 = a` is still the rotation input. This dummy
-XOR is what lets Bitwise64's IR materialize a Real-LOGIC predecessor
-+ Carrier for each trailing rotate, satisfying the chiplet's
-ROL-must-follow-LOGIC soundness invariant.
+Each lane's rotation resolves to one row, whatever the true amount
+`ρ ∈ [0, 63]`. The chiplet's own byte/limb rotate mechanism
+(`rot_limbs`, verified against `Range16`) certifies rotations up to
+`shift ≤ 30` directly; for `ρ ≥ 32` the row certifies the *reduced*
+rotation `ρ − 32 ≤ 30` and reconstructs the true output by
+half-swapping the reduced result's 32-bit halves —
+`ROL(x, ρ) = halfswap(ROL(x, ρ − 32))` — both for the value written
+to Memory64 and for what any downstream row reads. `swap` (the
+periodic column, 1 iff `ρ ≥ 32`) and `k` (the reduced multiplier
+`2^shift`) are materialized once by `program::rol_decompose`. Keccak's
+ρ table never lands in `[31, 35]`, so `ρ − 32 ≤ 30` always holds for
+`ρ ≥ 32`.
 
 ρ table (FIPS 202, x rows × y cols, indexed by *input* lane):
 
@@ -185,13 +206,12 @@ x=3:   28   55   25   21   56
 x=4:   27   20   39    8   14
 ```
 
-| ρ range | lanes | leading row | trailing rows | slots per lane |
-| --- | --- | --- | --- | --- |
-| 0 | (0,0) | 1 (pure XOR, k=0) | 0 | 1 |
-| [1, 30] | 14 | 1 (XORROL, k = 2^ρ) | 0 | 1 |
-| (30, 60] | 8 | 1 (XORROL, k = 2^30) | 1 (XORROL with b=ZERO, k = 2^(ρ−30)) | 2 |
-| (60, 63] | 2 (ρ = 61, 62) | 1 (XORROL, k = 2^30) | 2 (XORROL with b=ZERO, k = 2^30, 2^(ρ−60)) | 3 |
-| **sum** | 25 | 25 | 12 | **37** |
+| ρ range | lanes | op | rows per lane |
+| --- | --- | --- | --- |
+| 0 | (0,0) | plain XOR, no rotation | 1 |
+| [1, 30] | 14 | XORROL, `k = 2^ρ`, `swap = 0` | 1 |
+| [32, 63] | 10 | XORROL, `k = 2^(ρ−32)`, `swap = 1` | 1 |
+| **sum** | 25 | | **25** |
 
 ## Slot layout (period 128)
 
@@ -302,63 +322,24 @@ Each `C[x]` is read exactly twice: by `D[(x+1) mod 5]`'s ROL and by
 
 After θ, each lane `A'[x][y] = A[x][y] ⊕ D[x]` is rotated by `ρ[x][y]`
 and placed at position `π(x, y) = (y, (2x + 3y) mod 5)`. The chiplet
-emits one to three rows per output lane in **post-π row-major order**:
+emits **exactly one row per output lane**, in post-π row-major order
+(`out_y` outer, `out_x` inner), full-range in one fused op — `Xor`
+for lane (0,0) (`ρ = 0`), `XorRol(ρ)` otherwise, using the true `ρ`;
+the row's own byte/limb rotate mechanism handles the full range
+(§ρ decomposition). Operand order chains a fan-out-5 `D[x]` on
+`src_a` only for the column's first lane (`in_y == 0`, where `A`
+can't chain further since its carrier is already spent at the θ
+C-tree); every other lane keeps `A` in `src_a` (swapping costs +234
+rows/keccak, measured).
 
-- 1 row (ρ = 0 or ρ ≤ 30): one fused `XORROL(A[in], D[in.x], ρ)`.
-- 2 rows (30 < ρ ≤ 60): `XORROL(_, _, 30)` then
-  `XORROL(_, ZERO, ρ − 30)`.
-- 3 rows (60 < ρ ≤ 63): `XORROL(_, _, 30)`,
-  `XORROL(_, ZERO, 30)`, `XORROL(_, ZERO, ρ − 60)`.
-
-Trailing rows are XORROL (not pure ROL) so each preceding LOGIC
-message gives Bitwise64's IR the carrier it needs for the
-ROL-after-LOGIC invariant. `src_b` on trailing rows points at the
-ZERO slot.
-
-`B[out_x][out_y]` is the *last* row's output, `dst_mult = 3` (each B
-value is read 3× in χ).
-
-Slot table (concrete decompositions):
-
-| slot | op | src_a | src_b | out mult | meaning |
-| --- | --- | --- | --- | --- | --- |
-| 32 | XOR | A[0][0] | D[0] | 3 | B[0][0] ← in (0,0), ρ=0 |
-| 33 | XORROL k=2^30 | A[1][1] | D[1] | 1 | tmp (ρ=44: 30+14) |
-| 34 | XORROL k=2^14 | slot 33 | ZERO | 3 | B[1][0] |
-| 35 | XORROL k=2^30 | A[2][2] | D[2] | 1 | tmp (ρ=43: 30+13) |
-| 36 | XORROL k=2^13 | slot 35 | ZERO | 3 | B[2][0] |
-| 37 | XORROL k=2^21 | A[3][3] | D[3] | 3 | B[3][0] ← in (3,3), ρ=21 |
-| 38 | XORROL k=2^14 | A[4][4] | D[4] | 3 | B[4][0] ← in (4,4), ρ=14 |
-| 39 | XORROL k=2^28 | A[3][0] | D[3] | 3 | B[0][1] ← in (3,0), ρ=28 |
-| 40 | XORROL k=2^20 | A[4][1] | D[4] | 3 | B[1][1] ← in (4,1), ρ=20 |
-| 41 | XORROL k=2^3 | A[0][2] | D[0] | 3 | B[2][1] ← in (0,2), ρ=3 |
-| 42 | XORROL k=2^30 | A[1][3] | D[1] | 1 | tmp (ρ=45: 30+15) |
-| 43 | XORROL k=2^15 | slot 42 | ZERO | 3 | B[3][1] |
-| 44 | XORROL k=2^30 | A[2][4] | D[2] | 1 | tmp1 (ρ=61: 30+30+1) |
-| 45 | XORROL k=2^30 | slot 44 | ZERO | 1 | tmp2 |
-| 46 | XORROL k=2^1 | slot 45 | ZERO | 3 | B[4][1] |
-| 47 | XORROL k=2^1 | A[1][0] | D[1] | 3 | B[0][2] ← in (1,0), ρ=1 |
-| 48 | XORROL k=2^6 | A[2][1] | D[2] | 3 | B[1][2] ← in (2,1), ρ=6 |
-| 49 | XORROL k=2^25 | A[3][2] | D[3] | 3 | B[2][2] ← in (3,2), ρ=25 |
-| 50 | XORROL k=2^8 | A[4][3] | D[4] | 3 | B[3][2] ← in (4,3), ρ=8 |
-| 51 | XORROL k=2^18 | A[0][4] | D[0] | 3 | B[4][2] ← in (0,4), ρ=18 |
-| 52 | XORROL k=2^27 | A[4][0] | D[4] | 3 | B[0][3] ← in (4,0), ρ=27 |
-| 53 | XORROL k=2^30 | A[0][1] | D[0] | 1 | tmp (ρ=36: 30+6) |
-| 54 | XORROL k=2^6 | slot 53 | ZERO | 3 | B[1][3] |
-| 55 | XORROL k=2^10 | A[1][2] | D[1] | 3 | B[2][3] ← in (1,2), ρ=10 |
-| 56 | XORROL k=2^15 | A[2][3] | D[2] | 3 | B[3][3] ← in (2,3), ρ=15 |
-| 57 | XORROL k=2^30 | A[3][4] | D[3] | 1 | tmp (ρ=56: 30+26) |
-| 58 | XORROL k=2^26 | slot 57 | ZERO | 3 | B[4][3] |
-| 59 | XORROL k=2^30 | A[2][0] | D[2] | 1 | tmp1 (ρ=62: 30+30+2) |
-| 60 | XORROL k=2^30 | slot 59 | ZERO | 1 | tmp2 |
-| 61 | XORROL k=2^2 | slot 60 | ZERO | 3 | B[0][4] |
-| 62 | XORROL k=2^30 | A[3][1] | D[3] | 1 | tmp (ρ=55: 30+25) |
-| 63 | XORROL k=2^25 | slot 62 | ZERO | 3 | B[1][4] |
-| 64 | XORROL k=2^30 | A[4][2] | D[4] | 1 | tmp (ρ=39: 30+9) |
-| 65 | XORROL k=2^9 | slot 64 | ZERO | 3 | B[2][4] |
-| 66 | XORROL k=2^30 | A[0][3] | D[0] | 1 | tmp (ρ=41: 30+11) |
-| 67 | XORROL k=2^11 | slot 66 | ZERO | 3 | B[3][4] |
-| 68 | XORROL k=2^2 | A[1][4] | D[1] | 3 | B[4][4] ← in (1,4), ρ=2 |
+`B[out_x][out_y]` is the row's own output, `dst_mult = 3` (each B
+value is read 3× in χ). The 25 real ops occupy 25 of the 37 reserved
+slot positions `[32, 69)`; the remaining 12 are NOP. Exact slot
+indices, per-lane sources, and `ρ` values are in
+[`program::slot_b`](../../src/hash/keccak/round/program.rs) and
+[`program::emit_apply_rpi`](../../src/hash/keccak/round/program.rs)
+— the canonical source, not reproduced here to avoid a second,
+driftable copy.
 
 ## χ (slots 69..128, with NOP gap at 94..101 and ι at slot 103)
 
@@ -586,12 +567,14 @@ sponge configuration:
 | flow | count | per-cell mult | total mult |
 | --- | --- | --- | --- |
 | miniVM → memory64 (provides, all dst rows) | varies | varies | matches all reads internal to this perm + 2 reads per output lane (next perm's C-comp + apply) |
-| miniVM → bitwise64 (Logic64 require) | per round: 20 (C-comp) + 5 (D-XOR) + 25 (χ ANDNOT) + 25 (χ XOR) + 1 (ι) + 25 (apply+ρπ leading) + 12 (trailing dummies) + 1 (ZERO) = 114 | 1 | 24 · 114 = 2,736 |
-| miniVM → bitwise64 (Rol64 require) | per round: 5 (D-ROL) + 24 (apply+ρπ leading with k>0) + 12 (trailing) = 41 | 1 | 24 · 41 = 984 |
+| miniVM → BytePairLut (byte requires, 8/row) | per round: 106 non-NOP rows (52 XOR + 25 ANDNOT + 5 ROL + 24 XORROL) × 8 = 848 | 1 | 24 · 848 = 20,352 |
+| miniVM → Range16 (limb requires, 8/row) | per round: 29 rotating rows (5 pure ROL + 24 XORROL) × 8 = 232 | 1 | 24 · 232 = 5,568 |
 
-Total Bitwise64 messages per Keccak: 24·(114 + 41) = **3,720**
-(Logic64 + Rol64 combined). The Bitwise64 chiplet's trace is sized
-independently.
+Every request above is verified directly on the chiplet's own rows —
+there is no separate chiplet whose trace is "sized independently"; the
+BytePairLut/Range16 demand lands on the shared leaf table
+([`byte_pair_lut.md`](byte_pair_lut.md)), sized from every caller's
+combined requests.
 
 The sponge AIR's bus contributions depend on its role at each
 permutation boundary. With the dead-round address separation, every
@@ -619,8 +602,9 @@ Live in [`src/hash/keccak/round/`](../../src/hash/keccak/round/):
 - [`program.rs`](../../src/hash/keccak/round/program.rs) — slot table,
   periodic-column materialization, `Op` enum, `Slot` accessor.
 - [`mod.rs`](../../src/hash/keccak/round/mod.rs) — `KeccakRoundAir`,
-  `KeccakRoundProver`, `generate_trace`, `extract_output`. Constraints
-  and lookup interactions.
+  `generate_trace`, `extract_output`. Constraints and lookup
+  interactions, including the direct `BytePairLut`/`Range16` byte-level
+  verification (no intermediate chiplet).
 
 Tests in [`src/tests/keccak.rs`](../../src/tests/keccak.rs):
 
@@ -632,11 +616,9 @@ Tests in [`src/tests/keccak.rs`](../../src/tests/keccak.rs):
 
 The sponge ([`src/hash/keccak/sponge/`](../../src/hash/keccak/sponge/))
 and Keccak node ([`src/hash/keccak/node/`](../../src/hash/keccak/node/))
-are also landed;
-[`src/bin/bench_keccak_n.rs`](../../src/bin/bench_keccak_n.rs) proves and
-verifies the full eight-chiplet stack end-to-end, so the Memory64 bus
-closes against the sponge's round-0-input / RC provides and last-round
-output consumes.
+are also landed; the full stack proves and verifies end-to-end, so the
+Memory64 bus closes against the sponge's round-0-input / RC provides and
+last-round output consumes.
 
 ## Future work
 

@@ -23,10 +23,11 @@ transcript chiplet / orchestrator. It then walks the input as a chunk
 tape — **consuming** lane values from [`Memory64`](relation-registry.md#4--memory64)
 at a disjoint `CHUNK_ADDR_BASE` (= `2^48`, `src/hash/memory64.rs:38`)
 sub-namespace produced by the chunk chiplet — XORs each rate lane into
-the running state, applies the pad bytes through the
-[`Logic64`](relation-registry.md#2--logic64) bus (provided **externally**
-by the Bitwise64 chiplet), and **provides** the resulting state lanes back
-on [`Memory64`](relation-registry.md#4--memory64) as the next permutation's
+the running state, applies the pad bytes by verifying its own
+byte-decomposed columns (see "Byte-shadow columns" below) directly
+against [`BytePairLut`](relation-registry.md#0--bytepairlut), and **provides**
+the resulting state lanes back on
+[`Memory64`](relation-registry.md#4--memory64) as the next permutation's
 round-0 inputs. On the last block it consumes the final permutation output
 (squeeze) for the 21 non-digest lanes, leaving the 4 digest lanes in
 Memory64 for the transcript to read.
@@ -57,17 +58,17 @@ every bus.
 
 | Property | Value |
 |----------|-------|
-| Main width | `NUM_MAIN_COLS = 27` (`mod.rs:143`; `BaseAir::width` returns it, `mod.rs:203`) |
+| Main width | `NUM_MAIN_COLS = 67` (27 structural/padding/lane-value columns + 40 byte-shadow columns for `chunk`, `state_prev`, `state_new`, `cleared`, `padded`) |
 | Period | `SPONGE_PERIOD = 32` rows = one absorption block / one Keccak permutation (`program.rs:37`) |
 | Height | `(Σ num_blocks · 32)` rounded up to a power of two (min one period); trailing rows are `act = 0` padding (`trace.rs:390`) |
 | Periodic columns | `NUM_PERIODIC_COLS = 11` verifier-computed (`program.rs:40`) |
-| Aux width | `NUM_AUX_COLS = 3` LogUp columns (`mod.rs:165`); `COLUMN_SHAPE = [6, 5, 2]` (`mod.rs:566`) |
+| Aux width | `NUM_AUX_COLS = 24` LogUp columns |
 | Exposed σ | `num_aux_values = NUM_SIGMA_VALUES` — a single σ residue aggregating all three buses, summed into the cross-AIR `Σ σ = 0` by `MultiAir::eval_external` (`logup::sigma_sum`) |
 
-The chiplet exposes one σ residue (matching `bitwise64` / `keccak/round`);
-it nets the sponge's contribution across all three buses (Memory64,
-Logic64, KeccakSponge) into one running sum, kept per-bus-balanced by the
-bus-prefix-distinguished encodings and Schwartz–Zippel on random α.
+The chiplet exposes one σ residue; it nets the sponge's contribution
+across all three buses (Memory64, BytePairLut, KeccakSponge) into one
+running sum, kept per-bus-balanced by the bus-prefix-distinguished
+encodings and Schwartz–Zippel on random α.
 
 ## Main columns
 
@@ -101,9 +102,22 @@ live constraint).
 | 25 | `COL_PADDED_LO` | pad row (committed on all rate rows) | `[0, 2³²)` | pad-row intermediate `padded = cleared XOR padding_mask`. Low half |
 | 26 | `COL_PADDED_HI` | as 25 | `[0, 2³²)` | high half of `padded` |
 
-Indices 0..26 inclusive = 27 columns = `NUM_MAIN_COLS` ✓ (cross-checked
-against `mod.rs:143` and `trace.rs` which fills `[Felt; NUM_MAIN_COLS]`
-per row).
+### Byte-shadow columns
+
+Five of the lane values above also carry an 8-byte little-endian
+decomposition, each linked to its `_lo`/`_hi` halves by an ungated local
+constraint (§Constraints) and consumed directly by the `BytePairLut`
+byte requires (§Buses & lookups) — no intermediate chiplet.
+
+| Range | Name | Linked to |
+|-------|------|-----------|
+| 27–34 | `CHUNK_BYTES_RANGE` (`chunk_bytes`) | `COL_CHUNK_LO/HI` |
+| 35–42 | `STATE_PREV_BYTES_RANGE` (`state_prev_bytes`) | `COL_STATE_PREV_LO/HI` |
+| 43–50 | `STATE_NEW_BYTES_RANGE` (`state_new_bytes`) | `COL_STATE_NEW_LO/HI` |
+| 51–58 | `CLEARED_BYTES_RANGE` (`cleared_bytes`) | `COL_CLEARED_LO/HI` |
+| 59–66 | `PADDED_BYTES_RANGE` (`padded_bytes`) | `COL_PADDED_LO/HI` |
+
+Indices 0..66 inclusive = 67 columns = `NUM_MAIN_COLS`.
 
 The following are **not** committed columns — they are degree-1 inline
 expressions in `eval` (`mod.rs`):
@@ -134,7 +148,7 @@ expressions in `eval` (`mod.rs`):
 | 4 | `COL_CAPACITY` | `1` iff `p_idx ∈ [17, 25)` | capacity rows |
 | 5 | `COL_RC_ACTIVE` | `1` iff `p_idx ∈ [0, 24)` | gates the RC provide (Keccak has only 24 RCs; slot 24 carries none) |
 | 6 | `COL_SQUEEZE_ACTIVE` | `1` iff `p_idx ∈ [4, 25)` | gates the last-block squeeze consume (skips digest lanes `[0, 4)`) |
-| 7 | `COL_PAD_0X80` | `1` iff `p_idx == 25` | gates the lane-16 trailing-`0x80` row's Memory64 + Logic64 emissions |
+| 7 | `COL_PAD_0X80` | `1` iff `p_idx == 25` | gates the lane-16 trailing-`0x80` row's Memory64 + BytePairLut emissions |
 | 8 | `COL_RC_LO` | `RC[p_idx]` low u32 on `p_rc_active` rows, else `0` | RC value provided to Memory64 |
 | 9 | `COL_RC_HI` | `RC[p_idx]` high u32 on `p_rc_active` rows, else `0` | RC value provided to Memory64 |
 | 10 | `COL_EXTRA` | `1` iff `p_idx ∈ [26, 29)` | gates the extra chunk-consume rows (last-block overshoot lanes, paired with `b_sum`) |
@@ -221,14 +235,20 @@ is `when_first_row`.
 |---|-----------|-----|-----------|
 | 23 | `p_state_lane · is_first_block · state_prev_lo = 0` | 2 | no prev-perm on a first block: pin `state_prev = 0` so `state_new = state_prev ⊕ chunk` yields `state_new = chunk` (rate) / `0` (capacity). Low half |
 | 24 | `p_state_lane · is_first_block · state_prev_hi = 0` | 2 | high half of #23 |
-| 25 | `p_rate_block · is_zero · (state_new_lo − state_prev_lo) = 0` | 3 | past-pad rate row (garbage/zero-tail): state propagates `state_new = state_prev` (no Bitwise64 fires). Low half |
+| 25 | `p_rate_block · is_zero · (state_new_lo − state_prev_lo) = 0` | 3 | past-pad rate row (garbage/zero-tail): state propagates `state_new = state_prev` (no `BytePairLut` request fires). Low half |
 | 26 | `p_rate_block · is_zero · (state_new_hi − state_prev_hi) = 0` | 3 | high half of #25 |
 | 27 | `p_capacity · (state_new_lo − state_prev_lo) = 0` | 2 | capacity identity passthrough `state_new = state_prev`. Low half |
 | 28 | `p_capacity · (state_new_hi − state_prev_hi) = 0` | 2 | high half of #27 |
 
 Rate XORin rows with `is_zero = 0` (verbatim and pad-row classes) and the
-lane-16 `0x80` row have `state_new` pinned by their Logic64 messages
-(below), so they need no local state constraint.
+lane-16 `0x80` row have `state_new` pinned by their `BytePairLut` byte
+requires (§Buses & lookups), so they need no local state constraint.
+
+### Byte-shadow linking (ungated)
+
+| # | Constraint | Deg | Rationale |
+|---|-----------|-----|-----------|
+| 29–38 | `pack_le(x_bytes[0..4], 256) − x_lo = 0`, `pack_le(x_bytes[4..8], 256) − x_hi = 0`, for `x ∈ {chunk, state_prev, state_new, cleared, padded}` | 2 | pins each byte-shadow range (§Byte-shadow columns) to its `_lo`/`_hi` halves, so a `BytePairLut`-verified byte result is also the value every other bus message (Memory64 prev-perm consume, new-state provide, chunk consume) reads. Ungated: both sides are otherwise free witness on rows where the value is unused, so an honest prover always satisfies this by construction (10 constraints) |
 
 **Local degree summary.** Max local witness-degree is **5** (constraint
 #10, the `chunk_ptr` chain), then deg 4 (#9 `bytes_left` non-absorb, #21
@@ -239,10 +259,9 @@ constraint deg 7), so the local constraints sit below the LogUp ceiling
 
 ## Buses & lookups
 
-`COLUMN_SHAPE = [6, 5, 2]` (`mod.rs:566`) — three LogUp columns
-batching 6, 5, and 2 mutually-exclusive fractions respectively. Sign
-convention: **provide = `−k`**, **consume = `+k`**; every multiplicity is
-also multiplied by `act` so trace-tail rows touch no bus.
+`NUM_AUX_COLS = 24`. Sign convention: **provide = `−k`**, **consume =
+`+k`**; every multiplicity is also multiplied by `act` so trace-tail
+rows touch no bus.
 
 The sponge touches three buses, all defined in `src/relations.rs`:
 
@@ -250,14 +269,16 @@ The sponge touches three buses, all defined in `src/relations.rs`:
   **externally** (multiset bus; the round chiplet, this sponge, and the
   chunk chiplet are all producers/consumers at disjoint IP/address
   ranges).
-- [`Logic64`](relation-registry.md#2--logic64) (id 2) — provided
-  **externally** by the Bitwise64 chiplet; the sponge only consumes.
+- [`BytePairLut`](relation-registry.md#0--bytepairlut) (id 0) — provided
+  by the leaf `BytePairLut` table; the sponge issues 8 byte-wise
+  requires per pad/absorb XOR/ANDNOT op directly on its byte-shadow
+  columns.
 - [`KeccakSponge`](relation-registry.md#5--keccaksponge) (id 5) —
   provided **externally** by the transcript chiplet / orchestrator; the
   sponge only consumes the per-invocation request.
 
 So the sponge **provides** only Memory64 tuples (new-state, RC,
-lane-16 final) and **consumes** Memory64, Logic64, and KeccakSponge
+lane-16 final) and **consumes** Memory64, BytePairLut, and KeccakSponge
 tuples. Address expressions are degree-1 in `sponge_seq_id`, `p_idx`,
 `chunk_ptr`; on gated-off rows some go integer-negative and wrap, but
 `mult = 0` zeroes their LogUp contribution.
@@ -280,50 +301,38 @@ All on [`Memory64`](relation-registry.md#4--memory64) `(addr, lo, hi)`:
 | [`Memory64`](relation-registry.md#4--memory64) | squeeze | `(100·sponge_seq_id − 99·p_idx + 3072, state_out_lo, state_out_hi)` | `+2 · act · p_squeeze_active · Σ_j b_j` | state-lane rows where `p_squeeze_active` (`p_idx ∈ [4, 25)`), last block |
 | [`Memory64`](relation-registry.md#4--memory64) | lane-16 intermediate | `(100·sponge_seq_id − 2484, state_prev_lo, state_prev_hi)` | `+2 · act · Σ_j b_j` | lane-16 `0x80` row, last block |
 | [`Memory64`](relation-registry.md#4--memory64) | chunk-consume | `(CHUNK_ADDR_BASE + chunk_ptr, chunk_lo, chunk_hi)` | `act · (p_rate_block + p_extra · Σ_j b_j) · is_chunk_avail` | rate rows + last-block extra rows where chunks available |
-| [`Logic64`](relation-registry.md#2--logic64) | pad-row andnot | `(AndNot, andnot_mask, chunk, cleared)` | `act` (× `p_rate_block · is_pad` batch flag) | the pad row |
-| [`Logic64`](relation-registry.md#2--logic64) | pad-row xor-padding | `(Xor, cleared, padding_mask, padded)` | `act` (× pad-row batch flag) | the pad row |
-| [`Logic64`](relation-registry.md#2--logic64) | pad-row xor-state | `(Xor, state_prev, padded, state_new)` | `act` (× pad-row batch flag) | the pad row |
-| [`Logic64`](relation-registry.md#2--logic64) | verbatim xor-state | `(Xor, state_prev, chunk, state_new)` | `act` (× `p_rate_block · is_verbatim` batch flag) | verbatim rate rows |
-| [`Logic64`](relation-registry.md#2--logic64) | lane-16 xor | `(Xor, state_prev, 0x8000…00, state_new)` | `act` (× `p_pad_0x80 · Σ_j b_j` batch flag) | lane-16 `0x80` row, last block (`PAD_CONST_HI = 0x8000_0000`) |
+| [`BytePairLut`](relation-registry.md#0--bytepairlut) | pad-row andnot, ×8 bytes | `(AndNot, andnot_mask_bytes[i], chunk_bytes[i], cleared_bytes[i])` | `act · p_rate_block · is_pad` | the pad row |
+| [`BytePairLut`](relation-registry.md#0--bytepairlut) | pad-row xor-padding, ×8 bytes | `(Xor, cleared_bytes[i], padding_mask_bytes[i], padded_bytes[i])` | `act · p_rate_block · is_pad` | the pad row |
+| [`BytePairLut`](relation-registry.md#0--bytepairlut) | pad-row xor-state, ×8 bytes | `(Xor, state_prev_bytes[i], padded_bytes[i], state_new_bytes[i])` | `act · p_rate_block · is_pad` | the pad row |
+| [`BytePairLut`](relation-registry.md#0--bytepairlut) | verbatim xor-state, ×8 bytes | `(Xor, state_prev_bytes[i], chunk_bytes[i], state_new_bytes[i])` | `act · p_rate_block · is_verbatim` | verbatim rate rows |
+| [`BytePairLut`](relation-registry.md#0--bytepairlut) | lane-16 xor, ×8 bytes | `(Xor, state_prev_bytes[i], PAD_CONST_BYTES[i], state_new_bytes[i])` | `act · p_pad_0x80 · Σ_j b_j` | lane-16 `0x80` row, last block (`PAD_CONST_BYTES[7] = 0x80`, all others `0`) |
 | [`KeccakSponge`](relation-registry.md#5--keccaksponge) | request | `(sponge_seq_id, chunk_ptr, len_bytes=bytes_left)` | `act · is_first_row_of_invocation` | first row of each invocation (`p_first · is_first_block`) |
 
-The Logic64 messages carry per-row multiplicity `act` and are switched on
-by their **batch** outer flags (`is_pad`, `is_verbatim`, `p_pad_0x80·Σb_j`)
-rather than by the per-insert multiplicity; see the batching paragraph.
+`andnot_mask_bytes[i]` / `padding_mask_bytes[i]` are periodic-derived
+degree-1 expressions (`Σ_j b_j · mask_byte(...)`), extracted byte-by-byte
+from the `ANDNOT_MASK_{LO,HI}` / `PADDING_MASK_{LO,HI}` constants — not
+witness columns.
 
-### Mutex batching
+### Column packing
 
-The 13 fractions split across three σ columns purely to bound constraint
-degree (`mod.rs` `LookupAir::eval`); the split never changes which tuples
-cross the bus.
+`NUM_AUX_COLS = 24`, 48 fractions total:
 
-- **Col 0** (`memory64`, 6 fractions, `COLUMN_SHAPE[0] = 6`) — one group
-  with two **mutex batches** keyed by disjoint `p_idx` ranges:
-  - *state-lane* batch (outer flag `p_state_lane`, `p_idx ∈ [0, 25)`):
-    prev-perm + new-state + RC + squeeze (4 inserts).
-  - *lane-16 `0x80`* batch (outer flag `p_pad_0x80`, `p_idx = 25`):
-    lane-16 intermediate consume + final provide (2 inserts).
-  - `p_state_lane · p_pad_0x80 = 0` (disjoint ranges), so the two batches
-    legitimately share one running sum. Group `u_g` deg 5 → constraint
-    deg ≤ 7 → `log_quotient_degree = 3`.
-- **Col 1** (`logic64`, 5 fractions, `COLUMN_SHAPE[1] = 5`) — one group
-  with three mutex batches keyed by disjoint row classes:
-  - *pad-row* batch (outer flag `p_rate_block · is_pad`): andnot +
-    xor-padding + xor-state (3 inserts).
-  - *verbatim* batch (outer flag `p_rate_block · is_verbatim`): xor-state
-    (1 insert).
-  - *lane-16 `0x80`* batch (outer flag `p_pad_0x80 · Σ_j b_j`): xor
-    (1 insert).
-  - The pad, verbatim, and lane-16 classes are mutually exclusive by row,
-    so the batches share the column.
-- **Col 2** (`ks-and-chunk`, 2 fractions, `COLUMN_SHAPE[2] = 2`) — one
-  batch of two **independent** inserts on **different** buses: the
-  `KeccakSponge` request and the Memory64 chunk-consume. They never
-  collide (distinct buses, and the request fires only on the invocation's
-  first row); the bus-prefix-distinguished encodings keep their
-  denominators distinct, so they share one column. Lands at constraint
-  deg 3.
+- **Col 0** (2 fractions): `new-state` provide + `prev-perm` consume —
+  the two lowest-degree fractions, so the gated last-row close stays at
+  the chiplet's constraint-degree ceiling.
+- **Col 1** (3 fractions): `RC` provide + `lane-16 intermediate` consume
+  + `lane-16 final` provide.
+- **Col 2** (1 fraction): `squeeze` consume, alone (its degree-4
+  multiplicity is the floor).
+- **Cols 3–22** (20 columns, 2 fractions each = 40 fractions): the five
+  `BytePairLut` byte-request groups above, 8 bytes each, two bytes per
+  column.
+- **Col 23** (2 fractions): the `KeccakSponge` request + the Memory64
+  chunk-consume — two independent inserts on different buses, never
+  colliding (distinct buses, and the request fires only on the
+  invocation's first row); the bus-prefix-distinguished encodings keep
+  their denominators distinct, so they share one column.
 
-Within each batch the multiplicities are one-hot by row (a selector /
-periodic flag fires on at most the relevant row class), so the fractions
-are mutually exclusive and the shared running sum is sound.
+Within each column the multiplicities are one-hot by row (a selector /
+periodic flag fires on at most the relevant row class) or on genuinely
+independent buses, so the shared running sum is sound.

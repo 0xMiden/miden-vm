@@ -89,7 +89,6 @@ fn main() {
         "chunk    ",
         "poseidon2",
         "round    ",
-        "bitwise64",
         "bpl      ",
         "sponge   ",
         "kn       ",
@@ -116,11 +115,6 @@ fn main() {
             base + ext,
         );
     }
-    let bw64_active = traces.bw64_active_rows();
-    println!(
-        "  bitwise64 active: {bw64_active} rows ({} cells before 2^k pad)",
-        bw64_active * mains[3].width(),
-    );
     println!();
     println!("trace gen        : {gen_elapsed:?}");
 

@@ -10,7 +10,8 @@
 A **provide-only table** chiplet (it mints no per-op value via a hub
 cell; it is the authoritative *source* of two lookup relations). It is
 the leaf of the Keccak stack — it depends on nothing and is required by
-[Bitwise64](bitwise64.md) and by anyone who needs a 16-bit range check.
+[KeccakRound](keccak-round.md) and [KeccakSponge](keccak-sponge.md)
+directly, and by anyone who needs a 16-bit range check.
 It **provides** both:
 
 - [`BytePairLut`](relation-registry.md#0--bytepairlut) (0): the 4-tuple

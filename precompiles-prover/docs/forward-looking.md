@@ -55,6 +55,5 @@ shave columns only while `log_quotient_degree` holds at its tier.
 The per-column win is roughly constant (the opening plus the recursive
 multiplier), so it compounds across many columns or proofs and is
 negligible for a one-off handful. Applied here: the eval chip's central
-hasher ([`transcript-eval.md`](transcript-eval.md)), bitwise64 carrier
-chaining ([`chiplets/bitwise64-chaining.md`](chiplets/bitwise64-chaining.md)),
-ptr-keyed domain relations.
+hasher ([`transcript-eval.md`](transcript-eval.md)), ptr-keyed domain
+relations.

@@ -40,7 +40,7 @@ use crate::{
         },
     },
     logup::build_logup_aux_trace,
-    primitives::{bitwise64::Bitwise64Requires, byte_pair_lut::BytePairLutRequires},
+    primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     transcript::poseidon2::{
         digest::{P2Cap, P2Digest},
@@ -231,7 +231,6 @@ impl KeccakNodeRequires {
         sponge_req: &mut SpongeRequires,
         chunk_req: &mut ChunkRequires,
         round_req: &mut RoundRequires,
-        bw64_req: &mut Bitwise64Requires,
         bpl_req: &mut BytePairLutRequires,
         p2: &mut Poseidon2Requires,
     ) -> KeccakNodeOutput {
@@ -252,8 +251,7 @@ impl KeccakNodeRequires {
 
         // Miss path: full allocation through sponge + 2× P2 one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };
-        let sponge_out =
-            sponge_req.require(&sponge_inv, chunk_req, round_req, bw64_req, bpl_req, p2);
+        let sponge_out = sponge_req.require(&sponge_inv, chunk_req, round_req, bpl_req, p2);
         debug_assert_eq!(sponge_out.keccak_digest, keccak_digest);
 
         // h_input_chunks = the chunk-content P2 digest. The Keccak-node AIR

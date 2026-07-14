@@ -17,7 +17,6 @@ implementation against a single written spec.
 | Family | AIR | Doc |
 |--------|-----|-----|
 | Tables / primitives | `BytePairLutAir` | [byte-pair-lut.md](byte-pair-lut.md) |
-| | `Bitwise64Air` | [bitwise64.md](bitwise64.md) |
 | Keccak | `ChunkAir` | [chunk.md](chunk.md) |
 | | `KeccakRoundAir` | [keccak-round.md](keccak-round.md) |
 | | `KeccakSpongeAir` | [keccak-sponge.md](keccak-sponge.md) |

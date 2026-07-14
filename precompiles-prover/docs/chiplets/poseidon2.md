@@ -165,10 +165,9 @@ next row's `is_absorb` (= the next cycle's, since `is_absorb` is
 constant within a cycle). Next-row reads inside LogUp interactions
 are first-class in the LogUp framework — `LookupBuilder::main()`
 returns a two-row `WindowAccess` window, and existing chiplets in
-the repo emit both payloads (`Bitwise64`'s chain trick:
-`c_lo, c_hi` read from next row's `a_bytes`) and multiplicities
-(`KeccakSponge`'s `is_pad := is_zero_next − is_zero`) sourced from
-the next row. The `Poseidon2Out` gate uses the same idiom.
+the repo derive multiplicities from the next row too (`KeccakSponge`'s
+`is_pad := is_zero_next − is_zero`). The `Poseidon2Out` gate uses the
+same idiom.
 
 ### Caller consume patterns
 

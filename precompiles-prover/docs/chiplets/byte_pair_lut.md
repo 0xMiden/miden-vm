@@ -4,8 +4,9 @@
 
 Provides byte-level bitwise ops and 16-bit range checks. The
 leaf chiplet of the Keccak stack: depends on nothing, gets
-required by [Bitwise64](bitwise64.md) (byte-wise on LOGIC rows)
-and Range16-by-anyone-who-needs-it.
+required by [KeccakRound](keccak.md) and [KeccakSponge](keccak-sponge.md)
+(byte-wise, directly on their own operand/result columns) and
+Range16-by-anyone-who-needs-it.
 
 Implementation: [`src/primitives/byte_pair_lut.rs`](../../src/primitives/byte_pair_lut.rs).
 

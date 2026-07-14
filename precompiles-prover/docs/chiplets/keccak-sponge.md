@@ -58,7 +58,7 @@ Worst-case row inserts: 8 (rate XORin lane 16, non-first-block, last-
 block, pad-row, chunks-available — `state_prev + chunk + andnot +
 xor(padding) + xor(state) + state_new + RC + squeeze`). The lane-16
 `0x80` row stays well under at 3 inserts and the dedicated row keeps
-the lane-16 XORin row off the `0x80` Bitwise64. With mutex
+the lane-16 XORin row from also carrying the `0x80` mixin. With mutex
 grouping of the per-bus aux columns (see [§ Lookups](#lookups)),
 the binding `log_quotient_degree = 3` under Plonky3's deg-1 periodic
 convention.
@@ -93,9 +93,10 @@ contribute to `log_quotient_degree`.
 
 - **Lane-16 trailing-`0x80` row** (`p_idx = 25`): on last-block,
   consume lane 16's intermediate value from Memory64 at
-  `X = n·3200 + 16`, XOR with `0x80000000_00000000` via Bitwise64,
-  provide the post-XOR value at the same address. Three inserts:
-  1 Memory64 consume + 1 Bitwise64 + 1 Memory64 provide. Idle on
+  `X = n·3200 + 16`, XOR with `0x80000000_00000000` via 8 byte-wise
+  `BytePairLut` requires on the row's byte-shadow columns, provide the
+  post-XOR value at the same address. Ten inserts: 1 Memory64 consume +
+  8 `BytePairLut` byte requires + 1 Memory64 provide. Idle on
   non-last-block periods. Fires exactly once per invocation. The
   lane-16 rate XORin row at `p_idx = 16` always writes the pre-
   `0x80` value at `X`; the round chiplet's perm-`n` round-0 lane-16
@@ -105,9 +106,9 @@ contribute to `log_quotient_degree`.
   Cross-pairing (= a malicious prover wiring round chiplet's consume
   to the lane-16 row's provide while the dedicated row's
   consume/provide pair on each other) is foreclosed by the
-  Bitwise64 message: it locally pins `final = intermediate ⊕ 0x80`.
-  Any swap that tries to use `intermediate = final` forces
-  `0x80 = 0` (contradiction); any other reshuffle leaves a tuple
+  `BytePairLut` byte requires: they pin `final = intermediate ⊕ 0x80`
+  byte-by-byte. Any swap that tries to use `intermediate = final`
+  forces `0x80 = 0` (contradiction); any other reshuffle leaves a tuple
   unbalanced. When `pad_lane = 16, byte_offset = 7`, leading `0x01`
   and trailing `0x80` collide at byte 7 of lane 16 → `0x81`
   naturally from the two separate XORs.
@@ -217,7 +218,7 @@ One entry per `p_idx ∈ [0, 32)`.
 | `p_capacity` | 1 iff `p_idx ∈ [17, 25)` | gates capacity-row work |
 | `p_rc_active` | 1 iff `p_idx ∈ [0, 24)` | gates the RC provide bundled into state-lane rows (skips `p_idx = 24` since Keccak has only 24 rounds) |
 | `p_squeeze_active` | 1 iff `p_idx ∈ [4, 25)` | gates the squeeze consume bundled into state-lane rows on last-block (skips digest lanes `[0, 4)`) |
-| `p_pad_0x80` | 1 iff `p_idx == 25` | gates the lane-16 trailing-`0x80` row's bus + Bitwise64 emissions on last-block |
+| `p_pad_0x80` | 1 iff `p_idx == 25` | gates the lane-16 trailing-`0x80` row's bus + `BytePairLut` emissions on last-block |
 | `p_extra` | 1 iff `p_idx ∈ [26, 29)` | gates the extra chunk-consume rows that mop up last-block overshoot lanes (paired with `b_sum`) |
 | `rc_val_lo`, `rc_val_hi` | `RC[p_idx]` u32 halves on `p_rc_active` rows, `0` elsewhere | RC value provided to Memory64 from state-lane rows |
 
@@ -306,8 +307,8 @@ neither needs a dedicated placement constraint.
   `byte_offset ∈ [0, 7]`, the pad row's byte-offset within its lane.
   Per-invocation broadcast: exactly one fires (on the last block),
   none fire on non-last blocks. Used as degree-1 inline operands in
-  the `padding_mask` and `andnot_mask` expressions, keeping the
-  Bitwise64 messages degree-1.
+  the byte-wise `padding_mask_bytes` and `andnot_mask_bytes`
+  expressions, keeping the `BytePairLut` messages degree-1.
 
 `is_last_block_period := Σ_j b_j` is not a committed column — it's
 the degree-1 inline sum of the eight selector bits. By the
@@ -348,36 +349,44 @@ XORin rows where `is_zero_p` has not yet settled.
 - `padded_lo`, `padded_hi` — pad-row intermediate
   `cleared XOR padding_mask`. Same uniform-commit pattern.
 
+### Witness — byte-shadow columns (40)
+
+`chunk`, `state_prev`, `state_new`, `cleared`, and `padded` each also
+carry an 8-byte little-endian decomposition (`chunk_bytes`,
+`state_prev_bytes`, `state_new_bytes`, `cleared_bytes`,
+`padded_bytes`), linked to the `_lo`/`_hi` halves above by an ungated
+local constraint. These are what the pad/absorb XOR/ANDNOT ops verify
+directly against `BytePairLut` (see [§ Lookups](#lookups)) — every row
+commits its own bytes, so no intermediate chiplet or chain trick is
+needed.
+
 ### Witness — LogUp aux
 
-A single σ residue is exposed publicly (matches the convention of
-the existing chiplets: `bitwise64`, `keccak/round`, `byte_pair_lut`
-all expose `num_aux_values = 1`). It aggregates the sponge's net
-contribution across all three buses (Memory64, Logic64,
-KeccakSponge) — different buses produce distinct `(α − hash)`
-denominators thanks to bus-prefix-distinguished encodings, and
-Schwartz-Zippel on random α enforces per-bus balance even when
-one σ accumulates residues from all of them.
+A single σ residue is exposed publicly (matching every other chiplet's
+`num_aux_values = 1`). It aggregates the sponge's net contribution
+across all three buses (Memory64, BytePairLut, KeccakSponge) —
+different buses produce distinct `(α − hash)` denominators thanks to
+bus-prefix-distinguished encodings, and Schwartz-Zippel on random α
+enforces per-bus balance even when one σ accumulates residues from all
+of them.
 
-The number of physical aux columns is an implementation detail:
-declared inserts are spread across columns AND combined into
-mutex groups so that per-column `log_quotient_degree ≤ 2`. Col 0
-is the running-sum σ and (following the `bitwise64` pattern)
-hosts its own batch in addition to chaining the per-row fraction
-columns. Order of magnitude: 3 aux columns total (running-sum-
-plus-Memory64 + Logic64-fractions + KS-and-chunk-fractions).
+`NUM_AUX_COLS = 24`: col 0 is the running-sum σ (hosting the
+`new-state` + `prev-perm` fractions), col 1 hosts the RC + lane-16
+fractions, col 2 the squeeze fraction alone, cols 3–22 host the five
+`BytePairLut` byte-request groups (8 bytes each, two per column), and
+col 23 hosts the `KeccakSponge` request + chunk-consume pair.
 
 ### Total
 
-**~27 main witness columns** (5 structural + 10 padding + 12 lane
-values), plus **3 aux columns** (single σ residue exposed; col 0
-hosts the running σ and Memory64 batch, cols 1–2 are fraction
-columns chained into col 0).
+**67 main witness columns** (5 structural + 10 padding + 12 lane
+values + 40 byte-shadow), plus **24 aux columns** (single σ residue
+exposed; see [§ Witness — LogUp aux](#witness--logup-aux) for the
+column layout).
 
 ## Constraints
 
 Local polynomial constraints on the witness, organized by purpose.
-Lookups (bus interactions, Bitwise64 messages) live in their own
+Lookups (bus interactions, `BytePairLut` messages) live in their own
 section below. Every constraint listed here is in
 `when_transition` (cyclic skip of the last → first wrap) or
 `when_first_row` (just row 0) unless explicitly noted as ungated.
@@ -726,7 +735,7 @@ period of an invocation; pinning `state_prev = 0` lets the
 identity passthrough naturally yield `state_new = 0` (= zero
 capacity init).
 
-### State propagation (no Bitwise64 fires)
+### State propagation (no `BytePairLut` request fires)
 
 - Rate XORin row past-pad (`is_zero = 1`, garbage-tail or zero-tail):
   - `p_rate_block · is_zero · (state_new_lo − state_prev_lo) = 0`.
@@ -742,9 +751,9 @@ capacity init).
   `state_prev = 0` constraint above then forces `state_new = 0`.
 
 Rate XORin rows with `is_zero = 0` (real-input and pad-row classes)
-have `state_new` pinned by the Bitwise64 messages they emit; the
-lane-16 `0x80` row is similarly Bitwise64-pinned. No local
-constraint needed for those.
+have `state_new` pinned by the `BytePairLut` byte requires they emit;
+the lane-16 `0x80` row is similarly pinned. No local constraint needed
+for those.
 
 ### Chunk zero-fill on `is_chunk_avail = 0`
 
@@ -753,9 +762,9 @@ constraint needed for those.
 
 Both ungated. Pin `chunk_lo = chunk_hi = 0` on every row where the
 chunk chiplet doesn't provide a lane — including pre-pad verbatim
-rate XORin rows that would otherwise fire `Logic64(XOR, state_prev,
-chunk, state_new)` with a prover-chosen, Memory64-unpinned chunk
-witness and steer the state arbitrarily.
+rate XORin rows that would otherwise verify `state_new = state_prev ⊕
+chunk` against a prover-chosen, Memory64-unpinned chunk witness and
+steer the state arbitrarily.
 
 With the zero-fill in place, an under-emission by the chunk chiplet
 yields a deterministic zero-extended digest (the sponge effectively
@@ -795,11 +804,11 @@ local constraints sit comfortably below the LogUp ceiling.
 
 The sponge interacts with three LogUp buses:
 
-| Bus | Status | Tuple shape |
-|---|---|---|
-| `Memory64` | existing | `(addr, lo, hi)` |
-| `Logic64` (from `Bitwise64`) | existing | `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` |
-| `KeccakSponge` | new (this chiplet defines it; needs a `BusId::KeccakSponge` entry in `src/relations.rs`) | `(sponge_seq_id, chunk_ptr, len_bytes)` |
+| Bus | Tuple shape |
+|---|---|
+| `Memory64` | `(addr, lo, hi)` |
+| `BytePairLut` | `(op, a, b, c)`, byte-wise, 8 requires per 64-bit XOR/ANDNOT op |
+| `KeccakSponge` | `(sponge_seq_id, chunk_ptr, len_bytes)` |
 
 Chunk lane consumes ride on `Memory64` at a disjoint address range
 starting at `CHUNK_ADDR_BASE`; the chunk chiplet (designed
@@ -894,87 +903,68 @@ but trims constraint deg by 1 (7 vs 8). Under Winterfell-style
 periodic-deg-0 (`p3-air` TODO), the split would drop a full tier;
 that is the asymptotic motivation the design preserves.
 
-### Logic64 (Bitwise64) messages
+### `BytePairLut` byte requires
 
 Operand abbreviations (all degree-1 linear inlines in the witness):
-- `andnot_mask` — `0xFFFF_FFFF_FFFF_FFFF` shifted left by
-  `8·byte_offset` bits, computed as `Σ_j b_j · ANDNOT_MASK[j]`
-  where `ANDNOT_MASK[j] = 0xFFFF_FFFF_FFFF_FFFF << (8·j)` is the
-  constant for `byte_offset = j`. Periodic-flavour but the `b_j`
-  are witness, so the inline is witness deg 1. The intent is
-  `(NOT andnot_mask) = keep_mask` covers bytes `[0, byte_offset)`
-  with `0xFF` and bytes `[byte_offset, 8)` with `0x00`, so
-  `cleared = (NOT andnot_mask) AND chunk` keeps the input bytes
-  in positions `< byte_offset` and zeroes the rest. In particular
-  for `byte_offset = 0` (pad row has no input bytes — happens
-  whenever `bytes_in_block ≡ 0 mod 8`), `andnot_mask = 0xFF…FF`
-  and `cleared = 0` regardless of `chunk`, so the pad-row algebra
-  is independent of the chunk lane value on those rows.
-- `padding_mask` — `0x01 << (8·byte_offset)` on non-lane-16 pad rows,
-  bumped with the trailing `0x80` only on the lane-16 0x80 row (a
-  different row from the pad row in our layout, so `padding_mask`
-  here is just the leading `0x01`-byte mask).
-- `pad_const := (0, 0x80000000)` — the lane-16 `0x80` constant
-  split into u32 halves. Verifier-known constant.
+- `andnot_mask_bytes[i]`, `i ∈ [0, 8)` — byte `i` of
+  `0xFFFF_FFFF_FFFF_FFFF` shifted left by `8·byte_offset` bits,
+  computed as `Σ_j b_j · mask_byte(ANDNOT_MASK_LO[j], ANDNOT_MASK_HI[j], i)`,
+  extracting byte `i` from the verified `ANDNOT_MASK_{LO,HI}[j]`
+  per-`byte_offset` constants. The intent is `(NOT andnot_mask) =
+  keep_mask` covers bytes `[0, byte_offset)` with `0xFF` and bytes
+  `[byte_offset, 8)` with `0x00`, so `cleared = (NOT andnot_mask) AND
+  chunk` keeps the input bytes in positions `< byte_offset` and
+  zeroes the rest. In particular for `byte_offset = 0` (pad row has
+  no input bytes — happens whenever `bytes_in_block ≡ 0 mod 8`),
+  `andnot_mask = 0xFF…FF` and `cleared = 0` regardless of `chunk`, so
+  the pad-row algebra is independent of the chunk lane value on those
+  rows.
+- `padding_mask_bytes[i]` — byte `i` of `0x01 << (8·byte_offset)` on
+  non-lane-16 pad rows, extracted the same way from
+  `PADDING_MASK_{LO,HI}[j]`.
+- `PAD_CONST_BYTES[i]` — the lane-16 `0x80` constant's bytes: `0` for
+  `i < 7`, `0x80` for `i = 7`. A plain compile-time constant, not
+  selector-dependent.
 
-The five Logic64 messages partition by row class into three
-**mutex batches** inside one group: pad-row L64 (`is_pad`),
-verbatim-row L64 (`is_verbatim`), and lane-16 0x80 L64
-(`p_pad_0x80 · is_last_block_period`). The three are pairwise
-mutex on any single row.
+Five groups of 8 byte-wise `BytePairLut` requires each, one group per
+op, gated by the row class that op runs on — no cross-group batching,
+each byte packs with one other byte of the *same* group into a column
+(20 columns total, 2 fractions each):
 
-**Batch C — pad row** (outer flag `p_rate_block · is_pad`, deg 2)
+**Pad row** (mult `act · p_rate_block · is_pad`, `i ∈ [0, 8)`)
 
-| # | Message | Mult inside batch | Tuple `(op, a_lo, a_hi, b_lo, b_hi, c_lo, c_hi)` |
-|---|---|---|---|
-| 7 | Pad-row ANDNOT (clear past byte_offset) | `+act` | `(ANDNOT, andnot_mask_lo, andnot_mask_hi, chunk_lo, chunk_hi, cleared_lo, cleared_hi)` |
-| 8 | Pad-row XOR(padding) (add `0x01` byte) | `+act` | `(XOR, cleared_lo, cleared_hi, padding_mask_lo, padding_mask_hi, padded_lo, padded_hi)` |
-| 10 | Pad-row XOR(state) | `+act` | `(XOR, state_prev_lo, state_prev_hi, padded_lo, padded_hi, state_new_lo, state_new_hi)` |
+| Op | Tuple `(op, a, b, c)` |
+|---|---|
+| ANDNOT (clear past byte_offset) | `(ANDNOT, andnot_mask_bytes[i], chunk_bytes[i], cleared_bytes[i])` |
+| XOR(padding) (add `0x01` byte) | `(XOR, cleared_bytes[i], padding_mask_bytes[i], padded_bytes[i])` |
+| XOR(state) | `(XOR, state_prev_bytes[i], padded_bytes[i], state_new_bytes[i])` |
 
-**Batch D — verbatim row** (outer flag `p_rate_block · is_verbatim`, deg 2)
+**Verbatim row** (mult `act · p_rate_block · is_verbatim`, `i ∈ [0, 8)`)
 
-| # | Message | Mult inside batch | Tuple |
-|---|---|---|---|
-| 9 | Verbatim XOR(state) | `+act` | `(XOR, state_prev_lo, state_prev_hi, chunk_lo, chunk_hi, state_new_lo, state_new_hi)` |
+| Op | Tuple |
+|---|---|
+| XOR(state) | `(XOR, state_prev_bytes[i], chunk_bytes[i], state_new_bytes[i])` |
 
-**Batch E — lane-16 `0x80` row** (outer flag `p_pad_0x80 · is_last_block_period`, deg 2)
+**Lane-16 `0x80` row** (mult `act · p_pad_0x80 · is_last_block_period`, `i ∈ [0, 8)`)
 
-| # | Message | Mult inside batch | Tuple |
-|---|---|---|---|
-| 11 | Lane-16 `0x80` XOR | `+act` | `(XOR, state_prev_lo, state_prev_hi, pad_const_lo, pad_const_hi, state_new_lo, state_new_hi)` |
+| Op | Tuple |
+|---|---|
+| XOR | `(XOR, state_prev_bytes[i], PAD_CONST_BYTES[i], state_new_bytes[i])` |
 
-(`op` slot uses the `Logic64Op` tags — `ANDNOT = 0`, `XOR = 1` —
-matching the bus encoding in [`Logic64Msg`](../../src/primitives/bitwise64.rs).)
+(`op` uses the `BytePairOp` tags — `AndNot = 0`, `Xor = 1`.)
 
-Mutex argument:
-- **C vs D**: both gated by `p_rate_block`; `is_pad = (is_zero_p' − is_zero_p)` requires `is_zero_p' = 1` to fire, `is_verbatim = (1 − is_zero_p')` requires `is_zero_p' = 0`. Cannot co-fire.
-- **C, D vs E**: `p_rate_block · p_pad_0x80 = 0` (disjoint `p_idx` ranges).
+The pad-row, verbatim-row, and lane-16-row classes are mutually
+exclusive by row (`p_rate_block · is_pad`, `p_rate_block ·
+is_verbatim`, and `p_pad_0x80` gate disjoint `p_idx` ranges / row
+states), so on any single row at most one group's requests are live;
+every request's multiplicity is a simple witness-times-periodic
+product (deg ≤ 2), well below the chiplet's constraint-degree ceiling
+set elsewhere (see [§ Constraint degree summary](#constraint-degree-summary)).
 
-Group algebra:
-- `u_g = 1 + (d_C − 1) · f_C + (d_D − 1) · f_D + (d_E − 1) · f_E`
-- `deg(d_C) = 3, deg(d_D) = deg(d_E) = 1`.
-- Outer flag degrees: all three are deg 2
-  (witness × periodic, each contributing deg 1).
-- `deg(u_g) = max(3 + 2, 1 + 2, 1 + 2) = 5`.
-- `deg(v_g) ≤ 5` (worst-case batch-C numerator: outer flag deg 2,
-  3 deg-1 multiplicities `act`, multiplied through 2 other deg-1
-  encodings: `2 + 1 + 2 = 5`).
-
-Symbolic constraint deg ≤ `max(1 + 5, 5) = 6`, giving
-`log_quotient_degree = log2_ceil(5) = 3`.
-
-Compare with a single batch of all 5 messages and outer flag 1:
-`d` deg 5, constraint deg 6, `log_quotient_degree = log2_ceil(5) = 3`.
-The split lands at the same log-blowup tier under Plonky3 but
-restores per-row-class accounting (verbatim and lane-16 rows
-contribute their own — much lower-degree — batches independent of
-the pad-row chain). Under Winterfell-style periodic-deg-0, the
-split would drop a full tier.
-
-State pinning on rows where no Logic64 fires (past-pad rate rows,
-capacity rows, NOP slack) is handled by the local
+State pinning on rows where no `BytePairLut` request fires (past-pad
+rate rows, capacity rows, NOP slack) is handled by the local
 `state_new = state_prev` constraints in
-[§ State propagation](#state-propagation-no-bitwise64-fires).
+[§ State propagation](#state-propagation-no-bytepairlut-request-fires).
 
 ### KeccakSponge + chunk consume (auxiliary column)
 
@@ -1002,7 +992,8 @@ is_chunk_avail` — `p_extra · b_sum` is deg 2, the rest deg 1 each).
 With 2 declared inserts, `d` deg 2 and `n` deg ≤ `4 + 1 = 5`, so
 symbolic constraint deg ≤ `max(1 + 2, 5) = 5`,
 `log_quotient_degree = log2_ceil(4) = 2`. Still a tier below the
-Memory64 / Logic64 columns that set the chiplet-wide `log_quot = 3`.
+chiplet-wide `log_quot = 3` ceiling set by the Memory64
+running-sum column.
 
 The chunk address `CHUNK_ADDR_BASE + chunk_ptr` is degree-1 in the
 witness (`chunk_ptr`) and a constant offset (`CHUNK_ADDR_BASE`,
@@ -1049,7 +1040,7 @@ keeps the carry rows from actually consuming (both periodics are 0
 there).
 
 **No range check, and why that's sound.** The overshoot lanes are
-consumed but never absorbed nor routed through Bitwise64, so they
+consumed but never absorbed nor routed through `BytePairLut`, so they
 are not range-checked. That's safe: they cancel against the chunk
 chiplet's provides on Memory64 (the prover must set
 `chunk_lo/hi` to whatever the chiplet emitted — honest traces emit 0
@@ -1079,93 +1070,58 @@ binding.)
 
 ### Worst-case per-row active inserts
 
-Columns below labelled by *aux column*: M64 = state-lane + lane-16
-0x80 batches (col 0); L64 = Logic64 batches (col 1);
-aux = KeccakSponge + Memory64-chunk-consume (col 2). The chunk
-consume is on `Memory64` but lives in the auxiliary aux column.
+Columns below labelled by *aux column group*: M64 = state-lane +
+lane-16 0x80 batches (cols 0–1); squeeze (col 2); BPL = the twenty
+`BytePairLut` byte-request columns (cols 3–22); aux = KeccakSponge +
+Memory64-chunk-consume (col 23).
 
-| Scenario | M64 col | L64 col | aux col | Total |
-|---|---|---|---|---|
-| Rate XORin pad row at `p_idx ∈ [4, 17)`, intra, last-block, chunks-avail | 4 (batch A: #1 + #2 + #3 + #4) | 3 (batch C: #7 + #8 + #10) | 1 (#13) | **8** |
-| Lane-16 `0x80` row (`p_idx = 25`), last-block | 2 (batch B: #5 + #6) | 1 (batch E: #11) | 0 | 3 |
-| Rate XORin verbatim, intra, non-last, chunks-avail | 3 (batch A) | 1 (batch D: #9) | 1 (#13) | 5 |
-| First-row-of-invocation rate XORin verbatim, non-last block | 2 (batch A) | 1 (batch D) | 2 (#12 + #13) | 5 |
-| Trace tail (`act = 0`) | 0 | 0 | 0 | 0 |
+| Scenario | M64 cols | squeeze col | BPL cols | aux col | Total interactions |
+|---|---|---|---|---|---|
+| Rate XORin pad row at `p_idx ∈ [4, 17)`, intra, last-block, chunks-avail | 4 (prev + new + RC + lane-16 n/a) | 1 (squeeze) | 24 (andnot ×8 + xor-padding ×8 + xor-state ×8) | 1 (chunk consume) | **30** |
+| Lane-16 `0x80` row (`p_idx = 25`), last-block | 2 (lane-16 consume + provide) | 0 | 8 (xor ×8) | 0 | 10 |
+| Rate XORin verbatim, intra, non-last, chunks-avail | 2 (prev + new) | 0 | 8 (xor-state ×8) | 1 (chunk consume) | 11 |
+| First-row-of-invocation rate XORin verbatim, non-last block | 1 (new only) | 0 | 8 (xor-state ×8) | 2 (KS request + chunk consume) | 11 |
+| Trace tail (`act = 0`) | 0 | 0 | 0 | 0 | 0 |
 
-The pad row falling in `p_idx ∈ [4, 17)` is what stacks all four
-state-lane-row Memory64 inserts (prev, new, RC, squeeze) against
-the three pad-row Logic64 inserts and the chunk. Pad rows in
-digest-lane positions `p_idx ∈ [0, 4)` lose the squeeze insert
-(p_squeeze_active = 0) and cap at 7. Per-row active count is what
-determines bandwidth; per-aux-column constraint degree
-(after mutex grouping) is what determines `log_quotient_degree`.
+The pad row falling in `p_idx ∈ [4, 17)` is the busiest: it stacks
+the four state-lane Memory64 inserts, the squeeze, all three pad-row
+`BytePairLut` groups (24 byte requests), and the chunk consume. Pad
+rows in digest-lane positions `p_idx ∈ [0, 4)` lose the squeeze
+insert (`p_squeeze_active = 0`) and cap at 29. Raw interaction count
+determines LogUp evaluation work per row; it does not determine
+`log_quotient_degree` — that's set by each column's own closing
+degree (below), and every `BytePairLut` byte-request column holds
+exactly 2 fractions gated by a simple witness-times-periodic product,
+independent of how many total interactions the row has.
 
 ### Aux columns and σ exposure
 
-A single σ is exposed publicly (`num_aux_values = 1`, matching
-`bitwise64` / `keccak/round` / `byte_pair_lut`). It aggregates the
-sponge's net contribution across all three buses: each bus's
-encoding includes a bus prefix, so messages from different buses
-produce distinct `(α − hash)` denominators, and Schwartz-Zippel on
-random α enforces per-bus balance from a single combined residue.
+A single σ is exposed publicly (`num_aux_values = 1`, matching every
+other chiplet). It aggregates the sponge's net contribution across
+all three buses: each bus's encoding includes a bus prefix, so
+messages from different buses produce distinct `(α − hash)`
+denominators, and Schwartz-Zippel on random α enforces per-bus
+balance from a single combined residue.
 
-#### Why ≥ 3 aux columns
+`NUM_AUX_COLS = 24`, 48 fractions total, packed as follows:
 
-A single batch of all 13 inserts in one column would have
-constraint degree `1 + 13 = 14`, giving `log_quotient_degree = 4`.
-Even with mutex grouping, mixing buses in one column multiplies
-the groups' `u_g` together (groups within a column are
-product-closed, not mutex), pushing column constraint deg well
-past the `log_quot = 3` tier. Splitting M64 and L64 across two
-columns trims the per-column degree to fit one tier below that,
-plus a third column for the unrelated KeccakSponge +
-chunk-consume pair (the chunk consume rides on Memory64 at the
-disjoint `CHUNK_ADDR_BASE`-anchored range, but its mutual gating
-with the state-lane M64 messages is incompatible with the M64
-column's mutex grouping, so it lives in the auxiliary column).
+| Aux col(s) | Role | Fractions | Fraction count |
+|---|---|---|---|
+| 0 | running σ + Memory64 (new-state provide, prev-perm consume) | 2 | 2 |
+| 1 | Memory64 (RC provide, lane-16 intermediate consume, lane-16 final provide) | 3 | 3 |
+| 2 | Memory64 squeeze consume, alone (its degree-4 multiplicity is the floor) | 1 | 1 |
+| 3–22 | `BytePairLut` byte requires — five groups (pad-row andnot, pad-row xor-padding, pad-row xor-state, verbatim xor-state, lane-16 xor), 8 bytes each, 2 bytes/column | 40 | 40 |
+| 23 | `KeccakSponge` request + Memory64 chunk-consume (different buses, never colliding) | 2 | 2 |
 
-#### Recommended 3-aux-column layout
-
-Following `bitwise64`'s pattern (col 0 hosts its own batch *and*
-chains the per-row fraction columns), Memory64 lives directly on
-the running-sum column. The other two batches stay as fraction
-columns chained into col 0:
-
-| Aux col | Role | Group / batch structure | `deg(u_g)` | Constraint deg | `log_quot_deg` |
-|---|---|---|---|---|---|
-| 0 | running σ + Memory64 fractions (state-lane + lane-16 0x80) | 1 group, 2 mutex batches (A: 4 inserts, B: 2 inserts), periodic outer flags (deg 1) | 5 | 7 | **3** |
-| 1 | Logic64 fractions | 1 group, 3 mutex batches (C: 3 inserts, D: 1 insert, E: 1 insert), witness × periodic outer flags (deg 2) | 5 | 6 | **3** |
-| 2 | KeccakSponge + Memory64 chunk-consume fractions | 1 batch of 2 independent inserts, outer flag = 1 | 2 | 5 | 2 |
-
-Col 0's running-sum recurrence absorbs cols 1, 2's per-row values
-as scalar additions; the absorbed deg-1 EF values don't multiply
-into col 0's denominator, so col 0's constraint deg stays
-`max(1 + deg(u_g_M64), deg(v_g_M64)) = max(6, 7) = 7`. Max
-`log_quotient_degree` across all columns = **3** under Plonky3's
-periodic-deg-1 convention, the same tier `bitwise64` lands at
-in this codebase. Under the Winterfell-style periodic-deg-0
-analysis the layout drops to `log_quot = 2`; both the M64 and L64
-columns would lose one tier (see prior-section notes), so the
-mutex-grouping design retains its asymptotic motivation even if
-the current Plonky3 implementation absorbs that gain into its
-conservative deg estimates.
-
-#### What the mutex savings buy
-
-Under Plonky3's deg-1 periodic convention (current state):
-
-| | Memory64 column | Logic64 column |
-|---|---|---|
-| Naive single batch | `d` deg 6, constraint deg 8, `log_quot_deg = 3` | `d` deg 5, constraint deg 6, `log_quot_deg = 3` |
-| Mutex split | `deg(u_g) = 5`, constraint deg 7, `log_quot_deg = 3` | `deg(u_g) = 5`, constraint deg 6, `log_quot_deg = 3` |
-
-Under the Winterfell-style deg-0 periodic model (the `p3-air` TODO
-target):
-
-| | Memory64 column | Logic64 column |
-|---|---|---|
-| Naive single batch | `d` deg 6, constraint deg 7, `log_quot_deg = 3` | `d` deg 5, constraint deg 6, `log_quot_deg = 3` |
-| Mutex split | `deg(u_g) = 4`, constraint deg 5, `log_quot_deg = 2` | `deg(u_g) = 4`, constraint deg 5, `log_quot_deg = 2` |
+Unlike the Memory64 columns (which mutex-batch several inserts of
+*differing* degree into one running sum, since state-lane and
+lane-16 rows are disjoint `p_idx` ranges), the `BytePairLut` columns
+need no cross-group batching: each column's two fractions are
+simple, uniformly-low-degree byte requires from the *same* op group,
+so packing 2 per column already keeps every closing constraint at
+degree ≤ 3 — the chiplet's own `log_quotient_degree` ceiling is set
+by the Memory64 running-sum column (col 0), not by the byte-request
+columns.
 
 The key trick (per
 [`miden-vm` LookupBuilder docstrings](https://github.com/0xMiden/miden-vm/blob/3176d1f/air/src/lookup/builder.rs)):

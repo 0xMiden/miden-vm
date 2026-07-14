@@ -14,6 +14,7 @@ pub mod program;
 pub mod trace;
 
 use alloc::vec::Vec;
+use core::{array, ops::Range};
 
 pub use message::KeccakSpongeMsg;
 use miden_core::{
@@ -30,20 +31,23 @@ use crate::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
-    primitives::bitwise64::{Logic64Msg, Logic64Op},
+    primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
+    utils::{current_main, halves_le, next_main},
 };
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 27 main witness columns split into three groups:
+// 67 main witness columns split into four groups:
 //
 // - Structural (5):    sponge_seq_id, act, bytes_left, is_first_block_of_invocation, chunk_ptr.
 // - Padding state (10): is_zero_p, is_chunk_avail, b_0..b_7.
 // - Per-row lane (12): chunk, state_prev, state_new, state_out, cleared, padded — each as u32
 //   lo/hi.
+// - Byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte little-endian
+//   decomposition, linked to its lo/hi halves above and verified against the `BytePairLut` chiplet
+//   directly.
 //
 // See `docs/chiplets/keccak-sponge.md` §"Columns" for the definitions.
 
@@ -141,38 +145,52 @@ pub const COL_CLEARED_HI: usize = 24;
 pub const COL_PADDED_LO: usize = 25;
 pub const COL_PADDED_HI: usize = 26;
 
+// Byte-decomposed shadow columns.
+// --------------------------------------------------------------------
+//
+// `chunk`, `state_prev`, `state_new`, `cleared`, `padded` each also carry
+// an 8-byte little-endian decomposition, linked to their `_lo`/`_hi`
+// halves above by an ungated local constraint (`eval`'s "byte-shadow
+// linking" block). The bytes are what the `BytePairLut` requires below
+// verify each pad/absorb XOR/ANDNOT against directly — no intermediate
+// chiplet or chain trick, every row commits its own bytes.
+pub const CHUNK_BYTES_RANGE: Range<usize> = 27..35;
+pub const STATE_PREV_BYTES_RANGE: Range<usize> = 35..43;
+pub const STATE_NEW_BYTES_RANGE: Range<usize> = 43..51;
+pub const CLEARED_BYTES_RANGE: Range<usize> = 51..59;
+pub const PADDED_BYTES_RANGE: Range<usize> = 59..67;
+
 /// Total number of main witness columns (5 structural + 10 padding-
-/// state-machine + 12 per-row lane values).
-pub const NUM_MAIN_COLS: usize = 27;
+/// state-machine + 12 per-row lane values, halves + 40 byte-shadow
+/// columns for the same five values).
+pub const NUM_MAIN_COLS: usize = 67;
 
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Aux columns, FLATTENED to lqd 2. The mutex outer flags are folded into
-/// each insert's multiplicity (sound: the one-hot flags are binary, the same
-/// precondition the mutex-group fold already relies on), giving 13
-/// flag-folded fractions — one degree-2, ten degree-3, two degree-4
-/// multiplicities, all over degree-1 messages — partitioned so every
-/// closing constraint is degree ≤ 5:
+/// Aux columns. Columns 0–2 are FLATTENED to lqd 2 (the mutex outer flags
+/// folded into each insert's multiplicity — sound: the one-hot flags are
+/// binary, the same precondition the mutex-group fold already relies on):
 ///
 /// - col 0 (running σ): Memory64 `new-state` + `prev-perm` (the two lowest-degree fractions; the
 ///   gated last-row close adds +1, so it lands at degree 5).
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
-/// - col 3: Logic64 pad-row `andnot` + `xor-padding` + `xor-state`.
-/// - col 4: Logic64 verbatim `xor-state` + lane-16 0x80 `xor`.
-/// - col 5: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+/// - cols 3–22: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
+///   `xor-padding` + `xor-state`, the verbatim `xor-state`, and the lane-16 0x80 `xor` directly
+///   against the byte-shadow columns — no intermediate chiplet, two fractions per column.
+/// - col 23: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
 /// Max per-LogUp-column constraint deg = 5 → `log_quotient_degree = 2`. The
 /// degree-4 multiplicities (`squeeze`, `chunk-consume`) are the floor; dropping
 /// to lqd 1 would need them witness-decomposed. Width disregarded. See
 /// `docs/chiplets/keccak-sponge.md` §"Aux columns and σ exposure".
-pub const NUM_AUX_COLS: usize = 6;
+pub const NUM_AUX_COLS: usize = 24;
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]. The sponge's σ aggregates its net
-// contribution across all three buses (Memory64, Logic64, KeccakSponge)
+// contribution across all three buses (Memory64, BytePairLut, KeccakSponge)
 // into one residue — bus-prefix-distinguished encodings + Schwartz-Zippel
 // on random α enforce per-bus balance; the single-σ count is the shared
 // shape, not a sponge-specific choice. The shared public values
@@ -196,10 +214,11 @@ pub use program::{
 /// Keccak sponge chiplet AIR. Period-32 program (one period = one
 /// Keccak permutation) drives rate XORin / capacity passthrough /
 /// padding state machine over the
-/// [`Memory64`](crate::hash::memory64) bus and the Bitwise64
-/// chiplet's Logic64 bus, with the per-invocation request consumed
-/// from the new [`KeccakSponge`](crate::relations::BusId::KeccakSponge)
-/// bus.
+/// [`Memory64`](crate::hash::memory64) bus, verifying its own pad/absorb
+/// XOR/ANDNOT ops directly against
+/// [`BytePairLut`](crate::primitives::byte_pair_lut), with the
+/// per-invocation request consumed from the
+/// [`KeccakSponge`](crate::relations::BusId::KeccakSponge) bus.
 ///
 /// Trace generation lands in a subsequent commit. The verifier-side
 /// machinery (column layout, periodic program, constraints, lookups)
@@ -221,17 +240,18 @@ impl BaseAir<Felt> for KeccakSpongeAir {
     }
 }
 
-// LOGIC64 MASK TABLES (indexed by `byte_offset ∈ [0, 8)`)
+// PAD-ROW MASK TABLES (indexed by `byte_offset ∈ [0, 8)`)
 // ================================================================================================
 //
-// The pad-row Logic64 messages need two masks whose values are
+// The pad-row `BytePairLut` requests need two masks whose values are
 // selected by the unary `b_j` selector bits: `andnot_mask` clears
 // the bytes at and past `byte_offset`, and `padding_mask` places a
-// `0x01` byte at `byte_offset`. Both are 64-bit values committed to
-// the Logic64 bus as u32 lo/hi halves. The arrays below hold the
-// per-`byte_offset` constants; the eval body builds
-// `andnot_mask_lo = Σ_j b_j · ANDNOT_MASK_LO[j]` (and likewise for
-// the other three halves) as a degree-1 witness inline.
+// `0x01` byte at `byte_offset`. The arrays below hold the
+// per-`byte_offset` u32-half constants (kept as the verified source of
+// truth); `eval` extracts each byte from them via [`mask_byte`] and
+// builds `andnot_mask_bytes[i] = Σ_j b_j · mask_byte(ANDNOT_MASK_LO[j],
+// ANDNOT_MASK_HI[j], i)` (and likewise for padding) as a degree-1
+// witness inline.
 
 /// `ANDNOT_MASK[j].lo` (u32) for `byte_offset = j`. Equals the low
 /// 32 bits of `0xFFFF_FFFF_FFFF_FFFF << (8·j)`. Used by the pad-row
@@ -291,6 +311,17 @@ pub const PAD_CONST_LO: u32 = 0;
 /// High u32 half of the lane-16 trailing-`0x80` constant
 /// (`0x80 << 56` falls in the top byte of the hi half).
 pub const PAD_CONST_HI: u32 = 0x8000_0000;
+/// Byte `i` (LSB-first) of the lane-16 trailing-`0x80` constant.
+pub const PAD_CONST_BYTES: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0x80];
+
+/// Byte `byte_idx` (LSB-first, `< 8`) of the 64-bit value whose 32-bit
+/// halves are `lo`/`hi`. Extracts from the already-verified `_LO`/`_HI`
+/// per-`byte_offset` mask constants, so the per-byte view is correct by
+/// construction rather than a hand-rederived bit pattern.
+const fn mask_byte(lo: u32, hi: u32, byte_idx: usize) -> u8 {
+    let word = if byte_idx < 4 { lo } else { hi };
+    ((word >> (8 * (byte_idx % 4))) & 0xff) as u8
+}
 
 // LIFTED AIR
 // ================================================================================================
@@ -458,7 +489,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // Chunk zero-fill on `is_chunk_avail = 0` --------------
         // When the chunk chiplet doesn't provide at this row, pin
         // `chunk_lo = chunk_hi = 0` so the witness is canonical and
-        // pre-pad verbatim Bitwise64 XORs can't be steered by a
+        // pre-pad verbatim XORs can't be steered by a
         // prover-chosen unpinned chunk value. Effect: any
         // under-emission by the chunk chiplet yields a deterministic
         // zero-extended digest, caught by the downstream digest
@@ -531,7 +562,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         builder.assert_zero(p_state_lane.clone() * is_first_block.clone() * state_prev_lo.clone());
         builder.assert_zero(p_state_lane * is_first_block * state_prev_hi.clone());
 
-        // State propagation (no Bitwise64 fires) ----------------
+        // State propagation (no BytePairLut request fires) --------
         // Past-pad rate XORin rows: `state_new = state_prev`.
         builder.assert_zero(
             p_rate_block.clone() * is_zero.clone() * (state_new_lo.clone() - state_prev_lo.clone()),
@@ -539,8 +570,38 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         builder
             .assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
         // Capacity rows: identity passthrough.
-        builder.assert_zero(p_capacity.clone() * (state_new_lo - state_prev_lo));
-        builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
+        builder.assert_zero(p_capacity.clone() * (state_new_lo.clone() - state_prev_lo.clone()));
+        builder.assert_zero(p_capacity * (state_new_hi.clone() - state_prev_hi.clone()));
+
+        // Byte-shadow linking (ungated) --------------------------
+        // Every `_lo`/`_hi` pair below also has an 8-byte little-endian
+        // shadow (used by the `BytePairLut` requires in Phase 2, which
+        // range-check and byte-verify the pad/absorb XOR/ANDNOT ops
+        // directly). Without this link the byte columns would be a
+        // second, independent free witness disconnected from the halves
+        // every other bus message (Memory64 prev-perm consume, new-state
+        // provide, chunk consume) actually reads — pinning them together
+        // is what makes a `BytePairLut`-verified byte result also the
+        // value committed elsewhere. Ungated: both sides are otherwise
+        // free witness on rows where the value is unused, so an honest
+        // prover always satisfies this by construction.
+        let chunk_lo: AB::Expr = local[COL_CHUNK_LO].into();
+        let chunk_hi: AB::Expr = local[COL_CHUNK_HI].into();
+        let cleared_lo: AB::Expr = local[COL_CLEARED_LO].into();
+        let cleared_hi: AB::Expr = local[COL_CLEARED_HI].into();
+        let padded_lo: AB::Expr = local[COL_PADDED_LO].into();
+        let padded_hi: AB::Expr = local[COL_PADDED_HI].into();
+        let link = |builder: &mut AB, range: Range<usize>, lo: AB::Expr, hi: AB::Expr| {
+            let bytes: [AB::Var; 8] = array::from_fn(|i| local[range.start + i]);
+            let [lo_from_bytes, hi_from_bytes]: [AB::Expr; 2] = halves_le(&bytes, 256);
+            builder.assert_zero(lo_from_bytes - lo);
+            builder.assert_zero(hi_from_bytes - hi);
+        };
+        link(builder, CHUNK_BYTES_RANGE, chunk_lo.clone(), chunk_hi.clone());
+        link(builder, STATE_PREV_BYTES_RANGE, state_prev_lo.clone(), state_prev_hi.clone());
+        link(builder, STATE_NEW_BYTES_RANGE, state_new_lo.clone(), state_new_hi.clone());
+        link(builder, CLEARED_BYTES_RANGE, cleared_lo.clone(), cleared_hi.clone());
+        link(builder, PADDED_BYTES_RANGE, padded_lo.clone(), padded_hi.clone());
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb =
@@ -558,7 +619,16 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
 /// closing constraint is degree ≤ 5. The chunk-consume fires on rate rows
 /// and, on the last block, the extra rows [26,29) that mop up overshoot
 /// lanes (gated by `p_extra · b_sum`).
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 3, 1, 3, 2, 2];
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
+
+const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
+    let mut shape = [2usize; NUM_AUX_COLS];
+    shape[0] = 2;
+    shape[1] = 3;
+    shape[2] = 1;
+    shape[NUM_AUX_COLS - 1] = 2;
+    shape
+}
 
 impl<LB> LookupAir<LB> for KeccakSpongeAir
 where
@@ -612,25 +682,32 @@ where
         let state_new_hi: LB::Expr = local[COL_STATE_NEW_HI].into();
         let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].into();
         let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].into();
-        let cleared_lo: LB::Expr = local[COL_CLEARED_LO].into();
-        let cleared_hi: LB::Expr = local[COL_CLEARED_HI].into();
-        let padded_lo: LB::Expr = local[COL_PADDED_LO].into();
-        let padded_hi: LB::Expr = local[COL_PADDED_HI].into();
+        let cleared_bytes: [LB::Var; 8] = array::from_fn(|i| local[CLEARED_BYTES_RANGE.start + i]);
+        let padded_bytes: [LB::Var; 8] = array::from_fn(|i| local[PADDED_BYTES_RANGE.start + i]);
+        let chunk_bytes: [LB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
+        let state_prev_bytes: [LB::Var; 8] =
+            array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
+        let state_new_bytes: [LB::Var; 8] =
+            array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
 
         // Σ b_j (= `is_last_block_period`); `andnot_mask` and
-        // `padding_mask` u32 halves as `Σ_j b_j · MASK[j]` inlines.
+        // `padding_mask`, byte-decomposed, as `Σ_j b_j · MASK_BYTE[i][j]`
+        // inlines (`mask_byte` extracts byte `i` from the existing
+        // verifier-known `*_LO`/`*_HI` per-`byte_offset` constants, so the
+        // per-byte tables are correct by construction from the
+        // already-verified 32-bit ones).
         let mut b_sum = LB::Expr::ZERO;
-        let mut andnot_mask_lo = LB::Expr::ZERO;
-        let mut andnot_mask_hi = LB::Expr::ZERO;
-        let mut padding_mask_lo = LB::Expr::ZERO;
-        let mut padding_mask_hi = LB::Expr::ZERO;
+        let mut andnot_mask_bytes: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
+        let mut padding_mask_bytes: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
         for (j, col) in COL_B_RANGE.enumerate() {
             let b_j: LB::Expr = local[col].into();
             b_sum += b_j.clone();
-            andnot_mask_lo += LB::Expr::from(Felt::from(ANDNOT_MASK_LO[j])) * b_j.clone();
-            andnot_mask_hi += LB::Expr::from(Felt::from(ANDNOT_MASK_HI[j])) * b_j.clone();
-            padding_mask_lo += LB::Expr::from(Felt::from(PADDING_MASK_LO[j])) * b_j.clone();
-            padding_mask_hi += LB::Expr::from(Felt::from(PADDING_MASK_HI[j])) * b_j;
+            for i in 0..8 {
+                let andnot_byte = mask_byte(ANDNOT_MASK_LO[j], ANDNOT_MASK_HI[j], i);
+                let padding_byte = mask_byte(PADDING_MASK_LO[j], PADDING_MASK_HI[j], i);
+                andnot_mask_bytes[i] += LB::Expr::from(Felt::from(andnot_byte)) * b_j.clone();
+                padding_mask_bytes[i] += LB::Expr::from(Felt::from(padding_byte)) * b_j.clone();
+            }
         }
 
         // Derived signals (see `docs/chiplets/keccak-sponge.md`
@@ -669,8 +746,8 @@ where
         let mult_lane16_provide: LB::Expr =
             LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone() * b_sum.clone();
 
-        let andnot_op = LB::Expr::from(Felt::from(Logic64Op::AndNot.tag()));
-        let xor_op = LB::Expr::from(Felt::from(Logic64Op::Xor.tag()));
+        let andnot_tag = LB::Expr::from(Felt::from(BytePairOp::AndNot.tag()));
+        let xor_tag = LB::Expr::from(Felt::from(BytePairOp::Xor.tag()));
 
         let interaction_deg = Deg { v: 1, u: 1 };
         // FLATTENED to lqd 2: the mutex outer flags are folded into each
@@ -764,88 +841,177 @@ where
             ),
         );
 
-        // col 3: Logic64 pad-row — andnot + xor-padding + xor-state.
-        frac_col!(
-            builder,
-            "logic64",
-            triple_deg,
-            (
-                "andnot",
-                p_rate_block.clone() * is_pad.clone() * act.clone(),
-                Logic64Msg {
-                    op: andnot_op.clone(),
-                    a_lo: andnot_mask_lo.clone(),
-                    a_hi: andnot_mask_hi.clone(),
-                    b_lo: chunk_lo.clone(),
-                    b_hi: chunk_hi.clone(),
-                    c_lo: cleared_lo.clone(),
-                    c_hi: cleared_hi.clone(),
-                },
-                interaction_deg
-            ),
-            (
-                "xor-padding",
-                p_rate_block.clone() * is_pad.clone() * act.clone(),
-                Logic64Msg {
-                    op: xor_op.clone(),
-                    a_lo: cleared_lo.clone(),
-                    a_hi: cleared_hi.clone(),
-                    b_lo: padding_mask_lo.clone(),
-                    b_hi: padding_mask_hi.clone(),
-                    c_lo: padded_lo.clone(),
-                    c_hi: padded_hi.clone(),
-                },
-                interaction_deg
-            ),
-            (
-                "xor-state",
-                p_rate_block.clone() * is_pad.clone() * act.clone(),
-                Logic64Msg {
-                    op: xor_op.clone(),
-                    a_lo: state_prev_lo.clone(),
-                    a_hi: state_prev_hi.clone(),
-                    b_lo: padded_lo.clone(),
-                    b_hi: padded_hi.clone(),
-                    c_lo: state_new_lo.clone(),
-                    c_hi: state_new_hi.clone(),
-                },
-                interaction_deg
-            ),
-        );
-        // col 4: Logic64 verbatim xor-state + lane-16 0x80 xor.
-        frac_col!(
-            builder,
-            "logic64",
-            pair_deg,
-            (
-                "xor-state-verbatim",
-                p_rate_block.clone() * is_verbatim.clone() * act.clone(),
-                Logic64Msg {
-                    op: xor_op.clone(),
-                    a_lo: state_prev_lo.clone(),
-                    a_hi: state_prev_hi.clone(),
-                    b_lo: chunk_lo.clone(),
-                    b_hi: chunk_hi.clone(),
-                    c_lo: state_new_lo.clone(),
-                    c_hi: state_new_hi.clone(),
-                },
-                interaction_deg
-            ),
-            (
-                "xor-lane16",
-                p_pad_0x80.clone() * b_sum.clone() * act.clone(),
-                Logic64Msg {
-                    op: xor_op.clone(),
-                    a_lo: state_prev_lo.clone(),
-                    a_hi: state_prev_hi.clone(),
-                    b_lo: LB::Expr::from(Felt::from(PAD_CONST_LO)),
-                    b_hi: LB::Expr::from(Felt::from(PAD_CONST_HI)),
-                    c_lo: state_new_lo.clone(),
-                    c_hi: state_new_hi.clone(),
-                },
-                interaction_deg
-            ),
-        );
+        // cols 3..7: pad-row `BytePairLut` byte requires, 8 bytes each —
+        // `andnot` (mask, chunk) → cleared, `xor-padding` (cleared,
+        // padding_mask) → padded, `xor-state` (state_prev, padded) →
+        // state_new. Same 8-byte-request pattern the round chiplet uses;
+        // each op verifies its own row's bytes directly, no intermediate
+        // chiplet or chain trick.
+        let pad_mult = p_rate_block.clone() * is_pad.clone() * act.clone();
+        for pair in 0..4 {
+            let i0 = pair * 2;
+            let i1 = i0 + 1;
+            frac_col!(
+                builder,
+                "byte-pair-lut",
+                pair_deg,
+                (
+                    "andnot",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: andnot_tag.clone(),
+                        a: andnot_mask_bytes[i0].clone(),
+                        b: chunk_bytes[i0].into(),
+                        c: cleared_bytes[i0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "andnot",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: andnot_tag.clone(),
+                        a: andnot_mask_bytes[i1].clone(),
+                        b: chunk_bytes[i1].into(),
+                        c: cleared_bytes[i1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+        }
+        for pair in 0..4 {
+            let i0 = pair * 2;
+            let i1 = i0 + 1;
+            frac_col!(
+                builder,
+                "byte-pair-lut",
+                pair_deg,
+                (
+                    "xor-padding",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: cleared_bytes[i0].into(),
+                        b: padding_mask_bytes[i0].clone(),
+                        c: padded_bytes[i0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "xor-padding",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: cleared_bytes[i1].into(),
+                        b: padding_mask_bytes[i1].clone(),
+                        c: padded_bytes[i1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+        }
+        for pair in 0..4 {
+            let i0 = pair * 2;
+            let i1 = i0 + 1;
+            frac_col!(
+                builder,
+                "byte-pair-lut",
+                pair_deg,
+                (
+                    "xor-state",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i0].into(),
+                        b: padded_bytes[i0].into(),
+                        c: state_new_bytes[i0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "xor-state",
+                    pad_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i1].into(),
+                        b: padded_bytes[i1].into(),
+                        c: state_new_bytes[i1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+        }
+
+        // cols 7..11: verbatim `xor-state` (state_prev, chunk) →
+        // state_new, 8 bytes.
+        let verbatim_mult = p_rate_block.clone() * is_verbatim * act.clone();
+        for pair in 0..4 {
+            let i0 = pair * 2;
+            let i1 = i0 + 1;
+            frac_col!(
+                builder,
+                "byte-pair-lut",
+                pair_deg,
+                (
+                    "xor-state-verbatim",
+                    verbatim_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i0].into(),
+                        b: chunk_bytes[i0].into(),
+                        c: state_new_bytes[i0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "xor-state-verbatim",
+                    verbatim_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i1].into(),
+                        b: chunk_bytes[i1].into(),
+                        c: state_new_bytes[i1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+        }
+
+        // cols 11..15: lane-16 `xor-lane16` (state_prev, PAD_CONST) →
+        // state_new, 8 bytes. `PAD_CONST_BYTES` is a plain constant (not
+        // selector-dependent), so the `b` field is a literal per byte.
+        let lane16_mult = p_pad_0x80.clone() * b_sum.clone() * act.clone();
+        for pair in 0..4 {
+            let i0 = pair * 2;
+            let i1 = i0 + 1;
+            frac_col!(
+                builder,
+                "byte-pair-lut",
+                pair_deg,
+                (
+                    "xor-lane16",
+                    lane16_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i0].into(),
+                        b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i0])),
+                        c: state_new_bytes[i0].into()
+                    },
+                    interaction_deg
+                ),
+                (
+                    "xor-lane16",
+                    lane16_mult.clone(),
+                    BytePairLutMsg {
+                        op: xor_tag.clone(),
+                        a: state_prev_bytes[i1].into(),
+                        b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i1])),
+                        c: state_new_bytes[i1].into()
+                    },
+                    interaction_deg
+                ),
+            );
+        }
 
         // col 5: the KeccakSponge request + the chunk consume (a degree-4
         // multiplicity, paired → closing 5). Two independent inserts on
