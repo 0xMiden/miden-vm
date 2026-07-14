@@ -12,6 +12,14 @@ use crate::{
     transcript::poseidon2::P2Digest,
 };
 
+/// wNAF window for [`translate_ec_msm`](DeferredSessionBuilder::translate_ec_msm)'s
+/// joint-wNAF addition chain. `w = 5` (digits odd, `|d| < 2^{w-1}`, `2^{w-2}`
+/// odd multiples per base) matches the width already used for full-width
+/// (~256-bit) scalars elsewhere in this crate (`examples/ec_msm_ecdsa.rs`'s
+/// `WNAF_W`) — GLV's `w = 4` sweet spot is tuned for its ~128-bit halves, not
+/// the full-width scalars a raw MSM claim carries.
+const MSM_WNAF_WINDOW: usize = 5;
+
 pub(crate) struct DeferredSession {
     pub(crate) session: Session,
     pub(crate) root: Truthy,
@@ -246,8 +254,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         }
 
         // TODO: Convert valid-but-currently-unsupported MSM shapes into typed errors:
-        // duplicate canonical bases, zero-scalar terms, and large pair-lists requiring
-        // a non-Straus strategy.
+        // duplicate canonical bases and zero-scalar terms.
         if let Some((point, _)) = terms.first() {
             self.session
                 .constrain_scalar_bound(&point.node, curve.scalar_domain().bound_ptr());
@@ -257,7 +264,10 @@ impl<'a> DeferredSessionBuilder<'a> {
             .iter()
             .map(|(point, scalar)| (point.node, scalar.value))
             .collect::<Vec<_>>();
-        let expr = strategies::straus(&mut self.session, &expr_terms);
+        // `joint_wnaf`'s per-column cost is linear in the term count (unlike
+        // Straus's 2^k subset-sum table), so an arbitrary-arity pair-list
+        // never needs a term-count cap here.
+        let expr = strategies::joint_wnaf(&mut self.session, &expr_terms, MSM_WNAF_WINDOW);
 
         let claim_terms = terms
             .iter()

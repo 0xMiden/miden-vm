@@ -153,6 +153,14 @@ enum Strategy {
     /// signatures (the win of the two-stage [`wnaf_table`] / `wnaf_scalarmul`
     /// split); only each fresh `Q`'s table is per-instance.
     Wnaf,
+    /// **Interleaved** width-`W_MSM_JOINT_WNAF` wNAF: a single shared
+    /// double-and-add ladder over `{G, Q}`, each base contributing its own
+    /// wNAF digit's table entry per column (see [`joint_wnaf`]) — the
+    /// production `translate_ec_msm` strategy (`deferred/session.rs`).
+    /// Unlike [`Wnaf`](Strategy::Wnaf)'s separate ladders, doublings are
+    /// shared across both bases; unlike [`Straus`](Strategy::Straus), no
+    /// `2ᵏ`-entry table caps the term count.
+    JointWnaf,
     /// **GLV**: decompose each `uᵢ·Pᵢ` via the endomorphism into
     /// `kᵢₐ·Pᵢ + kᵢᵦ·φ(Pᵢ)` with **signed** `~128-bit` halves (a real lattice
     /// reduction), routing each sign onto its base with `ec_sub(∞, P)` so the
@@ -163,11 +171,17 @@ enum Strategy {
     Glv,
 }
 
+/// wNAF window for [`Strategy::JointWnaf`] — matches [`WNAF_W`], the width
+/// already used for full-width (~256-bit) scalars by the separate-wNAF
+/// strategy (and the production `translate_ec_msm` window).
+const W_MSM_JOINT_WNAF: usize = WNAF_W;
+
 impl Strategy {
     fn parse(s: &str) -> Self {
         match s {
             "naf" | "joint_naf" | "jsf" => Strategy::JointNaf,
             "wnaf" => Strategy::Wnaf,
+            "joint_wnaf" | "jwnaf" => Strategy::JointWnaf,
             "glv" => Strategy::Glv,
             _ => Strategy::Straus,
         }
@@ -177,6 +191,7 @@ impl Strategy {
             Strategy::Straus => "straus",
             Strategy::JointNaf => "joint_naf",
             Strategy::Wnaf => "wnaf",
+            Strategy::JointWnaf => "joint_wnaf",
             Strategy::Glv => "glv",
         }
     }
@@ -219,6 +234,7 @@ fn verify_signature(
                 &[(g_table.expect("the wnaf strategy needs G's table"), u1), (&q_table, u2)],
             )
         },
+        Strategy::JointWnaf => joint_wnaf(s, &[(*g_pt, u1), (q_pt, u2)], W_MSM_JOINT_WNAF),
         Strategy::Glv => unreachable!("glv is routed to verify_signature_glv"),
     };
 
