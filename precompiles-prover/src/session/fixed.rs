@@ -30,16 +30,10 @@ pub(crate) fn fixed_uints() -> impl Iterator<Item = (u32, u32, Limbs)> {
 
 /// Verifier-side `UintVal` consumes for the fixed uint environment.
 pub(crate) fn fixed_uintval_msgs() -> impl Iterator<Item = UintValMsg<Felt>> {
-    fixed_uints().flat_map(|(ptr, bound_ptr, limbs)| {
-        (0..2).map(move |offset| {
-            let start = offset * 4;
-            UintValMsg {
-                ptr: Felt::from(ptr),
-                bound_ptr: Felt::from(bound_ptr),
-                offset: Felt::from(offset as u32),
-                limbs: core::array::from_fn(|i| Felt::from(limbs[start + i])),
-            }
-        })
+    fixed_uints().map(|(ptr, bound_ptr, limbs)| UintValMsg {
+        ptr: Felt::from(ptr),
+        bound_ptr: Felt::from(bound_ptr),
+        limbs: core::array::from_fn(|i| Felt::from(limbs[i])),
     })
 }
 

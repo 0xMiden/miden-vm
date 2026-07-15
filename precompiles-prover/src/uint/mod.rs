@@ -96,28 +96,24 @@ use crate::{
 // MESSAGES
 // ================================================================================================
 
-/// LogUp message for the [`UintVal`](BusId::UintVal) relation: a 7-tuple
-/// `(ptr, bound_ptr, offset, c0, c1, c2, c3)` exposing one 128-bit half of
-/// a stored 256-bit uint as four 32-bit limbs — the **recombined view**
-/// (each `c_i = lo16 + 2¹⁶·hi16` of the underlying committed 16-bit limbs)
-/// — together with `bound_ptr`, the ptr of the uint storing this value's
-/// modulus `p − 1`.
+/// LogUp message for the [`UintVal`](BusId::UintVal) relation: a 10-tuple
+/// `(ptr, bound_ptr, c0..c7)` exposing a full stored 256-bit uint as eight
+/// 32-bit limbs — the **recombined view** (each `c_i = lo16 + 2¹⁶·hi16` of
+/// the underlying committed 16-bit limbs) — together with `bound_ptr`,
+/// the ptr of the uint storing this value's modulus `p − 1`.
 ///
-/// `offset ∈ {0, 1}` selects the low / high 128-bit chunk; a full value is
-/// two messages sharing `(ptr, bound_ptr)`. Carrying `bound_ptr` lets any
-/// consumer (eval hash, add/mul) recover the modulus in the same lookup.
-/// The limb layout mirrors
+/// Carrying `bound_ptr` lets any consumer (eval hash, add/mul) recover
+/// the modulus in the same lookup. The limb layout mirrors
 /// [`Poseidon2InMsg`](crate::transcript::poseidon2::Poseidon2InMsg) so the
-/// eval chip can pin both halves straight into its rate lanes.
+/// eval chip can pin the whole value straight into its rate lanes.
 ///
-/// Encoded as `bus_prefix[UintVal] + β⁰·ptr + β¹·bound_ptr + β²·offset +
-/// β³·c0 + β⁴·c1 + β⁵·c2 + β⁶·c3`.
+/// Encoded as `bus_prefix[UintVal] + β⁰·ptr + β¹·bound_ptr + β²·c0 + … +
+/// β⁹·c7`.
 #[derive(Debug, Clone)]
 pub struct UintValMsg<E> {
     pub ptr: E,
     pub bound_ptr: E,
-    pub offset: E,
-    pub limbs: [E; 4],
+    pub limbs: [E; 8],
 }
 
 impl<E, EF> LookupMessage<E, EF> for UintValMsg<E>
@@ -126,34 +122,31 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let [c0, c1, c2, c3] = self.limbs.clone();
+        let [c0, c1, c2, c3, c4, c5, c6, c7] = self.limbs.clone();
         challenges.encode(
             BusId::UintVal as usize,
-            [self.ptr.clone(), self.bound_ptr.clone(), self.offset.clone(), c0, c1, c2, c3],
+            [self.ptr.clone(), self.bound_ptr.clone(), c0, c1, c2, c3, c4, c5, c6, c7],
         )
     }
 }
 
 /// LogUp message for the [`UintLimbs`](BusId::UintLimbs) relation: an
-/// 11-tuple `(ptr, bound_ptr, offset, l0..l7)` exposing one half of a
-/// stored 256-bit uint as its **raw 8×16-bit limbs** — the committed
-/// trace cells themselves, already `Range16`-checked here, so a consumer
-/// (the [mul chiplet](crate::uint::mul)) inherits the range checks
-/// through the bus tie and convolves at 16-bit granularity (the no-wrap
-/// bound that 32-bit limbs would bust).
+/// 18-tuple `(ptr, bound_ptr, l0..l15)` exposing a full stored 256-bit
+/// uint as its **raw 16×16-bit limbs** — the committed trace cells
+/// themselves, already `Range16`-checked here, so a consumer (the [mul
+/// chiplet](crate::uint::mul)) inherits the range checks through the bus
+/// tie and convolves at 16-bit granularity (the no-wrap bound that 32-bit
+/// limbs would bust).
 ///
-/// `offset ∈ {0, 1}` selects the low / high 8-limb half; a full value is
-/// two messages sharing `(ptr, bound_ptr)`. This view sets
-/// [`MAX_MESSAGE_WIDTH`].
+/// This view sets [`MAX_MESSAGE_WIDTH`].
 ///
-/// Encoded as `bus_prefix\[UintLimbs] + β⁰·ptr + β¹·bound_ptr + β²·offset
-/// + β³·l0 + … + β¹⁰·l7`.
+/// Encoded as `bus_prefix\[UintLimbs] + β⁰·ptr + β¹·bound_ptr + β²·l0 +
+/// … + β¹⁷·l15`.
 #[derive(Debug, Clone)]
 pub struct UintLimbsMsg<E> {
     pub ptr: E,
     pub bound_ptr: E,
-    pub offset: E,
-    pub limbs: [E; 8],
+    pub limbs: [E; 16],
 }
 
 impl<E, EF> LookupMessage<E, EF> for UintLimbsMsg<E>
@@ -162,13 +155,13 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let [l0, l1, l2, l3, l4, l5, l6, l7] = self.limbs.clone();
+        let [l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15] =
+            self.limbs.clone();
         challenges.encode(
             BusId::UintLimbs as usize,
             [
                 self.ptr.clone(),
                 self.bound_ptr.clone(),
-                self.offset.clone(),
                 l0,
                 l1,
                 l2,
@@ -177,6 +170,14 @@ where
                 l5,
                 l6,
                 l7,
+                l8,
+                l9,
+                l10,
+                l11,
+                l12,
+                l13,
+                l14,
+                l15,
             ],
         )
     }
@@ -231,14 +232,16 @@ const PCOL_BOUND: usize = 3;
 /// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
 /// can concatenate this chiplet's column shape onto mul's own instead of
 /// hand-duplicating the derived column count.
-pub(crate) const NUM_LOGUP_COLS: usize = 3 // provide-lo, provide-hi+consume-lo, consume-hi+range16-gap
+pub(crate) const NUM_LOGUP_COLS: usize = 1 // the merged UintVal provide
+    + 1 // the merged UintVal consume + the ptr-gap Range16
     + NUM_CELLS.div_ceil(2) // Range16 on every cell position, two per column
-    + 1; // the raw UintLimbs provides (lo + hi)
+    + 1; // the merged raw UintLimbs provide
 const REGISTER_COL: usize = NUM_LOGUP_COLS;
 const AUX_WIDTH: usize = NUM_LOGUP_COLS + 1;
 pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = {
     let mut shape = [2usize; NUM_LOGUP_COLS];
     shape[0] = 1;
+    shape[NUM_LOGUP_COLS - 1] = 1;
     shape
 };
 
@@ -469,34 +472,41 @@ where
 
         let ptr: LB::Expr = local[COL_PTR].into();
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        // The provide multiplicities live in `v` hi's own hub cells: the
-        // `v` lo row reads them as its *next* row, `v` hi itself (emitting
-        // the offset-1 provides) reads them locally — one cell per mult,
-        // no constancy transport.
-        let neg_mult_next: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTVAL_MULT].into();
-        let neg_mult_here: LB::Expr = LB::Expr::ZERO - local[HUB_CELL_UINTVAL_MULT].into();
+        // The provide multiplicities live in `v` hi's own hub cells,
+        // read via `next` from `v` lo's row (the only row either merged
+        // provide fires from).
+        let neg_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTVAL_MULT].into();
+        let neg_limbs_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].into();
 
-        // 4×32 views: recombined (v lo local; v hi local — no more
-        // `next` needed now that the hub sits on `v` hi's own row) and
-        // direct (bound, both halves local).
+        // 4×32 recombined view, full value: the lo half local (this row
+        // is `v` lo), the hi half from `v` hi via `next`.
         let two16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
-        let recomb: [LB::Expr; 4] =
-            array::from_fn(|k| local[2 * k].into() + two16.clone() * local[2 * k + 1].into());
-        let direct_lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
-        let direct_hi: [LB::Expr; 4] = array::from_fn(|k| local[8 + k].into());
+        let recomb: [LB::Expr; 8] = array::from_fn(|k| {
+            if k < 4 {
+                local[2 * k].into() + two16.clone() * local[2 * k + 1].into()
+            } else {
+                let k = k - 4;
+                next[2 * k].into() + two16.clone() * next[2 * k + 1].into()
+            }
+        });
+        // 4×32 direct view, full value: both halves local (this row is
+        // `bound`, hosting both).
+        let direct: [LB::Expr; 8] =
+            array::from_fn(|k| if k < 4 { local[k].into() } else { local[4 + k].into() });
+        // Raw 8×16 view, full value: the lo half local, the hi half via
+        // `next`.
+        let raw: [LB::Expr; 16] =
+            array::from_fn(|j| if j < 8 { local[j].into() } else { next[j - 8].into() });
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 1, u: 1 };
         // Flattened columns hold ≤ 2 fractions (degree-3 numerator over a
         // degree-2 denominator product); col 0 a single degree-2 fraction.
         let pair_deg = Deg { v: 3, u: 2 };
-
-        let raw: [LB::Expr; 8] = array::from_fn(|j| local[j].into());
-        let neg_limbs_mult_next: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].into();
-        let neg_limbs_mult_here: LB::Expr = LB::Expr::ZERO - local[HUB_CELL_UINTLIMBS_MULT].into();
         let rc_deg = Deg { v: 1, u: 1 };
 
-        // col 0: UintVal provide-lo (running sum, single degree-2 fraction).
+        // col 0: the merged UintVal provide (running sum, single
+        // degree-2 fraction) — fires at `v` lo, reading `v` hi via next.
         builder.next_column(
             |col| {
                 col.group(
@@ -507,13 +517,12 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-lo",
-                                    neg_mult_next * v_lo_sel.clone(),
+                                    "provide",
+                                    neg_mult * v_lo_sel.clone(),
                                     UintValMsg {
                                         ptr: ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: recomb.clone(),
+                                        limbs: recomb,
                                     },
                                     provide_deg,
                                 );
@@ -526,7 +535,8 @@ where
             },
             provide_deg,
         );
-        // col 1: provide-hi + consume-lo.
+        // col 1: the merged UintVal consume + the per-block ptr-gap
+        // Range16, both fired from `bound`.
         builder.next_column(
             |col| {
                 col.group(
@@ -537,54 +547,12 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-hi",
-                                    neg_mult_here * v_hi_sel.clone(),
-                                    UintValMsg {
-                                        ptr: ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: recomb.clone(),
-                                    },
-                                    provide_deg,
-                                );
-                                b.insert(
-                                    "consume-lo",
+                                    "consume",
                                     bound_sel.clone(),
                                     UintValMsg {
                                         ptr: bound_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: direct_lo.clone(),
-                                    },
-                                    consume_deg,
-                                );
-                            },
-                            pair_deg,
-                        );
-                    },
-                    pair_deg,
-                );
-            },
-            pair_deg,
-        );
-        // col 2: consume-hi + the per-block ptr-gap Range16.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "uintval",
-                    |g| {
-                        g.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-hi",
-                                    bound_sel.clone(),
-                                    UintValMsg {
-                                        ptr: bound_ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: direct_hi.clone(),
+                                        limbs: direct,
                                     },
                                     consume_deg,
                                 );
@@ -648,7 +616,8 @@ where
                 pair_deg,
             );
         }
-        // col: the raw UintLimbs provides (lo + hi).
+        // col: the merged raw UintLimbs provide, single degree-2
+        // fraction — fires at `v` lo, reading `v` hi via next.
         builder.next_column(
             |col| {
                 col.group(
@@ -659,35 +628,19 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-raw-lo",
-                                    neg_limbs_mult_next * v_lo_sel,
-                                    UintLimbsMsg {
-                                        ptr: ptr.clone(),
-                                        bound_ptr: bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: raw.clone(),
-                                    },
-                                    provide_deg,
-                                );
-                                b.insert(
-                                    "provide-raw-hi",
-                                    neg_limbs_mult_here * v_hi_sel,
-                                    UintLimbsMsg {
-                                        ptr,
-                                        bound_ptr,
-                                        offset: LB::Expr::ONE,
-                                        limbs: raw,
-                                    },
+                                    "provide-raw",
+                                    neg_limbs_mult * v_lo_sel,
+                                    UintLimbsMsg { ptr, bound_ptr, limbs: raw },
                                     provide_deg,
                                 );
                             },
-                            pair_deg,
+                            provide_deg,
                         );
                     },
-                    pair_deg,
+                    provide_deg,
                 );
             },
-            pair_deg,
+            provide_deg,
         );
     }
 }

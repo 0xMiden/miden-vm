@@ -311,15 +311,17 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
 // multiplicity, paired ≤ 2 per column (col 0 a single fraction; the
 // odd cell count leaves one Range16 column a singleton too) → every
 // constraint degree ≤ 3.
+const NUM_RAW_CONSUMES: usize = 3; // a, b, bound
+const NUM_RAW_CONSUME_COLS: usize = NUM_RAW_CONSUMES.div_ceil(2);
 const NUM_RANGE16_COLS: usize = NUM_CELLS.div_ceil(2);
 /// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
 /// can concatenate this chiplet's column shape onto the store's own
 /// instead of hand-duplicating the derived column count.
 pub(crate) const NUM_LOGUP_COLS: usize = 1 // the UintMul provide
-    + 3 // the six raw UintLimbs consumes (a, b, bound), two per column
+    + NUM_RAW_CONSUME_COLS // the three merged raw UintLimbs consumes (a, b, bound)
     + NUM_RANGE16_COLS // Range16 on every cell position
     + 1 // the two κ Range16s
-    + 2; // the 4×32 UintVal consumes (r, c)
+    + 1; // the merged 4×32 UintVal consumes (r, c)
 const REG_ID: usize = NUM_LOGUP_COLS;
 const REG_S: usize = NUM_LOGUP_COLS + 1;
 const AUX_WIDTH: usize = NUM_LOGUP_COLS + 2;
@@ -327,10 +329,15 @@ const AUX_WIDTH: usize = NUM_LOGUP_COLS + 2;
 const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
     let mut shape = [2usize; NUM_LOGUP_COLS];
     shape[0] = 1;
-    // The Range16 block starts right after the provide + raw-consume
-    // columns; if NUM_CELLS is odd its last column is a singleton.
+    // The raw-consume block (3 messages, ≤ 2 per column) has a singleton
+    // tail.
+    if NUM_RAW_CONSUMES % 2 == 1 {
+        shape[NUM_RAW_CONSUME_COLS] = 1;
+    }
+    // The Range16 block starts right after; if NUM_CELLS is odd its last
+    // column is a singleton too.
     if NUM_CELLS % 2 == 1 {
-        shape[4 + NUM_RANGE16_COLS - 1] = 1;
+        shape[1 + NUM_RAW_CONSUME_COLS + NUM_RANGE16_COLS - 1] = 1;
     }
     shape
 }
@@ -658,19 +665,23 @@ where
             provide_deg,
         );
 
-        // cols 1..3: the six raw 8×16 consumes (a, b, modulus), two per col.
-        // Both offsets of a given operand now read the *same* row (just a
-        // different cell slice), since each operand's full 16 limbs live
-        // together.
-        let raw_consumes: Vec<(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 8])> =
+        // cols 1..: the three merged raw 16×16 consumes (a, b, modulus),
+        // two per col — each operand's full 16 limbs already live
+        // together on its own row, so one message covers the whole
+        // value.
+        let raw_consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 16])> =
             [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone()), (ROW_P, bound_ptr.clone())]
                 .into_iter()
-                .flat_map(|(row, ptr)| {
+                .map(|(row, ptr)| {
                     let mult = sel[row].clone() * act.clone();
-                    [
-                        (mult.clone(), ptr.clone(), LB::Expr::ZERO, raw_lo.clone()),
-                        (mult, ptr, LB::Expr::ONE, raw_hi.clone()),
-                    ]
+                    let limbs: [LB::Expr; 16] = array::from_fn(|i| {
+                        if i < 8 {
+                            raw_lo[i].clone()
+                        } else {
+                            raw_hi[i - 8].clone()
+                        }
+                    });
+                    (mult, ptr, limbs)
                 })
                 .collect();
         for group in raw_consumes
@@ -679,8 +690,7 @@ where
                 <[(
                     <LB as LookupBuilder>::Expr,
                     <LB as LookupBuilder>::Expr,
-                    <LB as LookupBuilder>::Expr,
-                    [<LB as LookupBuilder>::Expr; 8],
+                    [<LB as LookupBuilder>::Expr; 16],
                 )]>::to_vec,
             )
             .collect::<Vec<_>>()
@@ -694,14 +704,13 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    for (mult, ptr, offset, limbs) in group {
+                                    for (mult, ptr, limbs) in group {
                                         b.insert(
                                             "consume-uintlimbs",
                                             mult,
                                             UintLimbsMsg {
                                                 ptr,
                                                 bound_ptr: bound_ptr.clone(),
-                                                offset,
                                                 limbs,
                                             },
                                             consume_deg,
@@ -812,43 +821,46 @@ where
             },
             pair_deg,
         );
-        // cols: the 4×32 UintVal consumes (r, then c), lo+hi per col.
+        // col: the merged 4×32 UintVal consumes (r, then c) — one
+        // message per operand now that both halves are local, so both
+        // fit in a single column.
+        let val_full: [LB::Expr; 8] = array::from_fn(|i| {
+            if i < 4 {
+                val_lo[i].clone()
+            } else {
+                val_hi[i - 4].clone()
+            }
+        });
         let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_local)];
-        for (row, ptr) in val_consumes {
-            builder.next_column(
-                |col| {
-                    col.group(
-                        "uintval",
-                        |g| {
-                            g.batch(
-                                "f",
-                                LB::Expr::ONE,
-                                |b| {
-                                    for (offset, half) in [
-                                        (LB::Expr::ZERO, val_lo.clone()),
-                                        (LB::Expr::ONE, val_hi.clone()),
-                                    ] {
-                                        b.insert(
-                                            "consume-uintval",
-                                            sel[row].clone() * act.clone(),
-                                            UintValMsg {
-                                                ptr: ptr.clone(),
-                                                bound_ptr: bound_ptr.clone(),
-                                                offset,
-                                                limbs: half,
-                                            },
-                                            consume_deg,
-                                        );
-                                    }
-                                },
-                                pair_deg,
-                            );
-                        },
-                        pair_deg,
-                    );
-                },
-                pair_deg,
-            );
-        }
+        builder.next_column(
+            |col| {
+                col.group(
+                    "uintval",
+                    |g| {
+                        g.batch(
+                            "f",
+                            LB::Expr::ONE,
+                            |b| {
+                                for (row, ptr) in val_consumes {
+                                    b.insert(
+                                        "consume-uintval",
+                                        sel[row].clone() * act.clone(),
+                                        UintValMsg {
+                                            ptr,
+                                            bound_ptr: bound_ptr.clone(),
+                                            limbs: val_full.clone(),
+                                        },
+                                        consume_deg,
+                                    );
+                                }
+                            },
+                            pair_deg,
+                        );
+                    },
+                    pair_deg,
+                );
+            },
+            pair_deg,
+        );
     }
 }

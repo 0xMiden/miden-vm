@@ -479,21 +479,30 @@ where
         };
         let store_ptr: LB::Expr = local_s[COL_PTR].into();
         let store_bound_ptr: LB::Expr = local_s[COL_BOUND_PTR].into();
-        let neg_mult_next: LB::Expr = LB::Expr::ZERO - next_s[HUB_CELL_UINTVAL_MULT].into();
-        let neg_mult_here: LB::Expr = LB::Expr::ZERO - local_s[HUB_CELL_UINTVAL_MULT].into();
+        let neg_val_mult: LB::Expr = LB::Expr::ZERO - next_s[HUB_CELL_UINTVAL_MULT].into();
+        let neg_limbs_val_mult: LB::Expr = LB::Expr::ZERO - next_s[HUB_CELL_UINTLIMBS_MULT].into();
         let two16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
-        let recomb: [LB::Expr; 4] =
-            array::from_fn(|k| local_s[2 * k].into() + two16.clone() * local_s[2 * k + 1].into());
-        let direct_lo: [LB::Expr; 4] = array::from_fn(|k| local_s[k].into());
-        let direct_hi: [LB::Expr; 4] = array::from_fn(|k| local_s[8 + k].into());
+        let recomb: [LB::Expr; 8] = array::from_fn(|k| {
+            if k < 4 {
+                local_s[2 * k].into() + two16.clone() * local_s[2 * k + 1].into()
+            } else {
+                let k = k - 4;
+                next_s[2 * k].into() + two16.clone() * next_s[2 * k + 1].into()
+            }
+        });
+        let direct: [LB::Expr; 8] = array::from_fn(|k| {
+            if k < 4 {
+                local_s[k].into()
+            } else {
+                local_s[4 + k].into()
+            }
+        });
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 1, u: 1 };
         let pair_deg = Deg { v: 3, u: 2 };
-        let raw: [LB::Expr; 8] = array::from_fn(|j| local_s[j].into());
-        let neg_limbs_mult_next: LB::Expr = LB::Expr::ZERO - next_s[HUB_CELL_UINTLIMBS_MULT].into();
-        let neg_limbs_mult_here: LB::Expr =
-            LB::Expr::ZERO - local_s[HUB_CELL_UINTLIMBS_MULT].into();
+        let raw: [LB::Expr; 16] =
+            array::from_fn(|j| if j < 8 { local_s[j].into() } else { next_s[j - 8].into() });
         let rc_deg = Deg { v: 1, u: 1 };
 
         // MUL's own window.
@@ -533,13 +542,12 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-lo",
-                                    neg_mult_next * v_lo_sel.clone(),
+                                    "provide",
+                                    neg_val_mult * v_lo_sel.clone(),
                                     UintValMsg {
                                         ptr: store_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: recomb.clone(),
+                                        limbs: recomb,
                                     },
                                     provide_deg,
                                 );
@@ -553,7 +561,7 @@ where
             provide_deg,
         );
 
-        // cols 1..: store's own remaining columns, unchanged in shape.
+        // col 1: store's merged consume + the ptr-gap Range16.
         builder.next_column(
             |col| {
                 col.group(
@@ -564,53 +572,12 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-hi",
-                                    neg_mult_here * v_hi_sel.clone(),
-                                    UintValMsg {
-                                        ptr: store_ptr.clone(),
-                                        bound_ptr: store_bound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: recomb.clone(),
-                                    },
-                                    provide_deg,
-                                );
-                                b.insert(
-                                    "consume-lo",
+                                    "consume",
                                     bound_sel.clone(),
                                     UintValMsg {
                                         ptr: store_bound_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: direct_lo.clone(),
-                                    },
-                                    consume_deg,
-                                );
-                            },
-                            pair_deg,
-                        );
-                    },
-                    pair_deg,
-                );
-            },
-            pair_deg,
-        );
-        builder.next_column(
-            |col| {
-                col.group(
-                    "uintval",
-                    |g| {
-                        g.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "consume-hi",
-                                    bound_sel.clone(),
-                                    UintValMsg {
-                                        ptr: store_bound_ptr.clone(),
-                                        bound_ptr: store_bound_ptr.clone(),
-                                        offset: LB::Expr::ONE,
-                                        limbs: direct_hi.clone(),
+                                        limbs: direct,
                                     },
                                     consume_deg,
                                 );
@@ -680,35 +647,23 @@ where
                             LB::Expr::ONE,
                             |b| {
                                 b.insert(
-                                    "provide-raw-lo",
-                                    neg_limbs_mult_next * v_lo_sel,
-                                    UintLimbsMsg {
-                                        ptr: store_ptr.clone(),
-                                        bound_ptr: store_bound_ptr.clone(),
-                                        offset: LB::Expr::ZERO,
-                                        limbs: raw.clone(),
-                                    },
-                                    provide_deg,
-                                );
-                                b.insert(
-                                    "provide-raw-hi",
-                                    neg_limbs_mult_here * v_hi_sel,
+                                    "provide-raw",
+                                    neg_limbs_val_mult * v_lo_sel,
                                     UintLimbsMsg {
                                         ptr: store_ptr,
                                         bound_ptr: store_bound_ptr,
-                                        offset: LB::Expr::ONE,
                                         limbs: raw,
                                     },
                                     provide_deg,
                                 );
                             },
-                            pair_deg,
+                            provide_deg,
                         );
                     },
-                    pair_deg,
+                    provide_deg,
                 );
             },
-            pair_deg,
+            provide_deg,
         );
 
         // col 8: mul's original col 0 (the `UintMul` provide) — placed
@@ -750,15 +705,19 @@ where
         );
 
         // cols 9..: mul's own remaining columns, unchanged in shape.
-        let raw_consumes: Vec<(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 8])> =
+        let raw_consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 16])> =
             [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone()), (ROW_P, mul_bound_ptr.clone())]
                 .into_iter()
-                .flat_map(|(row, ptr)| {
+                .map(|(row, ptr)| {
                     let mult = sel[row].clone() * mul_act.clone();
-                    [
-                        (mult.clone(), ptr.clone(), LB::Expr::ZERO, raw_m_lo.clone()),
-                        (mult, ptr, LB::Expr::ONE, raw_m_hi.clone()),
-                    ]
+                    let limbs: [LB::Expr; 16] = array::from_fn(|i| {
+                        if i < 8 {
+                            raw_m_lo[i].clone()
+                        } else {
+                            raw_m_hi[i - 8].clone()
+                        }
+                    });
+                    (mult, ptr, limbs)
                 })
                 .collect();
         for group in raw_consumes
@@ -767,8 +726,7 @@ where
                 <[(
                     <LB as LookupBuilder>::Expr,
                     <LB as LookupBuilder>::Expr,
-                    <LB as LookupBuilder>::Expr,
-                    [<LB as LookupBuilder>::Expr; 8],
+                    [<LB as LookupBuilder>::Expr; 16],
                 )]>::to_vec,
             )
             .collect::<Vec<_>>()
@@ -782,14 +740,13 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    for (mult, ptr, off, limbs) in group {
+                                    for (mult, ptr, limbs) in group {
                                         b.insert(
                                             "consume-uintlimbs",
                                             mult,
                                             UintLimbsMsg {
                                                 ptr,
                                                 bound_ptr: mul_bound_ptr.clone(),
-                                                offset: off,
                                                 limbs,
                                             },
                                             mul_consume_deg,
@@ -886,42 +843,43 @@ where
             },
             pair_deg,
         );
+        let val_full: [LB::Expr; 8] = array::from_fn(|i| {
+            if i < 4 {
+                val_lo[i].clone()
+            } else {
+                val_hi[i - 4].clone()
+            }
+        });
         let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_local)];
-        for (row, ptr) in val_consumes {
-            builder.next_column(
-                |col| {
-                    col.group(
-                        "uintval",
-                        |g| {
-                            g.batch(
-                                "f",
-                                LB::Expr::ONE,
-                                |b| {
-                                    for (off, half) in [
-                                        (LB::Expr::ZERO, val_lo.clone()),
-                                        (LB::Expr::ONE, val_hi.clone()),
-                                    ] {
-                                        b.insert(
-                                            "consume-uintval",
-                                            sel[row].clone() * mul_act.clone(),
-                                            UintValMsg {
-                                                ptr: ptr.clone(),
-                                                bound_ptr: mul_bound_ptr.clone(),
-                                                offset: off,
-                                                limbs: half,
-                                            },
-                                            mul_consume_deg,
-                                        );
-                                    }
-                                },
-                                pair_deg,
-                            );
-                        },
-                        pair_deg,
-                    );
-                },
-                pair_deg,
-            );
-        }
+        builder.next_column(
+            |col| {
+                col.group(
+                    "uintval",
+                    |g| {
+                        g.batch(
+                            "f",
+                            LB::Expr::ONE,
+                            |b| {
+                                for (row, ptr) in val_consumes {
+                                    b.insert(
+                                        "consume-uintval",
+                                        sel[row].clone() * mul_act.clone(),
+                                        UintValMsg {
+                                            ptr,
+                                            bound_ptr: mul_bound_ptr.clone(),
+                                            limbs: val_full.clone(),
+                                        },
+                                        mul_consume_deg,
+                                    );
+                                }
+                            },
+                            pair_deg,
+                        );
+                    },
+                    pair_deg,
+                );
+            },
+            pair_deg,
+        );
     }
 }
