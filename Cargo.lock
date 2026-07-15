@@ -1548,6 +1548,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-constraint-compiler"
+version = "0.28.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+]
+
+[[package]]
 name = "miden-core"
 version = "0.28.0"
 dependencies = [
