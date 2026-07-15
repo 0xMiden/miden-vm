@@ -243,11 +243,12 @@ impl<'a> EcRequire<'a> {
                     // `x₁ = x₂` / `y₁ = y₂` equalities are enforced natively
                     // in the AIR (the operands are the same stored point, so
                     // their coords share ptrs under value-interning). No
-                    // `y₁ ≠ 0` witness: the slope pin `2λy ≡ s = 3x² + a`
-                    // already excludes `y = 0`, since on a **smooth** curve a
-                    // 2-torsion point has `3x² + a ≠ 0` (simple cubic root),
-                    // so `2λ·0 ≡ s ≠ 0` is unsatisfiable — a `y = 0` self-add
-                    // can only take the `cancel` branch (2·(2-torsion) = ∞).
+                    // `y₁ ≠ 0` witness: at `y = 0`, the slope pin forces
+                    // `s = 3x² + a = 0`, which together with the curve
+                    // equation makes `x` a common root of the curve
+                    // polynomial and its derivative — impossible on a smooth
+                    // curve. A `y = 0` self-add can only take the `cancel`
+                    // branch (2·(2-torsion) = ∞).
                     debug_assert_eq!(y1, y2, "on-curve x₁ = x₂ forces y₂ = ±y₁");
                     let s = self.uint.mac(3, px, px, 1, a);
                     let s_v = self.uint.value(s);
@@ -409,10 +410,9 @@ impl<'a> EcRequire<'a> {
     }
 
     /// The live cases' shared tail: `x₃ = λ² − t`, `e = x₁ − x₃`,
-    /// `y₃ = λ·e − y₁` — the two mul-subtracts fused (no `w` / `u`
-    /// intermediate store, no `x₃` / `y₃` sub op). generic forms
-    /// `t = x₁ + x₂`; double, where `x₁ = x₂`, folds `t = 2x₁` into x₃'s
-    /// `κ_c = 2` subtract, so it lays no `t` add/store at all. `R` is minted
+    /// `y₃ = λ·e − y₁`. generic forms `t = x₁ + x₂`; double, where
+    /// `x₁ = x₂`, folds `t = 2x₁` into x₃'s `κ_c = 2` subtract, so it lays
+    /// no `t` add/store at all. `R` is minted
     /// as a **closure-cert** point — its membership rides this block's
     /// `EcOnCurveCert` (the group law is closed → on-curve operands give an
     /// on-curve result), so it pays *no* MAC trio.
@@ -445,8 +445,7 @@ impl<'a> EcRequire<'a> {
         // maximum (> operands), satisfying the strict ordering the cert
         // rests on; a hit reuses its existing certified row and mints = false.
         let (r, mints) = self.store.add_point_cert(group, x3, y3);
-        // Cell 2 (once the disequality witness `inv`) is unused: `generic`'s
-        // `d ≠ 0` now rides `d`'s own `UintAdd` tuple (`nz = 1`).
+        // Cell 2 is unused.
         ([slope_aux, lambda, null, t, y3, e, null, x3, null], r, mints)
     }
 }

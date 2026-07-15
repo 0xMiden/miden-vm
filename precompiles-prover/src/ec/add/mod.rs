@@ -229,21 +229,17 @@ pub const ROW_RES: usize = 2;
 pub const ROW_TERM: usize = 3;
 
 /// Row-0 cells: `slope_aux` is `d = x₂ − x₁` for `generic`, `s = 3x² + a`
-/// for `double`. Cell 2 is unused — `generic`'s disequality now rides `d`'s
-/// own `UintAdd` tuple (`nz = 1`, see the module doc) rather than a
-/// separate witnessed inverse.
+/// for `double`; cell 2 is unused.
 pub const CELL_SLOPE_AUX: usize = 0;
 pub const CELL_LAMBDA: usize = 1;
 pub const CELL_T: usize = 3;
 /// Row-1 (tail) cells: the fused result `y₃`, the `x₁ − x₃` witness `e`,
-/// and `x₃` (cell 2 is dead — the mul-subtracts leave no `w` / `u`
-/// intermediate).
+/// and `x₃`; cell 2 is unused.
 pub const CELL_Y3: usize = 0;
 pub const CELL_E: usize = 1;
 pub const CELL_X3: usize = 3;
-/// Row-2 (res) cells: the hosted `r` / scalar-bound / group ptrs. Cell 0 is
-/// free — `y₃` moved to the tail row so the `λ·e − y₁` mul-subtract reads
-/// it in the slope-row window.
+/// Row-2 (res) cells: the hosted `r`, scalar-bound, and group ptrs; cell 0
+/// is reserved.
 pub const CELL_R: usize = 1;
 pub const CELL_SBOUND: usize = 2;
 pub const CELL_GROUP: usize = 3;
@@ -670,14 +666,14 @@ where
             ),
         );
         // col 5 (paired, lqd-1): double's s ≡ 3·x² + a and its slope pin
-        // 2·λ·y ≡ s = 3x² + a. No `y₁ ≠ 0` witness is needed: at `y = 0`
-        // this would force `s = 0`, which never holds at a 2-torsion point
-        // of a **smooth** curve (`3x² + a ≠ 0` at a simple cubic root). A
-        // `y = 0` self-add thus cannot satisfy the double case — it can
-        // only take `cancel` (2·(2-torsion) = ∞). This leans on curve
-        // smoothness (`4a³ + 27b² ≠ 0`), the same anchored-curve
-        // well-formedness assumption as the `b ≠ 0` guard the disequality
-        // MACs rest on.
+        // 2·λ·y ≡ s = 3x² + a. No `y₁ ≠ 0` witness is needed: at `y = 0`,
+        // the slope pin forces `s = 3x² + a = 0`, which together with the
+        // curve equation `y² = x³ + ax + b` (giving `x³ + ax + b = 0`)
+        // makes `x` a common root of the curve polynomial and its
+        // derivative — impossible on a smooth curve (`4a³ + 27b² ≠ 0`). A
+        // `y = 0` self-add thus can only take `cancel` (2·(2-torsion) =
+        // ∞); this rests on the same anchored-curve smoothness assumption
+        // as the `b ≠ 0` guard the disequality MACs rest on.
         frac_col!(
             builder,
             "ec-add-slope",

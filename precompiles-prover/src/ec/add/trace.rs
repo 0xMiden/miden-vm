@@ -156,7 +156,7 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
     for (cell, ptr) in transients[NUM_CELLS..2 * NUM_CELLS].iter().enumerate() {
         set(ROW_TAIL, cell, *ptr);
     }
-    set(ROW_RES, 0, transients[8]); // res cell 0 (free — y₃ rides the tail row)
+    set(ROW_RES, 0, transients[8]); // reserved zero cell
 
     // Hosted scalars: the result / scalar-bound / group ptrs on the res
     // row, the operand ptrs + the `EcGroupAdd` provide multiplicity

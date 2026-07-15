@@ -532,8 +532,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         // single local witness. Degree 2 (`κ_c` × `is_sub`), well under
         // the lqd-1 budget.
         let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
-        let c_sign_local: AB::Expr =
-            AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub.clone();
+        let c_sign_local: AB::Expr = AB::Expr::ONE - is_sub.double();
         builder.assert_zero(
             sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
         );

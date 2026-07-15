@@ -91,21 +91,21 @@ pub fn mac_div_rem(
     (q.to(), r.to())
 }
 
-/// `(κₐ·a·b − κ_c·c) mod p` — the subtractive scaled-MAC reduction.
+/// `(κ_a·a·b − κ_c·c) mod p` — the subtractive scaled-MAC reduction.
 pub fn mac_sub_reduce(kappa_a: u16, a: U256, b: U256, kappa_c: u16, c: U256, bound: U256) -> U256 {
     mac_sub_div_rem(kappa_a, a, b, kappa_c, c, bound).1
 }
 
-/// `(q_committed, r, borrow)` of `κₐ·a·b − κ_c·c ≡ r (mod p)`, written
+/// `(q_committed, r, borrow)` of `κ_a·a·b − κ_c·c ≡ r (mod p)`, written
 ///
 /// ```text
-/// κₐ·a·b − κ_c·c = r + (q_committed − borrow)·p
+/// κ_a·a·b − κ_c·c = r + (q_committed − borrow)·p
 /// ```
 ///
 /// with `r ≤ bound`, `q_committed ≥ 0` (the trace's 17 16-bit quotient
 /// limbs), and `borrow` the number of moduli the canonical reduction adds
-/// back when `κₐ·a·b < κ_c·c` (`q_committed = 0` on that branch). The
-/// underflow is `d = κ_c·c − κₐ·a·b < κ_c·p`, so `borrow ≤ κ_c`: a bit for
+/// back when `κ_a·a·b < κ_c·c` (`q_committed = 0` on that branch). The
+/// underflow is `d = κ_c·c − κ_a·a·b < κ_c·p`, so `borrow ≤ κ_c`: a bit for
 /// the EC tail's `κ_c = 1` (`λ²−t`, `λe−y₁`) and `∈ {0, 1, 2}` for its
 /// `κ_c = 2` (`λ²−2x₁` doubling). The subtractive mode's contract is
 /// `κ_c ≤ 2`, matching the AIR's `borrow ∈ {0, 1, 2}` constraint.
