@@ -19,46 +19,58 @@
 //!
 //! With the store holding `bound = p − 1` (so any modulus, incl. 2²⁵⁶, stays
 //! representable), the looked-up value is `bound` and the `+1` becomes a `−k`
-//! correction at `β⁰`. Verified at the LogUp challenge `β` by a single `id`
-//! ext-field register (aux col 5, excluded from σ by `num_logup_cols = 5`):
+//! correction at `β⁰`. Verified at the LogUp challenge `β` by one
+//! **block-local** ext constraint on the open row's two-row window — the
+//! open row sees `a ‖ b` locally and `c ‖ p` on next, so the whole check is
+//! a single local assertion (no accumulation register, no closure row, and
+//! the trace's final block needs no wrap-around special case):
 //!
 //! ```text
 //! a(β) + b(β) − c(β) − k·bound(β) − k + (β − t)·Γ(β) = 0,    t = 2³²
-//! Γ(β) = Σⱼ₌₀⁶ (γⱼ⁺ − γⱼ⁻)·βʲ
+//! Γ(β) = Σⱼ₌₀⁶ γⱼ·βʲ,    γⱼ ∈ {−1, 0, 1}
 //! ```
 //!
 //! `D(X) = a + b − c − k·bound − k` has `D(t) = 0`, so `(X − t) ∣ D` with a
-//! degree-6 quotient → exactly 7 carries `γ₀..γ₆`, **no top-carry slot** (the
-//! bit-256 overflow cancels in the difference, since `a + b = c + k·p`). The
-//! signed carry is split `γⱼ = γⱼ⁺ − γⱼ⁻` into the **binary carry chain of
-//! `a+b`** (`γ⁺ = α`) and the **binary chain of `c+k·p`** (`γ⁻ = δ`) — both
-//! `∈ {0, 1}`, checked by booleanity, no `Range16` on carries. Operands
-//! inherit the store's 16-bit `Range16` through the `UintVal` tie; no-wrap
-//! holds trivially (`|coeff| ≲ 2³⁵ ≪ 2⁶³`).
+//! degree-6 quotient → exactly 7 signed carries `γ₀..γ₆`, **no top-carry
+//! slot** (the bit-256 overflow cancels in the difference, since
+//! `a + b = c + k·p`). Each `γⱼ` — the difference between the binary carry
+//! chain of `a + b` and that of `c + k·p` — is **ternary**, range-checked by
+//! an ungated `γ(1−γ)(1+γ)` per carry column: the four carry columns host
+//! only Γ slots (per [`GAMMA_SLOTS`]), so no row selector is needed and the
+//! check stays at degree 3. Operands inherit the store's 16-bit `Range16`
+//! through the `UintVal` tie; no-wrap holds trivially (every per-limb
+//! coefficient of the identity is `≲ 2³⁴ ≪ 2⁶³`, so field-vanishing
+//! coefficients vanish over ℤ and the limb equations chain to the exact
+//! integer identity).
 //!
-//! ## Layout (period-4, one value per row)
+//! ## Layout (period-2, two values per row)
 //!
-//! 8×32 per row (a whole 256-bit value): `a`, `b`, `c` and `p` each take a
-//! single row, in that fixed order, and the two `UintVal` halves (offsets
-//! 0/1) are both consumed from that one row. `p` sits last in the period, so
-//! it doubles as the block's closing row — the `UintAdd` provide and the
-//! `id == 0` assertion both fire there, with no dedicated term row.
+//! 16×32 per row (two whole 256-bit values): the **open row** carries
+//! `a ‖ b`, the **closing row** `c ‖ p`. The SZ identity is asserted on the
+//! open row (whose window sees all four values); the `UintAdd` provide and
+//! its multiplicity cell sit on the closing row.
 //!
-//! Every row's cells past the limbs (8–14) host that row's own block scalar
-//! plus a share of the seven-limb signed carry pair `γ⁺` / `γ⁻`: `a` has no
-//! scalar of its own, so five go to carries; `b` and `c` each spend one on
-//! their zero-sentinel flag, `p` spends one on the reduction bit `k` and one
-//! on the provide multiplicity — the rest carry `γ⁺` / `γ⁻`. `b` additionally
-//! hosts the nonzero-certificate witness (cells 13–14, see below).
-//! [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`] are the placement tables the
-//! AIR, trace-gen and prover all read, mirroring the pattern
-//! [`UintMul`](crate::uint::mul)'s `GAMMA_SLOTS` uses for its own carries:
-//! the `id` accumulation is additive across rows, so splitting a carry
-//! vector over several rows' spare cells costs nothing beyond the placement
-//! table itself.
+//! Cells 16–19 are the carry columns (γ₀–γ₃ on the open row, γ₄–γ₆ on the
+//! closing row, whose fourth slot is structurally zero); cells 20–23 host
+//! the block scalars, one per row:
 //!
-//! Two zero-sentinel modes, one per operand row: **`is_c_zero`** drops the
-//! `c` side (`a + b ≡ 0` — negation with an unstored zero result) and
+//! | col   | open row (`a ‖ b`)    | closing row (`c ‖ p`) |
+//! |-------|-----------------------|-----------------------|
+//! | 0–7   | `a`'s limbs           | `c`'s limbs           |
+//! | 8–15  | `b`'s limbs           | `p`'s limbs           |
+//! | 16–19 | γ₀ γ₁ γ₂ γ₃           | γ₄ γ₅ γ₆ (19 zero)    |
+//! | 20    | `is_b_zero`           | `k`                   |
+//! | 21    | `w`                   | `c_on`                |
+//! | 22    | `wS`                  | `mult`                |
+//! | 23    | `b_on`                | `is_c_zero`           |
+//! | 24–29 | `a_ptr b_ptr c_ptr bound_ptr act nz` (cycle-constant)|
+//!
+//! Columns 20 and 23 host a boolean on both rows, so one ungated booleanity
+//! check per column covers both residents (`is_b_zero`/`k` and
+//! `b_on`/`is_c_zero` respectively).
+//!
+//! Two zero-sentinel modes, one per row: **`is_c_zero`** drops the `c` side
+//! (`a + b ≡ 0` — negation with an unstored zero result) and
 //! **`is_b_zero`** drops the `b` side (`a + 0 ≡ c` — the stored-value
 //! **equality certificate** `a = c`, both canonical under one modulus;
 //! consumed e.g. by the EC group law's `x₁ = x₂` / `y₁ = y₂` case ties).
@@ -73,13 +85,6 @@
 //! consumer can demand `nz = 1` on the same block that already proves
 //! `a + b ≡ c` — the EC group law's generic-add case uses this on its
 //! `d = x₂ − x₁` subtraction instead of a separate disequality MAC.
-//!
-//! | row | role | cells 0–7  | cells 8–14                                   |
-//! |-----|------|------------|-----------------------------------------------|
-//! | 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄ (13–14 spare)                         |
-//! | 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12, `w`@13 `wS`@14 |
-//! | 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12, `b_on`@13 (14 spare) |
-//! | 3   | `p`  | p's limbs  | `k`@8, `c_on`@10, γ⁻₆@9, `mult`@12 (11, 13–14 spare) |
 
 pub mod trace;
 
@@ -91,7 +96,6 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
@@ -154,15 +158,59 @@ where
 // COLUMN LAYOUT
 // ================================================================================================
 
-/// Limb cells per value row: the full 8×32-bit view (both `UintVal` halves)
-/// laid on one row.
+/// Limb cells per value: the full 8×32 view of one 256-bit uint.
 pub const NUM_LIMBS: usize = 8;
-/// Cell columns per row: 8 limbs plus 5 scalar/carry cells (8–12).
-pub const NUM_CELLS: usize = 15;
-/// Scalar cell past the limbs holding this row's flag: `is_b_zero` on the
-/// `b` row, `is_c_zero` on the `c` row, the reduction bit `k` on the `p`
-/// row. Read locally by that row's role-gated constraints.
-pub const CELL_FLAG: usize = 8;
+/// First limb cell of the row's second value — `b` on the open row, `p`
+/// on the closing row.
+pub const CELL_HI: usize = NUM_LIMBS;
+/// Cell columns per row: 16 limbs (two whole values), 4 carry cells
+/// (16–19) and 4 block-scalar cells (20–23).
+pub const NUM_CELLS: usize = 24;
+
+/// Scalar cell boolean on both rows: `is_b_zero` on the open row, the
+/// reduction bit `k` on the closing row — one ungated booleanity check
+/// covers the column.
+pub const CELL_FLAG: usize = 20;
+/// Open-row resident of [`CELL_FLAG`]: when set, `b` is the (unstored)
+/// zero — the `+b(β)` term and the `b` `UintVal` consume are dropped, and
+/// `b_ptr` is forced to 0. The block then proves `a + 0 ≡ c (mod p)`, and
+/// with `a`, `c` both stored canonical under the shared modulus that is
+/// exactly the **equality certificate `a = c`** — value-level, ptr-free, no
+/// zero pin.
+pub const CELL_IS_B_ZERO: usize = CELL_FLAG;
+/// Closing-row resident of [`CELL_FLAG`]: the boolean reduction bit `k`.
+pub const CELL_K: usize = CELL_FLAG;
+/// Open-row cell holding the witnessed candidate inverse `w` of `S = Σⱼ bⱼ`
+/// (the eight 32-bit `b` limbs, native-summed — `S < 2³⁵ < p_Goldilocks`,
+/// so no wrap) — the nonzero certificate's witness, meaningful only when
+/// [`COL_NZ`] is set. See "Nonzero certificate" above.
+pub const CELL_D_W: usize = 21;
+/// Closing-row cell holding `c_on = act·(1 − is_c_zero)`, the witnessed
+/// activity gate for the `c` `UintVal` consume: `cp_sel·c_on` (all local)
+/// is degree 2, letting the gated `c` consume pair with `b`'s in one
+/// column instead of sitting alone at degree 3 (`sel·(1−is_zero)·act`).
+pub const CELL_C_ON: usize = 21;
+/// Open-row cell pinning `wS = w · S`, so the nz-cert's main check
+/// (`nz · (wS − 1) = 0`) reads one degree-1 cell instead of multiplying `w`
+/// and `S` inline at the point that also carries `nz` and the row selector.
+pub const CELL_D_WS: usize = 22;
+/// Closing-row cell holding the `UintAdd` provide multiplicity = consumer
+/// count (one per eval `UintOp` node, 0 for bare ptr-space ops) — read
+/// only by the closing row's provide.
+pub const TERM_CELL_MULT: usize = 22;
+/// Open-row cell holding `b_on = act·(1 − is_b_zero)`, the witnessed
+/// activity gate for the `b` `UintVal` consume (the mirror of
+/// [`CELL_C_ON`]).
+pub const CELL_B_ON: usize = 23;
+/// Closing-row cell: when set, `c` is the (unstored) zero — the `−c(β)`
+/// term and the `c` `UintVal` consume are dropped, and `c_ptr` is forced
+/// to 0 (address 0 is never stored, so it reads as "none" on the `UintAdd`
+/// bus). Lets `a + b ≡ 0 (mod p)` (negation: `b = −a`) avoid referencing a
+/// stored zero, which can't be pinned untyped for an arbitrary modulus.
+/// Boolean together with [`CELL_B_ON`] on the open row — one ungated check
+/// covers the column.
+pub const CELL_IS_C_ZERO: usize = 23;
+
 /// `a`'s pointer (cycle-constant per block).
 pub const COL_A_PTR: usize = NUM_CELLS;
 /// `b`'s pointer (cycle-constant).
@@ -174,114 +222,61 @@ pub const COL_BOUND_PTR: usize = NUM_CELLS + 3;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op blocks,
 /// 0 on padding. Gates every `UintVal` consume so an all-zero padding
 /// block stays off the bus — with the zero sentinel gone, nothing provides
-/// the `(0, 0, off, 0…)` tuples bare periodic flags would emit there.
+/// the `(0, 0, off, 0…)` tuples bare row selectors would emit there.
 pub const COL_ACT: usize = NUM_CELLS + 4;
 /// Nonzero-certificate flag (cycle-constant): 1 when this block additionally
-/// certifies `b ≠ 0` — see "Nonzero certificate" below. Read both on the `b`
-/// row (where the certificate is checked) and the `p` row (where it rides
-/// the `UintAdd` provide tuple), which a single cycle-constant column makes
-/// free — `b` and `p` are three rows apart, outside any local/next window.
+/// certifies `b ≠ 0` — see "Nonzero certificate" above. Read both on the
+/// open row (where the certificate is checked) and the closing row (where
+/// it rides the `UintAdd` provide tuple), which the cycle-constant column
+/// makes free.
 pub const COL_NZ: usize = NUM_CELLS + 5;
 pub const NUM_MAIN_COLS: usize = NUM_CELLS + 6;
 
-/// B-row cell holding the `is_b_zero` flag: when set, `b` is the (unstored)
-/// zero — the `+b(β)` term and the `b` `UintVal` consumes are dropped, and
-/// `b_ptr` is forced to 0. The block then proves `a + 0 ≡ c (mod p)`, and
-/// with `a`, `c` both stored canonical under the shared modulus that is
-/// exactly the **equality certificate `a = c`** — value-level, ptr-free, no
-/// zero pin.
-pub const CELL_IS_B_ZERO: usize = CELL_FLAG;
-/// C-row cell holding the `is_c_zero` flag: when set, `c` is the (unstored)
-/// zero — the `−c(β)` term and the `c` `UintVal` consumes are dropped, and
-/// `c_ptr` is forced to 0 (address 0 is never stored, so it reads as "none"
-/// on the `UintAdd` bus). Lets `a + b ≡ 0 (mod p)` (negation: `b = −a`)
-/// avoid referencing a stored zero, which can't be pinned untyped for an
-/// arbitrary modulus.
-pub const CELL_IS_C_ZERO: usize = CELL_FLAG;
-/// B-row cell holding the witnessed candidate inverse `w` of `S = Σⱼ bⱼ`
-/// (the row's eight 32-bit limbs, native-summed — `S < 2³⁵ < p_Goldilocks`,
-/// so no wrap) — the nonzero certificate's witness, meaningful only when
-/// [`COL_NZ`] is set. See "Nonzero certificate" below.
-pub const CELL_D_W: usize = 13;
-/// B-row cell pinning `wS = w · S`, so the nz-cert's main check
-/// (`nz · (wS − 1) = 0`) reads one degree-1 cell instead of multiplying `w`
-/// and `S` inline at the point that also carries `nz` and `b_sel`.
-pub const CELL_D_WS: usize = 14;
-/// C-row cell holding `b_on = act·(1 − is_b_zero)`, the witnessed activity
-/// gate for the `b` `UintVal` consumes: `sel[ROW_B]·b_on` (read from `b`'s
-/// next row, i.e. here) is degree 2, letting the two gated `b` consumes pair
-/// with the `c` consumes in one column instead of sitting alone at degree 3
-/// (`sel·(1−is_zero)·act`). Spare on the C row (unused by `is_c_zero`).
-pub const CELL_B_ON: usize = 13;
-/// P-row cell holding `c_on = act·(1 − is_c_zero)`, the same witnessed
-/// activity gate for the `c` `UintVal` consumes (read from `c`'s next row).
-/// Spare on the P row (unused by `k` / the provide mult).
-pub const CELL_C_ON: usize = 10;
-/// P-row cell holding the boolean reduction bit `k`.
-pub const CELL_K: usize = CELL_FLAG;
-/// P-row cell holding the `UintAdd` provide multiplicity = consumer count
-/// (one per eval `UintOp` node, 0 for bare ptr-space ops) — read only by
-/// the closing row's provide.
-pub const TERM_CELL_MULT: usize = 12;
-
-/// Block period: one add op = 4 rows, `a` / `b` / `c` / `p` one row each.
-pub const PERIOD: usize = 4;
-
-// One-hot periodic role selectors (one column each, period 4): selector `i`
-// fires on row `i`, so the role index doubles as the row index.
-pub const ROW_A: usize = 0;
-pub const ROW_B: usize = 1;
-pub const ROW_C: usize = 2;
-/// The modulus row, last in the period — it doubles as the block's closing
-/// row (the `UintAdd` provide and the `id == 0` assertion both fire here).
-pub const ROW_P: usize = 3;
-const NUM_PERIODIC: usize = PERIOD;
+/// Block period: one add op = 2 rows — the open row (`a ‖ b`) and the
+/// closing row (`c ‖ p`).
+pub const PERIOD: usize = 2;
+/// The open row: `a`'s limbs in cells 0–7, `b`'s in 8–15. The SZ identity
+/// is asserted here, on the local/next window that sees the whole block.
+pub const ROW_AB: usize = 0;
+/// The closing row: `c`'s limbs in cells 0–7, `p`'s in 8–15. The `UintAdd`
+/// provide fires here.
+pub const ROW_CP: usize = 1;
 
 /// Carry vector length: `deg Γ = 6` (see the module identity), 7 limbs.
 pub const NUM_GAMMA: usize = 7;
+/// First of the four carry columns.
+pub const FIRST_GAMMA_COL: usize = 16;
+/// Number of carry columns. Each hosts one Γ slot per row (and nothing
+/// else), which is what lets the ternary range check run ungated — one
+/// degree-3 `γ(1−γ)(1+γ)` per column, no row selector.
+pub const NUM_GAMMA_COLS: usize = 4;
 
-/// The `γ⁺` (binary carry chain of `a + b`) placement table: slot `j` hosts
-/// `γ⁺ⱼ` at `(row, cell)`. `a` has no scalar of its own so it hosts five;
-/// `b` the remaining two, in the cells left over past its zero-sentinel
-/// flag. Shared verbatim by the AIR (weights), trace-gen (placement) and
-/// the aux builder (the `id` mirror), so the three cannot drift.
-pub const GAMMA_POS_SLOTS: [(usize, usize); NUM_GAMMA] = [
-    (ROW_A, 8),
-    (ROW_A, 9),
-    (ROW_A, 10),
-    (ROW_A, 11),
-    (ROW_A, 12),
-    (ROW_B, 9),
-    (ROW_B, 10),
-];
-/// The `γ⁻` (binary carry chain of `c + k·p`) placement table, continuing
-/// where [`GAMMA_POS_SLOTS`] leaves off: two cells left on `b`, four on `c`
-/// past its own flag, and one on `p` past its flag and the provide-mult
-/// cell (cells 10–11 on `p` are unused).
-pub const GAMMA_NEG_SLOTS: [(usize, usize); NUM_GAMMA] = [
-    (ROW_B, 11),
-    (ROW_B, 12),
-    (ROW_C, 9),
-    (ROW_C, 10),
-    (ROW_C, 11),
-    (ROW_C, 12),
-    (ROW_P, 9),
+/// The signed-carry placement table: slot `j` hosts `γⱼ` at `(row, cell)`.
+/// Shared verbatim by the AIR (weights) and trace-gen (placement), so the
+/// two cannot drift. The closing row's fourth carry cell (19) is
+/// structurally zero.
+pub const GAMMA_SLOTS: [(usize, usize); NUM_GAMMA] = [
+    (ROW_AB, 16),
+    (ROW_AB, 17),
+    (ROW_AB, 18),
+    (ROW_AB, 19),
+    (ROW_CP, 16),
+    (ROW_CP, 17),
+    (ROW_CP, 18),
 ];
 
-// Aux layout (FLATTENED to lqd 1): cols 0..3 = LogUp fraction columns, two
-// fractions each (col 0 a single one) so every closing constraint is
-// degree ≤ 3; col 3 = the Schwartz–Zippel `id` register (excluded from σ
-// via num_logup_cols = 3). Each operand now consumes its whole value in
-// one message (down from a lo/hi pair), so the four operand consumes plus
-// the provide fit in three columns instead of five: col 0 hosts `a` alone
-// (the running sum — the gate adds +1, so a degree-3 multiplicity there
-// would bust the budget), col 1 the two gated b/c consumes (their
-// witnessed activity gate `on = act·(1−is_zero)`, see [`CELL_B_ON`] /
-// [`CELL_C_ON`], keeps `sel·on` at degree 2), col 2 `p`'s consume mixed
-// with the provide.
+// Aux (lqd 1): 3 LogUp fraction columns, ≤ 2 fractions each so every
+// closing constraint is degree ≤ 3. Each operand consumes its whole value
+// in one message from its own row, so the four operand consumes plus the
+// provide fit in three columns: col 0 hosts `a` alone (the running sum —
+// the gate adds +1, so a degree-3 multiplicity there would bust the
+// budget), col 1 the two gated b/c consumes (their witnessed activity
+// gates `on = act·(1−is_zero)`, see [`CELL_B_ON`] / [`CELL_C_ON`], keep
+// `sel·on` at degree 2), col 2 `p`'s consume mixed with the provide. The
+// SZ identity is a block-local main-trace constraint, so the aux trace
+// carries no register.
 const NUM_LOGUP_COLS: usize = 3;
-const REGISTER_COL: usize = 3;
-const AUX_WIDTH: usize = 4;
+const AUX_WIDTH: usize = 3;
 const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2];
 
 // AIR
@@ -300,13 +295,9 @@ impl BaseAir<Felt> for UintAddAir {
     }
 
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        (0..PERIOD)
-            .map(|row| {
-                let mut col = vec![Felt::ZERO; PERIOD];
-                col[row] = Felt::ONE;
-                col
-            })
-            .collect()
+        // One selector, 1 on the open row; the closing row is its
+        // complement.
+        vec![vec![Felt::ONE, Felt::ZERO]]
     }
 }
 
@@ -337,15 +328,12 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-        // Role selectors — the role index doubles as the row index.
-        let sel: [AB::Expr; NUM_PERIODIC] = {
-            let p = builder.periodic_values();
-            array::from_fn(|i| p[i].into())
-        };
-        let a_sel = sel[ROW_A].clone();
-        let b_sel = sel[ROW_B].clone();
-        let c_sel = sel[ROW_C].clone();
-        let p_sel = sel[ROW_P].clone();
+        // The one role selector: 1 on the open row, its complement marking
+        // the closing row. Every next-reading constraint is ab_sel-gated,
+        // so the cyclic last → first window (whose local row is a closing
+        // row) is dropped for free.
+        let ab_sel: AB::Expr = builder.periodic_values()[0].into();
+        let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
 
         // β^0 .. β^7.
         let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
@@ -356,146 +344,121 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         }
         let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
-        // `id` register on aux col 5.
-        let id: AB::ExprEF =
-            current_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
-        let id_next: AB::ExprEF =
-            next_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
+        // The four values at β (Σⱼ limbⱼ·βʲ — t = 2³² is the limb radix, so
+        // the 32-bit limbs recombine to the 256-bit value at β), all read
+        // from the open row's window: a ‖ b local, c ‖ p next.
+        let a_beta: AB::ExprEF = (0..NUM_LIMBS)
+            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[j]));
+        let b_beta: AB::ExprEF = (0..NUM_LIMBS)
+            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[CELL_HI + j]));
+        let c_beta: AB::ExprEF = (0..NUM_LIMBS)
+            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(next[j]));
+        let p_beta: AB::ExprEF = (0..NUM_LIMBS)
+            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(next[CELL_HI + j]));
 
-        // The full 8×32 value on this row: Σⱼ limbⱼ·βʲ (t = 2³² is the limb
-        // radix, so the 32-bit limbs recombine to the 256-bit value at β).
-        let full_sum: AB::ExprEF =
-            (0..8).fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[j]));
-
-        // Block scalars, read locally on their own rows.
+        // Block scalars, read from the row that hosts them.
         let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].into();
-        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].into();
-        let k: AB::Expr = local[CELL_K].into();
-        let b_active: AB::Expr = AB::Expr::ONE - is_b_zero.clone();
-        let c_active: AB::Expr = AB::Expr::ONE - is_c_zero.clone();
+        let is_c_zero_next: AB::Expr = next[CELL_IS_C_ZERO].into();
+        let k_next: AB::Expr = next[CELL_K].into();
 
-        // Carry contributions: each slot's weight (β^{j+1} − t·βʲ) times its
-        // hosting row's cell, gated by that row's own selector — whichever
-        // physical row the placement table puts it on.
-        let mut carry_pos: AB::ExprEF = AB::ExprEF::ZERO;
-        for (j, &(row, cell)) in GAMMA_POS_SLOTS.iter().enumerate() {
+        // Σⱼ (β^{j+1} − t·βʲ)·γⱼ — the (β − t)·Γ(β) term, each slot read
+        // from whichever block row the placement table hosts it on.
+        let mut carry: AB::ExprEF = AB::ExprEF::ZERO;
+        for (j, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
             let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_pos += w * sel[row].clone() * AB::Expr::from(local[cell]);
+            let g: AB::Expr = if row == ROW_AB {
+                local[cell].into()
+            } else {
+                next[cell].into()
+            };
+            carry += w * g;
         }
-        let mut carry_neg: AB::ExprEF = AB::ExprEF::ZERO;
-        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
-            let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_neg += w * sel[row].clone() * AB::Expr::from(local[cell]);
+
+        // The block-local SZ identity, one ext constraint on the open
+        // row's window: a(β) + b(β)·(1−is_b_zero) − c(β)·(1−is_c_zero)
+        // − k·(bound(β)+1) + (β−t)·Γ(β) = 0. Padding rows satisfy it
+        // trivially (all-zero cells), so no act gate is needed.
+        let identity: AB::ExprEF = a_beta + b_beta * (AB::Expr::ONE - is_b_zero.clone())
+            - c_beta * (AB::Expr::ONE - is_c_zero_next)
+            - (p_beta + bp[0].clone()) * k_next
+            + carry;
+        builder.assert_zero_ext(identity * ab_sel.clone());
+
+        // Ternary carries: each carry column hosts only Γ slots (or a
+        // structural zero), so the {−1, 0, 1} range check runs ungated on
+        // every row — degree 3 with no selector, lqd-safe.
+        for &cell in &local[FIRST_GAMMA_COL..FIRST_GAMMA_COL + NUM_GAMMA_COLS] {
+            let g: AB::Expr = cell.into();
+            builder.assert_zero(g.clone() * (AB::Expr::ONE - g.clone()) * (AB::Expr::ONE + g));
         }
 
-        // Per-row `id` contributions (one selector fires per row, so the
-        // cross terms vanish): +a, +b·(1−is_b_zero), −c·(1−is_c_zero),
-        // −k·(bound(β)+1), ±carries (spread over whichever rows host them).
-        let contrib: AB::ExprEF = full_sum.clone() * a_sel
-            + full_sum.clone() * (b_sel.clone() * b_active)
-            - full_sum.clone() * (c_sel.clone() * c_active)
-            - (full_sum.clone() + bp[0].clone()) * (p_sel.clone() * k.clone())
-            + carry_pos
-            - carry_neg;
-
-        builder.when_first_row().assert_zero_ext(id.clone());
-        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-
-        // The closing row (`p`) has a nonzero contribution of its own — its
-        // `−k·(bound(β)+1)` term plus its share of γ⁻ — so the closure check
-        // folds it in directly instead of reading it back from `id_next`.
-        // That keeps the check local to the block's last row, so it also
-        // covers the trace's final block: relying on `id_next` would read
-        // the wrap-around first row's pinned zero regardless of whether that
-        // last block actually closed. Built from p's own cells only (not the
-        // shared `contrib`, whose other-role terms carry their own periodic
-        // gates and would needlessly bloat this constraint's degree once
-        // multiplied by `p_sel`).
-        let mut p_own: AB::ExprEF = -(full_sum + bp[0].clone()) * k.clone();
-        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
-            if row == ROW_P {
-                let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-                p_own -= w * AB::Expr::from(local[cell]);
-            }
+        // Columns 20 and 23 host booleans on both rows (is_b_zero / k and
+        // b_on / is_c_zero) — one ungated check per column covers both.
+        for col in [CELL_FLAG, CELL_B_ON] {
+            let f: AB::Expr = local[col].into();
+            builder.assert_zero(f.clone() * (AB::Expr::ONE - f));
         }
-        builder.assert_zero_ext((id + p_own) * p_sel.clone());
 
-        // k is the boolean reduction bit (p-row scalar).
-        builder.assert_zero(p_sel.clone() * k.clone() * (AB::Expr::ONE - k));
-
-        // act is the boolean block-active flag (cycle-constant).
+        // act / nz: boolean cycle-constant flags.
         let act: AB::Expr = local[COL_ACT].into();
         builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+        let nz: AB::Expr = local[COL_NZ].into();
+        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
 
-        // A provide must come from an active block. The `UintAdd` provide is
-        // gated only by `sel[ROW_P]` (not `act`), and the operand consumes
-        // are act-gated — so an `act = 0` block with zeroed limbs (the SZ
-        // closes trivially) and a witnessed closing-row `mult` would provide
-        // a *false* relation onto the bus. Force the mult to 0 when act = 0.
+        // A provide must come from an active block. The `UintAdd` provide
+        // is gated only by the closing-row selector (not `act`), and the
+        // operand consumes are act-gated — so an `act = 0` block with
+        // zeroed limbs (the SZ closes trivially) and a witnessed `mult`
+        // would provide a *false* relation onto the bus. Force the mult to
+        // 0 when act = 0.
         builder.assert_zero(
-            p_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
+            cp_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
         );
 
-        // is_c_zero (a c-row scalar) is boolean, and forces c_ptr = 0 — the
-        // zero result has no stored address, and the tuple's c_ptr = 0 reads
-        // as "≡ 0" to a consumer.
-        builder
-            .assert_zero(c_sel.clone() * is_c_zero.clone() * (AB::Expr::ONE - is_c_zero.clone()));
+        // is_c_zero (read locally on the closing row) forces c_ptr = 0 —
+        // the zero result has no stored address, and the tuple's c_ptr = 0
+        // reads as "≡ 0" to a consumer.
+        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].into();
         let c_ptr_local: AB::Expr = local[COL_C_PTR].into();
-        builder.assert_zero(c_sel.clone() * is_c_zero.clone() * c_ptr_local);
+        builder.assert_zero(cp_sel.clone() * is_c_zero.clone() * c_ptr_local);
 
-        // is_b_zero (a b-row scalar) likewise: boolean, and forces b_ptr = 0
-        // so the tuple reads as the `a + 0 ≡ c` equality form.
-        builder
-            .assert_zero(b_sel.clone() * is_b_zero.clone() * (AB::Expr::ONE - is_b_zero.clone()));
+        // is_b_zero (an open-row scalar) likewise forces b_ptr = 0 so the
+        // tuple reads as the `a + 0 ≡ c` equality form.
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
-        builder.assert_zero(b_sel.clone() * is_b_zero.clone() * b_ptr_local);
+        builder.assert_zero(ab_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
-        // b_on / c_on host act·(1 − is_zero): the witnessed activity gate
-        // that lets the gated b/c UintVal consumes carry a degree-2
-        // multiplicity `sel·on` instead of `sel·(1−is_zero)·act` (degree 3).
-        // Pinned from the row that hosts is_zero, read by the LogUp side
-        // from the *next* row (b_on lives on b's next row — the c row;
-        // c_on lives on c's next row — the p row).
-        let b_on_next: AB::Expr = next[CELL_B_ON].into();
-        builder
-            .assert_zero(b_sel.clone() * (b_on_next - act.clone() * (AB::Expr::ONE - is_b_zero)));
-        let c_on_next: AB::Expr = next[CELL_C_ON].into();
-        builder.assert_zero(c_sel * (c_on_next - act * (AB::Expr::ONE - is_c_zero)));
+        // b_on / c_on host act·(1 − is_zero): the witnessed activity gates
+        // that let the gated b/c UintVal consumes carry a degree-2
+        // multiplicity `sel·on` instead of `sel·(1−is_zero)·act`
+        // (degree 3). Each is pinned on its own row, all cells local.
+        let b_on: AB::Expr = local[CELL_B_ON].into();
+        builder.assert_zero(ab_sel.clone() * (b_on - act.clone() * (AB::Expr::ONE - is_b_zero)));
+        let c_on: AB::Expr = local[CELL_C_ON].into();
+        builder.assert_zero(cp_sel * (c_on - act * (AB::Expr::ONE - is_c_zero)));
 
-        // Nonzero certificate: when `nz = 1`, this block additionally
-        // certifies `b ≠ 0` — the disequality cert the EC group law's
-        // generic-add case consumes in place of a full inverse modmul.
-        // `S = Σⱼ bⱼ` (a native sum of `b`'s eight 32-bit limbs — no
-        // β-weighting, so no LogUp challenge needed here — stays
+        // Nonzero certificate (open row): when `nz = 1`, this block
+        // additionally certifies `b ≠ 0` — the disequality cert the EC
+        // group law's generic-add case consumes in place of a full inverse
+        // modmul. `S = Σⱼ bⱼ` (a native sum of `b`'s eight 32-bit limbs —
+        // no β-weighting, so no LogUp challenge needed here — stays
         // `< 2³⁵ < p_Goldilocks`, no wrap) is `0 ⟺ b = 0`; `w` is the
         // witnessed candidate inverse, `wS` its pinned product (hoisted so
         // the main check stays degree 3 instead of stacking
-        // `b_sel·nz·w·S` at degree 5).
-        let nz: AB::Expr = local[COL_NZ].into();
-        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
-        let s_sum: AB::Expr = (0..8).fold(AB::Expr::ZERO, |s, j| s + AB::Expr::from(local[j]));
+        // `ab_sel·nz·w·S` at degree 5).
+        let s_sum: AB::Expr =
+            (0..NUM_LIMBS).fold(AB::Expr::ZERO, |s, j| s + AB::Expr::from(local[CELL_HI + j]));
         let w: AB::Expr = local[CELL_D_W].into();
         let ws: AB::Expr = local[CELL_D_WS].into();
-        builder.assert_zero(b_sel.clone() * (ws.clone() - w * s_sum));
-        builder.assert_zero(b_sel * nz * (ws - AB::Expr::ONE));
-
-        // Carry booleanity: every γ⁺ / γ⁻ cell, gated by whichever row's
-        // selector the placement table assigns it to.
-        for &(row, cell) in GAMMA_POS_SLOTS.iter().chain(GAMMA_NEG_SLOTS.iter()) {
-            let lj: AB::Expr = local[cell].into();
-            builder.assert_zero(sel[row].clone() * lj.clone() * (AB::Expr::ONE - lj));
-        }
+        builder.assert_zero(ab_sel.clone() * (ws.clone() - w * s_sum));
+        builder.assert_zero(ab_sel.clone() * nz * (ws - AB::Expr::ONE));
 
         // Cycle-constancy: the four ptrs + act + nz are constant within a
-        // block (every row but the closing one, which the not_term gate
-        // drops at the block boundary — the modulus row sits last in the
-        // period).
-        let not_term: AB::Expr = AB::Expr::ONE - p_sel;
+        // block — the open row pins the closing row; the closing → open
+        // edge (the block boundary, and the cyclic wrap) is free.
         for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT, COL_NZ] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
-            builder.assert_zero(not_term.clone() * (there - here));
+            builder.assert_zero(ab_sel.clone() * (there - here));
         }
 
         // Phase 2: LogUp — UintVal consumes + the UintAdd provide.
@@ -574,12 +537,9 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-        let sel: [LB::Expr; NUM_PERIODIC] = {
-            let p = builder.periodic_values();
-            array::from_fn(|i| p[i].into())
-        };
+        let ab_sel: LB::Expr = builder.periodic_values()[0].into();
+        let cp_sel: LB::Expr = LB::Expr::ONE - ab_sel.clone();
 
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
@@ -589,20 +549,21 @@ where
         let nz: LB::Expr = local[COL_NZ].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].into();
 
-        // The full 8×32 `UintVal` value on this row (cells 0..8): every
-        // operand consumes it whole in one message now (a, b, c and p
-        // each take one row), so no next-row read is needed for the
-        // value itself.
-        let full: [LB::Expr; 8] = array::from_fn(|k| local[k].into());
+        // The row's two full 8×32 views: `lo` is the a / c value (cells
+        // 0–7 on the open / closing row), `hi` the b / p value (cells
+        // 8–15). Which interpretation is live is decided by the
+        // multiplicity's row gate; everything is local — no next-row
+        // reads anywhere on the lookup path.
+        let lo: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[j].into());
+        let hi: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[CELL_HI + j].into());
 
-        // The gated b/c consumes read the witnessed activity gate
-        // `on = act·(1 − is_zero)` from the *next* row: b_on lives on b's
-        // next row (the c row), c_on on c's next row (the p row). `sel·on`
+        // The gated b/c consumes read their witnessed activity gate
+        // `on = act·(1 − is_zero)` locally on their firing row. `sel·on`
         // is degree 2 (the pinned `on` folds the act gate in), so the two
         // gated consumes pair per fraction column instead of sitting alone
         // at degree 3 (`sel·(1−is_zero)·act`).
-        let b_on_next: LB::Expr = next[CELL_B_ON].into();
-        let c_on_next: LB::Expr = next[CELL_C_ON].into();
+        let b_on: LB::Expr = local[CELL_B_ON].into();
+        let c_on: LB::Expr = local[CELL_C_ON].into();
 
         let consume_deg = Deg { v: 2, u: 1 };
         let provide_deg = Deg { v: 2, u: 1 };
@@ -613,16 +574,16 @@ where
         // Each operand consumes its whole `UintVal` from its own row in
         // one message. Every multiplicity is degree 2: a/p carry
         // `sel·act`, the gated b/c carry `sel·on`. (mult, ptr, limbs, deg).
-        let a_full = (sel[ROW_A].clone() * act.clone(), a_ptr.clone(), full.clone(), consume_deg);
-        let b_full = (sel[ROW_B].clone() * b_on_next, b_ptr.clone(), full.clone(), consume_deg);
-        let c_full = (sel[ROW_C].clone() * c_on_next, c_ptr.clone(), full.clone(), consume_deg);
-        let p_full = (sel[ROW_P].clone() * act, bound_ptr.clone(), full, consume_deg);
+        let a_full = (ab_sel.clone() * act.clone(), a_ptr.clone(), lo.clone(), consume_deg);
+        let b_full = (ab_sel * b_on, b_ptr.clone(), hi.clone(), consume_deg);
+        let c_full = (cp_sel.clone() * c_on, c_ptr.clone(), lo, consume_deg);
+        let p_full = (cp_sel.clone() * act, bound_ptr.clone(), hi, consume_deg);
 
-        // Flattened LogUp (lqd 1). Four merged consumes (one per operand,
-        // down from eight lo/hi halves) plus the provide fit in three
-        // columns: col 0 hosts `a` alone (the running sum, the +1 gate
-        // forbids a degree-3 fraction there), col 1 the two gated b/c
-        // consumes, col 2 `p`'s consume mixed with the `UintAdd` provide.
+        // Flattened LogUp (lqd 1). Four merged consumes (one per operand)
+        // plus the provide fit in three columns: col 0 hosts `a` alone
+        // (the running sum, the +1 gate forbids a degree-3 fraction
+        // there), col 1 the two gated b/c consumes, col 2 `p`'s consume
+        // mixed with the `UintAdd` provide.
 
         // col 0: a (running sum, one degree-2 consume).
         consume_column(builder, &bound_ptr, vec![a_full], consume_deg);
@@ -651,7 +612,7 @@ where
                                 );
                                 b.insert(
                                     "provide-uintadd",
-                                    neg_mult.clone() * sel[ROW_P].clone(),
+                                    neg_mult.clone() * cp_sel.clone(),
                                     UintAddMsg {
                                         bound_ptr: bound_ptr.clone(),
                                         a_ptr: a_ptr.clone(),
