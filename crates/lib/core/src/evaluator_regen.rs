@@ -4,7 +4,7 @@
 use alloc::{format, string::String, vec::Vec};
 use std::{fs, println};
 
-use miden_air::AIRS;
+use miden_air::{AIRS, HandwrittenMidenAir};
 use miden_constraint_compiler::{
     backend::rust_eval::{AirEvaluator, emit_module},
     ir::capture,
@@ -27,11 +27,14 @@ const HEADER: &str = "\
 
 /// Generate the evaluator-module source from the current constraint definitions.
 fn generate() -> String {
-    // `MidenAir::eval` routes to the hand-written definitions today. When a
-    // generated dispatch lands in `MidenAir::eval`, this capture must switch to the
-    // handwritten-routing wrapper (miden-constraint-compiler crate invariant 1).
-    let captured: Vec<_> =
-        AIRS.iter().copied().map(|air| (air, capture(&air))).collect();
+    // `MidenAir::eval` executes the generated evaluators; the generator must
+    // never consume its own output (miden-constraint-compiler crate invariant 1),
+    // so capture goes through the handwritten-routing wrapper.
+    let captured: Vec<_> = AIRS
+        .iter()
+        .copied()
+        .map(|air| (air, capture(&HandwrittenMidenAir(air))))
+        .collect();
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
     let evaluators: Vec<_> = captured

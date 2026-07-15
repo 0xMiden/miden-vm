@@ -1,12 +1,17 @@
 //! Whole-AIR invariant tests over the real Miden AIRs.
 //!
-//! `MidenAir::eval` routes to the hand-written constraint definitions, so
-//! capturing it here respects the capture invariant.
+//! Capture goes through [`HandwrittenMidenAir`]: `MidenAir::eval` routes to the
+//! generated evaluators, and these tests exercise the capture frontend on the
+//! hand-written definitions (crate invariant 1).
 
-use miden_air::AIRS;
-use miden_constraint_compiler::ir::{
-    Class, Graph, Leaf, Node, capture, capture_into, gate_groups, op_counts,
-};
+use miden_air::{HandwrittenMidenAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
+
+const AIRS: [HandwrittenMidenAir; MIDEN_AIR_COUNT] = [
+    HandwrittenMidenAir(MidenAir::Core),
+    HandwrittenMidenAir(MidenAir::Chiplets),
+    HandwrittenMidenAir(MidenAir::Poseidon2Permutation),
+];
 
 #[test]
 fn capture_is_deterministic() {
@@ -120,18 +125,5 @@ fn cse_only_removes_work() {
         let cse = cse_base.total() + cse_ext.total();
         assert!(cse > 0);
         assert!(cse < naive, "expected real sharing: naive={naive} cse={cse}");
-    }
-}
-
-#[test]
-fn gate_groups_cover_all_roots_exactly_once() {
-    for air in AIRS {
-        let (g, c) = capture(&air);
-        let (groups, ungated) = gate_groups(&g, &c.base_roots);
-        let covered: usize = groups.iter().map(|(_, m)| m.len()).sum::<usize>() + ungated.len();
-        assert_eq!(covered, c.base_roots.len());
-        for (_, members) in &groups {
-            assert!(members.len() >= 2, "singleton groups must fold into ungated");
-        }
     }
 }

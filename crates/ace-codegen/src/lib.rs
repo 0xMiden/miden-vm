@@ -1,8 +1,8 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
 //! The pipeline is:
-//! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
-//! 2. Lower symbolic expressions into a DAG that matches verifier constraints evaluation.
+//! 1. Capture AIR constraints into the `miden-constraint-compiler` IR.
+//! 2. Lower the constraint graph into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
 //! The resulting circuit is intended to run inside the recursive verifier. All
@@ -14,10 +14,9 @@
 //! ```ignore
 //! use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
 //! use miden_air::ChipletsAir;
-//! use miden_core::{Felt, field::QuadFelt};
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm, num_airs: 1 };
-//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ChipletsAir, config)?;
+//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
 //! ```
 //!
 //! Module map (data flow):
@@ -65,7 +64,7 @@ pub mod testing;
 /// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
 /// production consumes the IR lowering through the pipeline.
 #[cfg(any(test, feature = "testing"))]
-pub use crate::dag::{PeriodicColumnData, build_verifier_dag_from_ir};
+pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},

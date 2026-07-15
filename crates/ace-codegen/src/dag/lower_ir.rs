@@ -1,9 +1,86 @@
 //! Lowering from the captured constraint IR to the verifier DAG.
 //!
-//! IR-driven counterpart of [`super::lower`]: the verifier expression is
-//! documented there and built identically here; only the per-constraint input
-//! representation differs (a hash-consed [`Graph`] instead of symbolic
-//! expression trees).
+//! # Verifier expression
+//!
+//! The ACE circuit evaluates the STARK verifier's core check at a single
+//! out-of-domain point `z`. The root expression is:
+//!
+//! ```text
+//!   root = acc - quotient_recomposition * (z^N - 1)
+//! ```
+//!
+//! The verifier accepts if and only if `root == 0`.
+//!
+//! ## Constraint folding
+//!
+//! Given N constraints `C_0, C_1, ..., C_{N-1}`, the folded accumulator `acc`
+//! starts at zero and folds constraints in evaluation order via Horner's method
+//! with the composition challenge `alpha`:
+//!
+//! ```text
+//!   acc <- acc * alpha + C_i
+//!       == C_0 * alpha^(N-1) + C_1 * alpha^(N-2) + ... + C_{N-1}
+//! ```
+//!
+//! Each constraint `C_i(z)` is a symbolic expression over trace openings,
+//! public inputs, periodic columns, and selector polynomials (see below).
+//!
+//! ## Selector polynomials
+//!
+//! Constraints may be multiplied by selector polynomials that restrict them
+//! to specific rows. These selectors are precomputed by the MASM verifier
+//! and supplied as circuit inputs:
+//!
+//! - `is_first = (z^N - 1) / (z - 1)` Active on the first row of the trace.
+//!
+//! - `is_last = (z^N - 1) / (z - g^{-1})` Active on the last row of the trace (g = trace domain
+//!   generator).
+//!
+//! - `is_transition = z - g^{-1}` Active on all rows except the last.
+//!
+//! ## Periodic columns
+//!
+//! Periodic columns are polynomials evaluated at `z_k = z^(N / max_cycle_len)`.
+//! Each column's coefficients are Horner-evaluated at `z_k` (or a power of
+//! `z_k` for columns whose period divides `max_cycle_len`).
+//!
+//! ## Quotient recomposition
+//!
+//! The quotient polynomial `Q(x)` is split into `k` chunks `Q_0, ..., Q_{k-1}`,
+//! where chunk `Q_i` is evaluated on a coset shifted by `s_i`. To recover the
+//! combined quotient at `z^N`, barycentric interpolation over the `k` coset
+//! shifts is used:
+//!
+//! ```text
+//!   s_i      = s0 * f^i              (coset shifts)
+//!   delta_i  = z^N - s_i             (eval point minus each shift)
+//!   w_i      = weight0 * f^i         (barycentric weights)
+//!   zps_i    = w_i * prod_{j != i} delta_j
+//!
+//!   quotient_recomposition = sum_{i=0}^{k-1} zps_i * Q_i(z)
+//! ```
+//!
+//! where `s0 = offset^N`, `f = h^N` (h = LDE domain generator),
+//! `weight0 = 1 / (k * s0^{k-1})`, and `Q_i(z)` is reconstructed from its
+//! base-field coordinates evaluations.
+//!
+//! ## Stark variables summary
+//!
+//! Each stark variable and where it enters the expression:
+//!
+//! ```text
+//!   alpha          Composition challenge. Horner accumulator for constraint folding.
+//!   z^N            Trace-length power. Vanishing factor and delta base in quotient
+//!                  recomposition.
+//!   z_k            Periodic column evaluation point (z^(N / max_cycle_len)).
+//!   is_first       Precomputed selector (z^N - 1) / (z - 1).
+//!   is_last        Precomputed selector (z^N - 1) / (z - g^{-1}).
+//!   is_transition  Precomputed selector z - g^{-1}.
+//!   reserved       Word-alignment padding slot (kept zero).
+//!   weight0        First barycentric weight for quotient recomposition.
+//!   f              Chunk shift ratio h^N. Generates coset shifts and weights.
+//!   s0             First coset shift offset^N. Base for shifted evaluation points.
+//! ```
 //!
 //! # Digest-critical invariant
 //!
@@ -28,7 +105,7 @@ use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
 use super::{
     builder::DagBuilder,
     ir::{AceDag, NodeId, PeriodicColumnData},
-    lower::build_periodic_nodes,
+    periodic::build_periodic_nodes,
 };
 use crate::{
     layout::{InputKey, InputLayout},
@@ -36,12 +113,8 @@ use crate::{
     randomness,
 };
 
-/// Build the verifier-equivalent root expression DAG from a captured
-/// constraint graph.
-///
-/// Equivalent to [`super::lower::build_verifier_dag`] with the per-constraint
-/// lowering driven by the IR; see the module docs there for the expression
-/// being built.
+/// Build the verifier-equivalent root expression DAG (see the module docs)
+/// from a captured constraint graph.
 pub fn build_verifier_dag_from_ir(
     graph: &Graph,
     constraints: &CapturedConstraints,

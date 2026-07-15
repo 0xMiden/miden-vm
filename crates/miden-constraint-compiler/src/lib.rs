@@ -8,9 +8,10 @@
 //!
 //! # Invariants
 //!
-//! 1. **Capture consumes only hand-written definitions.** Generated artifacts are never inputs to
-//!    capture; otherwise regeneration is self-referential and the chain back to the source of truth
-//!    is lost.
+//! 1. **Capture that feeds artifacts or oracle anchors consumes only hand-written definitions** — a
+//!    generated artifact as capture input makes regeneration self-referential and severs the chain
+//!    back to the source of truth. Capturing generated code is legitimate only as the subject under
+//!    test (drift tests compare it against a hand-written capture).
 //! 2. **IR node ids are internal.** Ids are deterministic (dense, in walk order) but not part of
 //!    any artifact contract. Digest-visible ordering, such as ACE `DagBuilder` interning order, is
 //!    owned by each backend.

@@ -5,18 +5,14 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that matches verifier evaluation.
 
-use miden_crypto::{
-    field::{Algebra, ExtensionField, Field, TwoAdicField},
-    stark::air::{
-        LiftedAir,
-        symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
-    },
-};
+use miden_constraint_compiler::ir::capture;
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::stark::air::LiftedAir;
 
 use crate::{
     AceError,
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, PeriodicColumnData, build_verifier_dag},
+    dag::{AceDag, PeriodicColumnData, build_verifier_dag_from_ir},
     layout::{InputCounts, InputLayout},
 };
 
@@ -53,30 +49,34 @@ pub struct AceArtifacts<EF> {
 }
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
-pub fn build_ace_circuit_for_air<A, F, EF>(
+///
+/// This builds the constraint-evaluation DAG, validates layout invariants, and
+/// emits the off-VM circuit representation. The circuit performs the constraint
+/// evaluation check at the out-of-domain point z.
+///
+/// The constraints are captured from `air.eval`: callers producing production
+/// artifacts must pass an AIR whose `eval` routes to the hand-written
+/// definitions (e.g. `HandwrittenMidenAir`).
+pub fn build_ace_circuit_for_air<A>(
     air: &A,
     config: AceConfig,
-) -> Result<AceCircuit<EF>, AceError>
+) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
-    let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
+    let artifacts = build_ace_dag_for_air(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
 }
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
-pub fn build_ace_dag_for_air<A, F, EF>(
+///
+/// See [`build_ace_circuit_for_air`] for the capture invariant on `air`.
+pub fn build_ace_dag_for_air<A>(
     air: &A,
     config: AceConfig,
-) -> Result<AceArtifacts<EF>, AceError>
+) -> Result<AceArtifacts<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     if config.num_airs == 0 {
         return Err(AceError::InvalidInputLayout {
@@ -85,7 +85,7 @@ where
     }
 
     let periodic_columns = air.periodic_columns();
-    let counts = input_counts_for_air::<A, F, EF>(air, config)?;
+    let counts = input_counts_for_air(air, config)?;
     let layout = match (config.layout, config.num_airs >= 2) {
         (LayoutKind::Native, false) => InputLayout::new(counts),
         (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
@@ -94,39 +94,17 @@ where
     };
     layout.validate();
 
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: counts.width,
-        num_public_values: counts.num_public,
-        permutation_width: counts.aux_width,
-        num_permutation_challenges: counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: periodic_columns.len(),
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
-
+    let (graph, constraints) = capture(air);
     let periodic_data = (!periodic_columns.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns.to_vec()));
-    let dag = build_verifier_dag::<F, EF>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
-        &layout,
-        periodic_data.as_ref(),
-    );
+        .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
+    let dag = build_verifier_dag_from_ir(&graph, &constraints, &layout, periodic_data.as_ref());
 
     Ok(AceArtifacts { layout, dag })
 }
 
-fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
+fn input_counts_for_air<A>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: Field,
-    EF: ExtensionField<F>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     if config.num_quotient_chunks == 0 {
         return Err(AceError::InvalidInputLayout {

@@ -1,8 +1,9 @@
 //! Symbolic capture: run an AIR's `eval` against a recording builder and intern the
 //! resulting constraint expressions into a [`Graph`].
 //!
-//! Per crate invariant 1, the AIR passed here must route `eval` to the hand-written
-//! constraint definitions, never to a generated evaluator.
+//! Per crate invariant 1, capture that feeds artifact generation or oracle
+//! anchoring must receive an AIR whose `eval` routes to the hand-written
+//! constraint definitions.
 //!
 //! The symbolic expressions form `Arc` trees; the walk memoizes on `Arc` pointer
 //! identity (valid because every `Arc` outlives the walk, so no address is reused)

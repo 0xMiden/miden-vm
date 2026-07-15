@@ -1,8 +1,6 @@
-//! Analyses over the constraint graph: op counting and gate grouping.
+//! Analyses over the constraint graph.
 
-use std::collections::HashMap;
-
-use super::graph::{Class, Graph, Node, NodeId, OpKind};
+use super::graph::{Class, Graph, Node, OpKind};
 
 /// Field-operation counts, split by kind.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,86 +44,9 @@ pub fn op_counts(graph: &Graph) -> (OpCounts, OpCounts) {
     (base, ext)
 }
 
-/// Gate grouping over constraint roots: assign each mul-root to its most-shared
-/// factor. Returns `(groups, ungated)` where each group is
-/// `(gate id, members [(local constraint index, inner id)])` with two or more
-/// members, and `ungated` holds `(local index, root id)` for everything else.
-///
-/// Grouping exploits `sum_j a_j * (s * E_j) = s * sum_j a_j * E_j`, which is
-/// bit-exact (field addition is associative). A gate product that is also a shared
-/// subexpression of other constraints stays live regardless, so grouping only
-/// removes the muls of products nothing else uses.
-#[allow(clippy::type_complexity)]
-pub fn gate_groups(
-    graph: &Graph,
-    roots: &[NodeId],
-) -> (Vec<(NodeId, Vec<(usize, NodeId)>)>, Vec<(usize, NodeId)>) {
-    let mut factor_counts: HashMap<NodeId, usize> = HashMap::new();
-    for &r in roots {
-        if let Some((x, y)) = graph.mul_children(r) {
-            *factor_counts.entry(x).or_default() += 1;
-            *factor_counts.entry(y).or_default() += 1;
-        }
-    }
-    let mut groups: Vec<(NodeId, Vec<(usize, NodeId)>)> = Vec::new();
-    let mut index_of: HashMap<NodeId, usize> = HashMap::new();
-    let mut ungated: Vec<(usize, NodeId)> = Vec::new();
-    for (j, &r) in roots.iter().enumerate() {
-        let Some((x, y)) = graph.mul_children(r) else {
-            ungated.push((j, r));
-            continue;
-        };
-        let (gate, inner) = if factor_counts[&x] >= factor_counts[&y] {
-            (x, y)
-        } else {
-            (y, x)
-        };
-        let gi = *index_of.entry(gate).or_insert_with(|| {
-            groups.push((gate, Vec::new()));
-            groups.len() - 1
-        });
-        groups[gi].1.push((j, inner));
-    }
-    let (kept, single): (Vec<_>, Vec<_>) = groups.into_iter().partition(|(_, m)| m.len() >= 2);
-    for (_, members) in single {
-        let (j, _) = members[0];
-        ungated.push((j, roots[j]));
-    }
-    ungated.sort_unstable();
-    (kept, ungated)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{super::graph::Leaf, *};
-
-    /// Roots `s*a`, `s*b`, `t*a`, `c`: factor counts are s=2, a=2, t=1, b=1, so the
-    /// first two group under `s` (`s*a` ties s-vs-a and keeps its left factor), the
-    /// third picks `a` but stays a singleton (folded into ungated), and `c` is not
-    /// a mul at all.
-    #[test]
-    fn gate_groups_pick_most_shared_factor_and_cover_roots() {
-        let mut b = Graph::builder();
-        let s = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let t = b.leaf(Leaf::Main { offset: 0, index: 1 });
-        let a = b.leaf(Leaf::Main { offset: 0, index: 2 });
-        let bb = b.leaf(Leaf::Main { offset: 0, index: 3 });
-        let c = b.leaf(Leaf::Main { offset: 0, index: 4 });
-        let (sa, _) = b.op(Class::Base, OpKind::Mul, s, Some(a));
-        let (sb, _) = b.op(Class::Base, OpKind::Mul, s, Some(bb));
-        let (ta, _) = b.op(Class::Base, OpKind::Mul, t, Some(a));
-        let roots = [sa, sb, ta, c];
-        let g = b.freeze();
-
-        let (groups, ungated) = gate_groups(&g, &roots);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].0, s);
-        assert_eq!(groups[0].1, vec![(0, a), (1, bb)]);
-        assert_eq!(ungated, vec![(2, ta), (3, c)]);
-
-        let covered: usize = groups.iter().map(|(_, m)| m.len()).sum::<usize>() + ungated.len();
-        assert_eq!(covered, roots.len());
-    }
 
     #[test]
     fn op_counts_split_by_class_over_unique_nodes() {

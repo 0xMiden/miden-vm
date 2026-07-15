@@ -192,7 +192,7 @@ fn test_verifier_dag_matches_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -240,7 +240,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -287,7 +287,7 @@ fn test_emitted_circuit_matches_dag_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
 
@@ -306,7 +306,7 @@ fn pipeline_rejects_zero_airs() {
         num_airs: 0,
     };
 
-    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    let err = build_ace_dag_for_air(&air, config).unwrap_err();
     assert!(
         matches!(err, crate::AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
@@ -322,7 +322,7 @@ fn pipeline_rejects_zero_quotient_chunks() {
         num_airs: 1,
     };
 
-    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    let err = build_ace_dag_for_air(&air, config).unwrap_err();
     assert!(
         matches!(err, crate::AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
@@ -337,7 +337,7 @@ fn test_encoded_circuit_structure() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
 
