@@ -393,6 +393,10 @@ pub fn generate_trace(
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
     let n_real: usize = requires.exprs.iter().map(|e| e.rows.len()).sum();
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT EcMsm {n_real}");
+    }
     let height = n_real.max(1).next_power_of_two().max(2);
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
 

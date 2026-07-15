@@ -353,6 +353,11 @@ pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowM
 /// `ptr = row + 1` on every row, so pads carry their ptr too — they are
 /// simply rows whose `mult` (and params) stay zero, touching no bus.
 fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = requires.groups.len();
+        std::eprintln!("REAL_HEIGHT EcGroups {real}");
+    }
     let height = requires.groups.len().next_power_of_two().max(2);
     let mut vals = Vec::with_capacity(height * G_NUM_MAIN_COLS);
 
@@ -378,6 +383,11 @@ fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
 /// (ptr = row + 1), padded to a power-of-two height (min 2) with
 /// all-zero (`act = 0`) rows that touch no bus.
 fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = requires.points.len();
+        std::eprintln!("REAL_HEIGHT EcPointStore {real}");
+    }
     let height = requires.points.len().next_power_of_two().max(2);
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
 

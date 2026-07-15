@@ -112,6 +112,10 @@ impl KeccakNodeInvocation {
 /// no bus.
 pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_rows() as usize;
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT ChunkNode_node {active_rows}");
+    }
     let height = active_rows.next_power_of_two().max(2);
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 

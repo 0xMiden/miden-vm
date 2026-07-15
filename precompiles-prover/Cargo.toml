@@ -49,4 +49,6 @@ wincode.workspace = true
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
 k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std"] }
+miden-vm = { path = "../miden-vm" }
+miden-vm-precompiles-bench = { path = "../benches/precompiles-bench" }
 rand = { workspace = true, features = ["std_rng"] }

@@ -947,6 +947,10 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     let n_rows = 1
         + rows.iter().map(|(n, _)| node_rows(&n.kind)).sum::<usize>()
         + usize::from(zero_mult > 0);
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT TranscriptEval {n_rows}");
+    }
     let height = n_rows.next_power_of_two().max(2);
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 

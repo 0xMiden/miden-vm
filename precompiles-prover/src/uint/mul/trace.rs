@@ -350,6 +350,11 @@ pub fn generate_trace(
     store: &mut UintStoreRequires,
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = requires.ops.len() * PERIOD;
+        std::eprintln!("REAL_HEIGHT UintStoreMul_mul {real}");
+    }
     let height = (requires.ops.len().max(1) * PERIOD).next_power_of_two();
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
     for (op, mult) in &requires.ops {

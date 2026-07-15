@@ -972,6 +972,11 @@ pub fn generate_trace(
     // Whole permutations split across lanes in contiguous blocks; the busiest
     // lane sets the height.
     let perms_per_lane = num_perms.max(1).div_ceil(NUM_LANES);
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = perms_per_lane * active_rows_per_cycle;
+        std::eprintln!("REAL_HEIGHT Round {real}");
+    }
     let height = (perms_per_lane * PERM_CYCLE).next_power_of_two().max(2);
     let program = slots();
 

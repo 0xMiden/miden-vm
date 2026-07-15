@@ -383,6 +383,10 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 /// trace.
 pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_active_rows() as usize;
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT KeccakSponge {active_rows}");
+    }
     let height = active_rows.next_power_of_two().max(SPONGE_PERIOD);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);

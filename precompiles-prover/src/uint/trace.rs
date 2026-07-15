@@ -327,6 +327,11 @@ pub(crate) fn generate_trace_padded_to(
 ) -> RowMajorMatrix<Felt> {
     let requires = &requires;
     let n_real = requires.uints.len();
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = n_real * PERIOD;
+        std::eprintln!("REAL_HEIGHT UintStoreMul_store {real}");
+    }
     let blocks = padded_blocks(requires, min_blocks);
     let demand = &requires.demand;
 

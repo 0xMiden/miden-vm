@@ -2509,6 +2509,8 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
+ "miden-vm",
+ "miden-vm-precompiles-bench",
  "rand 0.10.2",
  "ruint",
  "serde",
