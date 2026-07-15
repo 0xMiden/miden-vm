@@ -1612,6 +1612,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-assembly-syntax",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",
