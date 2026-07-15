@@ -1,16 +1,15 @@
 //! UintStoreMul chiplet — the uint store and the scaled-MAC relation
 //! sharing one row range.
 //!
-//! Store's period (8) equals mul's period (8), so both progress
-//! **simultaneously**, in lockstep, on the same rows in disjoint column
-//! ranges: main columns 0..10 are exactly
-//! [`UintStoreAir`](crate::uint)'s own layout (unchanged), columns
-//! 10..36 are exactly [`UintMulAir`](crate::uint::mul)'s own layout
-//! (unchanged, shifted by [`MUL_COL_OFFSET`]). Every 8-row cycle, store
-//! completes 1 of its own 8-row blocks while mul completes 1 of its own
-//! 8-row block — both for real, no mode selector, no cross-gating. Each
-//! side keeps its own constraint degree (`lqd = 1`); nothing here raises
-//! it.
+//! Store's period (4) divides mul's period (8), so both progress
+//! **simultaneously** on the same rows in disjoint column ranges: main
+//! columns 0..18 are exactly [`UintStoreAir`](crate::uint)'s own layout
+//! (unchanged), columns 18..44 are exactly
+//! [`UintMulAir`](crate::uint::mul)'s own layout (unchanged, shifted by
+//! [`MUL_COL_OFFSET`]). Every 8-row cycle, store completes 2 of its own
+//! 4-row blocks while mul completes 1 of its own 8-row block — both for
+//! real, no mode selector, no cross-gating. Each side keeps its own
+//! constraint degree (`lqd = 1`); nothing here raises it.
 //!
 //! Exactly one running-sum column is committed per AIR, so column 0 is
 //! store's own anchor fraction, unchanged; mul's own anchor fraction
@@ -66,44 +65,42 @@ use crate::{
 // COLUMN LAYOUT
 // ================================================================================================
 
-// STORE — main cols 0..10, its own original numbering, unshifted.
-pub const NUM_LIMBS: usize = 8;
-pub const COL_PTR: usize = 8;
-pub const COL_BOUND_PTR: usize = 9;
-pub const STORE_NUM_MAIN_COLS: usize = 10;
-pub const HUB_CELL_UINTVAL_MULT: usize = 0;
-pub const HUB_CELL_UINTLIMBS_MULT: usize = 1;
-pub const TERM_CELL_GAP: usize = 0;
-pub const CARRY_CELLS_BEGIN: usize = 4;
-/// Store's own block period: one uint = 8 rows.
-pub const STORE_PERIOD: usize = 8;
+// STORE — main cols 0..18, its own original numbering, unshifted.
+pub const NUM_CELLS: usize = 16;
+pub const COL_PTR: usize = 16;
+pub const COL_BOUND_PTR: usize = 17;
+pub const STORE_NUM_MAIN_COLS: usize = 18;
+pub const HUB_CELL_UINTVAL_MULT: usize = 8;
+pub const HUB_CELL_UINTLIMBS_MULT: usize = 9;
+pub const TERM_CELL_GAP: usize = 15;
+pub const CARRY_LO_BEGIN: usize = 4;
+pub const CARRY_HI_BEGIN: usize = 12;
+/// Store's own block period: one uint = 4 rows.
+pub const STORE_PERIOD: usize = 4;
 
 const PCOL_V_LO: usize = 0;
-const PCOL_HUB: usize = 1;
-const PCOL_V_HI: usize = 2;
-const PCOL_COMP_LO: usize = 3;
-const PCOL_COMP_HI: usize = 4;
-const PCOL_BOUND_LO: usize = 5;
-const PCOL_BOUND_HI: usize = 6;
-const PCOL_TERM: usize = 7;
+const PCOL_V_HI: usize = 1;
+const PCOL_COMP: usize = 2;
+const PCOL_BOUND: usize = 3;
 
-// MUL — main cols 10..36, its own original numbering shifted by
+// MUL — main cols 18..44, its own original numbering shifted by
 // `MUL_COL_OFFSET`.
 pub const MUL_COL_OFFSET: usize = STORE_NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = STORE_NUM_MAIN_COLS + MUL_NUM_MAIN_COLS;
-/// The shared block period: `lcm(8, 8) = 8` — store and mul now run in
-/// lockstep, one block of each per cycle.
+/// The shared block period: `lcm(4, 8) = 8` — store's period divides it,
+/// so both progress every cycle.
 pub const PERIOD: usize = MUL_PERIOD;
 const _: () = assert!(
-    MUL_PERIOD == STORE_PERIOD,
-    "the lockstep periodic-column tiling below assumes equal periods"
+    MUL_PERIOD.is_multiple_of(STORE_PERIOD),
+    "the tiled periodic columns below assume store's period divides mul's"
 );
+/// How many times store's own period tiles within the shared period.
+const STORE_TILE_COUNT: usize = MUL_PERIOD / STORE_PERIOD;
 
 // Periodic columns: mul's 8 one-hots + its `S_KEEP` gate first (indices
-// 0..9, unchanged from mul's own reading convention), then store's 8
-// one-hots (indices 9..17) — a straight concatenation now that both
-// sides share the same period, no more tiling.
+// 0..9, unchanged from mul's own reading convention), then store's 4
+// one-hots (period 4, tiled twice over the shared period-8 domain).
 const PCOL_MUL_S_KEEP: usize = MUL_PERIOD;
 const PCOL_STORE_ROLE_BASE: usize = MUL_PERIOD + 1;
 const NUM_PERIODIC: usize = MUL_PERIOD + 1 + STORE_PERIOD;
@@ -163,8 +160,10 @@ impl BaseAir<Felt> for UintStoreMulAir {
         }
         cols.push(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect());
         for role in 0..STORE_PERIOD {
-            let mut c = vec![Felt::ZERO; STORE_PERIOD];
-            c[role] = Felt::ONE;
+            let mut c = vec![Felt::ZERO; MUL_PERIOD];
+            for tile in 0..STORE_TILE_COUNT {
+                c[role + tile * STORE_PERIOD] = Felt::ONE;
+            }
             cols.push(c);
         }
         cols
@@ -200,10 +199,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             let local: [AB::Var; STORE_NUM_MAIN_COLS] = current_main(builder.main(), 0);
             let next: [AB::Var; STORE_NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-            let (v_lo, v_hi, comp_lo, comp_hi, bound_lo, bound_hi, term_sel): (
-                AB::Expr,
-                AB::Expr,
-                AB::Expr,
+            let (v_lo_sel, v_hi_sel, comp_sel, bound_sel): (
                 AB::Expr,
                 AB::Expr,
                 AB::Expr,
@@ -214,11 +210,8 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
                 (
                     p[b + PCOL_V_LO].into(),
                     p[b + PCOL_V_HI].into(),
-                    p[b + PCOL_COMP_LO].into(),
-                    p[b + PCOL_COMP_HI].into(),
-                    p[b + PCOL_BOUND_LO].into(),
-                    p[b + PCOL_BOUND_HI].into(),
-                    p[b + PCOL_TERM].into(),
+                    p[b + PCOL_COMP].into(),
+                    p[b + PCOL_BOUND].into(),
                 )
             };
 
@@ -235,51 +228,60 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
                 next_main::<_, AB::VarEF, 1>(builder.permutation(), STORE_REG_ID)[0].into();
 
             let two16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-            let mut lo_recomb = AB::ExprEF::ZERO;
-            let mut hi_recomb = AB::ExprEF::ZERO;
-            let mut lo_direct = AB::ExprEF::ZERO;
-            let mut hi_direct = AB::ExprEF::ZERO;
+            let mut recomb_lo07 = AB::ExprEF::ZERO;
+            let mut recomb_hi07 = AB::ExprEF::ZERO;
+            let mut recomb_hi815 = AB::ExprEF::ZERO;
+            let mut direct_lo = AB::ExprEF::ZERO;
+            let mut direct_hi = AB::ExprEF::ZERO;
             for k in 0..4 {
-                let r_k: AB::Expr =
+                let r07: AB::Expr =
                     AB::Expr::from(local[2 * k]) + two16.clone() * AB::Expr::from(local[2 * k + 1]);
-                let d_k: AB::Expr = AB::Expr::from(local[k]);
-                lo_recomb += bp[k].clone() * r_k.clone();
-                hi_recomb += bp[4 + k].clone() * r_k;
-                lo_direct += bp[k].clone() * d_k.clone();
-                hi_direct += bp[4 + k].clone() * d_k;
+                let r815: AB::Expr = AB::Expr::from(local[8 + 2 * k])
+                    + two16.clone() * AB::Expr::from(local[8 + 2 * k + 1]);
+                recomb_lo07 += bp[k].clone() * r07.clone();
+                recomb_hi07 += bp[4 + k].clone() * r07;
+                recomb_hi815 += bp[4 + k].clone() * r815;
+                direct_lo += bp[k].clone() * AB::Expr::from(local[k]);
+                direct_hi += bp[4 + k].clone() * AB::Expr::from(local[8 + k]);
             }
 
             let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
             let mut carry_lo_term = AB::ExprEF::ZERO;
             for j in 0..4 {
                 let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-                carry_lo_term += weight * AB::Expr::from(local[CARRY_CELLS_BEGIN + j]);
+                carry_lo_term += weight * AB::Expr::from(local[CARRY_LO_BEGIN + j]);
             }
             let mut carry_hi_term = AB::ExprEF::ZERO;
             for j in 4..7 {
                 let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-                carry_hi_term += weight * AB::Expr::from(local[CARRY_CELLS_BEGIN + j - 4]);
+                carry_hi_term += weight * AB::Expr::from(local[CARRY_HI_BEGIN + (j - 4)]);
             }
 
-            let contrib: AB::ExprEF = lo_recomb * (v_lo + comp_lo)
-                + hi_recomb * (v_hi + comp_hi)
-                + (carry_lo_term - lo_direct) * bound_lo.clone()
-                + (carry_hi_term - hi_direct) * bound_hi.clone();
+            let contrib: AB::ExprEF = recomb_lo07.clone() * (v_lo_sel.clone() + comp_sel.clone())
+                + recomb_hi07 * v_hi_sel.clone()
+                + recomb_hi815 * comp_sel.clone()
+                + (carry_lo_term.clone() - direct_lo.clone() + carry_hi_term.clone()
+                    - direct_hi.clone())
+                    * bound_sel.clone();
 
             builder.when_first_row().assert_zero_ext(id.clone());
             builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-            builder.assert_zero_ext(id * term_sel.clone());
 
-            for &cell in local.iter().take(NUM_LIMBS).skip(CARRY_CELLS_BEGIN) {
-                let lj: AB::Expr = cell.into();
-                builder.assert_zero(bound_lo.clone() * lj.clone() * (AB::Expr::ONE - lj));
+            let bound_own: AB::ExprEF = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
+            builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
+
+            for &cell in
+                [CARRY_LO_BEGIN, CARRY_LO_BEGIN + 1, CARRY_LO_BEGIN + 2, CARRY_LO_BEGIN + 3].iter()
+            {
+                let lj: AB::Expr = local[cell].into();
+                builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
             }
-            for &cell in local.iter().take(NUM_LIMBS - 1).skip(CARRY_CELLS_BEGIN) {
-                let lj: AB::Expr = cell.into();
-                builder.assert_zero(bound_hi.clone() * lj.clone() * (AB::Expr::ONE - lj));
+            for &cell in [CARRY_HI_BEGIN, CARRY_HI_BEGIN + 1, CARRY_HI_BEGIN + 2].iter() {
+                let lj: AB::Expr = local[cell].into();
+                builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
             }
 
-            let not_term: AB::Expr = AB::Expr::ONE - term_sel.clone();
+            let not_term: AB::Expr = AB::Expr::ONE - bound_sel.clone();
             for col in [COL_PTR, COL_BOUND_PTR] {
                 let here: AB::Expr = local[col].into();
                 let there: AB::Expr = next[col].into();
@@ -291,7 +293,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             let ptr_next: AB::Expr = next[COL_PTR].into();
             builder
                 .when_transition()
-                .assert_zero(term_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
+                .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
         }
 
         // ---- MUL (verbatim from `UintMulAir::eval`, cols `MUL_COL_OFFSET`..`NUM_MAIN_COLS`) ----
@@ -465,27 +467,14 @@ where
         // STORE's own window.
         let local_s: [LB::Var; STORE_NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next_s: [LB::Var; STORE_NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let (v_lo, hub_sel, v_hi, comp_lo, comp_hi, bound_lo, bound_hi, term_sel): (
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-            LB::Expr,
-        ) = {
+        let (v_lo_sel, v_hi_sel, comp_sel, bound_sel): (LB::Expr, LB::Expr, LB::Expr, LB::Expr) = {
             let p = builder.periodic_values();
             let b = PCOL_STORE_ROLE_BASE;
             (
                 p[b + PCOL_V_LO].into(),
-                p[b + PCOL_HUB].into(),
                 p[b + PCOL_V_HI].into(),
-                p[b + PCOL_COMP_LO].into(),
-                p[b + PCOL_COMP_HI].into(),
-                p[b + PCOL_BOUND_LO].into(),
-                p[b + PCOL_BOUND_HI].into(),
-                p[b + PCOL_TERM].into(),
+                p[b + PCOL_COMP].into(),
+                p[b + PCOL_BOUND].into(),
             )
         };
         let store_ptr: LB::Expr = local_s[COL_PTR].into();
@@ -495,16 +484,13 @@ where
         let two16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
         let recomb: [LB::Expr; 4] =
             array::from_fn(|k| local_s[2 * k].into() + two16.clone() * local_s[2 * k + 1].into());
-        let recomb_next: [LB::Expr; 4] =
-            array::from_fn(|k| next_s[2 * k].into() + two16.clone() * next_s[2 * k + 1].into());
-        let direct: [LB::Expr; 4] = array::from_fn(|k| local_s[k].into());
+        let direct_lo: [LB::Expr; 4] = array::from_fn(|k| local_s[k].into());
+        let direct_hi: [LB::Expr; 4] = array::from_fn(|k| local_s[8 + k].into());
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 1, u: 1 };
         let pair_deg = Deg { v: 3, u: 2 };
-        let range_gate: LB::Expr = v_lo.clone() + v_hi.clone() + comp_lo.clone() + comp_hi.clone();
         let raw: [LB::Expr; 8] = array::from_fn(|j| local_s[j].into());
-        let raw_next: [LB::Expr; 8] = array::from_fn(|j| next_s[j].into());
         let neg_limbs_mult_next: LB::Expr = LB::Expr::ZERO - next_s[HUB_CELL_UINTLIMBS_MULT].into();
         let neg_limbs_mult_here: LB::Expr =
             LB::Expr::ZERO - local_s[HUB_CELL_UINTLIMBS_MULT].into();
@@ -548,7 +534,7 @@ where
                             |b| {
                                 b.insert(
                                     "provide-lo",
-                                    neg_mult_next * v_lo.clone(),
+                                    neg_mult_next * v_lo_sel.clone(),
                                     UintValMsg {
                                         ptr: store_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
@@ -567,7 +553,7 @@ where
             provide_deg,
         );
 
-        // cols 1..8: store's original cols 1..7, unchanged.
+        // cols 1..: store's own remaining columns, unchanged in shape.
         builder.next_column(
             |col| {
                 col.group(
@@ -579,23 +565,23 @@ where
                             |b| {
                                 b.insert(
                                     "provide-hi",
-                                    neg_mult_here * hub_sel.clone(),
+                                    neg_mult_here * v_hi_sel.clone(),
                                     UintValMsg {
                                         ptr: store_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
                                         offset: LB::Expr::ONE,
-                                        limbs: recomb_next.clone(),
+                                        limbs: recomb.clone(),
                                     },
                                     provide_deg,
                                 );
                                 b.insert(
                                     "consume-lo",
-                                    bound_lo.clone(),
+                                    bound_sel.clone(),
                                     UintValMsg {
                                         ptr: store_bound_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
                                         offset: LB::Expr::ZERO,
-                                        limbs: direct.clone(),
+                                        limbs: direct_lo.clone(),
                                     },
                                     consume_deg,
                                 );
@@ -619,18 +605,18 @@ where
                             |b| {
                                 b.insert(
                                     "consume-hi",
-                                    bound_hi.clone(),
+                                    bound_sel.clone(),
                                     UintValMsg {
                                         ptr: store_bound_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
                                         offset: LB::Expr::ONE,
-                                        limbs: direct.clone(),
+                                        limbs: direct_hi.clone(),
                                     },
                                     consume_deg,
                                 );
                                 b.insert(
                                     "range16-gap",
-                                    term_sel.clone(),
+                                    bound_sel.clone(),
                                     Range16Msg { w: local_s[TERM_CELL_GAP].into() },
                                     consume_deg,
                                 );
@@ -643,9 +629,20 @@ where
             },
             pair_deg,
         );
-        for pair in 0..4usize {
-            let (j0, j1) = (2 * pair, 2 * pair + 1);
-            let (g0, g1) = (range_gate.clone(), range_gate.clone());
+        let store_cell_gate = |cell: usize| -> LB::Expr {
+            if cell < 8 {
+                v_lo_sel.clone() + v_hi_sel.clone() + comp_sel.clone()
+            } else {
+                comp_sel.clone()
+            }
+        };
+        let store_cell_specs: Vec<(LB::Expr, usize)> =
+            (0..NUM_CELLS).map(|cell| (store_cell_gate(cell), cell)).collect();
+        for group in store_cell_specs
+            .chunks(2)
+            .map(<[(<LB as LookupBuilder>::Expr, usize)]>::to_vec)
+            .collect::<Vec<_>>()
+        {
             builder.next_column(
                 |col| {
                     col.group(
@@ -655,18 +652,14 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    b.insert(
-                                        "range16-limb",
-                                        g0,
-                                        Range16Msg { w: local_s[j0].into() },
-                                        rc_deg,
-                                    );
-                                    b.insert(
-                                        "range16-limb",
-                                        g1,
-                                        Range16Msg { w: local_s[j1].into() },
-                                        rc_deg,
-                                    );
+                                    for (mult, cell) in group {
+                                        b.insert(
+                                            "range16-limb",
+                                            mult,
+                                            Range16Msg { w: local_s[cell].into() },
+                                            rc_deg,
+                                        );
+                                    }
                                 },
                                 pair_deg,
                             );
@@ -688,23 +681,23 @@ where
                             |b| {
                                 b.insert(
                                     "provide-raw-lo",
-                                    neg_limbs_mult_next * v_lo,
+                                    neg_limbs_mult_next * v_lo_sel,
                                     UintLimbsMsg {
                                         ptr: store_ptr.clone(),
                                         bound_ptr: store_bound_ptr.clone(),
                                         offset: LB::Expr::ZERO,
-                                        limbs: raw,
+                                        limbs: raw.clone(),
                                     },
                                     provide_deg,
                                 );
                                 b.insert(
                                     "provide-raw-hi",
-                                    neg_limbs_mult_here * hub_sel,
+                                    neg_limbs_mult_here * v_hi_sel,
                                     UintLimbsMsg {
                                         ptr: store_ptr,
                                         bound_ptr: store_bound_ptr,
                                         offset: LB::Expr::ONE,
-                                        limbs: raw_next,
+                                        limbs: raw,
                                     },
                                     provide_deg,
                                 );

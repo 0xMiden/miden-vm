@@ -22,8 +22,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CARRY_CELLS_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_NUM_MAIN_COLS, STORE_PERIOD,
-    UintStoreMulAir,
+    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_NUM_MAIN_COLS,
+    STORE_PERIOD, UintStoreMulAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -124,30 +124,45 @@ pub(crate) fn build_aux(
 
         // STORE contrib.
         let store_cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        let store_contrib: QuadFelt = match r % STORE_PERIOD {
-            0 | 3 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+        let recomb_lo07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = store_cell(2 * k) + two16 * store_cell(2 * k + 1);
                 s + bp8[k] * QuadFelt::from(rk)
-            }),
-            2 | 4 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+            })
+        };
+        let recomb_hi07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = store_cell(2 * k) + two16 * store_cell(2 * k + 1);
                 s + bp8[4 + k] * QuadFelt::from(rk)
-            }),
-            5 => (0..4).fold(QuadFelt::ZERO, |s, j| {
-                let w = bp8[j + 1] - bp8[j] * t32;
-                s + w * QuadFelt::from(store_cell(CARRY_CELLS_BEGIN + j))
-                    - bp8[j] * QuadFelt::from(store_cell(j))
-            }),
-            6 => (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let carry = if k < 3 {
-                    let j = 4 + k;
-                    (bp8[j + 1] - bp8[j] * t32) * QuadFelt::from(store_cell(CARRY_CELLS_BEGIN + k))
-                } else {
-                    QuadFelt::ZERO
-                };
-                s + carry - bp8[4 + k] * QuadFelt::from(store_cell(k))
-            }),
-            _ => QuadFelt::ZERO,
+            })
+        };
+        let recomb_hi815 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
+                let rk = store_cell(8 + 2 * k) + two16 * store_cell(8 + 2 * k + 1);
+                s + bp8[4 + k] * QuadFelt::from(rk)
+            })
+        };
+        let store_contrib: QuadFelt = match r % STORE_PERIOD {
+            0 => recomb_lo07(),
+            1 => recomb_hi07(),
+            2 => recomb_lo07() + recomb_hi815(),
+            3 => {
+                let carry_lo = (0..4).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp8[j + 1] - bp8[j] * t32;
+                    s + w * QuadFelt::from(store_cell(CARRY_LO_BEGIN + j))
+                });
+                let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp8[4 + j + 1] - bp8[4 + j] * t32;
+                    s + w * QuadFelt::from(store_cell(CARRY_HI_BEGIN + j))
+                });
+                let direct_lo =
+                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp8[k] * QuadFelt::from(store_cell(k)));
+                let direct_hi = (0..4).fold(QuadFelt::ZERO, |s, k| {
+                    s + bp8[4 + k] * QuadFelt::from(store_cell(8 + k))
+                });
+                carry_lo - direct_lo + carry_hi - direct_hi
+            },
+            _ => unreachable!("STORE_PERIOD = 4"),
         };
         store_id += store_contrib;
 
