@@ -1,5 +1,0 @@
----
-source: crates/assembly/src/tests.rs
-expression: program.hash()
----
-0x9a79be31aa063db6dc79b2aaf5d8257d8b42d0508a25fe2062a34fcc0ff07234
