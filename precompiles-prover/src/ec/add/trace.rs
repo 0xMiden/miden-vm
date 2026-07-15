@@ -81,11 +81,10 @@ pub(crate) struct EcAddOp {
     /// 0 none-sentinels).
     pub p_coords: Option<(UintPtr, UintPtr)>,
     pub q_coords: Option<(UintPtr, UintPtr)>,
-    /// Transient cells of the live formulas, in cell order —
-    /// `(slope_aux, λ, inv, t)` on the slope row, `(y₃, e, —, x₃)` on the
-    /// tail row (cell 2 dead, the res row's cell 0 free) — `None` (all-zero
-    /// cells) for the cases that allocate none.
-    pub transients: Option<[UintPtr; 9]>,
+    /// Transient cells of the live formulas, in cell order — `(slope_aux,
+    /// λ, t)` on the slope row, `(y₃, e, x₃)` on the tail row — `None`
+    /// (all-zero cells) for the cases that allocate none.
+    pub transients: Option<[UintPtr; 6]>,
     /// Fresh-mint flag (closure cert): `true` iff this op *first* minted
     /// `r` (a generic/double `add_point_at` miss) — the op that owns `r`'s
     /// membership certificate. Drives `COL_MINTS` + the ptr-ordering
@@ -148,15 +147,14 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
     let mut block = [[Felt::ZERO; NUM_MAIN_COLS]; PERIOD];
     let mut set = |row: usize, col: usize, v: u32| block[row][col] = Felt::from(v);
 
-    // Transient ptr cells: slope row, tail row, and the res row's y₃.
-    let transients = op.transients.map_or([0u32; 9], |t| t.map(UintPtr::addr));
+    // Transient ptr cells: slope row, then tail row.
+    let transients = op.transients.map_or([0u32; 6], |t| t.map(UintPtr::addr));
     for (cell, ptr) in transients[..NUM_CELLS].iter().enumerate() {
         set(ROW_SLOPE, cell, *ptr);
     }
     for (cell, ptr) in transients[NUM_CELLS..2 * NUM_CELLS].iter().enumerate() {
         set(ROW_TAIL, cell, *ptr);
     }
-    set(ROW_RES, 0, transients[8]); // reserved zero cell
 
     // Hosted scalars: the result / scalar-bound / group ptrs on the res
     // row, the operand ptrs + the `EcGroupAdd` provide multiplicity

@@ -82,21 +82,21 @@
 //!
 //! ## Layout
 //!
-//! Period **4**, 4 ptr cells/row; one add op per block, all-zero
-//! `act = 0` blocks as padding. The per-block scalars that the old
-//! 16-row layout held as cycle-constant columns are **hosted in dead
-//! cells** and read through the two-row windows:
+//! Period **4**, 3 ptr cells/row (each row's 3 live transients/hosted
+//! scalars fill the row exactly — no dead cell), one add op per block,
+//! all-zero `act = 0` blocks as padding, read through the two-row
+//! windows:
 //!
-//! | row | cells 0–3 | emits |
+//! | row | cells 0–2 | emits |
 //! |---|---|---|
-//! | 0 `slope` | `(slope_aux, λ, —, t)` | slope + predicate certs (local), tail certs (cells @ next) |
-//! | 1 `tail`  | `(y₃, e, —, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` @ next) |
-//! | 2 `res`   | `(—, r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
-//! | 3 `term`  | `(mult, p, q, —)` | — (hosts only; the constancy gate drops here) |
+//! | 0 `slope` | `(slope_aux, λ, t)` | slope + predicate certs (local), tail certs (cells @ next) |
+//! | 1 `tail`  | `(y₃, e, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` @ next) |
+//! | 2 `res`   | `(r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
+//! | 3 `term`  | `(mult, p, q)` | — (hosts only; the constancy gate drops here) |
 //!
 //! Columns carry only what gates or names certificates on rows 0–2:
 //! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
-//! flags, `act` — 17 main columns, 3 LogUp aux columns, 4 periodic
+//! flags, `act` — 21 main columns, 12 LogUp aux columns, 4 periodic
 //! one-hots.
 
 pub mod trace;
@@ -185,39 +185,40 @@ where
 // COLUMN LAYOUT
 // ================================================================================================
 
-/// Ptr cells per row (transients / hosted scalars by row role).
-pub const NUM_CELLS: usize = 4;
+/// Ptr cells per row (transients / hosted scalars by row role): each row
+/// fills all 3 exactly, no dead cell.
+pub const NUM_CELLS: usize = 3;
 /// Operand coordinate ptrs (0 for a PAI operand, matching its store row).
-pub const COL_PX: usize = 4;
-pub const COL_PY: usize = 5;
-pub const COL_QX: usize = 6;
-pub const COL_QY: usize = 7;
+pub const COL_PX: usize = 3;
+pub const COL_PY: usize = 4;
+pub const COL_QX: usize = 5;
+pub const COL_QY: usize = 6;
 /// Curve params + base-field modulus (read by certificates on rows 0–2).
-pub const COL_A_PTR: usize = 8;
-pub const COL_B_PTR: usize = 9;
-pub const COL_BOUND_PTR: usize = 10;
+pub const COL_A_PTR: usize = 7;
+pub const COL_B_PTR: usize = 8;
+pub const COL_BOUND_PTR: usize = 9;
 /// The case near-one-hot (cycle-constant; Σ = act + pai_p·pai_q).
-pub const COL_PAI_P: usize = 11;
-pub const COL_PAI_Q: usize = 12;
-pub const COL_CANCEL: usize = 13;
-pub const COL_DBL: usize = 14;
-pub const COL_GEN: usize = 15;
-pub const COL_ACT: usize = 16;
+pub const COL_PAI_P: usize = 10;
+pub const COL_PAI_Q: usize = 11;
+pub const COL_CANCEL: usize = 12;
+pub const COL_DBL: usize = 13;
+pub const COL_GEN: usize = 14;
+pub const COL_ACT: usize = 15;
 /// Fresh-mint flag (closure certificate, Phase 1): set iff this op is the
 /// *first* to mint its result point (`add_point_at` miss) on a generic /
 /// double case — the op that owns `r`'s membership certificate. Witnessed,
 /// pinned by the case guard `mints ⟹ generic ∨ double` and the strict
 /// ordering `mints ⟹ r_ptr > p_ptr ∧ r_ptr > q_ptr` below. Cycle-constant.
-pub const COL_MINTS: usize = 17;
+pub const COL_MINTS: usize = 16;
 /// Limbs of `r_ptr − p_ptr − 1` (16-bit lo / hi) — the witnessed,
 /// Range16-checked difference proving `r_ptr > p_ptr` on `mints` ops. 0 off
 /// mint ops. Cycle-constant.
-pub const COL_RP_LO: usize = 18;
-pub const COL_RP_HI: usize = 19;
+pub const COL_RP_LO: usize = 17;
+pub const COL_RP_HI: usize = 18;
 /// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`.
-pub const COL_RQ_LO: usize = 20;
-pub const COL_RQ_HI: usize = 21;
-pub const NUM_MAIN_COLS: usize = 22;
+pub const COL_RQ_LO: usize = 19;
+pub const COL_RQ_HI: usize = 20;
+pub const NUM_MAIN_COLS: usize = 21;
 
 /// Block period: one add op = 4 rows.
 pub const PERIOD: usize = 4;
@@ -229,20 +230,20 @@ pub const ROW_RES: usize = 2;
 pub const ROW_TERM: usize = 3;
 
 /// Row-0 cells: `slope_aux` is `d = x₂ − x₁` for `generic`, `s = 3x² + a`
-/// for `double`; cell 2 is unused.
+/// for `double`; `t = x₁ + x₂` (generic only — double folds `t = 2x₁`
+/// directly into the tail's mul-subtract instead).
 pub const CELL_SLOPE_AUX: usize = 0;
 pub const CELL_LAMBDA: usize = 1;
-pub const CELL_T: usize = 3;
+pub const CELL_T: usize = 2;
 /// Row-1 (tail) cells: the fused result `y₃`, the `x₁ − x₃` witness `e`,
-/// and `x₃`; cell 2 is unused.
+/// and `x₃`.
 pub const CELL_Y3: usize = 0;
 pub const CELL_E: usize = 1;
-pub const CELL_X3: usize = 3;
-/// Row-2 (res) cells: the hosted `r`, scalar-bound, and group ptrs; cell 0
-/// is reserved.
-pub const CELL_R: usize = 1;
-pub const CELL_SBOUND: usize = 2;
-pub const CELL_GROUP: usize = 3;
+pub const CELL_X3: usize = 2;
+/// Row-2 (res) cells: the hosted `r`, scalar-bound, and group ptrs.
+pub const CELL_R: usize = 0;
+pub const CELL_SBOUND: usize = 1;
+pub const CELL_GROUP: usize = 2;
 /// Row-3 (term) cells: the `EcGroupAdd` provide multiplicity and the
 /// hosted operand ptrs.
 pub const TERM_CELL_MULT: usize = 0;
