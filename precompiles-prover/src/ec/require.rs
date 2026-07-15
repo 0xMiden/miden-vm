@@ -427,7 +427,7 @@ impl<'a> EcRequire<'a> {
         py: UintPtr,
         qx: UintPtr,
         group: EcGroupPtr,
-    ) -> ([UintPtr; 9], EcPointPtr, bool) {
+    ) -> ([UintPtr; 6], EcPointPtr, bool) {
         let null = UintPtr::from_addr(0);
         // double: x₁ = x₂ (the operands share a coord ptr under value
         // interning), so t = x₁ + x₂ = 2x₁ folds straight into the x₃
@@ -445,8 +445,7 @@ impl<'a> EcRequire<'a> {
         // maximum (> operands), satisfying the strict ordering the cert
         // rests on; a hit reuses its existing certified row and mints = false.
         let (r, mints) = self.store.add_point_cert(group, x3, y3);
-        // Cell 2 is unused.
-        ([slope_aux, lambda, null, t, y3, e, null, x3, null], r, mints)
+        ([slope_aux, lambda, t, y3, e, x3], r, mints)
     }
 }
 
