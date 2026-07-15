@@ -47,16 +47,16 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 
 /// PCS parameters for the precompile chiplet stack.
 ///
-/// Every chiplet AIR in [`ChipletAir`](crate::session::ChipletAir) closes at
-/// `log_quotient_degree <= 2` (see the `log_quotient_degrees_fit_the_blowup` test), so
-/// the stack only needs `log_blowup = 2` (blowup = 4), unlike the core VM's
-/// `miden_air::config::pcs_params`, which is fixed at `log_blowup = 3` for its own
-/// degree-8 constraints.
-///
-/// The remaining FRI parameters (folding arity, final degree, PoW bits, query count)
-/// mirror `miden_air::config::pcs_params` as-is; they have not been independently
-/// re-derived for this lower blowup and should get a dedicated security review before
-/// this config is relied on outside benchmarking.
+/// Mirrors `miden_air::config::pcs_params` in every parameter, including
+/// `log_blowup = 3`. It exists as its own function to decouple the
+/// precompile stack's PCS config from the core VM's, since the two need not
+/// evolve together: every chiplet AIR in
+/// [`ChipletAir`](crate::session::ChipletAir) closes at a `log_quotient_degree`
+/// well under the core VM's degree-8 constraints (see the
+/// `log_quotient_degrees_fit_the_blowup` test), so `log_blowup` could be
+/// lowered independently of the core VM in the future. That has not been done
+/// here, and doing so would need a dedicated security review of the
+/// resulting FRI parameters before use outside benchmarking.
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
         3,  // log_blowup (must be >= log_quotient_degree)
