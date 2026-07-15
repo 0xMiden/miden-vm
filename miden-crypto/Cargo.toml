@@ -80,6 +80,7 @@ name              = "transpose"
 required-features = ["std"]
 
 [features]
+arbitrary         = ["dep:proptest", "miden-field/arbitrary"]
 concurrent        = ["dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
@@ -89,7 +90,7 @@ persistent-forest = ["rocksdb", "serde"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
 std               = ["blake3/std", "dep:cc", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
-testing           = ["dep:proptest", "miden-field/testing"]
+testing           = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies

@@ -1,5 +1,6 @@
 ## 0.29.0 (TBD)
 
+- Added `arbitrary` features to expose proptest `Arbitrary` implementations without enabling broader testing features ([#1091](https://github.com/0xMiden/crypto/pull/1091)).
 - Updated `miden-bench` Keccak trace summaries to report padded trace rows separately from active Keccak rows ([#1065](https://github.com/0xMiden/crypto/pull/1065)).
 
 ## 0.28.0 (2026-07-03)

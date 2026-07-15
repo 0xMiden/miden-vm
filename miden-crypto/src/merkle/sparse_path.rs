@@ -448,6 +448,58 @@ fn path_depth_iter(tree_depth: u8) -> impl ExactSizeIterator<Item = NonZero<u8>>
     top_down_iter.rev()
 }
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{MerklePath, SparseMerklePath};
+    use crate::{Word, merkle::smt::SMT_MAX_DEPTH};
+
+    impl Arbitrary for MerklePath {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop::collection::vec(any::<Word>(), 0..=SMT_MAX_DEPTH as usize)
+                .prop_map(MerklePath::new)
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for SparseMerklePath {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (0..=SMT_MAX_DEPTH as usize)
+                .prop_flat_map(|depth| {
+                    let max_mask = if depth > 0 && depth < 64 {
+                        (1u64 << depth) - 1
+                    } else if depth == 64 {
+                        u64::MAX
+                    } else {
+                        0
+                    };
+                    let empty_nodes_mask =
+                        prop::num::u64::ANY.prop_map(move |mask| mask & max_mask);
+
+                    empty_nodes_mask.prop_flat_map(move |mask| {
+                        let empty_count = mask.count_ones() as usize;
+                        let non_empty_count = depth.saturating_sub(empty_count);
+
+                        prop::collection::vec(any::<Word>(), non_empty_count).prop_map(
+                            move |nodes| SparseMerklePath::from_parts(mask, nodes).unwrap(),
+                        )
+                    })
+                })
+                .boxed()
+        }
+    }
+}
+
 // TESTS
 // ================================================================================================
 #[cfg(test)]
@@ -634,51 +686,6 @@ mod tests {
     }
 
     use proptest::prelude::*;
-
-    // Arbitrary instance for MerklePath
-    impl Arbitrary for MerklePath {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            prop::collection::vec(any::<Word>(), 0..=SMT_MAX_DEPTH as usize)
-                .prop_map(MerklePath::new)
-                .boxed()
-        }
-    }
-
-    // Arbitrary instance for SparseMerklePath
-    impl Arbitrary for SparseMerklePath {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (0..=SMT_MAX_DEPTH as usize)
-                .prop_flat_map(|depth| {
-                    // Generate a bitmask for empty nodes - avoid overflow
-                    let max_mask = if depth > 0 && depth < 64 {
-                        (1u64 << depth) - 1
-                    } else if depth == 64 {
-                        u64::MAX
-                    } else {
-                        0
-                    };
-                    let empty_nodes_mask =
-                        prop::num::u64::ANY.prop_map(move |mask| mask & max_mask);
-
-                    // Generate non-empty nodes based on the mask
-                    empty_nodes_mask.prop_flat_map(move |mask| {
-                        let empty_count = mask.count_ones() as usize;
-                        let non_empty_count = depth.saturating_sub(empty_count);
-
-                        prop::collection::vec(any::<Word>(), non_empty_count).prop_map(
-                            move |nodes| SparseMerklePath::from_parts(mask, nodes).unwrap(),
-                        )
-                    })
-                })
-                .boxed()
-        }
-    }
 
     proptest! {
         #[test]
