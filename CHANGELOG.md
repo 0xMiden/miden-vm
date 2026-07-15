@@ -10,6 +10,13 @@
 - Expose some assembler configuration methods, and `ProjectAssembler::assemble_source_project` ([#3383](https://github.com/0xMiden/miden-vm/pull/3383)).
 
 ## v0.25.3 (2026-07-12)
+## v0.25.3 (TBD)
+
+#### Enhancements
+
+- Added a typed encoder/decoder for package debug info metadata, with range-checked felt decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
+## v0.25.2 (2026-07-12)
 
 - Update `wincode` dependency to v0.5.5.
 
@@ -41,11 +48,6 @@
 
 - Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
 - Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
-## v0.24.1 (TBD)
-
-#### Enhancements
-
-- Added a typed encoder/decoder for package debug info metadata, with range-checked felt decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
 
 ## v0.24.0 (2026-06-24)
 
