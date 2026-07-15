@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
+use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
 use crate::lookup::BoundaryBuilder;
 
 // COMMITTED-FINALS COUNT
@@ -18,14 +18,14 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 /// Emit boundary corrections for Core lookup columns.
 ///
-/// The block-hash seed and log-precompile transcript terminals cancel against these Core
+/// The block-hash seed and log-deferred root terminals cancel against these Core
 /// bus accumulators:
 /// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
-/// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
-///   merged column).
+/// - `LogDeferredRoot` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap merged
+///   column).
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // The core boundary's statement inputs arrive as the single var-len slice
-    // `[program_hash (4) | transcript_state (4)]`. Absent inputs (debug walker on a bare trace)
+    // `[program_hash (4) | deferred_root (4)]`. Absent inputs (debug walker on a bare trace)
     // default to zero, mirroring `emit_chiplets_boundary`'s handling of an empty digest group.
     let stmt = boundary.var_len_public_inputs().first().copied().unwrap_or_default();
     let program_hash: [B::F; 4] =
@@ -57,9 +57,9 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         },
     );
 
-    // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-    boundary.add("log_precompile_initial", LogPrecompileMsg { state: [B::F::ZERO; 4] });
-    boundary.remove("log_precompile_final", LogPrecompileMsg { state: final_state });
+    // Log-deferred root terminals: +1 / d_initial − 1 / d_final.
+    boundary.add("log_deferred_initial", LogDeferredMsg { state: [B::F::ZERO; 4] });
+    boundary.remove("log_deferred_final", LogDeferredMsg { state: final_state });
 }
 
 /// Emit boundary corrections for Chiplets lookup columns.

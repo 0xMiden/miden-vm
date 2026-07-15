@@ -4,8 +4,8 @@ use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
+    deferred::{DeferredState, PrecompileRegistry},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
 use miden_mast_package::Package;
@@ -124,15 +124,18 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // build public inputs and generate the advice data needed for recursive proof verification
-    let pub_inputs = PublicInputs::new(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        PrecompileTranscriptState::default(),
-    );
-    let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
+    // These programs are deferred-free, so an empty registry is intentional; still rehydrate the
+    // proof-carried deferred wire instead of assuming TRUE.
+    let deferred_state = DeferredState::from_wire(
+        Arc::new(PrecompileRegistry::new()),
+        proof.deferred_state(),
+        usize::MAX,
+    )
+    .unwrap();
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
+
+    generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

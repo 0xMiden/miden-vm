@@ -57,6 +57,7 @@ serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
+    "miden-core-lib/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -93,6 +94,7 @@ assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-precompiles.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true

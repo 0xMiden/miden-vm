@@ -12,7 +12,7 @@
 //!
 //!   kernel_digests -> stack i/o ->
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   transcript state (DEFERRED) -> main commit -> aux commit ->
+//!   deferred root -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
@@ -196,9 +196,8 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 3. Transcript state (DEFERRED), loaded by `verify_proof::stage_reduced_inputs`.
-    advice_stack
-        .extend(pub_inputs.pc_transcript_state().as_ref().iter().map(Felt::as_canonical_u64));
+    // 3. Final deferred root, loaded by `verify_proof::stage_reduced_inputs`.
+    advice_stack.extend(pub_inputs.deferred_root().as_ref().iter().map(Felt::as_canonical_u64));
 
     // 4. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));

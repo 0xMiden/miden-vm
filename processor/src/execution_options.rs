@@ -1,5 +1,8 @@
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{
+    deferred::DEFAULT_MAX_DEFERRED_ELEMENTS as DEFAULT_DEFERRED_STATE_ELEMENTS,
+    program::MIN_STACK_DEPTH,
+};
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -20,15 +23,13 @@ pub struct ExecutionOptions {
     max_adv_map_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
+    /// Maximum approximate number of field elements allowed in durable deferred-state nodes.
+    max_deferred_elements: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
     /// Maximum number of internal nodes allowed in the advice provider's Merkle store.
     max_merkle_store_nodes: usize,
-    /// Maximum number of deferred precompile requests allowed during execution.
-    max_precompile_requests: usize,
-    /// Maximum total number of calldata bytes allowed across deferred precompile requests.
-    max_precompile_request_calldata_bytes: usize,
     /// Maximum number of field elements allowed on the operand stack across the active execution
     /// context and all suspended contexts.
     ///
@@ -52,11 +53,9 @@ impl Default for ExecutionOptions {
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
-            max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
-            max_precompile_request_calldata_bytes:
-                Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         }
@@ -83,9 +82,12 @@ impl ExecutionOptions {
     /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
     pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
 
-    /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
-    /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
+    /// Default maximum number of input bytes for a single hash precompile invocation.
+    /// Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
+
+    /// Default maximum approximate number of field elements allowed in deferred state.
+    pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = DEFAULT_DEFERRED_STATE_ELEMENTS;
 
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
@@ -96,14 +98,6 @@ impl ExecutionOptions {
     /// Set to 2^20 so the default allows large Merkle inputs and repeated updates while still
     /// providing a finite host-memory backstop.
     pub const DEFAULT_MAX_MERKLE_STORE_NODES: usize = 1 << 20;
-
-    /// Default maximum number of deferred precompile requests allowed during execution.
-    /// Set to 2^16 (65536).
-    pub const DEFAULT_MAX_PRECOMPILE_REQUESTS: usize = 1 << 16;
-
-    /// Default maximum total calldata bytes allowed across deferred precompile requests.
-    /// Set to 2^28 (256 MB).
-    pub const DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES: usize = 1 << 28;
 
     /// Default maximum number of field elements allowed on the operand stack.
     ///
@@ -178,11 +172,9 @@ impl ExecutionOptions {
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
-            max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
-            max_precompile_request_calldata_bytes:
-                Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         })
@@ -244,6 +236,12 @@ impl ExecutionOptions {
         self.max_hash_len_bytes
     }
 
+    /// Returns the maximum approximate number of field elements allowed in deferred state.
+    #[inline]
+    pub fn max_deferred_elements(&self) -> usize {
+        self.max_deferred_elements
+    }
+
     /// Sets the maximum number of field elements allowed in a single live advice map value.
     pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
         self.max_adv_map_value_size = size;
@@ -262,6 +260,12 @@ impl ExecutionOptions {
         self
     }
 
+    /// Sets the maximum approximate number of field elements allowed in deferred state.
+    pub fn with_max_deferred_elements(mut self, size: usize) -> Self {
+        self.max_deferred_elements = size;
+        self
+    }
+
     /// Returns the maximum number of continuations allowed on the continuation stack.
     #[inline]
     pub fn max_num_continuations(&self) -> usize {
@@ -272,18 +276,6 @@ impl ExecutionOptions {
     #[inline]
     pub fn max_merkle_store_nodes(&self) -> usize {
         self.max_merkle_store_nodes
-    }
-
-    /// Returns the maximum number of deferred precompile requests allowed during execution.
-    #[inline]
-    pub fn max_precompile_requests(&self) -> usize {
-        self.max_precompile_requests
-    }
-
-    /// Returns the maximum total calldata bytes allowed across deferred precompile requests.
-    #[inline]
-    pub fn max_precompile_request_calldata_bytes(&self) -> usize {
-        self.max_precompile_request_calldata_bytes
     }
 
     /// Returns the maximum number of field elements allowed on the operand stack across the active
@@ -311,21 +303,6 @@ impl ExecutionOptions {
     /// Sets the maximum number of internal nodes allowed in the advice provider's Merkle store.
     pub fn with_max_merkle_store_nodes(mut self, max_merkle_store_nodes: usize) -> Self {
         self.max_merkle_store_nodes = max_merkle_store_nodes;
-        self
-    }
-
-    /// Sets the maximum number of deferred precompile requests allowed during execution.
-    pub fn with_max_precompile_requests(mut self, max_precompile_requests: usize) -> Self {
-        self.max_precompile_requests = max_precompile_requests;
-        self
-    }
-
-    /// Sets the maximum total calldata bytes allowed across deferred precompile requests.
-    pub fn with_max_precompile_request_calldata_bytes(
-        mut self,
-        max_precompile_request_calldata_bytes: usize,
-    ) -> Self {
-        self.max_precompile_request_calldata_bytes = max_precompile_request_calldata_bytes;
         self
     }
 

@@ -45,39 +45,28 @@ const _: () = assert!(
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
+    // --- Out-of-circuit (boundary correction / eval_external) ---
     /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
     KernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.
     BlockHashTable = 1,
-    /// Log-precompile transcript: initial/final capacity state boundary correction.
-    LogPrecompileTranscript = 2,
-    /// Kernel ROM call: syscall multiplicities for kernel procedure roots.
+    /// Log-deferred state: initial/final deferred-root boundary correction.
+    LogDeferredRoot = 2,
+
+    // --- In-circuit buses ---
     KernelRomCall = 3,
-    /// Hasher request: linear hash initial state.
     HasherLinearHashInit = 4,
-    /// Hasher response: return full sponge state.
     HasherReturnState = 5,
-    /// Hasher request: absorb a rate block.
     HasherAbsorption = 6,
-    /// Hasher response: return digest word.
     HasherReturnHash = 7,
-    /// Hasher request: Merkle path verification leaf.
     HasherMerkleVerifyInit = 8,
-    /// Hasher request: old-root side of Merkle root update.
     HasherMerkleOldInit = 9,
-    /// Hasher request: new-root side of Merkle root update.
     HasherMerkleNewInit = 10,
-    /// Memory bus: read one element.
     MemoryReadElement = 11,
-    /// Memory bus: write one element.
     MemoryWriteElement = 12,
-    /// Memory bus: read one word.
     MemoryReadWord = 13,
-    /// Memory bus: write one word.
     MemoryWriteWord = 14,
-    /// Bitwise chiplet request/response bus.
     Bitwise = 15,
-    /// ACE chiplet init bus.
     AceInit = 16,
     /// Block stack table (decoder p1): tracks control flow block nesting.
     BlockStackTable = 17,
@@ -114,7 +103,7 @@ impl BusId {
 // expected index here only if necessary, and add a matching assert for the new variant.
 const _: () = assert!(BusId::KernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
-const _: () = assert!(BusId::LogPrecompileTranscript as usize == 2);
+const _: () = assert!(BusId::LogDeferredRoot as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
 const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
 const _: () = assert!(BusId::HasherReturnState as usize == 5);
@@ -169,7 +158,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 
     /// Linear hash / control block init: full 12-lane sponge state.
     ///
-    /// Used by: HPERM input, LOGPRECOMPILE input.
+    /// Used by: HPERM input, LOGDEFERRED input.
     pub fn linear_hash_init(addr: E, state: [E; 12]) -> Self {
         Self {
             kind: BusId::HasherLinearHashInit,
@@ -207,7 +196,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 
     /// Return full sponge state after permutation.
     ///
-    /// Used by: HPERM output, LOGPRECOMPILE output.
+    /// Used by: HPERM output, LOGDEFERRED output.
     pub fn return_state(addr: E, state: [E; 12]) -> Self {
         Self {
             kind: BusId::HasherReturnState,
@@ -538,6 +527,9 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     }
 }
 
+// ACE MESSAGE
+// ================================================================================================
+
 /// ACE circuit evaluation init message (5 elements): `[clk, ctx, ptr, num_read, num_eval]`.
 #[derive(Clone, Debug)]
 pub struct AceInitMsg<E> {
@@ -559,14 +551,17 @@ pub struct RangeMsg<E> {
     pub value: E,
 }
 
-// LOG-PRECOMPILE TRANSCRIPT-STATE MESSAGE
+// LOG-DEFERRED STATE MESSAGE
 // ================================================================================================
 
-/// Log-precompile transcript-state message (4 elements): `state[4]`.
+/// Log-deferred state message (4 elements): deferred root `state[4]`.
 #[derive(Clone, Debug)]
-pub struct LogPrecompileMsg<E> {
+pub struct LogDeferredMsg<E> {
     pub state: [E; 4],
 }
+
+// SIBLING TABLE MESSAGE
+// ================================================================================================
 
 // ACE WIRING MESSAGE
 // ================================================================================================
@@ -827,15 +822,15 @@ where
     }
 }
 
-// --- LogPrecompileMsg ----------------------------------------------------------------------------
+// --- LogDeferredMsg ----------------------------------------------------------------------------
 
-impl<E, EF> LookupMessage<E, EF> for LogPrecompileMsg<E>
+impl<E, EF> LookupMessage<E, EF> for LogDeferredMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(BusId::LogPrecompileTranscript as usize, self.state.clone())
+        challenges.encode(BusId::LogDeferredRoot as usize, self.state.clone())
     }
 }
 

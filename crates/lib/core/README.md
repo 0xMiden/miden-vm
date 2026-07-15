@@ -9,6 +9,16 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
+`CoreLibrary` also bundles precompile-backed verification support used internally by core wrappers,
+so users do not need any separate precompile-package wiring for standard Miden programs. Users
+should call the stable facades under `miden::core::*`.
+
+Generated core-library MASM can be inspected locally:
+
+```sh
+cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
+```
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 
@@ -35,6 +45,7 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::stark::verifier](./docs/stark/verifier.md)
 - [miden::core::sys](./docs/sys.md)
 - [miden::core::word](./docs/word.md)
+
 
 ## Status
 At this point, all implementations listed above are considered to be experimental and are subject to change.

@@ -23,10 +23,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
 # CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 4832287872766089914
-const RELATION_DIGEST_1 = 16757227783333073660
-const RELATION_DIGEST_2 = 11327626720171417995
-const RELATION_DIGEST_3 = 8482092520982883323
+const RELATION_DIGEST_0 = 13216208594319733444
+const RELATION_DIGEST_1 = 9096751034522676785
+const RELATION_DIGEST_2 = 13929225146107169158
+const RELATION_DIGEST_3 = 12718644633785171408
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -81,8 +81,8 @@ end
 #!
 #! The kernel-procedure digests and the stack i/o (FLPI) are read from caller memory at the
 #! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
-#! transcript state (DEFERRED) is loaded from the advice stack. `verify_proof` stages the
-#! reduced-inputs block (kernel_H | program_digest | transcript_state | pad) before the transcript
+#! final deferred root is loaded from the advice stack. `verify_proof` stages the reduced-inputs
+#! block (kernel_H | program_digest | deferred_root | pad) before the transcript
 #! starts.
 #!
 #! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3,

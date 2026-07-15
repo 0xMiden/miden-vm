@@ -198,7 +198,7 @@ This group contains operations which require constraints with degree up to $3$. 
 | `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `LOGPRECOMPILE` |     $94$     |   `101_1110`    | [Crypto ops](./crypto_ops.md#log_precompile) |     $5$     |
+| `LOGDEFERRED` |     $94$     |   `101_1110`    | [Crypto ops](./crypto_ops.md#log_deferred) |     $5$     |
 | `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
 
 Note that the `SPLIT` and `LOOP` operations share the common prefix `101010` and can be detected together with a flag of degree $4$ (using $e_0$ for degree reduction). Only `SPLIT` shifts the stack to the left, however: `LOOP` is do-while and reads no stack input — see [LOOP block decoding](../decoder/index.md#loop-block-decoding).

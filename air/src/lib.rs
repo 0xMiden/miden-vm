@@ -11,8 +11,8 @@ use core::borrow::Borrow;
 
 use miden_core::{
     WORD_SIZE, Word,
+    deferred::DeferredRoot,
     field::ExtensionField,
-    precompile::PrecompileTranscriptState,
     program::{KernelDescriptor, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::{
@@ -106,23 +106,23 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    deferred_root: DeferredRoot,
 }
 
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
-    /// and the precompile transcript state (rolling digest of all recorded commitments).
+    /// and the final deferred root.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        pc_transcript_state: PrecompileTranscriptState,
+        deferred_root: DeferredRoot,
     ) -> Self {
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
-            pc_transcript_state,
+            deferred_root,
         }
     }
 
@@ -138,9 +138,9 @@ impl PublicInputs {
         self.program_info.clone()
     }
 
-    /// Returns the precompile transcript state.
-    pub fn pc_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript_state
+    /// Returns the final deferred root.
+    pub fn deferred_root(&self) -> DeferredRoot {
+        self.deferred_root
     }
 
     /// Returns the canonical commitment to the kernel of the verified statement: the value the
@@ -161,7 +161,7 @@ impl PublicInputs {
     /// `aux_inputs` (statement inputs not read by the AIRs, consumed only by `observe` and
     /// `eval_external`) layout:
     ///   [0..4]   program hash
-    ///   [4..8]   precompile transcript state
+    ///   [4..8]   final deferred root
     ///   [8..]    kernel procedure digests (concatenated words, variable length)
     pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Felt>) {
         let mut air_inputs = Vec::with_capacity(NUM_PUBLIC_VALUES);
@@ -171,7 +171,7 @@ impl PublicInputs {
         let kernel_felts = Word::words_as_elements(self.program_info.kernel_procedures());
         let mut aux_inputs = Vec::with_capacity(AUX_KERNEL_DIGESTS + kernel_felts.len());
         aux_inputs.extend_from_slice(self.program_info.program_hash().as_elements());
-        aux_inputs.extend_from_slice(self.pc_transcript_state.as_ref());
+        aux_inputs.extend_from_slice(self.deferred_root.as_ref());
         aux_inputs.extend_from_slice(kernel_felts);
 
         (air_inputs, aux_inputs)
@@ -181,12 +181,12 @@ impl PublicInputs {
     /// - program info elements (including kernel procedure hashes)
     /// - stack inputs
     /// - stack outputs
-    /// - precompile transcript state
+    /// - final deferred root
     pub fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.program_info.to_elements();
         result.extend_from_slice(self.stack_inputs.as_ref());
         result.extend_from_slice(self.stack_outputs.as_ref());
-        result.extend_from_slice(self.pc_transcript_state.as_ref());
+        result.extend_from_slice(self.deferred_root.as_ref());
         result
     }
 }
@@ -213,8 +213,8 @@ impl Arbitrary for PublicInputs {
             .prop_map(|values| StackOutputs::new(&values).expect("generated stack outputs fit"));
 
         (program_info, stack_inputs, stack_outputs, word_strategy())
-            .prop_map(|(program_info, stack_inputs, stack_outputs, pc_transcript_state)| {
-                Self::new(program_info, stack_inputs, stack_outputs, pc_transcript_state)
+            .prop_map(|(program_info, stack_inputs, stack_outputs, deferred_root)| {
+                Self::new(program_info, stack_inputs, stack_outputs, deferred_root)
             })
             .boxed()
     }
@@ -228,7 +228,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
-        self.pc_transcript_state.write_into(target);
+        self.deferred_root.write_into(target);
     }
 }
 
@@ -237,13 +237,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        let pc_transcript_state = PrecompileTranscriptState::read_from(source)?;
+        let deferred_root = DeferredRoot::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
-            pc_transcript_state,
+            deferred_root,
         })
     }
 }
@@ -257,7 +257,7 @@ impl Deserializable for PublicInputs {
 ///   [0..16]  stack inputs
 ///   [16..32] stack outputs
 ///
-/// The program hash and precompile transcript state are not read by any AIR constraint, so they
+/// The program hash and final deferred root are not read by any AIR constraint, so they
 /// are carried as `aux_inputs` and consumed only by [`MidenMultiAir::observe`] and
 /// [`MidenMultiAir::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
@@ -266,10 +266,10 @@ pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 
 // `aux_inputs` layout offsets — statement inputs that the AIRs do not read. The fixed program
-// hash and transcript state occupy the first two words; the variable-length kernel-procedure
+// hash and final deferred root occupy the first two words; the variable-length kernel-procedure
 // digests follow.
 const AUX_PROGRAM_HASH: usize = 0;
-const AUX_TRANSCRIPT_STATE: usize = WORD_SIZE;
+const AUX_DEFERRED_ROOT: usize = WORD_SIZE;
 const AUX_KERNEL_DIGESTS: usize = 2 * WORD_SIZE;
 
 // CORE AIR
@@ -298,8 +298,8 @@ impl CoreAir {
 
     /// LogUp boundary correction for the core trace: the running sum of every
     /// boundary interaction reduced to its denominator contribution. The single var-len slice
-    /// carries `[program_hash (4) | transcript_state (4)]`, the statement inputs the core
-    /// boundary cancels against the block-hash and log-precompile buses.
+    /// carries `[program_hash (4) | deferred_root (4)]`, the statement inputs the core
+    /// boundary cancels against the block-hash and log-deferred buses.
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
@@ -315,7 +315,7 @@ impl CoreAir {
         }
         if var_len_public_inputs[0].len() != 2 * WORD_SIZE {
             return Err(format!(
-                "CoreAir expects {} boundary felts (program hash + transcript state), got {}",
+                "CoreAir expects {} boundary felts (program hash + deferred root), got {}",
                 2 * WORD_SIZE,
                 var_len_public_inputs[0].len()
             )
@@ -655,7 +655,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     }
 
     fn max_aux_inputs(&self) -> usize {
-        // aux_inputs = program hash (1 word) + transcript state (1 word) + the var-len
+        // aux_inputs = program hash (1 word) + deferred root (1 word) + the var-len
         // kernel-digest group: one `Word` per kernel procedure, capped at
         // `KernelDescriptor::MAX_NUM_PROCEDURES`.
         AUX_KERNEL_DIGESTS + KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE
@@ -668,7 +668,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     ///
     /// ```text
     /// [ kernel_H (4) | program_hash (4) ]
-    /// [ transcript_state (4) | 0,0,0,0 ]      trailing pad keeps the schedule rate-aligned
+    /// [ deferred_root (4) | 0,0,0,0 ]         trailing pad keeps the schedule rate-aligned
     /// [ stack_inputs (16) ]                   two blocks
     /// [ stack_outputs (16) ]                  two blocks
     /// ```
@@ -686,19 +686,19 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         assert_eq!(air_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
         assert!(
             aux_inputs.len() >= AUX_KERNEL_DIGESTS,
-            "aux inputs shorter than the fixed program-hash + transcript-state prefix"
+            "aux inputs shorter than the fixed program-hash + deferred-root prefix"
         );
 
         let kernel_h = hash_kernel_digests(&aux_inputs[AUX_KERNEL_DIGESTS..]);
         let program_hash = &aux_inputs[AUX_PROGRAM_HASH..AUX_PROGRAM_HASH + WORD_SIZE];
-        let transcript_state = &aux_inputs[AUX_TRANSCRIPT_STATE..AUX_TRANSCRIPT_STATE + WORD_SIZE];
+        let deferred_root = &aux_inputs[AUX_DEFERRED_ROOT..AUX_DEFERRED_ROOT + WORD_SIZE];
         let stack_io = air_inputs;
 
-        // Block 1: kernel_H | program_hash. Block 2: transcript_state | zero pad.
+        // Block 1: kernel_H | program_hash. Block 2: deferred_root | zero pad.
         for &v in kernel_h.iter().chain(program_hash) {
             challenger.observe(v);
         }
-        for &v in transcript_state {
+        for &v in deferred_root {
             challenger.observe(v);
         }
         for _ in 0..WORD_SIZE {
@@ -711,7 +711,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
     /// Cross-AIR LogUp closure: the sum of every committed aux final plus the
     /// per-trace boundary corrections must vanish. `aux_inputs` carries the program hash and
-    /// transcript state (consumed by the core boundary) followed by the kernel digests
+    /// deferred root (consumed by the core boundary) followed by the kernel digests
     /// (consumed by the chiplets boundary).
     fn eval_external(
         &self,
