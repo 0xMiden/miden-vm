@@ -1920,7 +1920,12 @@ name = "miden-vm-synthetic-bench"
 version = "0.26.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "miden-assembly",
+ "miden-core",
+ "miden-core-lib",
  "miden-processor",
+ "miden-prover",
+ "miden-test-utils",
  "miden-vm",
  "serde",
  "serde_json",
