@@ -217,14 +217,6 @@ impl Graph {
             },
         }
     }
-
-    /// The `(x, y)` children of `id` when it is a binary mul, else `None`.
-    pub fn mul_children(&self, id: NodeId) -> Option<(NodeId, NodeId)> {
-        match self.node(id) {
-            Node::Op { op: OpKind::Mul, x, y: Some(y), .. } => Some((x, y)),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -261,7 +253,7 @@ mod tests {
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let y = b.leaf(Leaf::Main { offset: 1, index: 0 });
         let (d, _) = b.op(Class::Base, OpKind::Sub, y, Some(x));
-        let (n, _) = b.op(Class::Base, OpKind::Neg, d, None);
+        b.op(Class::Base, OpKind::Neg, d, None);
         let g = b.freeze();
 
         assert_eq!(g.len(), 4);
@@ -273,7 +265,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(g.mul_children(n), None);
         assert_eq!(
             g.node(d),
             Node::Op {
@@ -298,6 +289,5 @@ mod tests {
         assert_eq!(g.class(wrapped), Class::Base);
         assert_eq!(g.class(ch), Class::Ext);
         assert_eq!(g.class(prod), Class::Ext);
-        assert_eq!(g.mul_children(prod), Some((wrapped, ch)));
     }
 }

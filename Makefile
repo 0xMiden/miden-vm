@@ -291,12 +291,14 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
 .PHONY: regenerate-constraints
-regenerate-constraints: ## Regenerate core-lib constraint artifacts
+regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
 
 .PHONY: check-constraints
-check-constraints: ## Check core-lib constraint artifacts for drift
+check-constraints: ## Check the checked-in constraint artifacts for drift
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
