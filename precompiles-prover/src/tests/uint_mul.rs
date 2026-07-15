@@ -25,7 +25,7 @@ use crate::{
     uint::{
         UintStoreAir,
         mul::{
-            NUM_MAIN_COLS, PERIOD, ROW_Q_HI, ROW_R, UintMulAir,
+            GAMMA_SLOTS, NUM_GAMMA_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_Q, ROW_R, UintMulAir,
             trace::{UintMulRequires, canonical_q, gamma_halves, generate_trace, op_block},
         },
         trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
@@ -143,7 +143,7 @@ fn mul_constraints_hold() {
 
     let (op, _) = mul.ops[0];
     let main = generate_trace(mul, &mut store, &mut BytePairLutRequires::new());
-    assert_eq!(main.height(), PERIOD, "one op = one period-16 block");
+    assert_eq!(main.height(), PERIOD, "one op = one period-8 block");
 
     // The carries must be exercised: some γ cell pair differs from the
     // zero encoding (lo, hi) = (0, 2¹⁵).
@@ -161,8 +161,8 @@ fn mul_constraints_hold() {
 #[test]
 fn mul_scaled_17_limb_quotient() {
     // κₐ = 3 against a near-2²⁵⁵ modulus with a = b = p − 1 pushes the
-    // quotient past 2²⁵⁶: the 17th limb (q_hi cell 6) must be live, and
-    // constraints + buses must still close (the ECC `3x²` shape).
+    // quotient past 2²⁵⁶: the 17th limb (q row, cell 16) must be live,
+    // and constraints + buses must still close (the ECC `3x²` shape).
     let mut rng = StdRng::seed_from_u64(0x3_5ca1e);
     let mut bound16 = to_limbs16(random_modulus(&mut rng));
     bound16[15] = 0x7fff;
@@ -178,7 +178,7 @@ fn mul_scaled_17_limb_quotient() {
     mul.record(3, fp, fp, 2, ptrs[0], r_ptr, fp, 0);
 
     let main = check_and_balance(store, mul, &mut rng);
-    let q16 = main.values[ROW_Q_HI * NUM_MAIN_COLS + 6];
+    let q16 = main.values[ROW_Q * NUM_MAIN_COLS + 16];
     assert_ne!(q16, Felt::ZERO, "κₐ = 3 at full size must spill into q₁₆");
 }
 
@@ -202,7 +202,7 @@ fn mul_ops_balance_with_padding() {
     mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], r_ptr, fp, 0);
 
     let mul_main = check_and_balance(store, mul, &mut rng);
-    assert_eq!(mul_main.height(), 64, "3 ops pad to 4 blocks");
+    assert_eq!(mul_main.height(), 32, "3 ops pad to 4 blocks");
 }
 
 #[test]
@@ -316,4 +316,25 @@ fn mul_q_range_checks_are_load_bearing() {
         residual, 0,
         "an oversized q limb must unbalance Range16 — the checks are load-bearing",
     );
+}
+
+#[test]
+fn log_quotient_degree_matches_design_target() {
+    // Flattened to lqd 1: every fraction is an act-gated degree-2
+    // multiplicity, paired ≤ 2 per column (the folded closing check adds
+    // no new multiplication chain — `c_own` is built from `c`'s own
+    // local cells, same shape as the generic `contrib`).
+    assert_eq!(crate::tests::log_quotient_degree(&UintMulAir), 1);
+}
+
+#[test]
+fn gamma_slots_is_a_bijection_onto_distinct_cells() {
+    // Every one of the 62 committed γ halves must land on its own
+    // distinct (row, cell) — a collision would silently drop a carry
+    // coefficient instead of failing loudly.
+    let mut seen = std::collections::HashSet::new();
+    for &slot in GAMMA_SLOTS.iter() {
+        assert!(seen.insert(slot), "duplicate γ slot placement at {slot:?}");
+    }
+    assert_eq!(seen.len(), NUM_GAMMA_SLOTS);
 }

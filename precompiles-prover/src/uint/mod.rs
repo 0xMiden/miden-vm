@@ -227,10 +227,13 @@ const PCOL_TERM: usize = 7;
 // The 15 fractions (UintVal provides/consumes + ptr-gap Range16, eight
 // per-limb Range16s, two raw UintLimbs provides) are split so every
 // closing constraint is degree ≤ 3. Width disregarded (research/logup-flatten).
-const NUM_LOGUP_COLS: usize = 8;
+/// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
+/// can concatenate this chiplet's column shape onto mul's own instead of
+/// hand-duplicating the derived column count.
+pub(crate) const NUM_LOGUP_COLS: usize = 8;
 const REGISTER_COL: usize = 8;
 const AUX_WIDTH: usize = 9;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================

@@ -1,15 +1,16 @@
 //! UintStoreMul chiplet — the uint store and the scaled-MAC relation
 //! sharing one row range.
 //!
-//! Store's period (8) divides mul's period (16), so both progress
-//! **simultaneously** on the same rows in disjoint column ranges: main
-//! columns 0..10 are exactly [`UintStoreAir`](crate::uint)'s own layout
-//! (unchanged), columns 10..27 are exactly
-//! [`UintMulAir`](crate::uint::mul)'s own layout (unchanged, shifted by
-//! [`MUL_COL_OFFSET`]). Every 16-row cycle, store completes 2 of its own
-//! 8-row blocks while mul completes 1 of its own 16-row block — both for
-//! real, no mode selector, no cross-gating. Each side keeps its own
-//! constraint degree (`lqd = 1`); nothing here raises it.
+//! Store's period (8) equals mul's period (8), so both progress
+//! **simultaneously**, in lockstep, on the same rows in disjoint column
+//! ranges: main columns 0..10 are exactly
+//! [`UintStoreAir`](crate::uint)'s own layout (unchanged), columns
+//! 10..36 are exactly [`UintMulAir`](crate::uint::mul)'s own layout
+//! (unchanged, shifted by [`MUL_COL_OFFSET`]). Every 8-row cycle, store
+//! completes 1 of its own 8-row blocks while mul completes 1 of its own
+//! 8-row block — both for real, no mode selector, no cross-gating. Each
+//! side keeps its own constraint degree (`lqd = 1`); nothing here raises
+//! it.
 //!
 //! Exactly one running-sum column is committed per AIR, so column 0 is
 //! store's own anchor fraction, unchanged; mul's own anchor fraction
@@ -46,17 +47,17 @@ use crate::{
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{
-        UintLimbsMsg, UintValMsg,
+        COLUMN_SHAPE as STORE_COLUMN_SHAPE, NUM_LOGUP_COLS as STORE_NUM_LOGUP_COLS, UintLimbsMsg,
+        UintValMsg,
         mul::{
             COL_A_PTR as M_COL_A_PTR, COL_ACT as M_COL_ACT, COL_B_PTR as M_COL_B_PTR,
             COL_BORROW as M_COL_BORROW, COL_BOUND_PTR as M_COL_BOUND_PTR,
-            COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR, GAMMA_OFFSET, GAMMA_SLOTS,
-            NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS as MUL_NUM_MAIN_COLS,
-            NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A_HI, ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C,
-            ROW_G0, ROW_G4,
-            ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM, S_KEEP, TERM_CELL_C_PTR,
-            TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED, TERM_CELL_MULT,
-            UintMulMsg,
+            COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR,
+            COLUMN_SHAPE as MUL_COLUMN_SHAPE, GAMMA_OFFSET, GAMMA_SLOTS,
+            NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA, NUM_LOGUP_COLS as MUL_NUM_LOGUP_COLS,
+            NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A, ROW_B,
+            ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB,
+            TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED, TERM_CELL_MULT, UintMulMsg,
         },
     },
     utils::{current_main, next_main},
@@ -86,39 +87,57 @@ const PCOL_BOUND_LO: usize = 5;
 const PCOL_BOUND_HI: usize = 6;
 const PCOL_TERM: usize = 7;
 
-// MUL — main cols 10..27, its own original numbering shifted by
+// MUL — main cols 10..36, its own original numbering shifted by
 // `MUL_COL_OFFSET`.
 pub const MUL_COL_OFFSET: usize = STORE_NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = STORE_NUM_MAIN_COLS + MUL_NUM_MAIN_COLS;
-/// The shared block period: `lcm(8, 16) = 16` — store's period divides
-/// it, so both progress every cycle.
+/// The shared block period: `lcm(8, 8) = 8` — store and mul now run in
+/// lockstep, one block of each per cycle.
 pub const PERIOD: usize = MUL_PERIOD;
+const _: () = assert!(
+    MUL_PERIOD == STORE_PERIOD,
+    "the lockstep periodic-column tiling below assumes equal periods"
+);
 
-// Periodic columns: mul's 16 one-hots + its `S_KEEP` gate first (indices
-// 0..17, unchanged from mul's own reading convention), then store's 8
-// one-hots (period 8, tiled twice over the shared period-16 domain).
+// Periodic columns: mul's 8 one-hots + its `S_KEEP` gate first (indices
+// 0..9, unchanged from mul's own reading convention), then store's 8
+// one-hots (indices 9..17) — a straight concatenation now that both
+// sides share the same period, no more tiling.
 const PCOL_MUL_S_KEEP: usize = MUL_PERIOD;
 const PCOL_STORE_ROLE_BASE: usize = MUL_PERIOD + 1;
 const NUM_PERIODIC: usize = MUL_PERIOD + 1 + STORE_PERIOD;
 
 // Aux layout: col 0 = the shared running sum (store's own anchor
 // fraction + mul's own anchor fraction, both unconditionally live —
-// exactly one running-sum column is committed per AIR); cols 1..8 =
-// store's original cols 1..7 unchanged; cols 8..19 = mul's original
-// cols 1..11 unchanged (shifted). Registers stay independent (store and
-// mul are simultaneously live, not mutually exclusive, so their `id`
-// accumulators cannot share a column): col 19 = store's `id`, col 20 =
-// mul's `id`, col 21 = mul's `S`.
-pub const NUM_LOGUP_COLS: usize = 1 + 7 + 1 + 11;
+// exactly one running-sum column is committed per AIR); the rest is a
+// straight concatenation of store's own column shape (cols 1..8) and
+// mul's own column shape (cols 8..; mul's own col 0, its anchor,
+// becomes an ordinary column here rather than folding into store's).
+// Registers stay independent (store and mul are simultaneously live,
+// not mutually exclusive, so their `id` accumulators cannot share a
+// column).
+pub const NUM_LOGUP_COLS: usize = STORE_NUM_LOGUP_COLS + MUL_NUM_LOGUP_COLS;
 pub const STORE_REG_ID: usize = NUM_LOGUP_COLS;
 pub const MUL_REG_ID: usize = NUM_LOGUP_COLS + 1;
 pub const MUL_REG_S: usize = NUM_LOGUP_COLS + 2;
 pub const AUX_WIDTH: usize = NUM_LOGUP_COLS + 3;
-// col 0 (store's anchor) and col 8 (mul's, now an ordinary column) hold
-// a single fraction; every other column holds a pair.
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] =
-    [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+
+const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
+    let mut shape = [0usize; NUM_LOGUP_COLS];
+    let mut i = 0;
+    while i < STORE_NUM_LOGUP_COLS {
+        shape[i] = STORE_COLUMN_SHAPE[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < MUL_NUM_LOGUP_COLS {
+        shape[STORE_NUM_LOGUP_COLS + j] = MUL_COLUMN_SHAPE[j];
+        j += 1;
+    }
+    shape
+}
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 
 // AIR
 // ================================================================================================
@@ -144,9 +163,8 @@ impl BaseAir<Felt> for UintStoreMulAir {
         }
         cols.push(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect());
         for role in 0..STORE_PERIOD {
-            let mut c = vec![Felt::ZERO; MUL_PERIOD];
+            let mut c = vec![Felt::ZERO; STORE_PERIOD];
             c[role] = Felt::ONE;
-            c[role + STORE_PERIOD] = Felt::ONE;
             cols.push(c);
         }
         cols
@@ -281,8 +299,8 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             let local: [AB::Var; MUL_NUM_MAIN_COLS] = current_main(builder.main(), MUL_COL_OFFSET);
             let next: [AB::Var; MUL_NUM_MAIN_COLS] = next_main(builder.main(), MUL_COL_OFFSET);
 
-            // Mul's own periodic reading convention: indices 0..16 = role
-            // one-hots, 16 = `S_KEEP` — unchanged, since mul's periodic
+            // Mul's own periodic reading convention: indices 0..8 = role
+            // one-hots, 8 = `S_KEEP` — unchanged, since mul's periodic
             // columns sit first in `periodic_columns()`.
             let sel: [AB::Expr; MUL_PERIOD + 1] = {
                 let p = builder.periodic_values();
@@ -301,7 +319,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
 
             let kappa_a: AB::Expr = local[M_COL_KAPPA_A].into();
             let act: AB::Expr = local[M_COL_ACT].into();
-            let kappa_c_signed_next: AB::Expr = next[TERM_CELL_KAPPA_C_SIGNED].into();
+            let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
 
             let id: AB::ExprEF =
                 current_main::<_, AB::VarEF, 1>(builder.permutation(), MUL_REG_ID)[0].into();
@@ -312,37 +330,24 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             let s_next: AB::ExprEF =
                 next_main::<_, AB::VarEF, 1>(builder.permutation(), MUL_REG_S)[0].into();
 
-            let limb_sum = |from: usize| -> AB::ExprEF {
-                (0..8).fold(AB::ExprEF::ZERO, |acc, i| {
-                    acc + bp[from + i].clone() * AB::Expr::from(local[i])
-                })
-            };
-            let lo_sum = limb_sum(0);
-            let hi_sum = limb_sum(8);
+            let full16_sum: AB::ExprEF = (0..16)
+                .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+            let full_q_sum: AB::ExprEF = (0..NUM_Q_LIMBS)
+                .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+            let val_sum: AB::ExprEF = (0..8).fold(AB::ExprEF::ZERO, |acc, m| {
+                acc + bp[2 * m].clone() * AB::Expr::from(local[m])
+            });
 
-            let build: AB::ExprEF = lo_sum.clone() * (sel[ROW_A_LO].clone() * kappa_a.clone())
-                + hi_sum.clone() * (sel[ROW_A_HI].clone() * kappa_a)
-                + lo_sum.clone() * sel[ROW_P_LO].clone()
-                + hi_sum.clone() * sel[ROW_P_HI].clone();
+            let build: AB::ExprEF = full16_sum.clone() * (sel[ROW_A].clone() * kappa_a)
+                + full16_sum.clone() * sel[ROW_P].clone();
             let keep: AB::Expr = sel[PCOL_MUL_S_KEEP].clone();
             builder.when_first_row().assert_zero_ext(s.clone());
             builder.when_transition().assert_zero_ext(s_next - s.clone() * keep - build);
 
-            let product = s.clone() * lo_sum.clone() * sel[ROW_B_LO].clone()
-                + s.clone() * hi_sum.clone() * sel[ROW_B_HI].clone();
-            let q_lo_sum: AB::ExprEF = (0..MUL_NUM_CELLS)
-                .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
-            let q_hi_sum: AB::ExprEF = (0..NUM_Q_LIMBS - MUL_NUM_CELLS)
-                .fold(AB::ExprEF::ZERO, |acc, i| {
-                    acc + bp[MUL_NUM_CELLS + i].clone() * AB::Expr::from(local[i])
-                });
-            let quotient = (s + AB::ExprEF::ONE)
-                * (q_lo_sum * sel[ROW_Q_LO].clone() + q_hi_sum * sel[ROW_Q_HI].clone());
-            let val_sum: AB::ExprEF = (0..8).fold(AB::ExprEF::ZERO, |acc, m| {
-                acc + bp[2 * m].clone() * AB::Expr::from(local[m])
-            });
-            let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_next)
-                - val_sum * sel[ROW_R].clone();
+            let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
+            let quotient = (s + AB::ExprEF::ONE) * full_q_sum * sel[ROW_Q].clone();
+            let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
+                - val_sum.clone() * sel[ROW_R].clone();
 
             let mut carries = AB::ExprEF::ZERO;
             for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
@@ -359,41 +364,58 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             }
 
             let borrow: AB::Expr = local[M_COL_BORROW].into();
-            let borrow_contrib: AB::ExprEF = (lo_sum + AB::ExprEF::ONE)
-                * (sel[ROW_P_LO].clone() * borrow.clone())
-                + hi_sum * (sel[ROW_P_HI].clone() * borrow.clone());
+            let borrow_contrib: AB::ExprEF =
+                (full16_sum + AB::ExprEF::ONE) * (sel[ROW_P].clone() * borrow.clone());
 
             let contrib: AB::ExprEF = product - quotient + linear + carries + borrow_contrib;
             builder.when_first_row().assert_zero_ext(id.clone());
             builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-            builder.assert_zero_ext(id * sel[ROW_TERM].clone());
+
+            // The `c` row folds the closing check onto its own last-operand
+            // row, exactly like `UintMulAir::eval` — see that function's
+            // comment for the full rationale.
+            let mut c_own: AB::ExprEF = val_sum * kappa_c_signed_local.clone();
+            for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+                if row == ROW_C {
+                    let k = slot / 2;
+                    let mut w = x_minus_t.clone() * bp[k].clone();
+                    if slot % 2 == 1 {
+                        w *= t16.clone();
+                    }
+                    let mut gated: AB::Expr = AB::Expr::from(local[cell]);
+                    if slot % 2 == 0 {
+                        gated -= act.clone() * offset.clone();
+                    }
+                    c_own += w * gated;
+                }
+            }
+            builder.assert_zero_ext((id + c_own) * sel[ROW_C].clone());
 
             builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
 
             let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
             builder.assert_zero(
-                sel[ROW_TERM].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()),
+                sel[ROW_C].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()),
             );
 
             let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
-            let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
             let c_sign_local: AB::Expr =
                 AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub.clone();
             builder.assert_zero(
-                sel[ROW_TERM].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
+                sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
             );
 
             let two = AB::Expr::from(Felt::from(2u32));
             builder.assert_zero(
                 borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),
             );
-            builder.assert_zero(sel[ROW_TERM].clone() * borrow * (AB::Expr::ONE - is_sub));
+            builder.assert_zero(sel[ROW_C].clone() * borrow * (AB::Expr::ONE - is_sub));
 
             builder.assert_zero(
-                sel[ROW_TERM].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into(),
+                sel[ROW_C].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into(),
             );
 
-            let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_TERM].clone();
+            let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_C].clone();
             for col in [
                 M_COL_A_PTR,
                 M_COL_B_PTR,
@@ -490,7 +512,6 @@ where
 
         // MUL's own window.
         let local_m: [LB::Var; MUL_NUM_MAIN_COLS] = current_main(builder.main(), MUL_COL_OFFSET);
-        let next_m: [LB::Var; MUL_NUM_MAIN_COLS] = next_main(builder.main(), MUL_COL_OFFSET);
         let sel: [LB::Expr; MUL_PERIOD] = {
             let p = builder.periodic_values();
             array::from_fn(|i| p[i].into())
@@ -501,13 +522,14 @@ where
         let mul_bound_ptr: LB::Expr = local_m[M_COL_BOUND_PTR].into();
         let mul_kappa_a: LB::Expr = local_m[M_COL_KAPPA_A].into();
         let mul_act: LB::Expr = local_m[M_COL_ACT].into();
-        let c_ptr_next: LB::Expr = next_m[TERM_CELL_C_PTR].into();
+        let c_ptr_local: LB::Expr = local_m[TERM_CELL_C_PTR].into();
         let kappa_c_local: LB::Expr = local_m[TERM_CELL_KAPPA_C].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - local_m[TERM_CELL_MULT].into();
         let mul_provide_deg = Deg { v: 2, u: 1 };
         let mul_consume_deg = Deg { v: 2, u: 1 };
         let mul_rc_deg = Deg { v: 2, u: 1 };
-        let raw_m: [LB::Expr; 8] = array::from_fn(|i| local_m[i].into());
+        let raw_m_lo: [LB::Expr; 8] = array::from_fn(|i| local_m[i].into());
+        let raw_m_hi: [LB::Expr; 8] = array::from_fn(|i| local_m[8 + i].into());
         let val_lo: [LB::Expr; 4] = array::from_fn(|k| local_m[k].into());
         let val_hi: [LB::Expr; 4] = array::from_fn(|k| local_m[4 + k].into());
 
@@ -711,13 +733,13 @@ where
                             |b| {
                                 b.insert(
                                     "provide-uintmul",
-                                    neg_mult.clone() * sel[ROW_TERM].clone(),
+                                    neg_mult.clone() * sel[ROW_C].clone(),
                                     UintMulMsg {
                                         kappa_a: mul_kappa_a.clone(),
                                         kappa_c: kappa_c_local.clone(),
                                         a_ptr: a_ptr.clone(),
                                         b_ptr: b_ptr.clone(),
-                                        c_ptr: local_m[TERM_CELL_C_PTR].into(),
+                                        c_ptr: c_ptr_local.clone(),
                                         r_ptr: r_ptr.clone(),
                                         bound_ptr: mul_bound_ptr.clone(),
                                         is_sub: local_m[TERM_CELL_IS_SUB].into(),
@@ -734,21 +756,18 @@ where
             mul_provide_deg,
         );
 
-        // cols 9..19: mul's original cols 1..11, unchanged.
-        let raw_consumes: Vec<(LB::Expr, LB::Expr, LB::Expr)> = [
-            (ROW_A_LO, a_ptr.clone()),
-            (ROW_A_HI, a_ptr.clone()),
-            (ROW_B_LO, b_ptr.clone()),
-            (ROW_B_HI, b_ptr.clone()),
-            (ROW_P_LO, mul_bound_ptr.clone()),
-            (ROW_P_HI, mul_bound_ptr.clone()),
-        ]
-        .into_iter()
-        .map(|(row, ptr)| {
-            let off = if row % 2 == 1 { LB::Expr::ONE } else { LB::Expr::ZERO };
-            (sel[row].clone() * mul_act.clone(), ptr, off)
-        })
-        .collect();
+        // cols 9..: mul's own remaining columns, unchanged in shape.
+        let raw_consumes: Vec<(LB::Expr, LB::Expr, LB::Expr, [LB::Expr; 8])> =
+            [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone()), (ROW_P, mul_bound_ptr.clone())]
+                .into_iter()
+                .flat_map(|(row, ptr)| {
+                    let mult = sel[row].clone() * mul_act.clone();
+                    [
+                        (mult.clone(), ptr.clone(), LB::Expr::ZERO, raw_m_lo.clone()),
+                        (mult, ptr, LB::Expr::ONE, raw_m_hi.clone()),
+                    ]
+                })
+                .collect();
         for group in raw_consumes
             .chunks(2)
             .map(
@@ -756,6 +775,7 @@ where
                     <LB as LookupBuilder>::Expr,
                     <LB as LookupBuilder>::Expr,
                     <LB as LookupBuilder>::Expr,
+                    [<LB as LookupBuilder>::Expr; 8],
                 )]>::to_vec,
             )
             .collect::<Vec<_>>()
@@ -769,7 +789,7 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    for (mult, ptr, off) in group {
+                                    for (mult, ptr, off, limbs) in group {
                                         b.insert(
                                             "consume-uintlimbs",
                                             mult,
@@ -777,7 +797,7 @@ where
                                                 ptr,
                                                 bound_ptr: mul_bound_ptr.clone(),
                                                 offset: off,
-                                                limbs: raw_m.clone(),
+                                                limbs,
                                             },
                                             mul_consume_deg,
                                         );
@@ -793,20 +813,20 @@ where
             );
         }
 
-        let g_sum: LB::Expr =
-            (ROW_G0..=ROW_G4).map(|r| sel[r].clone()).fold(LB::Expr::ZERO, |acc, s| acc + s);
-        let solid_sum: LB::Expr = [ROW_A_LO, ROW_A_HI, ROW_B_LO, ROW_B_HI, ROW_P_LO, ROW_P_HI]
-            .map(|r| sel[r].clone())
-            .into_iter()
-            .fold(LB::Expr::ZERO, |acc, s| acc + s);
-        let q_sum: LB::Expr = sel[ROW_Q_LO].clone() + sel[ROW_Q_HI].clone();
-        let cell_gate = |cell: usize| -> LB::Expr {
-            match cell {
-                0..=7 => q_sum.clone() + g_sum.clone(),
-                8 => q_sum.clone() + g_sum.clone() + solid_sum.clone() + sel[ROW_R].clone(),
-                _ => q_sum.clone() + solid_sum.clone() + sel[ROW_R].clone(),
+        let mul_raw16_gate = |cell: usize| -> LB::Expr {
+            if cell < NUM_Q_LIMBS {
+                sel[ROW_Q].clone()
+            } else {
+                LB::Expr::ZERO
             }
         };
+        let mul_gamma_gate = |cell: usize| -> LB::Expr {
+            GAMMA_SLOTS
+                .iter()
+                .filter(|&&(_, c)| c == cell)
+                .fold(LB::Expr::ZERO, |acc, &(row, _)| acc + sel[row].clone())
+        };
+        let cell_gate = |cell: usize| -> LB::Expr { mul_raw16_gate(cell) + mul_gamma_gate(cell) };
         let cell_specs: Vec<(LB::Expr, usize)> = (0..MUL_NUM_CELLS)
             .map(|cell| (cell_gate(cell) * mul_act.clone(), cell))
             .collect();
@@ -854,13 +874,13 @@ where
                             |b| {
                                 b.insert(
                                     "range16-kappa-a",
-                                    sel[ROW_TERM].clone() * mul_act.clone(),
+                                    sel[ROW_C].clone() * mul_act.clone(),
                                     Range16Msg { w: mul_kappa_a.clone() },
                                     mul_rc_deg,
                                 );
                                 b.insert(
                                     "range16-kappa-c",
-                                    sel[ROW_TERM].clone() * mul_act.clone(),
+                                    sel[ROW_C].clone() * mul_act.clone(),
                                     Range16Msg { w: kappa_c_local.clone() },
                                     mul_rc_deg,
                                 );
@@ -873,7 +893,7 @@ where
             },
             pair_deg,
         );
-        let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_next)];
+        let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_local)];
         for (row, ptr) in val_consumes {
             builder.next_column(
                 |col| {
