@@ -18,6 +18,7 @@ members = [
     "crates/lifted-air",
     "crates/lifted-stark",
     "crates/mast-package",
+    "crates/miden-constraint-compiler",
     "crates/midenc-hir-type",
     "crates/package-registry",
     "crates/package-registry-local",
@@ -83,6 +84,7 @@ miden-air               = { path = "./air", version = "0.28", default-features =
 miden-assembly          = { path = "./crates/assembly", version = "0.28", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.28", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.28", default-features = false }
+miden-constraint-compiler = { path = "./crates/miden-constraint-compiler", version = "0.28", default-features = false }
 miden-core              = { path = "./core", version = "0.28", default-features = false }
 miden-crypto            = { path = "./crates/crypto", version = "0.28", default-features = false }
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "0.28", default-features = false }
