@@ -30,7 +30,7 @@
 //! committed sign-offset as `γ'ₖ = γₖ + 2³¹ ∈ [0, 2³²)` in two
 //! `Range16`-checked 16-bit halves. The offset correction folds into
 //! the γ-lo terms, so every block sums to zero and the `id` register
-//! closes at the term row, exactly like the store's range check.
+//! closes at the `c` row, exactly like the store's range check.
 //!
 //! **No-wrap:** limbs are 16-bit (store-checked, inherited through the
 //! `UintLimbs` tie — never re-checked here), `κₐ, κ_c < 2¹⁶`
@@ -40,44 +40,46 @@
 //! contract** (`κ ≲ 2⁹`) is a completeness condition only — beyond it
 //! the honest carries outgrow their `2³²` window and nothing proves.
 //!
-//! ## Liquid layout (period 16, zero dead rows)
+//! ## Liquid layout (period 8, folded closing)
 //!
-//! Only lookups impose shape: the bus-facing operands keep 8 limbs
-//! co-resident per row (cells 0–7), while the local witnesses `q` / `Γ`
-//! flow into every remaining cell — each placement is one
-//! precomputed-weight term in the `id` accumulator plus one `Range16`
-//! fraction. Ten cells per row pack the 146 committed values into
-//! exactly 16 live rows:
+//! Only lookups impose shape: the bus-facing operands keep their limbs
+//! co-resident in a single row (no more lo/hi split), while the local
+//! witnesses `q` / `Γ` flow into every remaining cell — each placement
+//! is one precomputed-weight term in the `id` accumulator plus one
+//! `Range16` fraction. Nineteen cells per row pack the 148 committed
+//! values into exactly 8 live rows:
 //!
-//! | row | role | cells 0–7 | cells 8–9 |
-//! |-----|-------|--------------------------|------------|
-//! | 0–1 | `a` lo/hi | a's 16-bit limbs | γ spill |
-//! | 2–3 | `b` lo/hi | b's limbs | γ spill |
-//! | 4–5 | `p` lo/hi | bound's limbs | γ spill |
-//! | 6 | `q` lo | q₀..q₉ (all ten cells) | — |
-//! | 7 | `q` hi | q₁₀..q₁₆ | γ spill (7–9) |
-//! | 8–12 | `γ₀..γ₄` | nine γ halves each (0–8) | spare (9) |
-//! | 13 | `r` | r's 4×32 halves | γ spill |
-//! | 14 | `c` | c's 4×32 halves | spare |
-//! | 15 | `term` | mult, c_ptr, κ_c (cells 0–2) | spare |
+//! | row | role | cells 0–15 / 0–16 | cells past the limbs |
+//! |-----|------|--------------------|------------------------|
+//! | 0   | `a`  | a's 16-bit limbs (0–15) | γ spill (16–18) |
+//! | 1   | `b`  | b's limbs (0–15) | γ spill (16–18) |
+//! | 2   | `p`  | bound's limbs (0–15) | γ spill (16–18) |
+//! | 3   | `q`  | q₀..q₁₆ (0–16) | γ spill (17–18) |
+//! | 4   | `r`  | r's 4×32 halves (0–7) | γ spill (8–18) |
+//! | 5   | `g0` | — | γ (0–18, all cells) |
+//! | 6   | `g1` | — | γ (0–14; 15–18 spare) |
+//! | 7   | `c`  | c's 4×32 halves (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
 //!
 //! ([`GAMMA_SLOTS`] is the single placement table the AIR, trace-gen
-//! and prover all read.) The `c` row sits at term − 1 so `c_ptr` / `κ_c`
-//! live as term-row cells read via next-row access — consume,
-//! contribution and provide all read the *same* cell, so the tuple is
-//! consistent by construction, no tie constraints.
+//! and prover all read.) The `c` row folds the old dedicated term row's
+//! role: it's both the last operand row of the block *and* the closing
+//! row, so its own contribution — not yet folded into `id` by the time
+//! its own row is evaluated — is reconstructed locally (mirroring
+//! [`UintAdd`](crate::uint::add)'s `p_own` pattern) and asserted
+//! directly instead of relying on a dedicated all-metadata successor
+//! row to stay at a hard-pinned zero.
 //!
 //! ## Registers
 //!
 //! Two ext-field aux registers beyond the LogUp columns (σ-excluded via
-//! `num_logup_cols = 3`):
+//! `num_logup_cols`):
 //!
-//! - **`S`** (staging): builds `κₐ·a(β)` over the a-rows, holds through the b-rows (whose `id`
-//!   contribution `S·Σbⱼβʲ` lands the degree-2 product at constraint degree 3), resets, builds
-//!   `bound(β)`, holds through the q-rows (`−(S+1)·Σqᵢβⁱ` — the `+1` is `p = bound + 1`), resets.
-//!   One register serves both products via the periodic keep gate [`S_KEEP`].
-//! - **`id`**: accumulates every role's contribution; `when_first_row` pins 0, the term row asserts
-//!   0.
+//! - **`S`** (staging): builds `κₐ·a(β)` on the `a` row, holds through the `b` row (whose `id`
+//!   contribution `S·b(β)` lands the degree-2 product at constraint degree 3), resets, builds
+//!   `bound(β)` on the `p` row, holds through the `q` row (`−(S+1)·q(β)` — the `+1` is `p = bound +
+//!   1`), resets. One register serves both products via the periodic keep gate [`S_KEEP`].
+//! - **`id`**: accumulates every role's contribution; `when_first_row` pins 0, the `c` row's folded
+//!   check asserts the block closes to 0.
 //!
 //! ## Padding
 //!
@@ -170,75 +172,68 @@ where
 // COLUMN LAYOUT
 // ================================================================================================
 
-/// Limb/witness cells per row — 8 bus-facing limbs plus 2 liquid cells.
-pub const NUM_CELLS: usize = 10;
+/// Limb/witness cells per row — 19 cells host either 16/17 bus-facing
+/// limbs plus γ spill, or (on the `r`/`c` rows) 8 bus-facing 32-bit
+/// limbs plus γ spill / term metadata.
+pub const NUM_CELLS: usize = 19;
 /// `a`'s pointer (cycle-constant per block).
-pub const COL_A_PTR: usize = 10;
+pub const COL_A_PTR: usize = NUM_CELLS;
 /// `b`'s pointer (cycle-constant).
-pub const COL_B_PTR: usize = 11;
+pub const COL_B_PTR: usize = NUM_CELLS + 1;
 /// `r`'s pointer — the witnessed result (cycle-constant).
-pub const COL_R_PTR: usize = 12;
+pub const COL_R_PTR: usize = NUM_CELLS + 2;
 /// the shared modulus's pointer = `bound_ptr` (cycle-constant).
-pub const COL_BOUND_PTR: usize = 13;
-/// the product scale κₐ (cycle-constant; `Range16`-checked on term rows).
-pub const COL_KAPPA_A: usize = 14;
+pub const COL_BOUND_PTR: usize = NUM_CELLS + 3;
+/// the product scale κₐ (cycle-constant; `Range16`-checked on the `c` row).
+pub const COL_KAPPA_A: usize = NUM_CELLS + 4;
 /// Block-active flag `act ∈ {0, 1}` (cycle-constant): 1 on real op
 /// blocks, 0 on padding; gates every bus flag + the γ offset constant.
-pub const COL_ACT: usize = 15;
+pub const COL_ACT: usize = NUM_CELLS + 5;
 /// Subtractive-underflow borrow `∈ {0, 1, 2}` (cycle-constant): the moduli
 /// the canonical reduction adds back when `is_sub` and the product
 /// `< κ_c·c` (up to 2 for the `κ_c = 2` doubling `λ² − 2x₁`). Read on the
-/// p-rows (where `bound(β)` is live) to contribute `borrow·(bound(β)+1)`
+/// `p` row (where `bound(β)` is live) to contribute `borrow·(bound(β)+1)`
 /// to the SZ identity. Pinned to 0 unless `is_sub`.
-pub const COL_BORROW: usize = 16;
-pub const NUM_MAIN_COLS: usize = 17;
+pub const COL_BORROW: usize = NUM_CELLS + 6;
+pub const NUM_MAIN_COLS: usize = NUM_CELLS + 7;
 
-/// Block period: one mul op = 16 rows, all live.
-pub const PERIOD: usize = 16;
+/// Block period: one mul op = 8 rows, all live.
+pub const PERIOD: usize = 8;
 
 // Row roles (also the periodic one-hot indices: selector `i` fires on
 // row `i`).
-pub const ROW_A_LO: usize = 0;
-pub const ROW_A_HI: usize = 1;
-pub const ROW_B_LO: usize = 2;
-pub const ROW_B_HI: usize = 3;
-pub const ROW_P_LO: usize = 4;
-pub const ROW_P_HI: usize = 5;
-pub const ROW_Q_LO: usize = 6;
-pub const ROW_Q_HI: usize = 7;
-pub const ROW_G0: usize = 8;
-pub const ROW_G4: usize = 12;
-pub const ROW_R: usize = 13;
-pub const ROW_C: usize = 14;
-pub const ROW_TERM: usize = 15;
+pub const ROW_A: usize = 0;
+pub const ROW_B: usize = 1;
+pub const ROW_P: usize = 2;
+pub const ROW_Q: usize = 3;
+pub const ROW_R: usize = 4;
+pub const ROW_G0: usize = 5;
+pub const ROW_G1: usize = 6;
+/// The closing row: hosts `c`'s limbs, the term metadata, and the
+/// block's folded closing check.
+pub const ROW_C: usize = 7;
 
 /// The periodic `S`-keep gate `g`: `S' = g·S + build`. 1 across each
-/// build-and-use span (a-rows into the b-rows, p-rows into the q-rows),
-/// 0 on the resets after `b_hi` / `q_hi` and across the tail.
-pub const S_KEEP: [u64; PERIOD] = [1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// build-and-use span (the `a` row into the `b` row, the `p` row into
+/// the `q` row), 0 on the resets after `b` / `q` and across the tail.
+pub const S_KEEP: [u64; PERIOD] = [1, 0, 1, 0, 0, 0, 0, 0];
 const PCOL_S_KEEP: usize = PERIOD;
 const NUM_PERIODIC: usize = PERIOD + 1;
 
-// Term-row metadata cells (the c row reads them via next-row access;
-// the provide reads them locally — same cell, consistent by
-// construction).
-pub const TERM_CELL_MULT: usize = 0;
-pub const TERM_CELL_C_PTR: usize = 1;
-pub const TERM_CELL_KAPPA_C: usize = 2;
-/// Term-row cell holding the subtractive-mode flag `is_sub ∈ {0, 1}` (read
-/// locally for the booleanity / borrow gate, and on the `c` row via next
-/// for the sign of [`TERM_CELL_KAPPA_C_SIGNED`]).
-pub const TERM_CELL_IS_SUB: usize = 3;
-/// Term-row cell holding the witnessed signed scale
-/// `κ_c_signed = κ_c·(1 − 2·is_sub)`, pinned locally by a degree-2
-/// constraint (`κ_c`, `is_sub` are both term-row-local cells, so the pin
-/// needs no `next` window). Hoists the `κ_c·(1 − 2·is_sub)` product out of
-/// the `id`-register `linear` contribution, which is read via `next` on
-/// the `c` row: without the hoist that contribution multiplies `val_sum`
-/// (deg 1) by two `next`-row witnesses (`κ_c`, `is_sub`, deg 1 each),
-/// landing the `id` transition constraint at degree 4 (lqd 2) instead of 3
-/// (lqd 1) once the `when_transition` selector's own +1 is counted.
-pub const TERM_CELL_KAPPA_C_SIGNED: usize = 4;
+// Term-metadata cells, now hosted on the `c` row past its 8 raw limbs
+// (the `c` row reads them locally — no more `next`-row access, since
+// there's no separate term row anymore).
+pub const TERM_CELL_MULT: usize = 8;
+pub const TERM_CELL_C_PTR: usize = 9;
+pub const TERM_CELL_KAPPA_C: usize = 10;
+/// Subtractive-mode flag `is_sub ∈ {0, 1}`, local to the `c` row.
+pub const TERM_CELL_IS_SUB: usize = 11;
+/// The witnessed signed scale `κ_c_signed = κ_c·(1 − 2·is_sub)`, pinned
+/// locally by a degree-2 constraint (`κ_c`, `is_sub` are both `c`-row-local
+/// cells). Hoists the `κ_c·(1 − 2·is_sub)` product out of the `id`-register
+/// `linear` contribution so that contribution stays a single local
+/// multiplication instead of two.
+pub const TERM_CELL_KAPPA_C_SIGNED: usize = 12;
 
 /// Quotient limbs: `q ≤ κₐ·p + κ_c < 2²⁷²` needs 17.
 pub const NUM_Q_LIMBS: usize = 17;
@@ -257,53 +252,95 @@ pub const GAMMA_SLOTS: [(usize, usize); NUM_GAMMA_SLOTS] = gamma_slots();
 const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
     let mut slots = [(0usize, 0usize); NUM_GAMMA_SLOTS];
     let mut s = 0;
-    // The five dedicated γ rows: cells 0–8 (cell 9 spare, keeping the
-    // per-row Range16 batch at nine fractions).
-    let mut row = ROW_G0;
-    while row <= ROW_G4 {
-        let mut cell = 0;
-        while cell < 9 {
-            slots[s] = (row, cell);
-            s += 1;
-            cell += 1;
-        }
-        row += 1;
-    }
-    // The solid rows' liquid cells (8, 9).
-    let solid = [ROW_A_LO, ROW_A_HI, ROW_B_LO, ROW_B_HI, ROW_P_LO, ROW_P_HI];
-    let mut i = 0;
-    while i < solid.len() {
-        slots[s] = (solid[i], 8);
-        slots[s + 1] = (solid[i], 9);
-        s += 2;
-        i += 1;
-    }
-    // q_hi's tail cells past the seven high q limbs.
-    let mut cell = 7;
-    while cell < 10 {
-        slots[s] = (ROW_Q_HI, cell);
+    // g0: every cell.
+    let mut cell = 0;
+    while cell < NUM_CELLS {
+        slots[s] = (ROW_G0, cell);
         s += 1;
         cell += 1;
     }
-    // The r row's liquid cells close the count at 62.
-    slots[s] = (ROW_R, 8);
-    slots[s + 1] = (ROW_R, 9);
+    // g1: cells 0..15 (15 used, cells 15..19 spare).
+    let mut cell = 0;
+    while cell < 15 {
+        slots[s] = (ROW_G1, cell);
+        s += 1;
+        cell += 1;
+    }
+    // a, b, p: each spill 3 cells (16..19) past their 16 raw limbs.
+    let solid16 = [ROW_A, ROW_B, ROW_P];
+    let mut i = 0;
+    while i < solid16.len() {
+        let mut cell = 16;
+        while cell < NUM_CELLS {
+            slots[s] = (solid16[i], cell);
+            s += 1;
+            cell += 1;
+        }
+        i += 1;
+    }
+    // q: spills 2 cells (17..19) past its 17 raw limbs.
+    let mut cell = NUM_Q_LIMBS;
+    while cell < NUM_CELLS {
+        slots[s] = (ROW_Q, cell);
+        s += 1;
+        cell += 1;
+    }
+    // r: spills 11 cells (8..19) past its 8 raw (32-bit, unchecked-here) limbs.
+    let mut cell = 8;
+    while cell < NUM_CELLS {
+        slots[s] = (ROW_R, cell);
+        s += 1;
+        cell += 1;
+    }
+    // c: spills 6 cells (13..19) past its 8 raw limbs + 5 term-metadata cells.
+    let mut cell = TERM_CELL_KAPPA_C_SIGNED + 1;
+    while cell < NUM_CELLS {
+        slots[s] = (ROW_C, cell);
+        s += 1;
+        cell += 1;
+    }
     slots
 }
 
-// Aux layout: col 0 = LogUp running sum (the UintMul provide +
-// the six raw UintLimbs consumes), col 1 = Range16 on the bus-facing
-// cell positions, col 2 = Range16 on the liquid/κ positions + the 4×32
-// UintVal consumes, cols 12/13 = the Schwartz–Zippel `id` and staging `S`
-// registers (excluded from σ via num_logup_cols = 12). FLATTENED to lqd 1:
-// all 23 fractions are act-gated degree-2 multiplicities, so they pair ≤ 2
-// per column (col 0 a single fraction) → every constraint degree ≤ 3.
-// Width disregarded (research/logup-flatten).
-const NUM_LOGUP_COLS: usize = 12;
-const REG_ID: usize = 12;
-const REG_S: usize = 13;
-const AUX_WIDTH: usize = 14;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+// Aux layout: col 0 = LogUp running sum (the UintMul provide), the raw
+// UintLimbs consumes, Range16 on every cell position, the two κ
+// Range16s, and the 4×32 UintVal consumes, then the Schwartz–Zippel
+// `id` and staging `S` registers (excluded from σ via num_logup_cols).
+// FLATTENED to lqd 1: every fraction is an act-gated degree-2
+// multiplicity, paired ≤ 2 per column (col 0 a single fraction; the
+// odd cell count leaves one Range16 column a singleton too) → every
+// constraint degree ≤ 3.
+const NUM_RAW_CONSUMES: usize = 3; // a, b, bound
+const NUM_RAW_CONSUME_COLS: usize = NUM_RAW_CONSUMES.div_ceil(2);
+const NUM_RANGE16_COLS: usize = NUM_CELLS.div_ceil(2);
+/// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
+/// can concatenate this chiplet's column shape onto the store's own
+/// instead of hand-duplicating the derived column count.
+pub(crate) const NUM_LOGUP_COLS: usize = 1 // the UintMul provide
+    + NUM_RAW_CONSUME_COLS // the three merged raw UintLimbs consumes (a, b, bound)
+    + NUM_RANGE16_COLS // Range16 on every cell position
+    + 1 // the two κ Range16s
+    + 1; // the merged 4×32 UintVal consumes (r, c)
+const REG_ID: usize = NUM_LOGUP_COLS;
+const REG_S: usize = NUM_LOGUP_COLS + 1;
+const AUX_WIDTH: usize = NUM_LOGUP_COLS + 2;
+
+const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
+    let mut shape = [2usize; NUM_LOGUP_COLS];
+    shape[0] = 1;
+    // The raw-consume block (3 messages, ≤ 2 per column) has a singleton
+    // tail.
+    if NUM_RAW_CONSUMES % 2 == 1 {
+        shape[NUM_RAW_CONSUME_COLS] = 1;
+    }
+    // The Range16 block starts right after; if NUM_CELLS is odd its last
+    // column is a singleton too.
+    if NUM_CELLS % 2 == 1 {
+        shape[1 + NUM_RAW_CONSUME_COLS + NUM_RANGE16_COLS - 1] = 1;
+    }
+    shape
+}
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 
 /// The γ sign offset `2³¹` (carries are committed as `γ + 2³¹`).
 pub(crate) const GAMMA_OFFSET: u32 = 1 << 31;
@@ -370,9 +407,9 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // β⁰..β³¹ (the γ weights reach (β − t)·β³⁰).
         let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(2 * PERIOD);
+        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(NUM_GAMMA + 1);
         bp.push(AB::ExprEF::ONE);
-        for i in 1..2 * PERIOD {
+        for i in 1..NUM_GAMMA + 1 {
             bp.push(bp[i - 1].clone() * beta.clone());
         }
         let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
@@ -381,10 +418,10 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
         let act: AB::Expr = local[COL_ACT].into();
-        // The pinned signed scale (see `TERM_CELL_KAPPA_C_SIGNED`) — reads
-        // straight from the term row, no in-place `κ_c · (1 − 2·is_sub)`
-        // product on the `c` row's `next` window.
-        let kappa_c_signed_next: AB::Expr = next[TERM_CELL_KAPPA_C_SIGNED].into();
+        // κ_c_signed is now local to the `c` row (see
+        // `TERM_CELL_KAPPA_C_SIGNED`) — no more `next`-row access, since
+        // the `c` row hosts its own term metadata directly.
+        let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
 
         // Registers.
         let id: AB::ExprEF =
@@ -395,48 +432,33 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         let s_next: AB::ExprEF =
             next_main::<_, AB::VarEF, 1>(builder.permutation(), REG_S)[0].into();
 
-        // Weighted cell sums over the 8 bus-facing limbs (cells 0–7).
-        let limb_sum = |from: usize| -> AB::ExprEF {
-            (0..8).fold(AB::ExprEF::ZERO, |acc, i| {
-                acc + bp[from + i].clone() * AB::Expr::from(local[i])
-            })
-        };
-        let lo_sum = limb_sum(0);
-        let hi_sum = limb_sum(8);
+        // Weighted cell sums: the 16-limb operands (a/b/bound, cells
+        // 0–15), the 17-limb quotient (cells 0–16), and the linear r/c
+        // operands (4×32 limbs at even powers, cells 0–7).
+        let full16_sum: AB::ExprEF =
+            (0..16).fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+        let full_q_sum: AB::ExprEF = (0..NUM_Q_LIMBS)
+            .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+        let val_sum: AB::ExprEF = (0..8)
+            .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
 
-        // S: build κₐ·a(β) over the a-rows, bound(β) over the p-rows;
+        // S: build κₐ·a(β) on the `a` row, bound(β) on the `p` row;
         // hold / reset per the periodic keep gate.
-        let build: AB::ExprEF = lo_sum.clone() * (sel[ROW_A_LO].clone() * kappa_a.clone())
-            + hi_sum.clone() * (sel[ROW_A_HI].clone() * kappa_a)
-            + lo_sum.clone() * sel[ROW_P_LO].clone()
-            + hi_sum.clone() * sel[ROW_P_HI].clone();
+        let build: AB::ExprEF = full16_sum.clone() * (sel[ROW_A].clone() * kappa_a)
+            + full16_sum.clone() * sel[ROW_P].clone();
         let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
         builder.when_first_row().assert_zero_ext(s.clone());
         builder.when_transition().assert_zero_ext(s_next - s.clone() * keep - build);
 
         // id contributions.
-        // The product: S = κₐ·a(β) through the b-rows.
-        let product = s.clone() * lo_sum.clone() * sel[ROW_B_LO].clone()
-            + s.clone() * hi_sum.clone() * sel[ROW_B_HI].clone();
-        // The quotient: S = bound(β) through the q-rows; q(β)·(bound(β)+1)
-        // with q₀..q₉ on q_lo (all ten cells) and q₁₀..q₁₆ on q_hi.
-        let q_lo_sum: AB::ExprEF = (0..NUM_CELLS)
-            .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
-        let q_hi_sum: AB::ExprEF = (0..NUM_Q_LIMBS - NUM_CELLS).fold(AB::ExprEF::ZERO, |acc, i| {
-            acc + bp[NUM_CELLS + i].clone() * AB::Expr::from(local[i])
-        });
-        let quotient = (s + AB::ExprEF::ONE)
-            * (q_lo_sum * sel[ROW_Q_LO].clone() + q_hi_sum * sel[ROW_Q_HI].clone());
+        // The product: S = κₐ·a(β) through the `b` row.
+        let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
+        // The quotient: S = bound(β) through the `q` row; q(β)·(bound(β)+1).
+        let quotient = (s + AB::ExprEF::ONE) * full_q_sum * sel[ROW_Q].clone();
         // The linear operands: 4×32 limbs at even powers, both halves on
-        // one row. κ_c is read from the term row (next).
-        let val_sum: AB::ExprEF = (0..8)
-            .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
-        // κ_c_signed (term row, read via next on the c row) is +κ_c for
-        // `κₐ·a·b + κ_c·c`, −κ_c for the subtractive `κₐ·a·b − κ_c·c` — pinned
-        // below to `κ_c · (1 − 2·is_sub)`. The result r stays on the −R side
-        // either way.
-        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_next)
-            - val_sum * sel[ROW_R].clone();
+        // one row. κ_c_signed is local to the `c` row.
+        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
+            - val_sum.clone() * sel[ROW_R].clone();
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
         // the lo halves carry the −2³¹ offset correction, act-gated so
         // all-zero padding blocks contribute nothing.
@@ -456,62 +478,84 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // The subtractive borrow: when `is_sub` and `κₐ·a·b < κ_c·c`, the
         // canonical reduction wraps up by one p, so the identity carries
-        // `+borrow·(bound(β)+1)`. Contributed on the p-rows, where bound(β)
-        // is live as the limb sums (lo on p_lo, hi on p_hi); the +1 of
-        // `p = bound + 1` rides p_lo's β⁰.
+        // `+borrow·(bound(β)+1)`. Contributed on the `p` row, where
+        // bound(β) is live as the full limb sum; the +1 of `p = bound + 1`
+        // rides β⁰.
         let borrow: AB::Expr = local[COL_BORROW].into();
-        let borrow_contrib: AB::ExprEF = (lo_sum + AB::ExprEF::ONE)
-            * (sel[ROW_P_LO].clone() * borrow.clone())
-            + hi_sum * (sel[ROW_P_HI].clone() * borrow.clone());
+        let borrow_contrib: AB::ExprEF =
+            (full16_sum + AB::ExprEF::ONE) * (sel[ROW_P].clone() * borrow.clone());
 
         let contrib: AB::ExprEF = product - quotient + linear + carries + borrow_contrib;
         builder.when_first_row().assert_zero_ext(id.clone());
         builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-        builder.assert_zero_ext(id * sel[ROW_TERM].clone());
+
+        // The closing row (`c`) has a nonzero contribution of its own —
+        // its `κ_c_signed · val_sum` linear term plus its share of γ — so
+        // the closure check folds it in directly instead of reading it
+        // back from `id_next`. That keeps the check local to the block's
+        // last row, so it also covers the trace's final block: relying on
+        // `id_next` would read the wrap-around first row's pinned zero
+        // regardless of whether that last block actually closed. Built
+        // from `c`'s own cells only (not the shared `contrib`, whose
+        // other-role terms carry their own periodic gates and would
+        // needlessly bloat this constraint's degree once multiplied by
+        // `sel[ROW_C]`).
+        let mut c_own: AB::ExprEF = val_sum * kappa_c_signed_local.clone();
+        for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+            if row == ROW_C {
+                let k = slot / 2;
+                let mut w = x_minus_t.clone() * bp[k].clone();
+                if slot % 2 == 1 {
+                    w *= t16.clone();
+                }
+                let mut gated: AB::Expr = AB::Expr::from(local[cell]);
+                if slot % 2 == 0 {
+                    gated -= act.clone() * offset.clone();
+                }
+                c_own += w * gated;
+            }
+        }
+        builder.assert_zero_ext((id + c_own) * sel[ROW_C].clone());
 
         // act is the boolean block-active flag (cycle-constant).
         builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
 
-        // `is_sub` (term-row cell) is boolean; `borrow` (cycle-constant)
+        // `is_sub` (`c`-row cell) is boolean; `borrow` (cycle-constant)
         // ∈ {0, 1, 2} — a `κ_c = 2` double (`λ² − 2x₁`) underflows by up to
         // 2p — and only fires in the subtractive mode (`borrow ⟹ is_sub`),
         // so an additive op cannot smuggle a +p shift onto its quotient.
         let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
-        builder
-            .assert_zero(sel[ROW_TERM].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
+        builder.assert_zero(sel[ROW_C].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
 
-        // κ_c_signed = κ_c · (1 − 2·is_sub), pinned term-row-local (no `next`
-        // window needed here — both operands live on this row), so `linear`
-        // above can read it via a single `next`-row witness instead of
-        // multiplying two `next`-row witnesses in place. Degree 2 (`κ_c` ×
-        // `is_sub`), well under the lqd-1 budget.
+        // κ_c_signed = κ_c · (1 − 2·is_sub), pinned `c`-row-local (both
+        // operands live on this row), so `linear` above can read it via a
+        // single local witness. Degree 2 (`κ_c` × `is_sub`), well under
+        // the lqd-1 budget.
         let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
-        let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
         let c_sign_local: AB::Expr =
             AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub.clone();
         builder.assert_zero(
-            sel[ROW_TERM].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
+            sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
         );
 
         let two = AB::Expr::from(Felt::from(2u32));
         builder.assert_zero(
             borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),
         );
-        builder.assert_zero(sel[ROW_TERM].clone() * borrow * (AB::Expr::ONE - is_sub));
+        builder.assert_zero(sel[ROW_C].clone() * borrow * (AB::Expr::ONE - is_sub));
 
         // A provide must come from an active block. The `UintMul` provide is
-        // gated only by `sel[ROW_TERM]` (not `act`), and the operand consumes
+        // gated only by `sel[ROW_C]` (not `act`), and the operand consumes
         // are act-gated — so an `act = 0` block with zeroed limbs (the SZ
-        // registers close trivially) and a witnessed term-row `mult` would
+        // registers close trivially) and a witnessed `c`-row `mult` would
         // provide a *false* relation onto the bus. Force the mult to 0 when
         // act = 0.
-        builder.assert_zero(
-            sel[ROW_TERM].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into(),
-        );
+        builder
+            .assert_zero(sel[ROW_C].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into());
 
         // Cycle-constancy: ptrs / κₐ / act are constant within a block
         // (every row but the terminal one).
-        let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_TERM].clone();
+        let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_C].clone();
         for col in
             [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT, COL_BORROW]
         {
@@ -553,7 +597,6 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
         let sel: [LB::Expr; NUM_PERIODIC] = {
             let p = builder.periodic_values();
@@ -566,28 +609,25 @@ where
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
         let kappa_a: LB::Expr = local[COL_KAPPA_A].into();
         let act: LB::Expr = local[COL_ACT].into();
-        let c_ptr_next: LB::Expr = next[TERM_CELL_C_PTR].into();
+        let c_ptr_local: LB::Expr = local[TERM_CELL_C_PTR].into();
         let kappa_c_local: LB::Expr = local[TERM_CELL_KAPPA_C].into();
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].into();
 
-        // Column budget: every fraction column must stay inside the
-        // degree-9 (lqd-3) envelope — at most 8 fractions with the act-
-        // gated degree-2 multiplicities. The provide + the six raw
-        // consumes share col 0 (7 fractions); the eight bus-facing cell
-        // positions fill col 1; the two liquid positions, the two κ cells
-        // and the four 4×32 consumes fill col 2.
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 2, u: 1 };
         let rc_deg = Deg { v: 2, u: 1 };
         // Flattened columns hold ≤ 2 degree-2 fractions → constraint degree ≤ 3.
         let pair_deg = Deg { v: 3, u: 2 };
 
-        let raw: [LB::Expr; 8] = array::from_fn(|i| local[i].into());
+        // The two 8×16 halves of a/b/bound's 16-limb value on this row —
+        // reused across whichever of the three raw-limb rows is active.
+        let raw_lo: [LB::Expr; 8] = array::from_fn(|i| local[i].into());
+        let raw_hi: [LB::Expr; 8] = array::from_fn(|i| local[8 + i].into());
         let val_lo: [LB::Expr; 4] = array::from_fn(|k| local[k].into());
         let val_hi: [LB::Expr; 4] = array::from_fn(|k| local[4 + k].into());
 
-        // Flattened LogUp (lqd 1): all 23 fractions are act-gated degree-2
-        // multiplicities, paired ≤ 2 per column (col 0 a single fraction).
+        // Flattened LogUp (lqd 1): every fraction is an act-gated degree-2
+        // multiplicity, paired ≤ 2 per column (col 0 a single fraction).
 
         // col 0 (running sum): the UintMul provide.
         builder.next_column(
@@ -601,13 +641,13 @@ where
                             |b| {
                                 b.insert(
                                     "provide-uintmul",
-                                    neg_mult.clone() * sel[ROW_TERM].clone(),
+                                    neg_mult.clone() * sel[ROW_C].clone(),
                                     UintMulMsg {
                                         kappa_a: kappa_a.clone(),
                                         kappa_c: kappa_c_local.clone(),
                                         a_ptr: a_ptr.clone(),
                                         b_ptr: b_ptr.clone(),
-                                        c_ptr: local[TERM_CELL_C_PTR].into(),
+                                        c_ptr: c_ptr_local.clone(),
                                         r_ptr: r_ptr.clone(),
                                         bound_ptr: bound_ptr.clone(),
                                         is_sub: local[TERM_CELL_IS_SUB].into(),
@@ -624,28 +664,32 @@ where
             provide_deg,
         );
 
-        // cols 1..3: the six raw 8×16 consumes (a, b, modulus), two per col.
-        let raw_consumes: Vec<(LB::Expr, LB::Expr, LB::Expr)> = [
-            (ROW_A_LO, a_ptr.clone()),
-            (ROW_A_HI, a_ptr.clone()),
-            (ROW_B_LO, b_ptr.clone()),
-            (ROW_B_HI, b_ptr.clone()),
-            (ROW_P_LO, bound_ptr.clone()),
-            (ROW_P_HI, bound_ptr.clone()),
-        ]
-        .into_iter()
-        .map(|(row, ptr)| {
-            let offset = if row % 2 == 1 { LB::Expr::ONE } else { LB::Expr::ZERO };
-            (sel[row].clone() * act.clone(), ptr, offset)
-        })
-        .collect();
+        // cols 1..: the three merged raw 16×16 consumes (a, b, modulus),
+        // two per col — each operand's full 16 limbs already live
+        // together on its own row, so one message covers the whole
+        // value.
+        let raw_consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 16])> =
+            [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone()), (ROW_P, bound_ptr.clone())]
+                .into_iter()
+                .map(|(row, ptr)| {
+                    let mult = sel[row].clone() * act.clone();
+                    let limbs: [LB::Expr; 16] = array::from_fn(|i| {
+                        if i < 8 {
+                            raw_lo[i].clone()
+                        } else {
+                            raw_hi[i - 8].clone()
+                        }
+                    });
+                    (mult, ptr, limbs)
+                })
+                .collect();
         for group in raw_consumes
             .chunks(2)
             .map(
                 <[(
                     <LB as LookupBuilder>::Expr,
                     <LB as LookupBuilder>::Expr,
-                    <LB as LookupBuilder>::Expr,
+                    [<LB as LookupBuilder>::Expr; 16],
                 )]>::to_vec,
             )
             .collect::<Vec<_>>()
@@ -659,15 +703,14 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    for (mult, ptr, offset) in group {
+                                    for (mult, ptr, limbs) in group {
                                         b.insert(
                                             "consume-uintlimbs",
                                             mult,
                                             UintLimbsMsg {
                                                 ptr,
                                                 bound_ptr: bound_ptr.clone(),
-                                                offset,
-                                                limbs: raw.clone(),
+                                                limbs,
                                             },
                                             consume_deg,
                                         );
@@ -683,26 +726,34 @@ where
             );
         }
 
-        // Range16 gates by cell position per [`GAMMA_SLOTS`]: cells 0–7
-        // host q limbs + the dedicated γ rows; cell 8 adds the solid
-        // spills + r; cell 9 the same minus the γ rows (their cell 9 is
-        // spare).
-        let g_sum: LB::Expr =
-            (ROW_G0..=ROW_G4).map(|r| sel[r].clone()).fold(LB::Expr::ZERO, |acc, s| acc + s);
-        let solid_sum: LB::Expr = [ROW_A_LO, ROW_A_HI, ROW_B_LO, ROW_B_HI, ROW_P_LO, ROW_P_HI]
-            .map(|r| sel[r].clone())
-            .into_iter()
-            .fold(LB::Expr::ZERO, |acc, s| acc + s);
-        let q_sum: LB::Expr = sel[ROW_Q_LO].clone() + sel[ROW_Q_HI].clone();
-        let cell_gate = |cell: usize| -> LB::Expr {
-            match cell {
-                0..=7 => q_sum.clone() + g_sum.clone(),
-                8 => q_sum.clone() + g_sum.clone() + solid_sum.clone() + sel[ROW_R].clone(),
-                _ => q_sum.clone() + solid_sum.clone() + sel[ROW_R].clone(),
+        // Range16 gates by cell position: a raw-limb gate (only `q`'s
+        // limbs — a witness local to this chiplet — need re-checking
+        // here; a/b/bound's raw limbs are inherited already-range16'd
+        // from the store via the `UintLimbs` bus tie, so re-checking them
+        // would demand a Range16 the store side never registers) plus a
+        // γ-slot gate (every row that hosts a γ half at this exact cell
+        // position, per `GAMMA_SLOTS` — this is what covers a/b/bound's
+        // own γ spill on cells 16–18). `r`/`c`'s own 8×32 limbs (cells
+        // 0–7) and `c`'s term-metadata cells never appear in either gate,
+        // so they're excluded automatically — as are the dead cells on
+        // `g1`'s tail.
+        let raw16_gate = |cell: usize| -> LB::Expr {
+            if cell < NUM_Q_LIMBS {
+                sel[ROW_Q].clone()
+            } else {
+                LB::Expr::ZERO
             }
         };
+        let gamma_gate = |cell: usize| -> LB::Expr {
+            GAMMA_SLOTS
+                .iter()
+                .filter(|&&(_, c)| c == cell)
+                .fold(LB::Expr::ZERO, |acc, &(row, _)| acc + sel[row].clone())
+        };
+        let cell_gate = |cell: usize| -> LB::Expr { raw16_gate(cell) + gamma_gate(cell) };
 
-        // cols 4..8: Range16 on all ten cell positions, two per column.
+        // cols 4..4+NUM_RANGE16_COLS: Range16 on all nineteen cell
+        // positions, two per column (the last column a singleton).
         let cell_specs: Vec<(LB::Expr, usize)> =
             (0..NUM_CELLS).map(|cell| (cell_gate(cell) * act.clone(), cell)).collect();
         for group in cell_specs
@@ -738,7 +789,7 @@ where
             );
         }
 
-        // col 9: the two κ Range16s (both on the term row).
+        // col: the two κ Range16s (both on the `c` row).
         builder.next_column(
             |col| {
                 col.group(
@@ -750,13 +801,13 @@ where
                             |b| {
                                 b.insert(
                                     "range16-kappa-a",
-                                    sel[ROW_TERM].clone() * act.clone(),
+                                    sel[ROW_C].clone() * act.clone(),
                                     Range16Msg { w: kappa_a.clone() },
                                     rc_deg,
                                 );
                                 b.insert(
                                     "range16-kappa-c",
-                                    sel[ROW_TERM].clone() * act.clone(),
+                                    sel[ROW_C].clone() * act.clone(),
                                     Range16Msg { w: kappa_c_local.clone() },
                                     rc_deg,
                                 );
@@ -769,43 +820,46 @@ where
             },
             pair_deg,
         );
-        // cols 10..11: the 4×32 UintVal consumes (r, then c), lo+hi per col.
-        let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_next)];
-        for (row, ptr) in val_consumes {
-            builder.next_column(
-                |col| {
-                    col.group(
-                        "uintval",
-                        |g| {
-                            g.batch(
-                                "f",
-                                LB::Expr::ONE,
-                                |b| {
-                                    for (offset, half) in [
-                                        (LB::Expr::ZERO, val_lo.clone()),
-                                        (LB::Expr::ONE, val_hi.clone()),
-                                    ] {
-                                        b.insert(
-                                            "consume-uintval",
-                                            sel[row].clone() * act.clone(),
-                                            UintValMsg {
-                                                ptr: ptr.clone(),
-                                                bound_ptr: bound_ptr.clone(),
-                                                offset,
-                                                limbs: half,
-                                            },
-                                            consume_deg,
-                                        );
-                                    }
-                                },
-                                pair_deg,
-                            );
-                        },
-                        pair_deg,
-                    );
-                },
-                pair_deg,
-            );
-        }
+        // col: the merged 4×32 UintVal consumes (r, then c) — one
+        // message per operand now that both halves are local, so both
+        // fit in a single column.
+        let val_full: [LB::Expr; 8] = array::from_fn(|i| {
+            if i < 4 {
+                val_lo[i].clone()
+            } else {
+                val_hi[i - 4].clone()
+            }
+        });
+        let val_consumes: [(usize, LB::Expr); 2] = [(ROW_R, r_ptr.clone()), (ROW_C, c_ptr_local)];
+        builder.next_column(
+            |col| {
+                col.group(
+                    "uintval",
+                    |g| {
+                        g.batch(
+                            "f",
+                            LB::Expr::ONE,
+                            |b| {
+                                for (row, ptr) in val_consumes {
+                                    b.insert(
+                                        "consume-uintval",
+                                        sel[row].clone() * act.clone(),
+                                        UintValMsg {
+                                            ptr,
+                                            bound_ptr: bound_ptr.clone(),
+                                            limbs: val_full.clone(),
+                                        },
+                                        consume_deg,
+                                    );
+                                }
+                            },
+                            pair_deg,
+                        );
+                    },
+                    pair_deg,
+                );
+            },
+            pair_deg,
+        );
     }
 }

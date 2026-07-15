@@ -253,14 +253,14 @@ pub const COL_NEG_YR: usize = 36;
 pub const COL_NEG_MINTED: usize = 37;
 pub const NUM_MAIN_COLS: usize = 38;
 
-// Aux: 11 columns, flattened via `frac_col!` over the 21 fractions so
+// Aux: 11 columns, flattened via `frac_col!` over the 20 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
 // 1 (folding the intermediate 12-column flatten and the follow-on
 // singleton-pack into one step):
 //  col 0:  MsmTerm provide — alone, the gated running-sum anchor.
 //  col 1:  MsmExpr provide + MsmClaimTerm provide.
-//  col 2:  EcOnCurveCert provide (neg value R) + literal-1 UintVal lo (intro).
-//  col 3:  literal-1 UintVal hi (intro) + MsmTerm consume A.
+//  col 2:  EcOnCurveCert provide (neg value R) + literal-1 UintVal (intro, one full-value message).
+//  col 3:  MsmTerm consume A — alone, now that the literal-1 UintVal merged into col 2.
 //  col 4:  MsmTerm consume B + UintAdd (take_both merge).
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
@@ -270,7 +270,7 @@ pub const NUM_MAIN_COLS: usize = 38;
 //  col 10: ordering Range16 — b_lo + b_hi.
 const NUM_LOGUP_COLS: usize = 11;
 const AUX_WIDTH: usize = 11;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -620,7 +620,8 @@ where
         // cert point — vouch its on-curve membership here (R is on-curve
         // because val_a is), once, when this neg freshly mints R
         // (`neg_minted` on the boundary) — paired with intro's literal-1
-        // UintVal low limb.
+        // UintVal, now sent as one full-value message instead of a
+        // lo/hi pair.
         frac_col!(
             builder,
             "ec-msm-provide",
@@ -635,34 +636,31 @@ where
                 two_deg
             ),
             (
-                "consume-one-lo",
+                "consume-one",
                 is_intro.clone(),
                 UintValMsg {
                     ptr: scalar.clone(),
                     bound_ptr: sbound_ptr.clone(),
-                    offset: LB::Expr::ZERO,
-                    limbs: [LB::Expr::ONE, LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO],
+                    limbs: [
+                        LB::Expr::ONE,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                    ],
                 },
                 one_deg
             ),
         );
-        // col 3 (paired, lqd-1): intro's literal-1 UintVal high limb,
-        // paired with the combine term walk's operand-A consume.
+        // col 3: the combine term walk's operand-A consume, alone now
+        // that the literal-1 UintVal it was paired with merged into col 2.
         frac_col!(
             builder,
             "ec-msm-walk",
-            pair_deg,
-            (
-                "consume-one-hi",
-                is_intro.clone(),
-                UintValMsg {
-                    ptr: scalar.clone(),
-                    bound_ptr: sbound_ptr.clone(),
-                    offset: LB::Expr::ONE,
-                    limbs: [LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO, LB::Expr::ZERO],
-                },
-                one_deg
-            ),
+            single_deg,
             (
                 "consume-term-a",
                 adv_i.clone(),

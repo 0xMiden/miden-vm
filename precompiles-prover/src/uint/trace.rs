@@ -20,8 +20,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CARRY_CELLS_BEGIN, HUB_CELL_UINTLIMBS_MULT, HUB_CELL_UINTVAL_MULT, NUM_LIMBS,
-    NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP, UintStoreAir,
+    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, HUB_CELL_UINTLIMBS_MULT, HUB_CELL_UINTVAL_MULT,
+    NUM_CELLS, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP, UintStoreAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -353,37 +353,34 @@ pub(crate) fn generate_trace_padded_to(
         }
         bpl.require_range16(gap as u16);
 
-        let mut hub = [Felt::ZERO; NUM_LIMBS];
-        hub[HUB_CELL_UINTVAL_MULT] = Felt::from(mult);
-        hub[HUB_CELL_UINTLIMBS_MULT] = Felt::from(limbs_mult);
-        let mut term = [Felt::ZERO; NUM_LIMBS];
-        term[TERM_CELL_GAP] = Felt::from(gap);
+        // v_lo: v's low 8 limbs, cells 8–15 dead.
+        let mut v_lo = [Felt::ZERO; NUM_CELLS];
+        for i in 0..8 {
+            v_lo[i] = Felt::from(v16[i]);
+        }
+        // v_hi: v's high 8 limbs, then the hub (provide mults), cells 10–15 dead.
+        let mut v_hi = [Felt::ZERO; NUM_CELLS];
+        for i in 0..8 {
+            v_hi[i] = Felt::from(v16[8 + i]);
+        }
+        v_hi[HUB_CELL_UINTVAL_MULT] = Felt::from(mult);
+        v_hi[HUB_CELL_UINTLIMBS_MULT] = Felt::from(limbs_mult);
+        // comp: both halves on one row.
+        let comp: [Felt; NUM_CELLS] = array::from_fn(|i| Felt::from(comp16[i]));
+        // bound (closing): 4×32 lo (0–3) + γ0–3 (4–7), 4×32 hi (8–11) +
+        // γ4–6 (12–14) + gap (15).
+        let mut bound = [Felt::ZERO; NUM_CELLS];
+        for i in 0..4 {
+            bound[i] = Felt::from(bound32[i]);
+            bound[CARRY_LO_BEGIN + i] = Felt::from(c[i]);
+            bound[8 + i] = Felt::from(bound32[4 + i]);
+        }
+        for j in 0..3 {
+            bound[CARRY_HI_BEGIN + j] = Felt::from(c[4 + j]);
+        }
+        bound[TERM_CELL_GAP] = Felt::from(gap);
 
-        let rows: [[Felt; NUM_LIMBS]; PERIOD] = [
-            array::from_fn(|i| Felt::from(v16[i])), // v_lo
-            hub,
-            array::from_fn(|i| Felt::from(v16[8 + i])), // v_hi
-            array::from_fn(|i| Felt::from(comp16[i])),  // comp_lo
-            array::from_fn(|i| Felt::from(comp16[8 + i])), // comp_hi
-            // bound lo/hi: the 4×32 half in cells 0–3, carries in 4–7/4–6.
-            array::from_fn(|i| {
-                if i < 4 {
-                    Felt::from(bound32[i])
-                } else {
-                    Felt::from(c[i - 4])
-                }
-            }),
-            array::from_fn(|i| {
-                if i < 4 {
-                    Felt::from(bound32[4 + i])
-                } else if i < 7 {
-                    Felt::from(c[i])
-                } else {
-                    Felt::ZERO
-                }
-            }),
-            term,
-        ];
+        let rows: [[Felt; NUM_CELLS]; PERIOD] = [v_lo, v_hi, comp, bound];
         for row in rows {
             vals.extend(row);
             vals.push(Felt::from(u.ptr.0));
@@ -423,32 +420,46 @@ pub(crate) fn build_aux(
         data.push(id);
 
         let limb = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        let contrib: QuadFelt = match r % PERIOD {
-            0 | 3 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+        let recomb_lo07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = limb(2 * k) + two16 * limb(2 * k + 1);
                 s + bp[k] * QuadFelt::from(rk)
-            }),
-            2 | 4 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+            })
+        };
+        let recomb_hi07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = limb(2 * k) + two16 * limb(2 * k + 1);
                 s + bp[4 + k] * QuadFelt::from(rk)
-            }),
-            // Bound rows: subtract the direct 4×32 half, add the
-            // hosted carries' (β^{j+1} − t·β^j) terms.
-            5 => (0..4).fold(QuadFelt::ZERO, |s, j| {
-                let w = bp[j + 1] - bp[j] * t32;
-                s + w * QuadFelt::from(limb(CARRY_CELLS_BEGIN + j))
-                    - bp[j] * QuadFelt::from(limb(j))
-            }),
-            6 => (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let carry = if k < 3 {
-                    let j = 4 + k;
-                    (bp[j + 1] - bp[j] * t32) * QuadFelt::from(limb(CARRY_CELLS_BEGIN + k))
-                } else {
-                    QuadFelt::ZERO
-                };
-                s + carry - bp[4 + k] * QuadFelt::from(limb(k))
-            }),
-            _ => QuadFelt::ZERO,
+            })
+        };
+        let recomb_hi815 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
+                let rk = limb(8 + 2 * k) + two16 * limb(8 + 2 * k + 1);
+                s + bp[4 + k] * QuadFelt::from(rk)
+            })
+        };
+        let contrib: QuadFelt = match r % PERIOD {
+            0 => recomb_lo07(),
+            1 => recomb_hi07(),
+            2 => recomb_lo07() + recomb_hi815(),
+            // Bound (closing) row: subtract both direct 4×32 halves, add
+            // both hosted carries' (β^{j+1} − t·β^j) terms.
+            3 => {
+                let carry_lo = (0..4).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp[j + 1] - bp[j] * t32;
+                    s + w * QuadFelt::from(limb(CARRY_LO_BEGIN + j))
+                });
+                let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp[4 + j + 1] - bp[4 + j] * t32;
+                    s + w * QuadFelt::from(limb(CARRY_HI_BEGIN + j))
+                });
+                let direct_lo =
+                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp[k] * QuadFelt::from(limb(k)));
+                let direct_hi =
+                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp[4 + k] * QuadFelt::from(limb(8 + k)));
+                carry_lo - direct_lo + carry_hi - direct_hi
+            },
+            _ => unreachable!("PERIOD = 4"),
         };
         id += contrib;
     }
