@@ -28,7 +28,24 @@ pub mod ecdsa_k256_keccak {
     use miden_crypto::{
         SequentialCommit,
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
+        hash::keccak::Keccak256,
     };
+    use miden_precompiles::{
+        Limbs, glv_decompose, reduce_mod_n, scalar_inv_mod_n, scalar_mul_mod_n,
+    };
+
+    /// Which scalar-multiplication strategy the MASM verifier uses to compute `u1*G + u2*Q`: an
+    /// untrusted, prover-supplied choice with no soundness implication either way — a wrong
+    /// witness for either path fails verification, it can never forge one. GLV amortizes its two
+    /// endomorphism-image bases across every signature that shares a proof, so it favors large
+    /// batches; Straus has no such shared setup cost and favors small ones.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Algorithm {
+        /// Classic 2-base joint wNAF multi-scalar multiplication (`u1*G + u2*Q`).
+        Straus,
+        /// GLV-endomorphism 4-base multi-scalar multiplication.
+        Glv,
+    }
 
     /// Signs the provided message with the supplied secret key and encodes the resulting signature
     /// and public key into the native advice-stack format expected by `ecdsa_k256_keccak::verify`.
@@ -37,24 +54,42 @@ pub mod ecdsa_k256_keccak {
     /// uncommitted advice witness data and the MASM verifier does not require low-s. See
     /// [`encode_signature()`] for the advice encoding. Use [`public_key_commitment()`] to derive
     /// the `PK_COMM` word that must be provided on the operand stack alongside the message.
-    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
+    pub fn sign(sk: &SigningKey, msg: Word, algo: Algorithm) -> Vec<Felt> {
         let pk = sk.public_key();
         let sig = sk.sign(msg);
-        encode_signature(&pk, &sig)
+        encode_signature(&pk, &sig, msg, algo)
     }
 
-    /// Encodes the provided public key and signature into the native advice-stack format expected
-    /// by `ecdsa_k256_keccak::verify`.
+    /// Number of felts a GLV witness occupies: the verifier's two ECDSA scalars (`u1`, `u2`) each
+    /// split into a signed short pair via the secp256k1 GLV endomorphism, encoded as an 8-limb
+    /// magnitude plus one sign felt (`1` = negative) per half.
+    const GLV_HALVES_FELTS: usize = 4 * 9;
+
+    /// Encodes the provided public key, signature, and message into the native advice-stack format
+    /// expected by `ecdsa_k256_keccak::verify`.
     ///
     /// The encoding is the structural order consumed from the advice stack:
-    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
-    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
-    /// to the supplied signature encoding.
+    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8] || ALGO || GLV_HALVES? || PAD]`, where each scalar
+    /// value is a little-endian `u32` limb represented as a field element. The signature portion
+    /// preserves `r` and `s` exactly, omits the recovery ID, and does not normalize or enforce
+    /// low-s. `ALGO` is a single untrusted felt (`0` = Straus, `1` = GLV) selecting the verifier's
+    /// scalar-multiplication strategy; `GLV_HALVES` (present only when `algo` is
+    /// [`Algorithm::Glv`]) is an untrusted witness for the verifier's in-circuit GLV scalar
+    /// decomposition (`u1 = k1a + λ·k1b`, `u2 = k2a + λ·k2b`, magnitude-then-sign-felt per half, in
+    /// that order) — the MASM verifier re-derives and checks this relation, so an incorrect
+    /// witness fails verification rather than forging anything. `PAD` is trailing zero felts
+    /// rounding the total up to a multiple of 8 (`push_for_adv_pipe`'s requirement); the verifier
+    /// drains them from advice unread. The result is advice witness data, not a commitment to the
+    /// supplied signature encoding.
     ///
     /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
     /// commitment returned by [`public_key_commitment()`].
-    pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
+    pub fn encode_signature(
+        pk: &PublicKey,
+        sig: &Signature,
+        msg: Word,
+        algo: Algorithm,
+    ) -> Vec<Felt> {
         let pk_elements = pk.to_elements();
         assert_eq!(
             pk_elements.len(),
@@ -62,10 +97,54 @@ pub mod ecdsa_k256_keccak {
             "ECDSA public key elements must be QX[8] || QY[8] native limbs",
         );
 
-        let mut out = Vec::with_capacity(32);
+        let is_glv = algo == Algorithm::Glv;
+        let mut out = Vec::with_capacity(16 + 16 + 1 + GLV_HALVES_FELTS + 7);
         out.extend(pk_elements);
         out.extend_from_slice(&signature_felts(sig));
+        out.push(Felt::from_u32(is_glv as u32));
+        if is_glv {
+            out.extend_from_slice(&glv_advice_felts(sig, msg));
+        }
+        let pad = (8 - out.len() % 8) % 8;
+        out.resize(out.len() + pad, Felt::from_u32(0));
         out
+    }
+
+    /// Computes the verifier's `u1`/`u2` ECDSA scalars the same way the MASM verifier does, splits
+    /// each via the secp256k1 GLV endomorphism, and encodes the four signed halves as advice.
+    fn glv_advice_felts(sig: &Signature, msg: Word) -> [Felt; GLV_HALVES_FELTS] {
+        let z = z_from_message(msg);
+        let r = be_bytes_to_le_limbs(sig.r());
+        let s = be_bytes_to_le_limbs(sig.s());
+        let s_inv = scalar_inv_mod_n(s);
+        let u1 = scalar_mul_mod_n(z, s_inv);
+        let u2 = scalar_mul_mod_n(r, s_inv);
+
+        let [k1a, k1b] = glv_decompose(u1);
+        let [k2a, k2b] = glv_decompose(u2);
+
+        let mut out = [Felt::from_u32(0); GLV_HALVES_FELTS];
+        let mut i = 0;
+        for (neg, mag) in [k1a, k1b, k2a, k2b] {
+            out[i..i + 8].copy_from_slice(&limbs_to_felts(mag));
+            out[i + 8] = Felt::from_u32(neg as u32);
+            i += 9;
+        }
+        out
+    }
+
+    /// The Keccak256 prehash scalar `z`, reduced mod the secp256k1 scalar-field order, matching
+    /// `ecdsa_k256_keccak.masm`'s exact message-to-scalar conversion: each message felt's 8
+    /// little-endian bytes are concatenated (in element order) into the 32-byte Keccak256
+    /// preimage, and the resulting digest is converted back to native little-endian u32 limbs
+    /// (see [`be_bytes_to_le_limbs`]) before reduction.
+    fn z_from_message(msg: Word) -> Limbs {
+        let mut preimage = [0u8; 32];
+        for (i, felt) in msg.iter().enumerate() {
+            preimage[i * 8..i * 8 + 8].copy_from_slice(&felt.as_canonical_u64().to_le_bytes());
+        }
+        let digest: [u8; 32] = Keccak256::hash(&preimage).into();
+        reduce_mod_n(be_bytes_to_le_limbs(&digest))
     }
 
     /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.

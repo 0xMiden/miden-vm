@@ -99,12 +99,406 @@ pub proc verify
 
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
+
+    # Untrusted, prover-supplied algorithm selector (1 = GLV, 0 = Straus): which path computes
+    # `u1*G + u2*Q` is a pure performance choice, not a soundness one, since each path's own
+    # certificate independently fails a wrong witness rather than forging one.
+    adv_push
+    # => [algo, U1, Q, U2, SIG_R, ...]
+    dup dup dup mul assert_eq
+    # => [algo, U1, Q, U2, SIG_R, ...]  (booleanity checked, one copy of algo survives)
+    if.true
+        locaddr.0
+        # => [pubkey_ptr, U1, Q, U2, SIG_R, ...]
+        movdn.12
+        # => [U1, Q, U2, pubkey_ptr, SIG_R, ...]
+        exec.verify_point_glv
+        # => [VERIFY_POINT, SIG_R, ...]
+    else
+        exec.verify_point_straus
+        # => [VERIFY_POINT, SIG_R, ...]
+    end
+    exec.assert_x_eq_scalar_k1
+    # => [...]
+end
+
+# INTERNAL PROCEDURES — GLV
+# ================================================================================================
+#
+# `verify_point_glv` computes `R = u1*G + u2*Q` via the secp256k1 GLV endomorphism instead of the
+# naive 2-base MSM: each scalar splits into a signed short pair over the endomorphism basis
+# (`u = ka + lambda*kb`), turning the 2-base ~256-bit MSM into a 4-base ~128-bit one (`k1a*G +
+# k1b*phi(G) + k2a*Q + k2b*phi(Q)`), which the joint addition-chain strategy lays with roughly half
+# the doublings. The split is untrusted advice, certified in-circuit two ways: `phi(P) = (beta*x_P
+# mod p, y_P)` is proven on-curve when the deferred prover evaluates it (sound because `phi(P) =
+# lambda*P` for any curve point whenever `beta^3 = 1 mod p` and `lambda^3 = 1 mod n` -- a fixed
+# program constant, not attacker-influenced), and each split's recompose relation is checked
+# directly against `u1`/`u2` via k1 scalar-field arithmetic below. A negative half routes its sign
+# through the *base* (`sign ? -P : P`) rather than the scalar, so the four MSM scalars stay
+# non-negative ~128-bit magnitudes -- what actually caps the ladder near 128 doublings.
+#
+# T0-2 note: this does not yet special-case a degenerate GLV split (duplicate canonical base
+# across the four terms, e.g. Q colliding with G/phi(G), or a zero-magnitude half) -- the same class
+# of liveness gap the audit tracks for the non-GLV path. Left for a follow-up; astronomically
+# unlikely for a randomly chosen public key.
+
+#! secp256k1 GLV base-field constant `beta` (`beta^3 = 1 mod p`), as a k1_base VALUE digest.
+proc push_beta_digest
+    push.0x7ae96a2b
+    push.0x657c0710
+    push.0x6e64479e
+    push.0xac3434e9
+    push.0x9cf04975
+    push.0x12f58995
+    push.0xc1396c28
+    push.0x719501ee
+    exec.k1_base::load
+end
+
+#! secp256k1 GLV scalar `lambda` (`lambda^3 = 1 mod n`), as a k1_scalar VALUE digest.
+proc push_lambda_digest
+    push.0x5363ad4c
+    push.0xc05c30e0
+    push.0xa5261c02
+    push.0x8812645a
+    push.0x122e22ea
+    push.0x20816678
+    push.0xdf02967c
+    push.0x1b23bd72
+    exec.k1_scalar::load
+end
+
+#! The secp256k1 generator's x-coordinate, as a k1_base VALUE digest.
+proc push_gx_digest
+    push.0x79be667e
+    push.0xf9dcbbac
+    push.0x55a06295
+    push.0xce870b07
+    push.0x029bfcdb
+    push.0x2dce28d9
+    push.0x59f2815b
+    push.0x16f81798
+    exec.k1_base::load
+end
+
+#! The secp256k1 generator's y-coordinate, as a k1_base VALUE digest.
+proc push_gy_digest
+    push.0x483ada77
+    push.0x26a3c465
+    push.0x5da4fbfc
+    push.0x0e1108a8
+    push.0xfd17b448
+    push.0xa6855419
+    push.0x9c47d08f
+    push.0xfb10d4b8
+    exec.k1_base::load
+end
+
+#! Builds `phi(P) = (beta*x_P mod p, y_P)` from `P`'s raw base-field coordinate digests -- the
+#! secp256k1 GLV endomorphism image. On-curve membership (and hence `phi(P) = lambda*P`) is
+#! certified when this digest is later evaluated, because `P` is on-curve and `beta^3 = 1 mod p`
+#! keeps the curve equation satisfied.
+#!
+#! Input:  [bx, by, ...]
+#! Output: [PHI_DIGEST, ...]
+proc phi_point
+    exec.push_beta_digest
+    # => [BETA, bx, by, ...]
+    swapw
+    # => [bx, BETA, by, ...]
+    exec.k1_base::mul
+    # => [PHI_X, by, ...]
+    exec.secp256k1::load_digest_pair
+    # => [PHI_DIGEST, ...]
+end
+
+#! Pulls one signed GLV magnitude from advice: an 8-limb canonical k1 scalar magnitude, then a
+#! sign felt (`1` = negative).
+#!
+#! Advice: [MAG_LO[4] | MAG_HI[4] | SIGN | ...]
+#! Output: [sign, MAG_DIGEST, ...]
+proc pull_signed_scalar
+    exec.load_scalar_k1_from_advice
+    # => [MAG_DIGEST, ...]
+    adv_push
+    # => [sign, MAG_DIGEST, ...]
+    dup dup dup mul assert_eq
+    # => [sign, MAG_DIGEST, ...]  (booleanity checked; one copy of sign survives)
+end
+
+#! Returns `sign ? neg(base) : base` -- routes a GLV half's sign through the base, so the MSM
+#! ladder's scalar stays a non-negative magnitude.
+#!
+#! Input:  [sign, base, ...]
+#! Output: [signed_base, ...]
+proc signed_base
+    if.true
+        exec.secp256k1::neg
+        # => [NEG_BASE, ...]
+    else
+        # => [base, ...]
+    end
+end
+
+#! Returns `sign ? (0 - mag) : mag` -- the k1 scalar this signed half contributes to a mod-n
+#! recompose sum.
+#!
+#! Input:  [sign, mag, ...]
+#! Output: [hat, ...]
+proc signed_hat
+    if.true
+        exec.k1_scalar::push_zero_digest
+        # => [ZERO, mag, ...]
+        exec.k1_scalar::sub
+        # => [HAT, ...]
+    else
+        # => [mag, ...]
+    end
+end
+
+#! Certifies `u == hat_a + lambda*hat_b (mod n)`, tying a term's two GLV halves back to the
+#! original scalar. Traps immediately on mismatch (an incorrect GLV witness fails verification,
+#! it can never forge one).
+#!
+#! Input:  [lambda, hat_b, hat_a, u, ...]
+#! Output: [...]
+proc assert_recompose
+    exec.k1_scalar::mul
+    # => [PROD, hat_a, u, ...]
+    exec.k1_scalar::add
+    # => [SUM, u, ...]
+    exec.k1_scalar::is_eq
+    # => [is_equal, ...]
+    assert.err="GLV recompose check failed"
+end
+
+#! Computes `R = u1*G + u2*Q` via the secp256k1 GLV endomorphism (see the module note above).
+#!
+#! Each inlined half below follows the same shape: pull one signed magnitude from advice, load its
+#! base digest from a fixed local slot, write the MSM pair `(signed_base, mag)` to the pair buffer,
+#! and reduce to `hat = sign ? (0 - mag) : mag` for the term's recompose check.
+#!
+#! Advice: four [`pull_signed_scalar`] draws, in order: u1's `a` half, u1's `b` half, u2's `a`
+#! half, u2's `b` half.
+#! Input:  [U1, Q, U2, pubkey_ptr, ...]
+#! Output: [VERIFY_POINT, ...]
+@locals(56)
+proc verify_point_glv
+    # => [U1, Q, U2, pubkey_ptr, ...]
+
+    # -- Gather phase: Q's raw coordinates (for phi(Q)), phi(Q), phi(G), G -- stash G/phi(G)/
+    #    phi(Q)/Q/U1/U2 to locals so the process phase below can address them by fixed offset.
+    movup.12
+    # => [pubkey_ptr, U1, Q, U2, ...]
+    dup
+    # => [pubkey_ptr, pubkey_ptr, U1, Q, U2, ...]
+    exec.k1_base::load_mem
+    # => [BX, pubkey_ptr, U1, Q, U2, ...]
+    locaddr.12 mem_storew_le dropw
+    # => [pubkey_ptr, U1, Q, U2, ...]
+    add.8
+    # => [pubkey_ptr+8, U1, Q, U2, ...]
+    exec.k1_base::load_mem
+    # => [BY, U1, Q, U2, ...]
+    locaddr.16 mem_storew_le dropw
+    # => [U1, Q, U2, ...]
+
+    swapw
+    # => [Q, U1, U2, ...]
+    padw locaddr.12 mem_loadw_le
+    # => [BX, Q, U1, U2, ...]
+    padw locaddr.16 mem_loadw_le
+    # => [BY, BX, Q, U1, U2, ...]
+    swapw
+    # => [BX, BY, Q, U1, U2, ...]
+    exec.phi_point
+    # => [PHI_Q, Q, U1, U2, ...]
+
+    exec.push_gy_digest
+    # => [GY, PHI_Q, Q, U1, U2, ...]
+    exec.push_gx_digest
+    # => [GX, GY, PHI_Q, Q, U1, U2, ...]
+    exec.phi_point
+    # => [PHI_G, PHI_Q, Q, U1, U2, ...]
+
+    exec.secp256k1::push_generator
+    # => [G, PHI_G, PHI_Q, Q, U1, U2, ...]
+
+    locaddr.0 mem_storew_le dropw
+    # => [PHI_G, PHI_Q, Q, U1, U2, ...]
+    locaddr.4 mem_storew_le dropw
+    # => [PHI_Q, Q, U1, U2, ...]
+    locaddr.8 mem_storew_le dropw
+    # => [Q, U1, U2, ...]
+    locaddr.12 mem_storew_le dropw
+    # => [U1, U2, ...]
+    locaddr.16 mem_storew_le dropw
+    # => [U2, ...]
+    locaddr.20 mem_storew_le dropw
+    # => [...]
+
+    # -- Term 1 (u1 = k1a + lambda*k1b): halves over G (loc[0]) and phi(G) (loc[4]). --
+
+    # Half k1a, base G.
+    exec.pull_signed_scalar
+    # => [sign, MAG, ...]
+    dup
+    # => [sign, sign, MAG, ...]
+    movdn.5
+    # => [sign, MAG, sign2, ...]
+    padw locaddr.0 mem_loadw_le
+    # => [BASE, sign, MAG, sign2, ...]
+    movup.4
+    # => [sign, BASE, MAG, sign2, ...]
+    exec.signed_base
+    # => [SIGNED_BASE, MAG, sign2, ...]
+    locaddr.24 mem_storew_le dropw
+    # => [MAG, sign2, ...]
+    dupw
+    # => [MAG, MAG, sign2, ...]
+    locaddr.28 mem_storew_le dropw
+    # => [MAG, sign2, ...]
+    movup.4
+    # => [sign2, MAG, ...]
+    exec.signed_hat
+    # => [HAT_1A, ...]
+
+    # Half k1b, base phi(G).
+    exec.pull_signed_scalar
+    # => [sign, MAG, HAT_1A, ...]
+    dup
+    # => [sign, sign, MAG, HAT_1A, ...]
+    movdn.5
+    # => [sign, MAG, sign2, HAT_1A, ...]
+    padw locaddr.4 mem_loadw_le
+    # => [BASE, sign, MAG, sign2, HAT_1A, ...]
+    movup.4
+    # => [sign, BASE, MAG, sign2, HAT_1A, ...]
+    exec.signed_base
+    # => [SIGNED_BASE, MAG, sign2, HAT_1A, ...]
+    locaddr.32 mem_storew_le dropw
+    # => [MAG, sign2, HAT_1A, ...]
+    dupw
+    # => [MAG, MAG, sign2, HAT_1A, ...]
+    locaddr.36 mem_storew_le dropw
+    # => [MAG, sign2, HAT_1A, ...]
+    movup.4
+    # => [sign2, MAG, HAT_1A, ...]
+    exec.signed_hat
+    # => [HAT_1B, HAT_1A, ...]
+
+    padw locaddr.16 mem_loadw_le
+    # => [U1, HAT_1B, HAT_1A, ...]
+    movdnw.2
+    # => [HAT_1B, HAT_1A, U1, ...]
+    exec.push_lambda_digest
+    # => [LAMBDA, HAT_1B, HAT_1A, U1, ...]
+    exec.assert_recompose
+    # => [...]
+
+    # -- Term 2 (u2 = k2a + lambda*k2b): halves over Q (loc[12]) and phi(Q) (loc[8]). --
+
+    # Half k2a, base Q.
+    exec.pull_signed_scalar
+    # => [sign, MAG, ...]
+    dup
+    # => [sign, sign, MAG, ...]
+    movdn.5
+    # => [sign, MAG, sign2, ...]
+    padw locaddr.12 mem_loadw_le
+    # => [BASE, sign, MAG, sign2, ...]
+    movup.4
+    # => [sign, BASE, MAG, sign2, ...]
+    exec.signed_base
+    # => [SIGNED_BASE, MAG, sign2, ...]
+    locaddr.40 mem_storew_le dropw
+    # => [MAG, sign2, ...]
+    dupw
+    # => [MAG, MAG, sign2, ...]
+    locaddr.44 mem_storew_le dropw
+    # => [MAG, sign2, ...]
+    movup.4
+    # => [sign2, MAG, ...]
+    exec.signed_hat
+    # => [HAT_2A, ...]
+
+    # Half k2b, base phi(Q).
+    exec.pull_signed_scalar
+    # => [sign, MAG, HAT_2A, ...]
+    dup
+    # => [sign, sign, MAG, HAT_2A, ...]
+    movdn.5
+    # => [sign, MAG, sign2, HAT_2A, ...]
+    padw locaddr.8 mem_loadw_le
+    # => [BASE, sign, MAG, sign2, HAT_2A, ...]
+    movup.4
+    # => [sign, BASE, MAG, sign2, HAT_2A, ...]
+    exec.signed_base
+    # => [SIGNED_BASE, MAG, sign2, HAT_2A, ...]
+    locaddr.48 mem_storew_le dropw
+    # => [MAG, sign2, HAT_2A, ...]
+    dupw
+    # => [MAG, MAG, sign2, HAT_2A, ...]
+    locaddr.52 mem_storew_le dropw
+    # => [MAG, sign2, HAT_2A, ...]
+    movup.4
+    # => [sign2, MAG, HAT_2A, ...]
+    exec.signed_hat
+    # => [HAT_2B, HAT_2A, ...]
+
+    # Drain the 3 zero felts `encode_signature` appends to pad its GLV advice output to a multiple
+    # of 8 (`push_for_adv_pipe`'s requirement).
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    # => [HAT_2B, HAT_2A, ...]
+
+    padw locaddr.20 mem_loadw_le
+    # => [U2, HAT_2B, HAT_2A, ...]
+    movdnw.2
+    # => [HAT_2B, HAT_2A, U2, ...]
+    exec.push_lambda_digest
+    # => [LAMBDA, HAT_2B, HAT_2A, U2, ...]
+    exec.assert_recompose
+    # => [...]
+
+    # -- Resolve the 4-term MSM over the pair buffer at loc[24..56]. --
+    push.4 locaddr.24
+    # => [ptr, n, ...]
+    exec.secp256k1::msm_mem
+    # => [VERIFY_POINT, ...]
+end
+
+# INTERNAL PROCEDURES — STRAUS
+# ================================================================================================
+#
+# `verify_point_straus` computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, with no GLV
+# endomorphism split. Cheaper than GLV for a single signature or a small batch, since it carries no
+# per-signature endomorphism-image/table setup; GLV wins once enough signatures in one proof share
+# its two cacheable bases (`G`, `phi(G)`) to amortize that setup.
+
+#! Computes `R = u1*G + u2*Q` via the classic 2-base joint wNAF MSM.
+#!
+#! Advice: 7 trailing zero felts, padding `encode_signature`'s Straus output to a multiple of 8
+#! (`push_for_adv_pipe`'s requirement).
+#! Input:  [U1, Q, U2, SIG_R, ...]
+#! Output: [VERIFY_POINT, SIG_R, ...]
+proc verify_point_straus
     exec.secp256k1::push_generator
     # => [G, U1, Q, U2, SIG_R, ...]
     exec.secp256k1::msm2
     # => [VERIFY_POINT, SIG_R, ...]
-    exec.assert_x_eq_scalar_k1
-    # => [...]
+
+    # Drain the 7 trailing zero felts `encode_signature` appends to pad its Straus advice output to
+    # a multiple of 8 (`push_for_adv_pipe`'s requirement).
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    adv_push drop
+    # => [VERIFY_POINT, SIG_R, ...]
 end
 
 # INTERNAL PROCEDURES — ECDSA

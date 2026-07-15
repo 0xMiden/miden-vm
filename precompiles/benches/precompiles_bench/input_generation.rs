@@ -40,11 +40,16 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
 
         builder.push_word(message);
         builder.push_word(ecdsa_k256_keccak::public_key_commitment(&pk));
-        builder.push_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
+        builder.push_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(
+            &pk,
+            &signature,
+            message,
+            ecdsa_k256_keccak::Algorithm::Glv,
+        ));
     }
 
     let advice = builder.into_elements();
-    assert_eq!(advice.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");
+    assert_eq!(advice.len(), workload.ecdsas * 80, "unexpected ECDSA advice length");
     AdviceInputs::default().with_stack(advice)
 }
 

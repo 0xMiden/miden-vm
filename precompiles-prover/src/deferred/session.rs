@@ -1,4 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{
+    collections::{BTreeMap, btree_map::Entry},
+    vec::Vec,
+};
 
 use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
 use miden_precompiles::{
@@ -7,17 +10,19 @@ use miden_precompiles::{
 };
 
 use crate::{
+    ec::trace::EcPointPtr,
     math::{U256, from_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
     transcript::poseidon2::P2Digest,
 };
 
-/// wNAF window for [`translate_ec_msm`](DeferredSessionBuilder::translate_ec_msm)'s
-/// joint-wNAF addition chain. `w = 5` (digits odd, `|d| < 2^{w-1}`, `2^{w-2}`
-/// odd multiples per base) matches the width already used for full-width
-/// (~256-bit) scalars elsewhere in this crate (`examples/ec_msm_ecdsa.rs`'s
-/// `WNAF_W`) — GLV's `w = 4` sweet spot is tuned for its ~128-bit halves, not
-/// the full-width scalars a raw MSM claim carries.
+/// wNAF window for [`translate_ec_msm`](DeferredSessionBuilder::translate_ec_msm)'s joint-wNAF
+/// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
+/// suits GLV's ~128-bit halves in isolation, but `translate_ec_msm` now caches a repeating base's
+/// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
+/// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
+/// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
+/// and GLV's 4-base one.
 const MSM_WNAF_WINDOW: usize = 5;
 
 pub(crate) struct DeferredSession {
@@ -46,7 +51,11 @@ pub(crate) enum DeferredSessionError {
 pub(crate) fn session_from_deferred_state(
     state: &DeferredState,
 ) -> Result<DeferredSession, DeferredSessionError> {
-    let mut builder = DeferredSessionBuilder { state, session: Session::new() };
+    let mut builder = DeferredSessionBuilder {
+        state,
+        session: Session::new(),
+        wnaf_tables: BTreeMap::new(),
+    };
 
     let root = builder.translate_truthy(state.root())?;
     let expected = P2Digest::from(state.root());
@@ -63,6 +72,11 @@ pub(crate) fn session_from_deferred_state(
 struct DeferredSessionBuilder<'a> {
     state: &'a DeferredState,
     session: Session,
+    /// A base's [`WnafTable`](strategies::WnafTable), by `(point, window)` —
+    /// so a base recurring across many MSM claims in this pass (the ECDSA GLV
+    /// generator and its endomorphism image across a batch of signatures)
+    /// lays its table once and every claim that rides it reuses the same one.
+    wnaf_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -273,13 +287,32 @@ impl<'a> DeferredSessionBuilder<'a> {
         // `joint_wnaf`'s per-column cost is linear in the term count (unlike
         // Straus's 2^k subset-sum table), so an arbitrary-arity pair-list
         // never needs a term-count cap here.
-        let expr = strategies::joint_wnaf(&mut self.session, &expr_terms, MSM_WNAF_WINDOW);
+        for (base, _) in &expr_terms {
+            self.ensure_wnaf_table(base, MSM_WNAF_WINDOW);
+        }
+        let table_terms: Vec<(&strategies::WnafTable, U256)> = expr_terms
+            .iter()
+            .map(|(base, scalar)| {
+                (self.wnaf_tables.get(&(base.point, MSM_WNAF_WINDOW)).unwrap(), *scalar)
+            })
+            .collect();
+        let expr = strategies::joint_wnaf_with_tables(&mut self.session, &table_terms);
 
         let claim_terms = terms
             .iter()
             .map(|(point, scalar)| (point.node, scalar.node))
             .collect::<Vec<_>>();
         Ok(self.session.ec_msm(expr, &claim_terms))
+    }
+
+    /// Ensures `base`'s [`WnafTable`](strategies::WnafTable) at window `w` is
+    /// in [`Self::wnaf_tables`], building it once via
+    /// [`wnaf_table`](strategies::wnaf_table) on the first request and
+    /// reusing it for every later claim that rides the same base.
+    fn ensure_wnaf_table(&mut self, base: &EcNode, w: usize) {
+        if let Entry::Vacant(entry) = self.wnaf_tables.entry((base.point, w)) {
+            entry.insert(strategies::wnaf_table(&mut self.session, base, w));
+        }
     }
 
     fn require_truthy_metadata(&self, digest: Digest) -> Result<(), DeferredSessionError> {

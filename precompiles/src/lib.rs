@@ -16,8 +16,9 @@ pub use hash::{HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak25
 pub use math::{
     curve::{
         CurveCoefficient, CurveId, CurveNodeRef, CurvePoint, CurvePrecompile, CurveSpec, K1_A_PTR,
-        K1_B_PTR, K1_GROUP_PTR, SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID,
-        ShortWeierstrassSpec, curve_coefficients,
+        K1_B_PTR, K1_GROUP_PTR, SECP256K1_BETA, SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y,
+        SECP256K1_ID, SECP256K1_LAMBDA, ShortWeierstrassSpec, curve_coefficients, glv_decompose,
+        reduce_mod_n, scalar_inv_mod_n, scalar_mul_mod_n,
     },
     k1_base::K1Base,
     k1_scalar::K1Scalar,

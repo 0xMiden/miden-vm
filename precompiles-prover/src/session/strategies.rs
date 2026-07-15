@@ -260,11 +260,28 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 ///
 /// `terms` pairs each base with its **non-negative** scalar (GLV signs ride
 /// the base via transcript `ec_sub(∞, P)` upstream, so the magnitudes land
-/// here); each base's [`WnafTable`] is built per call. Returns the combined
-/// MSM expression. Panics if `terms` is empty or every scalar is zero.
+/// here); each base's [`WnafTable`] is built fresh. Returns the combined MSM
+/// expression. Panics if `terms` is empty or every scalar is zero.
+///
+/// When a base recurs across many calls — the generator across a batch of
+/// signatures — build its table once with [`wnaf_table`] and drive the same
+/// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
+/// recurring base's table is laid once rather than rebuilt per call.
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
     let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
-    let digits: Vec<Vec<i8>> = terms.iter().map(|(_, k)| wnaf(*k, w)).collect();
+    let table_terms: Vec<(&WnafTable, U256)> =
+        tables.iter().zip(terms).map(|(table, &(_, k))| (table, k)).collect();
+    joint_wnaf_with_tables(session, &table_terms)
+}
+
+/// The interleaved wNAF ladder behind [`joint_wnaf`], taking already-built
+/// [`WnafTable`]s instead of building one per base — lets a caller reuse a
+/// recurring base's table (built once via [`wnaf_table`]) across many MSM
+/// claims instead of rebuilding it per claim. Each table drives its own digit
+/// expansion at its own window (`table.w`). Returns the combined MSM
+/// expression. Panics if `terms` is empty or every scalar is zero.
+pub fn joint_wnaf_with_tables(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
+    let digits: Vec<Vec<i8>> = terms.iter().map(|(table, k)| wnaf(*k, table.w)).collect();
     let len = digits.iter().map(Vec::len).max().unwrap_or(0);
 
     let mut acc: Option<EcExprPtr> = None;
@@ -275,7 +292,7 @@ pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> 
             acc = Some(session.msm_combine(a, a));
         }
         // Then each base adds its digit's (signed) table entry at this column.
-        for (table, base_digits) in tables.iter().zip(&digits) {
+        for ((table, _), base_digits) in terms.iter().zip(&digits) {
             let d = base_digits.get(i).copied().unwrap_or(0);
             if d != 0 {
                 let pos = table.odds[(d.unsigned_abs() as usize - 1) / 2];

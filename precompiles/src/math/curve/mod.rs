@@ -36,6 +36,7 @@
 //! This precompile does not provide compressed point encodings, subgroup checks, signature
 //! semantics, or public API stability guarantees beyond this internal precompile contract.
 
+mod glv;
 mod secp256k1;
 mod short_weierstrass;
 
@@ -50,7 +51,13 @@ use miden_core::{
 };
 
 use self::secp256k1::Secp256k1;
-pub use self::secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID};
+pub use self::{
+    glv::{
+        SECP256K1_BETA, SECP256K1_LAMBDA, glv_decompose, reduce_mod_n, scalar_inv_mod_n,
+        scalar_mul_mod_n,
+    },
+    secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID},
+};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
 /// VM-owned store pointer for the secp256k1 curve coefficient `A`.
