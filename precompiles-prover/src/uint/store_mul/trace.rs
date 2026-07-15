@@ -22,8 +22,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_WIDTH, CARRY_CELLS_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_NUM_MAIN_COLS, STORE_PERIOD,
-    UintStoreMulAir,
+    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, MUL_COL_OFFSET, NUM_MAIN_COLS, STORE_NUM_MAIN_COLS,
+    STORE_PERIOD, UintStoreMulAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -31,10 +31,9 @@ use crate::{
     uint::{
         mul::{
             COL_ACT as M_COL_ACT, COL_BORROW as M_COL_BORROW, COL_KAPPA_A as M_COL_KAPPA_A,
-            GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS as MUL_NUM_CELLS,
-            NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A_HI,
-            ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R,
-            S_KEEP, TERM_CELL_KAPPA_C_SIGNED,
+            GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA, NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS,
+            PERIOD as MUL_PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP,
+            TERM_CELL_KAPPA_C_SIGNED,
             trace::{UintMulRequires, generate_trace as mul_trace},
         },
         trace::{UintStoreRequires, generate_trace_padded_to as store_trace_padded_to},
@@ -49,9 +48,10 @@ pub fn generate_trace(
     let mut store = store;
     let mul_main = mul_trace(mul, &mut store, bpl);
 
-    // Both `mul_main.height()` and `MUL_PERIOD * 2` are powers of two, so
-    // this floor is too — `generate_trace_padded_to` needs that to stay
-    // a valid power-of-two block count.
+    // `mul_main.height()` is a power of two and `STORE_PERIOD` divides it
+    // (both are powers of two), so this floor is too —
+    // `generate_trace_padded_to` needs that to stay a valid power-of-two
+    // block count.
     let store_min_blocks = mul_main.height() / STORE_PERIOD;
     let store_main = store_trace_padded_to(store, bpl, store_min_blocks);
     let h_merged = store_main.height();
@@ -92,9 +92,9 @@ pub(crate) fn build_aux(
 
     // MUL's own register math (mirrors `uint::mul::trace::build_aux`
     // exactly, reading cols `MUL_COL_OFFSET`..`NUM_MAIN_COLS`).
-    let mut bp32 = [QuadFelt::ZERO; 2 * MUL_PERIOD];
+    let mut bp32 = [QuadFelt::ZERO; NUM_GAMMA + 1];
     bp32[0] = QuadFelt::ONE;
-    for i in 1..2 * MUL_PERIOD {
+    for i in 1..NUM_GAMMA + 1 {
         bp32[i] = bp32[i - 1] * beta;
     }
     let t16 = QuadFelt::from(Felt::from(1u32 << 16));
@@ -124,30 +124,45 @@ pub(crate) fn build_aux(
 
         // STORE contrib.
         let store_cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        let store_contrib: QuadFelt = match r % STORE_PERIOD {
-            0 | 3 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+        let recomb_lo07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = store_cell(2 * k) + two16 * store_cell(2 * k + 1);
                 s + bp8[k] * QuadFelt::from(rk)
-            }),
-            2 | 4 => (0..4).fold(QuadFelt::ZERO, |s, k| {
+            })
+        };
+        let recomb_hi07 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
                 let rk = store_cell(2 * k) + two16 * store_cell(2 * k + 1);
                 s + bp8[4 + k] * QuadFelt::from(rk)
-            }),
-            5 => (0..4).fold(QuadFelt::ZERO, |s, j| {
-                let w = bp8[j + 1] - bp8[j] * t32;
-                s + w * QuadFelt::from(store_cell(CARRY_CELLS_BEGIN + j))
-                    - bp8[j] * QuadFelt::from(store_cell(j))
-            }),
-            6 => (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let carry = if k < 3 {
-                    let j = 4 + k;
-                    (bp8[j + 1] - bp8[j] * t32) * QuadFelt::from(store_cell(CARRY_CELLS_BEGIN + k))
-                } else {
-                    QuadFelt::ZERO
-                };
-                s + carry - bp8[4 + k] * QuadFelt::from(store_cell(k))
-            }),
-            _ => QuadFelt::ZERO,
+            })
+        };
+        let recomb_hi815 = || {
+            (0..4).fold(QuadFelt::ZERO, |s, k| {
+                let rk = store_cell(8 + 2 * k) + two16 * store_cell(8 + 2 * k + 1);
+                s + bp8[4 + k] * QuadFelt::from(rk)
+            })
+        };
+        let store_contrib: QuadFelt = match r % STORE_PERIOD {
+            0 => recomb_lo07(),
+            1 => recomb_hi07(),
+            2 => recomb_lo07() + recomb_hi815(),
+            3 => {
+                let carry_lo = (0..4).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp8[j + 1] - bp8[j] * t32;
+                    s + w * QuadFelt::from(store_cell(CARRY_LO_BEGIN + j))
+                });
+                let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, j| {
+                    let w = bp8[4 + j + 1] - bp8[4 + j] * t32;
+                    s + w * QuadFelt::from(store_cell(CARRY_HI_BEGIN + j))
+                });
+                let direct_lo =
+                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp8[k] * QuadFelt::from(store_cell(k)));
+                let direct_hi = (0..4).fold(QuadFelt::ZERO, |s, k| {
+                    s + bp8[4 + k] * QuadFelt::from(store_cell(8 + k))
+                });
+                carry_lo - direct_lo + carry_hi - direct_hi
+            },
+            _ => unreachable!("STORE_PERIOD = 4"),
         };
         store_id += store_contrib;
 
@@ -157,39 +172,24 @@ pub(crate) fn build_aux(
         let mul_kappa_a = QuadFelt::from(mul_cell(M_COL_KAPPA_A));
         let mul_act = mul_cell(M_COL_ACT);
 
-        let lo_sum =
-            (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp32[i] * QuadFelt::from(mul_cell(i)));
-        let hi_sum =
-            (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp32[8 + i] * QuadFelt::from(mul_cell(i)));
+        let full16_sum =
+            (0..16).fold(QuadFelt::ZERO, |acc, i| acc + bp32[i] * QuadFelt::from(mul_cell(i)));
+        let full_q_sum = (0..NUM_Q_LIMBS)
+            .fold(QuadFelt::ZERO, |acc, i| acc + bp32[i] * QuadFelt::from(mul_cell(i)));
         let val_sum =
             (0..8).fold(QuadFelt::ZERO, |acc, m| acc + bp32[2 * m] * QuadFelt::from(mul_cell(m)));
 
         let role_contrib: QuadFelt = match row_kind {
-            _ if row_kind == ROW_B_LO => mul_s * lo_sum,
-            _ if row_kind == ROW_B_HI => mul_s * hi_sum,
-            _ if row_kind == ROW_P_LO => {
+            _ if row_kind == ROW_B => mul_s * full16_sum,
+            _ if row_kind == ROW_P => {
                 let borrow = mul_cell(M_COL_BORROW);
-                QuadFelt::from(borrow) * (lo_sum + QuadFelt::ONE)
+                QuadFelt::from(borrow) * (full16_sum + QuadFelt::ONE)
             },
-            _ if row_kind == ROW_P_HI => {
-                let borrow = mul_cell(M_COL_BORROW);
-                QuadFelt::from(borrow) * hi_sum
-            },
-            _ if row_kind == ROW_Q_LO => {
-                -((mul_s + QuadFelt::ONE)
-                    * (0..MUL_NUM_CELLS)
-                        .fold(QuadFelt::ZERO, |acc, i| acc + bp32[i] * QuadFelt::from(mul_cell(i))))
-            },
-            _ if row_kind == ROW_Q_HI => {
-                -((mul_s + QuadFelt::ONE)
-                    * (0..NUM_Q_LIMBS - MUL_NUM_CELLS).fold(QuadFelt::ZERO, |acc, i| {
-                        acc + bp32[MUL_NUM_CELLS + i] * QuadFelt::from(mul_cell(i))
-                    }))
-            },
+            _ if row_kind == ROW_Q => -((mul_s + QuadFelt::ONE) * full_q_sum),
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
-                let kappa_c_signed = main.values
-                    [(r + 1) * NUM_MAIN_COLS + MUL_COL_OFFSET + TERM_CELL_KAPPA_C_SIGNED];
+                let kappa_c_signed =
+                    main.values[r * NUM_MAIN_COLS + MUL_COL_OFFSET + TERM_CELL_KAPPA_C_SIGNED];
                 QuadFelt::from(kappa_c_signed) * val_sum
             },
             _ => QuadFelt::ZERO,
@@ -206,10 +206,8 @@ pub(crate) fn build_aux(
         mul_id += role_contrib + gamma_contrib;
 
         let build: QuadFelt = match row_kind {
-            _ if row_kind == ROW_A_LO => mul_kappa_a * lo_sum,
-            _ if row_kind == ROW_A_HI => mul_kappa_a * hi_sum,
-            _ if row_kind == ROW_P_LO => lo_sum,
-            _ if row_kind == ROW_P_HI => hi_sum,
+            _ if row_kind == ROW_A => mul_kappa_a * full16_sum,
+            _ if row_kind == ROW_P => full16_sum,
             _ => QuadFelt::ZERO,
         };
         let keep = QuadFelt::from(Felt::from(S_KEEP[row_kind] as u32));

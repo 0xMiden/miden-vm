@@ -332,7 +332,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // - col 1:  `consume-rhs` + `provide-h` (the True-binding provide, heavy — a degree-2 message).
 // - col 2:  unhash Poseidon2 perm — `p2in-rate0` + `p2in-rate1`.
 // - col 3:  unhash Poseidon2 perm — `p2in-cap` + `p2out`.
-// - col 4:  Binding bus, value path — `consume-lo` + `consume-hi` (both `UintVal` halves).
+// - col 4:  Binding bus, value path — `consume-uint`, alone (one full-value `UintVal` message).
 // - col 5:  `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
 // - col 6:  Binding bus, op-children path — `consume-lhs-uint` + `consume-rhs-uint`.
 // - col 7:  `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
@@ -345,7 +345,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // - col 14: EcMsm absorb — `consume-base-group` + `consume-scalar-uint`.
 // - col 15: EcMsm absorb — `consume-msmclaimterm` + `consume-msmexpr`.
 pub const NUM_AUX_COLS: usize = 16;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 1, 2, 1, 1, 2, 1, 1, 1, 1, 2, 2];
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -838,31 +838,22 @@ where
             ),
         );
 
-        // col 4 (paired, lqd-1): Binding bus, value path — consume both
-        // UintVal halves on leaf rows (the 4×32 view is the perm rate).
+        // col 4: Binding bus, value path — consume the whole UintVal in
+        // one message on leaf rows (the 4×32+4×32 view is the perm
+        // rate), alone now that both halves merged.
         frac_col!(
             builder,
             "binding-uint",
-            pair_deg,
+            single_deg,
             (
-                "consume-lo",
-                uint_gate.clone(),
-                UintValMsg {
-                    ptr: ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    offset: LB::Expr::ZERO,
-                    limbs: lhs.clone(),
-                },
-                one_deg
-            ),
-            (
-                "consume-hi",
+                "consume-uint",
                 uint_gate,
                 UintValMsg {
                     ptr: ptr.clone(),
                     bound_ptr: bound_ptr.clone(),
-                    offset: LB::Expr::ONE,
-                    limbs: rhs.clone(),
+                    limbs: array::from_fn(|i| {
+                        if i < 4 { lhs[i].clone() } else { rhs[i - 4].clone() }
+                    }),
                 },
                 one_deg
             ),

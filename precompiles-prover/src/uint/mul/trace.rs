@@ -20,10 +20,9 @@ use miden_core::{
 
 use super::{
     AUX_WIDTH, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BORROW, COL_BOUND_PTR, COL_KAPPA_A, COL_R_PTR,
-    GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A_HI,
-    ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM,
-    S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED,
-    TERM_CELL_MULT, UintMulAir,
+    GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA, NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A, ROW_B, ROW_C,
+    ROW_P, ROW_Q, ROW_R, S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C,
+    TERM_CELL_KAPPA_C_SIGNED, TERM_CELL_MULT, UintMulAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -288,7 +287,7 @@ pub(crate) fn op_block(
     // κ_c_signed = κ_c · (1 − 2·is_sub) — the pinned witness
     // `TERM_CELL_KAPPA_C_SIGNED`'s eval constraint mirror; written directly
     // (ahead of `set`, which is u32-only and can't hold a field negation).
-    block[ROW_TERM][TERM_CELL_KAPPA_C_SIGNED] = if op.is_sub {
+    block[ROW_C][TERM_CELL_KAPPA_C_SIGNED] = if op.is_sub {
         Felt::ZERO - Felt::from(op.kappa_c as u32)
     } else {
         Felt::from(op.kappa_c as u32)
@@ -298,20 +297,13 @@ pub(crate) fn op_block(
     };
 
     let (a, b, bound) = (to_limbs16(v.a), to_limbs16(v.b), to_limbs16(v.bound));
-    for i in 0..8 {
-        set(ROW_A_LO, i, a[i] as u32);
-        set(ROW_A_HI, i, a[8 + i] as u32);
-        set(ROW_B_LO, i, b[i] as u32);
-        set(ROW_B_HI, i, b[8 + i] as u32);
-        set(ROW_P_LO, i, bound[i] as u32);
-        set(ROW_P_HI, i, bound[8 + i] as u32);
+    for i in 0..16 {
+        set(ROW_A, i, a[i] as u32);
+        set(ROW_B, i, b[i] as u32);
+        set(ROW_P, i, bound[i] as u32);
     }
     for (i, &qi) in q.iter().enumerate() {
-        if i < NUM_CELLS {
-            set(ROW_Q_LO, i, qi);
-        } else {
-            set(ROW_Q_HI, i - NUM_CELLS, qi);
-        }
+        set(ROW_Q, i, qi);
     }
     for (s, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
         let (lo, hi) = gammas[s / 2];
@@ -325,10 +317,10 @@ pub(crate) fn op_block(
     }
     // Term metadata (the provide mult = the op's consumer count) +
     // cycle-constant columns.
-    set(ROW_TERM, TERM_CELL_MULT, mult);
-    set(ROW_TERM, TERM_CELL_C_PTR, op.c.addr());
-    set(ROW_TERM, TERM_CELL_KAPPA_C, op.kappa_c as u32);
-    set(ROW_TERM, TERM_CELL_IS_SUB, op.is_sub as u32);
+    set(ROW_C, TERM_CELL_MULT, mult);
+    set(ROW_C, TERM_CELL_C_PTR, op.c.addr());
+    set(ROW_C, TERM_CELL_KAPPA_C, op.kappa_c as u32);
+    set(ROW_C, TERM_CELL_IS_SUB, op.is_sub as u32);
     for row in 0..PERIOD {
         set(row, COL_A_PTR, op.a.addr());
         set(row, COL_B_PTR, op.b.addr());
@@ -402,9 +394,9 @@ pub(crate) fn build_aux(
     let beta = challenges[1];
 
     // β⁰..β³¹ + the γ slot weights (mirroring the AIR's).
-    let mut bp = [QuadFelt::ZERO; 2 * PERIOD];
+    let mut bp = [QuadFelt::ZERO; NUM_GAMMA + 1];
     bp[0] = QuadFelt::ONE;
-    for i in 1..2 * PERIOD {
+    for i in 1..NUM_GAMMA + 1 {
         bp[i] = bp[i - 1] * beta;
     }
     let t16 = QuadFelt::from(Felt::from(1u32 << 16));
@@ -438,40 +430,24 @@ pub(crate) fn build_aux(
         let kappa_a = QuadFelt::from(cell(COL_KAPPA_A));
         let act = cell(COL_ACT);
 
-        let lo_sum = (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
-        let hi_sum =
-            (0..8).fold(QuadFelt::ZERO, |acc, i| acc + bp[8 + i] * QuadFelt::from(cell(i)));
+        let full16_sum =
+            (0..16).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
+        let full_q_sum =
+            (0..NUM_Q_LIMBS).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
         let val_sum =
             (0..8).fold(QuadFelt::ZERO, |acc, m| acc + bp[2 * m] * QuadFelt::from(cell(m)));
 
         let role_contrib: QuadFelt = match row_kind {
-            _ if row_kind == ROW_B_LO => s_reg * lo_sum,
-            _ if row_kind == ROW_B_HI => s_reg * hi_sum,
-            // +borrow·(bound(β)+1), split across the p-rows where bound(β)
-            // lives (the +1 of p = bound + 1 rides p_lo's β⁰).
-            _ if row_kind == ROW_P_LO => {
+            _ if row_kind == ROW_B => s_reg * full16_sum,
+            // +borrow·(bound(β)+1); the +1 of p = bound + 1 rides β⁰.
+            _ if row_kind == ROW_P => {
                 let borrow = main.values[r * NUM_MAIN_COLS + COL_BORROW];
-                QuadFelt::from(borrow) * (lo_sum + QuadFelt::ONE)
+                QuadFelt::from(borrow) * (full16_sum + QuadFelt::ONE)
             },
-            _ if row_kind == ROW_P_HI => {
-                let borrow = main.values[r * NUM_MAIN_COLS + COL_BORROW];
-                QuadFelt::from(borrow) * hi_sum
-            },
-            _ if row_kind == ROW_Q_LO => {
-                -((s_reg + QuadFelt::ONE)
-                    * (0..NUM_CELLS)
-                        .fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i))))
-            },
-            _ if row_kind == ROW_Q_HI => {
-                -((s_reg + QuadFelt::ONE)
-                    * (0..NUM_Q_LIMBS - NUM_CELLS).fold(QuadFelt::ZERO, |acc, i| {
-                        acc + bp[NUM_CELLS + i] * QuadFelt::from(cell(i))
-                    }))
-            },
+            _ if row_kind == ROW_Q => -((s_reg + QuadFelt::ONE) * full_q_sum),
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
-                let kappa_c_signed =
-                    main.values[(r + 1) * NUM_MAIN_COLS + TERM_CELL_KAPPA_C_SIGNED];
+                let kappa_c_signed = main.values[r * NUM_MAIN_COLS + TERM_CELL_KAPPA_C_SIGNED];
                 QuadFelt::from(kappa_c_signed) * val_sum
             },
             _ => QuadFelt::ZERO,
@@ -484,10 +460,8 @@ pub(crate) fn build_aux(
         id += role_contrib + gamma_contrib;
 
         let build: QuadFelt = match row_kind {
-            _ if row_kind == ROW_A_LO => kappa_a * lo_sum,
-            _ if row_kind == ROW_A_HI => kappa_a * hi_sum,
-            _ if row_kind == ROW_P_LO => lo_sum,
-            _ if row_kind == ROW_P_HI => hi_sum,
+            _ if row_kind == ROW_A => kappa_a * full16_sum,
+            _ if row_kind == ROW_P => full16_sum,
             _ => QuadFelt::ZERO,
         };
         let keep = QuadFelt::from(Felt::from(S_KEEP[row_kind] as u32));
