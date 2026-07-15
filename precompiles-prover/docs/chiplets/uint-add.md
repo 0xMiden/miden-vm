@@ -54,64 +54,86 @@ the operands onto one modulus, and the modulus consume
 Canonicity of `c` (`< p`) is the store's range-membership on interning;
 this AIR checks only the reduction identity.
 
-## Layout (narrow, period-16)
+## Layout (period-4, one value per row)
 
-4×32 per row — one `UintVal` half, mirroring the store's bound rows.
-Periodic one-hots are verifier-computed, so the extra roles cost no
-opening width; the 4-limb trace is Pareto-cheaper for the recursive
-verifier than an 8-wide / period-8 alternative. Per-block scalars read
-within one two-row window live in spare cells, not columns: each of the
-`b` / `c` / `p` families gets a **hub row between its halves** hosting
-the scalar that family reads (`is_b_zero` / `is_c_zero` / `k`) — the lo
-row reads it as the next row, the hi half's events fire *on* the hub
-against the next row's limbs, so one cell serves both halves with no
-constancy transport — and the provide mult sits on the term row (the
-mul chiplet's `TERM_CELL_MULT` pattern).
+8×32 per row (a whole 256-bit value): `a`, `b`, `c` and `p` each take a
+single row, in that fixed order, and the full `UintVal` message is
+consumed from that one row. `p` sits last in the period, so it doubles
+as the block's closing row — the `UintAdd` provide and the SZ closure
+both fire there, with no dedicated term row.
 
-| rows  | role          | cells (4×32 / scalar) | id contributes            |
-|-------|---------------|-----------------------|---------------------------|
-| 0–1   | `a` lo/hi     | a's 4×32 halves       | `+a(β)`                   |
-| 2     | `b` lo        | b's lo half           | `+b_lo(β)` (flag @ next)  |
-| 3     | `b` hub       | `is_b_zero` (cell 0)  | `+b_hi(β)` (limbs @ next) |
-| 4     | `b` hi        | b's hi half           | — (rides the hub)         |
-| 5     | `c` lo        | c's lo half           | `−c_lo(β)` (flag @ next)  |
-| 6     | `c` hub       | `is_c_zero` (cell 0)  | `−c_hi(β)` (limbs @ next) |
-| 7     | `c` hi        | c's hi half           | — (rides the hub)         |
-| 8     | `p` lo        | bound's lo half       | `−k·(bound_lo(β) + 1)` (k @ next) |
-| 9     | `k` hub       | `k` (cell 0)          | `−k·bound_hi(β)` (limbs @ next) |
-| 10    | `p` hi        | bound's hi half       | — (consume on its own row) |
-| 11–12 | `cpos` lo/hi  | γ⁺₀..₃ / γ⁺₄..₆       | `+Σ γ⁺ⱼ(β^{j+1} − t·βʲ)`  |
-| 13–14 | `cneg` lo/hi  | γ⁻₀..₃ / γ⁻₄..₆       | `−Σ γ⁻ⱼ(β^{j+1} − t·βʲ)`  |
-| 15    | `term`        | `mult` (cell 0)       | assert `id = 0`           |
+Every row's cells past the limbs (8–14) host that row's own block
+scalar plus a share of the seven-limb signed carry pair `γ⁺` / `γ⁻`:
+`a` has no scalar of its own, so five go to carries; `b` and `c` each
+spend one on their zero-sentinel flag, `p` spends one on the reduction
+bit `k` and one on the provide multiplicity — the rest carry `γ⁺` /
+`γ⁻`. `b` additionally hosts the nonzero-certificate witness (cells
+13–14, see below). [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`] are the
+placement tables the AIR, trace-gen and prover all read, mirroring the
+pattern [`UintMul`](uint-mul.md)'s `GAMMA_SLOTS` uses for its own
+carries: the `id` accumulation is additive across rows, so splitting a
+carry vector over several rows' spare cells costs nothing beyond the
+placement table itself.
 
-Max constraint degree 3 (the `k·bound` term), matching the store.
+Two zero-sentinel modes, one per operand row: **`is_c_zero`** drops the
+`c` side (`a + b ≡ 0` — negation with an unstored zero result) and
+**`is_b_zero`** drops the `b` side (`a + 0 ≡ c` — the stored-value
+**equality certificate** `a = c`, both canonical under one modulus;
+consumed e.g. by the EC group law's `x₁ = x₂` / `y₁ = y₂` case ties).
+
+**Nonzero certificate.** A block's cycle-constant `nz` flag ([`COL_NZ`])
+additionally certifies `b ≠ 0` when set, in place of a full inverse
+modmul: `S = Σⱼ bⱼ` — a native sum of `b`'s eight 32-bit limbs, no
+β-weighting, `< 2³⁵ < p_Goldilocks` so no wrap — is `0 ⟺ b = 0`, and
+`nz · (w·S − 1) = 0` with a witnessed candidate inverse `w`
+([`CELL_D_W`], `w·S` hoisted to [`CELL_D_WS`] to keep the check degree 3)
+proves `S ≠ 0`. `nz` rides the `UintAdd` bus tuple as a 5th field, so a
+consumer can demand `nz = 1` on the same block that already proves
+`a + b ≡ c` — the EC group law's generic-add case uses this on its
+`d = x₂ − x₁` subtraction instead of a separate disequality MAC.
+
+| row | role | cells 0–7  | cells 8–14                                   |
+|-----|------|------------|-----------------------------------------------|
+| 0   | `a`  | a's limbs  | γ⁺₀..γ⁺₄ (13–14 spare)                         |
+| 1   | `b`  | b's limbs  | `is_b_zero`@8, γ⁺₅ γ⁺₆ @9–10, γ⁻₀ γ⁻₁ @11–12, `w`@13 `wS`@14 |
+| 2   | `c`  | c's limbs  | `is_c_zero`@8, γ⁻₂ γ⁻₃ γ⁻₄ γ⁻₅ @9–12, `b_on`@13 (14 spare) |
+| 3   | `p`  | p's limbs  | `k`@8, `c_on`@10, γ⁻₆@9, `mult`@12 (11, 13–14 spare) |
+
+The `b`/`c` rows' gated `UintVal` consumes read a witnessed activity
+gate `on = act·(1 − is_zero)` from the *next* row (`b_on` lives on `c`'s
+row, `c_on` on `p`'s row): `sel·on` is degree 2, folding the `act` gate
+in so the gated consume pairs with another degree-2 fraction instead of
+sitting alone at degree 3.
 
 ## Columns
 
-**Main 9**: 4 limb cells, then `a_ptr, b_ptr, c_ptr, bound_ptr, act`
-(cycle-constant). The four ptrs are forced to columns — they need joint
-visibility at the term-row provide *and* at their scattered consume
-rows, which only cycle-constancy transports — and `act ∈ {0, 1}` gates
-eight rows; `k` / `is_c_zero` / `mult` are hub / term cells (above).
-`act` gating every consume flag means **padding blocks are all-zero
-rows that touch no bus** — with the zero sentinel gone, an ungated pad
-block would emit unprovidable `(0, 0, off, 0…)` consumes.
+**Main 21**: 8 limb cells (`NUM_LIMBS = 8`, the full `UintVal` value on
+one row) + 7 scalar/carry cells (8–14), then `a_ptr, b_ptr, c_ptr,
+bound_ptr, act, nz` (cycle-constant). The four ptrs are forced to
+columns — they need joint visibility at the closing-row provide *and*
+at their own row's consume, which only cycle-constancy transports — and
+`act ∈ {0, 1}` gates every consume. `nz` rides a cycle-constant column
+too: it's read on both the `b` row (where the certificate is checked)
+and the `p` row (where it rides the provide tuple), three rows apart.
+`act` gating every consume means **padding blocks are all-zero rows
+that touch no bus**.
 
-**Aux 3** (each fraction column capped at 8 fractions — the
+**Aux 4** (each fraction column capped at 8 fractions — the
 [degree-9 / lqd-3 budget](../lookup-argument.md#the-fraction-column-degree-budget)):
 
 | col | contents |
 |---|---|
-| 0 | LogUp running sum: the a/b `UintVal` consumes + the `UintAdd` provide |
-| 1 | the c / modulus `UintVal` consumes |
-| 2 | `id` register (σ-excluded via `num_logup_cols = 2`) |
+| 0 | LogUp running sum: `a`'s `UintVal` consume, alone |
+| 1 | `b` + `c`'s gated `UintVal` consumes |
+| 2 | `p`'s `UintVal` consume + the `UintAdd` provide |
+| 3 | `id` register (σ-excluded via `num_logup_cols = 3`) |
 
 ## Buses
 
 | Bus | Tuple | Direction |
 |---|---|---|
-| `UintAdd` (11) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | provide on term rows, mult = the op's consumer count (identical relations collapse onto one block, mults accumulating; 0 = dormant); a 0 ptr-slot reads as "the unstored zero" (`c_ptr = 0`: "≡ 0"; `b_ptr = 0`: the `a + 0 ≡ c` equality form) |
-| `UintVal` (10) | 4×32 view | consume ×8/op (a, b, c, modulus halves; ×6 when `is_b_zero` / `is_c_zero`) |
+| `UintAdd` (11) | `(bound_ptr, a_ptr, b_ptr, c_ptr, nz)` | provide on the `p` row, mult = the op's consumer count (identical relations collapse onto one block, mults accumulating; 0 = dormant); a 0 ptr-slot reads as "the unstored zero" (`c_ptr = 0`: "≡ 0"; `b_ptr = 0`: the `a + 0 ≡ c` equality form) |
+| `UintVal` (10) | 4×32 view, full value | consume ×4/op (a, b, c, modulus; ×2 when `is_b_zero` / `is_c_zero`) |
 
 The result `c` is **caller-assigned** (a nondeterministic witness),
 which is what lets arrangements name their result — and `is_c_zero`
@@ -159,12 +181,12 @@ pinned, and pinning originates in the DAG). A boolean cycle-constant
 - the tuple carries **`c_ptr = 0` as the "≡ 0" sentinel** (address 0 is
   never stored, so it reads as "none" on the bus), constraint-tied by
   `is_c_zero · c_ptr = 0`;
-- the c-row consumes and id contribution gate by `(1 − is_c_zero)` —
-  their multiplicities go degree 2 → 3, landing that fraction column at
+- the c-row consume and id contribution gate by `(1 − is_c_zero)` —
+  the multiplicity goes degree 2 → 3, landing that fraction column at
   constraint degree 6, inside the
   [budget](../lookup-argument.md#the-fraction-column-degree-budget);
-- cost: one C-hub cell, zero new rows, no bus changes; per negation,
-  one add block (c-rows dead) + the transient's store block.
+- cost: one cell, zero new rows, no bus changes; per negation, one add
+  block (c-row dead) + the transient's store block.
 
 Why not cheaper? The store witnesses `comp = bound − v` for every uint,
 but that is the *complement* `~v`, off by a carry-rippling `+1` from
@@ -180,14 +202,13 @@ the block into `a + 0 ≡ c (mod p)` — with `a`, `c` stored canonical
 under one modulus, exactly the **value-equality certificate `a = c`**,
 ptr-free and pin-free. `k` stays witnessed but only `k = 0` is
 satisfiable (`a = c + p` is out of range for canonical values). Same
-mechanics as `is_c_zero`: a B-hub cell between the `b` halves,
-`is_b_zero · b_ptr = 0` ties the tuple sentinel, the `b` consumes and
-id contributions gate by `(1 − is_b_zero)`. The consumer this was built
-for: the EC group law's case ties (`x₁ = x₂` for `double`/`cancel`,
-`y₁ = y₂` for `double`) — value-level, so two distinct ptrs binding
-equal coordinates still add correctly, with no limb views in the add
-relation chiplet (see [ec-group-add.md](ec-group-add.md)). The B hub
-occupies what was the layout's pad row — zero new rows, no bus changes.
+mechanics as `is_c_zero`: `is_b_zero · b_ptr = 0` ties the tuple
+sentinel, the `b` consume and id contribution gate by `(1 −
+is_b_zero)`. The consumer this was built for: the EC group law's case
+ties (`x₁ = x₂` for `double`/`cancel`, `y₁ = y₂` for `double`) —
+value-level, so two distinct ptrs binding equal coordinates still add
+correctly, with no limb views in the add relation chiplet (see
+[ec-group-add.md](ec-group-add.md)).
 
 ## Tests
 
@@ -196,5 +217,7 @@ occupies what was the layout's pad row — zero new rows, no bus changes.
 balance against store + BPL, the act-gated padding regression (3 ops →
 a pad block that must stay off every bus), negation balancing with no
 stored zero, the equality certificate holding + balancing with no `b`,
-and the sentinel rejections (forged `c_ptr` under `is_c_zero`, forged
-`b_ptr` under `is_b_zero`, `is_b_zero` forged onto unequal values).
+the nonzero-certificate tests (holds and balances; forged zero
+rejected; wrong witness rejected), and the sentinel rejections (forged
+`c_ptr` under `is_c_zero`, forged `b_ptr` under `is_b_zero`,
+`is_b_zero` forged onto unequal values).

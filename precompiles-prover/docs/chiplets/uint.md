@@ -24,16 +24,16 @@ against the existing [`Range16`](byte_pair_lut.md) relation — the
 UintStore is a [BytePairLut](byte_pair_lut.md) consumer, like
 [KeccakRound](keccak.md).
 
-The store *provides* two views of each uint:
+The store *provides* two views of each uint, each as a single full-value
+message:
 
-- the **4×32 recombined view** `UintVal(ptr, bound_ptr, offset, c₀..c₃)`
-  — one 4-limb half (`offset ∈ {0, 1}`) of the 8×32-bit recombination
-  `cₖ = v₂ₖ + 2¹⁶·v₂ₖ₊₁`. The eval chip pulls *both* halves straight
-  into its Poseidon2 rate — no recombination on the eval side (see the
-  seam); [UintAdd](uint-add.md) and the mul chiplet's *linear*
-  operands consume it too.
-- the **raw 8×16 view** `UintLimbs(ptr, bound_ptr, offset, l₀..l₇)` —
-  the committed 16-bit limb cells as-is, 11-wide (it sets
+- the **4×32 recombined view** `UintVal(ptr, bound_ptr, c₀..c₇)` — the
+  whole 8×32-bit recombination `cₖ = v₂ₖ + 2¹⁶·v₂ₖ₊₁`. The eval chip
+  pulls it straight into its Poseidon2 rate — no recombination on the
+  eval side (see the seam); [UintAdd](uint-add.md) and the mul
+  chiplet's *linear* operands consume it too.
+- the **raw 16×16 view** `UintLimbs(ptr, bound_ptr, l₀..l₁₅)` — the
+  committed 16-bit limb cells as-is, 18-wide (it sets
   `MAX_MESSAGE_WIDTH`), `BusId = 13`. [UintMul](uint-mul.md)'s
   convolution operands consume it: 16-bit granularity is what keeps the
   SZ product's coefficients under the no-wrap bound, and the bus tie
@@ -109,37 +109,38 @@ extension-field register in an aux column *beyond* the LogUp running sum
 `β` is Fiat-Shamir-sampled *after* the main trace commits, so a
 β-dependent witness cannot live in the main trace — only raw limbs do.
 
-One uint = one **period-8 block**, one role per row (periodic one-hot
+One uint = one **period-4 block**, one role per row (periodic one-hot
 selectors). Per-block scalars read at only one or two rows live in
 spare *cells* of their host rows rather than full columns:
 
-| row | role | cells hold |
-|---|---|---|
-| 0 | `v_lo` | `v`'s low 8 × 16-bit limbs |
-| 1 | `hub` | `uintval_mult`, `uintlimbs_mult` (cells 0–1) |
-| 2 | `v_hi` | `v`'s high 8 × 16-bit limbs |
-| 3 | `comp_lo` | `comp`'s low 8 |
-| 4 | `comp_hi` | `comp`'s high 8 |
-| 5 | `bound_lo` | `bound`'s low 4 × 32-bit (cells 0–3) + carries `c₀..c₃` (4–7) |
-| 6 | `bound_hi` | `bound`'s high 4 × 32-bit + carries `c₄..c₆` (cells 4–6) |
-| 7 | `term` | `gap` (cell 0) — the SZ closes here |
+| row | role | cells 0–7 | cells 8–15 |
+|---|---|---|---|
+| 0 | `v_lo` | `v`'s low 8 × 16-bit limbs | — (dead) |
+| 1 | `v_hi` | `v`'s high 8 × 16-bit limbs | `uintval_mult`@8, `uintlimbs_mult`@9 (10–15 dead) |
+| 2 | `comp` | `comp`'s low 8 | `comp`'s high 8 |
+| 3 | `bound` (closing) | `bound`'s low 4 × 32-bit (0–3) + carries `c₀..c₃` (4–7) | `bound`'s high 4 × 32-bit (8–11) + carries `c₄..c₆` (12–14) + `gap` (15) |
 
-The **hub sits between the `v` halves** so one mult cell serves both
-provides through the two-row constraint window: the offset-0 provides
-fire on `v_lo` (limbs local, mults read from the next row — the hub),
-the offset-1 provides fire on the hub itself (mults local, limbs read
-from the next row — `v_hi`). Each mult is one structurally shared cell —
-no copy ties, no cycle-constancy transport; a per-half mult split would
-be unsound (one ptr's lo half could pair with another's hi into a
-"value" never jointly range-checked), which is exactly why the shared
-cell is the right shape.
+`v_lo` and `v_hi` stay on adjacent rows so a merged full-value message
+can read both from one local/next window; `comp` and `bound` each pack
+both halves onto their own single row, since nothing needs to read
+either at more than one row.
+
+The **hub sits on `v_hi`'s row** — the offset-0 provide (on `v_lo`)
+reads the mults via the next row (`v_hi` itself), the offset-1 provide
+reads them locally, both cells structurally shared — no copy ties, no
+cycle-constancy transport; a per-half mult split would be unsound (one
+ptr's lo half could pair with another's hi into a "value" never jointly
+range-checked), which is exactly why the shared cell is the right shape.
 
 Per row, `id` accumulates a β-weighted contribution gated by the role:
-`+v` / `+comp` (recombined 32-bit, `Σₖ β^k cₖ`), and on the bound rows
-`−bound` (direct 32-bit) plus the hosted carries'
-`+Σⱼ cⱼ·(β^{j+1} − 2³²·β^j)` terms. `when_first_row` pins
-`id = 0`; `when_transition` accumulates; and at the `term` row the
-constraint **`id · term_sel = 0`** forces the closing identity
+`+v` / `+comp` (recombined 32-bit, `Σₖ β^k cₖ`, `comp` contributing both
+halves from its one row), and on the `bound` row `−bound` (direct
+32-bit, both halves) plus the hosted carries'
+`+Σⱼ cⱼ·(β^{j+1} − 2³²·β^j)` terms. `when_first_row` pins `id = 0`;
+`when_transition` accumulates; and since `bound` is the block's last row
+*and* carries a nonzero contribution of its own, the closing check folds
+that contribution in directly (mirroring [UintAdd](uint-add.md)'s `p`
+row) rather than depending on a dedicated all-zero successor row:
 
 ```
 v(β) + comp(β) − bound(β) + carry(β) = 0.
@@ -171,38 +172,37 @@ leaning on this at scale, with a dedicated `γ_SZ ≠ β` as the fallback.
 of the top limb, into bit 256. A prover trying to pass an out-of-range
 `v > bound` would forge a wrapped `comp = (bound − v) mod 2²⁵⁶`, making
 the *stored limbs* of `v + comp` equal `bound` — but then `v + comp =
-bound + 2²⁵⁶` *overflows* (`c₇ = 1`), and with no `c₇` term the `id`
-leaves a `2³²·β⁷` residual at the term row, so `id · term_sel ≠ 0` and
-the trace is rejected. (`tests::uint::uint_store_rejects_out_of_range_value`
+bound + 2²⁵⁶` *overflows* (`c₇ = 1`), and with no `c₇` term the folded
+closing check on the `bound` row leaves a `2³²·β⁷` residual, so the
+trace is rejected. (`tests::uint::uint_store_rejects_out_of_range_value`
 forges exactly this.)
 
 ## Columns
 
-10 main columns:
+18 main columns:
 
 | cols | name | role |
 |---|---|---|
-| 0–7 | cells | per-row by role: 8×16-bit limbs (`v` / `comp`), 4×32-bit + carries (`bound` rows), the hub mults, or the term gap |
-| 8 | `ptr` | the uint's pointer (cycle-constant within a block) |
-| 9 | `bound_ptr` | the modulus's pointer (cycle-constant) |
+| 0–15 | cells | per-row by role: 8×16-bit limbs (`v_lo`/`v_hi`), 16×16-bit limbs across both halves (`comp`), 8×32-bit + carries + gap (`bound`), or the hub mults |
+| 16 | `ptr` | the uint's pointer (cycle-constant within a block) |
+| 17 | `bound_ptr` | the modulus's pointer (cycle-constant) |
 
 Only `ptr` / `bound_ptr` ride columns, because only they are read
 beyond a single two-row window: `ptr` at the provides *and* both sides
 of every block boundary (the gap chain), `bound_ptr` at the provides
-*and* the bound rows' self-consume — and an untied cell copy of either
+*and* the bound row's self-consume — and an untied cell copy of either
 is a forgery (relocate the range check under one address, advertise the
 provides under another). Everything read at one or two adjacent rows —
 the mults, the carries, the gap — lives in spare cells instead.
 
-Aux: col 0 = the LogUp running sum (the `UintVal` provide / consume
-**plus the ptr-gap's `Range16`** — a ninth fraction in the limb column
-would push it past the degree-9 / lqd-3 budget every chiplet shares),
-col 1 = the `Range16` fraction column (exactly the 8 limb cells), col 2
-= the `UintLimbs` provides, col 3 = the `id` register (the ext-field
-accumulator beyond LogUp — the `num_logup_cols` σ-exclusion keeps it out
-of the running sum). 10 main columns is deliberately **narrow**: the
-vertical layout trades trace *height* for opening *width*, which is the
-dimension the recursive verifier pays for.
+Aux: col 0 = the LogUp running sum (the merged `UintVal` provide, single
+degree-2 fraction), col 1 = the merged `UintVal` consume **plus the
+ptr-gap's `Range16`**, cols 2–9 = the `Range16` fraction columns (16
+cell positions, two per column), col 10 = the merged `UintLimbs`
+provide, col 11 = the `id` register (the ext-field accumulator beyond
+LogUp — the `num_logup_cols` σ-exclusion keeps it out of the running
+sum). The vertical layout trades trace *height* for opening *width*,
+which is the dimension the recursive verifier pays for.
 
 Local constraints besides the SZ: carry **booleanity**
 (`bound_sel · cⱼ·(1 − cⱼ) = 0` on the hosting bound rows);
@@ -261,17 +261,17 @@ the laid blocks by construction.
 
 | Bus | Tuple | Provider | Notes |
 |---|---|---|---|
-| `UintVal` | `(ptr, bound_ptr, offset, c₀..c₃)` | `UintStore` | 7-wide, `BusId = 10`; provided on `v` rows (mult `uintval_mult`), self-consumed on `bound` rows |
-| `UintLimbs` | `(ptr, bound_ptr, offset, l₀..l₇)` | `UintStore` | 11-wide, `BusId = 13`; provided on `v` rows (mult `uintlimbs_mult`) for [UintMul](uint-mul.md)'s convolution operands |
+| `UintVal` | `(ptr, bound_ptr, c₀..c₇)` | `UintStore` | 10-wide, `BusId = 10`; one message provided on `v_lo` (mult `uintval_mult`, read via next from `v_hi`), self-consumed on the `bound` row |
+| `UintLimbs` | `(ptr, bound_ptr, l₀..l₁₅)` | `UintStore` | 18-wide, `BusId = 13`, sets `MAX_MESSAGE_WIDTH`; one message provided on `v_lo` (mult `uintlimbs_mult`) for [UintMul](uint-mul.md)'s convolution operands |
 | [`Range16`](byte_pair_lut.md) | `(w,)` | BPL (consumed here) | every `v` / `comp` 16-bit limb + the per-block `gap` |
 
 **The demand ledgers.** A uint's `uintval_mult` is its *total* 4×32
 consumer count, which is **cross-chiplet**: its own bound-refs (a uint's
-`bound`-rows consume the modulus's `UintVal`) *plus* the eval uint-leaves
+`bound` row consumes the modulus's `UintVal`) *plus* the eval uint-leaves
 that hash it, verifier-loaded boundary consumes for fixed domains/curve
 coefficients, the add ops' operands, and the mul ops' linear operands.
 `uintlimbs_mult` counts the raw-view consumers (mul's
-convolution operands), one require per operand-use covering both halves.
+convolution operands), one require per operand-use.
 Two `UintValRequires`-shaped ledgers collect per-ptr demand — mirroring
 [`BytePairLutRequires`](byte_pair_lut.md) for `Range16` — and the store
 reads the totals.
@@ -298,9 +298,9 @@ Two consequences of the store being modulus-agnostic:
 
 A stored uint enters the transcript through the [eval chip](transcript-eval.md)
 only when the caller creates a runtime VM uint value node or an explicit
-transcript pin claim. In both cases the eval chip pulls **both** `UintVal`
-halves into its Poseidon2 rate — the 4×32 view *is* the 8×u32 rate, no
-recombination.
+transcript pin claim. In both cases the eval chip pulls the single
+`UintVal` message straight into its Poseidon2 rate — the 4×32 view *is*
+the 8×u32 rate, no recombination.
 
 Runtime VM uint values hash under
 `[UINT_PRECOMPILE_ID, VALUE_OP_ID, bound_ptr, 0]` and provide
@@ -311,16 +311,16 @@ Normal uint ops hash under `[UINT_PRECOMPILE_ID, op_id, 0, 0]`; their
 
 Manual transcript pin claims hash under
 `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`. A pin row consumes
-`UintVal(pin_ptr, bound_ptr, 0, lo)` and
-`UintVal(pin_ptr, bound_ptr, 1, hi)`, then provides
-`Binding(h_pin, True)`. Bounds/moduli may be self-pins (`pin_ptr = bound_ptr`),
-but fixed domains and fixed curve coefficients are not pinned this way by
+`UintVal(pin_ptr, bound_ptr, c0..c7)`, then provides `Binding(h_pin,
+True)`. Bounds/moduli may be self-pins (`pin_ptr = bound_ptr`), but
+fixed domains and fixed curve coefficients are not pinned this way by
 default.
 
 Default fixed values are verifier-loaded **external `UintVal` boundary
-consumes**: for each fixed half the verifier contributes the LogUp consume
-for `(ptr, bound_ptr, offset, c0..c3)`. The uint store must provide matching
-halves, but no eval row is created and nothing is folded into the public root.
+consumes**: for each fixed value the verifier contributes the LogUp
+consume for `(ptr, bound_ptr, c0..c7)`. The uint store must provide a
+matching value, but no eval row is created and nothing is folded into
+the public root.
 
 The eval trace keeps the cap slot row-kind-aware: VM uint value rows place
 `bound_ptr` in cap slot 2, uint op rows keep cap slot 2 zero, and explicit pin

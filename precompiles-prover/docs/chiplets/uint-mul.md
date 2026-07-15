@@ -28,14 +28,14 @@ With the store holding `bound = p − 1` (so the modulus enters as
 ```
 
 - **Convolution operands** `a`, `b`, `bound` are 16-bit limb
-  polynomials, consumed from the store over the raw 8×16
+  polynomials, consumed from the store over the raw 16×16
   [`UintLimbs`](uint.md#what-it-stores) view — 16-bit
   granularity is forced (32-bit limb products bust the no-wrap bound),
   and the bus tie makes the cells the store's committed, already
   `Range16`-checked limbs, so they are **not re-range-checked here**.
 - **Linear operands** `c`, `r` enter at 32-bit granularity as their
   4×32 `UintVal` views at even powers (`C(β²) = Σ Cₖ β²ᵏ`) — one row
-  and two consumes each instead of two and two.
+  and one full-value consume each.
 - **`q` has 17 limbs**: `q ≤ κₐ·p + κ_c`, which overflows 16 limbs for
   `κₐ ≥ 2` on a full-size modulus (`3p > 2²⁵⁶` for secp256k1). Each
   limb is `Range16`-checked.
@@ -44,7 +44,7 @@ With the store holding `bound = p − 1` (so the modulus enters as
   committed offset as `γ'ₖ = γₖ + 2³¹ ∈ [0, 2³²)` in two
   `Range16`-checked 16-bit halves. The `−2³¹` correction folds into the
   γ-lo contribution terms, so each block sums to zero and the `id`
-  register closes at the term row with no boundary constant.
+  register's folded closure vanishes with no boundary constant.
 
 **Soundness** follows the store's vertical-SZ argument: the bracketed
 expression is a polynomial in β with coefficients fixed at main-trace
@@ -70,82 +70,87 @@ The convolution itself is never materialised — the wide coefficients
 wide witnesses are exactly `q` and the carries (honest steady-state
 `|γₖ| ≲ 2²¹`, committed against a `2³²` window).
 
-## Liquid layout — period 16, zero dead rows
+## Liquid layout — period 8, folded closing
 
-Only lookups impose shape: bus-facing operands need their 8 message
-limbs co-resident on one row (cells 0–7), but `q` and `Γ` are local
-witnesses whose entire footprint is one `Range16` and one
-precomputed-weight term in the `id` accumulator — they flow into
-whatever cells the solid rows leave free. At **10 cells per row** the
-146 committed values pack into exactly 16 live rows:
+Only lookups impose shape: bus-facing operands need their message limbs
+co-resident on one row, but `q` and `Γ` are local witnesses whose entire
+footprint is one `Range16` and one precomputed-weight term in the `id`
+accumulator — they flow into whatever cells the solid rows leave free.
+At **19 cells per row** the 148 committed values pack into exactly 8
+live rows:
 
-| row | role | cells 0–7 | cells 8–9 |
-|-----|-------|--------------------------|------------|
-| 0–1 | `a` lo/hi | a's 16-bit limbs | γ spill |
-| 2–3 | `b` lo/hi | b's limbs | γ spill |
-| 4–5 | `p` lo/hi | bound's limbs | γ spill |
-| 6 | `q` lo | q₀..q₉ (all ten cells) | — |
-| 7 | `q` hi | q₁₀..q₁₆ | γ spill (7–9) |
-| 8–12 | `γ₀..γ₄` | nine γ halves each | spare |
-| 13 | `r` | r's 4×32 limbs | γ spill |
-| 14 | `c` | c's 4×32 limbs | spare |
-| 15 | `term` | mult, c_ptr, κ_c | spare |
+| row | role | cells 0–15 / 0–16 | cells past the limbs |
+|-----|------|--------------------|-----------------------|
+| 0 | `a` | a's 16-bit limbs (0–15) | γ spill (16–18) |
+| 1 | `b` | b's limbs (0–15) | γ spill (16–18) |
+| 2 | `p` (bound) | bound's limbs (0–15) | γ spill (16–18) |
+| 3 | `q` | q₀..q₁₆ (0–16) | γ spill (17–18) |
+| 4 | `r` | r's 4×32 limbs (0–7) | γ spill (8–18) |
+| 5 | `g0` | — | γ (0–18, all cells) |
+| 6 | `g1` | — | γ (0–14; 15–18 spare) |
+| 7 | `c` (closing) | c's 4×32 limbs (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
 
 `GAMMA_SLOTS` in `mul/mod.rs` is the single placement table the AIR
 (weights), trace-gen (placement) and prover (the `id` mirror) all read.
-Periodic one-hots are verifier-computed, so the 16 role selectors +
-the `S`-keep gate cost no opening width. 15 rows is unreachable twice
-over (one cell short, and the period must divide the power-of-two
-height), so 10 cells/16 rows is this family's optimum.
+Periodic one-hots are verifier-computed, so the 8 role selectors + the
+`S`-keep gate cost no opening width.
 
-**The c-row/term adjacency:** `c` sits at term − 1, so `c_ptr` and
-`κ_c` live as term-row cells read via next-row access. The consume, the
-id contribution and the provide all read the *same physical cell* — the
-tuple is consistent by construction, zero tie constraints.
+**The `c` row folds the closing role.** Rather than a dedicated
+all-metadata successor row, `c` — the block's last operand row — hosts
+the term metadata directly and doubles as the closing row: the
+`UintMul` provide and the SZ closure both fire there, with the closure
+folding `c`'s own not-yet-accumulated contribution in directly (the
+[`UintAdd`](uint-add.md) `p_own` pattern) instead of relying on a
+successor row staying at a hard-pinned zero. This is what lets every
+row carry live content — a dedicated metadata row would need 21
+cells/row instead of 19, since its own successor-row-zero requirement
+wastes capacity a fold doesn't.
 
 ## Registers
 
 Two ext-field aux registers past the LogUp columns (σ-excluded via
-`num_logup_cols = 3`):
+`num_logup_cols`):
 
 - **`S`** (staging): `S' = g·S + build` with the periodic keep gate
-  `g = [1,1,1,0,1,1,1,0,0…]`. Builds `κₐ·a(β)` over the a-rows (the
-  scale applied during the build keeps everything degree-3), holds
-  through the b-rows — whose contribution `S·Σbⱼβʲ` lands the degree-2
-  product at constraint degree 3 — resets, builds `bound(β)`, holds
-  through the q-rows (`−(S+1)·Σqᵢβⁱ`: the `+1` is `p = bound + 1`),
-  resets.
-- **`id`**: the SZ accumulator; `when_first_row` pins 0, `id·term_sel`
-  asserts closure.
+  `g = [1,0,1,0,0,0,0,0]`. Builds `κₐ·a(β)` on the `a` row (the scale
+  applied during the build keeps everything degree-3), holds through
+  the `b` row — whose contribution `S·Σbⱼβʲ` lands the degree-2 product
+  at constraint degree 3 — resets, builds `bound(β)` on the `p` row,
+  holds through the `q` row (`−(S+1)·Σqᵢβⁱ`: the `+1` is `p = bound +
+  1`), resets.
+- **`id`**: the SZ accumulator; `when_first_row` pins 0, the folded
+  closure on the `c` row asserts closure.
 
 ## Columns
 
-**Main 16**: cells 0–9, then `a_ptr, b_ptr, r_ptr, bound_ptr, κₐ, act`
-(cycle-constant; the four ptrs + κₐ need joint visibility at the
+**Main 26**: cells 0–18, then `a_ptr, b_ptr, r_ptr, bound_ptr, κₐ, act,
+borrow` (cycle-constant; the ptrs + κₐ need joint visibility at the
 provide *and* use across distant rows, which only cycle-constancy
-transports cheaply — c's metadata escaped to term cells only thanks to
-the adjacency above). `act ∈ {0,1}` gates every bus flag: padding
-blocks are **all-zero rows** that touch no bus, consume no store
-provides and add no BPL demand — no sentinel dependence.
+transports cheaply — `c`'s own metadata needs no transport since it's
+local to the closing row itself). `act ∈ {0,1}` gates every bus flag:
+padding blocks are **all-zero rows** that touch no bus, consume no
+store provides and add no BPL demand — no sentinel dependence.
 
-**Aux 5** (each fraction column capped at 8 fractions — the
+**Aux 17** (each fraction column capped at 8 fractions — the
 [degree-9 / lqd-3 budget](../lookup-argument.md#the-fraction-column-degree-budget)):
 
 | col | contents |
 |---|---|
-| 0 | LogUp running sum: the `UintMul` provide + the 6 raw `UintLimbs` consumes |
-| 1 | `Range16` on cell positions 0–7 (per-position multiplicity = act-gated sum of host-row selectors) |
-| 2 | `Range16` on positions 8–9 + κₐ + κ_c, plus the 4 `UintVal` consumes |
-| 3 | `id` register |
-| 4 | `S` register |
+| 0 | LogUp running sum: the `UintMul` provide |
+| 1–2 | the 3 merged raw `UintLimbs` consumes (a, b, bound), two per column (col 2 a singleton) |
+| 3–12 | `Range16` on all nineteen cell positions, two per column (col 12 a singleton) |
+| 13 | `Range16` on κₐ + κ_c |
+| 14 | the 2 merged `UintVal` consumes (r, c) |
+| 15 | `id` register |
+| 16 | `S` register |
 
 ## Buses
 
 | Bus | Tuple | Direction |
 |---|---|---|
-| `UintMul` (12) | `(κₐ, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` | provide on term rows, mult = the op's consumer count (identical relations collapse onto one block, mults accumulating — e.g. two points sharing a membership MAC; 0 = dormant) |
-| `UintLimbs` (13) | raw 8×16 view | consume ×6/op (a, b, bound halves) |
-| `UintVal` (10) | 4×32 view | consume ×4/op (c, r halves) |
+| `UintMul` (12) | `(κₐ, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr, is_sub)` | provide on the `c` row, mult = the op's consumer count (identical relations collapse onto one block, mults accumulating — e.g. two points sharing a membership MAC; 0 = dormant) |
+| `UintLimbs` (13) | raw 16×16 view, full value | consume ×3/op (a, b, bound) |
+| `UintVal` (10) | 4×32 view, full value | consume ×2/op (r, c) |
 | `Range16` | `(w,)` | consume ×81/op (17 q + 62 γ + 2 κ) |
 
 Every consume carries the block's `bound_ptr`, which is the

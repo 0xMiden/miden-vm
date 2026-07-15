@@ -29,8 +29,8 @@ with the verified provider/consumer matrix.
   range-checked — bus balance alone pins a provide's count to its
   consumers' (the dedup pass removed the old `Range16` ceiling).
 
-`MAX_MESSAGE_WIDTH = 11` — the widest payload is `UintLimbs` (`ptr`,
-`bound_ptr`, `offset`, + an 8×16-bit half). Width costs only precomputed
+`MAX_MESSAGE_WIDTH = 18` — the widest payload is `UintLimbs` (`ptr`,
+`bound_ptr`, + a full 16×16-bit value). Width costs only precomputed
 powers of `β`; encoding stays linear.
 
 ### Topology notes
@@ -60,10 +60,10 @@ powers of `β`; encoding stays linear.
 | 7 | [Poseidon2Out](#7--poseidon2out) | `(perm_seq_id, d0..d3)` | Poseidon2 | KeccakNode, TranscriptEval |
 | 8 | [Binding](#8--binding) | `(h0..h3, value_tag, ptr, bound_ptr)` | TranscriptEval, KeccakNode | TranscriptEval |
 | 9 | [ChunkChain](#9--chunkchain) | `(chunk_seq_id_head, perm_seq_id_head)` | Chunk | KeccakNode |
-| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, offset, c0..c3)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm, verifier boundary |
-| 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
-| 12 | [UintMul](#12--uintmul) | `(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` | UintMul | EcPointStore, EcGroupAdd, TranscriptEval |
-| 13 | [UintLimbs](#13--uintlimbs) | `(ptr, bound_ptr, offset, l0..l7)` | UintStore | UintMul |
+| 10 | [UintVal](#10--uintval) | `(ptr, bound_ptr, c0..c7)` | UintStore | UintStore, UintAdd, UintMul, TranscriptEval, EcMsm, verifier boundary |
+| 11 | [UintAdd](#11--uintadd) | `(bound_ptr, a_ptr, b_ptr, c_ptr, nz)` | UintAdd | TranscriptEval, EcGroupAdd, EcMsm |
+| 12 | [UintMul](#12--uintmul) | `(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr, is_sub)` | UintMul | EcPointStore, EcGroupAdd, TranscriptEval |
+| 13 | [UintLimbs](#13--uintlimbs) | `(ptr, bound_ptr, l0..l15)` | UintStore | UintMul |
 | 14 | [EcGroup](#14--ecgroup) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` | EcGroups | EcPointStore, EcGroupAdd, EcMsm, verifier boundary |
 | 15 | [EcPoint](#15--ecpoint) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` | EcPointStore | EcGroupAdd, EcMsm, TranscriptEval |
 | 16 | [EcGroupAdd](#16--ecgroupadd) | `(group_ptr, p_ptr, q_ptr, r_ptr)` | EcGroupAdd | EcMsm, TranscriptEval |
@@ -176,11 +176,11 @@ in the chunk chiplet's native sequence namespace.
 
 ## 10 — UintVal
 
-`(ptr, bound_ptr, offset, c0, c1, c2, c3)` — a 256-bit uint half in the
-4×32-bit recombined view, `offset ∈ {0 = lo, 1 = hi}`.
+`(ptr, bound_ptr, c0..c7)` — a full 256-bit uint in the 4×32-bit
+recombined view (`cₖ = v₂ₖ + 2¹⁶·v₂ₖ₊₁`), one message per value.
 
-- **Provider** — [UintStore](uint-store.md): each stored uint's two halves.
-- **Consumers** — [UintAdd](uint-add.md) (a / b / c / modulus halves),
+- **Provider** — [UintStore](uint-store.md): each stored uint, one message.
+- **Consumers** — [UintAdd](uint-add.md) (a / b / c / modulus),
   [UintMul](uint-mul.md) (the linear c / r operands),
   [TranscriptEval](transcript-eval.md) (runtime uint leaves and explicit
   transcript pin claims), [EcMsm](ec-msm.md) (the literal-`1` scalar of an
@@ -191,37 +191,41 @@ in the chunk chiplet's native sequence namespace.
 Verifier boundary consumes are not AIR rows and do not create
 [`Binding`](#8--binding) traffic. They simply add fixed public `UintVal`
 requirements at the LogUp seam, so the store must provide the expected
-halves at the named `(ptr, bound_ptr)`.
+value at the named `(ptr, bound_ptr)`.
 
 ## 11 — UintAdd
 
-`(bound_ptr, a_ptr, b_ptr, c_ptr)` — asserts `a + b ≡ c (mod p)` for
-uints sharing `bound_ptr`. A `0` ptr slot is the unstored zero (the
-`is_b_zero` / `is_c_zero` forms).
+`(bound_ptr, a_ptr, b_ptr, c_ptr, nz)` — asserts `a + b ≡ c (mod p)` for
+uints sharing `bound_ptr`, plus — when `nz = 1` — the certified fact
+`b ≠ 0`. A `0` ptr slot is the unstored zero (the `is_b_zero` /
+`is_c_zero` forms).
 
 - **Provider** — [UintAdd](uint-add.md): at the op's consumer count.
 - **Consumers** — [TranscriptEval](transcript-eval.md) (add / sub `UintOp`
-  nodes), [EcGroupAdd](ec-group-add.md) (the `x₁ = x₂` / `y₁ = y₂`
-  coordinate-equality certificates, the `is_b_zero` form),
+  nodes, always `nz = 0`), [EcGroupAdd](ec-group-add.md) (the `x₁ = x₂` /
+  `y₁ = y₂` coordinate-equality certificates, the `is_b_zero` form; the
+  generic-add case's `nz = 1` disequality certificate on `d = x₂ − x₁`),
   [EcMsm](ec-msm.md) (per-term scalar merge on combine, scalar negate on neg).
 
 ## 12 — UintMul
 
-`(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` — asserts the fused
-MAC `κ_a·a·b + κ_c·c ≡ r (mod p)`.
+`(κ_a, κ_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr, is_sub)` — asserts the
+fused MAC `κ_a·a·b + κ_c·c ≡ r (mod p)` (or `κ_a·a·b − κ_c·c ≡ r` when
+`is_sub = 1`).
 
 - **Provider** — [UintMul](uint-mul.md): at the op's consumer count.
 - **Consumers** — [EcPointStore](ec-points.md) (the on-curve MAC trio
   `u ≡ x²+a`, `w ≡ x·u+b`, `w ≡ y²`), [EcGroupAdd](ec-group-add.md) (the
   slope / chord / tangent / coordinate field certificates),
-  [TranscriptEval](transcript-eval.md) (uint-mul `UintOp` nodes).
+  [TranscriptEval](transcript-eval.md) (uint-mul `UintOp` nodes, always
+  `is_sub = 0`).
 
 ## 13 — UintLimbs
 
-`(ptr, bound_ptr, offset, l0..l7)` — a 256-bit uint half in the raw
-8×16-bit limb view, `offset ∈ {0, 1}`. The widest payload (11).
+`(ptr, bound_ptr, l0..l15)` — a full 256-bit uint in the raw 16×16-bit
+limb view, one message per value. The widest payload (18).
 
-- **Provider** — [UintStore](uint-store.md): the raw-limb view of each half.
+- **Provider** — [UintStore](uint-store.md): the raw-limb view of each value.
 - **Consumer** — [UintMul](uint-mul.md): the convolution operands `a`,
   `b`, modulus (the kernel multiplies 16-bit limbs).
 

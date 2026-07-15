@@ -18,7 +18,8 @@ group law's coordinate certificates.
 
 Two zero-sentinel modes share the layout: `is_c_zero` proves `a + b ≡ 0`
 (negation, with an unstored zero result) and `is_b_zero` proves
-`a + 0 ≡ c` — the stored-value **equality certificate** `a = c`.
+`a + 0 ≡ c` — the stored-value **equality certificate** `a = c`. A
+cycle-constant `nz` flag additionally certifies `b ≠ 0` when set.
 
 ## The identity (vertical Schwartz–Zippel)
 
@@ -31,8 +32,8 @@ a + b − k·p = c,   k ∈ {0, 1},   p = bound + 1
 The store holds `bound = p − 1` (so any modulus, including 2²⁵⁶, is
 representable), so the `+1` becomes a `−k` correction at `β⁰`. The whole
 block is checked at the LogUp challenge `β` by one extension-field
-register `id` (aux col 2), accumulated row-by-row and asserted zero at
-the term row:
+register `id` (aux col 3), accumulated row-by-row and folded closed at
+the `p` row:
 
 ```text
 D(β) = a(β) + b(β) − c(β) − k·bound(β) − k + (β − t)·Γ(β) = 0,   t = 2³²
@@ -50,108 +51,130 @@ store's 16-bit range through the `UintVal` tie.
 
 | Property | Value |
 |----------|-------|
-| Main width | `NUM_MAIN_COLS = 9` |
-| Period | `PERIOD = 16` rows = one add op |
-| Height | `(n_ops · 16)` rounded up to a power of two; trailing rows are all-zero (`act = 0`) padding |
-| Periodic columns | `14` one-hot role selectors (verifier-computed) |
-| Aux width | `3` = `2` LogUp columns (`COLUMN_SHAPE = [5, 4]`) + `1` Schwartz–Zippel register (excluded from σ) |
+| Main width | `NUM_MAIN_COLS = 21` |
+| Period | `PERIOD = 4` rows — `a`, `b`, `c`, `p` each one row |
+| Height | `(n_ops · 4)` rounded up to a power of two; trailing rows are all-zero (`act = 0`) padding |
+| Periodic columns | `4` one-hot role selectors (verifier-computed) — the role index doubles as the row index |
+| Aux width | `4` = `3` LogUp columns (`COLUMN_SHAPE = [1, 2, 2]`) + `1` Schwartz–Zippel register (col 3, excluded from σ via `num_logup_cols = 3`) |
 
-A block lays one `UintVal` 4×32 half per limb row, mirroring the store's
-bound rows; `b`/`c`/`p` each take two halves plus a **hub** row between
-them hosting that family's scalar.
+A block lays one full `UintVal` 8×32 value per row: `a`, `b`, `c` and
+`p` each take a single row, in that fixed order. `p` sits last in the
+period, so it doubles as the block's closing row — the `UintAdd`
+provide and the SZ closure both fire there, with no dedicated term row.
 
 ## Main columns
 
-Columns 0–3 (`NUM_LIMBS = 4`) are **role-polymorphic**: their meaning
-depends on the row (selected by the periodic column firing there).
-Columns 4–8 are **cycle-constant** (constant across the 16-row block).
+Columns 0–7 (`NUM_LIMBS = 8`) hold the full `UintVal` value on every
+row. Columns 8–14 (`CELL_FLAG` onward) are **role-polymorphic** scalar
+cells whose meaning depends on the row. Columns 15–20 are
+**cycle-constant** (constant across the 4-row block).
 
 | Col | Name | On rows | Range / values | Meaning |
 |-----|------|---------|----------------|---------|
-| 0–3 | limb cells | `a/b/c/p` lo & hi rows | each `∈ [0, 2³²)` (32-bit) | the four 32-bit words of one `UintVal` half |
-| 0–3 | carry cells | `cpos`/`cneg` lo & hi rows | each `∈ {0, 1}` | the binary carries γ⁺/γ⁻ (lo row: γ·₀..₃, hi row: γ·₄..₆ in cells 0–2) |
-| 0 | `is_b_zero` | `b`-hub row (3) | `{0, 1}` | when 1, `b` is the unstored zero: drop `+b(β)` and the `b` consumes, force `b_ptr = 0` (the `a = c` equality form) |
-| 0 | `is_c_zero` | `c`-hub row (6) | `{0, 1}` | when 1, `c` is the unstored zero: drop `−c(β)` and the `c` consumes, force `c_ptr = 0` |
-| 0 | `k` | `k`-hub row (9) | `{0, 1}` | the modular reduction bit |
-| 0 | `mult` | term row (15) | `[0, 2³²)` | the `UintAdd` provide multiplicity = consumer count |
-| 4 | `COL_A_PTR` | all | store ptr | `a`'s pointer |
-| 5 | `COL_B_PTR` | all | store ptr, or `0` | `b`'s pointer (forced `0` when `is_b_zero`) |
-| 6 | `COL_C_PTR` | all | store ptr, or `0` | `c`'s (result) pointer (forced `0` when `is_c_zero`) |
-| 7 | `COL_BOUND_PTR` | all | store ptr | the shared modulus `p`'s pointer |
-| 8 | `COL_ACT` | all | `{0, 1}` | block-active flag: `1` on real op blocks, `0` on padding (gates every consume) |
+| 0–7 | limb cells | all | each `∈ [0, 2³²)` (32-bit, via the `UintVal` tie) | the eight 32-bit words of the row's operand |
+| 8–12 | carry cells | `a` row (0) | each `∈ {0, 1}` | γ⁺₀..γ⁺₄ (`GAMMA_POS_SLOTS`) |
+| 8 | `is_b_zero` | `b` row (1) | `{0, 1}` | `CELL_IS_B_ZERO`: when set, `b` is the unstored zero |
+| 9–10 | carry cells | `b` row (1) | each `∈ {0, 1}` | γ⁺₅, γ⁺₆ |
+| 11–12 | carry cells | `b` row (1) | each `∈ {0, 1}` | γ⁻₀, γ⁻₁ |
+| 13 | `w` | `b` row (1) | field element | `CELL_D_W`: the nonzero-certificate's witnessed candidate inverse of `S = Σⱼ bⱼ` |
+| 14 | `wS` | `b` row (1) | field element | `CELL_D_WS`: `w · S`, pinned locally to keep the nz-cert check degree 3 |
+| 8 | `is_c_zero` | `c` row (2) | `{0, 1}` | `CELL_IS_C_ZERO`: when set, `c` is the unstored zero |
+| 9–12 | carry cells | `c` row (2) | each `∈ {0, 1}` | γ⁻₂..γ⁻₅ |
+| 13 | `b_on` | `c` row (2) | `{0, 1}` | `CELL_B_ON`: `act·(1 − is_b_zero)`, read via next from the `b` row |
+| 8 | `k` | `p` row (3) | `{0, 1}` | `CELL_K`: the modular reduction bit |
+| 9 | carry cell | `p` row (3) | `∈ {0, 1}` | γ⁻₆ |
+| 10 | `c_on` | `p` row (3) | `{0, 1}` | `CELL_C_ON`: `act·(1 − is_c_zero)`, read via next from the `c` row |
+| 12 | `mult` | `p` row (3) | `[0, 2³²)` | `TERM_CELL_MULT`: the `UintAdd` provide multiplicity = consumer count |
+| 15 | `COL_A_PTR` | all | store ptr | `a`'s pointer |
+| 16 | `COL_B_PTR` | all | store ptr, or `0` | `b`'s pointer (forced `0` when `is_b_zero`) |
+| 17 | `COL_C_PTR` | all | store ptr, or `0` | `c`'s (result) pointer (forced `0` when `is_c_zero`) |
+| 18 | `COL_BOUND_PTR` | all | store ptr | the shared modulus `p`'s pointer |
+| 19 | `COL_ACT` | all | `{0, 1}` | block-active flag: `1` on real op blocks, `0` on padding (gates every consume) |
+| 20 | `COL_NZ` | all | `{0, 1}` | nonzero-certificate flag, read on both the `b` row (checked) and the `p` row (rides the provide tuple) |
 
 ### Periodic columns (verifier-computed, uncommitted)
 
-14 one-hot selectors, each `1` on exactly one row of the period:
+4 one-hot selectors, each `1` on exactly one row of the period:
 
-| Selector | Row | Selector | Row | Selector | Row |
-|----------|-----|----------|-----|----------|-----|
-| `A_LO` | 0 | `C_HUB` | 6 | `CPOS_LO` | 11 |
-| `A_HI` | 1 | `P_LO` | 8 | `CPOS_HI` | 12 |
-| `B_LO` | 2 | `K_HUB` | 9 | `CNEG_LO` | 13 |
-| `B_HUB` | 3 | `P_HI` | 10 | `CNEG_HI` | 14 |
-| `C_LO` | 5 | | | `TERM` | 15 |
-
-Rows **4** (`b`-hi) and **7** (`c`-hi) have *no* selector — their `id`
-contributions and consumes fire on the preceding hub row through a
-next-row window, so they need no dedicated column.
+| Selector | Row |
+|----------|-----|
+| `ROW_A` | 0 |
+| `ROW_B` | 1 |
+| `ROW_C` | 2 |
+| `ROW_P` | 3 (closing) |
 
 ## Constraints
 
 All main-trace (Phase 1) constraints below are degree ≤ 3.
 
-### Schwartz–Zippel identity register (`id`, aux col 2)
+### Schwartz–Zippel identity register (`id`, aux col 3)
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
 | 1 | `when_first_row: id = 0` | 1 | the running combination starts empty |
 | 2 | `when_transition: id_next − id − contrib = 0` | 3 | accumulate `contrib`, the row's signed weighted-limb terms (`+a`, `±b`/`±c` gated by the zero flags, `−k·p`, `±Γ` carry terms), so `id` holds the partial `D(β)` |
-| 3 | `id · TERM = 0` | 2 | at the term row the accumulated `D(β)` must vanish — the modular-sum identity holds at `β` |
+| 3 | `(id + p_own) · ROW_P = 0` | 3 | at the `p` row the accumulated `D(β)`, folded with that row's own not-yet-accumulated contribution `p_own` (its `−k·(bound(β)+1)` term plus its γ⁻ share), must vanish — the modular-sum identity holds at `β`. Folding avoids depending on a dedicated all-zero successor row, so the check also covers the trace's final block |
 
-`contrib` weights each row's limbs by the appropriate `βʲ` and the
-periodic selector for its role; the `b`/`c` halves are multiplied by
-`(1 − is_b_zero)` / `(1 − is_c_zero)`, and the `p` half by `k`.
+`contrib` weights each row's limbs by `Σⱼ limbⱼ·βʲ` and the periodic
+selector for its role; the `b`/`c` values are multiplied by
+`(1 − is_b_zero)` / `(1 − is_c_zero)`, and the `p` value by `k`. `p_own`
+is built from `p`'s own local cells only, mirroring exactly the terms
+`contrib` contributes when gated by `ROW_P`.
 
 ### Booleanity
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 4 | `K_HUB · k · (1 − k) = 0` | 3 | reduction bit is boolean |
+| 4 | `ROW_P · k · (1 − k) = 0` | 3 | reduction bit is boolean |
 | 5 | `act · (1 − act) = 0` | 2 | block-active flag is boolean |
-| 6 | `C_HUB · is_c_zero · (1 − is_c_zero) = 0` | 3 | zero-sentinel flag is boolean |
-| 7 | `B_HUB · is_b_zero · (1 − is_b_zero) = 0` | 3 | zero-sentinel flag is boolean |
-| 8 | `(CPOS_LO + CNEG_LO) · limbⱼ · (1 − limbⱼ) = 0`, `j ∈ 0..4` | 3 | low-half carries γ·₀..₃ are boolean |
-| 9 | `(CPOS_HI + CNEG_HI) · limbₘ · (1 − limbₘ) = 0`, `m ∈ 0..3` | 3 | high-half carries γ·₄..₆ are boolean |
+| 6 | `ROW_C · is_c_zero · (1 − is_c_zero) = 0` | 3 | zero-sentinel flag is boolean |
+| 7 | `ROW_B · is_b_zero · (1 − is_b_zero) = 0` | 3 | zero-sentinel flag is boolean |
+| 8 | `nz · (1 − nz) = 0` | 2 | nonzero-certificate flag is boolean |
+| 9 | `sel[row] · γⱼ · (1 − γⱼ) = 0` for every `(row, cell)` in `GAMMA_POS_SLOTS ∪ GAMMA_NEG_SLOTS` | 3 | every carry cell is boolean, gated by whichever row the placement table assigns it to |
 
 ### Pointer pins
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 10 | `C_HUB · is_c_zero · c_ptr = 0` | 3 | the unstored zero result has no address; `c_ptr = 0` reads as "≡ 0" to a consumer |
-| 11 | `B_HUB · is_b_zero · b_ptr = 0` | 3 | the dropped `b` operand reads as the equality form `a + 0 ≡ c` |
+| 10 | `ROW_C · is_c_zero · c_ptr = 0` | 3 | the unstored zero result has no address; `c_ptr = 0` reads as "≡ 0" to a consumer |
+| 11 | `ROW_B · is_b_zero · b_ptr = 0` | 3 | the dropped `b` operand reads as the equality form `a + 0 ≡ c` |
+
+### Activity-gate pins
+
+| # | Constraint | Deg | Rationale |
+|---|-----------|-----|-----------|
+| 12 | `ROW_B · (b_on_next − act·(1 − is_b_zero)) = 0` | 3 | pins `b_on` (read by the `c` row's next-row window) to the witnessed activity gate |
+| 13 | `ROW_C · (c_on_next − act·(1 − is_c_zero)) = 0` | 3 | pins `c_on` (read by the `p` row's next-row window) to the witnessed activity gate |
+
+### Nonzero certificate
+
+| # | Constraint | Deg | Rationale |
+|---|-----------|-----|-----------|
+| 14 | `ROW_B · (wS − w·S) = 0` | 3 | pins the hoisted product `wS = w·S` (`S = Σⱼ bⱼ`, native-summed, no β-weighting) |
+| 15 | `ROW_B · nz · (wS − 1) = 0` | 3 | when `nz = 1`, `w` is a genuine inverse of `S` — proving `S ≠ 0 ⟺ b ≠ 0` |
 
 ### Cycle-constancy
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 12 | `(1 − TERM) · (next[col] − local[col]) = 0` for `col ∈ {A_PTR, B_PTR, C_PTR, BOUND_PTR, ACT}` | 2 | the four ptrs need joint visibility at the term-row provide *and* at their scattered consume rows; `act` gates eight rows. The `not_term` gate releases the constraint exactly at the block boundary |
+| 16 | `(1 − ROW_P) · (next[col] − local[col]) = 0` for `col ∈ {A_PTR, B_PTR, C_PTR, BOUND_PTR, ACT, NZ}` | 2 | the four ptrs need joint visibility at the closing-row provide *and* at their own row's consume; `nz` is read three rows apart (`b` and `p`); `act` gates every row. The `not_term` gate releases the constraint exactly at the block boundary |
 
 ### Provide gating
 
 | # | Constraint | Deg | Rationale |
 |---|-----------|-----|-----------|
-| 13 | `TERM · (1 − act) · mult = 0` | 3 | a provide must come from an active block. The `UintAdd` provide is gated by `TERM` only (not `act`), and the operand consumes *are* `act`-gated — so an `act = 0` block with zeroed limbs (the SZ `id` closes on `0 + 0 − 0 = 0`) and a witnessed term-row `mult` could otherwise provide a *false* relation onto the bus. Forcing `mult = 0` on inactive blocks closes it |
+| 17 | `ROW_P · (1 − act) · mult = 0` | 3 | a provide must come from an active block. The `UintAdd` provide is gated by `ROW_P` only (not `act`), and the operand consumes *are* `act`-gated — so an `act = 0` block with zeroed limbs (the SZ `id` closes on `0 = 0`) and a witnessed `mult` could otherwise provide a *false* relation onto the bus. Forcing `mult = 0` on inactive blocks closes it |
 
 ## Buses & lookups
 
-`COLUMN_SHAPE = [5, 4]` — two LogUp columns batching 5 and 4
+`COLUMN_SHAPE = [1, 2, 2]` — three LogUp columns batching 1, 2 and 2
 mutually-exclusive fractions respectively.
 
 ### Provides
 
 | Bus | Tuple | Multiplicity | Fires on |
 |-----|-------|--------------|----------|
-| [`UintAdd`](relation-registry.md#11--uintadd) (11) | `(bound_ptr, a_ptr, b_ptr, c_ptr)` | `−mult · TERM` | term row (15) |
+| [`UintAdd`](relation-registry.md#11--uintadd) (11) | `(bound_ptr, a_ptr, b_ptr, c_ptr, nz)` | `−mult · ROW_P` | `p` row (3), the closing row |
 
 The provide multiplicity is the stored consumer-count cell `mult`,
 negated; it is pinned to the actual demand by bus balance (no range
@@ -159,25 +182,28 @@ check).
 
 ### Consumes
 
-Eight [`UintVal`](relation-registry.md#10--uintval) halves per block —
-the 4×32 recombined view `(ptr, bound_ptr, offset, c0..c3)`:
+Four [`UintVal`](relation-registry.md#10--uintval) full-value messages
+per block — the 4×32 recombined view `(ptr, bound_ptr, c0..c7)`, one
+per operand row:
 
-| Operand | offset | Multiplicity | Notes |
-|---------|--------|--------------|-------|
-| `a` lo / hi | 0 / 1 | `A_LO · act` / `A_HI · act` | own-row limbs |
-| `b` lo / hi | 0 / 1 | `B_LO · (1−is_b_zero) · act` / `B_HUB · (1−is_b_zero) · act` | hi fires on the hub vs. next-row limbs; suppressed when `b = 0` |
-| `c` lo / hi | 0 / 1 | `C_LO · (1−is_c_zero) · act` / `C_HUB · (1−is_c_zero) · act` | hi fires on the hub vs. next-row limbs; suppressed when `c = 0` |
-| `p` lo / hi | 0 / 1 | `P_LO · act` / `P_HI · act` | the shared modulus |
+| Operand | Row | Multiplicity | Notes |
+|---------|-----|--------------|-------|
+| `a` | 0 | `ROW_A · act` | own-row limbs |
+| `b` | 1 | `ROW_B · b_on` (read via next from the `c` row) | suppressed when `b = 0` |
+| `c` | 2 | `ROW_C · c_on` (read via next from the `p` row) | suppressed when `c = 0` |
+| `p` | 3 | `ROW_P · act` | the shared modulus |
 
 ### Mutex batching
 
-The nine fractions split across the two σ columns purely to bound
-constraint degree (all nine in one column would hit degree 10):
+The four consumes plus the provide split across the three σ columns
+purely to bound constraint degree:
 
-- **Col 0** (`uintadd-ab`, 5 fractions): the four `a`/`b` `UintVal`
-  consumes + the `UintAdd` provide.
-- **Col 1** (`uintadd-cp`, 4 fractions): the four `c`/`p` `UintVal`
-  consumes.
+- **Col 0** (`uintadd`, 1 fraction): `a`'s consume, alone — the running
+  sum, since the `+1` gate forbids a degree-3 fraction there.
+- **Col 1** (`uintadd`, 2 fractions): `b` + `c`'s gated consumes
+  (degree 2 via `sel·on`).
+- **Col 2** (`uintadd-pp`, 2 fractions, mixed batch): `p`'s consume +
+  the `UintAdd` provide.
 
 Within each column the multiplicities are one-hot by row (a selector
 fires on at most one row of the period), so the fractions are mutually
