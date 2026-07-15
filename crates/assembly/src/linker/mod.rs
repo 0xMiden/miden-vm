@@ -40,7 +40,7 @@ mod debug;
 mod errors;
 mod library;
 mod module;
-mod namespaces;
+pub mod namespaces;
 mod resolver;
 mod rewrites;
 mod symbols;
@@ -68,12 +68,13 @@ pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
     library::{LinkLibrary, Linkage},
+    namespaces::NamespaceGraph,
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
     symbols::{Import, Symbol, SymbolItem},
 };
 use self::{
     module::{LinkModule, ModuleSource},
-    namespaces::{NamespaceGraph, ResolvedImports},
+    namespaces::ResolvedImports,
     resolver::*,
 };
 
