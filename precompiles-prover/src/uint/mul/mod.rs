@@ -370,9 +370,9 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // β⁰..β³¹ (the γ weights reach (β − t)·β³⁰).
         let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(2 * PERIOD);
+        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(NUM_GAMMA + 1);
         bp.push(AB::ExprEF::ONE);
-        for i in 1..2 * PERIOD {
+        for i in 1..NUM_GAMMA + 1 {
             bp.push(bp[i - 1].clone() * beta.clone());
         }
         let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));

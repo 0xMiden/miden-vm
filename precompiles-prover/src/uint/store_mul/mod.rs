@@ -51,8 +51,9 @@ use crate::{
             COL_A_PTR as M_COL_A_PTR, COL_ACT as M_COL_ACT, COL_B_PTR as M_COL_B_PTR,
             COL_BORROW as M_COL_BORROW, COL_BOUND_PTR as M_COL_BOUND_PTR,
             COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR, GAMMA_OFFSET, GAMMA_SLOTS,
-            NUM_CELLS as MUL_NUM_CELLS, NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS,
-            PERIOD as MUL_PERIOD, ROW_A_HI, ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_G0, ROW_G4,
+            NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA, NUM_MAIN_COLS as MUL_NUM_MAIN_COLS,
+            NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A_HI, ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C,
+            ROW_G0, ROW_G4,
             ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R, ROW_TERM, S_KEEP, TERM_CELL_C_PTR,
             TERM_CELL_IS_SUB, TERM_CELL_KAPPA_C, TERM_CELL_KAPPA_C_SIGNED, TERM_CELL_MULT,
             UintMulMsg,
@@ -289,9 +290,9 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             };
 
             let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-            let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(2 * MUL_PERIOD);
+            let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(NUM_GAMMA + 1);
             bp.push(AB::ExprEF::ONE);
-            for i in 1..2 * MUL_PERIOD {
+            for i in 1..NUM_GAMMA + 1 {
                 bp.push(bp[i - 1].clone() * beta.clone());
             }
             let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));

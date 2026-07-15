@@ -402,9 +402,9 @@ pub(crate) fn build_aux(
     let beta = challenges[1];
 
     // β⁰..β³¹ + the γ slot weights (mirroring the AIR's).
-    let mut bp = [QuadFelt::ZERO; 2 * PERIOD];
+    let mut bp = [QuadFelt::ZERO; NUM_GAMMA + 1];
     bp[0] = QuadFelt::ONE;
-    for i in 1..2 * PERIOD {
+    for i in 1..NUM_GAMMA + 1 {
         bp[i] = bp[i - 1] * beta;
     }
     let t16 = QuadFelt::from(Felt::from(1u32 << 16));

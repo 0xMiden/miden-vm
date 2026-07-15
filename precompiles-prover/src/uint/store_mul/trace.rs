@@ -31,7 +31,7 @@ use crate::{
     uint::{
         mul::{
             COL_ACT as M_COL_ACT, COL_BORROW as M_COL_BORROW, COL_KAPPA_A as M_COL_KAPPA_A,
-            GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS as MUL_NUM_CELLS,
+            GAMMA_OFFSET, GAMMA_SLOTS, NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA,
             NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A_HI,
             ROW_A_LO, ROW_B_HI, ROW_B_LO, ROW_C, ROW_P_HI, ROW_P_LO, ROW_Q_HI, ROW_Q_LO, ROW_R,
             S_KEEP, TERM_CELL_KAPPA_C_SIGNED,
@@ -92,9 +92,9 @@ pub(crate) fn build_aux(
 
     // MUL's own register math (mirrors `uint::mul::trace::build_aux`
     // exactly, reading cols `MUL_COL_OFFSET`..`NUM_MAIN_COLS`).
-    let mut bp32 = [QuadFelt::ZERO; 2 * MUL_PERIOD];
+    let mut bp32 = [QuadFelt::ZERO; NUM_GAMMA + 1];
     bp32[0] = QuadFelt::ONE;
-    for i in 1..2 * MUL_PERIOD {
+    for i in 1..NUM_GAMMA + 1 {
         bp32[i] = bp32[i - 1] * beta;
     }
     let t16 = QuadFelt::from(Felt::from(1u32 << 16));
