@@ -82,11 +82,12 @@ pub const NUM_BUS_IDS: usize = 21;
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
 /// by [`Challenges`](miden_air::lookup::Challenges).
 ///
-/// The widest payload is `UintLimbs` at 11 elements (`ptr`, `bound_ptr`,
-/// `offset`, plus a full 8×16-bit half) — the raw limb view the mul
-/// chiplet convolves over. Width costs only precomputed powers of β;
-/// encoding stays linear.
-pub const MAX_MESSAGE_WIDTH: usize = 11;
+/// The widest payload is `UintLimbs` at 18 elements (`ptr`, `bound_ptr`,
+/// plus a full 16×16-bit value — no more `offset` field, since each
+/// operand now lives on one row and sends its whole value in a single
+/// message) — the raw limb view the mul chiplet convolves over. Width
+/// costs only precomputed powers of β; encoding stays linear.
+pub const MAX_MESSAGE_WIDTH: usize = 18;
 
 /// Net multiplicity a LogUp bus tuple is provided / consumed with — the
 /// count a chiplet stamps into its trace cells and the demand ledgers
