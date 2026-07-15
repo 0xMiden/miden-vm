@@ -17,14 +17,21 @@
 //!     2> heights.log
 //! ```
 //!
-//! `heights.log` is a line-oriented log with three record kinds, meant to
+//! `heights.log` is a line-oriented log with four record kinds, meant to
 //! be fed to `parse_trace_heights.py`:
 //!
 //! ```text
 //! COMBO keccaks=<k> ecdsas=<e>
 //! REAL_HEIGHT <ChipletName> <rows>
 //! PADDED_HEIGHT <ChipletName> <rows>
+//! PROVE_TIME_MS <ms>
 //! ```
+//!
+//! `PROVE_TIME_MS` times only the `prove_once_with_hash` call (fixture
+//! generation happens first and isn't included). `ALREADY_MEASURED` skips
+//! combos with known row heights, but none of them have timing data yet —
+//! clear `ALREADY_MEASURED` to `&[]` before running a sweep whose goal is
+//! full-grid timing coverage.
 //!
 //! Two chiplets are built from a pair of sub-traces sharing one row
 //! range, so their real height is the `max` of two probes rather than a
@@ -118,7 +125,9 @@ fn main() {
             eprintln!("COMBO keccaks={keccaks} ecdsas={ecdsas}");
             let workload = PrecompileWorkload { keccaks, ecdsas };
             let fixture = PrecompileFixture::generate(workload);
+            let start = std::time::Instant::now();
             let _ = prove_once_with_hash(&fixture, HashFunction::Blake3_256);
+            eprintln!("PROVE_TIME_MS {}", start.elapsed().as_millis());
         }
     }
 }
