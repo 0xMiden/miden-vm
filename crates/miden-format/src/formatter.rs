@@ -291,9 +291,8 @@ fn render_item_import_lines(
     }
 
     let specs = import.item_specs().map(render_import_specifier).collect::<Vec<_>>();
-    let items = format!("{{{}}}", specs.join(", "));
     let from = format!("from {path}");
-    let line = format!("{header} {items} {from}");
+    let line = format!("{header} {{{}}} {from}", specs.join(", "));
 
     if line_length(&line) <= config.max_line_length() {
         vec![line]
@@ -309,27 +308,19 @@ fn render_vertical_item_import_lines(
     indent: usize,
     config: &Config,
 ) -> Vec<String> {
-    if specs.is_empty() {
-        return vec![
-            format!("{header} {{}}"),
-            format!("{}{}", indent_string(indent + config.indent_size()), from),
-        ];
-    }
-
-    let mut lines = vec![format!("{header} {{")];
     let item_indent = indent_string(indent + config.indent_size());
-    for spec in specs {
+    let mut lines = vec![format!("{header} {{")];
+    for spec in &specs {
         lines.push(format!("{item_indent}{spec},"));
     }
 
-    let mut closing = format!("{}}}", indent_string(indent));
-    if line_length(&closing) + 1 + line_length(&from) <= config.max_line_length() {
-        closing.push(' ');
-        closing.push_str(&from);
-        lines.push(closing);
+    let indent_str = indent_string(indent);
+    let inline_closing = format!("{indent_str}}} {from}");
+    if line_length(&inline_closing) <= config.max_line_length() {
+        lines.push(inline_closing);
     } else {
-        lines.push(closing);
-        lines.push(format!("{}{}", indent_string(indent + config.indent_size()), from));
+        lines.push(format!("{indent_str}}}"));
+        lines.push(format!("{item_indent}{from}"));
     }
 
     lines
