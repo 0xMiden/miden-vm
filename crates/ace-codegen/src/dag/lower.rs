@@ -265,7 +265,7 @@ where
     builder.build(root)
 }
 
-fn build_periodic_nodes<EF>(
+pub(super) fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,

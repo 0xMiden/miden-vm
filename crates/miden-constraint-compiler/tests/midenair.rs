@@ -3,18 +3,16 @@
 //! `MidenAir::eval` routes to the hand-written constraint definitions, so
 //! capturing it here respects the capture invariant.
 
-use miden_air::MidenAir;
+use miden_air::AIRS;
 use miden_constraint_compiler::ir::{
     Class, Graph, Leaf, Node, capture, capture_into, gate_groups, op_counts,
 };
 
-const AIRS: [&MidenAir; 2] = [&MidenAir::CORE, &MidenAir::CHIPLETS];
-
 #[test]
 fn capture_is_deterministic() {
     for air in AIRS {
-        let (g1, c1) = capture(air);
-        let (g2, c2) = capture(air);
+        let (g1, c1) = capture(&air);
+        let (g2, c2) = capture(&air);
         assert_eq!(g1, g2);
         assert_eq!(c1.base_roots, c2.base_roots);
         assert_eq!(c1.ext_roots, c2.ext_roots);
@@ -26,7 +24,7 @@ fn capture_is_deterministic() {
 #[test]
 fn ids_are_dense_and_topological() {
     for air in AIRS {
-        let (g, _) = capture(air);
+        let (g, _) = capture(&air);
         for (id, node) in g.iter() {
             match node {
                 Node::Op { x, y, .. } => {
@@ -49,9 +47,9 @@ fn ids_are_dense_and_topological() {
 fn shared_builder_capture_gives_equal_roots() {
     for air in AIRS {
         let mut b = Graph::builder();
-        let c1 = capture_into(air, &mut b);
+        let c1 = capture_into(&air, &mut b);
         let len_after_first = b.len();
-        let c2 = capture_into(air, &mut b);
+        let c2 = capture_into(&air, &mut b);
         assert_eq!(c1.base_roots, c2.base_roots);
         assert_eq!(c1.ext_roots, c2.ext_roots);
         // The second capture must not create a single new node.
@@ -64,7 +62,7 @@ fn shared_builder_capture_gives_equal_roots() {
 #[test]
 fn classes_are_sound() {
     for air in AIRS {
-        let (g, _) = capture(air);
+        let (g, _) = capture(&air);
         for (_, node) in g.iter() {
             match node {
                 Node::Op { class: Class::Base, x, y, .. } => {
@@ -101,7 +99,7 @@ fn classes_are_sound() {
 #[test]
 fn roots_and_indices_are_parallel_and_nonempty() {
     for air in AIRS {
-        let (_, c) = capture(air);
+        let (_, c) = capture(&air);
         assert_eq!(c.base_roots.len(), c.base_global_indices.len());
         assert_eq!(c.ext_roots.len(), c.ext_global_indices.len());
         assert!(!c.base_roots.is_empty());
@@ -114,7 +112,7 @@ fn roots_and_indices_are_parallel_and_nonempty() {
 #[test]
 fn cse_only_removes_work() {
     for air in AIRS {
-        let (g, c) = capture(air);
+        let (g, c) = capture(&air);
         let (cse_base, cse_ext) = op_counts(&g);
         assert!(cse_base.total() <= c.naive_base.total());
         assert!(cse_ext.total() <= c.naive_ext.total());
@@ -128,7 +126,7 @@ fn cse_only_removes_work() {
 #[test]
 fn gate_groups_cover_all_roots_exactly_once() {
     for air in AIRS {
-        let (g, c) = capture(air);
+        let (g, c) = capture(&air);
         let (groups, ungated) = gate_groups(&g, &c.base_roots);
         let covered: usize = groups.iter().map(|(_, m)| m.len()).sum::<usize>() + ungated.len();
         assert_eq!(covered, c.base_roots.len());

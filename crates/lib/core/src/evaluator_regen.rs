@@ -1,10 +1,10 @@
 //! Regenerates the CSE'd constraint evaluators (`air/src/constraints/generated.rs`)
 //! from the hand-written `MidenAir` constraint definitions.
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use std::{fs, println};
 
-use miden_air::MidenAir;
+use miden_air::AIRS;
 use miden_constraint_compiler::{
     backend::rust_eval::{AirEvaluator, emit_module},
     ir::capture,
@@ -30,25 +30,21 @@ fn generate() -> String {
     // `MidenAir::eval` routes to the hand-written definitions today. When a
     // generated dispatch lands in `MidenAir::eval`, this capture must switch to the
     // handwritten-routing wrapper (miden-constraint-compiler crate invariant 1).
-    let (core_graph, core_cons) = capture(&MidenAir::CORE);
-    let (chiplets_graph, chiplets_cons) = capture(&MidenAir::CHIPLETS);
-    emit_module(
-        HEADER,
-        &[
-            AirEvaluator {
-                name: "core",
-                air_label: "MidenAir::CORE",
-                graph: &core_graph,
-                constraints: &core_cons,
-            },
-            AirEvaluator {
-                name: "chiplets",
-                air_label: "MidenAir::CHIPLETS",
-                graph: &chiplets_graph,
-                constraints: &chiplets_cons,
-            },
-        ],
-    )
+    let captured: Vec<_> =
+        AIRS.iter().copied().map(|air| (air, capture(&air))).collect();
+    let labels: Vec<_> =
+        captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
+    let evaluators: Vec<_> = captured
+        .iter()
+        .zip(&labels)
+        .map(|((air, (graph, constraints)), label)| AirEvaluator {
+            name: air.file_token(),
+            air_label: label.as_str(),
+            graph,
+            constraints,
+        })
+        .collect();
+    emit_module(HEADER, &evaluators)
 }
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
