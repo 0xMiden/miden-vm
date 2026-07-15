@@ -426,7 +426,10 @@ impl Package {
     ///
     /// This is the non-panicking counterpart to [`Package::get_export_node_id`].
     pub fn get_export_node(&self, export: &ProcedureExport) -> Option<MastNodeId> {
-        export.node.or_else(|| self.mast.find_procedure_root(export.digest))
+        export
+            .node
+            .filter(|&node| self.mast.is_procedure_root_with_exact_digest(node, export.digest))
+            .or_else(|| self.mast.find_procedure_root(export.digest))
     }
 
     /// Returns an iterator over the procedures exported by this package that carry the attribute
