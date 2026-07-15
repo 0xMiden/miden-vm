@@ -17,12 +17,14 @@ ASSEMBLY_FIXTURES = Path(__file__).resolve().parent / "assembly-cycle-fixtures.t
 def extract_cycles_from_description(description: str) -> str:
     description = html.unescape(description)
     matches = list(
-        re.finditer(r"\bCycles(?:\s*\(estimate\))?\s*:?\s*(.*)", description, re.DOTALL)
+        re.finditer(r"\bCycles(?:\s*\((estimate)\))?\s*:?\s*(.*)", description, re.DOTALL)
     )
     if not matches:
         return ""
 
-    block = matches[-1].group(1).strip()
+    match = matches[-1]
+    is_estimate = match.group(1) is not None
+    block = match.group(2).strip()
     block = re.split(
         r"(?:#?\s*panics\b|security:|note:)",
         block,
@@ -36,13 +38,17 @@ def extract_cycles_from_description(description: str) -> str:
     block = block.replace("`", "")
     block = re.sub(r"\*\*", "", block)
     block = re.sub(r"\$([^$]+)\$", r"\1", block)
+    # Preserve estimate markers (~ or Cycles (estimate)) in the normalized text.
+    if "~" in block:
+        is_estimate = True
     block = block.replace("~", "")
     block = re.sub(r"(?m)^\s*-\s+", "", block)
     block = re.sub(r"where:\s*", "where ", block, flags=re.IGNORECASE)
     block = re.sub(r"[,.\:;]", " ", block)
     block = re.sub(r"\s+", " ", block.lower()).strip()
+    if is_estimate:
+        return f"estimate {block}"
     return block
-
 
 def slice_section(content: str, section: str | None) -> str:
     if not section:
