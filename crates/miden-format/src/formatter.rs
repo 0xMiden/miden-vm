@@ -290,19 +290,49 @@ fn render_item_import_lines(
         );
     }
 
-    let specs = import.item_specs().map(render_import_specifier).collect::<Vec<_>>().join(", ");
-    let items = format!("{{{specs}}}");
+    let specs = import.item_specs().map(render_import_specifier).collect::<Vec<_>>();
+    let items = format!("{{{}}}", specs.join(", "));
     let from = format!("from {path}");
     let line = format!("{header} {items} {from}");
 
     if line_length(&line) <= config.max_line_length() {
         vec![line]
     } else {
-        vec![
-            format!("{header} {items}"),
-            format!("{}{}", indent_string(indent + config.indent_size()), from),
-        ]
+        render_vertical_item_import_lines(header, specs, from, indent, config)
     }
+}
+
+fn render_vertical_item_import_lines(
+    header: String,
+    specs: Vec<String>,
+    from: String,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    if specs.is_empty() {
+        return vec![
+            format!("{header} {{}}"),
+            format!("{}{}", indent_string(indent + config.indent_size()), from),
+        ];
+    }
+
+    let mut lines = vec![format!("{header} {{")];
+    let item_indent = indent_string(indent + config.indent_size());
+    for spec in specs {
+        lines.push(format!("{item_indent}{spec},"));
+    }
+
+    let mut closing = format!("{}}}", indent_string(indent));
+    if line_length(&closing) + 1 + line_length(&from) <= config.max_line_length() {
+        closing.push(' ');
+        closing.push_str(&from);
+        lines.push(closing);
+    } else {
+        lines.push(closing);
+        lines.push(format!("{}{}", indent_string(indent + config.indent_size()), from));
+    }
+
+    lines
 }
 
 fn render_commented_item_import_lines(
@@ -374,6 +404,10 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -
         format!("{header}\n{body}")
     } else if line_length(&compact) <= config.max_line_length() {
         compact
+    } else if let Some(rendered) =
+        render_wrapped_value_call(&prefix_tokens, &value_tokens, indent, config)
+    {
+        rendered
     } else {
         let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
         let body = render_token_lines(&value_tokens, indent + config.indent_size(), true, config)
@@ -386,6 +420,51 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -
     }
 
     rendered
+}
+
+fn render_wrapped_value_call(
+    prefix_tokens: &[SyntaxToken],
+    value_tokens: &[SyntaxToken],
+    indent: usize,
+    config: &Config,
+) -> Option<String> {
+    let (open_index, close_index) =
+        outer_group_indices(value_tokens, SyntaxKind::LParen, SyntaxKind::RParen)?;
+    if open_index == 0 {
+        return None;
+    }
+
+    let header_tokens = combine_tokens(prefix_tokens, &value_tokens[..=open_index]);
+    let header = format!("{}{}", indent_string(indent), render_token_sequence(&header_tokens));
+    if line_length(&header) > config.max_line_length() {
+        return None;
+    }
+
+    let items = split_top_level_items(&value_tokens[(open_index + 1)..close_index]);
+    let item_count = items.len();
+    let mut lines = vec![header];
+
+    for (index, item) in items.into_iter().enumerate() {
+        if item.is_empty() {
+            continue;
+        }
+
+        let mut item_lines = render_token_lines(&item, indent + config.indent_size(), true, config);
+        if index + 1 != item_count
+            && let Some(last_line) = item_lines.last_mut()
+        {
+            last_line.push(',');
+        }
+        lines.extend(item_lines);
+    }
+
+    lines.push(format!(
+        "{}{}",
+        indent_string(indent),
+        render_token_sequence(&value_tokens[close_index..])
+    ));
+
+    Some(lines.join("\n"))
 }
 
 fn render_type_decl(type_decl: &TypeDecl, indent: usize, config: &Config) -> String {
@@ -1902,6 +1981,86 @@ const X =
     }
 
     #[test]
+    fn wraps_long_item_imports_vertically() {
+        let source = "\
+use {
+    ACCOUNT_GET_ID_OFFSET,
+    ACCOUNT_GET_NONCE_OFFSET,
+    ACCOUNT_COMPUTE_COMMITMENT_OFFSET,
+    ACCOUNT_GET_CODE_COMMITMENT_OFFSET,
+    ACCOUNT_COMPUTE_STORAGE_COMMITMENT_OFFSET,
+    ACCOUNT_GET_VAULT_ROOT_OFFSET,
+    ACCOUNT_GET_ITEM_OFFSET,
+    ACCOUNT_HAS_STORAGE_SLOT_OFFSET,
+    ACCOUNT_GET_MAP_ITEM_OFFSET,
+    ACCOUNT_GET_ASSET_OFFSET,
+    ACCOUNT_GET_NUM_PROCEDURES_OFFSET,
+    ACCOUNT_GET_PROCEDURE_ROOT_OFFSET,
+    ACCOUNT_HAS_PROCEDURE_OFFSET,
+} from miden::protocol::kernel_proc_offsets
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use {
+    ACCOUNT_GET_ID_OFFSET,
+    ACCOUNT_GET_NONCE_OFFSET,
+    ACCOUNT_COMPUTE_COMMITMENT_OFFSET,
+    ACCOUNT_GET_CODE_COMMITMENT_OFFSET,
+    ACCOUNT_COMPUTE_STORAGE_COMMITMENT_OFFSET,
+    ACCOUNT_GET_VAULT_ROOT_OFFSET,
+    ACCOUNT_GET_ITEM_OFFSET,
+    ACCOUNT_HAS_STORAGE_SLOT_OFFSET,
+    ACCOUNT_GET_MAP_ITEM_OFFSET,
+    ACCOUNT_GET_ASSET_OFFSET,
+    ACCOUNT_GET_NUM_PROCEDURES_OFFSET,
+    ACCOUNT_GET_PROCEDURE_ROOT_OFFSET,
+    ACCOUNT_HAS_PROCEDURE_OFFSET,
+} from miden::protocol::kernel_proc_offsets
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn keeps_long_const_call_head_with_assignment() {
+        let source = "\
+pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(
+    \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+)
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
     fn formats_namespace_extern_package_and_submodule_forms() {
         let source = "\
 namespace   app::main # root
@@ -2117,10 +2276,9 @@ adv_map CIRCUIT_COMMITMENT = [1, 0, 0, 0, 2305843126251553075, 114890375379, 230
         let config = Config::default();
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-const VERY_LONG_EVENT =
-    event(
-        \"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\"
-    )
+const VERY_LONG_EVENT = event(
+    \"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\"
+)
 adv_map CIRCUIT_COMMITMENT =
     [
         1,
@@ -2297,8 +2455,9 @@ end
         };
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-pub use {lowerbound_key_value as lowerbound_key_value_long_alias}
-    from ::miden::core::collections::sorted_array
+pub use {
+    lowerbound_key_value as lowerbound_key_value_long_alias,
+} from ::miden::core::collections::sorted_array
 
 pub proc println_debug_message_with_context(
     message: ptr<u8, addrspace(byte)>,
