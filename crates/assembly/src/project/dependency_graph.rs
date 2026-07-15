@@ -9,7 +9,7 @@ use std::path::Path as FsPath;
 
 use miden_assembly_syntax::diagnostics::Report;
 use miden_core::{Word, utils::hash_string_to_word};
-use miden_package_registry::{PackageId, PackageRegistry};
+use miden_package_registry::{PackageId, PackageRegistry, PackageRegistryAndProvider};
 use miden_project::{
     Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
@@ -88,10 +88,11 @@ impl DependencyGraph {
     pub fn build_source_provenance(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
+        package_registry: &dyn PackageRegistryAndProvider,
     ) -> Result<Option<PackageBuildProvenance>, Report> {
         let Some(node) = self.dependency_graph.get(package_id) else {
             return Ok(None);
@@ -111,6 +112,7 @@ impl DependencyGraph {
                     origin,
                     manifest_path,
                     source_provider,
+                    package_registry,
                 )
                 .map(Some),
         }
@@ -119,12 +121,13 @@ impl DependencyGraph {
     pub fn expected_source_provenance(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
+        package_registry: &dyn PackageRegistryAndProvider,
     ) -> Result<PackageBuildProvenance, Report> {
         self.expected_source_provenance_with_visited(
             package_id,
@@ -134,6 +137,7 @@ impl DependencyGraph {
             origin,
             manifest_path,
             source_provider,
+            package_registry,
             &mut BTreeSet::new(),
         )
     }
@@ -144,18 +148,20 @@ impl DependencyGraph {
     fn expected_source_provenance_with_visited(
         &self,
         package_id: &PackageId,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
+        package_registry: &dyn PackageRegistryAndProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash = self.compute_dependency_closure_hash(
             package_id,
             profile_name,
             source_provider,
+            package_registry,
             visiting,
         )?;
         let profile = project.resolve_profile(profile_name)?;
@@ -173,11 +179,12 @@ impl DependencyGraph {
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
                 let source_manager = self.source_manager.clone();
                 let context = TargetAssemblyContext::new(
-                    project,
+                    project.clone(),
                     manifest_path,
                     target,
                     profile,
                     &self.dependency_graph,
+                    package_registry,
                     source_manager,
                 )?;
                 Ok(PackageBuildProvenance::Path {
@@ -194,6 +201,7 @@ impl DependencyGraph {
         package_id: &PackageId,
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
+        package_registry: &dyn PackageRegistryAndProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<Word, Report> {
         if !visiting.insert(package_id.clone()) {
@@ -228,6 +236,7 @@ impl DependencyGraph {
                     &edge.dependency,
                     profile_name,
                     source_provider,
+                    package_registry,
                     visiting,
                 )?);
             }
@@ -244,6 +253,7 @@ impl DependencyGraph {
         package_id: &PackageId,
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
+        package_registry: &dyn PackageRegistryAndProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<String, Report> {
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
@@ -279,12 +289,13 @@ impl DependencyGraph {
                     })?;
                 let provenance = self.expected_source_provenance_with_visited(
                     package_id,
-                    &project,
+                    project,
                     &target,
                     profile_name,
                     origin,
                     manifest_path,
                     source_provider,
+                    package_registry,
                     visiting,
                 )?;
                 Ok(format!("source:{package_id}:{}\n", provenance.describe()))
