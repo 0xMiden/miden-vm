@@ -114,7 +114,7 @@ fn horner_sign_alternation_full_stack() {
     // (shares the store's merged trace at index 7).
     let mains = traces.mains();
     assert_eq!(mains[5].height(), 32, "eval: 22 rows pad to 32");
-    assert_eq!(mains[7].height(), 32, "uint-add: 7 blocks pad to 8");
+    assert_eq!(mains[7].height(), 16, "uint-add: 7 two-row blocks pad to 8");
 
     traces.check();
     assert_balanced(&traces, &mut rng);
@@ -153,7 +153,7 @@ fn op_dedup_collapses_repeated_nodes() {
 
     // Two recorded add ops (r once, w once), not three.
     let mains = traces.mains();
-    assert_eq!(mains[7].height(), 8, "uint-add: exactly two blocks");
+    assert_eq!(mains[7].height(), 4, "uint-add: exactly two two-row blocks");
     // r's single row carries out_mult 2 (consumed twice by w).
     let eval = mains[5];
     let r_row = (0..eval.height())

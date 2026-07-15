@@ -1,25 +1,25 @@
 //! UintAdd trace generation + aux builder.
 //!
 //! [`generate_trace`] lays each add op out as a [`PERIOD`]-row block: the
-//! full 8×32 operand rows (pulled from the store over `UintVal`, one value
-//! per row) with the binary carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`)
-//! spread across their spare cells per [`GAMMA_POS_SLOTS`] /
-//! [`GAMMA_NEG_SLOTS`]. `build_aux` drives the LogUp running sum and the
-//! Schwartz–Zippel `id` register, whose per-row accumulation mirrors
-//! [`super::UintAddAir`]'s `contrib` exactly.
+//! open row holds `a ‖ b` (two full 8×32 values, pulled from the store
+//! over `UintVal`), the closing row `c ‖ p`, with the signed ternary
+//! carries `γⱼ` spread across the carry columns per [`GAMMA_SLOTS`].
+//! `build_aux` drives the LogUp running sums; the Schwartz–Zippel
+//! identity is a block-local main-trace constraint, so no aux register
+//! accompanies them.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{Field, PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
+    field::{Field, QuadFelt},
+    utils::RowMajorMatrix,
 };
 
 use super::{
-    AUX_WIDTH, CELL_B_ON, CELL_C_ON, CELL_D_W, CELL_D_WS, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K,
-    COL_A_PTR, COL_NZ, GAMMA_NEG_SLOTS, GAMMA_POS_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_A, ROW_B,
-    ROW_C, ROW_P, TERM_CELL_MULT, UintAddAir,
+    CELL_B_ON, CELL_C_ON, CELL_D_W, CELL_D_WS, CELL_HI, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K,
+    COL_A_PTR, COL_NZ, GAMMA_SLOTS, NUM_GAMMA, NUM_LIMBS, NUM_MAIN_COLS, PERIOD, ROW_AB, ROW_CP,
+    TERM_CELL_MULT, UintAddAir,
 };
 use crate::{
     logup::build_logup_aux_trace,
@@ -165,17 +165,17 @@ impl UintAddRequires {
 }
 
 /// Per-op values resolved from the store (as the full 8×32 views trace-gen
-/// lays out) plus the derived witness: the reduction bit `k` and the two
-/// binary carry chains γ⁺ (of `a+b`) and γ⁻ (of `c+k·p`, with
-/// `p = bound + 1`).
+/// lays out) plus the derived witness: the reduction bit `k` and the
+/// signed ternary carries `γⱼ` — each the difference between the binary
+/// carry chain of `a+b` and that of `c+k·p` (with `p = bound + 1`), so
+/// `γⱼ ∈ {−1, 0, 1}`, committed directly as field elements.
 struct Witness {
     a: [u32; 8],
     b: [u32; 8],
     c: [u32; 8],
     bound: [u32; 8],
     k: u32,
-    gamma_pos: [u16; 7],
-    gamma_neg: [u16; 7],
+    gamma: [Felt; NUM_GAMMA],
     /// The nonzero certificate's witness: `S⁻¹` (native Goldilocks
     /// inverse of `b`'s raw limb sum), only meaningful when `op.nz`.
     d_w: Felt,
@@ -209,6 +209,12 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
         "a + b and c + k·p must share the bit-256 carry (a + b = c + k·p)",
     );
 
+    // γⱼ = γ⁺ⱼ − γ⁻ⱼ: two binary chains difference to a ternary value.
+    let mut gamma = [Felt::ZERO; NUM_GAMMA];
+    for j in 0..NUM_GAMMA {
+        gamma[j] = Felt::from(gamma_pos[j]) - Felt::from(gamma_neg[j]);
+    }
+
     // The nonzero certificate: S = Σⱼ bⱼ (native sum, no wrap — 8 limbs
     // each < 2³² sum to < 2³⁵ ≪ p_Goldilocks), w = S⁻¹.
     let d_w = if op.nz {
@@ -219,25 +225,16 @@ fn witness(op: &AddOp, store: &UintStoreRequires) -> Witness {
         Felt::ZERO
     };
 
-    Witness {
-        a,
-        b,
-        c,
-        bound,
-        k,
-        gamma_pos,
-        gamma_neg,
-        d_w,
-    }
+    Witness { a, b, c, bound, k, gamma, d_w }
 }
 
 /// Build the UintAdd main trace from the recorded ops — one op = one
 /// [`PERIOD`]-row block, the values + witnesses resolved from the store.
-/// The four ptrs + `act` repeat on every row (cycle-constant); each
-/// operand row hosts its own block scalar — `is_b_zero` on the `b` row,
-/// `is_c_zero` on the `c` row, `k` on the `p` row, the provide multiplicity
-/// on the `p` row's closing cell — plus its share of the γ⁺ / γ⁻ carries
-/// per [`GAMMA_POS_SLOTS`] / [`GAMMA_NEG_SLOTS`]. Padded to a power-of-two
+/// The open row holds `a ‖ b`, the closing row `c ‖ p`; the four ptrs +
+/// `act` + `nz` repeat on both rows (cycle-constant); the block scalars
+/// (`is_b_zero`, `k`, `is_c_zero`, the activity gates, the nz-cert
+/// witness, the provide multiplicity) and the signed carries ride the
+/// cells per the layout table in [`super`]. Padded to a power-of-two
 /// height.
 ///
 /// The same pass routes each block's `UintVal` demand into the store
@@ -263,41 +260,34 @@ pub fn generate_trace(
         store.require_uintval(op.bound);
         let w = witness(op, store);
 
-        // Rows 0–3: a / b / c / p, each a full 8×32 value on cells 0–7; the
-        // γ⁺ / γ⁻ carries and the closing-row provide mult ride the spare
-        // cells 8–12 per the placement tables.
+        // Open row: a ‖ b; closing row: c ‖ p. The carries, flags and the
+        // closing-row provide mult ride the cells per the layout table.
         let mut block = [[Felt::ZERO; NUM_MAIN_COLS]; PERIOD];
-        let put = |row: &mut [Felt; NUM_MAIN_COLS], v: &[u32; 8]| {
-            for j in 0..8 {
-                row[j] = Felt::from(v[j]);
-            }
-        };
-        put(&mut block[ROW_A], &w.a);
-        put(&mut block[ROW_B], &w.b);
-        put(&mut block[ROW_C], &w.c);
-        put(&mut block[ROW_P], &w.bound);
-        block[ROW_B][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
-        block[ROW_C][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
+        for j in 0..NUM_LIMBS {
+            block[ROW_AB][j] = Felt::from(w.a[j]);
+            block[ROW_AB][CELL_HI + j] = Felt::from(w.b[j]);
+            block[ROW_CP][j] = Felt::from(w.c[j]);
+            block[ROW_CP][CELL_HI + j] = Felt::from(w.bound[j]);
+        }
+        for (j, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+            block[row][cell] = w.gamma[j];
+        }
+        block[ROW_AB][CELL_IS_B_ZERO] = Felt::from(op.b.is_none() as u32);
+        block[ROW_CP][CELL_IS_C_ZERO] = Felt::from(op.c.is_none() as u32);
         // b_on / c_on = act·(1 − is_zero); act = 1 for every real op block
         // (padding blocks stay all-zero via the trailing zero-fill).
-        block[ROW_C][CELL_B_ON] = Felt::from(op.b.is_some() as u32);
-        block[ROW_P][CELL_C_ON] = Felt::from(op.c.is_some() as u32);
-        block[ROW_P][CELL_K] = Felt::from(w.k);
-        for (j, &(row, cell)) in GAMMA_POS_SLOTS.iter().enumerate() {
-            block[row][cell] = Felt::from(w.gamma_pos[j]);
-        }
-        for (j, &(row, cell)) in GAMMA_NEG_SLOTS.iter().enumerate() {
-            block[row][cell] = Felt::from(w.gamma_neg[j]);
-        }
-        block[ROW_P][TERM_CELL_MULT] = Felt::from(*mult);
+        block[ROW_AB][CELL_B_ON] = Felt::from(op.b.is_some() as u32);
+        block[ROW_CP][CELL_C_ON] = Felt::from(op.c.is_some() as u32);
+        block[ROW_CP][CELL_K] = Felt::from(w.k);
+        block[ROW_CP][TERM_CELL_MULT] = Felt::from(*mult);
         if op.nz {
-            let s_sum: Felt = block[ROW_B][0..8].iter().copied().sum();
-            block[ROW_B][CELL_D_W] = w.d_w;
-            block[ROW_B][CELL_D_WS] = w.d_w * s_sum;
+            let s_sum: Felt = block[ROW_AB][CELL_HI..CELL_HI + NUM_LIMBS].iter().copied().sum();
+            block[ROW_AB][CELL_D_W] = w.d_w;
+            block[ROW_AB][CELL_D_WS] = w.d_w * s_sum;
         }
 
         // Cycle-constant metadata (cols COL_A_PTR..=COL_NZ), identical on
-        // every row of the block.
+        // both rows of the block.
         let meta: [Felt; 6] = [
             Felt::from(op.a.addr()),
             Felt::from(op.b.map_or(0, UintPtr::addr)),
@@ -318,65 +308,13 @@ pub fn generate_trace(
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
 }
 
-/// Witness-bearing companion to [`UintAddAir`].
+/// Witness-bearing companion to [`UintAddAir`]: the three LogUp fraction
+/// columns over the `UintVal` consumes + the `UintAdd` provide. The
+/// Schwartz–Zippel identity is a block-local main-trace constraint, so
+/// the aux trace carries no register alongside them.
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    // Col 0: LogUp running sum over the UintVal consumes + UintAdd provide.
-    let (logup, sigma) = build_logup_aux_trace(&UintAddAir, main, challenges);
-    let n = main.height();
-    let beta = challenges[1];
-
-    // β^0..β^7.
-    let mut bp = [QuadFelt::ZERO; 8];
-    bp[0] = QuadFelt::ONE;
-    for i in 1..8 {
-        bp[i] = bp[i - 1] * beta;
-    }
-    let t32 = QuadFelt::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
-
-    // The SZ register. id[0] = 0; id[r+1] = id[r] + contrib(row r), contrib
-    // matching UintAddAir's role-gated expression exactly (all local now).
-    let logup_width = logup.width();
-    let mut data = Vec::with_capacity(AUX_WIDTH * n);
-    let mut id = QuadFelt::ZERO;
-    for r in 0..n {
-        data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
-        data.push(id); // the register past the LogUp columns
-
-        let cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        let full_sum = (0..8).fold(QuadFelt::ZERO, |s, j| s + bp[j] * QuadFelt::from(cell(j)));
-        let row_kind = r % PERIOD;
-
-        let mut contrib: QuadFelt = if row_kind == ROW_A {
-            full_sum
-        } else if row_kind == ROW_B {
-            let b_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_B_ZERO));
-            full_sum * b_active
-        } else if row_kind == ROW_C {
-            let c_active = QuadFelt::ONE - QuadFelt::from(cell(CELL_IS_C_ZERO));
-            -(full_sum * c_active)
-        } else {
-            debug_assert_eq!(row_kind, ROW_P);
-            let k = QuadFelt::from(cell(CELL_K));
-            -(k * (full_sum + bp[0]))
-        };
-
-        for (j, &(row, gc)) in GAMMA_POS_SLOTS.iter().enumerate() {
-            if row == row_kind {
-                let w = bp[j + 1] - bp[j] * t32;
-                contrib += w * QuadFelt::from(cell(gc));
-            }
-        }
-        for (j, &(row, gc)) in GAMMA_NEG_SLOTS.iter().enumerate() {
-            if row == row_kind {
-                let w = bp[j + 1] - bp[j] * t32;
-                contrib -= w * QuadFelt::from(cell(gc));
-            }
-        }
-        id += contrib;
-    }
-
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    build_logup_aux_trace(&UintAddAir, main, challenges)
 }
