@@ -1,20 +1,24 @@
 use miden_ace_codegen::{
-    AceConfig, AceError, EXT_DEGREE, InputKey, LayoutKind, build_ace_dag_for_air, emit_circuit,
+    AceConfig, AceDag, AceError, EXT_DEGREE, InputKey, LayoutKind, NodeKind, PeriodicColumnData,
+    build_ace_dag_for_air, build_verifier_dag_from_ir, emit_circuit,
     testing::{
         eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
         zps_for_chunk,
     },
 };
-use miden_air::{BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
     stark::air::symbolic::{AirLayout, SymbolicAirBuilder},
 };
 
-#[test]
-fn core_air_dag_matches_manual_eval() {
-    let air = MidenAir::Core;
+/// The DAG's evaluation on arbitrary inputs must equal an independently
+/// computed reference: folded constraints minus recomposed quotient times
+/// vanishing. This anchors the lowered DAG to the constraint semantics rather
+/// than to any particular lowering implementation.
+fn assert_dag_matches_manual_eval(air: MidenAir) {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
@@ -53,6 +57,13 @@ fn core_air_dag_matches_manual_eval() {
 
     let actual = eval_dag(&artifacts.dag, &inputs, &layout).unwrap();
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn all_airs_dag_matches_manual_eval() {
+    for air in AIRS {
+        assert_dag_matches_manual_eval(air);
+    }
 }
 
 #[test]
@@ -245,5 +256,69 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
         // DAG input reference is in range.
         let inputs: Vec<QuadFelt> = fill_inputs(layout);
         let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
+    }
+}
+
+/// A DAG node relabeled by index: `NodeId` embeds a per-builder dag id, so
+/// nodes from two builders can only be compared through their indices.
+#[derive(Debug, PartialEq)]
+enum Norm {
+    Input(InputKey),
+    Constant(QuadFelt),
+    Add(usize, usize),
+    Sub(usize, usize),
+    Mul(usize, usize),
+    Neg(usize),
+}
+
+fn normalized(dag: &AceDag<QuadFelt>) -> (Vec<Norm>, usize) {
+    let nodes = dag
+        .nodes
+        .iter()
+        .map(|node| match *node {
+            NodeKind::Input(key) => Norm::Input(key),
+            NodeKind::Constant(value) => Norm::Constant(value),
+            NodeKind::Add(a, b) => Norm::Add(a.index(), b.index()),
+            NodeKind::Sub(a, b) => Norm::Sub(a.index(), b.index()),
+            NodeKind::Mul(a, b) => Norm::Mul(a.index(), b.index()),
+            NodeKind::Neg(a) => Norm::Neg(a.index()),
+        })
+        .collect();
+    (nodes, dag.root().index())
+}
+
+/// Node-for-node differential: the IR-driven lowering must replicate the
+/// symbolic-tree lowering's `DagBuilder` interning order exactly (the order is
+/// digest-visible). Compares the complete single-AIR verifier DAGs — periodic
+/// evaluation, constraint bodies, alpha fold, quotient wrapping — and localizes
+/// the first mismatching node.
+#[test]
+fn ir_lowering_matches_symbolic_lowering_node_for_node() {
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: 1,
+    };
+    for air in AIRS {
+        let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
+
+        let (graph, constraints) = capture(&air);
+        let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
+        let periodic_data = (!periodic_columns.is_empty())
+            .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
+        let ir_dag = build_verifier_dag_from_ir(
+            &graph,
+            &constraints,
+            &artifacts.layout,
+            periodic_data.as_ref(),
+        );
+
+        let (tree_nodes, tree_root) = normalized(&artifacts.dag);
+        let (ir_nodes, ir_root) = normalized(&ir_dag);
+        for (i, (tree, ir)) in tree_nodes.iter().zip(&ir_nodes).enumerate() {
+            assert_eq!(tree, ir, "first mismatch at node {i}");
+        }
+        assert_eq!(tree_nodes.len(), ir_nodes.len(), "node counts differ");
+        assert_eq!(tree_root, ir_root, "roots differ");
     }
 }

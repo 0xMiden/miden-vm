@@ -9,7 +9,11 @@
 mod builder;
 mod ir;
 mod lower;
+#[cfg(any(test, feature = "testing"))]
+mod lower_ir;
 
 pub use builder::DagBuilder;
 pub use ir::{AceDag, DagSnapshot, NodeId, NodeKind, PeriodicColumnData};
 pub use lower::build_verifier_dag;
+#[cfg(any(test, feature = "testing"))]
+pub use lower_ir::build_verifier_dag_from_ir;

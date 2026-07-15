@@ -62,6 +62,10 @@ pub enum AceError {
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+/// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
+/// production consumes the IR lowering through the pipeline.
+#[cfg(any(test, feature = "testing"))]
+pub use crate::dag::{PeriodicColumnData, build_verifier_dag_from_ir};
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},

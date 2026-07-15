@@ -17,6 +17,7 @@ edition.workspace = true
 testing = []
 
 [dependencies]
+miden-constraint-compiler = { workspace = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
 thiserror = { workspace = true }
