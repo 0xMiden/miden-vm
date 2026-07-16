@@ -27,6 +27,8 @@ runs:
     - id: filter
       uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
       with:
+        base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref_name }}
+        token: ''
         filters: |
           crypto:
             - 'crates/crypto/**'
