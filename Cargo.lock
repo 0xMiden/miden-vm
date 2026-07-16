@@ -2888,18 +2888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-vm-precompiles-bench"
-version = "0.28.0"
-dependencies = [
- "codspeed-criterion-compat",
- "miden-core",
- "miden-core-lib",
- "miden-crypto",
- "miden-vm",
- "rand_chacha 0.10.0",
-]
-
-[[package]]
 name = "miden-vm-synthetic-bench"
 version = "0.28.0"
 dependencies = [

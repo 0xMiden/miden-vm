@@ -3,7 +3,6 @@ members = [
     "air",
     "benches/blake3-bench",
     "benches/miden-bench",
-    "benches/precompiles-bench",
     "benches/smt-codspeed",
     "benches/synthetic-bench",
     "core",
