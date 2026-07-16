@@ -22,6 +22,7 @@ help:
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
+	@printf "  make check-versions              # Check workspace crate versions\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -67,6 +68,12 @@ FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        := testing
 FEATURES_verifier        :=
+
+# -- checks ---------------------------------------------------------------------------------------
+
+.PHONY: check-versions
+check-versions: ## Checks that workspace crate versions are aligned
+	@scripts/check-workspace-versions.sh
 
 # -- linting --------------------------------------------------------------------------------------
 

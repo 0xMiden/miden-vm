@@ -30,6 +30,18 @@ jobs:
       - id: diffs
         uses: ./.github/actions/diffs
 
+  workspace-versions:
+    name: Check workspace versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Check workspace versions
+        run: make check-versions
+
   no-std:
     name: Build for no-std
     needs: diffs

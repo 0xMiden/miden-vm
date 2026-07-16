@@ -5,6 +5,7 @@
 #### Changes
 
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
+- Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
 - Added the `miden-precompiles` crate with the official deferred precompile registry used by the VM/prover/verifier path.
