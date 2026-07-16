@@ -2442,7 +2442,6 @@ dependencies = [
  "serde-wincode",
  "thiserror",
  "tracing",
- "tracing-subscriber",
  "wincode",
 ]
 
