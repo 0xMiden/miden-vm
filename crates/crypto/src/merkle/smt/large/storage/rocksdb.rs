@@ -630,7 +630,6 @@ impl SmtStorage for RocksDbStorage {
     /// # Errors
     /// - `StorageError::Backend`: If column families are missing or a RocksDB error occurs.
     /// - `StorageError::DeserializationError`: If existing leaf data is corrupt.
-    /// - `StorageError::Leaf`: If inserting into an existing leaf fails.
     fn insert_value(&mut self, index: u64, key: Word, value: Word) -> StorageResult<Option<Word>> {
         debug_assert_ne!(value, EMPTY_WORD);
 
@@ -647,7 +646,7 @@ impl SmtStorage for RocksDbStorage {
 
         let value_to_return: Option<Word> = match maybe_leaf {
             Some(mut existing_leaf) => {
-                let old_value = existing_leaf.insert(key, value)?;
+                let old_value = existing_leaf.insert(key, value).expect("Failed to insert value");
                 // Determine if the overall SMT entry_count needs to change.
                 // entry_count increases if:
                 //   1. The key was not present in this leaf before (`old_value` is `None`).

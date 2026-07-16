@@ -130,6 +130,7 @@ der             = { version = "0.8", default-features = false }
 derive_more     = { version = "2.0", features = ["from"] }
 ed25519-dalek   = { version = "3.0.0", default-features = false }
 env_logger      = { version = "0.11" }
+flume           = { version = "0.12.0", default-features = false }
 hex             = { version = "0.4", default-features = false }
 hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }

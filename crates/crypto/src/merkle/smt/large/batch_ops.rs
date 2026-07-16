@@ -384,8 +384,6 @@ impl<S: SmtStorage> LargeSmt<S> {
         // Pre-allocate capacity for subtree updates.
         let mut subtree_updates: Vec<SubtreeUpdate> = Vec::with_capacity(leaves.len());
 
-        let original_in_memory_nodes = self.in_memory_nodes.clone();
-
         // Process each depth level in reverse, stepping by the subtree depth
         for subtree_root_depth in
             (0..=SMT_DEPTH - SUBTREE_DEPTH).step_by(SUBTREE_DEPTH as usize).rev()
@@ -457,10 +455,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             leaf_count_delta,
             entry_count_delta,
         );
-        if let Err(err) = self.storage.apply(updates) {
-            self.in_memory_nodes = original_in_memory_nodes;
-            return Err(err.into());
-        }
+        self.storage.apply(updates)?;
 
         // Update cached counts
         self.leaf_count = self.leaf_count.saturating_add_signed(leaf_count_delta);
@@ -563,8 +558,6 @@ impl<S: SmtStorage> LargeSmt<S> {
             new_pairs,
             mut leaf_map,
         } = prepared;
-
-        let original_in_memory_nodes = self.in_memory_nodes.clone();
 
         // Update the root in memory
         self.in_memory_nodes_mut()[ROOT_MEMORY_INDEX] = new_root;
@@ -676,10 +669,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             leaf_count_delta,
             entry_count_delta,
         );
-        if let Err(err) = self.storage.apply(updates) {
-            self.in_memory_nodes = original_in_memory_nodes;
-            return Err(err.into());
-        }
+        self.storage.apply(updates)?;
 
         // Update cached counts
         self.leaf_count = self.leaf_count.saturating_add_signed(leaf_count_delta);
