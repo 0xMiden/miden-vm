@@ -280,7 +280,7 @@ fn tx_proof_cache_key(
         .into_iter(),
     )
     .into();
-    to_hex(&digest)
+    to_hex(digest)
 }
 
 fn tx_proof_cache_paths(
@@ -434,42 +434,38 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
             let proof_cache_key = tx_proof_cache_key(&program_info, &stack_values, config.hash_fn);
             print_tx_fixture_shape(&program, stack_inputs, advice_inputs.clone(), proof_index);
 
-            let (stack_outputs, proof, proof_cache_status) =
-                if let Some((stack_outputs, proof)) = config
-                    .tx_proof_cache_dir
-                    .as_deref()
-                    .and_then(|cache_dir| {
-                        load_cached_tx_proof(
-                            cache_dir,
-                            proof_index,
-                            proof_cache_key.as_str(),
-                            config.hash_fn,
-                        )
-                    })
-                {
-                    (stack_outputs, proof, "hit")
-                } else {
-                    let mut host = recursive_host();
-                    let (stack_outputs, proof) = prove_sync(
-                        &program,
-                        stack_inputs,
-                        advice_inputs,
-                        &mut host,
-                        ExecutionOptions::default(),
-                        ProvingOptions::new(config.hash_fn),
+            let (stack_outputs, proof, proof_cache_status) = if let Some((stack_outputs, proof)) =
+                config.tx_proof_cache_dir.as_deref().and_then(|cache_dir| {
+                    load_cached_tx_proof(
+                        cache_dir,
+                        proof_index,
+                        proof_cache_key.as_str(),
+                        config.hash_fn,
                     )
-                    .expect("prove transaction fixture");
-                    if let Some(cache_dir) = config.tx_proof_cache_dir.as_deref() {
-                        store_cached_tx_proof(
-                            cache_dir,
-                            proof_index,
-                            proof_cache_key.as_str(),
-                            &stack_outputs,
-                            &proof,
-                        );
-                    }
-                    (stack_outputs, proof, "miss")
-                };
+                }) {
+                (stack_outputs, proof, "hit")
+            } else {
+                let mut host = recursive_host();
+                let (stack_outputs, proof) = prove_sync(
+                    &program,
+                    stack_inputs,
+                    advice_inputs,
+                    &mut host,
+                    ExecutionOptions::default(),
+                    ProvingOptions::new(config.hash_fn),
+                )
+                .expect("prove transaction fixture");
+                if let Some(cache_dir) = config.tx_proof_cache_dir.as_deref() {
+                    store_cached_tx_proof(
+                        cache_dir,
+                        proof_index,
+                        proof_cache_key.as_str(),
+                        &stack_outputs,
+                        &proof,
+                    );
+                }
+                (stack_outputs, proof, "miss")
+            };
             let deferred_entries = proof.deferred_state().entries.len();
             assert_eq!(
                 deferred_entries, 0,
@@ -485,21 +481,16 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 "recursive benchmark generated duplicate transaction proof at index {proof_index}"
             );
 
+            let proof_digest_hex = to_hex(proof_digest);
             println!(
-                "    proof={} stack={stack_values:?} proof_bytes={} deferred_entries={}",
-                proof_index,
-                proof_bytes_len,
-                deferred_entries,
+                "    proof={proof_index} stack={stack_values:?} proof_bytes={proof_bytes_len} \
+                 deferred_entries={deferred_entries}",
             );
             println!(
-                "BENCH_TX_PROOF index={} stack={:?} proof_bytes={} deferred_entries={} proof_cache={} proof_digest={} proof_prefix={}",
-                proof_index,
-                stack_values,
-                proof_bytes_len,
-                deferred_entries,
-                proof_cache_status,
-                to_hex(&proof_digest),
-                proof_prefix,
+                "BENCH_TX_PROOF index={proof_index} stack={stack_values:?} \
+                 proof_bytes={proof_bytes_len} deferred_entries={deferred_entries} \
+                 proof_cache={proof_cache_status} proof_digest={proof_digest_hex} \
+                 proof_prefix={proof_prefix}",
             );
 
             TxProofFixture {
