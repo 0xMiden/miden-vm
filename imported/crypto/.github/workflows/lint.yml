@@ -1,0 +1,176 @@
+# Runs linting related jobs (local copy with LLVM for clippy/doc).
+
+name: lint
+
+on:
+  push:
+    branches: [ main, next ]
+  pull_request:
+    types: [ opened, reopened, synchronize ]
+
+permissions:
+  contents: read
+
+jobs:
+  typos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: typos
+      - run: make typos-check
+
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Rustup
+        run: |
+          rustup update --no-self-update nightly
+          rustup +nightly component add rustfmt
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
+      - name: Fmt
+        run: make format-check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      # `make doc` uses --all-features, which enables RocksDB with bindgen.
+      - name: Install LLVM/Clang
+        uses: ./.github/actions/install-llvm
+        with:
+          version: "17"
+      - name: Rustup
+        run: |
+          rustup update --no-self-update
+          rustup component add clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
+      - name: Clippy
+        run: make clippy
+
+  toml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: taplo-cli
+      - run: make toml-check
+
+  workspace-lints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: cargo-workspace-lints
+      - run: |
+          make workspace-check
+
+  doc:
+    name: doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      # Added: LLVM/Clang for RocksDB/bindgen
+      - name: Install LLVM/Clang
+        uses: ./.github/actions/install-llvm
+        with:
+          version: "17"
+      - name: Rustup
+        run: rustup update --no-self-update
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
+      - name: Build docs
+        run: make doc
+
+  shear:
+    name: cargo-shear
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: cargo-shear
+      - name: Check Cargo manifests for unused dependencies
+        run: make shear
+
+  cargo-deny:
+    name: check dependencies with cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: cargo-deny
+      - run: make cargo-deny
+
+  zeroize-audit:
+    name: zeroize-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Rustup
+        run: |
+          rustup update --no-self-update nightly
+      - name: Zeroize audit
+        run: make zeroize-audit
+
+  check-features:
+    name: check all feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      # Added: LLVM/Clang for RocksDB/bindgen (needed for rocksdb feature)
+      - name: Install LLVM/Clang
+        uses: ./.github/actions/install-llvm
+        with:
+          version: "17"
+      - name: Rustup
+        run: rustup update --no-self-update
+      - uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2.82.9
+        with:
+          tool: cargo-hack
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
+      - name: Check all feature combinations
+        run: ./scripts/check-features.sh

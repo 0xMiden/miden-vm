@@ -1,0 +1,50 @@
+[package]
+authors.workspace      = true
+categories.workspace   = true
+description            = "A unified field element type for on-chain and off-chain Miden Rust code"
+documentation          = "https://docs.rs/miden-field"
+edition.workspace      = true
+keywords.workspace     = true
+license.workspace      = true
+name                   = "miden-field"
+readme                 = "README.md"
+repository.workspace   = true
+rust-version.workspace = true
+version                = "0.29.0"
+
+[lib]
+crate-type = ["rlib"]
+
+# dependendies for both off-chain and on-chain targets
+[dependencies]
+thiserror = { workspace = true }
+
+# dependendies for the off-chain target only
+[target.'cfg(not(all(target_family = "wasm", miden)))'.dependencies]
+miden-serde-utils       = { workspace = true }
+num-bigint              = { default-features = false, version = "0.4" }
+p3-challenger.workspace = true
+p3-field.workspace      = true
+p3-goldilocks.workspace = true
+p3-util.workspace       = true
+paste                   = { version = "1.0.15" }
+proptest                = { default-features = false, features = ["alloc", "std"], optional = true, version = "1.7" }
+rand                    = { default-features = false, version = "0.10" }
+serde                   = { default-features = false, features = ["derive"], version = "1.0" }
+subtle                  = { default-features = false, version = "2.6" }
+
+[features]
+arbitrary = ["dep:proptest"]
+default   = []
+testing   = ["arbitrary"]
+
+[dev-dependencies]
+proptest = { features = ["alloc", "std"], workspace = true }
+rand     = { default-features = false, version = "0.10" }
+rstest   = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.cargo-shear]
+ignored = ["paste"]

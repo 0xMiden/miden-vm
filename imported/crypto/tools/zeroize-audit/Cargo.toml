@@ -1,0 +1,13 @@
+[package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+name    = "zeroize-audit"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+regex      = "1.11"
+serde      = { features = ["derive"], version = "1.0" }
+serde_json = "1.0"
+
+[workspace]

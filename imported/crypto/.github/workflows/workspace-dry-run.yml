@@ -1,0 +1,233 @@
+name: Workspace release dry-run
+
+on:
+  push:
+    branches:
+      - main
+      - next
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Comma, space, or newline separated packages to dry-run. Empty dry-runs all publishable workspace packages."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  release-dry-run:
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # pin@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Cache cargo registry and git index
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pin@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # pin@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install cargo-msrv
+        shell: bash
+        run: cargo binstall --no-confirm --force cargo-msrv
+
+      - name: Check MSRV
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          bash scripts/check-msrv.sh
+
+      - name: Clean packaging directory
+        shell: bash
+        run: rm -rf target/package
+
+      - name: Check public API semver compatibility
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # pin@v2
+        with:
+          rust-toolchain: manual
+
+      # Workaround for cargo#14283 and cargo#14789.
+      - name: Clear cargo registry
+        shell: bash
+        run: rm -rf ~/.cargo/registry/{cache,index,src}
+
+      - name: Dry-run selected package publish
+        shell: bash
+        env:
+          RELEASE_PACKAGES: ${{ github.event.inputs.packages || '' }}
+        run: |
+          set -euo pipefail
+
+          for cmd in cargo jq; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "error: required command '$cmd' is not installed or not in PATH" >&2
+              exit 1
+            fi
+          done
+
+          metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
+          selected_packages=()
+
+          add_packages() {
+            local line word
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="${line//,/ }"
+              for word in $line; do
+                selected_packages+=("$word")
+              done
+            done
+          }
+
+          add_packages <<< "$RELEASE_PACKAGES"
+
+          all_publishable_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select((.id as $id | $m.workspace_members | index($id)) and .publish != [])
+                | .name
+              '
+          }
+
+          all_workspace_packages() {
+            printf '%s' "$metadata_json" \
+              | jq -r '
+                . as $m
+                | $m.packages[]
+                | select(.id as $id | $m.workspace_members | index($id))
+                | .name
+              '
+          }
+
+          package_version() {
+            local package="$1"
+            printf '%s' "$metadata_json" \
+              | jq -er --arg package "$package" '
+                . as $m
+                | $m.packages[]
+                | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
+                | select(.publish != [])
+                | .version
+              '
+          }
+
+          is_selected_package() {
+            local package="$1"
+            local selected
+
+            for selected in "${selected_packages[@]}"; do
+              if [[ "$selected" == "$package" ]]; then
+                return 0
+              fi
+            done
+
+            return 1
+          }
+
+          is_release_package() {
+            local package="$1"
+
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              is_selected_package "$package"
+              return
+            fi
+
+            package_version "$package" >/dev/null
+          }
+
+          selected_packages_for_checks() {
+            if [[ ${#selected_packages[@]} -gt 0 ]]; then
+              printf '%s\n' "${selected_packages[@]}"
+            else
+              all_publishable_packages
+            fi
+          }
+
+          duplicate_packages="$(
+            selected_packages_for_checks | sort | uniq -d
+          )"
+          if [[ -n "$duplicate_packages" ]]; then
+            echo "error: duplicate package(s) selected:" >&2
+            printf '%s\n' "$duplicate_packages" | sed 's/^/  - /' >&2
+            exit 1
+          fi
+
+          for package in "${selected_packages[@]}"; do
+            if ! package_version "$package" >/dev/null; then
+              echo "error: '$package' is not a publishable workspace package" >&2
+              echo "publishable packages:" >&2
+              all_publishable_packages | sed 's/^/  - /' >&2
+              exit 1
+            fi
+          done
+
+          echo "Release mode: dry-run"
+          echo "Selected packages:"
+          remaining_packages=()
+          already_published_packages=()
+
+          while IFS= read -r package; do
+            version="$(package_version "$package")"
+
+            if cargo info --quiet --registry crates-io "${package}@${version}" >/dev/null 2>&1; then
+              echo "  - $package v$version already exists on crates.io; excluding it."
+              already_published_packages+=("$package")
+            else
+              echo "  - $package v$version"
+              remaining_packages+=("$package")
+            fi
+          done < <(selected_packages_for_checks)
+
+          if [[ ${#remaining_packages[@]} -eq 0 ]]; then
+            echo "All selected publishable crates already exist on crates.io."
+            exit 0
+          fi
+
+          echo "Dry-running crates that are not yet on crates.io:"
+          printf '  %s\n' "${remaining_packages[@]}"
+
+          publish_cmd=(cargo publish --workspace --locked --dry-run)
+
+          while IFS= read -r package; do
+            if ! is_release_package "$package"; then
+              publish_cmd+=(--exclude "$package")
+            fi
+          done < <(all_workspace_packages)
+
+          for package in "${already_published_packages[@]}"; do
+            publish_cmd+=(--exclude "$package")
+          done
+
+          "${publish_cmd[@]}"

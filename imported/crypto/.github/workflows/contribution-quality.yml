@@ -1,0 +1,32 @@
+name: Contribution Quality
+
+# Uses pull_request_target only to let the pinned shared workflow comment/label via API;
+# it must not checkout or execute PR code.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] metadata-only shared workflow, no PR checkout
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to evaluate (manual runs)"
+        required: true
+        type: string
+      force_all:
+        description: "Skip trusted/draft checks"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  contribution-quality:
+    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.user.login != 'app/dependabot') }}
+    uses: 0xMiden/.github/.github/workflows/contribution-quality.yml@385c1c10c311dc0508c71d83abb0be749a2c12ca # pin@main
+    with:
+      pr_number: ${{ github.event.inputs.pr_number || '' }}
+      force_all: ${{ github.event.inputs.force_all || 'false' }}

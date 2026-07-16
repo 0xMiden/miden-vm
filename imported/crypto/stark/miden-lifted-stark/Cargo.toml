@@ -1,0 +1,105 @@
+[package]
+description            = "Lifted STARK prover and verifier (LMCS-based)."
+edition                = "2024"
+homepage               = "https://github.com/0xMiden/crypto/tree/main/crates"
+license                = "MIT OR Apache-2.0"
+name                   = "miden-lifted-stark"
+readme                 = "../README.md"
+repository             = "https://github.com/0xMiden/crypto"
+rust-version.workspace = true
+version                = "0.29.0"
+
+[lib]
+doctest = false
+
+[dependencies]
+# Internal
+miden-lifted-air.workspace       = true
+miden-stark-transcript.workspace = true
+miden-stateful-hasher.workspace  = true
+
+# Plonky3 (always needed)
+p3-challenger.workspace  = true
+p3-dft.workspace         = true
+p3-field.workspace       = true
+p3-goldilocks.workspace  = true
+p3-matrix.workspace      = true
+p3-maybe-rayon.workspace = true
+p3-symmetric.workspace   = true
+p3-util.workspace        = true
+
+# Optional (for testing/examples features)
+p3-blake3        = { optional = true, workspace = true }
+p3-blake3-air    = { optional = true, workspace = true }
+p3-keccak        = { optional = true, workspace = true }
+p3-keccak-air    = { optional = true, workspace = true }
+p3-poseidon2-air = { optional = true, workspace = true }
+
+# Third-party
+rand.workspace      = true
+serde.workspace     = true
+thiserror.workspace = true
+tracing.workspace   = true
+
+[dev-dependencies]
+# Plonky3
+p3-blake3.workspace      = true
+p3-challenger.workspace  = true
+p3-commit.workspace      = true
+p3-fri.workspace         = true
+p3-goldilocks.workspace  = true
+p3-keccak.workspace      = true
+p3-merkle-tree.workspace = true
+p3-symmetric.workspace   = true
+
+# Third-party
+criterion.workspace          = true
+tracing-subscriber.workspace = true
+
+[features]
+concurrent = ["p3-maybe-rayon/parallel"]
+default    = ["concurrent"]
+testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
+
+[[bench]]
+harness           = false
+name              = "quotient_commit"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "merkle_commit"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "fri_fold"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "deep_quotient"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "pcs"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "pcs_trace"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "plonky3"
+required-features = ["testing"]
+
+[[bench]]
+harness           = false
+name              = "per_air_degree_opt"
+required-features = ["testing"]
+
+[lints]
+workspace = true

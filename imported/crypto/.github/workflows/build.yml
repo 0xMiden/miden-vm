@@ -1,0 +1,83 @@
+# Runs build related jobs.
+
+name: build
+
+# Limits workflow concurrency to only the latest commit in the PR.
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  no-std:
+    name: Build for no-std
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Build for no-std
+        run: |
+          rustup update --no-self-update ${{ matrix.toolchain }}
+          rustup default ${{ matrix.toolchain }}
+          rustup target add wasm32-unknown-unknown
+          make build-no-std
+
+  target-miden:
+    name: Build miden-field for on-chain target
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Build miden-field for on-chain target
+        run: |
+          rustup update --no-self-update ${{ matrix.toolchain }}
+          rustup default ${{ matrix.toolchain }}
+          rustup target add wasm32-wasip2
+          make build-target-miden
+
+  fuzz-check:
+    name: Check fuzz crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup toolchain install --no-self-update nightly
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
+        with:
+          # Fuzz crates are separate workspaces, so cache them explicitly.
+          workspaces: |
+            .
+            miden-crypto-fuzz
+            miden-serde-utils/fuzz
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.1
+      - name: Check fuzz crates
+        run: make check-fuzz

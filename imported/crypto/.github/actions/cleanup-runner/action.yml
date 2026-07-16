@@ -1,0 +1,36 @@
+name: 'Cleanup Runner'
+description: 'Remove unused tools in the runner image to free disk space'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Remove unused tools in the runner image
+      shell: bash
+      run: |
+        echo "=== Cleaning up GitHub Actions runner to free disk space ==="
+
+        # Remove large unnecessary toolchains
+        echo "Removing .NET toolchains..."
+        sudo rm -rf /usr/share/dotnet
+
+        echo "Removing Android SDK..."
+        sudo rm -rf /usr/local/lib/android
+
+        echo "Removing Docker images..."
+        sudo docker system prune -af --volumes || true
+
+        echo "Removing large packages..."
+        sudo apt-get remove -y '^ghc-.*' '^php.*' '^mongodb.*' '^mysql.*' '^postgresql.*' || true
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+
+        echo "Cleaning Rust build cache selectively..."
+        # Keep recent artifacts, remove old ones
+        cargo cache --limit-config 0 --dir-size-limit 2G || true
+
+        echo "Cleaning npm cache..."
+        npm cache clean --force || true
+
+        echo "=== Cleanup complete ==="
+        echo "Available disk space:"
+        df -h

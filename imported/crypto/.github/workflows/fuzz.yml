@@ -1,0 +1,71 @@
+# Runs fuzz targets with short execution time for CI smoke testing.
+# This is not a replacement for dedicated fuzzing runs, but catches obvious regressions.
+# Runs on a schedule (daily) rather than every PR to save CI resources.
+
+name: fuzz
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-miden-serde-utils:
+    name: fuzz miden-serde-utils (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        target: [primitives, collections, string, vint64, goldilocks, budgeted]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: rustup update --no-self-update nightly
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.1
+      - name: Run fuzz target (smoke test)
+        working-directory: miden-serde-utils
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=60 -runs=10000
+
+  fuzz-miden-crypto:
+    name: fuzz miden-crypto (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        target: [word, merkle, merkle_store, smt_serde, partial_smt, mmr, crypto, aead, signatures]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: rustup update --no-self-update nightly
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.1
+      - name: Run fuzz target (smoke test)
+        run: |
+          # Build the fuzz target first
+          cargo +nightly fuzz build --fuzz-dir miden-crypto-fuzz ${{ matrix.target }}
+          # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
+          miden-crypto-fuzz/target/x86_64-unknown-linux-gnu/release/${{ matrix.target }} -max_total_time=60 -runs=10000

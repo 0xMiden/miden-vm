@@ -1,0 +1,24 @@
+[package]
+authors.workspace      = true
+categories.workspace   = true
+description            = "Serialization/deserialization utilities for the Miden project"
+documentation          = "https://docs.rs/miden-serde-utils"
+edition.workspace      = true
+keywords.workspace     = true
+license.workspace      = true
+name                   = "miden-serde-utils"
+readme                 = "README.md"
+repository.workspace   = true
+rust-version.workspace = true
+version                = "0.29.0"
+
+[features]
+default = ["std"]
+std     = []
+
+[dependencies]
+p3-field.workspace      = true
+p3-goldilocks.workspace = true
+
+[lints]
+workspace = true

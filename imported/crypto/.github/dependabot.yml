@@ -1,0 +1,64 @@
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "/miden-crypto-fuzz"
+      - "/miden-serde-utils/fuzz"
+      - "/tools/zeroize-audit"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    labels:
+      - "dependencies"
+      - "no changelog"
+    open-pull-requests-limit: 1
+    groups:
+      cargo-refresh:
+        patterns:
+          - "*"
+        group-by: "dependency-name"
+    ignore:
+      - dependency-name: "der"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "hkdf"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "sha2"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "sha3"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+    cooldown:
+      default-days: 7
+      semver-patch-days: 7
+      semver-minor-days: 7
+      semver-major-days: 15
+
+  # Action updates still have to pass actionlint and zizmor in actions-hygiene.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    labels:
+      - "dependencies"
+      - "no changelog"
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 7

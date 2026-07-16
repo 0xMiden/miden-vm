@@ -1,0 +1,52 @@
+name: "Install LLVM"
+description: "Install a specific LLVM/Clang version"
+inputs:
+  version:
+    description: "LLVM major version to install"
+    default: "17"
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        LLVM_VERSION: ${{ inputs.version }}
+      run: | # zizmor: ignore[github-env] this composite action intentionally exports LLVM paths for later steps
+        set -eux
+        case "${LLVM_VERSION}" in
+          ''|*[!0-9]*)
+            echo "::error::LLVM version must be a numeric major version"
+            exit 1
+            ;;
+        esac
+
+        CODENAME="$(. /etc/os-release && echo "$UBUNTU_CODENAME")"
+
+        # Add apt.llvm.org repo
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | \
+          sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] \
+          http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | \
+          sudo tee /etc/apt/sources.list.d/llvm.list
+
+        sudo apt-get update
+        sudo apt-get install -y \
+          clang-"${LLVM_VERSION}" \
+          lld-"${LLVM_VERSION}" \
+          llvm-"${LLVM_VERSION}"-dev \
+          libclang-"${LLVM_VERSION}"-dev
+
+        sudo ln -sf /usr/lib/llvm-"${LLVM_VERSION}"/lib/libclang-"${LLVM_VERSION}".so \
+                    /usr/lib/llvm-"${LLVM_VERSION}"/lib/libclang.so
+
+        echo "/usr/lib/llvm-${LLVM_VERSION}/lib" | \
+          sudo tee /etc/ld.so.conf.d/llvm-"${LLVM_VERSION}".conf
+        sudo ldconfig
+
+        # Env for build scripts & tools
+        echo "LIBCLANG_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib" >> "$GITHUB_ENV"
+        echo "LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> "$GITHUB_PATH"
+        echo "CC=clang-${LLVM_VERSION}" >> "$GITHUB_ENV"
+        echo "CXX=clang++-${LLVM_VERSION}" >> "$GITHUB_ENV"

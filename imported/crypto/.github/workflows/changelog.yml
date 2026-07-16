@@ -1,0 +1,32 @@
+# Runs changelog related jobs.
+# CI job heavily inspired by: https://github.com/tarides/changelog-check-action
+
+name: changelog
+
+# Limits workflow concurrency to only the latest commit in the PR.
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pin@v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check for changes in changelog
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
+        run: ./scripts/check-changelog.sh
+        shell: bash
