@@ -17,16 +17,16 @@ const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 8038710223150791849
-const RELATION_DIGEST_1 = 13156704654984571464
-const RELATION_DIGEST_2 = 10765946003103527574
-const RELATION_DIGEST_3 = 6601093523753706930
+const RELATION_DIGEST_0 = 4375381088990496432
+const RELATION_DIGEST_1 = 4212053259181642413
+const RELATION_DIGEST_2 = 8452904386973974807
+const RELATION_DIGEST_3 = 2041470199369478808
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 13708846714983337326
-const ACE_REGISTRY_ROOT_1 = 10535239300401329743
-const ACE_REGISTRY_ROOT_2 = 5246949013794269672
-const ACE_REGISTRY_ROOT_3 = 16456148866123306216
+const ACE_REGISTRY_ROOT_0 = 4148299497879553801
+const ACE_REGISTRY_ROOT_1 = 1092094273652928416
+const ACE_REGISTRY_ROOT_2 = 18133008070156406798
+const ACE_REGISTRY_ROOT_3 = 5586818370089177132
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -186,8 +186,7 @@ end
 #! The kernel-procedure digests and the stack i/o are read from caller memory at the
 #! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
 #! final deferred root is loaded from the advice stack. `verify_proof` stages the reduced-inputs
-#! block (kernel_H | program_digest | deferred_root | pad) before the transcript
-#! starts.
+#! block (kernel_H | program_digest | deferred_root | pad) before the transcript starts.
 #!
 #! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
 #! Outputs: []

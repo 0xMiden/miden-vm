@@ -17,7 +17,7 @@ Err(
         },
         source_file: None,
         err: FriError(
-            "domain size was 0",
+            "coset index cannot exceed 3, but was 10",
         ),
     },
 )

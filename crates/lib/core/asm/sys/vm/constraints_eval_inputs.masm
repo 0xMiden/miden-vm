@@ -120,32 +120,13 @@ pub proc set_up_auxiliary_inputs_ace
     # => [...]
 
     # f, s0, weight0, and the reserved slot.
-    push.0
-    exec.constants::get_domain_offset
-    exec.constants::get_trace_length
-    # => [trace_length, offset, 0, ...]
-    exp.u32
-    # => [s0, 0, ...]
+    exec.constants::get_quotient_first_weight
+    # => [weight0, ...]
 
-    push.0
-    exec.constants::get_lde_domain_generator
-    exec.constants::get_trace_length
-    exp.u32
-    # => [f, 0, s0, 0, ...]
-
-    dup.2 dup
-    mul
-    # => [s0^2, f, 0, s0, 0, ...]
-    dup dup mul
-    # => [s0^4, s0^2, f, 0, s0, 0, ...]
-    mul
-    # => [s0^6, f, 0, s0, 0, ...]
-    dup.3 mul
-    mul.8 inv
-    # => [weight0, f, 0, s0, 0, ...]
-
-    movdn.4
+    push.0 exec.constants::get_quotient_first_shift
+    push.0 exec.constants::get_quotient_shift_ratio
     # => [f, 0, s0, 0, weight0, ...]
+
     exec.constants::auxiliary_ace_inputs_ptr add.16
     mem_storew_le
     dropw
