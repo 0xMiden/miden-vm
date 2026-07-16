@@ -7,8 +7,8 @@
 //! (the chunk chiplet today; uint / group / Keccak-eval chiplets
 //! soon) and the eval chip all read their tags from here.
 //!
-//! See `docs/transcript-nodes.md` for the full node-format spec and
-//! `docs/transcript-eval.md` for how the tags are dispatched.
+//! See the design notes for the full node-format spec and
+//! the design notes for how the tags are dispatched.
 //!
 //! ## Registry
 //!
@@ -46,8 +46,7 @@ pub enum NodeTag {
     /// Reserved local tag id for the multi-scalar-multiplication claim shape.
     /// Curve MSM transcript caps use `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`;
     /// the eval chip lays MSM as a variable-length VM PairList absorption. The
-    /// node *is* its value point (binds `Group`); see `docs/chiplets/ec-msm.md
-    /// §6.2`.
+    /// node *is* its value point (binds `Group`); see the design notes.
     EcMsm = 8,
 }
 

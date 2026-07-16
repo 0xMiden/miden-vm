@@ -2,7 +2,7 @@
 //!
 //! Sponge AIR over the [round chiplet's](super::round) 25-round /
 //! 3200-IP permutation cycle. One row per state lane, period 32 →
-//! α = 100. See `docs/chiplets/keccak-sponge.md` for the design.
+//! α = 100. See the design notes for the design.
 //!
 //! Status: incremental landing — currently exposes the
 //! [`KeccakSpongeMsg`] tuple, the period-32 program, and the AIR
@@ -45,7 +45,7 @@ use crate::{
 // - Per-row lane (12): chunk, state_prev, state_new, state_out, cleared, padded — each as u32
 //   lo/hi.
 //
-// See `docs/chiplets/keccak-sponge.md` §"Columns" for the definitions.
+// See the design notes §"Columns" for the definitions.
 
 // Structural columns.
 // --------------------------------------------------------------------
@@ -164,7 +164,7 @@ pub const NUM_MAIN_COLS: usize = 27;
 /// `deg(u_g) + 2 = 7` (was `1 + deg(u_g) = 5` under the older ungated
 /// σ/n form). Col 1's per-row fraction degree lands at 6 (deg-2 outer
 /// flags), col 2 at 5; col 0 dominates. See
-/// `docs/chiplets/keccak-sponge.md` §"Aux columns and σ exposure".
+/// the design notes §"Aux columns and σ exposure".
 pub const NUM_AUX_COLS: usize = 3;
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
@@ -409,7 +409,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         // Both branches are gated by `act`: on dead rows `bytes_left` is
         // unconstrained, so the all-dead (zero-invocation) trace is
         // admissible — the only valid empty-transcript trace (see
-        // `docs/chiplets/keccak-sponge.md` §`bytes_left` decrement chain).
+        // the design notes §`bytes_left` decrement chain).
         // On active rows the chain is identical, so it still forbids the
         // `act = 1 ∧ is_first_block = 0` cyclic-fixed-point forgery via the
         // `M · 136 ≢ 0 mod p` argument (`act` doesn't weaken it — the forgery
@@ -632,7 +632,7 @@ where
             padding_mask_hi += LB::Expr::from(Felt::from(PADDING_MASK_HI[j])) * b_j;
         }
 
-        // Derived signals (see `docs/chiplets/keccak-sponge.md`
+        // Derived signals (see the design notes
         // §"Derived multiplicity signals").
         let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
         let is_first_row_of_invocation: LB::Expr = p_first * is_first_block;

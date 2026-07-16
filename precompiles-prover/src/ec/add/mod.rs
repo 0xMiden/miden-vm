@@ -8,7 +8,7 @@
 //! enters this trace. This AIR's own job is *proving which case
 //! applies* and tying the right certificate set to the result.
 //!
-//! See `docs/chiplets/ec-group-add.md` for the design.
+//! See the design notes for the design.
 //!
 //! ## The case lattice
 //!

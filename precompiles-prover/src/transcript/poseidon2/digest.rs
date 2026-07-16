@@ -132,7 +132,7 @@ impl P2Cap {
     /// VM curve MSM capacity: `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]` —
     /// the **IV** of an MSM-claim chaining sponge, fed to the *first* absorb.
     /// Subsequent absorbs thread the VM PairList capacity lanes `out[8..12]`,
-    /// not the digest lanes `out[0..4]`. See `docs/chiplets/ec-msm.md §6.2`.
+    /// not the digest lanes `out[0..4]`. See the design notes.
     pub fn ec_msm_iv() -> Self {
         Self([
             CurvePrecompile::id(),

@@ -171,7 +171,7 @@ fn log_quotient_degree_matches_design_target() {
     // The 3-aux-column mutex-grouped layout lands at
     // `log_quotient_degree = 3` under Plonky3's
     // periodic-deg-1 convention — the same profile as
-    // `bitwise64`. See `docs/chiplets/keccak-sponge.md` §"Aux
+    // `bitwise64`. See the design notes §"Aux
     // columns and σ exposure" for the per-column constraint-deg
     // breakdown. Pin the value so any constraint or lookup edit
     // that drifts the degree past the column-max of 9 fails fast.

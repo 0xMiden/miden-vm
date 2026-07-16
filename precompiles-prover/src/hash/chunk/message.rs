@@ -9,7 +9,7 @@
 //! matching P2 chain. Exposing the chunk-chiplet's native index
 //! (rather than `chunk_ptr`) keeps the bus hasher-agnostic — the
 //! consumer multiplies by its own lane width — and forbids
-//! inter-chunk addresses by construction. See `docs/chiplets/chunk.md`.
+//! inter-chunk addresses by construction. See the design notes.
 
 use miden_core::field::Algebra;
 

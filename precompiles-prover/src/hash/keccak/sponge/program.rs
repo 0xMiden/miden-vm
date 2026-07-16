@@ -10,7 +10,7 @@
 //! [29, 32)  NOP slack
 //! ```
 //!
-//! See `docs/chiplets/keccak-sponge.md` for the design.
+//! See the design notes for the design.
 //!
 //! Periodic columns:
 //!
@@ -105,8 +105,8 @@ pub const NUM_RC: usize = 24;
 /// Standard FIPS 202 Keccak-f\[1600] round constants, indexed by round.
 ///
 /// Provided by the sponge to the round chiplet on Memory64 at IP
-/// `25 + n·3200 + r·128` for cycle `n`, round `r`. See `docs/chiplets/keccak-sponge.md`
-/// (RC address algebra) and `docs/chiplets/keccak.md` (sponge contract).
+/// `25 + n·3200 + r·128` for cycle `n`, round `r`. See the design notes
+/// (RC address algebra) and the design notes (sponge contract).
 pub const KECCAK_RC: [u64; NUM_RC] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,

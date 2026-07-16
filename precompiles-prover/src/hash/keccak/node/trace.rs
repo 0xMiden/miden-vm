@@ -53,7 +53,7 @@ use crate::{
 ///
 /// `d` and `h_input_chunks` come from elsewhere (the sponge's reference and
 /// the chunk chiplet's Poseidon2 absorption respectively); see
-/// `docs/chiplets/keccak-node.md` for how they line up with the buses.
+/// the design notes for how they line up with the buses.
 #[derive(Debug, Clone)]
 pub struct KeccakNodeInvocation {
     /// Message byte length.
@@ -108,7 +108,7 @@ impl KeccakNodeInvocation {
 /// accumulator); trailing rows up to the next power of two are
 /// inactive padding. `out_mult` is a plain consumer count, pinned to
 /// the `Binding` consumer count by bus balance (no range check — see
-/// `docs/lookup-argument.md`), so padding rows (`out_mult = 0`) touch
+/// the design notes), so padding rows (`out_mult = 0`) touch
 /// no bus.
 pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_rows() as usize;

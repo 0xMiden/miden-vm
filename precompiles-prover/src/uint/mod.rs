@@ -10,7 +10,7 @@
 //! views; hashing into the transcript is the eval chip's job, which
 //! pulls the 4×32 view below and pins it into its Poseidon2 rate lanes.
 //!
-//! See `docs/chiplets/uint.md` for the full design.
+//! See the design notes for the full design.
 //!
 //! ## Range-membership via vertical Schwartz–Zippel
 //!

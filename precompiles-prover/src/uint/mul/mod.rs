@@ -11,7 +11,7 @@
 //! [`UintMul`](crate::relations::BusId::UintMul) relation, consumed by the
 //! eval chip's mul `UintOp` nodes (the scaled shapes await the ECC gadget).
 //!
-//! See `docs/chiplets/uint-mul.md` for the full design.
+//! See the design notes for the full design.
 //!
 //! ## The identity (vertical Schwartz–Zippel)
 //!
