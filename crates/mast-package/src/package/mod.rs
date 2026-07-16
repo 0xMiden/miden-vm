@@ -424,7 +424,14 @@ impl Package {
 
     /// Resolves the MAST node corresponding to `export`, or `None` if it cannot be found.
     ///
-    /// This is the non-panicking counterpart to [`Package::get_export_node_id`].
+    /// The returned node is the recorded `export.node` only when it points at a procedure
+    /// root in this package's forest whose digest matches `export.digest`; otherwise this
+    /// falls back to a digest-based lookup.
+    ///
+    /// This is the non-panicking counterpart to [`Package::get_export_node_id`], though the
+    /// two take different arguments: `get_export_node_id` resolves an export by path and
+    /// panics if not found, while this method resolves an already-known `&ProcedureExport`
+    /// and treats its recorded `node` as an untrusted hint rather than authoritative.
     pub fn get_export_node(&self, export: &ProcedureExport) -> Option<MastNodeId> {
         export
             .node
@@ -2106,6 +2113,43 @@ mod tests {
 
         let dangling_export = ProcedureExport::new(path, None, Word::default(), None);
         assert_eq!(package.get_export_node(&dangling_export), None);
+    }
+
+    #[test]
+    fn get_export_node_falls_back_when_recorded_node_digest_mismatches() {
+        let mut forest = MastForest::new();
+        let matching_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build matching basic block");
+        forest.make_root(matching_id);
+        let stale_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .expect("failed to build stale basic block");
+        forest.make_root(stale_id);
+
+        let matching_digest = forest[matching_id].digest();
+        let path = absolute_path("app::entry");
+        let valid_export =
+            ProcedureExport::new(path.clone(), Some(matching_id), matching_digest, None);
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![PackageExport::Procedure(valid_export)],
+            None,
+        )
+        .expect("package should be valid");
+
+        // A caller-supplied export (not part of the package's own manifest) whose recorded
+        // node id points at a real root, but one whose digest no longer matches
+        // `export.digest` — e.g. a stale or hand-constructed `ProcedureExport`.
+        let stale_export = ProcedureExport::new(path, Some(stale_id), matching_digest, None);
+
+        // Must fall back to the digest-based lookup and return `matching_id`, never the
+        // mismatched `stale_id` recorded on the export — this is the regression a future
+        // "simplification" back to `export.node.or_else(...)` would silently reintroduce.
+        assert_eq!(package.get_export_node(&stale_export), Some(matching_id));
     }
 
     #[test]
