@@ -12,10 +12,14 @@
 //! Run with:
 //!
 //! ```sh
-//! DUMP_TRACE_HEIGHTS=1 cargo run --release \
+//! RUSTFLAGS="-C target-cpu=native" DUMP_TRACE_HEIGHTS=1 cargo run --profile optimized \
 //!     --example dump_trace_heights -p miden-precompiles-prover \
 //!     2> heights.log
 //! ```
+//!
+//! `--profile optimized` is this workspace's `[profile.optimized]` (LTO +
+//! `codegen-units = 1` on top of `release`, the same profile `make bench`
+//! uses) — plain `--release` under-measures proving time.
 //!
 //! `heights.log` is a line-oriented log with four record kinds, meant to
 //! be fed to `parse_trace_heights.py`:
