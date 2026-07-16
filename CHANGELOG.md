@@ -14,6 +14,7 @@
 - [BREAKING] Removed the `miden::core::crypto::hashes::sha512` MASM module, Rust handler, docs, and tests. SHA-512 support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
 - [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
 - [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
+- [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
 
 #### Fixes
 
@@ -43,7 +44,6 @@
 - [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#3333](https://github.com/0xMiden/miden-vm/issues/3333)).
 - [BREAKING] Removed `MastForest::compact`; MAST construction should deduplicate through builders or explicit `MastForest::merge` calls instead ([#3318](https://github.com/0xMiden/miden-vm/pull/3318)).
 - [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
-- [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
 
 ## v0.24.2 (2026-07-01)
 
