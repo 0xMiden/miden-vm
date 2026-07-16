@@ -44,8 +44,8 @@ use miden_assembly::Linkage;
 use miden_core::{
     Felt,
     crypto::hash::Blake3_256,
+    deferred::TRUE_DIGEST,
     field::QuotientMap,
-    precompile::PrecompileTranscriptState,
     serde::{Deserializable, Serializable},
     utils::to_hex,
 };
@@ -470,11 +470,11 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                     }
                     (stack_outputs, proof, "miss")
                 };
-            assert!(
-                proof.precompile_requests().is_empty(),
-                "recursive_verify fixture at proof index {proof_index} emits precompile requests; \
-                 the recursive advice is built with PrecompileTranscriptState::default(), which is \
-                 only valid for precompile-free fixtures"
+            let deferred_entries = proof.deferred_state().entries.len();
+            assert_eq!(
+                deferred_entries, 0,
+                "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
+                 this benchmark expects precompile-free fixtures"
             );
             let proof_bytes = proof.to_bytes();
             let proof_bytes_len = proof_bytes.len();
@@ -486,17 +486,17 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
             );
 
             println!(
-                "    proof={} stack={stack_values:?} proof_bytes={} pc_requests={}",
+                "    proof={} stack={stack_values:?} proof_bytes={} deferred_entries={}",
                 proof_index,
                 proof_bytes_len,
-                proof.precompile_requests().len(),
+                deferred_entries,
             );
             println!(
-                "BENCH_TX_PROOF index={} stack={:?} proof_bytes={} pc_requests={} proof_cache={} proof_digest={} proof_prefix={}",
+                "BENCH_TX_PROOF index={} stack={:?} proof_bytes={} deferred_entries={} proof_cache={} proof_digest={} proof_prefix={}",
                 proof_index,
                 stack_values,
                 proof_bytes_len,
-                proof.precompile_requests().len(),
+                deferred_entries,
                 proof_cache_status,
                 to_hex(&proof_digest),
                 proof_prefix,
@@ -606,7 +606,7 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,
-        PrecompileTranscriptState::default(),
+        TRUE_DIGEST,
     );
     let verifier_inputs =
         generate_advice_inputs(fixture.proof.stark_proof(), pub_inputs).expect("recursive advice");
