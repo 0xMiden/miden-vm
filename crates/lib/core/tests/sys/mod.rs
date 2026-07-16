@@ -12,9 +12,9 @@ fn truncate_stack() {
 
 #[test]
 fn reduce_kernel_digests_upper_bound() {
-    // `stage_reduced_inputs` takes the digest count `N` as an operand and asserts `N < 256`
-    // (mirroring `MultiAir::max_aux_inputs`). The bound is its first check, so no caller memory or
-    // advice is required.
+    // `stage_reduced_inputs` takes the digest count `N` as an operand and asserts it fits
+    // `Kernel::MAX_NUM_PROCEDURES` (`N < 256`). The bound is its first check, so no caller memory
+    // or advice is required.
     //
     // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3].
     let source = "

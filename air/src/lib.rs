@@ -26,15 +26,15 @@ pub mod ace;
 pub mod config;
 mod constraints;
 pub mod lookup;
+mod proof_order;
 pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
-/// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` for the multi-AIR
-/// instance; it dispatches per-trace work to [`crate::CoreAir`] / [`crate::ChipletsAir`].
+/// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
+/// statement; it dispatches per-trace work to Core, Chiplets, and Poseidon2 permutation AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
-/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
-/// Miden-specific types so it can be extracted into its own crate.
+/// The generic LogUp framework lives in [`crate::lookup`].
 pub mod logup {
     pub use crate::constraints::lookup::{
         BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
@@ -44,15 +44,21 @@ pub mod logup {
 use constraints::lookup::{
     chiplet_air::ChipletLookupBuilder,
     main_air::{MainLookupAir, MainLookupBuilder},
+    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
 };
 pub use constraints::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
+    poseidon2_permutation::columns::{
+        CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, INITIAL_EXTERNAL_ROUND_END,
+        INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
+        NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
+        PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
+    },
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
@@ -83,14 +89,17 @@ mod export {
 }
 
 pub use export::*;
+pub use proof_order::{
+    AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH, ProofOrder,
+};
 
 // MIDEN AIR BUILDER
 // ================================================================================================
 
-/// Convenience super-trait that pins `LiftedAirBuilder` to our field.
+/// Convenience super-trait that pins `LiftedAirBuilder` to the Miden base field.
 ///
-/// All constraint functions in this crate should be generic over `AB: MidenAirBuilder`
-/// instead of spelling out the full `LiftedAirBuilder<F = Felt>` bound.
+/// Constraint functions use `AB: MidenAirBuilder` instead of the longer
+/// `LiftedAirBuilder<F = Felt>` bound.
 pub trait MidenAirBuilder: LiftedAirBuilder<F = Felt> {}
 impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 
@@ -151,8 +160,7 @@ impl PublicInputs {
         self.program_info.kernel_commitment()
     }
 
-    /// Returns the AIR public values (`air_inputs`) and the statement `aux_inputs` as flat
-    /// slices of `Felt`s.
+    /// Returns the AIR public values (`air_inputs`) and statement inputs (`aux_inputs`).
     ///
     /// `air_inputs` (the values read by the AIR constraints) layout:
     ///   [0..16]  stack inputs
@@ -251,7 +259,7 @@ impl Deserializable for PublicInputs {
 // PROCESSOR AIR
 // ================================================================================================
 
-/// Number of public values read by the Miden VM AIRs — the `air_inputs` shared by every AIR.
+/// Number of public values read by the Miden VM AIRs: the `air_inputs` shared by every AIR.
 ///
 /// Layout (32 Felts total):
 ///   [0..16]  stack inputs
@@ -262,8 +270,8 @@ impl Deserializable for PublicInputs {
 /// [`MidenMultiAir::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
-/// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
+/// LogUp aux trace width: 4 core columns + 3 chiplet columns + 1 Poseidon2 column.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
 
 // `aux_inputs` layout offsets — statement inputs that the AIRs do not read. The fixed program
 // hash and final deferred root occupy the first two words; the variable-length kernel-procedure
@@ -275,10 +283,9 @@ const AUX_KERNEL_DIGESTS: usize = 2 * WORD_SIZE;
 // CORE AIR
 // ================================================================================================
 
-/// Core-trace AIR.
+/// Core trace AIR.
 ///
-/// Owns the system, decoder, stack, and range-check segments. Paired with [`ChipletsAir`]
-/// for the two-AIR proving path.
+/// Enforces the system, decoder, stack, and range-check constraints.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 
@@ -288,7 +295,6 @@ impl CoreAir {
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        // Core has no periodic columns; all periodic columns serve the chiplets.
         Vec::new()
     }
 
@@ -304,20 +310,20 @@ impl CoreAir {
         self,
         challenges: &Challenges<EF>,
         public_values: &[Felt],
-        var_len_public_inputs: &[&[Felt]],
+        boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
-        if var_len_public_inputs.len() != 1 {
+        if boundary_inputs.len() != 1 {
             return Err(format!(
-                "CoreAir expects 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
+                "CoreAir expects 1 boundary input slice, got {}",
+                boundary_inputs.len()
             )
             .into());
         }
-        if var_len_public_inputs[0].len() != 2 * WORD_SIZE {
+        if boundary_inputs[0].len() != 2 * WORD_SIZE {
             return Err(format!(
                 "CoreAir expects {} boundary felts (program hash + deferred root), got {}",
                 2 * WORD_SIZE,
-                var_len_public_inputs[0].len()
+                boundary_inputs[0].len()
             )
             .into());
         }
@@ -325,7 +331,7 @@ impl CoreAir {
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
             public_values,
-            var_len_public_inputs,
+            var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
         };
@@ -344,7 +350,7 @@ impl CoreAir {
         constraints::enforce_core(builder, local, next, &op_flags);
         constraints::public_inputs::enforce_main(builder, local);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CORE);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);
     }
 
@@ -376,22 +382,19 @@ impl CoreAir {
 // CHIPLETS AIR
 // ================================================================================================
 
-/// Chiplets-trace AIR for the multi-AIR proving path.
+/// Chiplets trace AIR.
 ///
-/// Owns the chiplet section and its LogUp accumulator columns. Counterpart to [`CoreAir`].
+/// Enforces the chiplet selector hierarchy, chiplet transition constraints, and
+/// chiplet-side LogUp buses.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
-/// Per-trace AIR logic. Like [`CoreAir`], `ChipletsAir` is not an AIR trait impl itself —
-/// [`MidenAir`] dispatches to these inherent (struct) methods for per-trace concerns.
 impl ChipletsAir {
     fn width(self) -> usize {
         constraints::columns::NUM_CHIPLETS_COLS
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        // All periodic columns (hasher round constants, bitwise operation table) belong to
-        // the chiplets trace.
         constraints::chiplets::columns::PeriodicCols::periodic_columns()
     }
 
@@ -399,27 +402,27 @@ impl ChipletsAir {
         constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
     }
 
-    /// LogUp boundary correction for the chiplets trace. The kernel digests are
-    /// the single var-len public input group; they boundary-cancel against the
-    /// kernel-rom bus, which lives on `CHIPLET_COLUMN_SHAPE[0]`. Consumed by
-    /// [`MidenMultiAir::eval_external`].
+    /// LogUp boundary correction for the chiplets trace.
+    ///
+    /// The boundary input slice contains the kernel-procedure digests; these statement values
+    /// close the kernel-ROM bus.
     fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         challenges: &Challenges<EF>,
         public_values: &[Felt],
-        var_len_public_inputs: &[&[Felt]],
+        boundary_inputs: &[&[Felt]],
     ) -> Result<EF, ReductionError> {
-        if var_len_public_inputs.len() != 1 {
+        if boundary_inputs.len() != 1 {
             return Err(format!(
-                "ChipletsAir expects 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
+                "ChipletsAir expects 1 boundary input slice, got {}",
+                boundary_inputs.len()
             )
             .into());
         }
-        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+        if !boundary_inputs[0].len().is_multiple_of(WORD_SIZE) {
             return Err(format!(
                 "kernel digest felts length {} is not a multiple of {}",
-                var_len_public_inputs[0].len(),
+                boundary_inputs[0].len(),
                 WORD_SIZE
             )
             .into());
@@ -428,7 +431,7 @@ impl ChipletsAir {
         let mut reducer = ReduceBoundaryBuilder {
             challenges,
             public_values,
-            var_len_public_inputs,
+            var_len_public_inputs: boundary_inputs,
             sum: EF::ZERO,
             error: None,
         };
@@ -446,7 +449,7 @@ impl ChipletsAir {
 
         constraints::enforce_chiplets(builder, local, next, &selectors);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CHIPLETS);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
         self.lookup_eval(&mut lb);
     }
 
@@ -479,29 +482,157 @@ impl ChipletsAir {
     }
 }
 
-// MIDEN AIR (multi-AIR enum wrapper)
+// POSEIDON2 PERMUTATION AIR
 // ================================================================================================
 
-/// Homogeneous wrapper that lets [`CoreAir`] and [`ChipletsAir`] share a single AIR type.
+/// Poseidon2 permutation trace AIR.
+///
+/// Enforces 16-row permutation cycles and the permutation-side LogUp bus.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Poseidon2PermutationAir;
+
+impl Poseidon2PermutationAir {
+    fn width(self) -> usize {
+        constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS
+    }
+
+    fn periodic_columns(self) -> Vec<Vec<Felt>> {
+        Poseidon2PermutationPeriodicCols::periodic_columns()
+    }
+
+    fn aux_width(self) -> usize {
+        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        _challenges: &Challenges<EF>,
+        _public_values: &[Felt],
+        boundary_inputs: &[&[Felt]],
+    ) -> Result<EF, ReductionError> {
+        if !boundary_inputs.is_empty() {
+            return Err(format!(
+                "Poseidon2PermutationAir expects 0 boundary input slices, got {}",
+                boundary_inputs.len()
+            )
+            .into());
+        }
+        Ok(EF::ZERO)
+    }
+
+    fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
+        constraints::enforce_poseidon2_permutation(builder);
+
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Poseidon2Permutation);
+        self.lookup_eval(&mut lb);
+    }
+
+    fn lookup_num_columns(self) -> usize {
+        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+    }
+
+    fn lookup_column_shape(self) -> &'static [usize] {
+        &constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
+    }
+
+    fn lookup_max_message_width(self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn lookup_num_bus_ids(self) -> usize {
+        BusId::COUNT
+    }
+
+    fn lookup_eval<LB: Poseidon2PermutationLookupBuilder>(self, builder: &mut LB) {
+        let main = builder.main();
+        let local: &Poseidon2PermutationCols<_> = main.current_slice().borrow();
+
+        constraints::lookup::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns(
+            builder, local,
+        );
+    }
+
+    fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
+}
+
+// MIDEN AIR
+// ================================================================================================
+
+/// AIR instance identifier for the Miden multi-AIR statement.
+///
 /// [`MultiAir::Air`](miden_crypto::stark::air::MultiAir) is a single associated type, so every
-/// instance in the multi-AIR proof must be the same type; this enum dispatches per-trace work
-/// to the inner [`CoreAir`] / [`ChipletsAir`].
-#[derive(Copy, Clone, Debug)]
+/// instance in the multi-AIR proof must have the same type. This enum identifies which concrete
+/// AIR logic to dispatch to.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidenAir {
-    Core(CoreAir),
-    Chiplets(ChipletsAir),
+    Core,
+    Chiplets,
+    Poseidon2Permutation,
 }
 
 impl MidenAir {
-    pub const CORE: Self = Self::Core(CoreAir);
-    pub const CHIPLETS: Self = Self::Chiplets(ChipletsAir);
+    pub const fn instance_index(self) -> usize {
+        match self {
+            Self::Core => 0,
+            Self::Chiplets => 1,
+            Self::Poseidon2Permutation => 2,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Core => "Core",
+            Self::Chiplets => "Chiplets",
+            Self::Poseidon2Permutation => "Poseidon2Permutation",
+        }
+    }
+
+    pub const fn file_token(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Chiplets => "chiplets",
+            Self::Poseidon2Permutation => "poseidon2_permutation",
+        }
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        challenges: &Challenges<EF>,
+        public_values: &[Felt],
+        aux_inputs: &[Felt],
+    ) -> Result<EF, ReductionError> {
+        if aux_inputs.len() < AUX_KERNEL_DIGESTS {
+            return Err(format!(
+                "aux_inputs length {} is shorter than the fixed prefix {AUX_KERNEL_DIGESTS}",
+                aux_inputs.len()
+            )
+            .into());
+        }
+
+        match self {
+            Self::Core => CoreAir.boundary_correction(
+                challenges,
+                public_values,
+                &[&aux_inputs[..AUX_KERNEL_DIGESTS]],
+            ),
+            Self::Chiplets => ChipletsAir.boundary_correction(
+                challenges,
+                public_values,
+                &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
+            ),
+            Self::Poseidon2Permutation => {
+                Poseidon2PermutationAir.boundary_correction(challenges, public_values, &[])
+            },
+        }
+    }
 }
 
 impl BaseAir<Felt> for MidenAir {
     fn width(&self) -> usize {
         match self {
-            Self::Core(a) => a.width(),
-            Self::Chiplets(a) => a.width(),
+            Self::Core => CoreAir.width(),
+            Self::Chiplets => ChipletsAir.width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.width(),
         }
     }
 
@@ -511,8 +642,9 @@ impl BaseAir<Felt> for MidenAir {
 
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         match self {
-            Self::Core(a) => a.periodic_columns(),
-            Self::Chiplets(a) => a.periodic_columns(),
+            Self::Core => CoreAir.periodic_columns(),
+            Self::Chiplets => ChipletsAir.periodic_columns(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.periodic_columns(),
         }
     }
 }
@@ -525,13 +657,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
 
     fn aux_width(&self) -> usize {
         match self {
-            Self::Core(a) => a.aux_width(),
-            Self::Chiplets(a) => a.aux_width(),
+            Self::Core => CoreAir.aux_width(),
+            Self::Chiplets => ChipletsAir.aux_width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.aux_width(),
         }
     }
 
     fn num_aux_values(&self) -> usize {
-        // One real committed LogUp final per AIR instance.
+        // One committed LogUp final per AIR instance.
         1
     }
 
@@ -546,60 +679,68 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         debug_assert_eq!(
             committed.len(),
             1,
-            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+            "build_logup_aux_trace returns one committed final per AIR"
         );
         (aux_trace, committed)
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {
-        // All AIRs peak at degree 9 over base-field and extension-field constraints.
-        ConstraintDegrees { base: 9, ext: 9 }
+        match self {
+            Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
+            Self::Poseidon2Permutation => ConstraintDegrees { base: 8, ext: 3 },
+        }
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
-            Self::Core(a) => a.eval(builder),
-            Self::Chiplets(a) => a.eval(builder),
+            Self::Core => CoreAir.eval(builder),
+            Self::Chiplets => ChipletsAir.eval(builder),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.eval(builder),
         }
     }
 }
 
 impl<LB> LookupAir<LB> for MidenAir
 where
-    LB: MainLookupBuilder + ChipletLookupBuilder,
+    LB: MainLookupBuilder + ChipletLookupBuilder + Poseidon2PermutationLookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_num_columns(),
-            Self::Chiplets(a) => a.lookup_num_columns(),
+            Self::Core => CoreAir.lookup_num_columns(),
+            Self::Chiplets => ChipletsAir.lookup_num_columns(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_columns(),
         }
     }
 
     fn column_shape(&self) -> &[usize] {
         match self {
-            Self::Core(a) => a.lookup_column_shape(),
-            Self::Chiplets(a) => a.lookup_column_shape(),
+            Self::Core => CoreAir.lookup_column_shape(),
+            Self::Chiplets => ChipletsAir.lookup_column_shape(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_column_shape(),
         }
     }
 
     fn max_message_width(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_max_message_width(),
-            Self::Chiplets(a) => a.lookup_max_message_width(),
+            Self::Core => CoreAir.lookup_max_message_width(),
+            Self::Chiplets => ChipletsAir.lookup_max_message_width(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_max_message_width(),
         }
     }
 
     fn num_bus_ids(&self) -> usize {
         match self {
-            Self::Core(a) => a.lookup_num_bus_ids(),
-            Self::Chiplets(a) => a.lookup_num_bus_ids(),
+            Self::Core => CoreAir.lookup_num_bus_ids(),
+            Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_bus_ids(),
         }
     }
 
     fn eval(&self, builder: &mut LB) {
         match self {
-            Self::Core(a) => a.lookup_eval(builder),
-            Self::Chiplets(a) => a.lookup_eval(builder),
+            Self::Core => CoreAir.lookup_eval(builder),
+            Self::Chiplets => ChipletsAir.lookup_eval(builder),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval(builder),
         }
     }
 
@@ -608,8 +749,9 @@ where
         B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
     {
         match self {
-            Self::Core(a) => a.lookup_eval_boundary(boundary),
-            Self::Chiplets(a) => a.lookup_eval_boundary(boundary),
+            Self::Core => CoreAir.lookup_eval_boundary(boundary),
+            Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval_boundary(boundary),
         }
     }
 }
@@ -617,23 +759,20 @@ where
 // MIDEN MULTI-AIR
 // ================================================================================================
 
-/// The cross-AIR statement for the `(Core, Chiplets)` proof: owns the AIR
-/// collection in instance order and carries the LogUp reduction over the
-/// committed aux finals.
+/// The cross-AIR statement for the Miden VM proof.
 ///
-/// Instance order is `[Core, Chiplets]`; every per-AIR slice follows that
+/// AIR instances come from [`AIRS`], and the external reduction sums the committed LogUp finals
+/// with the open-bus boundary corrections.
+///
+/// Instance order is `[Core, Chiplets, Poseidon2Permutation]`; every per-AIR slice follows that
 /// ordering.
 #[derive(Copy, Clone, Debug)]
-pub struct MidenMultiAir {
-    airs: [MidenAir; 2],
-}
+pub struct MidenMultiAir;
 
 impl MidenMultiAir {
-    /// Instance-order AIR collection: `[Core, Chiplets]`.
+    /// Construct the Miden multi-AIR statement marker.
     pub const fn new() -> Self {
-        Self {
-            airs: [MidenAir::CORE, MidenAir::CHIPLETS],
-        }
+        Self
     }
 }
 
@@ -647,7 +786,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
     type Air = MidenAir;
 
     fn airs(&self) -> &[MidenAir] {
-        &self.airs
+        &AIRS
     }
 
     fn num_air_inputs(&self) -> usize {
@@ -663,8 +802,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// Replaces the default length-prefixed stream with a rate-aligned schedule (six 8-felt
-    /// blocks, 48 felts total) that the recursive verifier mirrors:
+    /// Uses a rate-aligned schedule: six 8-felt blocks, 48 felts total.
     ///
     /// ```text
     /// [ kernel_H (4) | program_hash (4) ]
@@ -719,11 +857,50 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         air_inputs: &[Felt],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
+        if aux_values.len() != AIRS.len() {
+            return Err(format!(
+                "expected aux values for {} AIRs, got {}",
+                AIRS.len(),
+                aux_values.len()
+            )
+            .into());
+        }
+        if log_trace_heights.len() != AIRS.len() {
+            return Err(format!(
+                "expected log heights for {} AIRs, got {}",
+                AIRS.len(),
+                log_trace_heights.len()
+            )
+            .into());
+        }
+        if challenges.len() != trace::AUX_TRACE_RAND_CHALLENGES {
+            return Err(format!(
+                "expected {} aux trace challenges, got {}",
+                trace::AUX_TRACE_RAND_CHALLENGES,
+                challenges.len()
+            )
+            .into());
+        }
+        if air_inputs.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {NUM_PUBLIC_VALUES} public values, got {}",
+                air_inputs.len()
+            )
+            .into());
+        }
         if aux_inputs.len() < AUX_KERNEL_DIGESTS {
             return Err(format!(
                 "aux_inputs length {} is shorter than the fixed prefix {AUX_KERNEL_DIGESTS}",
+                aux_inputs.len()
+            )
+            .into());
+        }
+        let max_aux_inputs = <MidenMultiAir as MultiAir<Felt, EF>>::max_aux_inputs(self);
+        if aux_inputs.len() > max_aux_inputs {
+            return Err(format!(
+                "aux_inputs length {} exceeds maximum {max_aux_inputs}",
                 aux_inputs.len()
             )
             .into());
@@ -735,19 +912,23 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             BusId::COUNT,
         );
 
-        let core_correction = CoreAir.boundary_correction(
-            &challenges,
-            air_inputs,
-            &[&aux_inputs[..AUX_KERNEL_DIGESTS]],
-        )?;
-        let chiplets_correction = ChipletsAir.boundary_correction(
-            &challenges,
-            air_inputs,
-            &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
-        )?;
+        let mut aux_sum = EF::ZERO;
+        let mut boundary_correction = EF::ZERO;
+        for (air, values) in AIRS.iter().copied().zip(aux_values.iter()) {
+            boundary_correction += air.boundary_correction(&challenges, air_inputs, aux_inputs)?;
+            let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
+            if values.len() != expected {
+                return Err(format!(
+                    "{} expects {expected} aux boundary values, got {}",
+                    air.name(),
+                    values.len()
+                )
+                .into());
+            }
+            aux_sum += values.iter().copied().sum::<EF>();
+        }
 
-        let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
-        Ok(vec![aux_sum + core_correction + chiplets_correction])
+        Ok(vec![aux_sum + boundary_correction])
     }
 }
 
@@ -767,25 +948,30 @@ pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
         kernel_felts.len().is_multiple_of(WORD_SIZE),
         "kernel digest felts must be whole words"
     );
+    assert!(
+        kernel_felts.len() <= KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE,
+        "kernel digest felts exceed KernelDescriptor::MAX_NUM_PROCEDURES"
+    );
 
+    hash_kernel_input_felts(kernel_felts)
+}
+
+fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
     miden_core::chiplets::hasher::hash_elements(kernel_felts).into()
 }
 
 // REDUCED-AUX BOUNDARY BUILDER
 // ================================================================================================
 
-/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
-/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
-/// running `EF` accumulator.
+/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp denominator
+/// contribution `multiplicity / encode(msg)` and sums them into a running `EF` accumulator.
 ///
-/// Lets the boundary correction reuse the structured boundary emissions from
-/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
-/// instead of open-coding the three corrections a second time.
+/// Boundary correction is computed from the structured boundary messages emitted by each AIR.
 ///
-/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
-/// are non-zero with overwhelming probability. A malformed/adversarial proof can still
-/// drive a denominator to zero, so the reducer captures the first failure and surfaces it
-/// as a [`ReductionError`] to the verifier rather than panicking.
+/// Denominators are `alpha + sum_i beta^i * field_i` with random `alpha, beta`; on any
+/// legitimate proof they are non-zero with overwhelming probability. A malformed proof can still
+/// drive a denominator to zero, so the reducer captures the first failure and surfaces it as a
+/// [`ReductionError`] to the verifier rather than panicking.
 struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
     challenges: &'a Challenges<EF>,
     public_values: &'a [Felt],
@@ -836,6 +1022,8 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use miden_core::field::QuadFelt;
 
     use super::*;
@@ -844,10 +1032,90 @@ mod tests {
     /// degree away from the declared value, the override must be updated.
     #[test]
     fn constraint_degree_override_matches_symbolic() {
-        for air in [MidenAir::CORE, MidenAir::CHIPLETS] {
+        for air in AIRS {
             let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn eval_external_rejects_partial_kernel_digest() {
+        let challenges =
+            [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let mut aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
+        aux_inputs.push(Felt::ONE);
+        let zero = QuadFelt::from(Felt::ZERO);
+        let core_aux = [zero];
+        let chiplets_aux = [zero];
+        let poseidon2_aux = [zero];
+        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+
+        let err = MidenMultiAir::new()
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("kernel digest felts length 1 is not a multiple of 4"));
+    }
+
+    #[test]
+    fn eval_external_rejects_too_many_kernel_digests() {
+        let challenges =
+            [QuadFelt::from(Felt::new_unchecked(3)), QuadFelt::from(Felt::new_unchecked(5))];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let max_aux_inputs = AUX_KERNEL_DIGESTS + KernelDescriptor::MAX_NUM_PROCEDURES * WORD_SIZE;
+        let actual_aux_inputs = max_aux_inputs + WORD_SIZE;
+        let aux_inputs = vec![Felt::ZERO; actual_aux_inputs];
+        let zero = QuadFelt::from(Felt::ZERO);
+        let core_aux = [zero];
+        let chiplets_aux = [zero];
+        let poseidon2_aux = [zero];
+        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+
+        let err = MidenMultiAir::new()
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .unwrap_err();
+
+        assert!(err.to_string().contains(&format!(
+            "aux_inputs length {actual_aux_inputs} exceeds maximum {max_aux_inputs}"
+        )));
+    }
+
+    #[test]
+    #[should_panic(expected = "kernel digest felts exceed KernelDescriptor::MAX_NUM_PROCEDURES")]
+    fn hash_kernel_digests_rejects_too_many_digest_felts() {
+        let kernel_felts = vec![Felt::ZERO; (KernelDescriptor::MAX_NUM_PROCEDURES + 1) * WORD_SIZE];
+
+        let _ = hash_kernel_digests(&kernel_felts);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "aux inputs shorter than the fixed program-hash + deferred-root prefix"
+    )]
+    fn observe_rejects_short_aux_inputs() {
+        #[derive(Default)]
+        struct FeltSink {
+            observed: Vec<Felt>,
+        }
+
+        impl CanObserve<Felt> for FeltSink {
+            fn observe(&mut self, value: Felt) {
+                self.observed.push(value);
+            }
+        }
+
+        let mut challenger = FeltSink::default();
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let multi_air = MidenMultiAir::new();
+
+        <MidenMultiAir as MultiAir<Felt, QuadFelt>>::observe(
+            &multi_air,
+            &mut challenger,
+            &air_inputs,
+            &[],
+            &[8, 8, 8],
+        );
     }
 }

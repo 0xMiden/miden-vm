@@ -585,7 +585,7 @@ fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     if usize::from(row) >= main.chiplets_height() {
         return false;
     }
-    main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
+    main.chiplet_selector_0(row) == ZERO
 }
 
 /// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
@@ -602,7 +602,7 @@ fn as_bit(val: Felt) -> Option<bool> {
     }
 }
 
-/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`
+/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2 * node_index_next`
 /// (see `chiplet_responses.rs::mp_verify_input`). Independent of the `chiplet_direction_bit`
 /// column, so bugs in that column don't make the assertion vacuously pass.
 fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
@@ -624,7 +624,7 @@ fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
 // where the M4/C2 packing puts it.
 
 /// Drive a depth-3 Merkle MRUPDATE and assert the sibling-table bus fires one add per MV
-/// controller row and one remove per MU controller row (3 levels → 3 adds + 3 removes).
+/// controller row and one remove per MU controller row (3 levels: 3 adds + 3 removes).
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
@@ -647,15 +647,15 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_01 column) AND the hasher internal
-    // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
-    // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
+    // Collect MV / MU controller rows. A row is a sibling-table add/remove site when the
+    // controller selector is active and the hasher internal `(s0, s1, s2)` sub-selectors pick out
+    // the MV-all (`s0 * s1 * (1 - s2)`) or MU-all (`s0 * s1 * s2`) pattern.
+    // See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
+        if main.chiplet_selector_0(idx) != ZERO {
             continue;
         }
         let hs0 = main.chiplet_selector_1(idx);

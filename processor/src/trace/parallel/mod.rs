@@ -20,6 +20,15 @@ use miden_core::{
 use rayon::prelude::*;
 use tracing::instrument;
 
+use super::{
+    chiplets::Chiplets,
+    execution_tracer::TraceGenerationContext,
+    trace_state::{
+        AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
+        ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
+        RangeCheckerReplay,
+    },
+};
 use crate::{
     ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
@@ -51,16 +60,6 @@ pub(crate) mod core_trace_fragment;
 
 mod processor;
 mod tracer;
-
-use super::{
-    chiplets::Chiplets,
-    execution_tracer::TraceGenerationContext,
-    trace_state::{
-        AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
-        ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
-        RangeCheckerReplay,
-    },
-};
 
 #[cfg(test)]
 mod tests;
@@ -170,7 +169,9 @@ pub fn build_trace_with_max_len(
 
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
-    let padded_trace_len = core_height.max(chiplets_height);
+    let poseidon2_permutation_trace_len = chiplets.poseidon2_permutation_trace_len();
+    let poseidon2_permutation_height = pad_to_trace_length(poseidon2_permutation_trace_len);
+    let padded_trace_len = core_height.max(chiplets_height).max(poseidon2_permutation_height);
 
     // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
     // when the unpadded check above passed.
@@ -182,12 +183,13 @@ pub fn build_trace_with_max_len(
         core_trace_len,
         range_table_len,
         ChipletsLengths::new(&chiplets),
+        poseidon2_permutation_trace_len,
         padded_trace_len,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let (chiplets_trace, ()) = rayon::join(
-        || chiplets.into_trace(chiplets_height),
+    let ((chiplets_trace, poseidon2_permutation_trace), ()) = rayon::join(
+        || chiplets.into_traces(chiplets_height, poseidon2_permutation_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
 
@@ -204,7 +206,12 @@ pub fn build_trace_with_max_len(
     // Create the MainTrace
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(core_trace_data, chiplets_trace.trace, last_program_row)
+        MainTrace::from_parts(
+            core_trace_data,
+            chiplets_trace.trace,
+            poseidon2_permutation_trace.trace,
+            last_program_row,
+        )
     };
 
     Ok(ExecutionTrace::new_from_parts(

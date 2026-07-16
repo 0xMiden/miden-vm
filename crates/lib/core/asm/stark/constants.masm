@@ -38,8 +38,8 @@ const LDE_DOMAIN_GEN_PTR = 3223322626
 ### Address to store the number of FRI queries
 const NUM_QUERIES_PTR = 3223322628
 
-### Address to store the size of the FRI remainder polynomial, which is basically the number of its
-### coefficients or equivalently its degree plus one.
+### Address to store the size of the FRI remainder polynomial: the number of coefficients,
+### equivalently its degree plus one.
 const REMAINDER_POLY_SIZE_PTR = 3223322629
 
 ### Address to store the number of FRI folded oracles
@@ -55,16 +55,16 @@ const TRACE_LENGTH_PTR = 3223322632
 ### data for running FRI check
 const FRI_QUERIES_ADDRESS_PTR = 3223322633
 
-### Address storing the maximum per-AIR log height (= max(log_core, log_chip)).
+### Address storing the maximum per-AIR log height.
 ### Used for the lifted-domain math (LDE size, max-AIR selectors, vanishing).
 const TRACE_LENGTH_LOG_PTR = 3223322634
 
-### Per-AIR log heights — stored separately (not as min/max) so MASM can derive the
-### proof_order permutation locally for the β-fold and per-AIR selectors.
+### Per-AIR log heights, kept so MASM can derive proof order and lifted selectors.
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
+const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR = 3223322637
 
-### Gap at 3223322637..3223322639 to restore word alignment for MAIN_TRACE_COM_PTR.
+### Gap at 3223322638..3223322639 to restore word alignment for MAIN_TRACE_COM_PTR.
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 const MAIN_TRACE_COM_PTR = 3223322640
@@ -87,7 +87,7 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
 ### Address storing a pointer to the reduced-inputs block
-### [kernel_H | program_digest | transcript_state | zero_pad] (16 felts). The block lives at the
+### [kernel_H | program_digest | deferred_root | zero_pad] (16 felts). The block lives at the
 ### fixed standalone address REDUCED_INPUTS_PTR; this cell holds that pointer for the readers.
 const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 
@@ -121,14 +121,15 @@ const BUS_GAMMA_PTR = 3223322700
 
 ### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
 ### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
-### statement values materialized in step I, then asserted via `c_total + aux_sum == 0`.
+### statement values staged before the transcript starts, then asserted via
+### `c_total + aux_sum == 0`.
 const C_TOTAL_PTR = 3223322704
 
 ### Address of the cell holding the number of kernel-procedure digests `N`, persisted by
-### `process_public_inputs` (step I) for the outer-LogUp boundary fold computed in step II.
+### `verify_proof` for the outer-LogUp boundary fold computed in step II.
 const NUM_KERNEL_DIGESTS_PTR = 3223322712
 
-### Address to the randomness used in computing the constraints composition polynomial
+### Address of the composition challenges [alpha0, alpha1, beta0, beta1].
 const COMPOSITION_COEF_PTR = 3223322716
 
 ### Address to the randomness used in computing the DEEP polynomial
@@ -160,12 +161,16 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 
-### Scratch buffer (64 felts) used by `swap_air_regions_if_chip_first` to hold the
-### smaller AIR's main block during the swap.
-const SWAP_SCRATCH_PTR = 3223322764
+### Proof-order tags are Lehmer ranks over [Core, Chiplets, Poseidon2Permutation].
+const ORDER_TAG_COUNT = 6
+const ORDER_TAG_PTR = 3223322764
+
+### Relation metadata for this verifier instance.
+const RELATION_DIGEST_PTR = 3223322768
+const ACE_REGISTRY_ROOT_PTR = 3223322772
 
 ### Fixed standalone reduced-inputs block (16 felts):
-### [kernel_H (4) | program_digest (4) | transcript_state (4) | zero_pad (4)]. The verifier writes
+### [kernel_H (4) | program_digest (4) | deferred_root (4) | zero_pad (4)]. The verifier writes
 ### it and absorbs it into Fiat-Shamir; the ACE circuit never reads it, so it lives in the fixed
 ### verifier region rather than the OOD-derived ACE READ region.
 const REDUCED_INPUTS_PTR = 3223322836
@@ -176,7 +181,7 @@ const REDUCED_INPUTS_PTR = 3223322836
 ##
 ## In the backward direction, the size is determined solely by the fixed-length public inputs
 ## (FLPI, the 32 stack-i/o felts) — the only public values the circuit references. The FLPI
-## region is laid out by `compute_and_store_public_inputs_address` in `stark/public_inputs.masm`.
+## region is laid out immediately before `AUX_RAND_ELEM_PTR` by the generic public-input helper.
 ##
 ## In the forward direction, the size is determined by the OOD evaluations, aux bus boundary
 ## values, stark variables, and circuit constants.
@@ -193,7 +198,7 @@ const REDUCED_INPUTS_PTR = 3223322836
 ##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
 ##                                                          ... EVAL section follows ...
 ##
-## The reduced-inputs block (kernel_H | program_digest | transcript_state | zero pad) is NOT part
+## The reduced-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
 ## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
 ## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_proof` and absorbed into
 ## Fiat-Shamir; it is not carved out of this region.
@@ -207,39 +212,36 @@ const REDUCED_INPUTS_PTR = 3223322836
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### Reserved 1-word padding (4 base felts) between aux_rand and OOD_EVALUATIONS_PTR. The ACE
-### codegen layout (`crates/ace-codegen/src/layout/policy.rs::masm`) double-word-aligns the
-### `main_curr` region; with the 32-EF public region plus the 2-EF randomness slot the next
-### double-word boundary falls one word past the randomness word. The padding slots are
-### unreferenced by the circuit (fresh memory reads as zero).
-### Range: AUX_RAND_ELEM_PTR + 4 .. AUX_RAND_ELEM_PTR + 7  (= 3225419780 .. 3225419783).
+### ACE READ alignment pad. Aux randomness occupies 2 EF slots; the OOD `main_curr` region starts
+### at the next double-word-aligned EF slot, leaving 2 unused EF slots here.
+### Range: AUX_RAND_ELEM_PTR + 4 .. AUX_RAND_ELEM_PTR + 7 (= 3225419780 .. 3225419783).
 
 ### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
 ### (alignment = 8 for Poseidon2). Per row in EF slots:
-###   main = aligned(51) + aligned(22) = 56 + 24       = 80 EFs
-###   aux  = aligned(4·2) + aligned(3·2) = 8 + 8       = 16 EFs
-###   quot = 16                                         = 16 EFs
-###   total per row                                     = 112 EFs = 224 felts
-### Two rows (curr + next) × 224 = 448 felts.
-const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 4 (rand word) + 4 (codegen pad)
+###   main       = aligned(51) + aligned(22) + aligned(16) = 56 + 24 + 16 = 96
+###   aux coords = aligned(4 * 2) + aligned(3 * 2) + aligned(1 * 2) = 8 + 8 + 8 = 24
+###   quot       = 8 chunks * 2 coordinates = 16
+###   total per row = 136 EF slots = 272 felts
+### Two rows (curr + next) occupy 544 felts.
+const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 8
 
-### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
-const AUX_BUS_BOUNDARY_PTR = 3225420232       # OOD_EVALUATIONS_PTR + 448
+### Auxiliary bus boundary values.
+### One LogUp final per AIR, stored in proof order; 3 EF slots padded to 4 EF slots.
+const AUX_BUS_BOUNDARY_PTR = 3225420328       # OOD_EVALUATIONS_PTR + 544
 
-### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
-###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, reserved (zero),
-###                weight0, f, s0
-###   slots 10-11: multi_air_beta_{core,chip}
-###   slots 12-14: is_{first,last,transition}_core
-###   slots 15-17: is_{first,last,transition}_chip
-const AUXILIARY_ACE_INPUTS_PTR = 3225420236   # AUX_BUS_BOUNDARY_PTR + 4
+### Auxiliary inputs for ACE (stark vars), 20 EF slots = 40 base felts:
+###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, reserved, weight0, f, s0
+###   slot 10:     multi_air_fold_beta
+###   slots 11-13: is_{first,last,transition}_core
+###   slots 14-16: is_{first,last,transition}_chip
+###   slots 17-19: is_{first,last,transition}_poseidon2_permutation
+const AUXILIARY_ACE_INPUTS_PTR = 3225420336   # AUX_BUS_BOUNDARY_PTR + 8
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420272     # AUXILIARY_ACE_INPUTS_PTR + 36
+const ACE_CIRCUIT_STREAM_PTR = 3225420376     # AUXILIARY_ACE_INPUTS_PTR + 40
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420868            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225420972            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
 
 ## FRI
 ##
@@ -273,9 +275,9 @@ const ACE_CIRCUIT_PTR = 3225420868            # ACE_CIRCUIT_STREAM_PTR + num_con
 const FRI_COM_PTR = 4294912800
 
 ## Current trace row
-## 80 field elements for main portion of trace, 8 * 2 field elements for auxiliary portion of trace
-## and 8 * 2 field elements for constraint composition polynomials, i.e., the number of slots
-## required is 80 + 16 + 16 = 112
+## 96 field elements for the LMCS-aligned main trace values, 24 field elements for auxiliary
+## values, and 16 field elements for quotient chunks. The row therefore occupies 136 field
+## elements.
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
 ## Its size is determined by the sum of widths of all traces.
@@ -431,6 +433,14 @@ pub proc get_chiplets_trace_length_log
     push.CHIPLETS_TRACE_LENGTH_LOG_PTR mem_load
 end
 
+pub proc set_poseidon2_permutation_trace_length_log
+    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_store
+end
+
+pub proc get_poseidon2_permutation_trace_length_log
+    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_load
+end
+
 pub proc set_query_pow_bits
     push.QUERY_POW_BITS_PTR mem_store
 end
@@ -533,8 +543,25 @@ pub proc tmp4
     push.TMP4
 end
 
-pub proc swap_scratch_ptr
-    push.SWAP_SCRATCH_PTR
+pub proc set_order_tag
+    push.ORDER_TAG_PTR mem_store
+end
+
+pub proc get_order_tag
+    push.ORDER_TAG_PTR mem_load
+end
+
+pub proc assert_valid_order_tag
+    push.ORDER_TAG_PTR mem_load
+    u32lt.ORDER_TAG_COUNT assert.err="invalid order tag"
+end
+
+pub proc relation_digest_ptr
+    push.RELATION_DIGEST_PTR
+end
+
+pub proc ace_registry_root_ptr
+    push.ACE_REGISTRY_ROOT_PTR
 end
 
 pub proc random_coin_input_buf_ptr

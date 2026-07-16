@@ -20,7 +20,7 @@ use crate::{
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
-        chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
+        chiplets::hasher::{CAPACITY_LEN, CONTROLLER_ROWS_PER_PERMUTATION, RATE_LEN, STATE_WIDTH},
         log_deferred::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
@@ -60,10 +60,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGDEFERRED.
-    // Strides are measured in controller-trace rows (2 per permutation), not physical
-    // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
-    // controller output row.
+    // Hasher return addresses are controller-row addresses. The final row of a permutation is
+    // `addr + CONTROLLER_ROWS_PER_PERMUTATION - 1`; each following permutation advances by
+    // `CONTROLLER_ROWS_PER_PERMUTATION`.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
@@ -148,9 +147,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- RESPAN ---
-                    // Uses `addr_next` directly: in the controller/perm split, the next row's
-                    // decoder `addr` already points at the continuation input
-                    // row, so no offset is needed.
+                    // `addr_next` points at the continuation input row, so RESPAN does not apply
+                    // an address offset here.
                     g.remove(
                         "respan",
                         op_flags.respan(),
@@ -604,16 +602,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         op_flags.log_deferred(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
-                                if i < 4 {
+                            let logpre_in: [LB::Expr; STATE_WIDTH] = array::from_fn(|i| {
+                                if i < CAPACITY_LEN {
                                     user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
-                                } else if i < 8 {
-                                    stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
+                                } else if i < RATE_LEN {
+                                    stk.get(STACK_STMNT_RANGE.start + (i - CAPACITY_LEN)).into()
                                 } else {
                                     LB::Expr::from(DEFERRED_ROOT_DOMAIN[i - 8])
                                 }
                             });
-                            let logpre_out: [LB::Expr; 12] =
+                            let logpre_out: [LB::Expr; STATE_WIDTH] =
                                 array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
                                 "logdeferred_init",

@@ -73,6 +73,12 @@ fn stark_verifier_e2f4_with_kernel_single() {
     run_recursive_verifier(&data);
 }
 
+#[test]
+fn stark_verifier_e2f4_with_deferred_root() {
+    let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    run_recursive_verifier(&data);
+}
+
 // Helper function for recursive verification
 pub fn generate_recursive_verifier_data(
     source: &str,
@@ -164,7 +170,7 @@ fn run_recursive_verifier(data: &VerifierData) {
         end
 
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3, log_core, log_chip].
+            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
 
             # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
             # (kernel_ptr = 0). Build [dst=0, count=4N].
@@ -220,6 +226,11 @@ const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
         u32split drop
     end";
 
+const EXAMPLE_LOG_DEFERRED: &str = "begin
+        log_deferred
+        dropw dropw dropw
+    end";
+
 fn fib_stack_inputs() -> Vec<u64> {
     let mut inputs = vec![0_u64; 16];
     inputs[15] = 0;
@@ -227,7 +238,7 @@ fn fib_stack_inputs() -> Vec<u64> {
     inputs
 }
 
-// VARIABLE LENGTH PUBLIC INPUTS TESTS
+// REDUCED INPUTS TESTS
 // ================================================================================================
 
 #[rstest]
@@ -236,17 +247,18 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(2)]
 #[case(3)]
 #[case(8)]
-// 255 = MAX_AUX_INPUTS / WORD_SIZE is the maximum the Rust `Statement` accepts.
+// 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
+// accepts.
 #[case(255)]
-fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
+fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usize) {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
-    // 1) Generate the public inputs.
+    // 1) Generate the statement inputs.
     let stack_inputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let stack_outputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
-    let transcript_state: [u64; 4] = array::from_fn(|_| rng.next_u64());
+    let deferred_root: [u64; 4] = array::from_fn(|_| rng.next_u64());
     let kernel_digest_felts = generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
@@ -255,21 +267,18 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     const KERNEL_PTR: u64 = 0;
     const STACK_IO_PTR: u64 = 4096;
 
-    // 2) Initial operand stack: `stage_reduced_inputs` operands, then the init_seed args.
-    //    [kernel_ptr, N, stack_io_ptr, PROG0..3, log_core, log_chip, rd0..3]; relation digest
-    //    values are arbitrary here.
+    // 2) Initial operand stack: `stage_reduced_inputs` operands.
     let mut initial_stack = vec![KERNEL_PTR, num_kernel_proc_digests as u64, STACK_IO_PTR];
     initial_stack.extend_from_slice(&program_digest);
-    initial_stack.extend_from_slice(&[10, 10, 1, 2, 3, 4]);
 
     // 3) Build the advice stack: kernel digests (4N) and stack i/o (32) for the marshalling, then
-    //    transcript state (DEFERRED) for `stage_reduced_inputs`, then the aux randomness consumed
-    //    by the test prologue that drives `compute_outer_logup_correction`.
+    //    deferred root for `stage_reduced_inputs`, then the aux randomness consumed by the test
+    //    prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
-    advice_stack.extend_from_slice(&transcript_state);
+    advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
     // 4) Marshal the caller regions, stage the reduced-inputs block, run process_public_inputs,
@@ -299,6 +308,13 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
             exec.copy_advice_to_mem
 
             exec.public_inputs::stage_reduced_inputs
+
+            push.10 exec.constants::set_core_trace_length_log
+            push.10 exec.constants::set_chiplets_trace_length_log
+            push.10 exec.constants::set_poseidon2_permutation_trace_length_log
+            push.10 exec.constants::set_trace_length_log
+            push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
+
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
 
@@ -338,9 +354,9 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         );
     }
 
-    // 5) program_digest / transcript_state pass through to reduced_inputs+4..12; the trailing pad
-    //    word at +12..16 must be zero.
-    for (i, &v) in program_digest.iter().chain(transcript_state.iter()).enumerate() {
+    // 5) program_digest / deferred_root pass through to reduced_inputs+4..12; the trailing pad word
+    //    at +12..16 must be zero.
+    for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
             read_elem(reduced_ptr + 4 + i as u32),
             v,
@@ -362,7 +378,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     //     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))
     //             + 1 / ((α + 2γ) + msg(program_digest))
     //             + 1 / (α + 3γ)
-    //             − 1 / ((α + 3γ) + msg(transcript_state))
+    //             − 1 / ((α + 3γ) + msg(deferred_root))
     //
     // with γ = β^16 and msg(w) = Σ w_i·β^i, mirroring `MidenMultiAir::eval_external`.
     let beta = QuadFelt::new([
@@ -389,11 +405,11 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         });
     let d_bh = alpha + gamma.double() + msg(&program_digest);
     let prefix_lp = alpha + gamma * QuadFelt::from_u8(3);
-    let d_lpf = prefix_lp + msg(&transcript_state);
+    let d_lpf = prefix_lp + msg(&deferred_root);
     let expected_c_total = kernel_corr
         + d_bh.try_inverse().expect("zero block-hash denominator")
-        + prefix_lp.try_inverse().expect("zero log-precompile init denominator")
-        - d_lpf.try_inverse().expect("zero log-precompile final denominator");
+        + prefix_lp.try_inverse().expect("zero log-deferred init denominator")
+        - d_lpf.try_inverse().expect("zero log-deferred final denominator");
     let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
 
     assert_eq!(
@@ -408,11 +424,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     );
 }
 
-/// The recursive verifier must reject statements the Rust `Statement::new` refuses:
-/// `aux_inputs.len() = WORD_SIZE * num_kernel_proc_digests` must not exceed
-/// `MultiAir::max_aux_inputs()`. 256 kernel digests (1024 felts > MAX_AUX_INPUTS = 1020) is one
-/// over the limit, so `stage_reduced_inputs` must fail on its `N <= 255` bound rather than stage an
-/// out-of-range digest list.
+/// The recursive verifier must reject statements with more kernel-procedure digests than a
+/// `KernelDescriptor` can contain. 256 digests is one over the maximum, so
+/// `stage_reduced_inputs` must fail on the digest-count bound before reading caller memory or
+/// advice.
 #[test]
 fn rejects_too_many_kernel_proc_digests() {
     let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
@@ -439,8 +454,7 @@ fn rejects_too_many_kernel_proc_digests() {
 // HELPERS
 // ===============================================================================================
 
-/// Generates a vector with a specific number of kernel procedures digests given a `Rng`,
-/// as 4 canonical felts per digest.
+/// Generates kernel-procedure digest felts: 4 canonical felts per digest.
 fn generate_kernel_procedures_digests<R: Rng>(
     rng: &mut R,
     num_kernel_proc_digests: usize,

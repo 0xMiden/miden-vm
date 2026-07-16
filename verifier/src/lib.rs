@@ -174,11 +174,10 @@ pub enum StarkVerificationError {
     Verifier(#[from] VerifierError),
 }
 
-/// Verifies a multi-AIR STARK proof for the given (Core, Chiplets) split.
+/// Verifies a multi-AIR STARK proof for the Miden VM statement.
 ///
-/// Pre-seeds the challenger with the protocol parameters, public values, and the
-/// concatenated kernel-procedure digests (the only variable-length public input today,
-/// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR verifier.
+/// Pre-seeds the challenger with the protocol parameters, public values, and statement aux inputs,
+/// then delegates to the lifted multi-AIR verifier.
 fn verify_stark_proof<SC>(
     config: &SC,
     public_values: &[Felt],

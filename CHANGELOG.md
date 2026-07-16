@@ -14,6 +14,7 @@
 - [BREAKING] Removed the `miden::core::crypto::hashes::sha512` MASM module, Rust handler, docs, and tests. SHA-512 support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
 - [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
 - [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
+- [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
 
 #### Fixes
 

@@ -5,13 +5,13 @@ use alloc::vec::Vec;
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
-use crate::lookup::BoundaryBuilder;
+use crate::{MIDEN_AIR_COUNT, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Number of final aux values.
-pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
+/// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 
 // BOUNDARY EMITTERS
 // ================================================================================================
@@ -70,7 +70,7 @@ pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
         .unwrap_or_default();
 
-    // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
+    // Kernel ROM init: one contribution per kernel procedure digest.
     for digest in kernel_digests {
         boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
     }
@@ -106,12 +106,10 @@ mod tests {
         trace::AUX_TRACE_RAND_CHALLENGES,
     };
 
-    /// Pin the `BlockHashMsg::End → Child` boundary collapse: at the root END row, the
+    /// Pin the `BlockHashMsg::End -> Child` boundary collapse: at the root END row, the
     /// algebra forces `is_first_child = 0`, `is_loop_body = 0`, `parent = 0`, and
-    /// `child_hash = program_hash`, so the in-trace `End` removal encodes identically to
-    /// the boundary `Child` seed. If a future change to either side breaks the collapse
-    /// (e.g. flips one of those four conditions), the boundary `+1/d` no longer cancels
-    /// the in-trace `-1/d` and this test fires.
+    /// `child_hash = program_hash`, so the in-trace `End` removal and the boundary
+    /// `Child` seed encode to the same denominator.
     #[test]
     fn block_hash_seed_matches_root_end_removal() {
         use crate::{
@@ -156,26 +154,22 @@ mod tests {
         );
     }
 
-    /// Lookup-structure validation for `CoreAir` — the standalone Core-half AIR used by the
-    /// multi-AIR proving path.
+    /// Lookup-structure validation for `CoreAir`.
     #[test]
     fn core_air_lookup_validates() {
         let layout = ValidateLayout {
             trace_width: NUM_CORE_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
-            // Core has no periodic columns (all serve the chiplets).
             num_periodic_columns: 0,
             permutation_width: MAIN_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::CORE, layout)
+        ValidateLookupAir::validate(&MidenAir::Core, layout)
             .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
     }
 
-    /// Lookup-structure validation for `ChipletsAir` — the standalone Chiplets-half AIR.
-    /// Symmetric to `core_air_lookup_validates`: 21-col main trace, 3 LogUp accumulator
-    /// columns, 1 committed final, all periodic columns owned here.
+    /// Lookup-structure validation for `ChipletsAir`.
     #[test]
     fn chiplets_air_lookup_validates() {
         let num_periodic = ChipletsAir.periodic_columns().len();
@@ -187,7 +181,7 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::CHIPLETS, layout)
+        ValidateLookupAir::validate(&MidenAir::Chiplets, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
     }
 
@@ -211,7 +205,7 @@ mod tests {
         );
 
         let _ = check_trace_balance(
-            &MidenAir::CORE,
+            &MidenAir::Core,
             &main_trace,
             &periodic,
             &publics,

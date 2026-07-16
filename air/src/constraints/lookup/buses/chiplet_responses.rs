@@ -4,9 +4,9 @@
 //! all sharing one LogUp column.
 //!
 //! The 7 hasher response variants are gated on hasher controller rows
-//! (`chiplet_active.controller = 1`) via the per-variant `(s0, s1, s2, is_boundary)`
-//! combinations. Non-hasher variants (bitwise / memory / ACE init / kernel ROM) are gated
-//! by the matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
+//! (`chiplet_active.controller = 1`) using the controller-internal `(s0, s1, s2, is_boundary)`
+//! columns. Non-hasher variants (bitwise / memory / ACE init / kernel ROM) are gated by the
+//! matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
 //! rather than splitting into 4 per-label variants. This keeps the response-column
@@ -29,6 +29,7 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    trace::chiplets::hasher::{DIGEST_LEN, RATE_LEN, STATE_WIDTH},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -58,13 +59,13 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let ace = local.ace();
     let krom = local.kernel_rom();
 
-    let state: [LB::Var; 12] = ctrl.state;
-    let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let state: [LB::Var; STATE_WIDTH] = ctrl.state;
+    let rate_0: [LB::Var; DIGEST_LEN] = array::from_fn(|i| ctrl.state[i]);
+    let rate_1: [LB::Var; DIGEST_LEN] = array::from_fn(|i| ctrl.state[DIGEST_LEN + i]);
 
     // --- Hasher response flags ---
-    // All gated by `chiplet_active.controller`; composed with the per-row-type
-    // `(s0, s1, s2, is_boundary)` combinations.
+    // All gated by `chiplet_active.controller`; the row type is selected by the
+    // controller-internal `(s0, s1, s2, is_boundary)` columns.
     let controller_flag = ctx.chiplet_active.controller.clone();
     let hasher_flags = hasher_response_flags(controller_flag, ctrl);
 
@@ -82,10 +83,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // (`chip_clk`) so they cancel against the matching request.
     let clk_plus_one: LB::Expr = local.chip_clk.into();
 
-    // Hasher payload builders.
-    let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
-    let full_rate = || -> [LB::Expr; 8] {
-        array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() })
+    // Local helpers: convert the copied Var arrays into Expr arrays.
+    let full_state = || -> [LB::Expr; STATE_WIDTH] { state.map(Into::into) };
+    let full_rate = || -> [LB::Expr; RATE_LEN] {
+        array::from_fn(|i| {
+            if i < DIGEST_LEN {
+                rate_0[i].into()
+            } else {
+                rate_1[i - DIGEST_LEN].into()
+            }
+        })
     };
 
     builder.next_column(
@@ -121,8 +128,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
                     // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
                     // Each path has its own controller flag. All three encode
-                    // `leaf = (1-bit)·rate_0 + bit·rate_1` with `bit = node_index -
-                    // 2·node_index_next` (the current Merkle direction bit).
+                    // `leaf = (1-bit)*rate_0 + bit*rate_1` with
+                    // `bit = node_index - 2*node_index_next` (the current Merkle direction bit).
                     for (name, flag, kind) in [
                         ("mp_verify_input", hasher_flags.f_mp, BusId::HasherMerkleVerifyInit),
                         ("mr_update_old_input", hasher_flags.f_mv, BusId::HasherMerkleOldInit),
@@ -324,9 +331,9 @@ where
         * is_boundary.not();
 
     // Merkle tree input rows (is_boundary=1):
-    //   f_mp = ctrl · hs0 · (1-hs1) · hs2 · is_boundary
-    //   f_mv = ctrl · hs0 · hs1 · (1-hs2) · is_boundary
-    //   f_mu = ctrl · hs0 · hs1 · hs2 · is_boundary
+    //   f_mp = ctrl * hs0 * (1-hs1) * hs2 * is_boundary
+    //   f_mv = ctrl * hs0 * hs1 * (1-hs2) * is_boundary
+    //   f_mu = ctrl * hs0 * hs1 * hs2 * is_boundary
     let f_mp =
         controller_flag.clone() * hs0.clone() * not_hs1.clone() * hs2.clone() * is_boundary.clone();
     let f_mv =

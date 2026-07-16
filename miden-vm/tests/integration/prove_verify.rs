@@ -100,7 +100,7 @@ fn assert_recursive_verify(
         end
 
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3, log_core, log_chip].
+            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
 
             # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
             # (kernel_ptr = 0). Build [dst=0, count=4N].
@@ -198,7 +198,7 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Equal-heights regression: tiny program where both AIRs land at MIN_TRACE_LEN.
+/// Equal-heights regression: tiny program where every AIR lands at MIN_TRACE_LEN.
 /// Catches mistakes in the MASM `air_order` reconstruction's tie-break rule.
 #[test]
 fn test_equal_heights_recursive() {
@@ -210,8 +210,8 @@ fn test_equal_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
-/// Hash-heavy program where `chip_height > core_height`. Regression for the
-/// per-AIR-height boundary handling on the SLICED Core trace.
+/// Hash-heavy program where chiplets grow beyond the core trace. Regression for per-AIR-height
+/// boundary handling on the sliced core trace.
 #[test]
 fn test_hash_heavy_divergent_heights() {
     let source = "
@@ -224,6 +224,22 @@ fn test_hash_heavy_divergent_heights() {
         end
     ";
     assert_prove_verify(source, HashFunction::Blake3_256, "Blake3", false, false);
+}
+
+/// Exercises the MASM recursive verifier when the Poseidon2 permutation AIR is taller than the
+/// core trace.
+#[test]
+fn test_hash_heavy_divergent_heights_recursive() {
+    let source = "
+        begin
+            padw padw padw
+            repeat.20
+                hperm
+            end
+            dropw dropw dropw
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
 /// Test end-to-end proving and verification with RPX
@@ -320,14 +336,20 @@ mod fast_parallel {
         // Build public inputs
         let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
-        // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
-        let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
+        // Per-AIR matrices for prove_multi.
+        let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.to_air_matrices();
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
-        let proof_bytes =
-            prove_stark(&blake3_config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
-                .expect("Proving failed");
+        let proof_bytes = prove_stark(
+            &blake3_config,
+            core_matrix,
+            chiplets_matrix,
+            poseidon2_matrix,
+            &public_values,
+            &aux_inputs,
+        )
+        .expect("Proving failed");
 
         let deferred_wire = trace
             .deferred_state()

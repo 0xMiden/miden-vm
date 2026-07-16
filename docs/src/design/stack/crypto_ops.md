@@ -35,7 +35,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/permutation split design these rows are consecutive, so their addresses differ by exactly $1$.
+The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region. These controller rows are consecutive, so their addresses differ by exactly $1$.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $12$.
@@ -73,7 +73,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
+The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -120,7 +120,7 @@ The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation l
 > b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
 > $$
 
-The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the trace of the hash chiplet. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the hash-controller region. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
@@ -477,8 +477,8 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
 The above constraint enforces that the specified input and output controller rows must be present
-in the trace of the hash chiplet. In the controller/permutation split design these two controller
-rows are consecutive, so their addresses differ by exactly 1.
+in the hash-controller region. These two controller rows are consecutive, so their addresses differ
+by exactly 1.
 
 
 

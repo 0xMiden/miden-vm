@@ -1,6 +1,6 @@
 use miden::core::stark::constants
-use miden::core::stark::random_coin
 use miden::core::stark::public_inputs
+use miden::core::stark::random_coin
 use miden::core::crypto::hashes::poseidon2
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
@@ -46,8 +46,7 @@ use miden::core::crypto::hashes::poseidon2
 # Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
 # is accumulated as `requests − response`.
 #
-# Fiat-Shamir absorption order (rate-aligned, 6 permutes total, mirrors
-# `MidenMultiAir::observe`):
+# Fiat-Shamir absorption order (`MidenMultiAir::observe`):
 #   1. kernel_H + program_digest                      (4 + 4 = 8 felts)
 #   2. deferred_root + zero pad                       (4 + 4 = 8 felts)
 #   3. stack_inputs[0..8]                             (8 felts)
@@ -73,10 +72,8 @@ use miden::core::crypto::hashes::poseidon2
 # digest and deferred root live in the caller-facing reduced-inputs block instead.
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
-# Upper bound on the kernel-digest portion of the statement `aux_inputs`, in field elements:
-# `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. The fixed program hash and transcript
-# root occupy the rest of `aux_inputs` and are bounded separately.
-const MAX_AUX_INPUTS = 1020
+# Number of AIR instances in the Miden VM statement.
+const NUM_MIDEN_AIRS = 3
 
 # Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
@@ -106,7 +103,8 @@ end
 #!
 #! Precondition:  random coin input_len=0 (guaranteed by `init_seed`, which absorbs the
 #!                protocol parameters as one full rate block).
-#! Postcondition: random coin input_len=0, output_len=8.
+#! Postcondition: the transcript input buffer holds the AIR-shape values. The generic verifier
+#!                observes the main-trace commitment next and flushes before sampling.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -115,10 +113,10 @@ pub proc process_public_inputs
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="process_public_inputs: input buffer must be empty"
 
-    # 1) Compute and store `pi_ptr` (the reduced-inputs block lives at its fixed standalone
-    #    address, already populated by `verify_proof` before the transcript started).
+    # 1) Compute and store `pi_ptr`; publish the fixed reduced-inputs block address separately.
     exec.get_num_fixed_len_public_inputs
     exec.public_inputs::compute_and_store_public_inputs_address
+    exec.store_reduced_inputs_address
     # => [...]
 
     # 2) Observe the 16-felt reduced-inputs window into FS as two rate-aligned chunks.
@@ -128,6 +126,19 @@ pub proc process_public_inputs
     # 3) Load FLPI (stack i/o) from caller memory into the FLPI region and absorb into FS.
     exec.load_public_inputs
     # => [...]
+
+    # 4) Observe the AIR count and per-AIR log heights.
+    exec.observe_miden_air_shape
+    # => [...]
+end
+
+#! Publishes the fixed reduced-inputs block address for caller-facing output readers.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc store_reduced_inputs_address
+    exec.constants::reduced_inputs_ptr
+    exec.constants::reduced_inputs_address_ptr mem_store
 end
 
 #! Stages the reduced-inputs block at the fixed standalone `REDUCED_INPUTS_PTR` before the
@@ -146,10 +157,10 @@ end
 #! Input:  [kernel_ptr, N, stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
 #! Output: [...]
 pub proc stage_reduced_inputs
-    # Persist N (bounded by Kernel::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
+    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
     dup.1
     u32assert.err="number of kernel procedure digests must fit in a u32"
-    dup u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
+    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     exec.constants::num_kernel_digests_ptr mem_store
     # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
     dup exec.constants::kernel_digests_address_ptr mem_store
@@ -402,11 +413,10 @@ proc absorb_reduced_inputs_window_into_fs
     drop
 end
 
-#! Phase 3b — loads the fixed-length public inputs (stack i/o) from caller memory at
-#! `STACK_IO_ADDRESS_PTR`, stores them at `pi_ptr` as extension field elements (each base felt at
-#! offset `2*i`, zero in the high coordinate), and absorbs them into the FS transcript. Each
-#! `load_base_store_extension_double_word_from_mem + permute` iteration absorbs 8 base felts via
-#! direct sponge permutation.
+#! Loads stack i/o from caller memory at `STACK_IO_ADDRESS_PTR`, stores it at `pi_ptr` as extension
+#! field elements (each base felt at offset `2*i`, zero in the high coordinate), and absorbs it
+#! into the FS transcript. Each `load_base_store_extension_double_word_from_mem + permute`
+#! iteration absorbs 8 base felts via direct sponge permutation.
 #!
 #! POSTCONDITION: random coin input_len=0, output_len=8 on return.
 #!
@@ -437,4 +447,18 @@ proc load_public_inputs
     # => [pi_ptr + 64, stack_io_ptr + 32, ...]
 
     drop drop
+end
+
+#! Observe the Miden AIR shape into the Fiat-Shamir transcript.
+#!
+#! This matches the framework's shape observation: instance count followed by per-AIR log heights in
+#! instance order.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc observe_miden_air_shape
+    push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
+    exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_poseidon2_permutation_trace_length_log exec.random_coin::observe_felt
 end

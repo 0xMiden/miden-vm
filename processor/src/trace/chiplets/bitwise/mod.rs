@@ -58,7 +58,7 @@ struct BitwiseOp {
 /// It also builds an execution trace of these operations.
 ///
 /// ## Bitwise operation execution trace (AND and XOR)
-/// The execution trace for each operation consists of 8 rows and 14 columns. At a high level,
+/// The execution trace for each operation consists of 8 rows and 13 columns. At a high level,
 /// we break input values into 4-bit limbs, apply the bitwise operation to these limbs at every
 /// row starting with the most significant limb, and accumulate the result in the result column.
 ///
