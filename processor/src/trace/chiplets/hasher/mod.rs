@@ -558,7 +558,7 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 }
 
 fn perm_id_felt(id: usize) -> Felt {
-    Felt::new_unchecked(id.try_into().expect("Poseidon2 permutation id exceeds u64"))
+    Felt::from_u32(u32::try_from(id).expect("Poseidon2 permutation id exceeds u32"))
 }
 
 // HASHER STATE MUTATORS

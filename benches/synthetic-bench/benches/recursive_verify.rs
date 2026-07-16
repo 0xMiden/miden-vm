@@ -47,6 +47,7 @@ use miden_core::{
     field::QuotientMap,
     precompile::PrecompileTranscriptState,
     serde::{Deserializable, Serializable},
+    utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
@@ -64,19 +65,6 @@ const KERNEL_DIGEST_PTR: u64 = 0;
 const STACK_IO_PTR: u64 = 4096;
 const STACK_IO_VALUE_COUNT: u64 = 32;
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v1";
-
-#[allow(dead_code)]
-trait TraceLenSummaryExt {
-    fn poseidon2_permutation_trace_len(&self) -> usize;
-}
-
-// `next` has no separate Poseidon2 AIR. Branches which add one expose an inherent method with this
-// name; inherent methods take precedence over this shim.
-impl TraceLenSummaryExt for TraceLenSummary {
-    fn poseidon2_permutation_trace_len(&self) -> usize {
-        0
-    }
-}
 
 struct TxProofFixture {
     program_info: ProgramInfo,
@@ -265,21 +253,15 @@ fn stack_inputs(values: &[u64]) -> StackInputs {
     StackInputs::new(&values).expect("invalid RECURSION_BENCH_STACK")
 }
 
-fn append_word_bytes(bytes: &mut Vec<u8>, word: &miden_core::Word) {
-    for value in word.as_elements() {
-        bytes.extend_from_slice(&value.as_canonical_u64().to_le_bytes());
-    }
-}
-
 fn tx_proof_cache_key(
     program_info: &ProgramInfo,
     stack_values: &[u64],
     hash_fn: HashFunction,
 ) -> String {
     let mut program_bytes = Vec::new();
-    append_word_bytes(&mut program_bytes, program_info.program_hash());
+    program_bytes.extend_from_slice(&program_info.program_hash().as_bytes());
     for digest in program_info.kernel_procedures() {
-        append_word_bytes(&mut program_bytes, digest);
+        program_bytes.extend_from_slice(&digest.as_bytes());
     }
 
     let mut stack_bytes = Vec::with_capacity(stack_values.len() * 8);
@@ -298,7 +280,7 @@ fn tx_proof_cache_key(
         .into_iter(),
     )
     .into();
-    hex_encode(&digest)
+    to_hex(&digest)
 }
 
 fn tx_proof_cache_paths(
@@ -377,18 +359,8 @@ fn store_cached_tx_proof(
         .unwrap_or_else(|err| panic!("write cached outputs {}: {err}", outputs_path.display()));
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
 fn hex_prefix(bytes: &[u8]) -> String {
-    hex_encode(&bytes[..bytes.len().min(16)])
+    to_hex(&bytes[..bytes.len().min(16)])
 }
 
 fn trace_shape_summary_for(proof_count: usize, summary: &TraceLenSummary) -> TraceShapeSummary {
@@ -498,6 +470,12 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                     }
                     (stack_outputs, proof, "miss")
                 };
+            assert!(
+                proof.precompile_requests().is_empty(),
+                "recursive_verify fixture at proof index {proof_index} emits precompile requests; \
+                 the recursive advice is built with PrecompileTranscriptState::default(), which is \
+                 only valid for precompile-free fixtures"
+            );
             let proof_bytes = proof.to_bytes();
             let proof_bytes_len = proof_bytes.len();
             let proof_digest: [u8; 32] = Blake3_256::hash(&proof_bytes).into();
@@ -520,7 +498,7 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 proof_bytes_len,
                 proof.precompile_requests().len(),
                 proof_cache_status,
-                hex_encode(&proof_digest),
+                to_hex(&proof_digest),
                 proof_prefix,
             );
 

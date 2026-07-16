@@ -11,7 +11,7 @@ use miden_air::trace::{
     },
     poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -195,7 +195,7 @@ impl Chiplets {
 
         let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
         let mut poseidon2_trace =
-            vec![Felt::ZERO; NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len];
+            Felt::zero_vec(NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len);
         self.fill_trace(&mut trace, trace_len, &mut poseidon2_trace);
 
         (ChipletsTrace { trace }, Poseidon2PermutationTrace { trace: poseidon2_trace })

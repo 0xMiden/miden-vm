@@ -15,6 +15,7 @@ use miden_core::chiplets::hasher::Hasher;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
+    perm_id_felt,
 };
 
 // HASHER OPERATION
@@ -378,7 +379,7 @@ pub(super) fn fill_poseidon2_permutation_trace(
         write_poseidon2_permutation_cycle(
             &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
             &state,
-            felt_from_usize(perm_id),
+            perm_id_felt(perm_id),
             Felt::new_unchecked(request.multiplicity),
         );
         row_idx += HASH_CYCLE_LEN;
@@ -392,7 +393,7 @@ pub(super) fn fill_poseidon2_permutation_trace(
         write_poseidon2_permutation_cycle(
             &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
             &zero_state,
-            felt_from_usize(perm_id),
+            perm_id_felt(perm_id),
             ZERO,
         );
         row_idx += HASH_CYCLE_LEN;
@@ -400,7 +401,7 @@ pub(super) fn fill_poseidon2_permutation_trace(
 
         while row_idx < rows.len() {
             rows.copy_within(padding_start..padding_start + HASH_CYCLE_LEN, row_idx);
-            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], felt_from_usize(perm_id));
+            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], perm_id_felt(perm_id));
             row_idx += HASH_CYCLE_LEN;
             perm_id += 1;
         }
@@ -411,10 +412,6 @@ fn witnesses_with_first(value: Felt) -> [Felt; NUM_SBOX_WITNESSES] {
     let mut witnesses = [ZERO; NUM_SBOX_WITNESSES];
     witnesses[0] = value;
     witnesses
-}
-
-fn felt_from_usize(value: usize) -> Felt {
-    Felt::new_unchecked(value.try_into().expect("Poseidon2 permutation id exceeds u64"))
 }
 
 fn set_perm_id(rows: &mut [[Felt; NUM_POSEIDON2_PERMUTATION_COLS]], perm_id: Felt) {
