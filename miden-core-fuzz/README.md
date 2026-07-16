@@ -1,6 +1,6 @@
-# MastForest Fuzzing
+# Miden core fuzzing
 
-This crate tests MastForest deserialization and validation against bad inputs.
+This crate tests Miden core deserialization surfaces against bad inputs, including `MastForest`, `ExecutionProof`, and deferred-state proof wire formats.
 
 ## Prerequisites
 
@@ -59,13 +59,13 @@ cargo +nightly fuzz run program_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run program_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`kernel_deserialize`** — Tests `Kernel::read_from_bytes`.
+**`kernel_deserialize`** — Tests `KernelDescriptor::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run kernel_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`kernel_serde_deserialize`** — Tests `Kernel` JSON deserialization via `serde_json`.
+**`kernel_serde_deserialize`** — Tests `KernelDescriptor` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run kernel_serde_deserialize --fuzz-dir miden-core-fuzz
@@ -113,16 +113,16 @@ cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`precompile_request_deserialize`** — Tests `PrecompileRequest::read_from_bytes`.
+**`deferred_state_wire_deserialize`** — Tests `DeferredStateWire::read_from_bytes`.
 
 ```bash
-cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuzz
+cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`precompile_request_serde_deserialize`** — Tests `PrecompileRequest` JSON deserialization via `serde_json`.
+**`deferred_state_wire_serde_deserialize`** — Tests `DeferredStateWire` JSON deserialization via `serde_json`.
 
 ```bash
-cargo +nightly fuzz run precompile_request_serde_deserialize --fuzz-dir miden-core-fuzz
+cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 ### Package Deserialization Targets
@@ -202,6 +202,7 @@ Where we expect malicious inputs to cause problems:
 - MastNodeInfo (type discriminants, child IDs, digests)
 - DebugInfo (decorators, strings, CSR structures)
 - Hash verification in validation
+- Deferred-state proof wire parsing and JSON deserialization
 
 ## What We're Testing
 

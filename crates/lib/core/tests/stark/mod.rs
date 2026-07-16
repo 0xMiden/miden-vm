@@ -3,22 +3,13 @@ use std::{array, sync::Arc};
 use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
-    Felt, WORD_SIZE, Word,
-    events::{EventId, EventName},
+    Felt, WORD_SIZE,
+    deferred::{DeferredState, PrecompileRegistry},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    precompile::{
-        PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscriptState,
-        PrecompileVerifier, PrecompileVerifierRegistry,
-    },
     proof::HashFunction,
 };
-use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_processor::{
-    DefaultHost, ExecutionOptions, ProcessorState, Program, ProgramInfo,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler},
-};
+use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, prove_sync,
     recursive_verifier::{VerifierData, generate_advice_inputs},
@@ -83,8 +74,8 @@ fn stark_verifier_e2f4_with_kernel_single() {
 }
 
 #[test]
-fn stark_verifier_e2f4_with_log_precompile_transcript() {
-    let data = generate_recursive_verifier_data_with_log_precompile();
+fn stark_verifier_e2f4_with_deferred_root() {
+    let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
     run_recursive_verifier(&data);
 }
 
@@ -139,117 +130,18 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // build public inputs and generate the advice data needed for recursive proof verification
-    let pub_inputs = PublicInputs::new(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        PrecompileTranscriptState::default(),
-    );
-    let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
-}
-
-fn generate_recursive_verifier_data_with_log_precompile() -> VerifierData {
-    const EVENT_NAME: EventName = EventName::new("test::stark::log_precompile");
-
-    let event_id = EventId::from_name(EVENT_NAME);
-    let calldata = vec![1u8, 2, 3, 4];
-    let tag = Word::from([
-        event_id.as_felt(),
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(7),
-    ]);
-    let comm = Word::from([
-        Felt::new_unchecked(43),
-        Felt::new_unchecked(62),
-        Felt::new_unchecked(24),
-        Felt::new_unchecked(1),
-    ]);
-    let commitment = PrecompileCommitment::new(tag, comm);
-    let source = format!(
-        "
-            use miden::core::sys
-
-            begin
-                emit.event(\"{EVENT_NAME}\")
-
-                push.{tag} push.{comm}
-                exec.sys::log_precompile_request
-
-                repeat.320
-                    swap dup.1 add
-                end
-                u32split drop
-            end
-        ",
-    );
-
-    let core_lib = CoreLibrary::default();
-    let program: Program = Assembler::default()
-        .with_package(core_lib.package(), miden_assembly::Linkage::Dynamic)
-        .unwrap()
-        .assemble_program("program", source)
-        .unwrap()
-        .unwrap_program();
-    let stack_inputs = stack_inputs_from_ints(fib_stack_inputs());
-    let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default();
-    host.load_library(&core_lib).unwrap();
-    host.register_handler(EVENT_NAME, Arc::new(DummyLogPrecompileHandler { event_id, calldata }))
-        .unwrap();
-
-    let options = ProvingOptions::new(HashFunction::Poseidon2);
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
+    // These programs are deferred-free, so an empty registry is intentional; still rehydrate the
+    // proof-carried deferred wire instead of assuming TRUE.
+    let deferred_state = DeferredState::from_wire(
+        Arc::new(PrecompileRegistry::new()),
+        proof.deferred_state(),
+        usize::MAX,
     )
     .unwrap();
-    assert_eq!(proof.precompile_requests().len(), 1);
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
 
-    let verifier_registry = PrecompileVerifierRegistry::new()
-        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let transcript = verifier_registry.requests_transcript(proof.precompile_requests()).unwrap();
-    assert_ne!(transcript.state(), PrecompileTranscriptState::default());
-
-    let pub_inputs = PublicInputs::new(
-        ProgramInfo::from(program),
-        stack_inputs,
-        stack_outputs,
-        transcript.state(),
-    );
     generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
-}
-
-#[derive(Clone)]
-struct DummyLogPrecompileHandler {
-    event_id: EventId,
-    calldata: Vec<u8>,
-}
-
-impl EventHandler for DummyLogPrecompileHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![AdviceMutation::extend_precompile_requests([PrecompileRequest::new(
-            self.event_id,
-            self.calldata.clone(),
-        )])])
-    }
-}
-
-#[derive(Clone)]
-struct DummyLogPrecompileVerifier {
-    commitment: PrecompileCommitment,
-}
-
-impl PrecompileVerifier for DummyLogPrecompileVerifier {
-    fn verify(&self, _calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        Ok(self.commitment)
-    }
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.
@@ -334,6 +226,11 @@ const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
         u32split drop
     end";
 
+const EXAMPLE_LOG_DEFERRED: &str = "begin
+        log_deferred
+        dropw dropw dropw
+    end";
+
 fn fib_stack_inputs() -> Vec<u64> {
     let mut inputs = vec![0_u64; 16];
     inputs[15] = 0;
@@ -350,7 +247,8 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(2)]
 #[case(3)]
 #[case(8)]
-// 255 = Kernel::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement accepts.
+// 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
+// accepts.
 #[case(255)]
 fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usize) {
     let seed = [0_u8; 32];
@@ -360,7 +258,7 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     let stack_inputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let stack_outputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
-    let transcript_state: [u64; 4] = array::from_fn(|_| rng.next_u64());
+    let deferred_root: [u64; 4] = array::from_fn(|_| rng.next_u64());
     let kernel_digest_felts = generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
@@ -374,13 +272,13 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     initial_stack.extend_from_slice(&program_digest);
 
     // 3) Build the advice stack: kernel digests (4N) and stack i/o (32) for the marshalling, then
-    //    transcript state for `stage_reduced_inputs`, then the aux randomness consumed by the test
+    //    deferred root for `stage_reduced_inputs`, then the aux randomness consumed by the test
     //    prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
-    advice_stack.extend_from_slice(&transcript_state);
+    advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
     // 4) Marshal the caller regions, stage the reduced-inputs block, run process_public_inputs,
@@ -456,9 +354,9 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
         );
     }
 
-    // 5) program_digest / transcript_state pass through to reduced_inputs+4..12; the trailing pad
-    //    word at +12..16 must be zero.
-    for (i, &v) in program_digest.iter().chain(transcript_state.iter()).enumerate() {
+    // 5) program_digest / deferred_root pass through to reduced_inputs+4..12; the trailing pad word
+    //    at +12..16 must be zero.
+    for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
             read_elem(reduced_ptr + 4 + i as u32),
             v,
@@ -480,7 +378,7 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     //     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))
     //             + 1 / ((α + 2γ) + msg(program_digest))
     //             + 1 / (α + 3γ)
-    //             − 1 / ((α + 3γ) + msg(transcript_state))
+    //             − 1 / ((α + 3γ) + msg(deferred_root))
     //
     // with γ = β^16 and msg(w) = Σ w_i·β^i, mirroring `MidenMultiAir::eval_external`.
     let beta = QuadFelt::new([
@@ -507,11 +405,11 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
         });
     let d_bh = alpha + gamma.double() + msg(&program_digest);
     let prefix_lp = alpha + gamma * QuadFelt::from_u8(3);
-    let d_lpf = prefix_lp + msg(&transcript_state);
+    let d_lpf = prefix_lp + msg(&deferred_root);
     let expected_c_total = kernel_corr
         + d_bh.try_inverse().expect("zero block-hash denominator")
-        + prefix_lp.try_inverse().expect("zero log-precompile init denominator")
-        - d_lpf.try_inverse().expect("zero log-precompile final denominator");
+        + prefix_lp.try_inverse().expect("zero log-deferred init denominator")
+        - d_lpf.try_inverse().expect("zero log-deferred final denominator");
     let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
 
     assert_eq!(
@@ -527,7 +425,7 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
 }
 
 /// The recursive verifier must reject statements with more kernel-procedure digests than a
-/// `Kernel` can contain. 256 digests is one over `Kernel::MAX_NUM_PROCEDURES`, so
+/// `KernelDescriptor` can contain. 256 digests is one over the maximum, so
 /// `stage_reduced_inputs` must fail on the digest-count bound before reading caller memory or
 /// advice.
 #[test]

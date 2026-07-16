@@ -11,7 +11,7 @@ use miden_air::trace::{
     },
     poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
-use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::Kernel};
+use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::KernelDescriptor};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -117,8 +117,8 @@ pub struct Chiplets {
 impl Chiplets {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Returns a new [Chiplets] component instantiated with the provided Kernel.
-    pub fn new(kernel: Kernel) -> Self {
+    /// Returns a new [Chiplets] component instantiated with the provided KernelDescriptor.
+    pub fn new(kernel: KernelDescriptor) -> Self {
         Self {
             hasher: Hasher::default(),
             bitwise: Bitwise::default(),

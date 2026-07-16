@@ -6,7 +6,6 @@ use miden_core::{
     advice::AdviceMap,
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
-    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -33,7 +32,6 @@ pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
-    ExtendPrecompileRequests { data: Vec<PrecompileRequest> },
 }
 
 impl AdviceMutation {
@@ -47,10 +45,6 @@ impl AdviceMutation {
 
     pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
-    }
-
-    pub fn extend_precompile_requests(data: impl IntoIterator<Item = PrecompileRequest>) -> Self {
-        Self::ExtendPrecompileRequests { data: Vec::from_iter(data) }
     }
 }
 // HOST TRAIT

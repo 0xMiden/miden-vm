@@ -54,7 +54,7 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "serde")]
-use crate::serde::{Deserializable, SliceReader};
+use crate::serde::SliceReader;
 
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -71,7 +71,7 @@ use crate::{
     Felt, Word,
     advice::AdviceMap,
     crypto::hash::Poseidon2,
-    serde::{ByteWriter, DeserializationError, Serializable},
+    serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
 
@@ -1239,6 +1239,18 @@ impl From<MastNodeId> for u32 {
 impl Serializable for MastNodeId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         Serializable::write_into(&self.0, target);
+    }
+}
+
+impl Deserializable for MastNodeId {
+    fn read_from<R: crate::serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        Ok(Self(<u32 as Deserializable>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        <u32 as Deserializable>::min_serialized_size()
     }
 }
 

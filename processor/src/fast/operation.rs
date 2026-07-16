@@ -7,7 +7,7 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    precompile::{PrecompileTranscript, PrecompileTranscriptState},
+    deferred::Digest,
     program::MIN_STACK_DEPTH,
     utils::range,
 };
@@ -138,13 +138,25 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript.state()
+    fn deferred_root(&self) -> Word {
+        self.deferred_state.root()
     }
 
     #[inline(always)]
     fn increment_clock(&mut self) {
         self.clk += 1_u32;
+    }
+
+    #[inline(always)]
+    fn log_deferred_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Word,
+    ) -> Result<(), OperationError> {
+        self.deferred_state
+            .log_verified_statement(statement_digest, expected_new_root)
+            .map(|_| ())
+            .map_err(OperationError::from)
     }
 
     #[inline(always)]
@@ -155,11 +167,6 @@ impl SystemInterface for FastProcessor {
     #[inline(always)]
     fn set_ctx(&mut self, ctx: ContextId) {
         self.ctx = ctx;
-    }
-
-    #[inline(always)]
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
     #[inline(always)]

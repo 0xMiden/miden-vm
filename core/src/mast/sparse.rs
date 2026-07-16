@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     sync::Arc,
     vec::Vec,
 };
@@ -10,6 +11,8 @@ use crate::{
     Word,
     advice::AdviceMap,
     mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
+    serde::DeserializationError,
+    utils::Idx,
 };
 
 // MAST FOREST ID
@@ -50,20 +53,11 @@ pub struct SparseMastForest {
     /// full-node entry implicitly carries its own digest via [`MastNodeExt::digest`].
     digests: BTreeMap<MastNodeId, Word>,
 
-    /// Total number of nodes in the source [`MastForest`] from which this sparse forest was
-    /// built. Note that this is *not* `nodes.len()` — it is the upper bound on the original
-    /// [`MastNodeId`] space, preserved so that callers materializing dense-shaped state (e.g.
-    /// allocating an `IndexVec` keyed by [`MastNodeId`]) know its required size.
-    num_nodes: usize,
-
     /// Roots of procedures defined within the original MAST forest.
     roots: Vec<MastNodeId>,
 
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
-
-    /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
-    commitment_cache: Word,
 }
 
 impl SparseMastForest {
@@ -73,11 +67,18 @@ impl SparseMastForest {
         &self.nodes
     }
 
-    /// Returns the total number of nodes in the source [`MastForest`] from which this sparse
-    /// forest was built. This is *not* the number of visited (i.e. present) nodes — see
-    /// [`Self::nodes`] for that.
+    /// Returns the minimum node count needed to cover all IDs retained in this sparse replay view.
+    ///
+    /// This is *not* the number of visited nodes and may be smaller than the source
+    /// [`MastForest`]'s node count when high source IDs were not needed during replay.
     pub fn num_nodes(&self) -> usize {
-        self.num_nodes
+        self.nodes
+            .keys()
+            .chain(self.digests.keys())
+            .chain(self.roots.iter())
+            .map(|id| id.to_usize() + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Returns the roots of procedures defined within this sparse forest.
@@ -85,19 +86,154 @@ impl SparseMastForest {
         &self.roots
     }
 
-    /// Returns the advice map associated with this sparse forest.
+    /// Returns the empty advice map associated with this sparse forest.
+    ///
+    /// Sparse replay uses `AdviceReplay` for advice reads; this map remains empty to satisfy the
+    /// shared [`ExecutableMastForest`] interface.
     pub fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
     }
 
-    /// Returns the commitment to this sparse forest, computed from the procedure roots.
-    ///
-    /// The commitment value is derived from the digests of the procedure roots in the original
-    /// forest; it is therefore equal to the commitment of the source [`MastForest`] from which
-    /// this sparse forest was built.
-    pub fn commitment(&self) -> Word {
-        self.commitment_cache
+    /// Returns the digest-only entries associated with this sparse forest.
+    pub(in crate::mast) fn digest_entries(&self) -> &BTreeMap<MastNodeId, Word> {
+        &self.digests
     }
+
+    /// Builds a sparse forest from trusted replay parts.
+    pub(in crate::mast) fn from_serialized_parts(
+        nodes: Vec<(MastNodeId, MastNode)>,
+        digests: Vec<(MastNodeId, Word)>,
+        roots: Vec<MastNodeId>,
+        advice_map: AdviceMap,
+    ) -> Result<Self, DeserializationError> {
+        if !advice_map.is_empty() {
+            return Err(DeserializationError::InvalidValue(
+                "sparse MAST replay payload must not carry advice map entries".to_string(),
+            ));
+        }
+
+        let nodes = collect_unique_nodes(nodes)?;
+        let digests = collect_unique_digests(digests)?;
+
+        for &root in &roots {
+            validate_sparse_id(root, "procedure root")?;
+        }
+
+        for node_id in nodes.keys() {
+            if digests.contains_key(node_id) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "sparse full-node id {} overlaps a digest-only entry",
+                    node_id.0
+                )));
+            }
+        }
+
+        validate_full_node_child_digests(&nodes, &digests)?;
+
+        Ok(Self {
+            nodes,
+            digests,
+            roots,
+            advice_map: AdviceMap::default(),
+        })
+    }
+}
+
+fn validate_sparse_id(id: MastNodeId, label: &str) -> Result<(), DeserializationError> {
+    if id.to_usize() >= MastForest::MAX_NODES {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} id {} exceeds maximum sparse MAST node id {}",
+            id.0,
+            MastForest::MAX_NODES - 1
+        )));
+    }
+    Ok(())
+}
+
+fn collect_unique_nodes(
+    nodes: Vec<(MastNodeId, MastNode)>,
+) -> Result<BTreeMap<MastNodeId, MastNode>, DeserializationError> {
+    let mut result = BTreeMap::new();
+    for (id, node) in nodes {
+        validate_sparse_id(id, "full node")?;
+        if result.insert(id, node).is_some() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "duplicate sparse full-node id {}",
+                id.0
+            )));
+        }
+    }
+    Ok(result)
+}
+
+fn collect_unique_digests(
+    digests: Vec<(MastNodeId, Word)>,
+) -> Result<BTreeMap<MastNodeId, Word>, DeserializationError> {
+    let mut result = BTreeMap::new();
+    for (id, digest) in digests {
+        validate_sparse_id(id, "digest-only node")?;
+        if result.insert(id, digest).is_some() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "duplicate sparse digest-only id {}",
+                id.0
+            )));
+        }
+    }
+    Ok(result)
+}
+
+/// Checks that every child of a retained full node is available as either a full node or a
+/// digest-only entry.
+fn validate_full_node_child_digests(
+    nodes: &BTreeMap<MastNodeId, MastNode>,
+    digests: &BTreeMap<MastNodeId, Word>,
+) -> Result<(), DeserializationError> {
+    for (&node_id, node) in nodes {
+        validate_sparse_id(node_id, "full node")?;
+
+        match node {
+            MastNode::Block(block) => {
+                block.validate_batch_invariants().map_err(|error_msg| {
+                    DeserializationError::InvalidValue(format!(
+                        "invalid sparse basic block {}: {error_msg}",
+                        node_id.0
+                    ))
+                })?;
+            },
+            MastNode::External(_) | MastNode::Dyn(_) => {},
+            MastNode::Join(join) => {
+                require_child_digest(node_id, join.first(), nodes, digests)?;
+                require_child_digest(node_id, join.second(), nodes, digests)?;
+            },
+            MastNode::Split(split) => {
+                require_child_digest(node_id, split.on_true(), nodes, digests)?;
+                require_child_digest(node_id, split.on_false(), nodes, digests)?;
+            },
+            MastNode::Loop(loop_node) => {
+                require_child_digest(node_id, loop_node.body(), nodes, digests)?;
+            },
+            MastNode::Call(call) => {
+                require_child_digest(node_id, call.callee(), nodes, digests)?;
+            },
+        }
+    }
+    Ok(())
+}
+
+fn require_child_digest(
+    parent_id: MastNodeId,
+    child_id: MastNodeId,
+    nodes: &BTreeMap<MastNodeId, MastNode>,
+    digests: &BTreeMap<MastNodeId, Word>,
+) -> Result<(), DeserializationError> {
+    validate_sparse_id(child_id, "child")?;
+    if !nodes.contains_key(&child_id) && !digests.contains_key(&child_id) {
+        return Err(DeserializationError::InvalidValue(format!(
+            "sparse full node {} references child {} without a full node or digest-only entry",
+            parent_id.0, child_id.0
+        )));
+    }
+    Ok(())
 }
 
 impl ExecutableMastForest for SparseMastForest {
@@ -162,10 +298,6 @@ pub struct SparseMastForestBuilder {
     /// The source forest whose nodes are being collected.
     source: Arc<MastForest>,
 
-    /// Total number of nodes in the source forest, captured at construction time. Propagated to
-    /// the finalized [`SparseMastForest`] so consumers know the original [`MastNodeId`] space.
-    num_nodes: usize,
-
     /// IDs of nodes that were entered during execution. Their full [`MastNode`] is copied into the
     /// finalized forest's `nodes` map.
     full_visits: BTreeSet<MastNodeId>,
@@ -179,10 +311,8 @@ pub struct SparseMastForestBuilder {
 impl SparseMastForestBuilder {
     /// Creates a new builder for the given source forest.
     pub fn new(source: Arc<MastForest>) -> Self {
-        let num_nodes = source.nodes().len();
         Self {
             source,
-            num_nodes,
             full_visits: BTreeSet::new(),
             digest_only_visits: BTreeSet::new(),
         }
@@ -209,15 +339,10 @@ impl SparseMastForestBuilder {
     }
 
     /// Consumes the builder and produces a [`SparseMastForest`] containing only the visited nodes
-    /// from the source forest. The roots, advice map, and debug info are cloned from the source
-    /// in full (they are not yet trimmed to visited nodes only).
+    /// from the source forest. The roots are cloned from the source in full. Advice data is not
+    /// copied because sparse replay uses `AdviceReplay`.
     pub fn finalize(self) -> SparseMastForest {
-        let SparseMastForestBuilder {
-            source,
-            num_nodes,
-            full_visits,
-            digest_only_visits,
-        } = self;
+        let SparseMastForestBuilder { source, full_visits, digest_only_visits } = self;
 
         let mut nodes = BTreeMap::new();
         for node_id in &full_visits {
@@ -241,10 +366,8 @@ impl SparseMastForestBuilder {
         SparseMastForest {
             nodes,
             digests,
-            num_nodes,
             roots: source.procedure_roots().to_vec(),
-            advice_map: source.advice_map().clone(),
-            commitment_cache: source.commitment(),
+            advice_map: AdviceMap::default(),
         }
     }
 }

@@ -5,7 +5,7 @@
 //! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!
 //! Columns (in emission order):
-//! - block-stack table + u32 range checks + log-precompile capacity + range-table response (merged;
+//! - block-stack table + u32 range checks + log-deferred capacity + range-table response (merged —
 //!   see [`super::buses::block_stack_and_range_logcap`]).
 //! - block-hash queue + op-group table.
 //! - chiplet requests from the decoder.
@@ -109,7 +109,7 @@ where
 /// LogUp lookup argument over the main trace.
 ///
 /// Zero-sized. Emits four permutation columns: the first packs block-stack + u32 range
-/// checks + log-precompile capacity + range-table response; the second unions block-hash
+/// checks + log-deferred capacity + range-table response; the second unions block-hash
 /// queue and op-group table; the third hosts the decoder's chiplet requests; the fourth
 /// hosts the stack overflow table. The chiplet-trace half of the argument lives in
 /// [`super::chiplet_air::ChipletLookupAir`].
@@ -144,7 +144,7 @@ where
 
     fn num_bus_ids(&self) -> usize {
         // Main-trace emitters touch `BusId::{BlockStackTable, BlockHashTable, OpGroupTable,
-        // RangeCheck, LogPrecompileTranscript}` plus the shared chiplet-requests column.
+        // RangeCheck, LogDeferredRoot}` plus the shared chiplet-requests column.
         // The adapter's bus-prefix table is shared across every LookupAir it runs, so
         // returning `BusId::COUNT` (the total bus-type count) is the safe upper bound.
         BusId::COUNT

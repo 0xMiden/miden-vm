@@ -87,7 +87,7 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
 ### Address storing a pointer to the reduced-inputs block
-### [kernel_H | program_digest | transcript_state | zero_pad] (16 felts). The block lives at the
+### [kernel_H | program_digest | deferred_root | zero_pad] (16 felts). The block lives at the
 ### fixed standalone address REDUCED_INPUTS_PTR; this cell holds that pointer for the readers.
 const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 
@@ -170,7 +170,7 @@ const RELATION_DIGEST_PTR = 3223322768
 const ACE_REGISTRY_ROOT_PTR = 3223322772
 
 ### Fixed standalone reduced-inputs block (16 felts):
-### [kernel_H (4) | program_digest (4) | transcript_state (4) | zero_pad (4)]. The verifier writes
+### [kernel_H (4) | program_digest (4) | deferred_root (4) | zero_pad (4)]. The verifier writes
 ### it and absorbs it into Fiat-Shamir; the ACE circuit never reads it, so it lives in the fixed
 ### verifier region rather than the OOD-derived ACE READ region.
 const REDUCED_INPUTS_PTR = 3223322836
@@ -198,7 +198,7 @@ const REDUCED_INPUTS_PTR = 3223322836
 ##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
 ##                                                          ... EVAL section follows ...
 ##
-## The reduced-inputs block (kernel_H | program_digest | transcript_state | zero pad) is NOT part
+## The reduced-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
 ## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
 ## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_proof` and absorbed into
 ## Fiat-Shamir; it is not carved out of this region.

@@ -1,6 +1,6 @@
 [package]
 name = "miden-assembly-syntax-cst"
-version = "0.25.0"
+version = "0.26.0"
 description = "Lossless concrete syntax tree support for the Miden Assembly language"
 documentation = "https://docs.rs/miden-assembly-syntax-cst"
 readme = "README.md"

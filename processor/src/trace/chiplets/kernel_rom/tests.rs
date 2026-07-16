@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::{ChipletTraceFragment, Felt, KERNEL_ROM_TRACE_WIDTH, Kernel, KernelRom};
+use super::{ChipletTraceFragment, Felt, KERNEL_ROM_TRACE_WIDTH, KernelDescriptor, KernelRom};
 use crate::{ONE, ZERO};
 
 // CONSTANTS
@@ -85,8 +85,8 @@ fn kernel_rom_with_single_access() {
 // ================================================================================================
 
 /// Creates a kernel with two dummy procedures
-fn build_kernel() -> Kernel {
-    Kernel::new(&[PROC1_HASH.into(), PROC2_HASH.into()]).unwrap()
+fn build_kernel() -> KernelDescriptor {
+    KernelDescriptor::new(&[PROC1_HASH.into(), PROC2_HASH.into()]).unwrap()
 }
 
 /// Builds a trace of the specified length and fills it with data from the provided KernelRom

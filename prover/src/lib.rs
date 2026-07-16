@@ -133,8 +133,11 @@ fn prove_execution_trace(
     );
 
     let stack_outputs = *trace.stack_outputs();
-    let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
+    let deferred_wire = trace
+        .deferred_state()
+        .to_wire()
+        .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
@@ -203,7 +206,7 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
 
     Ok((stack_outputs, proof))
 }
@@ -231,9 +234,7 @@ where
     config::observe_protocol_params(&mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
-    // digests). The lifted prover absorbs both into Fiat-Shamir internally, along with the per-AIR
-    // trace heights.
+    // statement inputs read during observation/boundary correction.
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;

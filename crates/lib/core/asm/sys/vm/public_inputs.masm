@@ -18,7 +18,7 @@ use miden::core::crypto::hashes::poseidon2
 #
 #   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]   caller-facing reduced-inputs
 #                           [ program_digest    (4 felts) ]   block (16 felts). The trailing
-#                           [ transcript_state  (4 felts) ]   pad keeps the FS observation
+#                           [ deferred_root     (4 felts) ]   pad keeps the FS observation
 #                           [ zero pad          (4 felts) ]   rate-aligned (two 8-felt chunks).
 #
 #   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
@@ -34,21 +34,21 @@ use miden::core::crypto::hashes::poseidon2
 #
 #     c_total = Σ_i 1 / d(KernelRomInit,           kernel_digest_i)   (request,  +1)
 #             +     1 / d(BlockHashTable,           program_digest)   (request,  +1)
-#             +     1 / d(LogPrecompileTranscript,  <empty>)          (request,  +1)
-#             −     1 / d(LogPrecompileTranscript,  transcript_state) (response, −1)
+#             +     1 / d(LogDeferredRoot,           <empty>)          (request,  +1)
+#             −     1 / d(LogDeferredRoot,           deferred_root)     (response, −1)
 #
 # where the bus-message denominator is `d(bus, w) = (α + (bus + 1)·γ) + msg(w)`, the prefix
 # scale `bus + 1` is the matching `BUS_ID_*_PLUS_ONE` constant, `γ = β^MAX_MESSAGE_WIDTH`, and
 # `msg(w) = Σ_{j<4} w_j·β^j` (the empty message of the init term gives `msg = 0`). It is
 # computed in step II (`observe_aux_trace`) from the FS-sampled `α, β`, over the kernel digests,
-# program digest and transcript state staged before the transcript starts; `observe_aux_trace` then
-# asserts the boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals.
+# program digest and deferred root materialized in step I; `observe_aux_trace` then asserts
+# the boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals.
 # Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
 # is accumulated as `requests − response`.
 #
 # Fiat-Shamir absorption order (`MidenMultiAir::observe`):
 #   1. kernel_H + program_digest                      (4 + 4 = 8 felts)
-#   2. transcript_state + zero pad                    (4 + 4 = 8 felts)
+#   2. deferred_root + zero pad                       (4 + 4 = 8 felts)
 #   3. stack_inputs[0..8]                             (8 felts)
 #   4. stack_inputs[8..16]                            (8 felts)
 #   5. stack_outputs[0..8]                            (8 felts)
@@ -58,10 +58,10 @@ use miden::core::crypto::hashes::poseidon2
 #   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed for
 #     kernel_H and re-read for the step-II boundary fold.
 #   - program_digest: operand word.
-#   - transcript_state: advice (4 canonical felts), loaded by `verify_proof`.
+#   - deferred_root: advice (4 canonical felts), loaded by `verify_proof`.
 #   - stack i/o (FLPI): caller memory at `stack_io_ptr` (operand), 32 base felts.
 #
-# `verify_proof` stages kernel_H, program_digest and transcript_state into the reduced-inputs
+# `verify_proof` stages kernel_H, program_digest and deferred_root into the reduced-inputs
 # block before the transcript starts; `process_public_inputs` then only absorbs into FS.
 #
 # CONSTANTS
@@ -69,7 +69,7 @@ use miden::core::crypto::hashes::poseidon2
 
 # Number of fixed length public inputs (in field elements): stack inputs (16) + stack
 # outputs (16). These are the only public values referenced by the ACE circuit; the program
-# digest and transcript state live in the caller-facing reduced-inputs block instead.
+# digest and deferred root live in the caller-facing reduced-inputs block instead.
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
 # Number of AIR instances in the Miden VM statement.
@@ -78,12 +78,12 @@ const NUM_MIDEN_AIRS = 3
 # Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
-const BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE = 3   # LogPrecompileTranscript (2) + 1
+const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 
 # Word offsets into the 16-felt reduced-inputs block at `reduced_inputs_ptr`:
-#   [ kernel_H (+0) | program_digest (+4) | transcript_state (+8) | zero pad (+12) ].
+#   [ kernel_H (+0) | program_digest (+4) | deferred_root (+8) | zero pad (+12) ].
 const REDUCED_INPUTS_PROGRAM_OFFSET    = 4
-const REDUCED_INPUTS_TRANSCRIPT_OFFSET = 8
+const REDUCED_INPUTS_DEFERRED_OFFSET   = 8
 
 
 # CONSTANTS GETTERS
@@ -148,7 +148,7 @@ end
 #!   reduced_inputs+0  : kernel_H = hash_elements(kernel_ptr, 4·N), the kernel commitment over the
 #!                       caller-owned digest region.
 #!   reduced_inputs+4  : program_digest, taken from the operand word.
-#!   reduced_inputs+8  : transcript_state, loaded from advice.
+#!   reduced_inputs+8  : deferred_root, loaded from advice.
 #!
 #! Also persists the caller pointers `kernel_ptr` and `stack_io_ptr` and the digest count `N` into
 #! their fixed cells so the step-I FLPI load and the step-II boundary fold can re-read the same
@@ -157,10 +157,10 @@ end
 #! Input:  [kernel_ptr, N, stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
 #! Output: [...]
 pub proc stage_reduced_inputs
-    # Persist N (bounded by Kernel::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
+    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
     dup.1
     u32assert.err="number of kernel procedure digests must fit in a u32"
-    dup u32lt.256 assert.err="number of kernel procedure digests exceeds Kernel::MAX_NUM_PROCEDURES"
+    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     exec.constants::num_kernel_digests_ptr mem_store
     # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
     dup exec.constants::kernel_digests_address_ptr mem_store
@@ -182,9 +182,9 @@ pub proc stage_reduced_inputs
     exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_PROGRAM_OFFSET mem_storew_le dropw
     # => [...]
 
-    # transcript_state from advice -> reduced_inputs + REDUCED_INPUTS_TRANSCRIPT_OFFSET.
+    # deferred_root from advice -> reduced_inputs + REDUCED_INPUTS_DEFERRED_OFFSET.
     padw adv_loadw
-    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_TRANSCRIPT_OFFSET mem_storew_le dropw
+    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
 end
 
@@ -328,7 +328,7 @@ end
 #!
 #! Derives `γ = β^16`, then folds the request/response terms over the caller-owned kernel digests
 #! at `KERNEL_DIGESTS_ADDRESS_PTR` (count at `NUM_KERNEL_DIGESTS_PTR`) and the program digest /
-#! transcript state in the reduced-inputs block, all staged in `verify_proof`. Mirrors the module
+#! deferred root in the reduced-inputs block, all staged in `verify_proof`. Mirrors the module
 #! banner's `c_total` definition and `MidenMultiAir::eval_external`.
 #!
 #! Input:  [...]
@@ -354,15 +354,15 @@ pub proc compute_outer_logup_correction
     ext2add
     # => [acc0, acc1, ...]
 
-    #    Request c) log-precompile init: + 1 / (α + 3γ) (the init message is all zeros).
-    push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
+    #    Request c) log-deferred init: + 1 / (α + 3γ) (the init message is all zeros).
+    push.BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE
     exec.push_alpha_plus_i_gamma
     ext2inv
     ext2add
     # => [acc0, acc1, ...]
 
-    #    Response) transcript state: − 1 / ((α + 3γ) + msg(transcript)) from reduced_inputs+8.
-    push.REDUCED_INPUTS_TRANSCRIPT_OFFSET push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
+    #    Response) deferred root: − 1 / ((α + 3γ) + msg(deferred_root)) from reduced_inputs+8.
+    push.REDUCED_INPUTS_DEFERRED_OFFSET push.BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE
     exec.fold_reduced_word_inv_term
     neg swap neg swap
     ext2add
@@ -377,7 +377,7 @@ end
 #! Observes the 16-felt reduced-inputs window at `reduced_inputs_ptr + 0..+15` into the FS
 #! transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
 #!   Chunk 1: `[kernel_H | program_digest]`   at reduced_inputs+0..+7.
-#!   Chunk 2: `[transcript_state | zero_pad]` at reduced_inputs+8..+15.
+#!   Chunk 2: `[deferred_root | zero_pad]` at reduced_inputs+8..+15.
 #! The trailing pad word is written to zero here so the absorption does not depend on the scratch
 #! region being zero-initialized.
 #!

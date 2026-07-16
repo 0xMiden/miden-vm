@@ -26,7 +26,10 @@ mod host;
 mod processor;
 mod tracer;
 
-use miden_core::mast::ExecutableMastForest;
+use miden_core::{
+    deferred::{Digest, Node, PrecompileError},
+    mast::ExecutableMastForest,
+};
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
@@ -62,9 +65,10 @@ pub use host::{
     default::{DefaultHost, HostLibrary},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
-        InputError, Kernel, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs,
+        InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs,
+        StackOutputs,
     },
     serde, utils,
 };
@@ -259,6 +263,38 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
         self.processor.memory().get_memory_state(ctx)
+    }
+
+    /// Returns the already-memoized canonical deferred digest for `digest`, if present.
+    ///
+    /// This is a read-only lookup: it does not evaluate `digest`, register helper nodes, or mutate
+    /// deferred state.
+    #[inline(always)]
+    pub fn get_canonical_deferred_digest(&self, digest: Digest) -> Option<Digest> {
+        self.processor.deferred_state().get_canonical_digest(digest)
+    }
+
+    /// Returns the already-memoized canonical deferred node for `digest`, if present.
+    ///
+    /// This is a read-only lookup and returns only canonical results that were already memoized in
+    /// deferred state; it never evaluates or mutates deferred state.
+    #[inline(always)]
+    pub fn get_canonical_deferred_node(&self, digest: Digest) -> Option<(Digest, &Node)> {
+        self.processor.deferred_state().get_canonical_node(digest)
+    }
+
+    /// Returns the already-memoized canonical deferred node for `digest`.
+    ///
+    /// This is a read-only lookup and never evaluates or mutates deferred state.
+    ///
+    /// # Errors
+    /// Returns [`PrecompileError::MissingNode`] if no memoized canonical node is available.
+    #[inline(always)]
+    pub fn require_canonical_deferred_node(
+        &self,
+        digest: Digest,
+    ) -> Result<(Digest, &Node), PrecompileError> {
+        self.processor.deferred_state().require_canonical_node(digest)
     }
 }
 

@@ -9,7 +9,7 @@
 //!
 //!   kernel_digests -> stack i/o ->
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   transcript state -> Miden AIR heights -> main commit -> aux commit ->
+//!   deferred root -> Miden AIR heights -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
@@ -191,9 +191,8 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // Transcript state, loaded by `public_inputs::stage_reduced_inputs`.
-    advice_stack
-        .extend(pub_inputs.pc_transcript_state().as_ref().iter().map(Felt::as_canonical_u64));
+    // Final deferred root, loaded by `public_inputs::stage_reduced_inputs`.
+    advice_stack.extend(pub_inputs.deferred_root().as_ref().iter().map(Felt::as_canonical_u64));
 
     for height in heights.instance_order {
         advice_stack.push(height as u64);

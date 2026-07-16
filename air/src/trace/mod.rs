@@ -26,7 +26,7 @@ pub const DECODER_TRACE_WIDTH: usize = 24;
 
 pub const STACK_TRACE_WIDTH: usize = 19;
 
-pub mod log_precompile {
+pub mod log_deferred {
     use core::ops::Range;
 
     use super::chiplets::hasher::{CAPACITY_LEN, Hasher};
@@ -34,7 +34,7 @@ pub mod log_precompile {
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
 
-    /// Decoder helper register index where the hasher address is stored for `log_precompile`.
+    /// Decoder helper register index where the hasher address is stored for `log_deferred`.
     pub const HELPER_ADDR_IDX: usize = 0;
     /// Range covering the four helper registers holding `STATE_PREV`.
     pub const HELPER_STATE_PREV_RANGE: Range<usize> = Range {
@@ -51,6 +51,7 @@ pub mod log_precompile {
     //
     //   Input  (current row): `[_, STMNT, _, ...]`
     //     - stack[4..8] = STMNT — the per-call statement word.
+    //     - capacity is fixed by the opcode to the deferred-root folding domain `[1, 0, 0, 0]`.
     //   Output (next row):    `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
     //     - stack[0..4] = STATE_NEW (rate0 output, kept by the wrapper);
     //     - stack[4..12] hold output rate1 / capacity (discarded).
@@ -60,7 +61,7 @@ pub mod log_precompile {
 
     /// Stack range containing the precomputed statement word on opcode entry.
     pub const STACK_STMNT_RANGE: Range<usize> = Hasher::RATE1_RANGE;
-    /// Stack range that receives the new transcript state (output rate0) on opcode exit.
+    /// Stack range that receives the new deferred-root state (output rate0) on opcode exit.
     pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
 }
 

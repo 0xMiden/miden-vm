@@ -47,6 +47,7 @@ pub(crate) struct Comparison {
     pub(crate) status: String,
     pub(crate) regression: bool,
     pub(crate) threshold_pct: f64,
+    pub(crate) min_regression_ms: f64,
     pub(crate) primary_metric: String,
     pub(crate) baseline_sha: String,
     pub(crate) current_sha: String,

@@ -255,7 +255,7 @@ row, ensuring the product of both their running products is 1:
 > $$
 
 TODO: today we enforce that this bus is empty (equals 1) at Merkle path verification boundaries.
-This is sound but cumbersome and interferes with log_precompile state tracking. We plan to replace
+This is sound but cumbersome and interferes with log_deferred state tracking. We plan to replace
 it with a construction that supports multiple Merkle path verifications without forcing a boundary
 reset.
 

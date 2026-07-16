@@ -136,7 +136,7 @@ pub trait Tracer {
 
     /// Records the result of a call to `Hasher::permute()`.
     ///
-    /// Called by: `HPERM`, `LOG_PRECOMPILE`.
+    /// Called by: `HPERM`, `LOG_DEFERRED`.
     fn record_hasher_permute(
         &mut self,
         _input_state: [Felt; STATE_WIDTH],
@@ -477,13 +477,13 @@ pub enum OperationHelperRegisters {
         k1: Felt,
         acc_tmp: QuadFelt,
     },
-    /// Helper for the `LOG_PRECOMPILE` operation, which folds the per-call statement word into
-    /// the rolling precompile-transcript state via a Poseidon2 permutation.
+    /// Helper for the `LOG_DEFERRED` operation, which folds a verified statement digest into
+    /// the rolling deferred root via a Poseidon2 permutation.
     ///
-    /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
-    /// - `state_prev`: the previous transcript state word, provided non-deterministically and used
-    ///   as the rate0 input to the permutation.
-    LogPrecompile { addr: Felt, state_prev: Word },
+    /// - `addr`: start row of the hasher-chiplet permutation.
+    /// - `state_prev`: the previous deferred root, provided non-deterministically and used as the
+    ///   rate0 input to the permutation.
+    LogDeferred { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
 }
@@ -629,7 +629,7 @@ impl OperationHelperRegisters {
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],
-            Self::LogPrecompile { addr, state_prev } => {
+            Self::LogDeferred { addr, state_prev } => {
                 [*addr, state_prev[0], state_prev[1], state_prev[2], state_prev[3], ZERO]
             },
             Self::Empty => [ZERO; NUM_USER_OP_HELPERS],

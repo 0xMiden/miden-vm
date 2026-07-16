@@ -8,11 +8,10 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    events::EventId,
+    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
-    precompile::PrecompileRequest,
-    program::{Kernel, Program, StackInputs, StackOutputs},
+    program::{KernelDescriptor, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
     serde::{ByteWriter, Serializable},
 };
@@ -181,15 +180,15 @@ fn generate_fuzz_seeds() {
             Felt::new_unchecked(12),
         ]
         .into();
-        let kernel = Kernel::from_hashes_unchecked(vec![a, a]);
+        let kernel = KernelDescriptor::from_hashes_unchecked(vec![a, a]);
         let program = Program::with_kernel(Arc::new(forest), block_id, kernel);
 
         write_seed("program_deserialize", "program_with_duplicate_kernel.bin", &program.to_bytes());
     }
 
-    // Kernel seed
+    // KernelDescriptor seed
     {
-        let kernel = Kernel::default();
+        let kernel = KernelDescriptor::default();
         write_seed("kernel_deserialize", "empty_kernel.bin", &kernel.to_bytes());
 
         let a: Word = [
@@ -207,7 +206,7 @@ fn generate_fuzz_seeds() {
         ]
         .into();
 
-        let non_empty = Kernel::new(&[a]).expect("failed to build non-empty kernel");
+        let non_empty = KernelDescriptor::new(&[a]).expect("failed to build non-empty kernel");
         write_seed("kernel_deserialize", "single_kernel.bin", &non_empty.to_bytes());
 
         let max_kernel: Vec<Word> = (0u64..=254)
@@ -221,11 +220,12 @@ fn generate_fuzz_seeds() {
                 .into()
             })
             .collect();
-        let max_kernel = Kernel::new(&max_kernel).expect("failed to build max-size kernel");
+        let max_kernel =
+            KernelDescriptor::new(&max_kernel).expect("failed to build max-size kernel");
         write_seed("kernel_deserialize", "max_kernel_255.bin", &max_kernel.to_bytes());
 
         // Invalid seed: duplicate hashes should deserialize to Err (never panic).
-        let duplicate_kernel = Kernel::from_hashes_unchecked(vec![b, a, a]);
+        let duplicate_kernel = KernelDescriptor::from_hashes_unchecked(vec![b, a, a]);
         write_seed("kernel_deserialize", "duplicate_kernel.bin", &duplicate_kernel.to_bytes());
 
         // Serde kernel seeds (JSON payloads) used by kernel_serde_deserialize fuzz target.
@@ -260,16 +260,59 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Precompile request seed
+    // Deferred-state wire seeds. ExecutionProof carries this compact wire witness for verifier
+    // rehydration under the supplied precompile registry.
     {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        write_seed("precompile_request_deserialize", "precompile_request.bin", &request.to_bytes());
+        let empty = DeferredStateWire::default();
+        write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
+
+        let tag = Tag::from_word([
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+        ]);
+        let wire = DeferredStateWire {
+            entries: vec![
+                WireEntry::Data {
+                    tag,
+                    chunks: vec![[Felt::new_unchecked(1); 8]],
+                },
+                WireEntry::Data {
+                    tag,
+                    chunks: vec![[Felt::new_unchecked(2); 8], [Felt::new_unchecked(3); 8]],
+                },
+                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
+            ],
+        };
+        write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
+
+        let mut oversized_entry_count = Vec::new();
+        oversized_entry_count.write_usize(usize::MAX);
+        write_seed(
+            "deferred_state_wire_deserialize",
+            "oversized_entry_count.bin",
+            &oversized_entry_count,
+        );
+
+        #[cfg(feature = "serde")]
+        {
+            let empty_json =
+                serde_json::to_vec(&empty).expect("failed to serialize empty wire seed");
+            write_seed("deferred_state_wire_serde_deserialize", "empty_wire.json", &empty_json);
+            let wire_json = serde_json::to_vec(&wire).expect("failed to serialize wire seed");
+            write_seed(
+                "deferred_state_wire_serde_deserialize",
+                "all_entries_wire.json",
+                &wire_json,
+            );
+        }
     }
 
     // Execution proof seed (minimal)
     {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
+        let proof =
+            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
 
@@ -279,26 +322,32 @@ fn generate_fuzz_seeds() {
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
 
-        let mut oversized_pc_requests_len = Vec::new();
-        oversized_pc_requests_len.write_usize(0);
-        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
-        oversized_pc_requests_len.write_usize(usize::MAX);
+        let mut oversized_deferred_wire_entries_len = Vec::new();
+        oversized_deferred_wire_entries_len.write_usize(0);
+        oversized_deferred_wire_entries_len.write_u8(HashFunction::Blake3_256 as u8);
+        oversized_deferred_wire_entries_len.write_usize(usize::MAX);
         write_seed(
             "execution_proof_deserialize",
-            "oversized_pc_requests_len.bin",
-            &oversized_pc_requests_len,
+            "oversized_deferred_wire_entries_len.bin",
+            &oversized_deferred_wire_entries_len,
         );
     }
 
-    // Execution proof seed with many small precompile requests.
+    // Execution proof seed with many small deferred-wire entries.
     {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+        let deferred_wire = DeferredStateWire {
+            entries: (0..64)
+                .map(|idx| WireEntry::Join {
+                    tag: Tag::AND,
+                    lhs: if idx == 0 { TRUE_INDEX } else { idx },
+                    rhs: TRUE_INDEX,
+                })
+                .collect(),
+        };
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
         write_seed(
             "execution_proof_deserialize",
-            "many_minimal_precompile_requests.bin",
+            "many_minimal_deferred_wire_entries.bin",
             &proof.to_bytes(),
         );
     }
