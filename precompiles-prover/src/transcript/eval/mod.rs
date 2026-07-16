@@ -6,7 +6,7 @@
 //! Poseidon2 and settles the node's `Binding`-bus tuple. The eval chip is
 //! the sole provider of the `Binding` bus, except `KeccakNodeAir`, which
 //! fuses its own terminal keccak `True` (there is no transient Keccak —
-//! see `docs/transcript-eval.md`). Domain chiplets (the `UintStore`,
+//! see the design notes). Domain chiplets (the `UintStore`,
 //! `UintAdd` / `UintMul`, EC store/add/MSM chiplets) stay ptr-only and never
 //! touch `Binding`; this chip hashes their DAG nodes and ptr-references their
 //! relations.
@@ -57,8 +57,8 @@
 //! first-row `h = public_root`. An empty transcript is `is_zero = 1` on
 //! the first row: `public_root = 0`, nothing provided or consumed.
 //!
-//! See `docs/transcript-eval.md` for the binding-bus model and
-//! `docs/transcript-nodes.md` for the node formats.
+//! See the design notes for the binding-bus model and
+//! the design notes for the node formats.
 
 pub mod trace;
 
@@ -137,7 +137,7 @@ pub const COL_IS_ZERO: usize = COL_H_END;
 /// parents that consume it (DAG sharing / dedup, mirroring
 /// `KeccakNodeAir`'s `out_mult`). A plain count pinned to the
 /// consumer count by `Binding` bus balance — not range-checked (see
-/// `docs/lookup-argument.md`); `0` on the root (no parent) and on
+/// the design notes); `0` on the root (no parent) and on
 /// inactive rows.
 pub const COL_OUT_MULT: usize = COL_IS_ZERO + 1;
 
@@ -273,7 +273,7 @@ pub const COL_EC_CREATE_Y_PTR: usize = COL_B_PTR;
 // h = this term's Poseidon2 rate0 output, a_ptr/b_ptr = (Pᵢ_ptr, sᵢ_ptr),
 // ptr = val_ptr (the claim's value point), group_ptr = the group, bound_ptr =
 // the scalar bound. The run is one contiguous VM-style Poseidon2 absorption span
-// (`docs/chiplets/ec-msm.md §6.2`): see [`COL_MSM_IS_HEAD`].
+// (the design notes): see [`COL_MSM_IS_HEAD`].
 // ================================================================
 
 /// EcMsm family flag — set on every absorb row of an MSM-claim run. In

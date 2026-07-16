@@ -21,7 +21,7 @@
 //! `b_expr < expr` on every combine — grounds the induction against
 //! circular derivations) and on `scalar_bound = #E` (the full curve order
 //! annihilates every point, so the merge's `mod n` wrap is harmless —
-//! cofactor-agnostic). See `docs/chiplets/ec-msm.md`.
+//! cofactor-agnostic). See the design notes.
 //!
 //! `intro`, `combine`, and `neg` build the expression; the eval `EcMsm`
 //! absorb seam resolves a claim in-circuit, consuming the positionless

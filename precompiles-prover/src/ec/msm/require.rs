@@ -137,7 +137,7 @@ pub fn neg(
 /// Term lists are read in their stored (`idx`) order; the AIR re-checks
 /// each row, so faithfulness rests on the prover's discipline of laying
 /// operands in a consistent base order (equal bases must align to merge) —
-/// it is *completeness*, not soundness (see `docs/chiplets/ec-msm.md §3`).
+/// it is *completeness*, not soundness (see the design notes).
 pub fn merge_terms(
     a_terms: &[(EcPointPtr, UintPtr)],
     b_terms: &[(EcPointPtr, UintPtr)],

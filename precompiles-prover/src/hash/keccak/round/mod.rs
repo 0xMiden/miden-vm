@@ -6,7 +6,7 @@
 //! cleanly in one trace (and the sponge AIR uses the bus's multiset
 //! semantics to overwrite state at absorb boundaries).
 //!
-//! See `docs/chiplets/keccak.md` for the design rationale (slot
+//! See the design notes for the design rationale (slot
 //! layout, sponge contract, address-space layout, decomposition for
 //! `ρ > 30`).
 
@@ -428,7 +428,7 @@ pub const IP_BOUNDARY: u64 = 25;
 /// Active Keccak rounds per permutation. The full perm cycle is one
 /// longer ([`PERM_CYCLE`]) — the extra round is the dead round whose
 /// 128 IPs space perm N's outputs apart from perm N+1's round-0 inputs
-/// (see "Multi-permutation traces" in `docs/chiplets/keccak.md`).
+/// (see "Multi-permutation traces" in the design notes).
 pub const NUM_ROUNDS: usize = 24;
 
 /// Rows per perm cycle: 24 active rounds + 1 dead round.

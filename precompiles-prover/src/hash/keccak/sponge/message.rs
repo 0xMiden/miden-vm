@@ -8,7 +8,7 @@
 //! - `chunk_ptr` — the chunk-tape base offset for this invocation (= the sponge's `chunk_ptr`
 //!   cursor value at that row). Shared identifier with the chunk chiplet's per-invocation segment
 //!   base; pins the sponge's `chunk_ptr` at the invocation start (the `chunk_ptr` chain is relaxed
-//!   at invocation seams — see `docs/chiplets/keccak-sponge.md`).
+//!   at invocation seams — see the design notes).
 //! - `len_bytes` — the length of the input in bytes; flows directly into the sponge's
 //!   `bytes_left_0` witness column on consume.
 //!
@@ -16,7 +16,7 @@
 //! triggers Keccak), consumed by the sponge chiplet at the first row
 //! of each invocation (`is_first_row_of_invocation = 1`).
 //!
-//! See `docs/chiplets/keccak-sponge.md` for the role this message
+//! See the design notes for the role this message
 //! plays in pinning the invocation's start, `chunk_ptr` base, and
 //! `bytes_left_0`.
 

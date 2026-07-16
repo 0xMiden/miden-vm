@@ -971,7 +971,7 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     // Padding rows are all-zero (out_mult = 0): the Binding provide is
     // `−out_mult`, so they touch no bus. (The provide multiplicity is no
     // longer range-checked — it's pinned to the consumer count by bus
-    // balance; see `docs/lookup-argument.md`.)
+    // balance; see the design notes.)
     trace.resize(height * NUM_MAIN_COLS, Felt::ZERO);
 
     debug_assert_eq!(public_root, root_hash(&trace), "row 0's hash must pin public_root");

@@ -51,7 +51,7 @@
 //! non-LOGIC predecessor. [`Bitwise64Requires::require_rol`] enforces
 //! the same invariant at IR-construction time.
 //!
-//! See `docs/chiplets/bitwise64.md` for the row-construction
+//! See the design notes for the row-construction
 //! algorithm, the +2^32 offset trick's full derivation, and
 //! known soundness gaps.
 
@@ -367,7 +367,7 @@ impl Bitwise64Requires {
     /// (callers can issue `require(Xor, a, 0)` to materialize one).
     ///
     /// `k` must be a power of two with `k < 2^31` (checked here). See
-    /// `docs/chiplets/bitwise64.md` for the soundness derivation behind the
+    /// the design notes for the soundness derivation behind the
     /// upper bound. Drives 8 `Range16` requires for the b-limb decomposition
     /// (order-invariant).
     pub fn require_rol(&mut self, bpl_req: &mut BytePairLutRequires, a: u64, k: u64) -> u64 {

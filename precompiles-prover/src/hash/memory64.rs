@@ -16,7 +16,7 @@
 //! exploits the multiset semantics to overwrite state: consume
 //! `(X, perm_N_out)` and provide `(X, perm_N_out ⊕ block)` at the
 //! same `X`, two different bus entries each balancing independently.
-//! See `docs/chiplets/keccak.md` for the boundary tuple math.
+//! See the design notes for the boundary tuple math.
 //!
 //! The `64` suffix anticipates future memory buses with different word
 //! widths; this one carries 64-bit values.

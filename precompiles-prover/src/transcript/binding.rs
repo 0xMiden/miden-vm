@@ -5,7 +5,7 @@
 //! LogUp bus: [`BusId::Binding`]. A node-evaluating chiplet *provides*
 //! one [`BindingMsg`] per node it binds and *consumes* its children's
 //! bindings; bus balance then means the DAG was evaluated consistently.
-//! See [`docs/transcript-eval.md`](../../../docs/transcript-eval.md).
+//! See the design notes.
 //!
 //! A binding is `node_hash ↦ typed value`: `h` is the bus key, the
 //! [`ValueTag`] says what kind of value it is, `ptr` is the canonical
@@ -29,7 +29,7 @@ use crate::{
 /// deliberately **absent**: a Keccak digest is terminal (only ever
 /// consumed by a Keccak relation node), so the Keccak path fuses and
 /// never puts a digest or chunks object on the Binding bus as a value —
-/// see [`docs/transcript-eval.md`](../../../docs/transcript-eval.md)
+/// see the design notes
 /// §"Why Keccak fuses". `Uint` / `Group` are non-terminal and *do* need
 /// value-bindings: `Uint` is live (transient uint leaves and the eval
 /// chip's `UintOp` results); `Group` lands with the group chiplet.
