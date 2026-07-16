@@ -97,7 +97,6 @@ end
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
-#!
 pub proc verify_query_64
 
     # Prepare the stack to match the shape expected by `verify_query_layer`.
@@ -154,7 +153,6 @@ end
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
-#!
 pub proc verify_query_128
 
     # Prepare the stack to match the shape expected by `verify_query_layer`.
@@ -224,7 +222,6 @@ end
 #! This means for example that:
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
-#!
 proc verify_64
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
@@ -299,7 +296,6 @@ end
 #! This means for example that:
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
 #! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
-#!
 proc verify_128
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
@@ -350,7 +346,6 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-#!
 pub proc verify
     # Get domain generator and pointer to the remainder codeword.
     exec.constants::get_lde_domain_generator

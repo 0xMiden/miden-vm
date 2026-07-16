@@ -627,6 +627,57 @@ fn rejects_too_many_kernel_proc_digests() {
     );
 }
 
+#[test]
+fn quotient_recomposition_constants_match_derivation() {
+    // The quotient recomposition constants in `asm/stark/constants.masm` are precomputed for the
+    // fixed blowup factor. Re-derive them from `BLOWUP_FACTOR_LOG` and the field so that changing
+    // the blowup without regenerating the constants fails here instead of shipping stale values.
+
+    // Goldilocks two-adicity: p - 1 = 2^32 * (2^32 - 1), so the largest power-of-two subgroup has
+    // order 2^32.
+    const TWO_ADICITY: u32 = 32;
+    // Goldilocks multiplicative generator.
+    const GENERATOR: u32 = 7;
+
+    let masm =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/asm/stark/constants.masm"))
+            .expect("read constants.masm");
+    let masm_const = |name: &str| -> u64 {
+        masm.lines()
+            .find_map(|line| {
+                let (lhs, rhs) = line.trim().strip_prefix("const ")?.split_once('=')?;
+                if lhs.trim() != name {
+                    return None;
+                }
+                Some(rhs.split_whitespace().next()?.parse().expect("parse const value"))
+            })
+            .unwrap_or_else(|| panic!("const {name} not found in constants.masm"))
+    };
+
+    let blowup_log = masm_const("BLOWUP_FACTOR_LOG") as u32;
+    let root_unity = Felt::new(masm_const("ROOT_UNITY")).unwrap();
+    let shift_ratio = Felt::new(masm_const("QUOTIENT_SHIFT_RATIO")).unwrap();
+    let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
+    let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
+
+    // With log_lde = log_trace + BLOWUP_FACTOR_LOG, both lde_g^N and offset^N collapse to one
+    // exponent that is independent of the trace length N = 2^log_trace.
+    let exp = 1u64 << (TWO_ADICITY - blowup_log);
+    let blowup = 1u32 << blowup_log;
+
+    // f = lde_g^N: the primitive 2^BLOWUP_FACTOR_LOG-th root of unity.
+    assert_eq!(root_unity.exp_u64(exp), shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
+
+    // s0 = offset^N with offset = GENERATOR^(2^(TWO_ADICITY - log_lde)).
+    let s0 = Felt::from_u32(GENERATOR).exp_u64(exp);
+    assert_eq!(s0, first_shift, "QUOTIENT_FIRST_SHIFT is stale");
+
+    // First barycentric weight = 1 / (BLOWUP_FACTOR * s0^(BLOWUP_FACTOR - 1)); check it as a
+    // reciprocal to avoid an explicit field inversion.
+    let denom = Felt::from_u32(blowup) * s0.exp_u64((blowup - 1) as u64);
+    assert_eq!((first_weight * denom).as_canonical_u64(), 1, "QUOTIENT_FIRST_WEIGHT is stale");
+}
+
 // HELPERS
 // ===============================================================================================
 
