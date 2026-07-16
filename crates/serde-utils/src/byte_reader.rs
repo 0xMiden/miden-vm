@@ -640,13 +640,6 @@ impl<T: AsRef<[u8]>> ByteReader for std::io::Cursor<T> {
         let size = self.get_ref().as_ref().len() as u64;
         pos < size
     }
-
-    fn max_alloc(&self, element_size: usize) -> usize {
-        if element_size == 0 {
-            return usize::MAX;
-        }
-        cursor_remaining_buf!(self).len() / element_size
-    }
 }
 
 // SLICE READER
@@ -708,13 +701,6 @@ impl ByteReader for SliceReader<'_> {
     fn has_more_bytes(&self) -> bool {
         self.pos < self.source.len()
     }
-
-    fn max_alloc(&self, element_size: usize) -> usize {
-        if element_size == 0 {
-            return usize::MAX;
-        }
-        (self.source.len() - self.pos) / element_size
-    }
 }
 
 // BUDGETED READER
@@ -737,7 +723,7 @@ impl ByteReader for SliceReader<'_> {
 /// method derives a bound from the remaining budget, which
 /// [`read_many_iter`](ByteReader::read_many_iter) checks before iterating.
 ///
-/// ## SliceReader bounds allocations by remaining bytes
+/// ## Problem: SliceReader alone doesn't bound allocations
 ///
 /// ```
 /// use miden_serde_utils::{ByteReader, Deserializable, SliceReader};
@@ -748,9 +734,10 @@ impl ByteReader for SliceReader<'_> {
 /// data.extend_from_slice(&1_000_000_000u64.to_le_bytes());
 /// data.extend_from_slice(&[0u8; 16]);
 ///
-/// // SliceReader bounds allocation by the remaining input bytes.
+/// // SliceReader returns usize::MAX from max_alloc, so direct low-level use accepts
+/// // any length. Public read_from_bytes wraps it in BudgetedReader.
 /// let reader = SliceReader::new(&data);
-/// assert_eq!(reader.max_alloc(8), data.len() / 8);
+/// assert_eq!(reader.max_alloc(8), usize::MAX);
 /// ```
 ///
 /// ## Solution: BudgetedReader bounds allocations via max_alloc
@@ -1168,14 +1155,12 @@ mod tests {
     }
 
     #[test]
-    fn slice_reader_max_alloc_uses_remaining_bytes() {
+    fn unbounded_reader_max_alloc_returns_max() {
         let data = [0u8; 100];
-        let mut reader = SliceReader::new(&data);
+        let reader = SliceReader::new(&data);
 
-        assert_eq!(reader.max_alloc(1), 100);
-        assert_eq!(reader.max_alloc(8), 12);
-        reader.read_slice(20).unwrap();
-        assert_eq!(reader.max_alloc(8), 10);
+        assert_eq!(reader.max_alloc(1), usize::MAX);
+        assert_eq!(reader.max_alloc(8), usize::MAX);
         assert_eq!(reader.max_alloc(0), usize::MAX);
     }
 
@@ -1193,9 +1178,13 @@ mod tests {
     // The following tests document the threat model and defense layers.
     // ============================================================================================
 
-    /// SliceReader rejects fake length prefixes before iteration begins.
+    /// SliceReader alone does NOT reject fake length prefixes.
+    ///
+    /// A malicious input claiming 1000 elements will be accepted by read_many_iter
+    /// because SliceReader.max_alloc() returns usize::MAX. The deserialization will
+    /// eventually fail with UnexpectedEOF, but only after attempting to iterate.
     #[test]
-    fn slice_reader_rejects_fake_length_prefix() {
+    fn slice_reader_accepts_fake_length_prefix() {
         let mut data = Vec::new();
         // Write length = 1000 (vint64 encoding: 0x07D0 << 2 | 0b10 = 0x1F42)
         // For simplicity, use the 9-byte form
@@ -1208,10 +1197,11 @@ mod tests {
         let _len = reader.read_usize().unwrap();
         let iter_result = reader.read_many_iter::<u64>(1000);
 
-        match iter_result {
-            Err(DeserializationError::InvalidValue(_)) => {},
-            other => panic!("expected InvalidValue error, got {:?}", other.map(|_| "Ok")),
-        }
+        assert!(iter_result.is_ok());
+
+        let collect_result: Result<Vec<u64>, _> = iter_result.unwrap().collect();
+        assert!(collect_result.is_err());
+        assert!(matches!(collect_result.unwrap_err(), DeserializationError::UnexpectedEOF));
     }
 
     /// BudgetedReader rejects fake length prefixes BEFORE iteration begins.
@@ -1237,6 +1227,15 @@ mod tests {
             Err(DeserializationError::InvalidValue(_)) => {}, // expected
             other => panic!("expected InvalidValue error, got {:?}", other.map(|_| "Ok")),
         }
+    }
+
+    #[test]
+    fn read_many_iter_does_not_advertise_fallible_items_as_ready() {
+        let data = [0u8; 8];
+        let mut reader = SliceReader::new(&data);
+        let iter = reader.read_many_iter::<u64>(1000).unwrap();
+
+        assert_eq!(iter.size_hint(), (0, Some(1000)));
     }
 
     /// Best practice: budget = input length provides both protections.
