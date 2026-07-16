@@ -1,0 +1,94 @@
+[package]
+edition = "2024"
+name    = "miden-crypto-fuzz"
+publish = false
+version = "0.0.0"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+miden-crypto  = { features = ["concurrent", "fuzzing"], path = "../crates/crypto" }
+rand          = { default-features = false, version = "0.10" }
+
+# Existing SMT fuzz target (for sequential vs parallel consistency)
+[[bin]]
+bench = false
+doc   = false
+name  = "smt"
+path  = "fuzz_targets/smt.rs"
+test  = false
+
+# Serialization/deserialization fuzz targets
+[[bin]]
+bench = false
+doc   = false
+name  = "word"
+path  = "fuzz_targets/word.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "merkle"
+path  = "fuzz_targets/merkle.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "merkle_store"
+path  = "fuzz_targets/merkle_store.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "smt_serde"
+path  = "fuzz_targets/smt_serde.rs"
+test  = false
+
+[[bin]]
+bench = false
+doc   = false
+name  = "partial_smt"
+path  = "fuzz_targets/partial_smt.rs"
+test  = false
+
+# MMR structures fuzz target
+[[bin]]
+bench = false
+doc   = false
+name  = "mmr"
+path  = "fuzz_targets/mmr.rs"
+test  = false
+
+# Cryptographic types fuzz target
+[[bin]]
+bench = false
+doc   = false
+name  = "crypto"
+path  = "fuzz_targets/crypto.rs"
+test  = false
+
+# AEAD decryption fuzz target
+[[bin]]
+bench = false
+doc   = false
+name  = "aead"
+path  = "fuzz_targets/aead.rs"
+test  = false
+
+# DSA signatures fuzz target
+[[bin]]
+bench = false
+doc   = false
+name  = "signatures"
+path  = "fuzz_targets/signatures.rs"
+test  = false
+
+[lints.rust]
+unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

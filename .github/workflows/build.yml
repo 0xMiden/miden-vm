@@ -4,6 +4,7 @@ name: build
 
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
@@ -12,8 +13,27 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
+  diffs:
+    name: detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
+      isVm: ${{ steps.diffs.outputs.isVm }}
+      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
+      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
+      isRelease: ${{ steps.diffs.outputs.isRelease }}
+      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - id: diffs
+        uses: ./.github/actions/diffs
+
   no-std:
     name: Build for no-std
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,7 +52,9 @@ jobs:
           rustup default ${{ matrix.toolchain }}
           make build-no-std
   fuzz-check:
-    name: Check for miden-core-fuzz crate
+    name: Check fuzz workspaces
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isFuzz == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -47,5 +69,7 @@ jobs:
           workspaces: |
             .
             miden-core-fuzz
-      - name: Check miden-core-fuzz crate
-        run: cd miden-core-fuzz && cargo check --locked
+            miden-crypto-fuzz
+            miden-serde-utils-fuzz
+      - name: Check fuzz workspaces
+        run: make check-fuzz

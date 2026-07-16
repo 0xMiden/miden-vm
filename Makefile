@@ -39,6 +39,9 @@ ALL_FEATURES             := --all-features
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
 FAST_TEST_FEATURES       := concurrent,testing
+MIDEN_CRYPTO_FUZZ_TARGETS := word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
+MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
+MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -216,7 +219,35 @@ build: ## Builds with default parameters
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace --exclude miden-vm-blake3-bench
+	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace \
+		--exclude miden-vm-blake3-bench \
+		--exclude miden-vm-synthetic-bench \
+		--exclude miden-crypto-smt-codspeed-bench \
+		--exclude miden-bench \
+		--exclude miden-crypto-wycheproof-tests
+
+.PHONY: build-target-miden
+build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
+
+.PHONY: check-fuzz
+check-fuzz: ## Checks standalone fuzz workspaces
+	cd miden-core-fuzz && cargo check --locked
+	cd miden-crypto-fuzz && cargo check --locked
+	cd miden-serde-utils-fuzz && cargo check --locked
+
+.PHONY: fuzz-build-crypto
+fuzz-build-crypto: ## Builds imported crypto fuzz targets
+	for target in $(MIDEN_CRYPTO_FUZZ_TARGETS); do \
+		cargo +nightly fuzz build --fuzz-dir miden-crypto-fuzz $$target; \
+	done
+	for target in $(MIDEN_SERDE_UTILS_FUZZ_TARGETS); do \
+		cargo +nightly fuzz build --fuzz-dir miden-serde-utils-fuzz $$target; \
+	done
+
+.PHONY: test-lifted-stark
+test-lifted-stark: ## Runs imported lifted STARK crate tests with parallel feature enabled
+	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/concurrent
 
 # --- executable ----------------------------------------------------------------------------------
 

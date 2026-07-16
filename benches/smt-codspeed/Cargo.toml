@@ -1,0 +1,26 @@
+[package]
+authors.workspace      = true
+description            = "CodSpeed benchmarks for Miden crypto SMT operations."
+edition.workspace      = true
+license.workspace      = true
+name                   = "miden-crypto-smt-codspeed-bench"
+publish                = false
+repository.workspace   = true
+rust-version.workspace = true
+version.workspace      = true
+
+[dev-dependencies]
+criterion    = { package = "codspeed-criterion-compat", version = "=4.6.0" }
+miden-crypto = { default-features = false, features = ["rocksdb"], workspace = true }
+tempfile     = { workspace = true }
+
+[lib]
+doctest = false
+test    = false
+
+[[bench]]
+harness = false
+name    = "smt_codspeed"
+
+[lints]
+workspace = true

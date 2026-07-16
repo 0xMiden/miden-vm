@@ -1,0 +1,109 @@
+name: Detect changed areas
+description: Classifies changes so workflows can skip unrelated heavy jobs.
+
+outputs:
+  isCrypto:
+    description: Crypto crates, crypto tests, crypto benchmarks, or crypto fuzz code changed.
+    value: ${{ steps.filter.outputs.crypto }}
+  isVm:
+    description: VM crates, VM tests, VM benchmarks, or VM fuzz code changed.
+    value: ${{ steps.filter.outputs.vm }}
+  isRustWorkspace:
+    description: Shared Rust workspace files changed.
+    value: ${{ steps.filter.outputs.rust-workspace }}
+  isFuzz:
+    description: Fuzz targets or fuzz workflow files changed.
+    value: ${{ steps.filter.outputs.fuzz }}
+  isRelease:
+    description: Release workflow files changed.
+    value: ${{ steps.filter.outputs.release }}
+  isDocsOnly:
+    description: Only documentation files changed.
+    value: ${{ steps.docs-only.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - id: filter
+      uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+      with:
+        filters: |
+          crypto:
+            - 'crates/crypto/**'
+            - 'crates/crypto-derive/**'
+            - 'crates/field/**'
+            - 'crates/serde-utils/**'
+            - 'crates/lifted-air/**'
+            - 'crates/lifted-stark/**'
+            - 'crates/stark-transcript/**'
+            - 'crates/stateful-hasher/**'
+            - 'tests/wycheproof/**'
+            - 'benches/miden-bench/**'
+            - 'benches/smt-codspeed/**'
+            - 'miden-crypto-fuzz/**'
+            - 'miden-serde-utils-fuzz/**'
+          vm:
+            - 'air/**'
+            - 'core/**'
+            - 'processor/**'
+            - 'prover/**'
+            - 'verifier/**'
+            - 'miden-vm/**'
+            - 'crates/ace-codegen/**'
+            - 'crates/assembly/**'
+            - 'crates/assembly-syntax/**'
+            - 'crates/assembly-syntax-cst/**'
+            - 'crates/debug-types/**'
+            - 'crates/lib/core/**'
+            - 'crates/mast-package/**'
+            - 'crates/midenc-hir-type/**'
+            - 'crates/package-registry/**'
+            - 'crates/package-registry-local/**'
+            - 'crates/miden-format/**'
+            - 'crates/project/**'
+            - 'crates/test-serde-macros/**'
+            - 'crates/test-utils/**'
+            - 'crates/utils-core-derive/**'
+            - 'crates/utils-diagnostics/**'
+            - 'crates/utils-indexing/**'
+            - 'crates/utils-sync/**'
+            - 'benches/blake3-bench/**'
+            - 'benches/synthetic-bench/**'
+            - 'miden-core-fuzz/**'
+          rust-workspace:
+            - '.github/actions/**'
+            - '.github/workflows/**'
+            - '.cargo/**'
+            - 'Cargo.toml'
+            - 'Cargo.lock'
+            - 'Makefile'
+            - 'rust-toolchain.toml'
+            - 'rustfmt.toml'
+            - 'scripts/**'
+          fuzz:
+            - 'miden-core-fuzz/**'
+            - 'miden-crypto-fuzz/**'
+            - 'miden-serde-utils-fuzz/**'
+            - '.github/workflows/fuzz.yml'
+          release:
+            - '.github/actions/workspace-release/**'
+            - '.github/workflows/workspace-dry-run.yml'
+            - '.github/workflows/workspace-publish.yml'
+          docs:
+            - 'docs/**'
+            - '**/*.md'
+    - id: docs-only
+      shell: bash
+      env:
+        DIFFS_DOCS: ${{ steps.filter.outputs.docs }}
+        DIFFS_CRYPTO: ${{ steps.filter.outputs.crypto }}
+        DIFFS_VM: ${{ steps.filter.outputs.vm }}
+        DIFFS_RUST_WORKSPACE: ${{ steps.filter.outputs.rust-workspace }}
+        DIFFS_FUZZ: ${{ steps.filter.outputs.fuzz }}
+        DIFFS_RELEASE: ${{ steps.filter.outputs.release }}
+      run: |
+        if [[ "$DIFFS_DOCS" == "true" && "$DIFFS_CRYPTO" != "true" && "$DIFFS_VM" != "true" && "$DIFFS_RUST_WORKSPACE" != "true" && "$DIFFS_FUZZ" != "true" && "$DIFFS_RELEASE" != "true" ]]; then
+          echo "value=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "value=false" >> "$GITHUB_OUTPUT"
+        fi
