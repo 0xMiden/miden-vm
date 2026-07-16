@@ -54,7 +54,12 @@ impl Zeroize for SharedSecret {
     }
 }
 
-// Safe to derive ZeroizeOnDrop because we implement Zeroize above
+impl Drop for SharedSecret {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 impl ZeroizeOnDrop for SharedSecret {}
 
 impl AsRef<[u8]> for SharedSecret {
