@@ -314,6 +314,8 @@ impl<S: SmtStorage> LargeSmt<S> {
             leaf_count as isize,
             entry_count as isize,
         );
+        // This construction path mutates an empty tree. If storage apply fails, callers must
+        // discard the failed tree rather than reuse its in-memory nodes.
         self.storage.apply(updates)?;
         self.leaf_count = leaf_count;
         self.entry_count = entry_count;

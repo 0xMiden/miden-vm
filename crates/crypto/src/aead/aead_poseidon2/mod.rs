@@ -764,6 +764,7 @@ fn derive_secret_key_from_bytes(bytes: &[u8]) -> Result<SecretKey, EncryptionErr
         return Err(EncryptionError::FailedOperation);
     }
 
+    // Preserve already-serialized keys from older releases before falling back to the KDF.
     if let Ok(key) = SecretKey::read_from_bytes_with_budget(bytes, SK_SIZE_BYTES) {
         return Ok(key);
     }

@@ -444,6 +444,10 @@ pub trait Deserializable: Sized {
     ///
     /// Note: if `bytes` contains more data than needed to deserialize `self`, no error is
     /// returned.
+    ///
+    /// # Security
+    /// This method is for trusted input. It does not bound allocations or reject trailing bytes.
+    /// Use [`Deserializable::read_from_bytes_with_budget`] for attacker-controlled bytes.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from(&mut SliceReader::new(bytes))
     }
