@@ -93,6 +93,7 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        source_provenance: Option<&ProjectSourceProvenanceInputs>,
     ) -> Result<Option<PackageBuildProvenance>, Report> {
         let Some(node) = self.dependency_graph.get(package_id) else {
             return Ok(None);
@@ -113,6 +114,7 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    source_provenance,
                 )
                 .map(Some),
         }
@@ -128,6 +130,7 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        source_provenance: Option<&ProjectSourceProvenanceInputs>,
     ) -> Result<PackageBuildProvenance, Report> {
         self.expected_source_provenance_with_visited(
             package_id,
@@ -138,6 +141,7 @@ impl DependencyGraph {
             manifest_path,
             source_provider,
             package_registry,
+            source_provenance,
             &mut BTreeSet::new(),
         )
     }
@@ -155,6 +159,7 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        source_provenance: Option<&ProjectSourceProvenanceInputs>,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash = self.compute_dependency_closure_hash(
@@ -172,6 +177,21 @@ impl DependencyGraph {
                 Ok(PackageBuildProvenance::Git {
                     repo: repo.to_string(),
                     resolved_revision: resolved_revision.to_string(),
+                    dependency_hash,
+                    build_settings,
+                })
+            },
+            ProjectSourceOrigin::Path | ProjectSourceOrigin::Root
+                if source_provenance.is_some() =>
+            {
+                Ok(PackageBuildProvenance::Path {
+                    source_hash: self.compute_path_source_hash_from_sources(
+                        &project,
+                        None,
+                        target,
+                        profile,
+                        source_provenance.unwrap(),
+                    ),
                     dependency_hash,
                     build_settings,
                 })
@@ -296,6 +316,7 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    None,
                     visiting,
                 )?;
                 Ok(format!("source:{package_id}:{}\n", provenance.describe()))
@@ -342,26 +363,51 @@ impl DependencyGraph {
                 "unsupported file type '{extension}': no source provider registered for that type"
             )));
         };
-        let ProjectSourceProvenanceInputs { root, support } =
-            source_provider.provide_source_provenance(context)?;
+        let source_provenance = source_provider.provide_source_provenance(context)?;
+
+        Ok(self.compute_path_source_hash_from_sources(
+            &context.package,
+            Some(context.project_root),
+            context.target,
+            context.profile,
+            &source_provenance,
+        ))
+    }
+
+    fn compute_path_source_hash_from_sources(
+        &self,
+        package: &miden_project::Package,
+        project_root: Option<&std::path::Path>,
+        target: &Target,
+        profile: &miden_project::Profile,
+        source_provenance: &ProjectSourceProvenanceInputs,
+    ) -> Word {
+        let ProjectSourceProvenanceInputs { root, support } = source_provenance;
 
         let mut inputs = Vec::with_capacity(1 + support.len());
-        let root_label = match root.path.strip_prefix(context.project_root) {
-            Ok(stripped) => stripped.display().to_string(),
-            Err(_) => root.path.display().to_string(),
+        let root_label = if let Some(project_root) = project_root {
+            match root.path.strip_prefix(project_root) {
+                Ok(stripped) => stripped.display().to_string(),
+                Err(_) => root.path.display().to_string(),
+            }
+        } else {
+            root.path.display().to_string()
         };
         inputs.push((format!("root:{root_label}"), root));
         for support_file in support {
-            let label = match support_file.path.strip_prefix(context.project_root) {
-                Ok(stripped) => stripped.display().to_string(),
-                Err(_) => support_file.path.display().to_string(),
+            let label = if let Some(project_root) = project_root {
+                match support_file.path.strip_prefix(project_root) {
+                    Ok(stripped) => stripped.display().to_string(),
+                    Err(_) => support_file.path.display().to_string(),
+                }
+            } else {
+                support_file.path.display().to_string()
             };
             inputs.push((format!("support:{label}"), support_file));
         }
         inputs.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut material =
-            context.package.build_provenance_projection(context.target, context.profile);
+        let mut material = package.build_provenance_projection(target, profile);
         for (label, source_file) in inputs {
             material.push_str(&label);
             material.push('\n');
@@ -369,6 +415,6 @@ impl DependencyGraph {
             material.push('\n');
         }
 
-        Ok(hash_string_to_word(material.as_str()))
+        hash_string_to_word(material.as_str())
     }
 }
