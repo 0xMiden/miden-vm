@@ -2417,12 +2417,8 @@ dependencies = [
 name = "miden-precompiles"
 version = "0.26.0"
 dependencies = [
- "codspeed-criterion-compat",
  "miden-core",
- "miden-core-lib",
  "miden-crypto",
- "miden-vm",
- "rand_chacha 0.10.0",
 ]
 
 [[package]]
@@ -2681,6 +2677,18 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "miden-vm-precompiles-bench"
+version = "0.26.0"
+dependencies = [
+ "codspeed-criterion-compat",
+ "miden-core",
+ "miden-core-lib",
+ "miden-crypto",
+ "miden-vm",
+ "rand_chacha 0.10.0",
 ]
 
 [[package]]
