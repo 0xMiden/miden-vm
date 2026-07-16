@@ -7665,10 +7665,11 @@ fn test_num_locals_one_above_max_is_rejected() {
 /// Regression test for the AST-producer path in issue #3331.
 ///
 /// The `@locals(..)` grammar cannot attach locals to a `begin`..`end` block, so the parser can
-/// never produce an entrypoint with locals. On the contrary, the AST API can, the entrypoint compiles to an
-/// ordinary procedure reachable via `Module::procedures_mut`, and `Procedure::set_num_locals`
-/// bypasses the parser entirely. An entrypoint with locals is an unrecoverable producer bug, so the
-/// invariant is enforced at the mutation site and must panic there.
+/// never produce an entrypoint with locals. On the contrary, the AST API can, the entrypoint
+/// compiles to an ordinary procedure reachable via `Module::procedures_mut`, and
+/// `Procedure::set_num_locals` bypasses the parser entirely. An entrypoint with locals is an
+/// unrecoverable producer bug, so the invariant is enforced at the mutation site and must panic
+/// there.
 #[test]
 #[should_panic(expected = "program entrypoint cannot have locals")]
 fn test_entrypoint_with_locals_via_setter_panics() {
