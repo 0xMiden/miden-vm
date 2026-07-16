@@ -79,6 +79,182 @@ fn stark_verifier_e2f4_with_deferred_root() {
     run_recursive_verifier(&data);
 }
 
+#[test]
+fn folding_reseed_helper_matches_reference_sampler() {
+    fn source(use_combined_helper: bool) -> String {
+        let sample = if use_combined_helper {
+            "
+            push.41.31.29.23 push.17
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+            "
+        } else {
+            "
+            push.41.31.29.23 push.17
+            exec.random_coin::reseed_with_felt
+            exec.constants::get_folding_pow_bits
+            exec.random_coin::sample_bits
+            assertz
+            exec.random_coin::sample_ext
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.0 exec.constants::set_folding_pow_bits
+                push.109.113.127.131 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+                {sample}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    let (reference, _) = build_test!(&source(false), &[])
+        .execute_for_output()
+        .expect("reference sampler should execute");
+    let (combined, _) = build_test!(&source(true), &[])
+        .execute_for_output()
+        .expect("combined sampler should execute");
+
+    assert_eq!(
+        combined.stack.get_num_elements(15),
+        reference.stack.get_num_elements(15),
+        "combined FRI reseed helper diverged from reference sampler"
+    );
+    assert_eq!(combined.stack.get_element(12), Some(Felt::from_u32(5)));
+}
+
+#[test]
+fn word_observe_helpers_match_scalar_observe() {
+    fn source(use_word_helpers: bool) -> String {
+        let observe = if use_word_helpers {
+            "
+            push.11.7.5.3
+            exec.random_coin::observe_word
+            push.23.19.17.13
+            exec.random_coin::observe_word_and_flush_buffer
+            "
+        } else {
+            "
+            push.3 exec.random_coin::observe_felt
+            push.5 exec.random_coin::observe_felt
+            push.7 exec.random_coin::observe_felt
+            push.11 exec.random_coin::observe_felt
+            push.13 exec.random_coin::observe_felt
+            push.17 exec.random_coin::observe_felt
+            push.19 exec.random_coin::observe_felt
+            push.23 exec.random_coin::observe_felt
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+                {observe}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    let (reference, _) = build_test!(&source(false), &[])
+        .execute_for_output()
+        .expect("scalar observe path should execute");
+    let (optimized, _) = build_test!(&source(true), &[])
+        .execute_for_output()
+        .expect("word observe path should execute");
+
+    assert_eq!(
+        optimized.stack.get_num_elements(13),
+        reference.stack.get_num_elements(13),
+        "word observe helpers changed random coin state"
+    );
+    assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+}
+
+#[test]
+fn observe_word_and_flush_buffer_matches_scalar_observe() {
+    fn source(prefix_len: usize, use_word_helper: bool) -> String {
+        let prefix = (0..prefix_len)
+            .map(|idx| format!("push.{} exec.random_coin::observe_felt", idx + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let observe = if use_word_helper {
+            "
+            push.23.19.17.13
+            exec.random_coin::observe_word_and_flush_buffer
+            "
+        } else {
+            "
+            push.13 exec.random_coin::observe_felt
+            push.17 exec.random_coin::observe_felt
+            push.19 exec.random_coin::observe_felt
+            push.23 exec.random_coin::observe_felt
+            exec.random_coin::flush_buffer
+            "
+        };
+
+        format!(
+            "
+            use miden::core::sys
+            use miden::core::stark::constants
+            use miden::core::stark::random_coin
+
+            begin
+                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
+                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+                {prefix}
+                {observe}
+
+                exec.constants::random_coin_output_len_ptr mem_load
+                exec.random_coin::load_random_coin_state
+                exec.sys::truncate_stack
+            end
+            "
+        )
+    }
+
+    for prefix_len in [0, 3, 4, 6] {
+        let (reference, _) = build_test!(&source(prefix_len, false), &[])
+            .execute_for_output()
+            .expect("scalar observe path should execute");
+        let (optimized, _) = build_test!(&source(prefix_len, true), &[])
+            .execute_for_output()
+            .expect("word observe path should execute");
+
+        assert_eq!(
+            optimized.stack.get_num_elements(13),
+            reference.stack.get_num_elements(13),
+            "word observe-and-flush helper changed random coin state with prefix_len={prefix_len}"
+        );
+        assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+    }
+}
+
 // Helper function for recursive verification
 pub fn generate_recursive_verifier_data(
     source: &str,
@@ -449,6 +625,57 @@ fn rejects_too_many_kernel_proc_digests() {
         test.execute_for_output().is_err(),
         "verifier accepted {num_kernel_proc_digests} kernel digests, exceeding max_aux_inputs"
     );
+}
+
+#[test]
+fn quotient_recomposition_constants_match_derivation() {
+    // The quotient recomposition constants in `asm/stark/constants.masm` are precomputed for the
+    // fixed blowup factor. Re-derive them from `BLOWUP_FACTOR_LOG` and the field so that changing
+    // the blowup without regenerating the constants fails here instead of shipping stale values.
+
+    // Goldilocks two-adicity: p - 1 = 2^32 * (2^32 - 1), so the largest power-of-two subgroup has
+    // order 2^32.
+    const TWO_ADICITY: u32 = 32;
+    // Goldilocks multiplicative generator.
+    const GENERATOR: u32 = 7;
+
+    let masm =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/asm/stark/constants.masm"))
+            .expect("read constants.masm");
+    let masm_const = |name: &str| -> u64 {
+        masm.lines()
+            .find_map(|line| {
+                let (lhs, rhs) = line.trim().strip_prefix("const ")?.split_once('=')?;
+                if lhs.trim() != name {
+                    return None;
+                }
+                Some(rhs.split_whitespace().next()?.parse().expect("parse const value"))
+            })
+            .unwrap_or_else(|| panic!("const {name} not found in constants.masm"))
+    };
+
+    let blowup_log = masm_const("BLOWUP_FACTOR_LOG") as u32;
+    let root_unity = Felt::new(masm_const("ROOT_UNITY")).unwrap();
+    let shift_ratio = Felt::new(masm_const("QUOTIENT_SHIFT_RATIO")).unwrap();
+    let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
+    let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
+
+    // With log_lde = log_trace + BLOWUP_FACTOR_LOG, both lde_g^N and offset^N collapse to one
+    // exponent that is independent of the trace length N = 2^log_trace.
+    let exp = 1u64 << (TWO_ADICITY - blowup_log);
+    let blowup = 1u32 << blowup_log;
+
+    // f = lde_g^N: the primitive 2^BLOWUP_FACTOR_LOG-th root of unity.
+    assert_eq!(root_unity.exp_u64(exp), shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
+
+    // s0 = offset^N with offset = GENERATOR^(2^(TWO_ADICITY - log_lde)).
+    let s0 = Felt::from_u32(GENERATOR).exp_u64(exp);
+    assert_eq!(s0, first_shift, "QUOTIENT_FIRST_SHIFT is stale");
+
+    // First barycentric weight = 1 / (BLOWUP_FACTOR * s0^(BLOWUP_FACTOR - 1)); check it as a
+    // reciprocal to avoid an explicit field inversion.
+    let denom = Felt::from_u32(blowup) * s0.exp_u64((blowup - 1) as u64);
+    assert_eq!((first_weight * denom).as_canonical_u64(), 1, "QUOTIENT_FIRST_WEIGHT is stale");
 }
 
 // HELPERS

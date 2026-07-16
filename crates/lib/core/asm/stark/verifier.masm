@@ -55,13 +55,13 @@ pub proc verify
     exec.public_inputs::process_public_inputs
     # => [...]
 
-    # Load the main-trace commitment, observe it onto the buffered stream, and flush.
+    # Load the main-trace commitment, observe it onto the buffered stream, and flush before
+    # sampling auxiliary randomness.
     padw adv_loadw
     exec.constants::main_trace_com_ptr mem_storew_le
     # => [main_trace_commitment, ...]
-    exec.random_coin::observe_main_trace_commitment
+    exec.random_coin::observe_word_and_flush_buffer
     # => [...]
-
 
     #==============================================================================================
     #       II) Observe auxiliary trace
@@ -101,8 +101,6 @@ pub proc verify
     #       V) Read the OOD frames for the main trace, auxiliary trace and the trace of evaluations
     #           of H over the LDE domain. This also computes some values needed for the computation
     #           of the DEEP queries.
-    #
-    # Cycles: 307
     #==============================================================================================
 
     exec.ood_frames::load_and_horner_eval_ood_frames
@@ -123,8 +121,7 @@ pub proc verify
     #       polynomial.
     #============================================
 
-    exec.random_coin::check_deep_pow
-    exec.random_coin::generate_deep_composition_random_coefficients
+    exec.random_coin::check_deep_pow_and_generate_deep_composition_random_coefficients
 
     #============================================
     #   2) Compute constants needed for computing
@@ -135,7 +132,6 @@ pub proc verify
     #       -   Number of FRI layers.
     #============================================
 
-    # Cycles: 45
     exec.helper::generate_fri_parameters
     # => [...]
 
@@ -145,7 +141,6 @@ pub proc verify
     #      computing the degree respecting projection
     #============================================
 
-    # Cycles: 21 + 225 * num_fri_layers
     exec.helper::load_fri_layer_commitments
     # => [...]
 
@@ -154,17 +149,18 @@ pub proc verify
     #      polynomial.
     #============================================
 
-    # Cycles:
-    #  1- Remainder polynomial of degree less than 64: 156
-    #  2- Remainder polynomial of degree less than 128: 188
     exec.helper::load_and_verify_remainder
     # => [...]
 
     #============================================
-    #   5) Check FRI Queries PoW nonce
+    #   5) Check FRI Queries PoW nonce and sample query indices
     #============================================
 
-    exec.random_coin::check_query_pow
+    # Compute the pointer to the first query using the pointer to
+    # the first layer commitment and the total number of queries.
+    exec.helper::compute_query_pointer
+
+    exec.random_coin::check_query_pow_and_generate_list_indices
     # => [...]
 
     #============================================
@@ -172,15 +168,6 @@ pub proc verify
     #   polynomial at randomly chosen query positions
     #============================================
 
-    # Compute the pointer to the first query using the pointer to
-    # the first layer commitment and the total number of queries.
-    exec.helper::compute_query_pointer
-
-    # Cycles: ~134 * num_queries
-    exec.random_coin::generate_list_indices
-    # => [...]
-
-    # Cycles: ~348 * num_queries
     exec.deep_queries::compute_deep_composition_polynomial_queries
     # => [...]
 
@@ -188,10 +175,5 @@ pub proc verify
     #   7) Call the FRI verifier
     #============================================
 
-    # Call FRI verifier
-    #
-    # Cycles:
-    #  1- Remainder of size 64: 22 + num_queries * (43 + num_layers * 93)
-    #  2- Remainder of size 128: 22 + num_queries * (75 + num_layers * 93)
     exec.frie2f4::verify
 end

@@ -51,13 +51,13 @@ pub proc observe_aux_trace
 
     swapw
     exec.random_coin::get_capacity
+    add.8
     movdnw.2
-    # Bind the absorbed length (8: commitment word + boundary word) into the capacity.
-    movup.8 add.8 movdn.8
+    # Capacity is tagged with the absorbed length: commitment word + boundary word.
     exec.poseidon2::permute
     # => [R1', R2', C', ...]
 
-    # Store final sponge state.
+    # Store the sponge state after the full-rate absorb.
     exec.random_coin::store_random_coin_state
     # => [...]
 
@@ -67,12 +67,11 @@ pub proc observe_aux_trace
     # => [aux2_0, aux2_1, 0, 0, ...]
 
     exec.random_coin::get_capacity
+    add.2
     padw
     # => [R2=0, C, R1, ...]
     movupw.2
     # => [R1, R2, C, ...]
-    # Bind the absorbed length (2) into the capacity.
-    movup.8 add.2 movdn.8
     exec.poseidon2::permute
     exec.random_coin::store_random_coin_state
 
