@@ -8,6 +8,7 @@ use alloc::string::{String, ToString};
 
 use miden_core::deferred::{DeferredState, TRUE_DIGEST};
 pub use miden_core::proof::{DeferredProof, HashFunction, StarkProof};
+pub use session::{VerifyError, verify_deferred};
 
 pub mod ec;
 pub mod hash;
