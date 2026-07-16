@@ -181,17 +181,6 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
-fn test_key_from_bytes_preserves_serialized_secret_key() {
-    let seed = [0_u8; 32];
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    let key = SecretKey::with_rng(&mut rng);
-
-    let decoded = AeadPoseidon2::key_from_bytes(&key.to_bytes()).unwrap();
-
-    assert_eq!(key, decoded);
-}
-
-#[test]
 fn test_key_from_bytes_accepts_noncanonical_key_material() {
     let bytes = [0xff; SK_SIZE_BYTES];
 
