@@ -1,3 +1,4 @@
+use num::Float;
 use rand::Rng;
 
 /// Samples an integer from {0, ..., 18} according to the distribution χ, which is close to
@@ -60,13 +61,13 @@ fn approx_exp(x: f64, ccs: f64) -> u64 {
     let twoe63 = 1u64 << 63;
 
     y = C[0];
-    z = f64::floor(x * (twoe63 as f64)) as u64;
+    z = Float::floor(x * (twoe63 as f64)) as u64;
     for cu in C.iter().skip(1) {
         let zy = (z as u128) * (y as u128);
         y = cu - ((zy >> 63) as u64);
     }
 
-    z = f64::floor((twoe63 as f64) * ccs) as u64;
+    z = Float::floor((twoe63 as f64) * ccs) as u64;
 
     (((z as u128) * (y as u128)) >> 63) as u64
 }
@@ -75,7 +76,7 @@ fn approx_exp(x: f64, ccs: f64) -> u64 {
 fn ber_exp<R: Rng>(x: f64, ccs: f64, rng: &mut R) -> bool {
     const LN2: f64 = core::f64::consts::LN_2;
     const ILN2: f64 = 1.0 / LN2;
-    let s = f64::floor(x * ILN2);
+    let s = Float::floor(x * ILN2);
     let r = x - s * LN2;
     let s = (s as u64).min(63);
     let z = ((approx_exp(r, ccs) << 1) - 1) >> s;
@@ -100,7 +101,7 @@ pub(crate) fn sampler_z<R: Rng>(mu: f64, sigma: f64, sigma_min: f64, rng: &mut R
     const INV_2SIGMA_MAX_SQ: f64 = 1f64 / (2f64 * SIGMA_MAX * SIGMA_MAX);
     let isigma = 1f64 / sigma;
     let dss = 0.5f64 * isigma * isigma;
-    let s = f64::floor(mu);
+    let s = Float::floor(mu);
     let r = mu - s;
     let ccs = sigma_min * isigma;
     loop {

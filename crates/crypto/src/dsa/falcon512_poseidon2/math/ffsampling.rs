@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 
-use num::Zero;
+use num::{Float, Zero};
 use num_complex::{Complex, Complex64};
 use rand::Rng;
 
@@ -153,7 +153,7 @@ pub fn normalize_tree(tree: &mut LdlTree, sigma: f64) {
             normalize_tree(right, sigma);
         },
         LdlTree::Leaf(vector) => {
-            vector[0] = Complex::new(sigma / vector[0].re.sqrt(), 0.0);
+            vector[0] = Complex::new(sigma / Float::sqrt(vector[0].re), 0.0);
             vector[1] = Complex64::zero();
         },
     }

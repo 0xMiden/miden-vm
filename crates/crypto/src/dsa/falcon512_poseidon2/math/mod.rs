@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 use core::ops::MulAssign;
 
-use num::{BigInt, FromPrimitive, One, Zero};
+use num::{BigInt, Float, FromPrimitive, One, Zero};
 use num_complex::Complex64;
 use rand::Rng;
 
@@ -271,7 +271,7 @@ fn babai_reduce(
             + capital_g_adjusted.hadamard_mul(&g_star_adjusted);
         let quotient = numerator.hadamard_div(&denominator_fft).ifft();
 
-        let k = quotient.map(|f| Into::<BigInt>::into(f.re.round() as i64));
+        let k = quotient.map(|f| Into::<BigInt>::into(Float::round(f.re) as i64));
 
         if k.is_zero() {
             break;

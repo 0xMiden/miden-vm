@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
-use num::Complex;
+use num::{Complex, Float};
 use num_complex::Complex64;
 use rand::Rng;
 
@@ -244,7 +244,7 @@ impl SecretKey {
             let s2_coef: [i16; N] = s2
                 .coefficients
                 .iter()
-                .map(|a| a.re.round() as i16)
+                .map(|a| Float::round(a.re) as i16)
                 .collect::<Vec<i16>>()
                 .try_into()
                 .expect("The number of coefficients should be equal to N");

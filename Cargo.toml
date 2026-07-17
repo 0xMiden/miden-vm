@@ -138,7 +138,7 @@ itertools       = { version = "0.15", default-features = false, features = ["use
 k256            = { version = "0.14", default-features = false }
 log             = { version = "0.4", default-features = false }
 num             = { version = "0.4", default-features = false }
-num-complex     = { version = "0.4" }
+num-complex     = { version = "0.4", default-features = false, features = ["libm"] }
 once_cell       = { version = "1.21", default-features = false }
 paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }

@@ -110,7 +110,7 @@ flume            = { workspace = true }
 hkdf             = { workspace = true }
 k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
 num              = { features = ["alloc", "libm"], workspace = true }
-num-complex      = { workspace = true }
+num-complex      = { features = ["libm"], workspace = true }
 once_cell        = { features = ["alloc", "critical-section"], workspace = true }
 proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { workspace = true }
