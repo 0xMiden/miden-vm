@@ -245,10 +245,10 @@ where
     let s1_next_raw: AB::Expr = sel_next[1].into();
     let s2_next_raw: AB::Expr = sel_next[2].into();
 
-    // The memory section is entered from the last bitwise row when bitwise is non-empty, or directly
-    // from the last controller row when bitwise is empty. The factor `s1' = 1, s2' = 0` confirms the
-    // next row is the first memory row; `is_bitwise` selects the last bitwise row (via that same
-    // `s1'` factor) and `ctrl_is_last` selects the last controller row, covering both entry paths.
+    // The memory section is entered from the last bitwise row (when bitwise is non-empty) or
+    // from the last controller row (when bitwise is empty). `s1' = 1` with `s2' = 0` confirms
+    // the next row is the first memory row; `is_bitwise` selects the last bitwise row (via that
+    // same `s1'` factor) and `ctrl_is_last` selects the last controller row, covering both paths.
     let precedes_first_memory_row = is_bitwise.clone() + ctrl_is_last.clone();
     let next_is_memory_first =
         precedes_first_memory_row * s1_next_raw.clone() * not_s2_next.clone();
