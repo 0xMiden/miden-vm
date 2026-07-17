@@ -36,8 +36,9 @@
 //! - `is_active`: 1 when this chiplet owns the current row
 //! - `is_transition`: active on both current and next row, including `is_transition()`
 //! - `is_last`: current row belongs to this chiplet and the next row has advanced past it
-//! - `next_is_first`: current row ends the previous chiplet section and the next row starts this
-//!   one
+//! - `next_is_first`: the next row is the first row of this chiplet's section (equivalently, the
+//!   current row is the last row before that section). This flag is derived from the section
+//!   boundary itself, so it still fires when the preceding chiplet section is empty.
 //!
 //! For each non-controller chiplet, `is_active` is `prefix * (1 - selector)`, where
 //! `selector` is the column that ends that chiplet's section. The code writes this as
@@ -223,11 +224,47 @@ where
     let is_ace_last = is_ace.clone() * s3_next;
 
     // --- Non-controller next-is-first flags ---
-    // A section starts after the previous section ends, unless the next row has already advanced
-    // past the target selector.
+    //
+    // Each `next_is_first` flag marks the row that immediately precedes a chiplet section's first
+    // row, and it gates that section's first-row initialization. Because any chiplet section other
+    // than the controller can be empty, these flags must be derived from the section boundary
+    // itself rather than from "the previous chiplet's last row". A predecessor-based definition
+    // silently fails when the predecessor is empty: it has no last row, so the flag never fires and
+    // the initialization is skipped. For the memory chiplet, that initialization is the "values not
+    // being written must be zero" reset, and skipping it would let a malicious prover forge a read
+    // of never-written memory.
+    //
+    // The bitwise flag is the exception that needs no boundary rewrite. Bitwise is preceded only by
+    // the controller, and the controller is always non-empty because a boundary constraint pins the
+    // first trace row to a controller row. (Even a hypothetical empty controller would be safe:
+    // bitwise would then begin at row 0, where the periodic `k_first` column already performs the
+    // reset.)
     let next_is_bitwise_first = ctrl_is_last.clone() * not_s1_next.clone();
-    let next_is_memory_first = is_bitwise_last.clone() * not_s2_next.clone();
-    let next_is_ace_first = is_memory_last.clone() * not_s3_next.clone();
+
+    let s0_next_raw: AB::Expr = sel_next[0].into();
+    let s1_next_raw: AB::Expr = sel_next[1].into();
+    let s2_next_raw: AB::Expr = sel_next[2].into();
+
+    // The memory section is entered from the last bitwise row when bitwise is non-empty, or directly
+    // from the last controller row when bitwise is empty. The factor `s1' = 1, s2' = 0` confirms the
+    // next row is the first memory row; `is_bitwise` selects the last bitwise row (via that same
+    // `s1'` factor) and `ctrl_is_last` selects the last controller row, covering both entry paths.
+    let precedes_first_memory_row = is_bitwise.clone() + ctrl_is_last.clone();
+    let next_is_memory_first =
+        precedes_first_memory_row * s1_next_raw.clone() * not_s2_next.clone();
+
+    // The ACE section is entered from the memory section, or from an earlier section when the
+    // sections in between are empty. Instead of enumerating those cases, we detect the boundary
+    // directly: the next row is the first ACE row (`s0' = s1' = s2' = 1` and `s3' = 0`) while the
+    // current row has not yet reached the ACE section or beyond (`s0 * s1 * s2 = 0`).
+    //
+    // Direct detection is affordable here because the ACE first-row constraint gates only a single
+    // column, so even this degree-7 flag stays within the AIR's degree-9 cap. The memory boundary
+    // above cannot afford it: its first-row init is degree-heavy, so the degree-5 direct form would
+    // overflow the cap, which is why memory uses the lower-degree two-term form instead.
+    let next_row_is_ace = s0_next_raw * s1_next_raw * s2_next_raw * not_s3_next.clone();
+    let current_row_before_ace = AB::Expr::ONE - s012.clone();
+    let next_is_ace_first = next_row_is_ace * current_row_before_ace;
 
     // --- Non-controller transition flags ---
     // Each non-controller chiplet fires its transition flag when the current row is in that
