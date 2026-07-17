@@ -93,7 +93,7 @@ use miden_crypto::{
 
 use super::{
     builder::DagBuilder,
-    ir::{AceDag, NodeId, PeriodicColumnData, SparseTerm},
+    ir::{AceDag, NodeId, PeriodicColumn, PeriodicColumnData, SparseTerm},
 };
 use crate::{
     layout::{InputKey, InputLayout},
@@ -290,43 +290,41 @@ where
     let mut z_cache = HashMap::<u32, NodeId>::new();
     let mut zpow_cache = HashMap::<u32, Vec<NodeId>>::new();
     let mut nodes = Vec::with_capacity(periodic.num_columns());
-    for (coeffs, terms) in periodic.columns().iter().zip(periodic.sparse_terms()) {
-        let col_len = coeffs.len();
+    for column in periodic.columns() {
+        let col_len = column.period();
         let ratio = max_len / col_len;
         let log_pow_col = ratio.ilog2();
         let log_len = col_len.ilog2();
 
-        // Dense Horner: 2 ops per nonzero-leading coefficient. Sparse Lagrange: per
-        // nonzero evaluation, `log_len` doubling ops to build `D(t)` plus one
-        // combining op, minus one shared combining op across all terms.
-        let dense_ops = 2 * col_len.saturating_sub(1);
-        let sparse_ops = terms.len() * (3 * log_len as usize) + terms.len().saturating_sub(1);
-
-        let value = if terms.is_empty() || sparse_ops < dense_ops {
-            let zpow = zpow_cache.entry(log_pow_col).or_insert_with(|| {
-                let mut z_col = builder.input(InputKey::ZK);
-                for _ in 0..log_pow_col {
-                    z_col = builder.mul(z_col, z_col);
-                }
-                let mut powers = Vec::with_capacity(log_len as usize);
-                let mut p = z_col;
-                for _ in 0..log_len {
-                    powers.push(p);
-                    p = builder.mul(p, p);
-                }
-                powers
-            });
-            build_sparse_periodic_value(builder, zpow, terms)
-        } else {
-            let z_col = *z_cache.entry(log_pow_col).or_insert_with(|| {
-                let mut z_col = builder.input(InputKey::ZK);
-                for _ in 0..log_pow_col {
-                    z_col = builder.mul(z_col, z_col);
-                }
-                z_col
-            });
-            let coeff_nodes: Vec<NodeId> = coeffs.iter().map(|c| builder.constant(*c)).collect();
-            horner_eval(builder, z_col, &coeff_nodes)
+        let value = match column {
+            PeriodicColumn::Sparse { terms, .. } => {
+                let zpow = zpow_cache.entry(log_pow_col).or_insert_with(|| {
+                    let mut z_col = builder.input(InputKey::ZK);
+                    for _ in 0..log_pow_col {
+                        z_col = builder.mul(z_col, z_col);
+                    }
+                    let mut powers = Vec::with_capacity(log_len as usize);
+                    let mut p = z_col;
+                    for _ in 0..log_len {
+                        powers.push(p);
+                        p = builder.mul(p, p);
+                    }
+                    powers
+                });
+                build_sparse_periodic_value(builder, zpow, terms)
+            },
+            PeriodicColumn::Dense(coeffs) => {
+                let z_col = *z_cache.entry(log_pow_col).or_insert_with(|| {
+                    let mut z_col = builder.input(InputKey::ZK);
+                    for _ in 0..log_pow_col {
+                        z_col = builder.mul(z_col, z_col);
+                    }
+                    z_col
+                });
+                let coeff_nodes: Vec<NodeId> =
+                    coeffs.iter().map(|c| builder.constant(*c)).collect();
+                horner_eval(builder, z_col, &coeff_nodes)
+            },
         };
         nodes.push(value);
     }
