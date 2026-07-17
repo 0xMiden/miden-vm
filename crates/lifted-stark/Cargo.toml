@@ -1,8 +1,8 @@
 [package]
 description            = "Lifted STARK prover and verifier (LMCS-based)."
-edition                = "2024"
+edition.workspace      = true
 homepage.workspace     = true
-license                = "MIT OR Apache-2.0"
+license.workspace      = true
 name                   = "miden-lifted-stark"
 readme                 = "README.md"
 repository.workspace   = true

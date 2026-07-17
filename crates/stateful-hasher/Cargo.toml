@@ -1,8 +1,8 @@
 [package]
 description            = "Stateful sponge-like hashers for cryptographic hashing"
-edition                = "2024"
+edition.workspace      = true
 homepage.workspace     = true
-license                = "MIT OR Apache-2.0"
+license.workspace      = true
 name                   = "miden-stateful-hasher"
 readme.workspace       = true
 repository.workspace   = true

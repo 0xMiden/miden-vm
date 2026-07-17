@@ -1,8 +1,8 @@
 [package]
 description            = "Transcript channels for Fiat-Shamir protocols with raw field/commitment storage"
-edition                = "2024"
+edition.workspace      = true
 homepage.workspace     = true
-license                = "MIT OR Apache-2.0"
+license.workspace      = true
 name                   = "miden-stark-transcript"
 readme.workspace       = true
 repository.workspace   = true

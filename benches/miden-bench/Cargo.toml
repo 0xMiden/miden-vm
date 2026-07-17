@@ -1,8 +1,8 @@
 [package]
 description            = "Profiling binary for lifted STARK and batch STARK provers."
-edition                = "2024"
+edition.workspace      = true
 homepage.workspace     = true
-license                = "MIT OR Apache-2.0"
+license.workspace      = true
 name                   = "miden-bench"
 publish                = false
 readme.workspace       = true

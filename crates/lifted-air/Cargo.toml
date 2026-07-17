@@ -1,8 +1,8 @@
 [package]
 description            = "AIR traits for the Miden lifted STARK protocol, with symbolic constraint analysis."
-edition                = "2024"
+edition.workspace      = true
 homepage.workspace     = true
-license                = "MIT OR Apache-2.0"
+license.workspace      = true
 name                   = "miden-lifted-air"
 readme.workspace       = true
 repository.workspace   = true
