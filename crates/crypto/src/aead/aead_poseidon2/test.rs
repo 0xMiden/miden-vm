@@ -182,8 +182,9 @@ fn test_key_from_bytes_rejects_invalid_length() {
 
 #[test]
 fn test_key_from_bytes_rejects_noncanonical_limb() {
-    // 0xffffffff00000002 is the smallest u64 >= Felt::ORDER (0xffffffff00000001).
-    // Random HKDF output (as used by the IES CryptoBox path) lands here with ~2^-32 per limb.
+    // 0xffffffff00000002 is Felt::ORDER + 1 (ORDER = 0xffffffff00000001), the smallest
+    // noncanonical u64. Random HKDF output (as used by the IES CryptoBox path) lands here
+    // with ~2^-32 per limb.
     let mut bytes = [0u8; SK_SIZE_BYTES];
     bytes[0] = 0x02;
     bytes[4] = 0xff;
@@ -195,7 +196,7 @@ fn test_key_from_bytes_rejects_noncanonical_limb() {
 
 #[test]
 fn test_key_from_uniform_bytes_accepts_noncanonical_limb() {
-    // Limb 0 is 0xffffffff00000002, the smallest u64 >= Felt::ORDER. Reduced mod ORDER it is 1.
+    // Limb 0 is 0xffffffff00000002 = Felt::ORDER + 1. Reduced mod ORDER it is 1.
     // Limbs 1-3 are zero. Pin both the acceptance and the exact reduction so a wrong mapping
     // (e.g. silently swapping to a different derivation) would fail this test.
     let mut bytes = [0u8; SK_SIZE_BYTES];
