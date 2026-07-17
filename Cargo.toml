@@ -2,20 +2,30 @@
 members = [
     "air",
     "benches/blake3-bench",
+    "benches/miden-bench",
+    "benches/smt-codspeed",
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
+    "crates/crypto",
+    "crates/crypto-derive",
     "crates/debug-types",
+    "crates/field",
     "crates/lib/core",
+    "crates/lifted-air",
+    "crates/lifted-stark",
     "crates/mast-package",
     "crates/midenc-hir-type",
     "crates/package-registry",
     "crates/package-registry-local",
     "crates/miden-format",
     "crates/project",
+    "crates/serde-utils",
+    "crates/stark-transcript",
+    "crates/stateful-hasher",
     "crates/test-serde-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
@@ -23,8 +33,11 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "miden-vm",
+    "precompiles",
+    "crates/lib/core/codegen",
     "processor",
     "prover",
+    "tests/wycheproof",
     "verifier",
 ]
 resolver = "3"
@@ -34,6 +47,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 authors = ["Miden contributors"]
+categories = ["cryptography", "no-std"]
+keywords = ["crypto", "hash", "merkle", "miden"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
@@ -41,7 +56,7 @@ rust-version = "1.96.1"
 # Private workspace members inherit this version. Publishable crates keep their
 # own package versions so release tooling can publish only the crates selected
 # for a release.
-version = "0.26.0"
+version = "0.28.0"
 
 [profile.optimized]
 inherits = "release"
@@ -63,32 +78,40 @@ opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
-miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.26", default-features = false }
-miden-air               = { path = "./air", version = "0.26", default-features = false }
-miden-assembly          = { path = "./crates/assembly", version = "0.26", default-features = false }
-miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.26", default-features = false }
-miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.26", default-features = false }
-miden-core              = { path = "./core", version = "0.26", default-features = false }
-miden-debug-types       = { path = "./crates/debug-types", version = "0.26", default-features = false }
-miden-mast-package      = { path = "./crates/mast-package", version = "0.26", default-features = false }
-miden-package-registry  = { path = "./crates/package-registry", version = "0.26", default-features = false }
-miden-processor         = { path = "./processor", version = "0.26", default-features = false }
+miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.28", default-features = false }
+miden-air               = { path = "./air", version = "0.28", default-features = false }
+miden-assembly          = { path = "./crates/assembly", version = "0.28", default-features = false }
+miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.28", default-features = false }
+miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.28", default-features = false }
+miden-core              = { path = "./core", version = "0.28", default-features = false }
+miden-crypto            = { path = "./crates/crypto", version = "0.28", default-features = false }
+miden-crypto-derive     = { path = "./crates/crypto-derive", version = "0.28", default-features = false }
+miden-debug-types       = { path = "./crates/debug-types", version = "0.28", default-features = false }
+miden-field             = { path = "./crates/field", version = "0.28", default-features = false }
+miden-lifted-air        = { path = "./crates/lifted-air", version = "0.28", default-features = false }
+miden-lifted-stark      = { path = "./crates/lifted-stark", version = "0.28", default-features = false }
+miden-mast-package      = { path = "./crates/mast-package", version = "0.28", default-features = false }
+miden-package-registry  = { path = "./crates/package-registry", version = "0.28", default-features = false }
+miden-precompiles       = { path = "./precompiles", version = "0.28", default-features = false }
+miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.28", default-features = false }
+miden-processor         = { path = "./processor", version = "0.28", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
-miden-project           = { path = "./crates/project", version = "0.26", default-features = false }
-miden-prover            = { path = "./prover", version = "0.26", default-features = false }
-miden-core-lib          = { path = "./crates/lib/core", version = "0.26", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.9", default-features = false }
-miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.26", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.26", default-features = false }
-miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.26", default-features = false }
-miden-utils-sync        = { path = "./crates/utils-sync", version = "0.26", default-features = false }
+miden-project           = { path = "./crates/project", version = "0.28", default-features = false }
+miden-prover            = { path = "./prover", version = "0.28", default-features = false }
+miden-core-lib          = { path = "./crates/lib/core", version = "0.28", default-features = false }
+miden-serde-utils       = { path = "./crates/serde-utils", version = "0.28", default-features = false }
+miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.28", default-features = false }
+miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.28", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.9.1", default-features = false }
+miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.28", default-features = false }
+miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.28", default-features = false }
+miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.28", default-features = false }
+miden-utils-sync        = { path = "./crates/utils-sync", version = "0.28", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
-miden-verifier          = { path = "./verifier", version = "0.26", default-features = false }
+miden-verifier          = { path = "./verifier", version = "0.28", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.28", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-miden-serde-utils = { version = "0.28", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
@@ -98,37 +121,89 @@ wincode       = { version = "0.5.5", default-features = false, features = ["allo
 clap            = { version = "4.5", features = ["derive"] }
 codspeed-criterion-compat = { version = "4.6.0" }
 criterion       = { version = "0.7" }
+assert_matches  = { version = "1.5", default-features = false }
+blake3          = { version = "1.8", default-features = false }
+cc              = "1.2"
+chacha20poly1305 = { version = "0.11.0", default-features = false }
+curve25519-dalek = { version = "5.0.0", default-features = false }
+der             = { version = "0.8", default-features = false }
 derive_more     = { version = "2.0", features = ["from"] }
+ed25519-dalek   = { version = "3.0.0", default-features = false }
 env_logger      = { version = "0.11" }
+flume           = { version = "0.12.0", default-features = false }
+hex             = { version = "0.4", default-features = false }
+hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
 itertools       = { version = "0.15", default-features = false, features = ["use_alloc"] }
+k256            = { version = "0.14", default-features = false }
 log             = { version = "0.4", default-features = false }
+num             = { version = "0.4", default-features = false }
+num-complex     = { version = "0.4", default-features = false, features = ["libm"] }
+once_cell       = { version = "1.21", default-features = false }
 paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.7", default-features = false }
+rand            = { version = "0.10", default-features = false }
+rayon           = "1.10"
+rocksdb         = { version = "0.24", default-features = false }
+seq-macro       = "0.3"
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_repr      = { version = "0.1" }
 serde-untagged  = {version = "0.1" }
+sha2            = { version = "0.11", default-features = false }
+sha3            = { version = "0.12", default-features = false }
+shake           = { version = "0.1", default-features = false }
 smallvec        = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
+subtle          = { version = "2.6", default-features = false }
 syn             = "1.0"
+syn2            = { package = "syn", version = "2.0", features = ["full"] }
 tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
-tracing-subscriber = { version = "0.3" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"] }
 trybuild        = { version = "1.0" }
 windows-sys     = { version = "0.61.2" }
+x25519-dalek    = { version = "3.0.0", default-features = false }
+
+p3-air           = { version = "0.6", default-features = false }
+p3-batch-stark   = { version = "0.6", default-features = false }
+p3-blake3        = { version = "0.6", default-features = false }
+p3-blake3-air    = { version = "0.6", default-features = false }
+p3-bn254         = { version = "0.6", default-features = false }
+p3-challenger    = { version = "0.6", default-features = false }
+p3-commit        = { version = "0.6", default-features = false }
+p3-dft           = { version = "0.6", default-features = false }
+p3-field         = { version = "0.6", default-features = false }
+p3-fri           = { version = "0.6", default-features = false }
+p3-goldilocks    = { version = "0.6", default-features = false }
+p3-keccak        = { version = "0.6", default-features = false }
+p3-keccak-air    = { version = "0.6", default-features = false }
+p3-lookup        = { version = "0.6", default-features = false }
+p3-matrix        = { version = "0.6", default-features = false }
+p3-maybe-rayon   = { version = "0.6", default-features = false }
+p3-merkle-tree   = { version = "0.6", default-features = false }
+p3-mersenne-31   = { version = "0.6", default-features = false }
+p3-poseidon2-air = { version = "0.6", default-features = false }
+p3-symmetric     = { version = "0.6", default-features = false }
+p3-uni-stark     = { version = "0.6", default-features = false }
+p3-util          = { version = "0.6", default-features = false }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"
 quote = "1.0"
 rand_chacha = { version = "0.10", default-features = false }
 rstest = "0.26"
 toml = { version = "1.0", default-features = false }
+tracing-forest = "0.3.1"
 walkdir = "2.5"
+wycheproof-ng-core = { version = "0.1.1", default-features = false }
+wycheproof-ng-dh = { version = "0.1.1", default-features = false }
+wycheproof-ng-eddsa = { version = "0.1.1", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

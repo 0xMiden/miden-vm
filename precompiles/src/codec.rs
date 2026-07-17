@@ -1,0 +1,61 @@
+//! Shared chunk ↔ byte codec for hash precompiles. Hash evaluation consumes framework-owned chunk
+//! list children, derives the expected chunk count from the assertion's declared byte length, and
+//! uses this codec to validate and strip trailing zero padding back to `n_bytes`.
+
+use alloc::vec::Vec;
+use core::num::NonZeroU32;
+
+use miden_core::deferred::{DataChunk, Node, PrecompileError};
+
+/// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
+pub const BYTES_PER_CHUNK: u32 = Node::PACKED_BYTES_PER_CHUNK as u32;
+
+/// Number of 8-felt chunks needed to encode `n_bytes` of u32-packed input.
+///
+/// Empty input still needs one chunk: deferred data payloads are non-empty, so a 0-byte hash
+/// preimage is encoded as a single zero chunk. The count is therefore clamped to at least 1.
+pub fn n_chunks(n_bytes: u32) -> NonZeroU32 {
+    NonZeroU32::new(n_bytes.div_ceil(BYTES_PER_CHUNK).max(1)).expect("clamped to at least 1")
+}
+
+/// Unpack a slice of u32-packed-LE chunks back to a `n_bytes`-length byte vector, returning
+/// `PrecompileError::InvalidNode` if any felt holds a value larger than `u32::MAX`.
+///
+/// The caller-supplied `n_bytes` may be shorter than `chunks.len() * BYTES_PER_CHUNK as usize`;
+/// the trailing bytes are zero-pad and are stripped from the output after validating they are
+/// zero.
+pub fn chunks_to_bytes(chunks: &[DataChunk], n_bytes: usize) -> Result<Vec<u8>, PrecompileError> {
+    let chunk_bytes = BYTES_PER_CHUNK as usize;
+    if n_bytes > chunks.len() * chunk_bytes {
+        return Err(PrecompileError::InvalidNode);
+    }
+    let mut bytes = Vec::with_capacity(chunks.len() * chunk_bytes);
+    for chunk in chunks {
+        for felt in chunk {
+            let limb =
+                u32::try_from(felt.as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
+            bytes.extend_from_slice(&limb.to_le_bytes());
+        }
+    }
+    if bytes[n_bytes..].iter().any(|&b| b != 0) {
+        return Err(PrecompileError::InvalidNode);
+    }
+    bytes.truncate(n_bytes);
+    Ok(bytes)
+}
+
+/// Unpack exactly `expected_chunks` u32-packed-LE chunks back to a `n_bytes`-length byte vector.
+///
+/// Returns [`PrecompileError::InvalidNode`] if the chunk count is not exact, if `n_bytes` is too
+/// large for the supplied chunks, if any felt is not a canonical `u32`, or if stripped padding
+/// bytes are non-zero.
+pub fn chunks_to_bytes_exact(
+    chunks: &[DataChunk],
+    expected_chunks: usize,
+    n_bytes: usize,
+) -> Result<Vec<u8>, PrecompileError> {
+    if chunks.len() != expected_chunks {
+        return Err(PrecompileError::InvalidNode);
+    }
+    chunks_to_bytes(chunks, n_bytes)
+}

@@ -1,0 +1,27 @@
+[package]
+name = "miden-core-lib-codegen"
+version.workspace = true
+description = "Build-time MASM code generation support for miden-core-lib"
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["std"]
+std = ["miden-core/std", "miden-precompiles/std"]
+
+[dependencies]
+miden-core.workspace = true
+miden-precompiles.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[[bin]]
+name = "miden-core-lib-codegen"
+path = "src/main.rs"
+required-features = ["std"]

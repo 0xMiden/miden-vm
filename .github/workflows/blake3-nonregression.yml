@@ -35,11 +35,6 @@ on:
         required: false
         default: "10"
         type: string
-      light_sample_size:
-        description: Criterion sample size for light axes.
-        required: false
-        default: "200"
-        type: string
       measurement_time_secs:
         description: Criterion measurement time for proof-heavy axes.
         required: false
@@ -49,6 +44,11 @@ on:
         description: Criterion warm-up time for proof-heavy axes.
         required: false
         default: "1"
+        type: string
+      light_bench_settings:
+        description: Criterion settings for light axes as sample_size,measurement_secs,warmup_secs.
+        required: false
+        default: "200,15,3"
         type: string
       bench_axes:
         description: "Comma-separated axes: all, execute_trace_inputs_sync, build_trace, prove_trace_sync, e2e_prove."
@@ -120,9 +120,9 @@ jobs:
           INPUT_MIN_DELTA_MS: ${{ inputs.regression_min_delta_ms }}
           INPUT_RAYON_THREADS: ${{ inputs.rayon_num_threads }}
           INPUT_SAMPLE_SIZE: ${{ inputs.sample_size }}
-          INPUT_LIGHT_SAMPLE_SIZE: ${{ inputs.light_sample_size }}
           INPUT_MEASUREMENT_TIME_SECS: ${{ inputs.measurement_time_secs }}
           INPUT_WARM_UP_TIME_SECS: ${{ inputs.warm_up_time_secs }}
+          INPUT_LIGHT_BENCH_SETTINGS: ${{ inputs.light_bench_settings }}
           INPUT_BENCH_AXES: ${{ inputs.bench_axes }}
         shell: bash
         run: |
@@ -174,11 +174,17 @@ jobs:
             min_delta_ms="${INPUT_MIN_DELTA_MS}"
             rayon_threads="${INPUT_RAYON_THREADS}"
             sample_size="${INPUT_SAMPLE_SIZE}"
-            light_sample_size="${INPUT_LIGHT_SAMPLE_SIZE}"
             measurement_time_secs="${INPUT_MEASUREMENT_TIME_SECS}"
             warm_up_time_secs="${INPUT_WARM_UP_TIME_SECS}"
-            light_measurement_time_secs="15"
-            light_warm_up_time_secs="3"
+            IFS=',' read -r light_sample_size light_measurement_time_secs light_warm_up_time_secs extra_light_setting <<< "${INPUT_LIGHT_BENCH_SETTINGS}"
+            if [[ -n "${extra_light_setting:-}" ]]; then
+              echo "light_bench_settings must contain exactly three comma-separated values: sample_size,measurement_secs,warmup_secs" >&2
+              exit 1
+            fi
+            if [[ -n "${INPUT_LIGHT_BENCH_SETTINGS}" && ( -z "${light_sample_size}" || -z "${light_measurement_time_secs}" || -z "${light_warm_up_time_secs}" ) ]]; then
+              echo "light_bench_settings must contain exactly three comma-separated values: sample_size,measurement_secs,warmup_secs" >&2
+              exit 1
+            fi
             bench_axes="${INPUT_BENCH_AXES}"
           fi
 

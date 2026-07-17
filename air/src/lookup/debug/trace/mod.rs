@@ -266,7 +266,7 @@ where
     }
 
     // Boundary / outer interactions (once per proof, no row): kernel init, block
-    // hash, log-precompile terminals, …. Accumulates into the same balance map as
+    // hash, log-deferred terminals, …. Accumulates into the same balance map as
     // the per-row trace emissions — a fully closed AIR produces `is_ok() == true`.
     {
         let mut boundary = DebugBoundaryEmitter {

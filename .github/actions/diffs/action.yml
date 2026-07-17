@@ -1,0 +1,111 @@
+name: Detect changed areas
+description: Classifies changes so workflows can skip unrelated heavy jobs.
+
+outputs:
+  isCrypto:
+    description: Crypto crates, crypto tests, crypto benchmarks, or crypto fuzz code changed.
+    value: ${{ steps.filter.outputs.crypto }}
+  isVm:
+    description: VM crates, VM tests, VM benchmarks, or VM fuzz code changed.
+    value: ${{ steps.filter.outputs.vm }}
+  isRustWorkspace:
+    description: Shared Rust workspace files changed.
+    value: ${{ steps.filter.outputs.rust-workspace }}
+  isFuzz:
+    description: Fuzz targets or fuzz workflow files changed.
+    value: ${{ steps.filter.outputs.fuzz }}
+  isRelease:
+    description: Release workflow files changed.
+    value: ${{ steps.filter.outputs.release }}
+  isDocsOnly:
+    description: Only documentation files changed.
+    value: ${{ steps.docs-only.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - id: filter
+      uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+      with:
+        base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref_name }}
+        token: ''
+        filters: |
+          crypto:
+            - 'crates/crypto/**'
+            - 'crates/crypto-derive/**'
+            - 'crates/field/**'
+            - 'crates/serde-utils/**'
+            - 'crates/lifted-air/**'
+            - 'crates/lifted-stark/**'
+            - 'crates/stark-transcript/**'
+            - 'crates/stateful-hasher/**'
+            - 'tests/wycheproof/**'
+            - 'benches/miden-bench/**'
+            - 'benches/smt-codspeed/**'
+            - 'tools/miden-crypto-fuzz/**'
+            - 'tools/miden-serde-utils-fuzz/**'
+          vm:
+            - 'air/**'
+            - 'core/**'
+            - 'processor/**'
+            - 'prover/**'
+            - 'verifier/**'
+            - 'miden-vm/**'
+            - 'crates/ace-codegen/**'
+            - 'crates/assembly/**'
+            - 'crates/assembly-syntax/**'
+            - 'crates/assembly-syntax-cst/**'
+            - 'crates/debug-types/**'
+            - 'crates/lib/core/**'
+            - 'crates/mast-package/**'
+            - 'crates/midenc-hir-type/**'
+            - 'crates/package-registry/**'
+            - 'crates/package-registry-local/**'
+            - 'crates/miden-format/**'
+            - 'crates/project/**'
+            - 'crates/test-serde-macros/**'
+            - 'crates/test-utils/**'
+            - 'crates/utils-core-derive/**'
+            - 'crates/utils-diagnostics/**'
+            - 'crates/utils-indexing/**'
+            - 'crates/utils-sync/**'
+            - 'benches/blake3-bench/**'
+            - 'benches/synthetic-bench/**'
+            - 'tools/miden-core-fuzz/**'
+          rust-workspace:
+            - '.github/actions/**'
+            - '.github/workflows/**'
+            - '.cargo/**'
+            - 'Cargo.toml'
+            - 'Cargo.lock'
+            - 'Makefile'
+            - 'rust-toolchain.toml'
+            - 'rustfmt.toml'
+            - 'scripts/**'
+          fuzz:
+            - 'tools/miden-core-fuzz/**'
+            - 'tools/miden-crypto-fuzz/**'
+            - 'tools/miden-serde-utils-fuzz/**'
+            - '.github/workflows/fuzz.yml'
+          release:
+            - '.github/actions/workspace-release/**'
+            - '.github/workflows/workspace-dry-run.yml'
+            - '.github/workflows/workspace-publish.yml'
+          docs:
+            - 'docs/**'
+            - '**/*.md'
+          non-docs:
+            - '**'
+            - '!docs/**'
+            - '!**/*.md'
+    - id: docs-only
+      shell: bash
+      env:
+        DIFFS_DOCS: ${{ steps.filter.outputs.docs }}
+        DIFFS_NON_DOCS: ${{ steps.filter.outputs.non-docs }}
+      run: |
+        if [[ "$DIFFS_DOCS" == "true" && "$DIFFS_NON_DOCS" != "true" ]]; then
+          echo "value=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "value=false" >> "$GITHUB_OUTPUT"
+        fi

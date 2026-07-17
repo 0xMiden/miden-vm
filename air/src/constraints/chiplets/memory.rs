@@ -92,8 +92,11 @@ pub fn enforce_memory_constraints<AB>(
     // ==========================================================================
     // FIRST-ROW INITIALIZATION
     // ==========================================================================
-    // Enforced at the bitwise→memory boundary. When entering the memory chiplet,
-    // values not being written must be zero.
+    // On the first row of the memory section, every value that is not being written must be zero,
+    // so that a read of a never-written cell returns zero. `next_is_first` marks the row before the
+    // first memory row and is derived from the section boundary directly, so this holds whether the
+    // memory section follows a bitwise section or, when bitwise is empty, follows the controller
+    // directly. (See `next_is_memory_first` in `selectors.rs`.)
     {
         let builder = &mut builder.when(flags.next_is_first.clone());
         for (i, nw) in not_written.iter().enumerate() {
@@ -263,7 +266,7 @@ mod tests {
     use super::enforce_memory_constraints;
     use crate::{
         ChipletCols, MemoryCols,
-        constraints::chiplets::selectors::ChipletFlags,
+        constraints::chiplets::selectors::{ChipletFlags, build_chiplet_selectors},
         trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH},
     };
 
@@ -378,20 +381,18 @@ mod tests {
 
     fn memory_row() -> ChipletCols<Felt> {
         ChipletCols {
-            s_00: Felt::ZERO,
-            s_01: Felt::ZERO,
+            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 1],
             chip_clk: Felt::ONE,
-            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 3],
         }
     }
 
     fn memory_cols(row: &mut ChipletCols<Felt>) -> &mut MemoryCols<Felt> {
-        row.chiplets[2..17].borrow_mut()
+        row.chiplets[3..18].borrow_mut()
     }
 
     fn set_word_addr_limbs(row: &mut ChipletCols<Felt>, lo: u64, hi: u64) {
-        row.chiplets[17] = Felt::new_unchecked(lo);
-        row.chiplets[18] = Felt::new_unchecked(hi);
+        row.chiplets[18] = Felt::new_unchecked(lo);
+        row.chiplets[19] = Felt::new_unchecked(hi);
     }
 
     fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {
@@ -432,5 +433,91 @@ mod tests {
         let mut invalid = valid.clone();
         set_word_addr_limbs(&mut invalid, 0, 0);
         assert_constraints_reject(&invalid);
+    }
+
+    // EMPTY-SECTION BOUNDARY REGRESSION TESTS
+    // ============================================================================================
+    // The memory chiplet's first-row initialization ("values not being written must be zero") is
+    // gated by `next_is_first`. That flag must fire on the row preceding the first memory row even
+    // when the bitwise section is empty, which is the case for any program that touches memory but
+    // performs no `u32and`/`u32xor` operations. The earlier definition gated it on a non-empty
+    // bitwise section, so an empty bitwise section skipped the initialization and let a malicious
+    // prover forge a read of never-written memory.
+
+    /// Builds a `ChipletCols` row with the given top-level selector prefix `[s0..s4]`.
+    fn row_with_selectors(selectors: [u64; 5]) -> ChipletCols<Felt> {
+        let mut row = memory_row();
+        for (slot, value) in row.chiplets[..5].iter_mut().zip(selectors) {
+            *slot = Felt::new_unchecked(value);
+        }
+        row
+    }
+
+    /// Runs `build_chiplet_selectors` over the `(local, next)` window and returns the memory flags
+    /// the AIR would actually derive for that boundary.
+    fn memory_flags_for_window(
+        local: &ChipletCols<Felt>,
+        next: &ChipletCols<Felt>,
+    ) -> ChipletFlags<Felt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        build_chiplet_selectors(&mut builder, local, next).memory
+    }
+
+    fn eval_memory_window(
+        local: &ChipletCols<Felt>,
+        next: &ChipletCols<Felt>,
+        flags: &ChipletFlags<Felt>,
+    ) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        enforce_memory_constraints(&mut builder, local, next, flags);
+        builder.evaluations
+    }
+
+    #[test]
+    fn memory_first_row_init_enforced_when_bitwise_empty() {
+        // Empty-bitwise layout: the memory section begins directly after a controller row, so the
+        // first memory row is entered at a controller -> memory boundary ([0..] -> [1,1,0,..]).
+        let controller = row_with_selectors([0, 0, 0, 0, 0]);
+        let mut first_memory = row_with_selectors([1, 1, 0, 0, 0]);
+        memory_cols(&mut first_memory).is_read = Felt::ONE; // fresh read: every value must be zero
+
+        let flags = memory_flags_for_window(&controller, &first_memory);
+        assert_eq!(
+            flags.next_is_first,
+            Felt::ONE,
+            "controller -> memory boundary (empty bitwise) must mark the next row as first memory",
+        );
+
+        // A forged fresh read of a never-written cell must be rejected.
+        let mut forged = first_memory.clone();
+        memory_cols(&mut forged).values[0] = Felt::new_unchecked(42);
+        let evals = eval_memory_window(&controller, &forged, &flags);
+        assert!(
+            evals.iter().any(|value| *value != QuadFelt::ZERO),
+            "forged fresh read must be rejected at the empty-bitwise memory boundary",
+        );
+
+        // The honest zero-initialized fresh read is accepted.
+        let evals = eval_memory_window(&controller, &first_memory, &flags);
+        assert!(
+            evals.iter().all(|value| *value == QuadFelt::ZERO),
+            "zero-initialized fresh read must be accepted; got {evals:?}",
+        );
+    }
+
+    #[test]
+    fn memory_next_is_first_marks_only_the_entry_row() {
+        // Non-empty bitwise: the bitwise -> memory boundary still fires.
+        let bitwise = row_with_selectors([1, 0, 0, 0, 0]);
+        let memory = row_with_selectors([1, 1, 0, 0, 0]);
+        assert_eq!(memory_flags_for_window(&bitwise, &memory).next_is_first, Felt::ONE);
+
+        // An interior memory -> memory transition is not a section start.
+        let memory_next = row_with_selectors([1, 1, 0, 0, 0]);
+        assert_eq!(memory_flags_for_window(&memory, &memory_next).next_is_first, Felt::ZERO);
+
+        // A memory -> ACE transition is not a memory section start.
+        let ace = row_with_selectors([1, 1, 1, 0, 0]);
+        assert_eq!(memory_flags_for_window(&memory, &ace).next_is_first, Felt::ZERO);
     }
 }

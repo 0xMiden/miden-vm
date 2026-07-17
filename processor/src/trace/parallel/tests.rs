@@ -7,7 +7,6 @@ use miden_air::{
 };
 use miden_core::{
     Felt, Word,
-    events::EventId,
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
@@ -15,7 +14,6 @@ use miden_core::{
         SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    precompile::PrecompileRequest,
     program::{KernelDescriptor, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
@@ -24,7 +22,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, TraceBuildInputs,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
     trace::trace_state::MemoryReadsReplay,
 };
 
@@ -46,7 +44,7 @@ fn dyn_target_proc_hash() -> &'static [Felt] {
         let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
             .add_to_forest(&mut forest)
             .unwrap();
-        // FastProcessor::new now expects first element to be top of stack
+        // Stack inputs are top-first for FastProcessor::new.
         forest.get_node_by_id(target).unwrap().digest().iter().copied().collect()
     });
     HASH.as_slice()
@@ -67,7 +65,7 @@ fn external_lib_proc_digest() -> Word {
 }
 
 /// Returns the external library procedure digest elements for stack inputs.
-/// FastProcessor::new now expects first element to be top of stack.
+/// Returns the digest in top-first stack-input order.
 fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
     use std::sync::LazyLock;
     static HASH: LazyLock<Vec<Felt>> =
@@ -406,15 +404,7 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.trace_len_summary(),
     );
 
-    // Verify deferred precompile data match deterministically.
-    assert_eq!(
-        trace_from_fragments.precompile_requests(),
-        trace_from_single_fragment.precompile_requests(),
-    );
-    assert_eq!(
-        trace_from_fragments.final_precompile_transcript,
-        trace_from_single_fragment.final_precompile_transcript,
-    );
+    // Verify precompile-backed deferred data match deterministically.
 
     // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
     assert_eq!(
@@ -428,23 +418,22 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let (core_from_fragments, chip_from_fragments) =
-        trace_from_fragments.main_trace().to_core_chiplets_matrices();
-    let (core_from_single, chip_from_single) =
-        trace_from_single_fragment.main_trace().to_core_chiplets_matrices();
-    for (label, air_frag, air_single) in [
-        ("Core", &core_from_fragments, &core_from_single),
-        ("Chiplets", &chip_from_fragments, &chip_from_single),
+    let (core_from_fragments, chip_from_fragments, poseidon2_from_fragments) =
+        trace_from_fragments.main_trace().to_air_matrices();
+    let (core_from_single, chip_from_single, poseidon2_from_single) =
+        trace_from_single_fragment.main_trace().to_air_matrices();
+    for (label, air, air_frag, air_single) in [
+        ("Core", MidenAir::Core, &core_from_fragments, &core_from_single),
+        ("Chiplets", MidenAir::Chiplets, &chip_from_fragments, &chip_from_single),
+        (
+            "Poseidon2Permutation",
+            MidenAir::Poseidon2Permutation,
+            &poseidon2_from_fragments,
+            &poseidon2_from_single,
+        ),
     ] {
-        let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CORE, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CORE, air_single, &challenges);
-            (a, c, b, d)
-        } else {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_single, &challenges);
-            (a, c, b, d)
-        };
+        let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
+        let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
         assert_eq!(
             aux_frag.values, aux_single.values,
             "{label} LogUp aux trace mismatch between fragments and single fragment"
@@ -1087,48 +1076,6 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
     );
 }
 
-/// Verifies that `build_trace` rejects compatibility bundles that reuse matching public outputs
-/// but carry different deferred precompile requests.
-#[test]
-fn test_build_trace_rejects_mismatched_precompile_requests() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    let mut host = DefaultHost::default();
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
-
-    let mut other_trace_output = trace_output;
-    other_trace_output
-        .precompile_requests
-        .push(PrecompileRequest::new(EventId::from_u64(7), vec![1, 2, 3]));
-
-    let result = build_trace(TraceBuildInputs::from_parts(
-        other_trace_output,
-        trace_generation_context,
-        program_info,
-    ));
-
-    assert!(
-        matches!(
-            result,
-            Err(ExecutionError::Internal(
-                "trace inputs do not match deferred precompile requests"
-            ))
-        ),
-        "expected deferred-precompile-request mismatch error, got: {result:?}"
-    );
-}
-
 /// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
 /// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
 /// appended by `build_trace_with_max_len`.
@@ -1218,10 +1165,10 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the chiplets trace
-/// (hasher + memory rows) exceeds `max_trace_len`, even though the core trace rows fit.
+/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the Poseidon2
+/// permutation trace exceeds `max_trace_len`, even though the core trace rows fit.
 #[test]
-fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
+fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_max_len() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     // Use the DYN program because it exercises both hasher and memory chiplets.
@@ -1244,20 +1191,20 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
         * trace_inputs.trace_generation_context().fragment_size;
 
-    // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
-    // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
-    // core_trace_rows / HASH_CYCLE_LEN + 1 permutations to guarantee the chiplets trace exceeds the
-    // limit.
+    // Inject enough unique permutation requests so the Poseidon2 permutation trace exceeds
+    // core_trace_rows. Each unique state adds one HASH_CYCLE_LEN cycle.
     let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
-    for _ in 0..num_permutations {
+    for i in 0..num_permutations {
+        let mut state = [ZERO; 12];
+        state[0] = Felt::from_u32(i as u32);
         trace_inputs
             .trace_generation_context_mut()
             .hasher_for_chiplet
-            .record_permute_input([ZERO; 12]);
+            .record_permute_input(state);
     }
 
     // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
-    // greater), but the inflated chiplets trace will exceed it.
+    // greater), but the Poseidon2 permutation trace will exceed it.
     let max_trace_len = core_trace_rows;
 
     let result = build_trace_with_max_len(trace_inputs, max_trace_len);
@@ -1363,9 +1310,7 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
             .field("main_trace", trace.main_trace())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
-            .field("precompile_requests", &trace.precompile_requests())
-            .field("final_precompile_transcript", &trace.final_precompile_transcript)
-            .field("trace_len_summary", &trace.trace_len_summary())
+            .field("trace_len_summary", trace.trace_len_summary())
             .finish()
     }
 }

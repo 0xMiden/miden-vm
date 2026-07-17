@@ -1,6 +1,6 @@
 //! Public input boundary constraints.
 //!
-//! Enforces that the stack trace entries matches the claimed public inputs:
+//! Enforces that the stack trace entries match the claimed public inputs:
 //! - First row: stack[0..16] == stack_inputs[0..16]
 //! - Last row:  stack[0..16] == stack_outputs[0..16]
 

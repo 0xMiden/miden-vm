@@ -53,9 +53,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo codspeed build --measurement-mode walltime --profile optimized -p miden-vm-synthetic-bench --bench synthetic_bench
+          cargo codspeed build --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
 
       - name: Run benchmarks
         uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4.15.1
         with:
           mode: walltime
-          run: cargo codspeed run --measurement-mode walltime -p miden-vm-synthetic-bench --bench synthetic_bench
+          run: |
+            cargo codspeed run --measurement-mode walltime -p miden-vm-synthetic-bench --bench synthetic_bench
+            cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed

@@ -4,9 +4,9 @@ use core::ops::ControlFlow;
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
+    deferred::Digest,
     field::PrimeField64,
     mast::SparseMastForest,
-    precompile::PrecompileTranscriptState,
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::range,
 };
@@ -260,8 +260,8 @@ impl SystemInterface for ReplayProcessor {
         self.system.ctx
     }
 
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.system.pc_transcript_state
+    fn deferred_root(&self) -> Word {
+        self.system.deferred_root
     }
 
     fn set_caller_hash(&mut self, caller_hash: Word) {
@@ -276,8 +276,13 @@ impl SystemInterface for ReplayProcessor {
         self.system.clk += 1_u32;
     }
 
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.system.pc_transcript_state = state;
+    fn log_deferred_statement(
+        &mut self,
+        _statement_digest: Digest,
+        expected_new_root: Word,
+    ) -> Result<(), OperationError> {
+        self.system.deferred_root = expected_new_root;
+        Ok(())
     }
 
     fn save_call_state(&mut self) {
@@ -531,7 +536,7 @@ mod tests {
             clk: 0_u32.into(),
             ctx: ContextId::root(),
             fn_hash: Word::default(),
-            pc_transcript_state: Word::default(),
+            deferred_root: Word::default(),
         };
         let stack = StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO);
 

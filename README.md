@@ -27,7 +27,7 @@ In the latest stable release, most of the core features of the VM have been stab
 
 ### Status and features
 
-The next version of the VM is being developed in the [next](https://github.com/0xMiden/miden-vm/tree/next) branch; see the [changelog](https://github.com/0xMiden/miden-vm/blob/next/CHANGELOG.md) for the list of changes made in the currently unreleased version, and every past release.
+The next version of the VM is being developed in the [next](https://github.com/0xMiden/miden-vm/tree/next) branch; see the [changelog](https://github.com/0xMiden/miden-vm/blob/next/CHANGELOG.md) for changes made in the currently unreleased version, and every past release.
 
 #### Feature highlights
 

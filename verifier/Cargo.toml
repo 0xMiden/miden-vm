@@ -1,6 +1,6 @@
 [package]
 name = "miden-verifier"
-version = "0.26.0"
+version = "0.28.0"
 description = "Miden VM execution verifier"
 documentation = "https://docs.rs/miden-verifier"
 readme = "README.md"
@@ -19,17 +19,17 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-core/std", "thiserror/std"]
+std = ["miden-air/std", "miden-core/std", "miden-precompiles/std", "thiserror/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+miden-precompiles.workspace = true
 
 # External dependencies
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 wincode.workspace = true

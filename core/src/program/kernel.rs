@@ -1,6 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::{Felt, Word};
+use miden_crypto::Word;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -93,14 +93,13 @@ impl KernelDescriptor {
         &self.0
     }
 
-    /// Returns the canonical commitment to this kernel: the Poseidon2 linear hash of the
-    /// flattened procedure digests.
+    /// Returns the canonical commitment to this kernel: `hash_elements` over the flattened
+    /// procedure digests.
     ///
     /// This matches the kernel commitment computed by the protocol and is the fixed-size
     /// identifier observed by the recursive verifier in place of the raw digest list.
     pub fn commitment(&self) -> Word {
-        let elements: Vec<Felt> = self.0.iter().flat_map(Word::as_elements).copied().collect();
-        hasher::hash_elements(&elements)
+        hasher::hash_elements(Word::words_as_elements(&self.0))
     }
 }
 

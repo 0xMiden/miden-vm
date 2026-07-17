@@ -1,0 +1,123 @@
+use miden::precompiles
+
+# ENCODING CONVENTIONS
+# ================================================================================================
+#
+# This module uses the following notation for data representation:
+# - VALUE_U32[n] = arrays of n u32 values, denoted as [v_0, ..., v_{n-1}]
+# - VALUE_U8[n] = arrays of n u8 values, denoted as [b_0, ..., b_{n-1}]
+# - Conversion: v_i = u32::from_le_bytes([b_{4i}, b_{4i+1}, b_{4i+2}, b_{4i+3}])
+# - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
+
+# CONSTANTS — Keccak256Precompile assertion tag fields and digest advice event
+# ================================================================================================
+# Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the Blake3-derived
+# `precompile_id(&Keccak256Precompile)` over NAME ("keccak256"); changing the NAME in Rust must
+# update this literal in lockstep. ASSERT_TAG_ID is the generic hash assertion discriminant.
+
+const PRECOMPILE_ID = 1416710563871706399
+const ASSERT_TAG_ID = 0
+const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::digest")
+
+# PROCEDURES
+# ================================================================================================
+
+#! Writes the advised Keccak256 digest, registers expected digest chunks, and logs the hash assertion.
+#!
+#! Input:  [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+#! Advice: DIGEST_U32[8]
+#! Output: [...]  (DIGEST_U32[8] written to out_ptr)
+proc finish_hash_assert
+    # Keccak writes exactly one double-word. Manual word stores avoid building a whole adv_pipe
+    # sponge shape for a single pipe.
+    adv_pushw
+    # => [DIGEST_LO_U32[4], out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+    dup.4 mem_storew_le dropw
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]  (out_ptr[0..4] = DIGEST_LO)
+    adv_pushw
+    # => [DIGEST_HI_U32[4], out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+    dup.4 add.4 mem_storew_le dropw
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]  (out_ptr[4..8] = DIGEST_HI)
+
+    exec.precompiles::register_chunks_mem_1
+    # => [EXPECTED_DIGEST_CHUNKS_DIGEST, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+    swapw
+    # => [PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, len_bytes, ...]
+    movup.8 push.0 swap push.ASSERT_TAG_ID push.PRECOMPILE_ID
+    # => [ASSERT_TAG=[PRECOMPILE_ID,0,len_bytes,0], PREIMAGE_CHUNKS_DIGEST,
+    #     EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    exec.precompiles::register_expr
+    # => [ASSERTION_DIGEST, ...]
+    exec.precompiles::log_deferred
+    # => [...]
+end
+
+#! Low-level deferred Keccak256 assertion over memory.
+#!
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [...]  (DIGEST_U32[8] = Keccak256(INPUT_U8[len_bytes]) written to out_ptr)
+#!
+#! Where:
+#! - in_ptr:   word-aligned address holding INPUT_U32[⌈len_bytes/4⌉] (unused bytes in the final u32
+#!             and any remaining felts in the final 32-byte CHUNKS block must be 0)
+#! - len_bytes: number of bytes to hash
+#! - out_ptr:  word-aligned destination for DIGEST_U32[8]
+#!
+#! Advice is untrusted: the advised digest is bound by the logged generic hash assertion.
+pub proc hash_bytes_mem
+    emit.KECCAK256_DIGEST_EVENT
+    # => [in_ptr, len_bytes, out_ptr, ...]
+    #    (handler sees [event_id, in_ptr, len_bytes, ...])
+
+    dup.1
+    # => [len_bytes, in_ptr, len_bytes, out_ptr, ...]
+    add.31 u32div.32
+    # => [ceil(len_bytes / 32), in_ptr, len_bytes, out_ptr, ...]
+    dup eq.0 add
+    # => [preimage_n_chunks=max(1,ceil(len_bytes/32)), in_ptr, len_bytes, out_ptr, ...]
+    swap
+    # => [in_ptr, preimage_n_chunks, len_bytes, out_ptr, ...]
+    exec.precompiles::register_chunks_mem
+    # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]
+    movup.5
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+
+    exec.finish_hash_assert
+    # => [...]
+end
+
+#! Low-level deferred Keccak256 assertion over exactly one 32-byte CHUNKS block.
+#!
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [...]  (DIGEST_U32[8] = Keccak256(INPUT_U8[len_bytes]) written to out_ptr)
+pub proc hash_1_chunk_mem
+    emit.KECCAK256_DIGEST_EVENT
+    # => [in_ptr, len_bytes, out_ptr, ...]
+    #    (handler sees [event_id, in_ptr, len_bytes, ...])
+
+    exec.precompiles::register_chunks_mem_1
+    # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]
+    movup.5
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+
+    exec.finish_hash_assert
+    # => [...]
+end
+
+#! Low-level deferred Keccak256 assertion over exactly two contiguous 32-byte CHUNKS blocks.
+#!
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [...]  (DIGEST_U32[8] = Keccak256(INPUT_U8[len_bytes]) written to out_ptr)
+pub proc hash_2_chunks_mem
+    emit.KECCAK256_DIGEST_EVENT
+    # => [in_ptr, len_bytes, out_ptr, ...]
+    #    (handler sees [event_id, in_ptr, len_bytes, ...])
+
+    exec.precompiles::register_chunks_mem_2
+    # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]
+    movup.5
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+
+    exec.finish_hash_assert
+    # => [...]
+end

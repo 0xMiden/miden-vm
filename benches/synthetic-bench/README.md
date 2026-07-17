@@ -51,10 +51,14 @@ single file in `SYNTH_SNAPSHOT`):
    concatenate, and enclose in `begin ... end`. The output is the MASM
    program that Criterion actually runs.
 5. **Verify** -- execute the emitted program, measure its real row
-   counts, and assert that `padded_core_side` and `padded_chiplets`
-   match the scenario's. A bracket miss fails the bench; smaller drift
-   inside the same bracket is reported but tolerated, because proving
-   cost is driven by the padded length, not the raw count.
+   counts, and assert that the available padded brackets match the
+   scenario's. Split-aware snapshots enforce core/range, chiplets,
+   Poseidon2 permutation, and total brackets. Legacy snapshots without a
+   Poseidon2 target enforce only core/range and total brackets, because
+   their `chiplets_rows` still include inlined Poseidon2 permutations.
+   A bracket miss fails the bench; smaller drift inside the same bracket
+   is reported but tolerated, because proving cost is driven by the
+   padded length, not the raw count.
 
 ## Snippets
 
@@ -62,7 +66,7 @@ Five patterns cover every component the solver targets:
 
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
-| `hasher`      | `hperm`                                      | Poseidon2 hasher chiplet      |
+| `hasher`      | `hperm`                                      | Poseidon2 hash work           |
 | `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
 | `u32arith`    | `u32assert2 push.65537 add swap push.65537 add swap` | range chiplet |
 | `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |
@@ -98,9 +102,11 @@ visibility limitation, not as proof that the VM emitted no ACE rows.
 A producer JSON file is a map of scenario keys to entries. Each entry
 must carry a `trace` section; any sibling fields (cycle counts,
 metadata, ...) are silently ignored. Inside `trace`, the AIR-side
-totals (`core_rows`, `chiplets_rows`, `range_rows`) are the verifier's
-hard contract; nested `chiplets_shape` is an advisory per-chiplet
-breakdown. The loader checks
+totals (`core_rows`, `chiplets_rows`, `poseidon2_permutation_rows`,
+`range_rows`) are the verifier's contract; nested `chiplets_shape` is an
+advisory per-chiplet breakdown. `poseidon2_permutation_rows` defaults to
+zero for older snapshots that predate the split Poseidon2 AIR. The
+loader checks
 `trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
 
 ```json
@@ -109,6 +115,7 @@ breakdown. The loader checks
     "trace": {
       "core_rows": 77699,
       "chiplets_rows": 123129,
+      "poseidon2_permutation_rows": 17740,
       "range_rows": 20203,
       "chiplets_shape": {
         "hasher_rows": 120352,
@@ -144,27 +151,36 @@ regressions.
 ### Hard checks -- fail the bench
 
 Proving cost is dominated by the padded (power-of-two) length of each
-trace segment, not by the raw row count. So the only assertions that
-can fail the bench are on two padded proxies:
+trace segment, not by the raw row count. For split-aware snapshots, the
+assertions that can fail the bench are on padded proxies:
 
 - `padded_core_side = max(64, next_pow2(max(core_rows, range_rows)))`
   -- the non-chiplets side of the AIR.
 - `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
+- `padded_poseidon2  = max(64, next_pow2(poseidon2_permutation_rows))`
+  when the snapshot carries a non-zero Poseidon2 target.
+- `padded_total      = max(padded_core_side, padded_chiplets, padded_poseidon2)`.
 
-These two can land in *different* brackets on the same workload --
-`consume two P2ID notes`, for example, has `padded_core_side = 131072`
-but `padded_chiplets = 262144`. Checking them independently catches a
-bracket miss on either side that a single global `padded_total` check
-would hide.
+These can land in *different* brackets on the same workload -- `consume
+two P2ID notes`, for example, has `padded_core_side = 131072` but
+`padded_chiplets = 262144`. Checking them independently catches a
+bracket miss that a single global `padded_total` check would hide.
+
+Legacy snapshots do not carry `poseidon2_permutation_rows`. In that
+mode, `chiplets_rows` still includes the old inlined Poseidon2
+permutation segment, so it is not comparable to the split branch's
+controller-only hasher rows. The verifier therefore hard-checks
+`padded_core_side` and `padded_total`; chiplets and Poseidon2 rows are
+reported as informational.
 
 ### Soft checks -- report, don't fail
 
-`core_rows` and `chiplets_rows` are compared against the targets
-within a 2% band. A drift inside that band is harmless for proving
-cost (same bracket either way), so the bench only reports it. A
-drift that *crosses* a bracket is already caught by the hard tier
-above, so this tier exists purely to surface in-bracket near-misses
-worth noticing.
+`core_rows`, `chiplets_rows`, and `poseidon2_permutation_rows` are
+compared against the targets within a 2% band. A drift inside that band
+is harmless for proving cost (same bracket either way), so the bench
+only reports it. A drift that *crosses* a bracket is already caught by
+the hard tier above, so this tier exists purely to surface in-bracket
+near-misses worth noticing.
 
 ### Info -- no judgement
 

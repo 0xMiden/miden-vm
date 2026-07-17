@@ -1,6 +1,6 @@
 [package]
 name = "miden-core"
-version = "0.26.0"
+version = "0.28.0"
 description = "Miden VM core components"
 documentation = "https://docs.rs/miden-core"
 readme = "README.md"

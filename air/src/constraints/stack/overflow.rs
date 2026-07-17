@@ -170,3 +170,69 @@ fn enforce_overflow_index_constraints<AB>(
         .when(op_flags.left_shift())
         .assert_zero(last_stack_item_next);
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt, ONE, ZERO,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+
+    use super::enforce_main;
+    use crate::constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+        stack::test_utils::ConstraintEvalBuilder,
+    };
+
+    fn eval_stack_overflow(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
+    }
+
+    #[test]
+    fn frie2f4_decrements_non_empty_overflow_depth() {
+        let mut local = generate_test_row(opcodes::FRIE2F4.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(16);
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b0 = Felt::new_unchecked(17);
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "FRIE2F4 must decrement stack depth when overflow is non-empty"
+        );
+    }
+
+    #[test]
+    fn frie2f4_zeros_s15_when_overflow_is_empty() {
+        let mut local = generate_test_row(opcodes::FRIE2F4.into());
+        local.stack.b0 = Felt::new_unchecked(16);
+        local.stack.h0 = ZERO;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(16);
+        next.stack.top[15] = ZERO;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.top[15] = ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "FRIE2F4 must zero s15 when no overflow item can be restored"
+        );
+    }
+}

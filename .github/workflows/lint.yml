@@ -4,6 +4,7 @@ name: lint
 
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
@@ -12,8 +13,27 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
+  diffs:
+    name: detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
+      isVm: ${{ steps.diffs.outputs.isVm }}
+      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
+      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
+      isRelease: ${{ steps.diffs.outputs.isRelease }}
+      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - id: diffs
+        uses: ./.github/actions/diffs
+
   cargo-deny:
     name: cargo-deny on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -26,6 +46,8 @@ jobs:
 
   cargo-shear:
     name: cargo-shear on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -38,6 +60,8 @@ jobs:
 
   workspace-inheritance:
     name: workspace inheritance on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -57,6 +81,8 @@ jobs:
 
   clippy:
     name: clippy stable on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -74,6 +100,8 @@ jobs:
 
   rustfmt:
     name: rustfmt check nightly on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -89,6 +117,8 @@ jobs:
 
   doc:
     name: doc stable on ubuntu-latest
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
