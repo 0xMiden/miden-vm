@@ -16,6 +16,7 @@
 - [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
 - [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
 - [BREAKING] Optimized the recursive verifier MASM by changing `fri_ext2fold4` to accept a natural coset index and return a loop-ready stack layout for FRI layer folding ([#3349](https://github.com/0xMiden/miden-vm/pull/3349)).
+- [BREAKING] Add missing constraint in Bitwise chiplet ([#3386](https://github.com/0xMiden/miden-vm/pull/3386)).
 
 #### Fixes
 
