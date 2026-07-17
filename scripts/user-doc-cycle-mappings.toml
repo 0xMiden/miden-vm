@@ -170,8 +170,3 @@ section = "decrypt"
 procedure = "decrypt"
 generated_doc = "crates/lib/core/docs/crypto/aead.md"
 
-[[entry]]
-user_doc = "docs/src/user_docs/core_lib/pcs/fri.md"
-section = "FRI Extension 2, Fold 4"
-procedure = "verify"
-generated_doc = "crates/lib/core/docs/pcs/fri/frie2f4.md"
