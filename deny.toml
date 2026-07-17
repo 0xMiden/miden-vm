@@ -62,8 +62,6 @@ skip = [
     { name = "shlex" },
 ]
 skip-tree = [
-    # Allow getrandom v0.2.x for now - will be phased out with nanorand
-    { name = "getrandom", version = "=0.2.17" },
     # Allow getrandom v0.3.x for now - will be updated when miden-crypto upgrades
     { name = "getrandom", version = "=0.3.4" },
     # Allow rustc_version v0.2.x - build dependency
