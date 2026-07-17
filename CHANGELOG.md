@@ -8,7 +8,7 @@
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - [BREAKING] Restored `AeadPoseidon2::key_from_bytes` to upstream canonical-Felt decoding. The SHA-256 KDF that briefly appeared on this branch is removed; keys persisted under the KDF contract must be re-derived ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
-- [BREAKING] Restored the `ExactSizeIterator` impl on `miden-serde-utils::ReadManyIter`, matching upstream, and corrected `size_hint` to advertise the exact remaining count ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Restored the `ExactSizeIterator` impl on `miden-serde-utils::ReadManyIter`, matching upstream, and corrected `size_hint` to advertise the exact remaining count ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Documented the `SharedSecret` zeroization contract on the k256 and x25519 ECDH paths: the type now holds owned `[u8; 32]` bytes and zeroizes on drop ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Hardened `Randomizable::from_random_bytes` to return `None` on short slices instead of panicking ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Capped `BudgetedReader::max_alloc` at `0` for zero-sized elements, so a length-prefixed `Vec<ZST>` can no longer claim `u64::MAX` elements (deliberate, documented divergence from upstream) ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
