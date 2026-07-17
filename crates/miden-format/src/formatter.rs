@@ -395,8 +395,9 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -
         format!("{header}\n{body}")
     } else if line_length(&compact) <= config.max_line_length() {
         compact
-    } else if let Some(rendered) =
-        render_wrapped_value_call(&prefix_tokens, &value_tokens, indent, config)
+    } else if config.overflow_delimited_expr()
+        && let Some(rendered) =
+            render_wrapped_value_call(&prefix_tokens, &value_tokens, indent, config)
     {
         rendered
     } else {
@@ -2025,7 +2026,7 @@ use {
     }
 
     #[test]
-    fn keeps_long_const_call_head_with_assignment() {
+    fn wraps_long_const_call_head_on_next_line_by_default() {
         let source = "\
 pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")
 ";
@@ -2034,6 +2035,37 @@ pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protoc
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
         let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT =
+    word(
+        \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+    )
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn keeps_long_const_call_head_with_assignment_when_configured() {
+        let source = "\
+pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config {
+            overflow_delimited_expr: Some(true),
+            ..Config::default()
+        };
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(
@@ -2267,9 +2299,10 @@ adv_map CIRCUIT_COMMITMENT = [1, 0, 0, 0, 2305843126251553075, 114890375379, 230
         let config = Config::default();
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-const VERY_LONG_EVENT = event(
-    \"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\"
-)
+const VERY_LONG_EVENT =
+    event(
+        \"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\"
+    )
 adv_map CIRCUIT_COMMITMENT =
     [
         1,

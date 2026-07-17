@@ -24,6 +24,9 @@ pub struct Config {
     /// The maximum length (in characters) of any line before line breaks are introduced
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_line_length: Option<u8>,
+    /// Keep the opening token of delimited expressions on the assignment line when wrapping
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overflow_delimited_expr: Option<bool>,
 }
 
 /// Constructors
@@ -42,6 +45,9 @@ impl Config {
         if other.max_line_length.is_some() {
             self.max_line_length = other.max_line_length;
         }
+        if other.overflow_delimited_expr.is_some() {
+            self.overflow_delimited_expr = other.overflow_delimited_expr;
+        }
     }
 }
 
@@ -55,6 +61,11 @@ impl Config {
     #[inline]
     pub fn max_line_length(&self) -> usize {
         self.max_line_length.unwrap_or(DEFAULT_MAX_LINE_LENGTH) as usize
+    }
+
+    #[inline]
+    pub fn overflow_delimited_expr(&self) -> bool {
+        self.overflow_delimited_expr.unwrap_or(false)
     }
 }
 
@@ -100,6 +111,10 @@ impl clap::builder::TypedValueParser for ConfigValueParser {
                 Some(("max_line_length", value)) => {
                     config.max_line_length = Some(parse_u8(value, "max_line_length")?);
                 },
+                Some(("overflow_delimited_expr", value)) => {
+                    config.overflow_delimited_expr =
+                        Some(parse_bool(value, "overflow_delimited_expr")?);
+                },
                 _ => {
                     return Err(clap::Error::raw(
                         ErrorKind::ValueValidation,
@@ -116,6 +131,13 @@ impl clap::builder::TypedValueParser for ConfigValueParser {
 fn parse_u8(input: &str, prop: &str) -> Result<u8, clap::Error> {
     use clap::error::ErrorKind;
     input.parse::<u8>().map_err(|err| {
+        clap::Error::raw(ErrorKind::ValueValidation, format!("invalid value for {prop}: {err}"))
+    })
+}
+
+fn parse_bool(input: &str, prop: &str) -> Result<bool, clap::Error> {
+    use clap::error::ErrorKind;
+    input.parse::<bool>().map_err(|err| {
         clap::Error::raw(ErrorKind::ValueValidation, format!("invalid value for {prop}: {err}"))
     })
 }
@@ -144,10 +166,15 @@ mod tests {
     fn cli_config_accepts_documented_indent_width() {
         let command = clap::Command::new("miden-format");
         let config = ConfigValueParser
-            .parse_ref(&command, None, OsStr::new("indent_width=2,max_line_length=80"))
+            .parse_ref(
+                &command,
+                None,
+                OsStr::new("indent_width=2,max_line_length=80,overflow_delimited_expr=true"),
+            )
             .unwrap();
 
         assert_eq!(config.indent_size(), 2);
         assert_eq!(config.max_line_length(), 80);
+        assert!(config.overflow_delimited_expr());
     }
 }
