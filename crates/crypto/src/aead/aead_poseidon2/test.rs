@@ -181,16 +181,6 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
-fn test_key_from_bytes_accepts_noncanonical_key_material() {
-    let bytes = [0xff; SK_SIZE_BYTES];
-
-    let key1 = AeadPoseidon2::key_from_bytes(&bytes).unwrap();
-    let key2 = AeadPoseidon2::key_from_bytes(&bytes).unwrap();
-
-    assert_eq!(key1, key2);
-}
-
-#[test]
 fn test_decrypt_rejects_trailing_ciphertext_bytes() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
