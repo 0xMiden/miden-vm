@@ -675,23 +675,39 @@ impl fmt::Debug for TypeExport {
 
 fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidationError> {
     let canonical_path = canonicalize_export_path(export.path().as_ref())?;
-    let leaf = export_raw_leaf(&canonical_path)?;
 
     match export {
         PackageExport::Procedure(proc) => {
-            ast::ProcedureName::new(leaf).map_err(|err| {
-                ManifestValidationError::InvalidExportPath {
-                    path: proc.path.clone(),
-                    error: ast::PathError::InvalidComponent(err),
-                }
-            })?;
+            let _ = canonical_path
+                .procedure_name()
+                .map_err(|error| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error,
+                })?
+                .ok_or_else(|| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::Empty,
+                })?;
             proc.path = canonical_path;
         },
         PackageExport::Constant(ConstantExport { path, .. })
         | PackageExport::Type(TypeExport { path, .. }) => {
-            ast::Ident::new(leaf).map_err(|err| ManifestValidationError::InvalidExportPath {
-                path: path.clone(),
-                error: ast::PathError::InvalidComponent(err),
+            let leaf = canonical_path
+                .components()
+                .next_back()
+                .ok_or_else(|| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::Empty,
+                })?
+                .map_err(|error| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error,
+                })?;
+            let _ = ast::Ident::new(leaf.as_str()).map_err(|err| {
+                ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::InvalidComponent(err),
+                }
             })?;
             *path = canonical_path;
         },
@@ -737,18 +753,4 @@ fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, ManifestValidation
                 path: path.to_path_buf().into(),
             })?;
     Ok(Arc::<Path>::from(canonical.into_boxed_path()))
-}
-
-fn export_raw_leaf(path: &Arc<Path>) -> Result<&str, ManifestValidationError> {
-    use ast::PathComponent;
-    match path.components().next_back() {
-        Some(Ok(PathComponent::Normal(leaf))) => Ok(leaf),
-        Some(Err(error)) => {
-            Err(ManifestValidationError::InvalidExportPath { path: path.clone(), error })
-        },
-        Some(Ok(PathComponent::Root)) | None => Err(ManifestValidationError::InvalidExportPath {
-            path: path.clone(),
-            error: ast::PathError::Empty,
-        }),
-    }
 }

@@ -254,7 +254,8 @@ macro_rules! const_add {
 macro_rules! import {
     ($name:literal) => {{
         let path = $name.parse::<PathBuf>().expect("invalid import path");
-        let name = Ident::new(path.last().unwrap()).unwrap();
+        let leaf = path.components().next_back().unwrap().expect("valid path component");
+        let name = leaf.to_ident().expect("invalid identifier");
         Form::Import(ImportDecl::Module(ModuleImport::new(
             SourceSpan::UNKNOWN,
             Visibility::Private,

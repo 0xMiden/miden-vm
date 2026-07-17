@@ -131,7 +131,7 @@ impl FromStr for QualifiedProcedureName {
         if path.parent().is_none() {
             return Err(Report::msg("invalid procedure path: must be qualified with a namespace"));
         }
-        ProcedureName::validate(path.last().unwrap()).into_diagnostic()?;
+        let _ = path.procedure_name().into_diagnostic()?.unwrap();
         Ok(Self {
             span: SourceSpan::default(),
             path: path.into(),

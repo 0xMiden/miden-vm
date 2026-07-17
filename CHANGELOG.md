@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.25.8 (2026-07-22)
+
+- Fix validation of procedure names in package manifest exports when extracting module info
+
 ## v0.25.7 (2026-07-20)
 
 - Use the `wincode` crate re-exported by `serde-wincode` for proof encoding.
