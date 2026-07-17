@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.26.0 (unreleased)
+## v0.28.0 (unreleased)
 
 #### Changes
 
@@ -25,6 +25,7 @@
 - [BREAKING] Optimized the recursive verifier MASM by changing `fri_ext2fold4` to accept a natural coset index and return a loop-ready stack layout for FRI layer folding ([#3349](https://github.com/0xMiden/miden-vm/pull/3349)).
 - [BREAKING] Add missing constraint in Bitwise chiplet ([#3386](https://github.com/0xMiden/miden-vm/pull/3386)).
 - [BREAKING] Fixed a soundness gap in the chiplets AIR where a chiplet section's first-row initialization was skipped when the preceding section was empty. A program that uses memory but performs no `u32and`/`u32xor` operations produces an empty bitwise section, which caused the memory chiplet to skip its "values not being written must be zero" reset; a malicious prover could exploit this to forge a read of never-written memory. Each section's first row is now identified from the chiplet selectors at the boundary rather than from the previous chiplet's last row, so the initialization holds no matter which preceding sections are empty. The ACE section-start reset was hardened the same way as a precaution ([#3387](https://github.com/0xMiden/miden-vm/pull/3387)).
+- [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
 
 #### Fixes
 
@@ -63,7 +64,6 @@
 - [BREAKING] Optimize constraint evaluation step by merging one-hot gated stack op constraints ([#3333](https://github.com/0xMiden/miden-vm/issues/3333)).
 - [BREAKING] Removed `MastForest::compact`; MAST construction should deduplicate through builders or explicit `MastForest::merge` calls instead ([#3318](https://github.com/0xMiden/miden-vm/pull/3318)).
 - [BREAKING] Changed the ECDSA K256 Keccak public key commitment format to use affine public key coordinates (`qx_le_u32[8] || qy_le_u32[8]`) instead of compressed SEC1 public key bytes, aligning the core wrapper with the `miden-crypto` commitment format discussed in [0xMiden/crypto#1075](https://github.com/0xMiden/crypto/issues/1075). Existing public key commitments must be regenerated with `PublicKey::to_commitment()` ([#3342](https://github.com/0xMiden/miden-vm/pull/3342)).
-- [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
 
 ## miden-crypto v0.28.0 (2026-07-03)
 
