@@ -32,9 +32,6 @@
 - Fixed a latent `CryptoBox` (IES) key-derivation bug: HKDF-SHA256 output is now reduced into canonical Felts via `AeadScheme::key_from_uniform_bytes` instead of being fed into canonical decoding, which rejected noncanonical limbs at ~2^-30 per key ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Hardened `AeadPoseidon2` and `XChaCha` decrypt paths against malleable ciphertexts by rejecting trailing bytes after a valid `EncryptedData` encoding ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Hardened Falcon signature deserialization against short buffers and rejected trailing bytes in `SignaturePoly::read_from_bytes` ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
-- Made SMT batch operations atomic on storage errors: `in_memory_nodes` is now snapshotted before `storage.apply` and restored on failure ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
-- Made large-SMT construction atomic: `build_subtrees_from_sorted_entries` now collects all subtree updates into a single `StorageUpdates` value applied in one call ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
-- Propagated RocksDB leaf-insertion errors instead of panicking ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Fixed `ReadAdapter` buffer position not being reset when the local buffer drained to empty during `read_slice` ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Restored compact SMT serialization budgets so an empty-subtree-only `NodeValue` can be read under a tight budget ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Built the crypto SVE archive from target cfg (`CARGO_CFG_TARGET_ARCH` / `CARGO_CFG_TARGET_FEATURE`) instead of `#[cfg(target_feature = "sve")]`, which does not fire in build scripts ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
