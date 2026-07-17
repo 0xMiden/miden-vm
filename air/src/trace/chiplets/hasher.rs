@@ -81,6 +81,11 @@ pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64)
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
 
+const _: () = assert!(
+    CONTROLLER_TRACE_ALIGNMENT.is_multiple_of(super::bitwise::OP_CYCLE_LEN),
+    "controller region alignment must keep the bitwise section on a cycle boundary"
+);
+
 /// Controller metadata columns after the selector and state columns.
 pub const NUM_METADATA_COLS: usize = 5;
 
