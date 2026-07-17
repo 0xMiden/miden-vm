@@ -1,7 +1,7 @@
 use core::assert_matches;
 use std::{
     string::{String, ToString},
-    sync::{Mutex, Once},
+    sync::{Arc, Mutex, Once},
 };
 
 use super::*;
@@ -9,10 +9,10 @@ use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView, MastNodeExt, MastNodeId,
-        OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
-        UntrustedMastForestReadOptions,
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExecutableMastForest,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView,
+        MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SparseMastForest, SparseMastForestBuilder,
+        SplitNodeBuilder, UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -145,7 +145,7 @@ fn confirm_operation_structure() {
         Operation::HornerExt => (),
         Operation::EvalCircuit => (),
         Operation::Emit => (),
-        Operation::LogPrecompile => (),
+        Operation::LogDeferred => (),
     };
 }
 
@@ -235,7 +235,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::HornerExt,
         Operation::EvalCircuit,
         Operation::Emit,
-        Operation::LogPrecompile,
+        Operation::LogDeferred,
     ]
 }
 
@@ -321,7 +321,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::HornerExt
         | Operation::EvalCircuit
         | Operation::Emit
-        | Operation::LogPrecompile) => {
+        | Operation::LogDeferred) => {
             assert_eq!(operation.encoded_size(), operation.to_bytes().len());
         },
     }
@@ -744,6 +744,429 @@ fn test_untrusted_hashless_keeps_external_digests_by_prefix() {
 
     assert_eq!(restored[MastNodeId::new_unchecked(0)].digest(), external_low);
     assert_eq!(restored[MastNodeId::new_unchecked(1)].digest(), external_high);
+}
+
+fn sparse_split_fixture() -> (Arc<MastForest>, SparseMastForest, MastNodeId, MastNodeId, MastNodeId)
+{
+    let mut forest = MastForest::new();
+    let true_branch = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let false_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let root = SplitNodeBuilder::new([true_branch, false_branch])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(true_branch, VisitKind::FullVisit);
+    builder.record_visit(false_branch, VisitKind::DigestOnly);
+    builder.record_visit(root, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    (forest, sparse, true_branch, false_branch, root)
+}
+
+#[test]
+fn sparse_mast_round_trip_preserves_sparse_replay_ids() {
+    let (source, sparse, true_branch, false_branch, root) = sparse_split_fixture();
+
+    let bytes = sparse.to_bytes();
+    let restored = SparseMastForest::read_from_bytes(&bytes).unwrap();
+
+    assert_eq!(restored.num_nodes(), source.num_nodes() as usize);
+    assert_eq!(restored.procedure_roots(), &[root]);
+    assert_eq!(
+        restored.get_node_by_id(true_branch).unwrap().digest(),
+        source[true_branch].digest()
+    );
+    assert_eq!(restored.get_node_by_id(root).unwrap().digest(), source[root].digest());
+    assert!(restored.get_node_by_id(false_branch).is_none());
+    assert_eq!(restored.get_digest_by_id(true_branch), Some(source[true_branch].digest()));
+    assert_eq!(restored.get_digest_by_id(false_branch), Some(source[false_branch].digest()));
+    assert_eq!(restored.get_digest_by_id(root), Some(source[root].digest()));
+}
+
+#[test]
+fn sparse_mast_round_trip_preserves_external_full_node() {
+    let mut forest = MastForest::new();
+    let unvisited = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_digest = Word::new([
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ]);
+    let external = ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(external, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+
+    assert_eq!(restored.num_nodes(), forest.num_nodes() as usize);
+    assert_eq!(restored.procedure_roots(), &[external]);
+    assert_eq!(restored.get_node_by_id(external).unwrap().digest(), external_digest);
+    assert_eq!(restored.get_digest_by_id(external), Some(external_digest));
+    assert!(restored.get_node_by_id(unvisited).is_none());
+    assert_eq!(restored.get_digest_by_id(unvisited), None);
+}
+
+#[test]
+fn sparse_mast_round_trip_writes_map_sections_in_node_id_order() {
+    let mut forest = MastForest::new();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let third = BasicBlockNodeBuilder::new(vec![Operation::Drop])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(first);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(third, VisitKind::FullVisit);
+    builder.record_visit(first, VisitKind::FullVisit);
+    builder.record_visit(second, VisitKind::DigestOnly);
+    let sparse = builder.finalize();
+
+    let (full_ids, digest_ids) = sparse_payload_ids(&sparse.to_bytes());
+
+    assert_eq!(full_ids, vec![first, third]);
+    assert_eq!(digest_ids, vec![second]);
+}
+
+#[test]
+fn sparse_mast_drops_source_advice_map() {
+    let mut source = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    source.make_root(root);
+    let advice_key = Word::new([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+    ]);
+    let advice_values = vec![Felt::new_unchecked(15), Felt::new_unchecked(16)];
+    let source = source.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values)]));
+
+    let mut builder = SparseMastForestBuilder::new(Arc::new(source));
+    builder.record_visit(root, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+
+    assert!(sparse.advice_map().is_empty());
+    assert!(restored.advice_map().is_empty());
+}
+
+#[test]
+fn sparse_reader_rejects_non_empty_advice_map_count() {
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
+    1usize.write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+
+    assert!(err.to_string().contains("must not carry advice map entries"));
+}
+
+#[test]
+fn sparse_reader_rejects_non_increasing_full_node_ids() {
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    2usize.write_into(&mut bytes);
+    write_sparse_block_entry(MastNodeId::from(1), &block, &mut bytes);
+    write_sparse_block_entry(MastNodeId::from(0), &block, &mut bytes);
+    0usize.write_into(&mut bytes);
+    AdviceMap::default().write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+    assert!(err.to_string().contains("full node ids must be strictly increasing"));
+}
+
+#[test]
+fn sparse_reader_rejects_non_increasing_digest_only_ids() {
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    1usize.write_into(&mut bytes);
+    write_sparse_block_entry(MastNodeId::from(0), &block, &mut bytes);
+    2usize.write_into(&mut bytes);
+    MastNodeId::from(2).write_into(&mut bytes);
+    block.digest().write_into(&mut bytes);
+    MastNodeId::from(1).write_into(&mut bytes);
+    block.digest().write_into(&mut bytes);
+    AdviceMap::default().write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+    assert!(err.to_string().contains("digest-only node ids must be strictly increasing"));
+}
+
+#[test]
+fn sparse_reader_rejects_trailing_bytes() {
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap();
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    1usize.write_into(&mut bytes);
+    write_sparse_block_entry(MastNodeId::from(0), &block, &mut bytes);
+    0usize.write_into(&mut bytes);
+    AdviceMap::default().write_into(&mut bytes);
+    bytes.push(0);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+    assert!(err.to_string().contains("extra bytes after SparseMastForest payload"));
+}
+
+#[test]
+fn sparse_reader_rejects_dense_payloads() {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root);
+
+    let result = SparseMastForest::read_from_bytes(&forest.to_bytes());
+    assert!(result.is_err());
+}
+
+#[test]
+fn sparse_reader_rejects_oversized_node_id_before_sections() {
+    let mut bytes = Vec::new();
+    1usize.write_into(&mut bytes);
+    MastNodeId::from(MastForest::MAX_NODES as u32).write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+
+    assert!(err.to_string().contains("procedure root id"));
+    assert!(err.to_string().contains("number of nodes in the forest"));
+}
+
+#[test]
+fn sparse_reader_rejects_oversized_section_count_before_allocation() {
+    let mut bytes = Vec::new();
+    usize::MAX.write_into(&mut bytes);
+
+    let err = SparseMastForest::read_from_bytes(&bytes).unwrap_err();
+
+    assert!(err.to_string().contains("procedure root count"));
+}
+
+#[test]
+fn sparse_serialized_parts_reject_missing_child_digest() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests = sparse
+        .digest_entries()
+        .iter()
+        .filter_map(|(&id, &digest)| (id != false_branch).then_some((id, digest)))
+        .collect();
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("without a full node or digest-only entry")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_duplicate_full_ids() {
+    let (_source, sparse, true_branch, _false_branch, _root) = sparse_split_fixture();
+    let mut nodes: Vec<_> = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let duplicate_node = sparse.get_node_by_id(true_branch).unwrap().clone();
+    nodes.push((true_branch, duplicate_node));
+    let digests = sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("duplicate sparse full-node id")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_duplicate_digest_only_ids() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let digest = sparse.get_digest_by_id(false_branch).unwrap();
+    digests.push((false_branch, digest));
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("duplicate sparse digest-only id")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_full_digest_overlap() {
+    let (_source, sparse, true_branch, _false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    digests.push((true_branch, sparse.get_digest_by_id(true_branch).unwrap()));
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("overlaps a digest-only entry")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
+    let (_source, sparse, true_branch, false_branch, _root) = sparse_split_fixture();
+    let out_of_range = MastNodeId::from(MastForest::MAX_NODES as u32);
+
+    let mut nodes: Vec<_> = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    nodes.push((out_of_range, sparse.get_node_by_id(true_branch).unwrap().clone()));
+    let digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests.clone(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("full node id")
+            && msg.contains("exceeds maximum")
+    );
+
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut out_of_range_digests = digests;
+    out_of_range_digests.push((out_of_range, sparse.get_digest_by_id(false_branch).unwrap()));
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        out_of_range_digests,
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("digest-only node id")
+            && msg.contains("exceeds maximum")
+    );
+
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests = sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        vec![out_of_range],
+        sparse.advice_map().clone(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("procedure root id")
+            && msg.contains("exceeds maximum")
+    );
+}
+
+fn write_sparse_block_entry<W: ByteWriter>(
+    id: MastNodeId,
+    block: &crate::mast::BasicBlockNode,
+    target: &mut W,
+) {
+    id.write_into(target);
+    target.write_u8(0);
+    block.digest().write_into(target);
+
+    let mut basic_block_data = BasicBlockDataBuilder::new();
+    let ops_offset = basic_block_data.encode_basic_block(block);
+    assert_eq!(ops_offset, 0);
+    let basic_block_data = basic_block_data.finalize();
+    target.write_usize(basic_block_data.len());
+    target.write_bytes(&basic_block_data);
+}
+
+fn sparse_payload_ids(bytes: &[u8]) -> (Vec<MastNodeId>, Vec<MastNodeId>) {
+    let mut reader = SliceReader::new(bytes);
+
+    let root_count = reader.read_usize().unwrap();
+    for _ in 0..root_count {
+        let _root = MastNodeId::read_from(&mut reader).unwrap();
+    }
+
+    let full_count = reader.read_usize().unwrap();
+    let mut full_ids = Vec::new();
+    for _ in 0..full_count {
+        let id = MastNodeId::read_from(&mut reader).unwrap();
+        skip_sparse_node(&mut reader);
+        full_ids.push(id);
+    }
+
+    let digest_count = reader.read_usize().unwrap();
+    let mut digest_ids = Vec::new();
+    for _ in 0..digest_count {
+        let id = MastNodeId::read_from(&mut reader).unwrap();
+        let _digest = Word::read_from(&mut reader).unwrap();
+        digest_ids.push(id);
+    }
+
+    (full_ids, digest_ids)
+}
+
+fn skip_sparse_node(reader: &mut SliceReader<'_>) {
+    let tag = reader.read_u8().unwrap();
+    let _digest = Word::read_from(reader).unwrap();
+    match tag {
+        0 => {
+            let len = reader.read_usize().unwrap();
+            let _ = reader.read_slice(len).unwrap();
+        },
+        1 | 2 => {
+            let _first = MastNodeId::read_from(reader).unwrap();
+            let _second = MastNodeId::read_from(reader).unwrap();
+        },
+        3..=5 => {
+            let _child = MastNodeId::read_from(reader).unwrap();
+        },
+        6..=8 => {},
+        _ => panic!("unexpected sparse test node tag {tag}"),
+    }
 }
 
 /// Test that a forest with a node whose child ids are larger than its own id serializes and
@@ -1247,7 +1670,7 @@ fn test_deserialize_rejects_unknown_flags() {
 
     let bytes = forest.to_bytes();
 
-    for flag in [0x01, 0x04] {
+    for flag in [0x01, 0x08] {
         let mut bytes = bytes.clone();
         bytes[4] = flag;
 

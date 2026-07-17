@@ -3,9 +3,9 @@
 //! The patterns are deliberately few and natural -- they mirror work a real transaction does,
 //! rather than one synthetic op per chiplet:
 //!
-//! - **hasher** drives the Poseidon2 chiplet via repeated `hperm`. The state evolves between
-//!   iterations (one `padw padw padw` as setup, no reset), so each permutation has a distinct input
-//!   and the hasher AIR's multiplicity column does not collapse them.
+//! - **hasher** drives the Poseidon2 AIR via repeated `hperm`. The state evolves between iterations
+//!   (one `padw padw padw` as setup, no reset), so each permutation has a distinct input and the
+//!   Poseidon2 multiplicity column does not collapse them.
 //! - **bitwise** drives the bitwise chiplet via `u32split + u32xor`.
 //! - **u32arith** drives the range checker via two banded u32 counters, advancing each by 65537 per
 //!   iter so their 16-bit halves evolve as disjoint contiguous bands. `u32assert2` issues fresh
@@ -20,9 +20,8 @@
 //! wrapped in a `repeat.N ... end` block. The body must leave stack depth unchanged -- the repeat
 //! block would otherwise drift the stack each iteration.
 //!
-//! Note: on current `next`, decoder-only programs still incur hasher rows due to MAST hashing, so
-//! low hasher targets may be unreachable; the solver clamps `hasher` iterations to zero in that
-//! case.
+//! Note: decoder-only programs still incur hasher rows due to MAST hashing, so low hasher targets
+//! may be unreachable; the solver clamps `hasher` iterations to zero in that case.
 
 /// A VM component the solver targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -32,8 +31,8 @@ pub enum Component {
     Hasher,
     Bitwise,
     Memory,
-    /// Range checker. Not currently a hard bracket target but the solver still sizes the
-    /// `u32arith` snippet against it so the synthetic's range workload is representative.
+    /// Range checker. The solver sizes the `u32arith` snippet against it so the synthetic's range
+    /// workload is representative.
     Range,
 }
 

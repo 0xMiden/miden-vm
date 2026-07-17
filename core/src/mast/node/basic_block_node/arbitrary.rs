@@ -15,7 +15,7 @@ use crate::{
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
     },
     operations::{AssemblyOp, Operation},
-    program::{Kernel, Program},
+    program::{KernelDescriptor, Program},
 };
 
 // Strategy for operations without immediate values (non-control flow)
@@ -616,7 +616,7 @@ impl Arbitrary for Program {
     }
 }
 
-impl Arbitrary for Kernel {
+impl Arbitrary for KernelDescriptor {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
@@ -634,7 +634,7 @@ impl Arbitrary for Kernel {
         // Strategy for generating kernel (0 to 3 words to avoid hitting MAX_NUM_PROCEDURES limit)
         prop::collection::vec(word_strategy, 0..=3)
             .prop_map(|words: Vec<Word>| {
-                Kernel::new(&words).expect("Generated kernel should be valid")
+                KernelDescriptor::new(&words).expect("Generated kernel should be valid")
             })
             .boxed()
     }

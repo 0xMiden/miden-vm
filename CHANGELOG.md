@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.26.0 (unreleased)
+
+#### Changes
+
+- [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
+- Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
+- Added the `miden-precompiles` crate with the official deferred precompile registry used by the VM/prover/verifier path.
+- [BREAKING] Migrated proof-bound precompiles to the deferred-DAG proof wire. `ExecutionProof` now carries a `DeferredStateWire`, proof serialization is incompatible with previous proof-bound precompile requests, and verification rehydrates the wire under the built-in `miden_precompiles::registry()` before binding the resulting deferred root to the STARK public inputs.
+- [BREAKING] Replaced the legacy proof-bound precompile request/transcript model with the deferred-DAG framework in `miden_core::deferred`; the old request/transcript API has been removed in favor of `Node`, `Tag`, `DeferredState`, `DeferredStateWire`, `Precompile`, and `PrecompileRegistry`.
+- [BREAKING] Replaced precompile request count/calldata execution limits with deferred-state element budgeting. Use `ExecutionOptions::with_max_deferred_elements(...)` and `verify_with_max_deferred_elements(...)` for non-default deferred-state budgets.
+- [BREAKING] Removed the `miden::core::crypto::dsa::eddsa_ed25519` MASM module, Rust handler, docs, and tests. EdDSA support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
+- [BREAKING] Removed the `miden::core::crypto::hashes::sha512` MASM module, Rust handler, docs, and tests. SHA-512 support is temporarily removed from core-lib and will be reintroduced once it is supported by the precompiles prover.
+- [BREAKING] Changed the `miden::core::crypto::dsa::ecdsa_k256_keccak` advice/signature ABI to `QX[8] || QY[8] || SIG_R[8] || SIG_S[8]` as little-endian u32 field elements. Existing 65-byte signature advice must be re-encoded as `(r, s)` limbs without a recovery byte.
+- [BREAKING] Removed the public `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash` and raw `miden::precompiles::crypto::dsa::ecdsa_secp256k1::assert_verify_prehash` ECDSA prehash verifier entrypoints. ECDSA K256 Keccak verification is now exposed only through the high-level `verify` procedure, whose implementation inlines the verifier, loads signature scalars directly from advice, and avoids the raw prehash memory ABI.
+- [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
+- [BREAKING] Optimized the recursive verifier MASM by changing `fri_ext2fold4` to accept a natural coset index and return a loop-ready stack layout for FRI layer folding ([#3349](https://github.com/0xMiden/miden-vm/pull/3349)).
+
+#### Fixes
+
+- Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
+
+## v0.25.2 (2026-07-11)
+
+- Support constructing initial `ResumeContext` for execution stepping from a `Package`, in order to ensure debug context is correctly initialized
+
+## v0.25.1 (2026-07-10)
+
+- `ResumeContext` now makes the debug info it carries available to users beyond the `miden-processor` crate itself ([#3355](https://github.com/0xMiden/miden-vm/pull/3355))
+
 ## v0.25.0 (2026-07-08)
 
 #### Changes
@@ -22,6 +51,7 @@
 
 - Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
 - Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
+- Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
 
 ## v0.24.0 (2026-06-24)
 

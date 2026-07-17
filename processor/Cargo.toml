@@ -1,6 +1,6 @@
 [package]
 name = "miden-processor"
-version = "0.25.0"
+version = "0.26.0"
 description = "Miden VM processor"
 documentation = "https://docs.rs/miden-processor"
 readme = "README.md"
@@ -39,6 +39,7 @@ miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
+miden-precompiles.workspace = true
 miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 

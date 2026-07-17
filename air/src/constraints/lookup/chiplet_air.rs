@@ -9,9 +9,9 @@
 //! - hash-kernel virtual table.
 //! - shared wiring column: ACE wiring + hasher perm-link.
 //!
-//! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. The default path
-//! reads the chiplet selector columns. Adapters can override it when they have a cheaper
-//! concrete-row path.
+//! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. All current adapters use
+//! the default path, which reads the chiplet selector columns; the hook exists so a future adapter
+//! can override it if a cheaper concrete-row path is worthwhile.
 
 use super::buses::{
     ChipletActiveFlags,
@@ -34,9 +34,8 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
     /// Build the shared [`ChipletActiveFlags`] snapshot for one `eval` call.
     ///
     /// Default body calls [`ChipletActiveFlags::from_chiplet_cols`] against the multi-AIR
-    /// `ChipletCols` view. Adapters override this when a cheaper construction path is
-    /// available (e.g. the prover path, where the selector columns are concrete 0/1 and the
-    /// active-flag subtractions can short-circuit).
+    /// `ChipletCols` view. Adapters can override this when a cheaper construction path is
+    /// worthwhile.
     fn build_chiplet_active(
         &self,
         local: &ChipletCols<Self::Var>,
@@ -52,7 +51,7 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
 /// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
-/// `ctx.local`, `ctx.next`, and `ctx.chiplet_active.*` directly — field access, no method
+/// `ctx.local`, `ctx.next`, and `ctx.chiplet_active.*` directly; field access, no method
 /// indirection.
 pub(crate) struct ChipletBusContext<'a, LB>
 where

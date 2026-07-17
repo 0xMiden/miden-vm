@@ -1,6 +1,6 @@
 //! Input layout definitions for ACE circuit evaluation.
 //!
-//! The layout mirrors the MASM verifier READ section: values are stored as
+//! The layout matches the MASM verifier READ section: values are stored as
 //! extension-field elements in point-major order (all openings at `zeta`
 //! followed by all openings at `g * zeta`). Auxiliary trace and quotient
 //! chunk openings are provided as base-field coordinates and merged into
@@ -18,8 +18,8 @@
 //! - Lagrange-kernel weights and shifts for quotient chunk recomposition.
 //! - Constraint folding with the composition challenge and final root check.
 //!
-//! The current "stark vars" block provides precomputed selectors and the
-//! Lagrange-kernel weights used in quotient chunk recomposition:
+//! The "stark vars" block provides precomputed selectors and the Lagrange-kernel weights used in
+//! quotient chunk recomposition:
 //! - Precomputed selectors (computed in MASM, supplied as inputs):
 //!   - `is_first = (z^N - 1) / (z - 1)`
 //!   - `is_last  = (z^N - 1) / (z - g^{-1})`
@@ -45,7 +45,10 @@
 //! Notes:
 //! - `quotient_next` is included in the READ layout and is mapped via
 //!   `InputKey::QuotientChunkCoord` with `offset = 1`.
-//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs.
+//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs. Multi-AIR layouts append
+//!   one beta slot plus three selector slots per AIR instance.
+
+pub(crate) const SELECTORS_PER_AIR: usize = 3;
 
 mod keys;
 mod plan;
@@ -54,4 +57,4 @@ mod policy;
 pub use keys::InputKey;
 pub(crate) use keys::InputKeyMapper;
 pub use plan::{InputCounts, InputLayout};
-pub(crate) use plan::{InputRegion, LayoutRegions, StarkVarIndices};
+pub(crate) use plan::{InputRegion, LayoutRegions, MultiAirIndices, StarkVarIndices};

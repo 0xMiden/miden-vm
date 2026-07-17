@@ -2,6 +2,34 @@
 source: air/src/config.rs
 expression: snapshot
 ---
-num_inputs: 572
-num_eval_gates: 5224
-relation_digest: [11673342714655626398, 13176600330268574783, 306402780537919181, 16194301399639599000]
+constraints_eval_core_then_chiplets_then_poseidon2_permutation:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [4874259644501079680, 16332892796118071565, 11414297404032790290, 10660689937346578903]
+constraints_eval_core_then_poseidon2_permutation_then_chiplets:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [9883304540310468400, 4378972414677178218, 5140020052729523916, 11824959456691019613]
+constraints_eval_chiplets_then_core_then_poseidon2_permutation:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [1035839115387530690, 9061285593685314689, 11036229366512022248, 1068571627136676701]
+constraints_eval_chiplets_then_poseidon2_permutation_then_core:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [18186715586742683011, 9878409925298869604, 16161924397320073735, 18051638696366776329]
+constraints_eval_poseidon2_permutation_then_core_then_chiplets:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [14697242261344899701, 2221328211544940951, 65383775082755689, 17113588734110064785]
+constraints_eval_poseidon2_permutation_then_chiplets_then_core:
+  num_inputs: 624
+  num_eval_gates: 5200
+  stream_len: 5784
+  commitment: [12706203364157672071, 8958937573313602835, 10293775000941676021, 15975711108897823848]
+relation_digest: [3224178501574871557, 4894450919228217275, 3947932329728800287, 3787930607313327922]

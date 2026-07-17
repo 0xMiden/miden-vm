@@ -1,13 +1,17 @@
-//! Chiplet bus requests emitted by decoder rows ([`BusId::Chiplets`]).
+//! Chiplet requests bus ([`BusId::Chiplets`]).
 //!
-//! These interactions remove the decoder-side request for work handled by the hasher, bitwise,
-//! memory, ACE init, and kernel ROM chiplets.
+//! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
 //!
-//! All interactions share one [`super::super::LookupColumn::group`] named `decoder_requests`.
+//! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
+//! The cached-encoding optimization can be reintroduced later if symbolic expression growth
+//! becomes a bottleneck.
 
 use core::array;
 
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE, deferred::DEFERRED_ROOT_DOMAIN, field::PrimeCharacteristicRing,
+    operations::opcodes,
+};
 
 use crate::{
     constraints::lookup::{
@@ -16,18 +20,19 @@ use crate::{
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
-        chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
-        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
+        chiplets::hasher::{CAPACITY_LEN, CONTROLLER_ROWS_PER_PERMUTATION, RATE_LEN, STATE_WIDTH},
+        log_deferred::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
 
-/// Maximum number of chiplet bus requests emitted by one decoder row.
+/// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// MRUPDATE emits four hasher requests: `merkle_old_init`, old `return_hash`,
-/// `merkle_new_init`, and new `return_hash`.
+/// Every branch here is gated by one mutually exclusive decoder-opcode flag. The heaviest
+/// branch is MRUPDATE, whose batch emits 4 removes (merkle_old_init + return_hash +
+/// merkle_new_init + return_hash). No other single branch exceeds 4.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the chiplet's bus requests from decoder rows.
+/// Emit the chiplet requests bus.
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -55,12 +60,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Hasher return addresses are expressed in controller rows, matching the controller
-    // output rows that provide the matching responses.
+    // Hasher return addresses are controller-row addresses. The final row of a permutation is
+    // `addr + CONTROLLER_ROWS_PER_PERMUTATION - 1`; each following permutation advances by
+    // `CONTROLLER_ROWS_PER_PERMUTATION`.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
-    // Address tuple used by MLOAD, MSTORE, MLOADW, and MSTOREW.
+    // Shared (ctx, addr, clk) triple for MLOAD / MSTORE / MLOADW / MSTOREW: all read from
+    // `s0` with the current system context and clock.
     let mem_ctx: LB::Expr = sys_ctx.into();
     let mem_clk: LB::Expr = clk.into();
     let mem_addr: LB::Expr = s0.into();
@@ -70,10 +77,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             col.group(
                 "decoder_requests",
                 |g| {
-                    // --- Hasher control-block requests.
-                    // Each remove cancels the decoder request for the corresponding control
-                    // block. CALL and SYSCALL are batches because they also request memory or
-                    // kernel-ROM work. SPAN uses domain 0 in the control-block capacity slot.
+                    // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN; CALL / SYSCALL
+                    // share the payload but live in batches below). SPAN encodes opcode 0
+                    // at the β¹² slot.
                     let mut control_remove = |name, flag, opcode: u8| {
                         g.remove(
                             name,
@@ -141,9 +147,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- RESPAN ---
-                    // Uses `addr_next` directly: in the controller/perm split, the next row's
-                    // decoder `addr` already points at the continuation input
-                    // row, so no offset is needed.
+                    // `addr_next` points at the continuation input row, so RESPAN does not apply
+                    // an address offset here.
                     g.remove(
                         "respan",
                         op_flags.respan(),
@@ -586,36 +591,36 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // --- LOGPRECOMPILE ---
+                    // --- LOGDEFERRED ---
                     //
-                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), ZERO]`.
+                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), domain]`.
                     // STMNT lives at stack[4..8] (rate1 lanes) so the bus's β⁶..β⁹ products
                     // share with HPERM's rate1 reads. Output is identity-mapped onto
                     // `stack_next[0..12]`, matching HPERM exactly.
                     g.batch(
-                        "logprecompile",
-                        op_flags.log_precompile(),
+                        "logdeferred",
+                        op_flags.log_deferred(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
-                                if i < 4 {
+                            let logpre_in: [LB::Expr; STATE_WIDTH] = array::from_fn(|i| {
+                                if i < CAPACITY_LEN {
                                     user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
-                                } else if i < 8 {
-                                    stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
+                                } else if i < RATE_LEN {
+                                    stk.get(STACK_STMNT_RANGE.start + (i - CAPACITY_LEN)).into()
                                 } else {
-                                    LB::Expr::ZERO
+                                    LB::Expr::from(DEFERRED_ROOT_DOMAIN[i - 8])
                                 }
                             });
-                            let logpre_out: [LB::Expr; 12] =
+                            let logpre_out: [LB::Expr; STATE_WIDTH] =
                                 array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
-                                "logprecompile_init",
+                                "logdeferred_init",
                                 HasherMsg::linear_hash_init(log_addr.clone(), logpre_in),
                                 Deg { v: 5, u: 6 },
                             );
                             let return_addr = log_addr + last_off;
                             b.remove(
-                                "logprecompile_return",
+                                "logdeferred_return",
                                 HasherMsg::return_state(return_addr, logpre_out),
                                 Deg { v: 5, u: 6 },
                             );

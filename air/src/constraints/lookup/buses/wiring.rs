@@ -1,9 +1,8 @@
 //! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
 //! HasherPermLinkOutput}`).
 //!
-//! The single [`super::super::LookupColumn::group`] is intentional. The chiplet tri-state
-//! (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows, and hasher
-//! permutation rows mutually exclusive. At most one of the five interactions is active per row.
+//! ACE rows and hasher-controller rows are mutually exclusive in the chiplets selector system, so
+//! both buses can share one group without multiplying sibling `(V, U)` pairs.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
 //!
@@ -22,32 +21,25 @@
 //!
 //! ## Hasher perm-link (`BusId::HasherPermLink{Input,Output}`)
 //!
-//! Binds hasher controller rows to permutation sub-chiplet rows. Without this bus the
-//! permutation segment is structurally independent from the controller, and a malicious
-//! prover could pair any controller `(state_in, state_out)` with any perm-cycle execution
-//! (or skip the cycle entirely). Four mutually exclusive interactions split across two
-//! domain-separated buses:
+//! Binds hasher controller rows to the Poseidon2 permutation AIR. The `perm_id` column ties each
+//! controller input/output row pair to one permutation cycle.
 //!
-//! - Controller input (`s_01 · is_input`, multiplicity `+1`): controller side of a (state_in,
-//!   state_out) pair. Routed to `BusId::HasherPermLinkInput`.
-//! - Controller output (`s_01 · is_output`, multiplicity `+1`). Routed to
-//!   `BusId::HasherPermLinkOutput`.
-//! - Permutation row 0 (`s_00 · is_init_ext`, multiplicity `-m`): input boundary of a Poseidon2
-//!   cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the cycle by
-//!   [`crate::constraints::chiplets::permutation`]. Routed to `BusId::HasherPermLinkInput`.
-//! - Permutation row 15 (`s_00 · (1 - periodic_sum)`, multiplicity `-m`): output boundary of the
-//!   same cycle. Routed to `BusId::HasherPermLinkOutput`.
+//! - Controller input (`controller_active * is_input`, multiplicity `+1`): controller side of a
+//!   `(perm_id, input_state)` message. Routed to `BusId::HasherPermLinkInput`.
+//! - Controller output (`controller_active * is_output`, multiplicity `+1`): controller side of a
+//!   `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
 //!
-//! The widest perm-link contribution is `f_ctrl_output` with gate degree 3. It is below
-//! the ACE batch's `(7, 8)`, so the merged group has transition degree `max(1 + 7, 8) = 8`.
+//! Each controller pair contributes one input message and one output message with the same
+//! `perm_id`. The Poseidon2 AIR removes those messages on rows 0 and 15 of the matching
+//! permutation instance, and its transition constraints tie the row-15 state to the row-0 state.
 
-use core::{array, borrow::Borrow};
+use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::{columns::PeriodicCols, hasher_control::flags::ControllerFlags},
+        chiplets::hasher_control::flags::ControllerFlags,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{AceWireMsg, HasherPermLinkMsg},
@@ -55,20 +47,19 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    trace::chiplets::hasher::STATE_WIDTH,
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Single group hosts both buses. The chiplet tri-state makes ACE, hasher-controller, and
-/// hasher-permutation rows pairwise mutually exclusive, so on any given row only one of:
+/// Single group hosts both buses. ACE and hasher-controller rows are mutually exclusive, so on any
+/// given row only one of:
 /// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally when
-///   the outer `ace_flag` is active).
+///   the outer `ace_flag` fires).
 /// - Perm-link on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
 ///   `s0`).
-/// - Perm-link on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the periodic
-///   cycle schedule).
 ///
-/// Per-row max is `max(3, 1, 1) = 3`.
+/// Per-row max is therefore `max(3, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the `v_wiring` shared column: ACE wiring + hasher perm-link.
@@ -108,46 +99,24 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     // `m_1`.
     let sblock: LB::Expr = ace.s_block.into();
 
-    // ---- Perm-link captures (Group 2) ----
-
-    // Periodic Poseidon2 cycle selectors. `is_init_ext` is 1 on cycle row 0 only; the four
-    // selectors together cover rows 0..14, so `1 - sum` is 1 only on the cycle boundary
-    // row 15. The `permutation/mod.rs` cycle-alignment constraints pin perm row 0 to cycle
-    // row 0 and perm row 15 to cycle row 15.
-    let (perm_row0_select, perm_row15_select): (LB::Expr, LB::Expr) = {
-        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        let h = periodic.hasher;
-        let is_init_ext: LB::Expr = h.is_init_ext.into();
-        let is_ext: LB::Expr = h.is_ext.into();
-        let is_packed_int: LB::Expr = h.is_packed_int.into();
-        let is_int_ext: LB::Expr = h.is_int_ext.into();
-        let not_cycle_end = is_init_ext.clone() + is_ext + is_packed_int + is_int_ext;
-        (is_init_ext, LB::Expr::ONE - not_cycle_end)
-    };
-
+    // ---- Perm-link captures ----
     // Controller-side row-kind flags. `is_input = s0` (deg 1); `is_output = (1-s0)*(1-s1)`
     // (deg 2). Padding rows (`s0=0, s1=1`) are excluded automatically by both expressions.
     let ctrl = local.controller();
     let (is_input, is_output) = ControllerFlags::<LB::Expr>::input_output(ctrl);
 
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let permutation_flag = ctx.chiplet_active.permutation.clone();
 
     let f_ctrl_input = controller_flag.clone() * is_input;
     let f_ctrl_output = controller_flag * is_output;
-    let f_perm_row0 = permutation_flag.clone() * perm_row0_select;
-    let f_perm_row15 = permutation_flag * perm_row15_select;
 
-    let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
-    let perm = local.permutation();
-    let perm_state: [LB::Var; 12] = array::from_fn(|i| perm.state[i]);
-    let perm_mult = perm.multiplicity;
+    let ctrl_state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| ctrl.state[i]);
+    let perm_id = ctrl.perm_id;
 
     builder.next_column(
         |col| {
-            // Keep ACE wiring and perm-link in one group: the chiplet tri-state makes their row
-            // selectors mutually exclusive, so this column takes the max per-interaction degree
-            // instead of composing sibling `(V_g, U_g)` pairs and stays inside degree 9.
+            // ACE rows and controller rows are mutually exclusive, so this group has at most one
+            // active batch per row.
             col.group(
                 "ace_perm_link",
                 |g| {
@@ -197,53 +166,26 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
 
-                    // Controller input: +1 / encode(ctrl.state) on HasherPermLinkInput.
+                    // Controller input: +1 / encode(perm_id, ctrl.state) on HasherPermLinkInput.
                     g.add(
                         "perm_ctrl_input",
                         f_ctrl_input,
                         move || {
-                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Input { state }
+                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg::Input { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 2, u: 3 },
                     );
 
-                    // Controller output: +1 / encode(ctrl.state) on HasherPermLinkOutput.
+                    // Controller output: +1 / encode(perm_id, ctrl.state) on HasherPermLinkOutput.
                     g.add(
                         "perm_ctrl_output",
                         f_ctrl_output,
                         move || {
-                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Output { state }
+                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg::Output { perm_id: perm_id.into(), state }
                         },
                         Deg { v: 3, u: 4 },
-                    );
-
-                    // Perm row 0: -m / encode(perm.state) on HasherPermLinkInput. Multiplicity is
-                    // `0 - m` so the LogUp accumulator subtracts the fraction.
-                    let perm_mult_input: LB::Expr = LB::Expr::ZERO - perm_mult.into();
-                    g.insert(
-                        "perm_row0",
-                        f_perm_row0,
-                        perm_mult_input,
-                        move || {
-                            let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                            HasherPermLinkMsg::Input { state }
-                        },
-                        Deg { v: 3, u: 3 },
-                    );
-
-                    // Perm row 15: -m / encode(perm.state) on HasherPermLinkOutput.
-                    let perm_mult_output: LB::Expr = LB::Expr::ZERO - perm_mult.into();
-                    g.insert(
-                        "perm_row15",
-                        f_perm_row15,
-                        perm_mult_output,
-                        move || {
-                            let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                            HasherPermLinkMsg::Output { state }
-                        },
-                        Deg { v: 3, u: 3 },
                     );
                 },
                 Deg { v: 8, u: 7 },

@@ -4,8 +4,9 @@
 //! scenario keys to entries; only the `trace` section of each entry is consumed.
 //!
 //! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
-//! `range_rows`). `shape` (nested under `trace`) is an advisory per-chiplet breakdown used by the
-//! solver. The loader checks `trace.chiplets_rows == shape.chiplets_sum()`.
+//! `poseidon2_permutation_rows`, `range_rows`). `shape` (nested under `trace`) is an advisory
+//! per-chiplet breakdown used by the solver. The loader checks
+//! `trace.chiplets_rows == shape.chiplets_sum()`.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -14,6 +15,9 @@ use serde::Deserialize;
 /// Mirrors `miden_air::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum padded
 /// length changes.
 const MIN_TRACE_LEN: u64 = 64;
+
+/// One Poseidon2 permutation cycle occupies 16 rows.
+const POSEIDON2_CYCLE_LEN: u64 = 16;
 
 /// A single scenario's trace snapshot, extracted from a producer JSON file.
 ///
@@ -38,6 +42,9 @@ pub struct TraceTotals {
     /// Total chiplets trace length, matching `ChipletsLengths::trace_len` in the processor (sum of
     /// per-chiplet lengths + 1 mandatory padding row).
     pub chiplets_rows: u64,
+    /// Poseidon2 permutation AIR trace length. Snapshots without a per-AIR Poseidon2 target use
+    /// zero.
+    pub poseidon2_permutation_rows: u64,
     /// Range-checker trace length. Derived from memory + bitwise activity; not independently
     /// targeted but tracked so the verifier can warn if it ever dominates.
     pub range_rows: u64,
@@ -54,8 +61,7 @@ pub struct TraceBreakdown {
     /// Kernel ROM rows. Not drivable from plain MASM; folded into memory.
     #[serde(default)]
     pub kernel_rom_rows: u64,
-    /// ACE chiplet rows. Not drivable from plain MASM; folded into memory. Some producer versions
-    /// may report this as zero until their processor dependency exposes the ACE trace accessor.
+    /// ACE chiplet rows. Not drivable from plain MASM; folded into memory.
     #[serde(default)]
     pub ace_rows: u64,
 }
@@ -68,10 +74,8 @@ pub struct TraceShape {
 }
 
 impl TraceTotals {
-    /// Padded power-of-two bracket for the non-chiplet side of the trace:
-    /// `next_pow2(max(core_rows, range_rows))`. Under the current AIR this covers core
-    /// (system/decoder/stack) and range together; if a future AIR separates them, this accessor
-    /// can be revisited.
+    /// Padded power-of-two bracket for core/range rows:
+    /// `next_pow2(max(core_rows, range_rows))`.
     pub fn padded_core_side(&self) -> u64 {
         self.core_rows.max(self.range_rows).next_power_of_two().max(MIN_TRACE_LEN)
     }
@@ -81,6 +85,16 @@ impl TraceTotals {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
+    /// Padded power-of-two bracket for the Poseidon2 permutation trace.
+    pub fn padded_poseidon2_permutation(&self) -> u64 {
+        self.poseidon2_permutation_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    }
+
+    /// True when the snapshot contains a per-AIR Poseidon2 row target.
+    pub fn has_poseidon2_permutation_target(&self) -> bool {
+        self.poseidon2_permutation_rows > 0
+    }
+
     /// Single global padded length as reported by the processor's
     /// `TraceLenSummary::padded_trace_len`. Used by the calibrator to cross-check our derived
     /// formulas against the prover.
@@ -88,13 +102,16 @@ impl TraceTotals {
         self.core_rows
             .max(self.range_rows)
             .max(self.chiplets_rows)
+            .max(self.poseidon2_permutation_rows)
             .next_power_of_two()
             .max(MIN_TRACE_LEN)
     }
 
     /// True iff `range_rows` is the largest unpadded component.
     pub fn range_dominates(&self) -> bool {
-        self.range_rows > self.core_rows && self.range_rows > self.chiplets_rows
+        self.range_rows > self.core_rows
+            && self.range_rows > self.chiplets_rows
+            && self.range_rows > self.poseidon2_permutation_rows
     }
 }
 
@@ -127,6 +144,16 @@ impl TraceShape {
     pub fn new(totals: TraceTotals, breakdown: TraceBreakdown) -> Self {
         Self { totals, breakdown }
     }
+
+    /// Logical hasher-work rows used by the solver. When a Poseidon2 row target is present, use it;
+    /// otherwise use the chiplets hasher row count.
+    pub fn hasher_work_rows(&self) -> u64 {
+        if self.totals.poseidon2_permutation_rows > 0 {
+            self.totals.poseidon2_permutation_rows
+        } else {
+            self.breakdown.hasher_rows
+        }
+    }
 }
 
 impl TraceSnapshot {
@@ -145,8 +172,18 @@ impl TraceSnapshot {
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
+                poseidon2_permutation_rows: entry.trace.poseidon2_permutation_rows,
                 range_rows: entry.trace.range_rows,
             };
+            if trace.poseidon2_permutation_rows > 0
+                && !trace.poseidon2_permutation_rows.is_multiple_of(POSEIDON2_CYCLE_LEN)
+            {
+                return Err(SnapshotError::InvalidPoseidon2Rows {
+                    scenario: key,
+                    rows: trace.poseidon2_permutation_rows,
+                    cycle_len: POSEIDON2_CYCLE_LEN,
+                });
+            }
             let shape = entry.trace.chiplets_shape;
             let expected = shape.chiplets_sum();
             if trace.chiplets_rows != expected {
@@ -178,6 +215,8 @@ struct RawScenarioEntry {
 struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
+    #[serde(default)]
+    poseidon2_permutation_rows: u64,
     range_rows: u64,
     chiplets_shape: TraceBreakdown,
 }
@@ -199,6 +238,14 @@ pub enum SnapshotError {
         scenario: String,
         from_trace: u64,
         from_shape: u64,
+    },
+    #[error(
+        "snapshot inconsistency in scenario {scenario:?}: poseidon2_permutation_rows = {rows} is not a multiple of {cycle_len}"
+    )]
+    InvalidPoseidon2Rows {
+        scenario: String,
+        rows: u64,
+        cycle_len: u64,
     },
 }
 
@@ -278,6 +325,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1000,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: 300,
             range_rows: 100,
         };
         (totals, breakdown)
@@ -295,12 +343,14 @@ mod tests {
     #[test]
     fn padded_totals_match_processor_formula() {
         let (t, _) = sample_shape();
-        // max(1000, 100, 651) = 1000 → next pow2 = 1024
+        // max(1000, 100, 651, 300) = 1000 -> next pow2 = 1024
         assert_eq!(t.padded_total(), 1024);
         // core + range: max(1000, 100) = 1000 → 1024
         assert_eq!(t.padded_core_side(), 1024);
         // chiplets alone: 651 → 1024
         assert_eq!(t.padded_chiplets(), 1024);
+        // Poseidon2 alone: 300 -> 512
+        assert_eq!(t.padded_poseidon2_permutation(), 512);
     }
 
     #[test]
@@ -308,6 +358,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1,
             chiplets_rows: 1,
+            poseidon2_permutation_rows: 0,
             range_rows: 0,
         };
         assert_eq!(totals.padded_total(), MIN_TRACE_LEN);
@@ -320,12 +371,14 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 100,
             chiplets_rows: 200,
+            poseidon2_permutation_rows: 300,
             range_rows: 500,
         };
         assert!(totals.range_dominates());
         let totals = TraceTotals {
             core_rows: 500,
             chiplets_rows: 200,
+            poseidon2_permutation_rows: 300,
             range_rows: 100,
         };
         assert!(!totals.range_dominates());
@@ -367,13 +420,13 @@ mod tests {
                         assert_eq!(
                             snap.trace.padded_core_side(),
                             expected.padded_core_side,
-                            "{producer_stem}/{key}: padded_core_side moved to a different bracket; \
+                            "{producer_stem}/{key}: padded_core_side does not match expectation; \
                              refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
                         );
                         assert_eq!(
                             snap.trace.padded_chiplets(),
                             expected.padded_chiplets,
-                            "{producer_stem}/{key}: padded_chiplets moved to a different bracket; \
+                            "{producer_stem}/{key}: padded_chiplets does not match expectation; \
                              refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
                         );
                         discovered.insert((producer_stem.clone(), key.clone()));
@@ -437,6 +490,26 @@ mod tests {
         let err = TraceSnapshot::load_all(&tmp).expect_err("expected inconsistency rejection");
         let _ = std::fs::remove_file(&tmp);
         assert!(matches!(err, SnapshotError::InconsistentChipletsTotal { .. }));
+    }
+
+    #[test]
+    fn rejects_misaligned_poseidon2_rows() {
+        let misaligned = r#"{
+            "broken": {
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 11,
+                    "poseidon2_permutation_rows": 17,
+                    "range_rows": 0,
+                    "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                }
+            }
+        }"#;
+        let tmp = std::env::temp_dir().join("synthetic-bench-poseidon2-misaligned.json");
+        std::fs::write(&tmp, misaligned).unwrap();
+        let err = TraceSnapshot::load_all(&tmp).expect_err("expected Poseidon2 row rejection");
+        let _ = std::fs::remove_file(&tmp);
+        assert!(matches!(err, SnapshotError::InvalidPoseidon2Rows { rows: 17, .. }));
     }
 
     #[test]

@@ -12,3 +12,9 @@ fn constraints_eval_masm_matches_air() {
 fn relation_digest_matches_air() {
     constraints_regen::relation_digest_matches_air().expect("relation digest check failed");
 }
+
+#[test]
+fn public_inputs_masm_matches_air() {
+    constraints_regen::public_inputs_masm_matches_air()
+        .expect("public_inputs.masm drift check failed");
+}

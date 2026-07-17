@@ -1,7 +1,7 @@
 //! Hasher-chiplet bus tests.
 //!
 //! For each of the main hasher scenarios (SPAN/END control block, RESPAN, SPLIT merge, HPERM,
-//! LOGPRECOMPILE, MPVERIFY, MRUPDATE) the test registers the decoder-side `remove` requests and
+//! LOGDEFERRED, MPVERIFY, MRUPDATE) the test registers the decoder-side `remove` requests and
 //! the chiplet-side `add` responses it expects to see, then lets
 //! [`InteractionLog::assert_contains`] confirm every one of them fires somewhere in the trace.
 //!
@@ -22,12 +22,13 @@ use miden_air::{
     trace::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
+        log_deferred::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    deferred::Tag,
     mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
@@ -315,35 +316,36 @@ fn hperm_hasher_bus() {
 }
 
 #[test]
-fn logprecompile_hasher_bus() {
-    let program = single_block_program(vec![Operation::LogPrecompile]);
-    let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
+fn logdeferred_hasher_bus() {
+    let program = single_block_program(vec![Operation::LogDeferred]);
+    let stack_inputs = stack![0, 0, 0, 0, 0, 0, 0, 0];
     let trace = build_trace_from_program(&program, &stack_inputs);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
-    let mut logprecompile_addr: Option<Felt> = None;
+    let mut logdeferred_addr: Option<Felt> = None;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
-        if op != opcodes::LOGPRECOMPILE as u64 {
+        if op != opcodes::LOGDEFERRED as u64 {
             continue;
         }
 
         let next = RowIndex::from(row + 1);
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
-        logprecompile_addr = Some(log_addr);
+        logdeferred_addr = Some(log_addr);
 
-        // Input: [STATE_PREV, STMNT, ZERO] — 4 helpers + 4 stack lanes + 4 ZEROs.
+        // Input: [DEFERRED_ROOT_PREV, STATEMENT, Tag::AND] — 4 helpers + 4 stack lanes + fixed
+        // capacity.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
                 main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
                 main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                ZERO
+                Tag::AND.as_word()[i - 8]
             }
         });
 
@@ -357,7 +359,7 @@ fn logprecompile_hasher_bus() {
         );
         request_count += 2;
     }
-    let log_addr = logprecompile_addr.expect("program should contain a LOGPRECOMPILE row");
+    let log_addr = logdeferred_addr.expect("program should contain a LOGDEFERRED row");
     let log_return_addr = log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
@@ -382,12 +384,9 @@ fn logprecompile_hasher_bus() {
         }
     }
 
-    assert_eq!(request_count, 2, "LOGPRECOMPILE: expected 2 removes (init + return)");
-    assert_eq!(
-        sponge_start_count, 1,
-        "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired sponge_start"
-    );
-    assert_eq!(sout_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired SOUT");
+    assert_eq!(request_count, 2, "LOGDEFERRED: expected 2 removes (init + return)");
+    assert_eq!(sponge_start_count, 1, "LOGDEFERRED: expected 1 LOGDEFERRED-paired sponge_start");
+    assert_eq!(sout_count, 1, "LOGDEFERRED: expected 1 LOGDEFERRED-paired SOUT");
     log.assert_contains(&exp);
 }
 
@@ -586,7 +585,7 @@ fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     if usize::from(row) >= main.chiplets_height() {
         return false;
     }
-    main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
+    main.chiplet_selector_0(row) == ZERO
 }
 
 /// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
@@ -603,7 +602,7 @@ fn as_bit(val: Felt) -> Option<bool> {
     }
 }
 
-/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`
+/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2 * node_index_next`
 /// (see `chiplet_responses.rs::mp_verify_input`). Independent of the `chiplet_direction_bit`
 /// column, so bugs in that column don't make the assertion vacuously pass.
 fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
@@ -625,7 +624,7 @@ fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
 // where the M4/C2 packing puts it.
 
 /// Drive a depth-3 Merkle MRUPDATE and assert the sibling-table bus fires one add per MV
-/// controller row and one remove per MU controller row (3 levels → 3 adds + 3 removes).
+/// controller row and one remove per MU controller row (3 levels: 3 adds + 3 removes).
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
@@ -648,15 +647,15 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_01 column) AND the hasher internal
-    // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
-    // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
+    // Collect MV / MU controller rows. A row is a sibling-table add/remove site when the
+    // controller selector is active and the hasher internal `(s0, s1, s2)` sub-selectors pick out
+    // the MV-all (`s0 * s1 * (1 - s2)`) or MU-all (`s0 * s1 * s2`) pattern.
+    // See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
+        if main.chiplet_selector_0(idx) != ZERO {
             continue;
         }
         let hs0 = main.chiplet_selector_1(idx);

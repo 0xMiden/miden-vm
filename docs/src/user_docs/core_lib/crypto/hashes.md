@@ -15,24 +15,21 @@ Module `miden::core::crypto::hashes::blake3` contains procedures for computing h
 | merge   | Computes BLAKE3 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element) |
 
 ## Keccak256
-Module `miden::core::crypto::hashes::keccak256` contains procedures for computing hashes using [Keccak256](https://keccak.team/keccak.html) hash function.
+Module `miden::core::crypto::hashes::keccak256` contains procedures for computing hashes using [Keccak256](https://keccak.team/keccak.html).
 
 Data is represented using u32 arrays and u8 arrays with the following conventions:
+
 - **`VALUE_U32[n]`** = arrays of `n` u32 values, denoted as `[v_0, ..., v_{n-1}]`
-- **`VALUE_U8[n]`** = arrays of `n` u8 values, denoted as `[b_0, ..., b_{n-1}]` 
+- **`VALUE_U8[n]`** = arrays of `n` u8 values, denoted as `[b_0, ..., b_{n-1}]`
 - **Conversion**: `v_i = u32::from_le_bytes([b_{4i}, b_{4i+1}, b_{4i+2}, b_{4i+3}])`
 
-All stack inputs and output digests are represented on the stack as `u32` arrays with the least significant element at the top. 
-For example, a 256-bit digest is defined as `DIGEST_U32[8] = [d_0, ..., d_7]` and is placed on the stack as `[d_0, ..., d_7]` with `d_0` at the top.
-Memory inputs follow the same convention with the least significant `u32` value at the lowest address.
+All stack inputs and output digests are represented on the stack as `u32` arrays with the least significant element at the top. For example, a 256-bit digest is defined as `DIGEST_U32[8] = [d_0, ..., d_7]` and is placed on the stack as `[d_0, ..., d_7]` with `d_0` at the top. Memory inputs follow the same convention with the least significant `u32` value at the lowest address.
 
-Internally, the result of the computation is provided non-deterministically. The VM records this computation so that it can be verified externally, either by recursively verifying a STARK of these computations, or by natively re-computing the results when verifying the proof of this program.
-
-| Procedure   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Procedure   | Description |
+|-------------|-------------|
 | hash_bytes | Computes Keccak256 hash of data stored in memory.<br /><br />Input: `[ptr, len_bytes, ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where:<br />- `ptr`: word-aligned memory address containing `INPUT_U32[len_u32]` where `len_u32=⌈len_bytes/4⌉`<br />- `len_bytes`: number of bytes to hash<br />- `INPUT_U32[len_u32] ~ INPUT_U8[len_bytes]` with `u32` packing (unused bytes in final `u32` must be 0)<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])`<br /> |
-| hash   | Computes Keccak256 hash of a single 256-bit input.<br /><br />Input: `[INPUT_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])`<br />- `INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32]` with `u32` packing<br />                                                                                                                                                                          |
-| merge   | Merges two 256-bit digests via Keccak256 hash.<br /><br />Input: `[INPUT_L_U32[8], INPUT_R_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where<br />- `INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]`<br />- `INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]`<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] \|\| INPUT_R_U8[32])`<br />                                                           |
+| hash   | Computes Keccak256 hash of a single 256-bit input.<br /><br />Input: `[INPUT_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where:<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])`<br />- `INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32]` with `u32` packing<br /> |
+| merge   | Merges two 256-bit digests via Keccak256 hash.<br /><br />Input: `[INPUT_L_U32[8], INPUT_R_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where:<br />- `INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]`<br />- `INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]`<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] concatenated with INPUT_R_U8[32])`<br /> |
 
 ## SHA256
 Module `miden::core::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
@@ -43,16 +40,6 @@ Module `miden::core::crypto::hashes::sha256` contains procedures for computing h
 | merge   | Computes SHA256 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
 | hash_bytes | Given a memory address and a message length in bytes, computes its SHA256 digest. There must be space for writing the padding after the message in memory, and the padding space must be all zeros before the procedure is called.<br /><br />Input: `[addr, len, ...]`<br />Output: `[dig0, dig1, ..., dig7, ...]`<br /><br />Panics if any loaded message word is not a valid 32-bit unsigned integer or padding range checks fail. |
 
-## SHA512
-Module `miden::core::crypto::hashes::sha512` contains procedures for computing hashes using the SHA512 hash function.
-
-Data representation and u32/u8 packing conventions are the same as in Keccak256. The only difference is the digest size: SHA512 digests are 64 bytes, represented as `DIGEST_U32[16] = [d_0, ..., d_15]`.
-
-Internally, the result of the computation is provided non-deterministically via a precompile. The VM records this computation so that it can be verified externally.
-
-| Procedure   | Description |
-|-------------|-------------|
-| hash_bytes  | Computes SHA512 hash of data stored in memory.<br /><br />Input: `[ptr, len_bytes, ...]`<br />Output: `[DIGEST_U32[16], ...]`<br /><br />Where:<br />- `ptr`: word-aligned memory address containing `INPUT_U32[len_u32]` where `len_u32=⌈len_bytes/4⌉`<br />- `len_bytes`: number of bytes to hash<br />- `INPUT_U32[len_u32] ~ INPUT_U8[len_bytes]` with u32 packing (unused bytes in final u32 must be 0)<br />- `DIGEST_U32[16] = [d_0, ..., d_15] = SHA512(INPUT_U8[len_bytes])` |
 
 ## Poseidon2
 Module `miden::core::crypto::hashes::poseidon2` contains procedures for computing and managing hashes using the [Poseidon2](https://eprint.iacr.org/2023/323) hash function.

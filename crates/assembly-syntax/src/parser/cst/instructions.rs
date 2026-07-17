@@ -194,6 +194,26 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
     },
     PrimitiveSpec {
+        spelling: "adv.register_deferred",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredRegister),
+    },
+    PrimitiveSpec {
+        spelling: "adv.register_deferred_data",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredRegisterData),
+    },
+    PrimitiveSpec {
+        spelling: "adv.evaluate_deferred",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluate),
+    },
+    PrimitiveSpec {
+        spelling: "adv.evaluate_deferred_tag",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateTag),
+    },
+    PrimitiveSpec {
+        spelling: "adv.evaluate_deferred_payload",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
+    },
+    PrimitiveSpec {
         spelling: "add",
         build: || Instruction::Add,
     },
@@ -418,8 +438,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::IsOdd,
     },
     PrimitiveSpec {
-        spelling: "log_precompile",
-        build: || Instruction::LogPrecompile,
+        spelling: "log_deferred",
+        build: || Instruction::LogDeferred,
     },
     PrimitiveSpec {
         spelling: "nop",

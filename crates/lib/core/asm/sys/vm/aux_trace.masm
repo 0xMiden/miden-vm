@@ -6,17 +6,16 @@ use miden::core::sys::vm::public_inputs
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the boundary values (2 extension field elements = 4 base field elements = 1 word).
+#! and absorbs the boundary values (3 extension field elements = 6 base field elements).
 #!
-#! The advice provider must supply exactly 2 words in order:
-#!   [commitment, W0]
+#! The advice provider supplies the commitment, then aux finals in proof order:
+#!   [commitment, aux0, aux1, aux2]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
 #! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
 #! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
-#! step I), then once the per-AIR LogUp finals are absorbed asserts the boundary identity
-#! `c_total + aux_sum == 0`, where `aux_sum` is the sum of the two absorbed finals
-#! (order-independent, so the proof_order shuffle does not matter).
+#! step I), then asserts `c_total + aux_sum == 0`, where `aux_sum` is the sum of the
+#! per-AIR LogUp finals. The sum is independent of proof order.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -29,7 +28,7 @@ pub proc observe_aux_trace
     # => [...]
 
     # Compute the outer-LogUp boundary correction `c_total` from the sampled aux randomness
-    # and the statement values materialized in step I (`process_public_inputs`).
+    # and the statement values staged before the transcript starts.
     exec.public_inputs::compute_outer_logup_correction
     # => [...]
 
@@ -40,7 +39,7 @@ pub proc observe_aux_trace
     # Reseeding clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Single permutation: Absorb [COM, W0] ---
+    # Absorb the full rate block [commitment, aux0, aux1].
 
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
@@ -52,24 +51,43 @@ pub proc observe_aux_trace
 
     swapw
     exec.random_coin::get_capacity
+    add.8
     movdnw.2
-    # Bind the absorbed length (8: commitment word + boundary word) into the capacity.
-    movup.8 add.8 movdn.8
+    # Capacity is tagged with the absorbed length: commitment word + boundary word.
     exec.poseidon2::permute
     # => [R1', R2', C', ...]
 
-    # Store final sponge state.
+    # Store the sponge state after the full-rate absorb.
     exec.random_coin::store_random_coin_state
     # => [...]
 
-    # Mark output buffer as full (8 elements available for sampling).
+    # Absorb aux2 as a two-element partial block.
+    push.0.0 adv_push adv_push swap
+    exec.constants::aux_bus_boundary_ptr add.4 mem_storew_le
+    # => [aux2_0, aux2_1, 0, 0, ...]
+
+    exec.random_coin::get_capacity
+    add.2
+    padw
+    # => [R2=0, C, R1, ...]
+    movupw.2
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+
+    # Fresh output available.
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 
     # --- Outer-LogUp boundary check: assert c_total + aux_sum == 0 coordinate-wise ---
 
-    # aux_sum = sum of the two per-AIR LogUp finals absorbed above.
+    # aux_sum = sum of the three per-AIR LogUp finals absorbed above.
     padw exec.constants::aux_bus_boundary_ptr mem_loadw_le
     # => [b0_0, b0_1, b1_0, b1_1, ...]
+    ext2add
+    # => [sum0, sum1, ...]
+    exec.constants::aux_bus_boundary_ptr add.5 mem_load
+    exec.constants::aux_bus_boundary_ptr add.4 mem_load
+    # => [b2_0, b2_1, sum0, sum1, ...]
     ext2add
     # => [sum0, sum1, ...]
     exec.constants::c_total_ptr add.1 mem_load

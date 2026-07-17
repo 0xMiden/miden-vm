@@ -1,6 +1,6 @@
 //! DAG IR for ACE circuit generation.
 //!
-//! This module lowers symbolic AIR constraints into a DAG that mirrors the
+//! This module lowers symbolic AIR constraints into a DAG that matches the
 //! verifier evaluation order: constraints are folded with the composition
 //! challenge, divided by the vanishing polynomial, and then compared against
 //! the recomposed quotient. Auxiliary/quotient openings are provided as base

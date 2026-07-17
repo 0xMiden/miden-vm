@@ -98,11 +98,13 @@ impl RunCmd {
             "VM cycles: {} extended to {} steps ({}% padding).
 ├── Stack rows: {}
 ├── Range checker rows: {}
-└── Chiplets rows: {}
-    ├── Hash chiplet rows: {}
-    ├── Bitwise chiplet rows: {}
-    ├── Memory chiplet rows: {}
-    └── Kernel ROM rows: {}",
+├── Chiplets rows: {}
+│   ├── Hash chiplet rows: {}
+│   ├── Bitwise chiplet rows: {}
+│   ├── Memory chiplet rows: {}
+│   ├── ACE chiplet rows: {}
+│   └── Kernel ROM rows: {}
+└── Poseidon2 permutation rows: {}",
             trace.trace_len_summary().trace_len(),
             trace.trace_len_summary().padded_trace_len(),
             padding_percentage,
@@ -112,7 +114,9 @@ impl RunCmd {
             trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
             trace.trace_len_summary().chiplets_trace_len().bitwise_chiplet_len(),
             trace.trace_len_summary().chiplets_trace_len().memory_chiplet_len(),
+            trace.trace_len_summary().chiplets_trace_len().ace_chiplet_len(),
             trace.trace_len_summary().chiplets_trace_len().kernel_rom_len(),
+            trace.trace_len_summary().poseidon2_permutation_trace_len(),
         );
 
         Ok(())

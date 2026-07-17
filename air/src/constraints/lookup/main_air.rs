@@ -5,17 +5,16 @@
 //! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!
 //! Columns (in emission order):
-//! - block-stack table + u32 range checks + log-precompile capacity + range-table response (merged
-//!   — see [`super::buses::block_stack_and_range_logcap`]).
+//! - block-stack table + u32 range checks + log-deferred capacity + range-table response (merged —
+//!   see [`super::buses::block_stack_and_range_logcap`]).
 //! - block-hash queue + op-group table.
 //! - chiplet requests from the decoder.
 //! - stack overflow table.
 //!
 //! The [`MainLookupBuilder`] extension trait exists so the `OpFlags` construction can diverge
-//! between the constraint path (polynomial, today's default) and the prover path (boolean
-//! fast path, planned). For now every adapter picks up the default polynomial body via an
-//! empty `impl MainLookupBuilder for …` block — the structural split is the sole purpose of
-//! this module today.
+//! between the constraint path (polynomial, the default body) and the prover path (boolean fast
+//! path). The constraint and debug adapters use the default body; the prover adapter overrides the
+//! hook in [`super::extension_impls`].
 
 use core::borrow::Borrow;
 
@@ -44,13 +43,12 @@ use crate::{
 ///
 /// Carries a single hook, [`build_op_flags`](Self::build_op_flags), for constructing the
 /// shared [`LookupOpFlags`] instance that the four main-trace bus emitters consume. The
-/// default body uses the polynomial path (today's behavior for both the constraint-path and
-/// the prover-path adapters). A future prover-side optimization will override this method on
-/// the prover adapter to skip the dead polynomial products that come from decoder bits
-/// already being concrete 0/1 values; no other code moves.
+/// default body uses the polynomial path. The prover-path adapter overrides this method to skip
+/// the dead polynomial products that come from decoder bits already being concrete 0/1 values; no
+/// emitter code moves.
 ///
 /// There is intentionally **no** blanket `impl<LB: LookupBuilder> MainLookupBuilder for LB`
-/// — Rust coherence would then forbid the prover adapter from overriding the default body.
+/// Rust coherence would then forbid the prover adapter from overriding the default body.
 /// Each adapter implements this trait explicitly with an empty `impl` block that picks up
 /// the default.
 pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
@@ -75,7 +73,7 @@ pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
 ///
 /// Holds the two-row window plus a single [`LookupOpFlags`] instance built once per `eval`
 /// through [`MainLookupBuilder::build_op_flags`]. Every emitter reads `ctx.local`,
-/// `ctx.next`, and `ctx.op_flags.<accessor>()` directly — no method indirection beyond the
+/// `ctx.next`, and `ctx.op_flags.<accessor>()` directly; no method indirection beyond the
 /// single clone each accessor performs.
 pub(crate) struct MainBusContext<'a, LB>
 where
@@ -111,7 +109,7 @@ where
 /// LogUp lookup argument over the main trace.
 ///
 /// Zero-sized. Emits four permutation columns: the first packs block-stack + u32 range
-/// checks + log-precompile capacity + range-table response; the second unions block-hash
+/// checks + log-deferred capacity + range-table response; the second unions block-hash
 /// queue and op-group table; the third hosts the decoder's chiplet requests; the fourth
 /// hosts the stack overflow table. The chiplet-trace half of the argument lives in
 /// [`super::chiplet_air::ChipletLookupAir`].
@@ -139,15 +137,14 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // The widest main-trace payload is `HasherMsg::State` (linear_hash_init /
-        // return_state) at 15 slots, but `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM
-        // transcript alignment.
+        // The widest main-trace payload is `HasherMsg::State` (addr, node_index, 12 state lanes).
+        // `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {
         // Main-trace emitters touch `BusId::{BlockStackTable, BlockHashTable, OpGroupTable,
-        // RangeCheck, LogPrecompileTranscript}` plus the shared chiplet-requests column.
+        // RangeCheck, LogDeferredRoot}` plus the shared chiplet-requests column.
         // The adapter's bus-prefix table is shared across every LookupAir it runs, so
         // returning `BusId::COUNT` (the total bus-type count) is the safe upper bound.
         BusId::COUNT
@@ -157,7 +154,7 @@ where
         // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
         // released by the time we grab the `&mut builder` for the per-column emitters.
         //
-        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols` — the Core half of
+        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols`; the Core half of
         // the trace.
         let main = builder.main();
         let local_slice = main.current_slice();

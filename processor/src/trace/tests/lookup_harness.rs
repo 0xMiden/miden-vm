@@ -49,9 +49,9 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
-        let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
-        // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
-        let chip_periodic = MidenAir::CHIPLETS.periodic_columns();
+        let (core_matrix, chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
+        let chip_periodic = MidenAir::Chiplets.periodic_columns();
+        let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -61,10 +61,20 @@ impl InteractionLog {
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
         let core_fractions =
-            build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
+            build_lookup_fractions(&MidenAir::Core, &core_matrix, &[], &challenges);
         let chip_fractions =
-            build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
-        let rows = merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions));
+            build_lookup_fractions(&MidenAir::Chiplets, &chip_matrix, &chip_periodic, &challenges);
+        let poseidon2_fractions = build_lookup_fractions(
+            &MidenAir::Poseidon2Permutation,
+            &poseidon2_matrix,
+            &poseidon2_periodic,
+            &challenges,
+        );
+        let rows = merge_rows(vec![
+            split_rows(&core_fractions),
+            split_rows(&chip_fractions),
+            split_rows(&poseidon2_fractions),
+        ]);
 
         Self { challenges, rows }
     }
@@ -174,19 +184,17 @@ fn split_rows(fractions: &LookupFractions<Felt, QuadFelt>) -> Vec<Vec<(Felt, Qua
     rows
 }
 
-/// Row-wise union of the Core and Chiplets per-row bags, padding the shorter side (the
-/// per-AIR matrices can have different padded heights) with empty rows.
-fn merge_rows(
-    core: Vec<Vec<(Felt, QuadFelt)>>,
-    chip: Vec<Vec<(Felt, QuadFelt)>>,
-) -> Vec<Vec<(Felt, QuadFelt)>> {
-    let num_rows = core.len().max(chip.len());
-    let mut core = core.into_iter();
-    let mut chip = chip.into_iter();
+/// Row-wise union of the per-AIR bags, padding shorter traces with empty rows.
+fn merge_rows(airs: Vec<Vec<Vec<(Felt, QuadFelt)>>>) -> Vec<Vec<(Felt, QuadFelt)>> {
+    let num_rows = airs.iter().map(Vec::len).max().unwrap_or(0);
     (0..num_rows)
-        .map(|_| {
-            let mut bag = core.next().unwrap_or_default();
-            bag.extend(chip.next().unwrap_or_default());
+        .map(|row| {
+            let mut bag = Vec::new();
+            for air_rows in &airs {
+                if let Some(row_bag) = air_rows.get(row) {
+                    bag.extend(row_bag.iter().copied());
+                }
+            }
             bag
         })
         .collect()

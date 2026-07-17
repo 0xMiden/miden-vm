@@ -1,3 +1,5 @@
+Keccak256 hash procedures.<br /><br />These stack-returning core wrappers use bundled precompile-backed support internally for event<br />handling and deferred verification.<br />
+
 
 ## miden::core::crypto::hashes::keccak256
 | Procedure | Description |

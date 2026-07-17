@@ -7,7 +7,8 @@ expression: summary
 ## Blake3 1-to-1 Non-Regression
 
 Status: **REGRESSION**
-Threshold: `5.00%`
+Criterion failure threshold: `5.00%`
+Minimum absolute slowdown: `1.00 ms`
 Primary metric: `e2e_prove`
 Baseline: `base` (1000.00 ms)
 Current: `head` (1100.00 ms)
@@ -17,7 +18,7 @@ Overall delta: `+100.00 ms` (+10.00%)
 | --- | --- | ---: | ---: | ---: | ---: |
 | e2e_prove | criterion | 1000.00 ms | 1100.00 ms | +100.00 ms | +10.00% |
 
-Regressions over threshold:
+Criterion regressions over threshold:
 - `e2e_prove` moved by +100.00 ms (+10.00%) against a 5.00% threshold.
 
 Top slowdowns:

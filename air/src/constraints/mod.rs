@@ -7,8 +7,8 @@
 //! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / range / stack
 //!   / decoder / chiplets transitions.
 //! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
-//!   `LookupAir` impls on [`crate::CoreAir`] and [`crate::ChipletsAir`], wired in from each AIR's
-//!   `eval` via [`crate::lookup::ConstraintLookupBuilder`].
+//!   `LookupAir` impls on the per-trace AIRs, wired in from each AIR's `eval` via
+//!   [`crate::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
 
@@ -21,6 +21,7 @@ pub mod decoder;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;
+pub mod poseidon2_permutation;
 pub mod public_inputs;
 pub mod range;
 pub mod stack;
@@ -52,8 +53,8 @@ pub fn enforce_core<AB>(
     decoder::enforce_main(builder, local, next, op_flags);
 }
 
-/// Enforces the Chiplets-trace main constraints (hasher permutation/controller, bitwise,
-/// memory, ACE). Selector validity is enforced separately via
+/// Enforces the Chiplets-trace main constraints (hasher controller, bitwise, memory, ACE).
+/// Selector validity is enforced separately via
 /// [`chiplets::selectors::build_chiplet_selectors`].
 pub fn enforce_chiplets<AB>(
     builder: &mut AB,
@@ -64,4 +65,12 @@ pub fn enforce_chiplets<AB>(
     AB: MidenAirBuilder,
 {
     chiplets::enforce_main(builder, local, next, selectors);
+}
+
+/// Enforces the Poseidon2 permutation trace constraints.
+pub fn enforce_poseidon2_permutation<AB>(builder: &mut AB)
+where
+    AB: MidenAirBuilder,
+{
+    poseidon2_permutation::enforce_main(builder);
 }

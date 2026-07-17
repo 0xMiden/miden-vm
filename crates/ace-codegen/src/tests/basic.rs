@@ -196,7 +196,8 @@ fn test_verifier_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,
@@ -205,7 +206,7 @@ fn test_verifier_dag_matches_manual_eval() {
         permutation_width: layout.counts.aux_width,
         num_permutation_challenges: layout.counts.num_randomness,
         num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: layout.counts.num_periodic,
+        num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
@@ -243,7 +244,8 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,
@@ -252,7 +254,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         permutation_width: layout.counts.aux_width,
         num_permutation_challenges: layout.counts.num_randomness,
         num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: layout.counts.num_periodic,
+        num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
@@ -293,6 +295,38 @@ fn test_emitted_circuit_matches_dag_eval() {
     let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
     let circuit_value = circuit.eval(&inputs).expect("circuit eval");
     assert_eq!(circuit_value, dag_value);
+}
+
+#[test]
+fn pipeline_rejects_zero_airs() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+        num_airs: 0,
+    };
+
+    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    assert!(
+        matches!(err, crate::AceError::InvalidInputLayout { .. }),
+        "expected InvalidInputLayout, got {err:?}"
+    );
+}
+
+#[test]
+fn pipeline_rejects_zero_quotient_chunks() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 0,
+        layout: LayoutKind::Native,
+        num_airs: 1,
+    };
+
+    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    assert!(
+        matches!(err, crate::AceError::InvalidInputLayout { .. }),
+        "expected InvalidInputLayout, got {err:?}"
+    );
 }
 
 #[test]

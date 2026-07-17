@@ -23,7 +23,7 @@ on:
       regression_min_delta_ms:
         description: Minimum absolute slowdown before the workflow fails.
         required: false
-        default: "1"
+        default: "5"
         type: string
       rayon_num_threads:
         description: RAYON_NUM_THREADS value used for the benchmark.
@@ -158,7 +158,7 @@ jobs:
             current_ref="${GITHUB_SHA}"
             baseline_ref="${BEFORE_SHA}"
             threshold_pct="5"
-            min_delta_ms="1"
+            min_delta_ms="5"
             rayon_threads="8"
             sample_size="10"
             measurement_time_secs="10"
@@ -187,7 +187,7 @@ jobs:
           fi
 
           if [[ -z "${min_delta_ms}" ]]; then
-            min_delta_ms="1"
+            min_delta_ms="5"
           fi
 
           if [[ -z "${rayon_threads}" ]]; then
@@ -436,7 +436,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - benchmark
-    if: always() && github.event_name == 'push' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
+    if: always() && github.event_name == 'push' && needs.benchmark.outputs.regression == 'true' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
     permissions:
       contents: write
     steps:

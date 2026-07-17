@@ -13,14 +13,13 @@ use core::{
 use super::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
+use crate::trace::{CHIPLET_CONTROLLER_OFFSET, CHIPLETS_WIDTH, TRACE_WIDTH};
 
 // CORE TRACE COLUMN STRUCT
 // ================================================================================================
@@ -76,57 +75,53 @@ impl<T> CoreCols<T> {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the `s_00` and `s_01` chiplet selectors, `chip_clk`, and the 19 shared
-/// chiplet data columns — the columns owned by `ChipletsAir`. It is also the layout of the
-/// trailing `NUM_CHIPLETS_COLS` columns of the unified main trace, so it can be borrowed from
-/// either a per-AIR `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
-/// `Borrow<ChipletCols<T>>`.
+/// `ChipletCols` covers the chiplet payload/selector columns and `chip_clk`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
-    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
-    pub s_00: T,
-    /// Controller segment selector: consumed by `build_chiplet_selectors`.
-    pub s_01: T,
-    /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
+    /// Chiplet-trace row counter: starts at 1 on the first row and increments by 1.
     pub chip_clk: T,
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 3],
 }
 
-/// Number of columns in the chiplets trace (22), derived from the struct layout.
+/// Number of columns in the chiplets trace, derived from the struct layout.
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
+pub const CHIPLET_SELECTOR_COUNT: usize = 5;
+
 impl<T> ChipletCols<T> {
-    /// Returns the 6 chiplet selector columns `[s_00, s_01, s1, s2, s3, s4]`.
-    ///
-    /// `s_00` and `s_01` are the two physical selectors for the permutation and controller
-    /// sub-chiplets. `s1..s4` subdivide the remaining chiplets under the virtual
-    /// `s0 = 1 - (s_00 + s_01)`.
-    pub fn chiplet_selectors(&self) -> [T; 6]
+    const CONTROLLER_OFFSET: usize = CHIPLET_CONTROLLER_OFFSET;
+    const CONTROLLER_END: usize = Self::CONTROLLER_OFFSET + size_of::<ControllerCols<u8>>();
+    const BITWISE_OFFSET: usize = 2;
+    const BITWISE_END: usize = Self::BITWISE_OFFSET + size_of::<BitwiseCols<u8>>();
+    const MEMORY_OFFSET: usize = 3;
+    const MEMORY_END: usize = Self::MEMORY_OFFSET + size_of::<MemoryCols<u8>>();
+    const MEMORY_WORD_ADDR_LO_OFFSET: usize = Self::MEMORY_END;
+    const MEMORY_WORD_ADDR_HI_OFFSET: usize = Self::MEMORY_WORD_ADDR_LO_OFFSET + 1;
+    const ACE_OFFSET: usize = 4;
+    const ACE_END: usize = Self::ACE_OFFSET + size_of::<AceCols<u8>>();
+    const KERNEL_ROM_OFFSET: usize = 5;
+    const KERNEL_ROM_END: usize = Self::KERNEL_ROM_OFFSET + size_of::<KernelRomCols<u8>>();
+
+    /// Returns the top-level selector slots `[s0, s1, s2, s3, s4]`.
+    pub fn chiplet_selectors(&self) -> [T; CHIPLET_SELECTOR_COUNT]
     where
         T: Copy,
     {
-        [
-            self.s_00,
-            self.s_01,
-            self.chiplets[0],
-            self.chiplets[1],
-            self.chiplets[2],
-            self.chiplets[3],
-        ]
+        core::array::from_fn(|i| self.chiplets[i])
     }
 
-    /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[1..14\]).
+    /// Returns a typed borrow of the bitwise chiplet columns.
     pub fn bitwise(&self) -> &BitwiseCols<T> {
-        self.chiplets[1..14].borrow()
+        self.chiplets[Self::BITWISE_OFFSET..Self::BITWISE_END].borrow()
     }
 
-    /// Returns a typed borrow of the memory chiplet columns (chiplets\[2..17\]).
+    /// Returns a typed borrow of the memory chiplet columns.
     pub fn memory(&self) -> &MemoryCols<T> {
-        self.chiplets[2..17].borrow()
+        self.chiplets[Self::MEMORY_OFFSET..Self::MEMORY_END].borrow()
     }
 
-    /// Returns the lower 16-bit limb of the memory word address (chiplets\[17\]).
+    /// Returns the lower 16-bit limb of the memory word address.
     ///
     /// Range-check auxiliary column populated by the trace builder for the lookup-bus
     /// emitter; not part of [`MemoryCols`] because the memory AIR's own transition
@@ -135,10 +130,10 @@ impl<T> ChipletCols<T> {
     where
         T: Copy,
     {
-        self.chiplets[17]
+        self.chiplets[Self::MEMORY_WORD_ADDR_LO_OFFSET]
     }
 
-    /// Returns the upper 16-bit limb of the memory word address (chiplets\[18\]).
+    /// Returns the upper 16-bit limb of the memory word address.
     ///
     /// See [`Self::memory_word_addr_lo`] for the same caveat about the range-check
     /// auxiliary columns living outside [`MemoryCols`].
@@ -146,27 +141,22 @@ impl<T> ChipletCols<T> {
     where
         T: Copy,
     {
-        self.chiplets[18]
+        self.chiplets[Self::MEMORY_WORD_ADDR_HI_OFFSET]
     }
 
-    /// Returns a typed borrow of the ACE chiplet columns (chiplets\[3..19\]).
+    /// Returns a typed borrow of the ACE chiplet columns.
     pub fn ace(&self) -> &AceCols<T> {
-        self.chiplets[3..].borrow()
+        self.chiplets[Self::ACE_OFFSET..Self::ACE_END].borrow()
     }
 
-    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[4..9\]).
+    /// Returns a typed borrow of the kernel ROM chiplet columns.
     pub fn kernel_rom(&self) -> &KernelRomCols<T> {
-        self.chiplets[4..9].borrow()
+        self.chiplets[Self::KERNEL_ROM_OFFSET..Self::KERNEL_ROM_END].borrow()
     }
 
-    /// Returns a typed borrow of the permutation sub-chiplet columns (chiplets\[0..19\]).
-    pub fn permutation(&self) -> &PermutationCols<T> {
-        self.chiplets[..].borrow()
-    }
-
-    /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[0..19\]).
+    /// Returns a typed borrow of the controller sub-chiplet columns.
     pub fn controller(&self) -> &ControllerCols<T> {
-        self.chiplets[..].borrow()
+        self.chiplets[Self::CONTROLLER_OFFSET..Self::CONTROLLER_END].borrow()
     }
 }
 
@@ -208,9 +198,8 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
 // COLUMN COUNTS
 // ================================================================================================
 //
-// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `build_aux_trace` (see `air/src/constraints/lookup/`): 4 Core
-// columns + 3 Chiplets columns.
+// Auxiliary columns materialize the per-AIR LogUp lookup arguments:
+// 4 Core columns, 3 Chiplets columns, and 1 Poseidon2 permutation column.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
@@ -311,14 +300,12 @@ mod tests {
 
     #[test]
     fn col_map_chiplets() {
-        assert_eq!(CHIPLET_COL_MAP.s_00, 0);
-        assert_eq!(CHIPLET_COL_MAP.s_01, 1);
-        assert_eq!(CHIPLET_COL_MAP.chip_clk, 2);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[0], 3);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[18], 21);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[CHIPLETS_WIDTH - 2], CHIPLETS_WIDTH - 2);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, CHIPLETS_WIDTH - 1);
     }
 
-    // --- Multi-AIR split: CoreCols + ChipletCols widths ---------------------------------------
+    // --- Per-AIR width invariants -------------------------------------------------------------
 
     /// `NUM_CORE_COLS` matches the sum of the segment widths it covers.
     #[test]
@@ -338,7 +325,7 @@ mod tests {
     // --- Layout snapshots ---------------------------------------------------------------------
     //
     // These pin the resolved column-index maps of each `Cols<T>` view to `.snap` files,
-    // so any layout change surfaces as a snapshot diff in PR review.
+    // so layout changes surface as snapshot diffs.
     // Regenerate with `cargo insta review` (or `INSTA_UPDATE=auto cargo test -p miden-air`).
 
     /// Builds a `$cols<usize>` index map by reinterpreting `[0, 1, …, N-1]` through the
@@ -395,10 +382,5 @@ mod tests {
     #[test]
     fn hasher_controller_col_map_layout() {
         insta::assert_debug_snapshot!(col_map!(ControllerCols));
-    }
-
-    #[test]
-    fn hasher_permutation_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(PermutationCols));
     }
 }

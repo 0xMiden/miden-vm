@@ -3,7 +3,7 @@
 //! This module ties together the major layers:
 //! - build a verifier-style DAG from AIR constraints,
 //! - choose a READ layout for inputs,
-//! - emit a circuit that mirrors verifier evaluation.
+//! - emit a circuit that matches verifier evaluation.
 
 use miden_crypto::{
     field::{Algebra, ExtensionField, Field, TwoAdicField},
@@ -21,10 +21,6 @@ use crate::{
 };
 
 /// Layout strategy for arranging ACE inputs.
-///
-/// - `Native`: minimal, no alignment/padding; useful for native (off-VM) evaluation.
-/// - `Masm`: matches the recursive verifier READ layout (alignment, padding, and randomness
-///   ordering).
 #[derive(Debug, Clone, Copy)]
 pub enum LayoutKind {
     /// Minimal layout used for off-VM evaluation.
@@ -38,29 +34,25 @@ pub enum LayoutKind {
 pub struct AceConfig {
     /// Number of quotient chunks used by the AIR.
     pub num_quotient_chunks: usize,
-    /// Layout policy (Native vs Masm).
+    /// Layout policy.
     pub layout: LayoutKind,
-    /// Number of AIRs the circuit is built over. With `1` the layout is the plain
-    /// single-AIR layout; with `num_airs >= 2` the stark-vars region reserves
-    /// additional EF slots for the per-AIR multi-AIR β coefficients (one per AIR)
-    /// and lifted selector triples (one per AIR).
+    /// Number of AIRs represented by the circuit layout.
+    ///
+    /// `1` builds the plain single-AIR layout. Values greater than one reserve the extra
+    /// stark-var slots needed by a caller-owned multi-AIR composition circuit.
     pub num_airs: usize,
 }
 
-/// Output of the ACE codegen pipeline (layout + DAG).
+/// Output of the ACE codegen pipeline.
 #[derive(Debug)]
 pub struct AceArtifacts<EF> {
     /// Input layout describing the READ section order.
     pub layout: InputLayout,
-    /// DAG that mirrors the verifier evaluation.
+    /// DAG that matches verifier evaluation.
     pub dag: AceDag<EF>,
 }
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
-///
-/// This builds the constraint-evaluation DAG, validates layout invariants, and
-/// emits the off-VM circuit representation. The circuit performs the constraint
-/// evaluation check at the out-of-domain point z.
 pub fn build_ace_circuit_for_air<A, F, EF>(
     air: &A,
     config: AceConfig,
@@ -86,8 +78,14 @@ where
     EF: ExtensionField<F>,
     SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
+    if config.num_airs == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "num_airs must be at least 1".into(),
+        });
+    }
+
     let periodic_columns = air.periodic_columns();
-    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
+    let counts = input_counts_for_air::<A, F, EF>(air, config)?;
     let layout = match (config.layout, config.num_airs >= 2) {
         (LayoutKind::Native, false) => InputLayout::new(counts),
         (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
@@ -103,7 +101,7 @@ where
         permutation_width: counts.aux_width,
         num_permutation_challenges: counts.num_randomness,
         num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: counts.num_periodic,
+        num_periodic_columns: periodic_columns.len(),
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
@@ -124,31 +122,38 @@ where
     Ok(AceArtifacts { layout, dag })
 }
 
-fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig, num_periodic: usize) -> InputCounts
+fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
 where
     A: LiftedAir<F, EF>,
     F: Field,
     EF: ExtensionField<F>,
 {
-    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
-    assert!(
-        air.preprocessed_trace().is_none(),
-        "preprocessed trace inputs are not supported"
-    );
+    if config.num_quotient_chunks == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "num_quotient_chunks must be > 0".into(),
+        });
+    }
+    if air.preprocessed_trace().is_some() {
+        return Err(AceError::InvalidInputLayout {
+            message: "preprocessed trace inputs are not supported".into(),
+        });
+    }
 
     let num_randomness = air.num_randomness();
-    assert!(
-        num_randomness == 2,
-        "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
-    );
+    if num_randomness != 2 {
+        return Err(AceError::InvalidInputLayout {
+            message: format!(
+                "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
+            ),
+        });
+    }
 
-    InputCounts {
+    Ok(InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),
         num_public: air.num_public_values(),
         num_randomness,
-        num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,
-    }
+    })
 }

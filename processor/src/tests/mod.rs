@@ -14,8 +14,8 @@ use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, Kernel, LoadedMastForest, ONE, ProcessorState, Program,
-    StackInputs, SyncHost, Word, ZERO,
+    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
+    Program, StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName},
     operation::Operation,
@@ -1395,7 +1395,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
             Program::with_kernel(
                 program.mast_forest().clone(),
                 program.entrypoint(),
-                Kernel::default(),
+                KernelDescriptor::default(),
             ),
             debug_info,
         )

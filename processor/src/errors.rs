@@ -3,9 +3,12 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::{
+    PackageDebugInfoError,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
@@ -19,6 +22,7 @@ use crate::{
 // EXECUTION ERROR
 // ================================================================================================
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
@@ -55,6 +59,16 @@ pub enum ExecutionError {
         event_name: Option<EventName>,
         #[source]
         error: EventError,
+    },
+    /// Deferred system event failed while validating or evaluating a committed node.
+    #[error("{err}")]
+    #[diagnostic()]
+    DeferredError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        err: PrecompileError,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
@@ -108,6 +122,8 @@ pub enum ExecutionError {
     ProvingError(String),
     #[error(transparent)]
     HostError(#[from] HostError),
+    #[error(transparent)]
+    PackageDebugInfoError(#[from] PackageDebugInfoError),
 }
 
 impl ExecutionError {
@@ -285,6 +301,8 @@ pub enum OperationError {
     CircularExternalNode(Word),
     #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
+    #[error(transparent)]
+    Deferred(#[from] PrecompileError),
     #[error(
         "assertion failed with error {}",
         match err_msg {
@@ -797,6 +815,9 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
                     },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
+                    },
                 })
             },
         }
@@ -819,6 +840,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
+                    },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
                     },
                 })
             },
@@ -849,6 +873,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
                     },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
+                    },
                 })
             },
             (Err(err), None) => {
@@ -862,6 +889,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
+                    },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
                     },
                 })
             },

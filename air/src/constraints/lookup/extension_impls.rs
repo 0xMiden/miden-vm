@@ -1,9 +1,9 @@
 //! Miden-side extension-trait impls pinning the generic
 //! [`ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
-//! Miden [`MainLookupBuilder`] / [`ChipletLookupBuilder`] traits.
+//! Miden lookup-builder extension traits.
 //!
-//! Both traits require `LookupBuilder<F = Felt>`, so the impls live here
-//! (Miden-side) rather than alongside the adapters — the generic adapter
+//! These traits require `LookupBuilder<F = Felt>`, so the impls live here
+//! (Miden-side) rather than alongside the adapters; the generic adapter
 //! code itself is field-polymorphic.
 //!
 //! The constraint-path adapter and the two debug builders pick up the default
@@ -13,13 +13,16 @@
 //! [`LookupOpFlags::from_boolean_row`](super::buses::LookupOpFlags::from_boolean_row),
 //! which decodes the 7-bit opcode as a `u8` and flips exactly one flag per row
 //! instead of materialising the polynomial products the symbolic path needs.
-//! `build_chiplet_active` stays on the default — the chiplet selectors produce
+//! `build_chiplet_active` stays on the default; the chiplet selectors produce
 //! only six outputs via four subtractions, so the boolean shortcut is noise.
 
 use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
+use super::{
+    buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
+};
 use crate::{
     CoreCols, Felt,
     lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
@@ -38,6 +41,11 @@ impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
 {
 }
 
+impl<'ab, AB> Poseidon2PermutationLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
+    AB: LiftedAirBuilder<F = Felt>
+{
+}
+
 // PROVER PATH
 // ================================================================================================
 
@@ -50,7 +58,7 @@ where
     /// On the prover side `decoder.op_bits` are concrete 0/1 Felt values (enforced by the
     /// decoder's boolean constraint), so a `u8` opcode decode + single-field write replaces
     /// ~100 Felt multiplications in the shared prefix tree. Semantics match the default body
-    /// on any valid trace — a `debug_assertions` parity check inside `from_boolean_row`
+    /// on any valid trace; a `debug_assertions` parity check inside `from_boolean_row`
     /// surfaces divergences immediately.
     fn build_op_flags(
         &self,
@@ -66,6 +74,11 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 {
 }
 
+impl<'a, EF> Poseidon2PermutationLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
+    EF: ExtensionField<Felt>
+{
+}
+
 // DEBUG BUILDERS
 // ================================================================================================
 //
@@ -76,12 +89,14 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 
 #[cfg(feature = "std")]
 mod debug_impls {
-    use super::{ChipletLookupBuilder, MainLookupBuilder};
+    use super::{ChipletLookupBuilder, MainLookupBuilder, Poseidon2PermutationLookupBuilder};
     use crate::lookup::debug::{DebugTraceBuilder, ValidationBuilder};
 
     impl<'ab, 'r> MainLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
+    impl<'ab, 'r> Poseidon2PermutationLookupBuilder for ValidationBuilder<'ab, 'r> {}
 
     impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
     impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
+    impl<'a> Poseidon2PermutationLookupBuilder for DebugTraceBuilder<'a> {}
 }

@@ -1,11 +1,13 @@
 //! Digital Signature Algorithm (DSA) helper functions.
 //!
-//! This module provides functions for signing messages and encoding signatures in the format
-//! expected by the corresponding MASM verification procedures.
+//! This module provides helpers for signature schemes whose MASM verification procedures are in the
+//! core library.
+//!
+//! These helpers encode public keys, signatures, messages, and advice inputs for the MASM
+//! verification procedures exposed by the core library.
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
-//! - [`eddsa_ed25519`]: EdDSA over Ed25519 with SHA-512 hashing
 //! - [`falcon512_poseidon2`]: Falcon-512 with Poseidon2 hashing
 
 // ECDSA K256 KECCAK
@@ -13,89 +15,83 @@
 
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
-/// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` MASM procedure.
+/// Functions in this module generate the public-key commitment and native advice witness expected
+/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
+/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
+/// Rust verifier, the MASM verifier intentionally accepts high-s values.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
+    use miden_core::{Felt, Word};
     use miden_crypto::{
         SequentialCommit,
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
     };
 
-    /// Signs the provided message with the supplied secret key and encodes this signature and the
-    /// associated public key into a vector of field elements in the format expected by
-    /// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
+    /// Signs the provided message with the supplied secret key and encodes the resulting signature
+    /// and public key into the native advice-stack format expected by `ecdsa_k256_keccak::verify`.
     ///
-    /// See [`encode_signature()`] for more info.
+    /// The `miden-crypto` signer produces a low-s signature, but the returned elements are
+    /// uncommitted advice witness data and the MASM verifier does not require low-s. See
+    /// [`encode_signature()`] for the advice encoding. Use [`public_key_commitment()`] to derive
+    /// the `PK_COMM` word that must be provided on the operand stack alongside the message.
     pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
         let pk = sk.public_key();
         let sig = sk.sign(msg);
         encode_signature(&pk, &sig)
     }
 
-    /// Encodes the provided public key and signature into a vector of field elements in the format
-    /// expected by `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
+    /// Encodes the provided public key and signature into the native advice-stack format expected
+    /// by `ecdsa_k256_keccak::verify`.
     ///
-    /// 1. The secp256k1 affine public key coordinates as `qx_le_u32[8] || qy_le_u32[8]` (16 felts).
-    /// 2. The ECDSA signature encoded as 17 packed-u32 felts (65 bytes total, padded to 17 felts).
+    /// The encoding is the structural order consumed from the advice stack:
+    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
+    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
+    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
+    /// to the supplied signature encoding.
     ///
-    /// The two chunks are concatenated as `[PK[16] || SIG[17]]` so they can be streamed straight to
-    /// the advice provider before invoking `ecdsa_k256_keccak::verify`.
+    /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
+    /// commitment returned by [`public_key_commitment()`].
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
-        let mut out = Vec::new();
-        out.extend(pk.to_elements());
-        let sig_bytes = sig.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&sig_bytes));
+        let pk_elements = pk.to_elements();
+        assert_eq!(
+            pk_elements.len(),
+            16,
+            "ECDSA public key elements must be QX[8] || QY[8] native limbs",
+        );
+
+        let mut out = Vec::with_capacity(32);
+        out.extend(pk_elements);
+        out.extend_from_slice(&signature_felts(sig));
         out
     }
-}
 
-// EDDSA ED25519
-// ================================================================================================
-
-/// EdDSA Ed25519 with SHA-512 signature helpers.
-///
-/// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::eddsa_ed25519::verify` MASM procedure.
-pub mod eddsa_ed25519 {
-    extern crate alloc;
-
-    use alloc::vec::Vec;
-
-    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
-    use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey};
-
-    /// Signs the provided message with the supplied secret key and encodes this signature and the
-    /// associated public key into a vector of field elements in the format expected by
-    /// `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
+    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.
     ///
-    /// See [`encode_signature()`] for more info.
-    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
-        let pk = sk.public_key();
-        let sig = sk.sign(msg);
-        encode_signature(&pk, &sig)
+    /// The commitment is delegated to [`PublicKey::to_commitment()`], which commits to the same
+    /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].
+    pub fn public_key_commitment(pk: &PublicKey) -> Word {
+        pk.to_commitment()
     }
 
-    /// Encodes the provided public key and signature into a vector of field elements in the format
-    /// expected by `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
-    ///
-    /// The encoding format is:
-    /// 1. The Ed25519 public key encoded as 8 packed-u32 felts (32 bytes total).
-    /// 2. The EdDSA signature encoded as 16 packed-u32 felts (64 bytes total).
-    ///
-    /// The two chunks are concatenated as `[PK[8] || SIG[16]]` so they can be streamed straight to
-    /// the advice provider before invoking `eddsa_ed25519::verify`.
-    pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
-        let mut out = Vec::new();
-        let pk_bytes = pk.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&pk_bytes));
-        let sig_bytes = sig.to_bytes();
-        out.extend(bytes_to_packed_u32_elements(&sig_bytes));
-        out
+    fn signature_felts(signature: &Signature) -> [Felt; 16] {
+        let mut felts = [Felt::from_u32(0); 16];
+        felts[..8].copy_from_slice(&limbs_to_felts(be_bytes_to_le_limbs(signature.r())));
+        felts[8..].copy_from_slice(&limbs_to_felts(be_bytes_to_le_limbs(signature.s())));
+        felts
+    }
+
+    fn be_bytes_to_le_limbs(bytes: &[u8; 32]) -> [u32; 8] {
+        core::array::from_fn(|i| {
+            let offset = bytes.len() - (i + 1) * 4;
+            u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 limb"))
+        })
+    }
+
+    fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
+        limbs.map(Felt::from_u32)
     }
 }
 
