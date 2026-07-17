@@ -61,6 +61,10 @@ pub fn enforce_bitwise_constraints<AB>(
     let cols: &BitwiseCols<AB::Var> = local.bitwise();
     let cols_next: &BitwiseCols<AB::Var> = next.bitwise();
 
+    // The bitwise section must start on a cycle boundary, otherwise an aggregation could never be
+    // reset, letting the prover emit a forged AND/XOR result.
+    builder.when(flags.next_is_first.clone()).assert_zero(k_transition);
+
     // All bitwise constraints are gated on the bitwise chiplet being active.
     let bitwise_builder = &mut builder.when(bitwise_flag);
 
