@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.25.5 (2026-07-16)
+
+- Use `Package::read_from_bytes_trusted` when loading preassembled packages from registry/cache during project assembly
+
 ## v0.25.4 (2026-07-16)
 
 - Add package post-processing hooks to the `ProjectSourceProvider` trait ([#3375](https://github.com/0xMiden/miden-vm/pull/3375)).
