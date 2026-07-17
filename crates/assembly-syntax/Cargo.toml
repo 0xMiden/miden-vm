@@ -1,6 +1,6 @@
 [package]
 name = "miden-assembly-syntax"
-version = "0.25.7"
+version = "0.25.8"
 description = "Parsing and semantic analysis of the Miden Assembly language"
 documentation = "https://docs.rs/miden-assembly-syntax"
 readme = "README.md"
