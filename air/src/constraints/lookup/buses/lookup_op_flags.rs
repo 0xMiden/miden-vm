@@ -200,6 +200,7 @@ where
 
         // left_shift_scalar (degree 5):
         //   prefix_010 + u32_add3_madd_group + SPLIT + REPEAT + END*is_loop + DYN.
+        //   prefix_010 includes FRIE2F4, which rewrites s0..s14 but still decrements stack depth.
         // DYNCALL intentionally excluded (see OpFlags::left_shift doc). LOOP is also excluded:
         // under do-while semantics the LOOP op reads no stack input.
         let prefix_010 = prefix_01 * bits[4][0].clone();
@@ -330,8 +331,9 @@ impl LookupOpFlags<Felt> {
         f.right_shift = bool_to_felt(
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
-        // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/REPEAT/DYN
-        // + END*is_loop. DYNCALL and LOOP are excluded; see OpFlags::left_shift.
+        // left_shift_scalar: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
+        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see
+        // OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)

@@ -8,10 +8,30 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  diffs:
+    name: detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
+      isVm: ${{ steps.diffs.outputs.isVm }}
+      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
+      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
+      isRelease: ${{ steps.diffs.outputs.isRelease }}
+      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - id: diffs
+        uses: ./.github/actions/diffs
+
   test:
     name: test on warpbuild
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -36,8 +56,33 @@ jobs:
       - name: test
         run: make test
 
+  crypto-test:
+    name: crypto test on warpbuild
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install nextest
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
+        with:
+          tool: cargo-nextest
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Run crypto tests
+        run: make test-crypto
+
   doc-tests:
     name: doc-tests
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -56,7 +101,8 @@ jobs:
   check-core-lib-docs:
     name: check core library docs
     runs-on: warp-ubuntu-latest-x64-8x
-    needs: [test, doc-tests]
+    needs: [diffs, test, doc-tests]
+    if: ${{ always() && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') && needs.test.result == 'success' && needs.doc-tests.result == 'success' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -95,6 +141,8 @@ jobs:
 
   check-constraints:
     name: check recursive constraint artifacts
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -112,6 +160,8 @@ jobs:
 
   run-examples:
     name: run masm examples
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -129,6 +179,8 @@ jobs:
 
   check-features:
     name: check all feature combinations
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

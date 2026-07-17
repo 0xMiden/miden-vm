@@ -1,0 +1,157 @@
+[package]
+authors.workspace      = true
+categories.workspace   = true
+description            = "Miden Cryptographic primitives"
+documentation          = "https://docs.rs/miden-crypto"
+edition.workspace      = true
+keywords.workspace     = true
+license.workspace      = true
+name                   = "miden-crypto"
+readme.workspace       = true
+repository.workspace   = true
+rust-version.workspace = true
+version = "0.28.0"
+
+[[bin]]
+bench             = false
+doctest           = false
+name              = "miden-crypto"
+path              = "src/main.rs"
+required-features = ["executable"]
+
+[[bench]]
+harness           = false
+name              = "encryption"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "hash"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "smt"
+required-features = ["internal"]
+
+[[bench]]
+harness           = false
+name              = "merkle"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "partial_mt"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "large_smt"
+required-features = ["rocksdb"]
+
+[[bench]]
+harness           = false
+name              = "large_smt_forest"
+required-features = ["persistent-forest"]
+
+[[bench]]
+harness           = false
+name              = "store"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "dsa"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "word"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "sparse_path"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
+name              = "transpose"
+required-features = ["std"]
+
+[features]
+arbitrary         = ["dep:proptest", "miden-field/arbitrary"]
+concurrent        = ["dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
+default           = ["concurrent", "std"]
+executable        = ["concurrent", "dep:clap"]
+fuzzing           = []
+internal          = ["concurrent"]
+persistent-forest = ["rocksdb", "serde"]
+rocksdb           = ["concurrent", "dep:rocksdb"]
+serde             = ["dep:serde", "serde?/alloc"]
+std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
+testing           = ["arbitrary"]
+
+[dependencies]
+# Miden dependencies
+miden-crypto-derive = { workspace = true }
+miden-field         = { workspace = true }
+miden-lifted-stark  = { default-features = false, workspace = true }
+miden-serde-utils   = { workspace = true }
+
+# External dependencies
+blake3           = { workspace = true }
+chacha20poly1305 = { features = ["alloc"], workspace = true }
+clap             = { features = ["derive"], optional = true, workspace = true }
+curve25519-dalek = { workspace = true }
+der              = { workspace = true }
+ed25519-dalek    = { features = ["alloc", "zeroize"], workspace = true }
+flume            = { workspace = true }
+hkdf             = { workspace = true }
+k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
+num              = { features = ["alloc", "libm"], workspace = true }
+num-complex      = { features = ["libm"], workspace = true }
+once_cell        = { features = ["alloc", "critical-section"], workspace = true }
+proptest         = { features = ["alloc"], optional = true, workspace = true }
+rand             = { workspace = true }
+rand_chacha      = { workspace = true }
+rayon            = { optional = true, workspace = true }
+rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = true, workspace = true }
+serde            = { features = ["derive"], optional = true, workspace = true }
+sha2             = { workspace = true }
+sha3             = { workspace = true }
+subtle           = { workspace = true }
+thiserror        = { workspace = true }
+x25519-dalek     = { features = ["static_secrets"], workspace = true }
+
+# Upstream Plonky3 dependencies
+p3-blake3.workspace      = true
+p3-challenger.workspace  = true
+p3-dft.workspace         = true
+p3-goldilocks.workspace  = true
+p3-keccak.workspace      = true
+p3-matrix.workspace      = true
+p3-maybe-rayon.workspace = true
+p3-symmetric.workspace   = true
+p3-util.workspace        = true
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+criterion      = { workspace = true }
+hex            = { features = ["alloc"], workspace = true }
+itertools      = { features = ["use_std"], workspace = true }
+miden-field    = { features = ["testing"], workspace = true }
+proptest       = { features = ["alloc"], workspace = true }
+seq-macro      = { workspace = true }
+shake          = { workspace = true }
+tempfile       = { workspace = true }
+
+[build-dependencies]
+cc = { features = ["parallel"], workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name              = "rocksdb_large_smt"
+required-features = ["concurrent", "rocksdb"]

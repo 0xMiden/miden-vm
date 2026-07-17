@@ -603,8 +603,8 @@ where
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
         let left_shift_scalar = E::sum_array::<6>(&[
-            // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, DROP,
-            //                        CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
+            // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, FRIE2F4,
+            //                        DROP, CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
             prefix_010,
             // +u32_add3_madd_group — U32ADD3, U32MADD: consume 3, produce 2
             u32_add3_madd_group,

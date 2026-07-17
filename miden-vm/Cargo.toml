@@ -1,6 +1,6 @@
 [package]
 name = "miden-vm"
-version = "0.26.0"
+version = "0.28.0"
 description = "Miden virtual machine"
 documentation = "https://docs.rs/miden-vm"
 readme = "README.md"
@@ -81,13 +81,13 @@ miden-verifier.workspace = true
 
 # External dependencies
 clap = { workspace = true, optional = true }
-hex = { version = "0.4", optional = true }
+hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
-tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
+tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }

@@ -1,6 +1,6 @@
 [package]
 name = "miden-test-utils"
-version = "0.1.0"
+version = "0.28.0"
 description = "Test utilities for Miden VM programs"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]

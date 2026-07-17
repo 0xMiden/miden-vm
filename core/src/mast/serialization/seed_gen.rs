@@ -28,7 +28,7 @@ fn generate_fuzz_seeds() {
     }
 
     fn write_seed(target: &str, name: &str, bytes: &[u8]) {
-        let corpus_dir = std::path::Path::new("../miden-core-fuzz/corpus").join(target);
+        let corpus_dir = std::path::Path::new("../tools/miden-core-fuzz/corpus").join(target);
         std::fs::create_dir_all(&corpus_dir).expect("Failed to create corpus directory");
         std::fs::write(corpus_dir.join(name), bytes).unwrap();
         println!("Generated {}/{} ({} bytes)", target, name, bytes.len());
@@ -352,5 +352,5 @@ fn generate_fuzz_seeds() {
         );
     }
 
-    println!("\nSeed corpus generated in ../miden-core-fuzz/corpus");
+    println!("\nSeed corpus generated in ../tools/miden-core-fuzz/corpus");
 }
