@@ -12,10 +12,7 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::{
-    events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry,
-    serde::Deserializable,
-};
+use miden_core::{events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry};
 use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
@@ -175,7 +172,7 @@ impl CoreLibrary {
 impl Default for CoreLibrary {
     fn default() -> Self {
         static CORELIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
-            let contents = Package::read_from_bytes(CoreLibrary::SERIALIZED)
+            let contents = Package::read_from_bytes_trusted(CoreLibrary::SERIALIZED)
                 .expect("failed to read core package!");
             CoreLibrary(Arc::new(contents))
         });

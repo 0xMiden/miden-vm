@@ -773,12 +773,10 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         expected_name: &str,
         requirement: Option<&VersionRequirement>,
     ) -> Result<CollectedDependencyNode, Report> {
-        use miden_core::serde::Deserializable;
-
         let path = path.canonicalize().map_err(|error| Report::msg(error.to_string()))?;
         let bytes = std::fs::read(&path).map_err(|error| Report::msg(error.to_string()))?;
-        let package =
-            MastPackage::read_from_bytes(&bytes).map_err(|error| Report::msg(error.to_string()))?;
+        let package = MastPackage::read_from_bytes_trusted(&bytes)
+            .map_err(|error| Report::msg(error.to_string()))?;
         self.ensure_dependency_name(expected_name, &package.name, Some(&path))?;
         let semver = package.version.clone();
         let selected = Version::new(semver, package.digest());
