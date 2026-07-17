@@ -9,7 +9,7 @@ pub enum ProjectTargetSelector<'a> {
 }
 
 impl<'a> ProjectTargetSelector<'a> {
-    pub(super) fn select_target(&self, project: &ProjectPackage) -> Result<Target, Report> {
+    pub fn select_target(&self, project: &ProjectPackage) -> Result<Target, Report> {
         match self {
             ProjectTargetSelector::Library => project
                 .library_target()

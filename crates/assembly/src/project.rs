@@ -43,7 +43,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
         self.for_project_at_path_with_providers(manifest_path, store, [masm_provider])
@@ -57,7 +57,7 @@ impl Assembler {
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
@@ -82,7 +82,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
         self.for_project_with_providers(project, store, [masm_provider])
@@ -96,7 +96,7 @@ impl Assembler {
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageCache + ?Sized,
+        S: PackageCache,
     {
         let source_manager = self.source_manager();
         let dependency_graph =
@@ -187,7 +187,7 @@ impl SourceProviderRegistry {
     }
 }
 
-pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
+pub struct ProjectAssembler<'a, S: PackageCache> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
@@ -197,7 +197,7 @@ pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
 
 impl<'a, S> ProjectAssembler<'a, S>
 where
-    S: PackageCache + ?Sized,
+    S: PackageCache,
 {
     pub fn with_source_provider(
         &mut self,
@@ -207,10 +207,19 @@ where
         self
     }
 
+    /// Get the project being assembled
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
     }
 
+    /// Assemble a target of the current project matching `target_selector`, using the configuration
+    /// under the profile `profile_name`.
+    ///
+    /// Returns an error if:
+    ///
+    /// * `target_selector` cannot find a matching target in the current project
+    /// * `profile_name` is not a profile defined in this project
+    /// * An error occurs during assembly of the project or one of its dependencies
     pub fn assemble(
         &mut self,
         target_selector: ProjectTargetSelector<'_>,
@@ -232,6 +241,8 @@ where
                 &library_target,
                 profile_name,
                 None,
+                None,
+                None,
                 &mut cache,
             )?)
         } else {
@@ -244,20 +255,44 @@ where
             &target,
             profile_name,
             required_lib,
+            None,
+            None,
             &mut cache,
         )
         .map(|resolved| resolved.package)
     }
 
-    fn assemble_source_package(
+    /// This is a low-level utility function of the project assembly infrastructure for assembling
+    /// a project target whose sources and source provenance may have already been computed by the
+    /// caller.
+    ///
+    /// In almost all cases you should prefer to use [`ProjectAssembler::assemble`].
+    ///
+    /// Callers are required to uphold the following invariants:
+    ///
+    /// * `package_id` must be the package identifier for `project` in the current dependency graph
+    /// * `target` must be a target extracted from `project`
+    /// * `required_lib` must be set if assembly of `target` would depend on another target of the
+    ///   same project (i.e. an executable target implicitly depends on the library target).
+    ///
+    /// It is invalid to provide `source_provenance` without `sources` - doing so will trigger an
+    /// assertion.
+    pub fn assemble_source_package(
         &mut self,
         package_id: PackageId,
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         required_lib: Option<ResolvedPackage>,
+        sources: Option<ProjectSourceInputs>,
+        source_provenance: Option<ProjectSourceProvenanceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
     ) -> Result<ResolvedPackage, Report> {
+        assert!(
+            source_provenance.is_none() || sources.is_some(),
+            "source provenance may only be provided with sources"
+        );
+
         let cache_key = project.target_package_name(target);
         if let Some(package) = cache.get(&cache_key).cloned() {
             assert_eq!(package.package.kind, target.ty);
@@ -265,11 +300,7 @@ where
         }
 
         let profile = project.resolve_profile(profile_name)?;
-        let mut assembler = self
-            .assembler
-            .clone()
-            .with_emit_debug_info(profile.should_emit_debug_info())
-            .with_trim_paths(profile.should_trim_paths());
+        let mut assembler = self.assembler.clone().with_profile(profile);
         let mut runtime_dependencies = RuntimeDependencies::default();
         debug_assert!(
             required_lib.is_none() || target.ty.is_executable(),
@@ -309,8 +340,11 @@ where
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
-        let ProjectSourceInputs { root, support } =
-            self.load_target_sources(project.as_ref(), target, profile)?;
+        let manually_provided_sources = sources.is_some();
+        let ProjectSourceInputs { root, support } = match sources {
+            Some(sources) => sources,
+            None => self.load_target_sources(project.clone(), target, profile)?,
+        };
 
         // Collect specific well-known custom sections produced by the project assembler
         let mut sections = Vec::new();
@@ -318,14 +352,21 @@ where
         // Section: build provenance
         //
         // This is produced before actual assembly, while we still have the sources on hand
-        if let Some(provenance) = self.dependency_graph.build_source_provenance(
-            &package_id,
-            project.as_ref(),
-            target,
-            profile_name,
-            &self.source_provider,
-        )? {
-            sections.push(provenance.to_section());
+        let build_provenance = if source_provenance.is_some() || !manually_provided_sources {
+            self.dependency_graph.build_source_provenance(
+                &package_id,
+                project.clone(),
+                target,
+                profile_name,
+                &self.source_provider,
+                self.store,
+                source_provenance.as_ref(),
+            )?
+        } else {
+            None
+        };
+        if let Some(build_provenance) = build_provenance {
+            sections.push(build_provenance.to_section());
         }
 
         if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
@@ -357,6 +398,12 @@ where
         package.version = project.version().into_inner().clone();
         package.description = project.description().map(|description| description.to_string());
         package.sections.extend(sections);
+
+        // We don't apply post-assembly hooks when assembling manually-provided sources
+        if !manually_provided_sources {
+            self.apply_post_assembly_hooks(&mut package, project.clone(), target, profile)?;
+        }
+
         let package = Arc::from(package);
 
         let resolved = ResolvedPackage {
@@ -410,7 +457,7 @@ where
                 match self.try_reuse_registered_source_package(
                     package_id,
                     &node_version,
-                    &project,
+                    project.clone(),
                     &target,
                     profile_name,
                     origin,
@@ -430,6 +477,8 @@ where
                             project,
                             &target,
                             profile_name,
+                            None,
+                            None,
                             None,
                             cache,
                         )?;
@@ -571,7 +620,7 @@ where
         &self,
         package_id: &PackageId,
         version: &miden_project::SemVer,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
         origin: &ProjectSourceOrigin,
@@ -595,6 +644,8 @@ where
             origin,
             manifest_path,
             &self.source_provider,
+            self.store,
+            None,
         )?;
 
         match PackageBuildProvenance::from_package(&package)? {
@@ -660,30 +711,13 @@ where
 
     fn load_target_sources(
         &self,
-        project: &ProjectPackage,
+        project: Arc<ProjectPackage>,
         target: &Target,
         profile: &Profile,
     ) -> Result<ProjectSourceInputs, Report> {
-        let manifest_path = project.expect_manifest_path()?;
-        let mut context = TargetAssemblyContext::new(
-            project,
-            manifest_path,
-            target,
-            profile,
-            self.dependency_graph.as_ref(),
-            self.assembler.source_manager(),
-        )?;
-        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
+        let (provider, context) =
+            self.get_provider_and_target_assembly_context(&project, target, profile)?;
 
-        let extension = context.resolved_target_root.extension().ok_or_else(|| {
-            Report::msg(format!(
-                "invalid target 'path' {}: path must have an extension",
-                context.resolved_target_root.display()
-            ))
-        })?;
-        let extension = extension.to_string_lossy();
-
-        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
         let inputs = provider.provide_sources(&context)?;
         match target.ty {
             TargetType::Executable if !inputs.root.kind().is_executable() => {
@@ -709,14 +743,60 @@ where
             _ => Ok(inputs),
         }
     }
+
+    fn apply_post_assembly_hooks(
+        &self,
+        package: &mut MastPackage,
+        project: Arc<ProjectPackage>,
+        target: &Target,
+        profile: &Profile,
+    ) -> Result<(), Report> {
+        let (provider, context) =
+            self.get_provider_and_target_assembly_context(&project, target, profile)?;
+
+        provider.post_process_package(package, &context)?;
+
+        Ok(())
+    }
+
+    fn get_provider_and_target_assembly_context<'this>(
+        &'this self,
+        project: &'this Arc<ProjectPackage>,
+        target: &'this Target,
+        profile: &'this Profile,
+    ) -> Result<(&'this dyn ProjectSourceProvider, TargetAssemblyContext<'this>), Report> {
+        let manifest_path = project.expect_manifest_path()?;
+        let mut context = TargetAssemblyContext::new(
+            project.clone(),
+            manifest_path,
+            target,
+            profile,
+            self.dependency_graph.as_ref(),
+            self.store,
+            self.assembler.source_manager(),
+        )?;
+        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
+
+        let extension = context.resolved_target_root.extension().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target 'path' {}: path must have an extension",
+                context.resolved_target_root.display()
+            ))
+        })?;
+        let extension = extension.to_string_lossy();
+
+        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
+
+        Ok((provider, context))
+    }
 }
 
 // ================================================================================================
 
 #[derive(Clone)]
-struct ResolvedPackage {
-    package: Arc<MastPackage>,
-    linked_kernel_package: Option<Arc<MastPackage>>,
+pub struct ResolvedPackage {
+    pub package: Arc<MastPackage>,
+    pub linked_kernel_package: Option<Arc<MastPackage>>,
 }
 
 enum RegisteredSourcePackage {

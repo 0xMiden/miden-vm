@@ -40,6 +40,19 @@
 - Built the crypto SVE archive from target cfg (`CARGO_CFG_TARGET_ARCH` / `CARGO_CFG_TARGET_FEATURE`) instead of `#[cfg(target_feature = "sve")]`, which does not fire in build scripts ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Qualified the word-wrapper derive macro's emitted `String` as `alloc::string::String` and wrapped the impl in `const _: () = { extern crate alloc; ... }` for `no_std` and `#![no_implicit_prelude]` consumers ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 
+## miden-vm v0.25.5 (2026-07-16)
+
+- Use `Package::read_from_bytes_trusted` when loading preassembled packages from registry/cache during project assembly
+
+## miden-vm v0.25.4 (2026-07-16)
+
+- Add package post-processing hooks to the `ProjectSourceProvider` trait ([#3375](https://github.com/0xMiden/miden-vm/pull/3375)).
+- Expose some assembler configuration methods, and `ProjectAssembler::assemble_source_project` ([#3383](https://github.com/0xMiden/miden-vm/pull/3383)).
+
+## miden-vm v0.25.3 (2026-07-12)
+
+- Update `wincode` dependency to v0.5.5.
+
 ## miden-vm v0.25.2 (2026-07-11)
 
 - Support constructing initial `ResumeContext` for execution stepping from a `Package`, in order to ensure debug context is correctly initialized
