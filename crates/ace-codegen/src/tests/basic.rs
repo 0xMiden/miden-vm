@@ -78,6 +78,73 @@ impl LiftedAir<F, EF> for MockAir {
     }
 }
 
+struct MockPeriodicAir;
+
+impl BaseAir<F> for MockPeriodicAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Vec<Vec<F>> {
+        // Period 128, mostly zero: cheaper to evaluate via the sparse Lagrange path.
+        let mut sparse_col = vec![Felt::ZERO; 128];
+        sparse_col[0] = Felt::new_unchecked(7);
+        sparse_col[50] = Felt::new_unchecked(11);
+        sparse_col[100] = Felt::new_unchecked(13);
+
+        // Period 8, fully dense: cheaper to evaluate via the Horner path.
+        let dense_col: Vec<Felt> =
+            [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(Felt::new_unchecked).collect();
+
+        vec![sparse_col, dense_col]
+    }
+}
+
+impl LiftedAir<F, EF> for MockPeriodicAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let per0 = builder.periodic_values()[0];
+        let per1 = builder.periodic_values()[1];
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+
+        let per0_ext: AB::ExprEF = per0.into().into();
+        let per1_ext: AB::ExprEF = per1.into().into();
+        builder.assert_zero_ext(per0_ext + per1_ext);
+    }
+}
+
 fn ef(x: u64) -> EF {
     EF::from(F::new_unchecked(x))
 }
@@ -158,6 +225,58 @@ fn test_verifier_dag_matches_manual_eval() {
 
     let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
     assert_eq!(actual, expected);
+}
+
+/// Cross-checks the DAG's periodic-column lowering against the independent
+/// `eval_periodic_values` reference (dense IDFT + Horner) for a column pair chosen
+/// so one column resolves via the sparse Lagrange path (period 128, 3/128 nonzero)
+/// and the other via the dense Horner path (period 8, fully dense) — see
+/// `build_periodic_nodes` in `dag/lower.rs`.
+#[test]
+fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
+    let air = MockPeriodicAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+        num_airs: 1,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(circuit_value, actual);
 }
 
 #[test]
