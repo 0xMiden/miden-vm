@@ -7,6 +7,11 @@
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- [BREAKING] Restored `AeadPoseidon2::key_from_bytes` to upstream canonical-Felt decoding. The SHA-256 KDF that briefly appeared on this branch is removed; keys persisted under the KDF contract must be re-derived ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- [BREAKING] Restored the `ExactSizeIterator` impl on `miden-serde-utils::ReadManyIter`, matching upstream, and corrected `size_hint` to advertise the exact remaining count ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Documented the `SharedSecret` zeroization contract on the k256 and x25519 ECDH paths: the type now holds owned `[u8; 32]` bytes and zeroizes on drop ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Hardened `Randomizable::from_random_bytes` to return `None` on short slices instead of panicking ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Capped `BudgetedReader::max_alloc` at `0` for zero-sized elements, so a length-prefixed `Vec<ZST>` can no longer claim `u64::MAX` elements (deliberate, documented divergence from upstream) ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Split package serialization assembly tests into their own module ([#3083](https://github.com/0xMiden/miden-vm/pull/3083)).
 - Added the `miden-precompiles` crate with the official deferred precompile registry used by the VM/prover/verifier path.
 - [BREAKING] Migrated proof-bound precompiles to the deferred-DAG proof wire. `ExecutionProof` now carries a `DeferredStateWire`, proof serialization is incompatible with previous proof-bound precompile requests, and verification rehydrates the wire under the built-in `miden_precompiles::registry()` before binding the resulting deferred root to the STARK public inputs.
@@ -22,6 +27,18 @@
 #### Fixes
 
 - Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
+- Fixed `hash_elements_in_domain(&[], d)` colliding with `hash_elements_in_domain(&[ZERO; RATE_WIDTH], d)` for nonzero `d`, by absorbing a `ONE` padding marker on the empty-input branch ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Fixed `hash_bytes(&[])` returning `Word::default()`; the empty-bytes input now absorbs a padding marker and permutes, producing a nonzero digest consistent with the 10\* sponge padding rule ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Fixed a latent `CryptoBox` (IES) key-derivation bug: HKDF-SHA256 output is now reduced into canonical Felts via `AeadScheme::key_from_uniform_bytes` instead of being fed into canonical decoding, which rejected noncanonical limbs at ~2^-30 per key ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Hardened `AeadPoseidon2` and `XChaCha` decrypt paths against malleable ciphertexts by rejecting trailing bytes after a valid `EncryptedData` encoding ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Hardened Falcon signature deserialization against short buffers and rejected trailing bytes in `SignaturePoly::read_from_bytes` ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Made SMT batch operations atomic on storage errors: `in_memory_nodes` is now snapshotted before `storage.apply` and restored on failure ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Made large-SMT construction atomic: `build_subtrees_from_sorted_entries` now collects all subtree updates into a single `StorageUpdates` value applied in one call ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Propagated RocksDB leaf-insertion errors instead of panicking ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Fixed `ReadAdapter` buffer position not being reset when the local buffer drained to empty during `read_slice` ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Restored compact SMT serialization budgets so an empty-subtree-only `NodeValue` can be read under a tight budget ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Built the crypto SVE archive from target cfg (`CARGO_CFG_TARGET_ARCH` / `CARGO_CFG_TARGET_FEATURE`) instead of `#[cfg(target_feature = "sve")]`, which does not fire in build scripts ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Qualified the word-wrapper derive macro's emitted `String` as `alloc::string::String` and wrapped the impl in `const _: () = { extern crate alloc; ... }` for `no_std` and `#![no_implicit_prelude]` consumers ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 
 ## miden-vm v0.25.2 (2026-07-11)
 
