@@ -273,9 +273,11 @@ impl<'reader, R: ByteReader, D: Deserializable> Iterator for ReadManyIter<'reade
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.remaining))
+        (self.remaining, Some(self.remaining))
     }
 }
+
+impl<'reader, R: ByteReader, D: Deserializable> ExactSizeIterator for ReadManyIter<'reader, R, D> {}
 
 // STANDARD LIBRARY ADAPTER
 // ================================================================================================
@@ -1241,12 +1243,16 @@ mod tests {
     }
 
     #[test]
-    fn read_many_iter_does_not_advertise_fallible_items_as_ready() {
+    fn read_many_iter_advertises_exact_remaining_count() {
         let data = [0u8; 8];
         let mut reader = SliceReader::new(&data);
         let iter = reader.read_many_iter::<u64>(1000).unwrap();
 
-        assert_eq!(iter.size_hint(), (0, Some(1000)));
+        // size_hint is exact: the iterator knows precisely how many items it will yield
+        // (each call to next() returns Some until remaining hits 0, whether the item is a
+        // deserialization Ok or Err). This satisfies ExactSizeIterator.
+        assert_eq!(iter.size_hint(), (1000, Some(1000)));
+        assert_eq!(iter.len(), 1000);
     }
 
     /// Best practice: budget = input length provides both protections.
