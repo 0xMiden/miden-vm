@@ -63,7 +63,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
         );
 
         let encryption_key = Zeroizing::new(
-            A::key_from_bytes(&encryption_key_bytes)
+            A::key_from_uniform_bytes(&encryption_key_bytes)
                 .map_err(|_| IesError::EncryptionKeyCreationFailed)?,
         );
 
@@ -92,7 +92,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
         );
 
         let decryption_key = Zeroizing::new(
-            A::key_from_bytes(&decryption_key_bytes)
+            A::key_from_uniform_bytes(&decryption_key_bytes)
                 .map_err(|_| IesError::EncryptionKeyCreationFailed)?,
         );
 
@@ -124,7 +124,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
         );
 
         let encryption_key = Zeroizing::new(
-            A::key_from_bytes(&encryption_key_bytes)
+            A::key_from_uniform_bytes(&encryption_key_bytes)
                 .map_err(|_| IesError::EncryptionKeyCreationFailed)?,
         );
 
@@ -153,7 +153,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
         );
 
         let decryption_key = Zeroizing::new(
-            A::key_from_bytes(&decryption_key_bytes)
+            A::key_from_uniform_bytes(&decryption_key_bytes)
                 .map_err(|_| IesError::EncryptionKeyCreationFailed)?,
         );
 

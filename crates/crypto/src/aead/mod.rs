@@ -49,6 +49,18 @@ pub(crate) trait AeadScheme {
 
     fn key_from_bytes(bytes: &[u8]) -> Result<Self::Key, EncryptionError>;
 
+    /// Derives a key from arbitrary uniform bytes (e.g. HKDF output), reducing into the key's
+    /// native representation without rejecting any byte patterns.
+    ///
+    /// Unlike [`key_from_bytes`](AeadScheme::key_from_bytes), which deserializes a canonical
+    /// encoding and rejects non-canonical values, this method accepts any `KEY_SIZE` bytes and
+    /// is therefore suitable for KDF/IES output that may contain limbs outside the canonical
+    /// range. The default impl delegates to `key_from_bytes`, which is correct for schemes
+    /// whose key representation has no canonical constraint (e.g. raw byte keys).
+    fn key_from_uniform_bytes(bytes: &[u8]) -> Result<Self::Key, EncryptionError> {
+        Self::key_from_bytes(bytes)
+    }
+
     // BYTE METHODS
     // ================================================================================================
 

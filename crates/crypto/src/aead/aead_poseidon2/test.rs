@@ -181,6 +181,36 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
+fn test_key_from_bytes_rejects_noncanonical_limb() {
+    // 0xffffffff00000002 is the smallest u64 >= Felt::ORDER (0xffffffff00000001).
+    // Random HKDF output (as used by the IES CryptoBox path) lands here with ~2^-32 per limb.
+    let mut bytes = [0u8; SK_SIZE_BYTES];
+    bytes[0] = 0x02;
+    bytes[4] = 0xff;
+    bytes[5] = 0xff;
+    bytes[6] = 0xff;
+    bytes[7] = 0xff;
+    assert!(AeadPoseidon2::key_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn test_key_from_uniform_bytes_accepts_noncanonical_limb() {
+    let mut bytes = [0u8; SK_SIZE_BYTES];
+    bytes[0] = 0x02;
+    bytes[4] = 0xff;
+    bytes[5] = 0xff;
+    bytes[6] = 0xff;
+    bytes[7] = 0xff;
+    assert!(AeadPoseidon2::key_from_uniform_bytes(&bytes).is_ok());
+}
+
+#[test]
+fn test_key_from_uniform_bytes_rejects_invalid_length() {
+    let bytes = [0u8; SK_SIZE_BYTES + 1];
+    assert!(AeadPoseidon2::key_from_uniform_bytes(&bytes).is_err());
+}
+
+#[test]
 fn test_decrypt_rejects_trailing_ciphertext_bytes() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

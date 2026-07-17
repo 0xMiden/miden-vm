@@ -784,6 +784,23 @@ impl AeadScheme for AeadPoseidon2 {
             .map_err(|_| EncryptionError::FailedOperation)
     }
 
+    /// Reduces arbitrary uniform bytes (e.g. HKDF output) into a `SecretKey` without rejecting
+    /// non-canonical limbs. Used by the IES path so that random ECDH-derived key material never
+    /// trips the canonical-range check that `key_from_bytes` enforces.
+    fn key_from_uniform_bytes(bytes: &[u8]) -> Result<Self::Key, EncryptionError> {
+        if bytes.len() != SK_SIZE_BYTES {
+            return Err(EncryptionError::FailedOperation);
+        }
+
+        let mut elements = [ZERO; SECRET_KEY_SIZE];
+        for (i, chunk) in bytes.chunks_exact(Felt::NUM_BYTES).enumerate() {
+            let value =
+                u64::from_le_bytes(chunk.try_into().map_err(|_| EncryptionError::FailedOperation)?);
+            elements[i] = Felt::new_unchecked(value);
+        }
+        Ok(SecretKey::from_elements(elements))
+    }
+
     fn encrypt_bytes<R: rand::CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
