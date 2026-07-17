@@ -244,11 +244,19 @@ where
     // if we absorbed some elements but didn't apply a permutation to them (would happen when
     // the number of elements is not a multiple of RATE_WIDTH), apply the permutation after
     // padding by as many 0 as necessary to make the input length a multiple of the RATE_WIDTH.
-    if i > 0 || (total_len == 0 && state[CAPACITY_RANGE.start + 1] != ZERO) {
+    if i > 0 {
         while i != RATE_WIDTH {
             state[RATE_RANGE.start + i] = ZERO;
             i += 1;
         }
+        S::apply_permutation(&mut state);
+    } else if total_len == 0 && state[CAPACITY_RANGE.start + 1] != ZERO {
+        // Empty input with a nonzero domain. Absorb a ONE padding marker into the first rate
+        // slot before permuting. Without this marker the pre-permutation state is identical to
+        // the state after absorbing exactly RATE_WIDTH zeros, so hash_elements_in_domain(&[], d)
+        // would collide with hash_elements_in_domain(&[ZERO; RATE_WIDTH], d). This mirrors the
+        // bytes-path fix in `hash_bytes` (see 70dd4b1099): same 10* padding rule, same slot.
+        state[RATE_RANGE.start] = Felt::ONE;
         S::apply_permutation(&mut state);
     }
 

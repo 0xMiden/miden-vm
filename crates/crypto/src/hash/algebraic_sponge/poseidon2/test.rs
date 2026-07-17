@@ -141,6 +141,16 @@ fn test_poseidon2_hash_empty_elements_in_domain() {
 }
 
 #[test]
+fn test_poseidon2_hash_empty_in_domain_does_not_collide_with_full_zero_block() {
+    // Regression: before the padding-marker fix, the empty input and a full rate block of zeros
+    // produced identical pre-permutation states and therefore identical digests. The fix absorbs
+    // a ONE into the first rate slot on the empty-input branch, breaking the collision.
+    let empty = Poseidon2::hash_elements_in_domain(&[] as &[Felt], ONE);
+    let full_zero_block = Poseidon2::hash_elements_in_domain(&[ZERO; 8], ONE);
+    assert_ne!(empty, full_zero_block);
+}
+
+#[test]
 fn test_poseidon2_hash_empty_bytes() {
     let bytes: &[u8] = &[];
     let elements: &[Felt] = &[];
