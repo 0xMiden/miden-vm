@@ -195,13 +195,21 @@ fn test_key_from_bytes_rejects_noncanonical_limb() {
 
 #[test]
 fn test_key_from_uniform_bytes_accepts_noncanonical_limb() {
+    // Limb 0 is 0xffffffff00000002, the smallest u64 >= Felt::ORDER. Reduced mod ORDER it is 1.
+    // Limbs 1-3 are zero. Pin both the acceptance and the exact reduction so a wrong mapping
+    // (e.g. silently swapping to a different derivation) would fail this test.
     let mut bytes = [0u8; SK_SIZE_BYTES];
     bytes[0] = 0x02;
     bytes[4] = 0xff;
     bytes[5] = 0xff;
     bytes[6] = 0xff;
     bytes[7] = 0xff;
-    assert!(AeadPoseidon2::key_from_uniform_bytes(&bytes).is_ok());
+    let key = AeadPoseidon2::key_from_uniform_bytes(&bytes).unwrap();
+    let elements = key.to_elements();
+    assert_eq!(elements[0].as_canonical_u64(), 1);
+    assert_eq!(elements[1].as_canonical_u64(), 0);
+    assert_eq!(elements[2].as_canonical_u64(), 0);
+    assert_eq!(elements[3].as_canonical_u64(), 0);
 }
 
 #[test]
