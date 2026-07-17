@@ -40,7 +40,7 @@ mod debug;
 mod errors;
 mod library;
 mod module;
-mod namespaces;
+pub mod namespaces;
 mod resolver;
 mod rewrites;
 mod symbols;
@@ -68,12 +68,13 @@ pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
     library::{LinkLibrary, Linkage},
+    namespaces::NamespaceGraph,
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
     symbols::{Import, Symbol, SymbolItem},
 };
 use self::{
     module::{LinkModule, ModuleSource},
-    namespaces::{NamespaceGraph, ResolvedImports},
+    namespaces::ResolvedImports,
     resolver::*,
 };
 
@@ -385,7 +386,7 @@ impl Linker {
     /// Returns a new [Linker] instantiated from the provided kernel and kernel info module.
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
-    pub(super) fn with_kernel(
+    pub fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
         kernel_package: Arc<MastPackage>,
     ) -> Result<Self, Report> {
@@ -404,10 +405,7 @@ impl Linker {
     ///
     /// This will panic if the kernel is empty, or the provided kernel module info is not valid for
     /// a kernel.
-    pub(super) fn link_with_kernel(
-        &mut self,
-        kernel_package: Arc<MastPackage>,
-    ) -> Result<(), Report> {
+    pub fn link_with_kernel(&mut self, kernel_package: Arc<MastPackage>) -> Result<(), Report> {
         if !kernel_package.is_kernel() {
             return Err(Report::msg("invalid kernel package: not a kernel"));
         }
@@ -725,6 +723,11 @@ impl Linker {
 // ------------------------------------------------------------------------------------------------
 /// Accessors/Queries
 impl Linker {
+    /// Get access to all module information maintained by the linker
+    pub fn modules(&self) -> &[LinkModule] {
+        self.modules.as_slice()
+    }
+
     /// Get an iterator over the external libraries the linker has linked against
     pub fn libraries(&self) -> impl Iterator<Item = &LinkLibrary> {
         self.libraries.values()
@@ -807,7 +810,7 @@ impl Linker {
     }
 
     /// Resolves the user-defined type signature of the given procedure to the HIR type signature
-    pub(super) fn resolve_signature(
+    pub fn resolve_signature(
         &self,
         gid: GlobalItemIndex,
     ) -> Result<Option<Arc<types::FunctionType>>, LinkerError> {
@@ -869,8 +872,8 @@ impl Linker {
         Ok(Arc::new(types::FunctionType::new(cc, args, results)))
     }
 
-    /// Resolves a [GlobalProcedureIndex] to the known attributes of that procedure
-    pub(super) fn resolve_attributes(&self, gid: GlobalItemIndex) -> AttributeSet {
+    /// Resolves a [GlobalItemIndex] to the known attributes of that procedure
+    pub fn resolve_attributes(&self, gid: GlobalItemIndex) -> AttributeSet {
         match self[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(proc)) => proc.attributes.clone(),
             SymbolItem::Procedure(proc) => {
@@ -884,7 +887,7 @@ impl Linker {
     }
 
     /// Resolves a [GlobalItemIndex] to a concrete [ast::types::Type]
-    pub(super) fn resolve_type(
+    pub fn resolve_type(
         &self,
         span: SourceSpan,
         gid: GlobalItemIndex,
@@ -944,7 +947,7 @@ impl Linker {
 /// Const evaluation
 impl Linker {
     /// Evaluate `expr` to a concrete constant value, in the context of the given item.
-    pub(super) fn const_eval(
+    pub fn const_eval(
         &self,
         gid: GlobalItemIndex,
         expr: &ast::ConstantExpr,

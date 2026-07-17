@@ -236,15 +236,10 @@ impl Assembler {
         self
     }
 
-    #[cfg(feature = "std")]
-    pub(crate) fn with_emit_debug_info(mut self, yes: bool) -> Self {
-        self.emit_debug_info = yes;
-        self
-    }
-
-    #[cfg(feature = "std")]
-    pub(crate) fn with_trim_paths(mut self, yes: bool) -> Self {
-        self.trim_paths = yes;
+    /// Configure this assembler based on configuration in `profile`
+    pub fn with_profile(mut self, profile: &miden_project::Profile) -> Self {
+        self.emit_debug_info = profile.should_emit_debug_info();
+        self.trim_paths = profile.should_trim_paths();
         self
     }
 }

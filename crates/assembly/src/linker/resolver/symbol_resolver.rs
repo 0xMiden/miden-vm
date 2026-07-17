@@ -72,7 +72,7 @@ impl<'a> SymbolResolver<'a> {
     }
 
     /// Create a new [SymbolResolver] with precomputed namespace and import resolutions.
-    pub(crate) fn with_namespaces(
+    pub fn with_namespaces(
         graph: &'a Linker,
         namespaces: &'a NamespaceGraph,
         imports: &'a ResolvedImports,
@@ -166,7 +166,7 @@ impl<'a> SymbolResolver<'a> {
         }
     }
 
-    pub(crate) fn resolve_constant_path(
+    pub fn resolve_constant_path(
         &self,
         context: &SymbolResolutionContext,
         path: Span<&Path>,
@@ -182,7 +182,7 @@ impl<'a> SymbolResolver<'a> {
         }
     }
 
-    pub(crate) fn resolve_type_path(
+    pub fn resolve_type_path(
         &self,
         context: &SymbolResolutionContext,
         path: Span<&Path>,
