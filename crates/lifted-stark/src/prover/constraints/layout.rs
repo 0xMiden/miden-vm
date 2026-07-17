@@ -1,0 +1,186 @@
+//! Constraint layout: maps global constraint indices to base/ext streams.
+//!
+//! Also provides [`ConstraintLayoutBuilder`], a lightweight AIR builder that discovers
+//! constraint types without building symbolic expression trees.
+
+use alloc::{vec, vec::Vec};
+
+use miden_lifted_air::{
+    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, WindowAccess,
+    symbolic::{AirLayout, ConstraintLayout},
+};
+use p3_field::{ExtensionField, Field};
+use p3_matrix::dense::RowMajorMatrix;
+use tracing::instrument;
+
+// ============================================================================
+// Constraint Layout Builder (lightweight, no symbolic expressions)
+// ============================================================================
+
+/// Evaluate the AIR on a lightweight builder and return the constraint layout.
+///
+/// Runs `air.eval()` on a [`ConstraintLayoutBuilder`] that uses concrete field zeros
+/// for all variables. This discovers which constraints are base-field vs extension-field
+/// without building symbolic expression trees — only the emission order matters.
+#[instrument(name = "compute constraint layout", skip_all, level = "debug")]
+pub(crate) fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+{
+    let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
+    #[cfg(debug_assertions)]
+    miden_lifted_air::debug::check_builder_shape(air, &builder);
+    air.eval(&mut builder);
+    builder.into_layout()
+}
+
+/// Lightweight AIR builder that only tracks constraint types (base vs extension).
+///
+/// Uses concrete field zeros for all variables — no symbolic expression trees, no degree
+/// tracking, no `Arc` allocations. Builds a [`ConstraintLayout`] directly by recording
+/// which `assert_*` method is called for each constraint.
+///
+/// Uses owned windows because the builder owns its trace data. `RowWindow` cannot be used here —
+/// it borrows, but the associated type can't capture the `&self` lifetime from `main()`.
+#[derive(Clone)]
+struct OwnedRowWindow<F> {
+    values: Vec<F>,
+    width: usize,
+}
+
+impl<F: Field> OwnedRowWindow<F> {
+    fn zeros(width: usize) -> Self {
+        Self { values: vec![F::ZERO; 2 * width], width }
+    }
+}
+
+impl<F> WindowAccess<F> for OwnedRowWindow<F> {
+    fn current_slice(&self) -> &[F] {
+        &self.values[..self.width]
+    }
+
+    fn next_slice(&self) -> &[F] {
+        &self.values[self.width..]
+    }
+}
+
+struct ConstraintLayoutBuilder<F: Field> {
+    main: RowMajorMatrix<F>,
+    preprocessed: OwnedRowWindow<F>,
+    public_values: Vec<F>,
+    periodic_values: Vec<F>,
+    permutation: RowMajorMatrix<F>,
+    permutation_challenges: Vec<F>,
+    permutation_values: Vec<F>,
+    layout: ConstraintLayout,
+    constraint_count: usize,
+}
+
+impl<F: Field> ConstraintLayoutBuilder<F> {
+    fn new(layout: AirLayout) -> Self {
+        let AirLayout {
+            preprocessed_width,
+            main_width,
+            num_public_values,
+            permutation_width,
+            num_permutation_challenges,
+            num_permutation_values,
+            num_periodic_columns,
+        } = layout;
+        Self {
+            main: RowMajorMatrix::new(vec![F::ZERO; 2 * main_width], main_width),
+            preprocessed: OwnedRowWindow::zeros(preprocessed_width),
+            public_values: vec![F::ZERO; num_public_values],
+            periodic_values: vec![F::ZERO; num_periodic_columns],
+            permutation: RowMajorMatrix::new(
+                vec![F::ZERO; 2 * permutation_width],
+                permutation_width,
+            ),
+            permutation_challenges: vec![F::ZERO; num_permutation_challenges],
+            permutation_values: vec![F::ZERO; num_permutation_values],
+            layout: ConstraintLayout::default(),
+            constraint_count: 0,
+        }
+    }
+
+    fn into_layout(self) -> ConstraintLayout {
+        self.layout
+    }
+}
+
+impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
+    type F = F;
+    type Expr = F;
+    type Var = F;
+    type PreprocessedWindow = OwnedRowWindow<F>;
+    type MainWindow = RowMajorMatrix<F>;
+    type PublicVar = F;
+    type PeriodicVar = F;
+
+    fn main(&self) -> Self::MainWindow {
+        self.main.clone()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed
+    }
+
+    fn is_first_row(&self) -> Self::Expr {
+        F::ZERO
+    }
+
+    fn is_last_row(&self) -> Self::Expr {
+        F::ZERO
+    }
+
+    fn is_transition(&self) -> Self::Expr {
+        F::ZERO
+    }
+
+    fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {
+        self.layout.base_indices.push(self.constraint_count);
+        self.constraint_count += 1;
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
+    }
+}
+
+impl<F: Field> ExtensionBuilder for ConstraintLayoutBuilder<F> {
+    type EF = F;
+    type ExprEF = F;
+    type VarEF = F;
+
+    fn assert_zero_ext<I>(&mut self, _x: I)
+    where
+        I: Into<Self::ExprEF>,
+    {
+        self.layout.ext_indices.push(self.constraint_count);
+        self.constraint_count += 1;
+    }
+}
+
+impl<F: Field> PermutationAirBuilder for ConstraintLayoutBuilder<F> {
+    type MP = RowMajorMatrix<F>;
+    type RandomVar = F;
+    type PermutationVar = F;
+
+    fn permutation(&self) -> Self::MP {
+        self.permutation.clone()
+    }
+
+    fn permutation_randomness(&self) -> &[Self::RandomVar] {
+        &self.permutation_challenges
+    }
+
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &self.permutation_values
+    }
+}

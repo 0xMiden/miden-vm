@@ -25,7 +25,7 @@ use miden_core::{
     WORD_SIZE, Word,
     mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
-    program::Kernel,
+    program::KernelDescriptor,
     serde::Serializable,
 };
 use miden_mast_package::{
@@ -383,7 +383,7 @@ impl Assembler {
     /// Returns a reference to the kernel for this assembler.
     ///
     /// If the assembler was instantiated without a kernel, the internal kernel will be empty.
-    pub fn kernel(&self) -> &Kernel {
+    pub fn kernel(&self) -> &KernelDescriptor {
         self.linker.kernel()
     }
 

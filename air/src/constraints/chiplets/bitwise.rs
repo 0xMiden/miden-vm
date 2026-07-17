@@ -61,6 +61,10 @@ pub fn enforce_bitwise_constraints<AB>(
     let cols: &BitwiseCols<AB::Var> = local.bitwise();
     let cols_next: &BitwiseCols<AB::Var> = next.bitwise();
 
+    // The bitwise section must start on a cycle boundary, otherwise an aggregation could never be
+    // reset, letting the prover emit a forged AND/XOR result.
+    builder.when(flags.next_is_first.clone()).assert_zero(k_transition);
+
     // All bitwise constraints are gated on the bitwise chiplet being active.
     let bitwise_builder = &mut builder.when(bitwise_flag);
 
@@ -72,7 +76,7 @@ pub fn enforce_bitwise_constraints<AB>(
     let op_flag = cols.op_flag;
     bitwise_builder.assert_bool(op_flag);
 
-    // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
+    // The operation flag is constant on the first 7 rows of each 8-row cycle.
     let op_flag_next = cols_next.op_flag;
     bitwise_builder.when(k_transition).assert_eq(op_flag, op_flag_next);
 
@@ -86,8 +90,8 @@ pub fn enforce_bitwise_constraints<AB>(
     bitwise_builder.assert_bools(a_bits);
     bitwise_builder.assert_bools(b_bits);
 
-    // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
-    // First row: input aggregation must match, and previous output must be zero.
+    // On the first cycle row, the aggregate inputs match the current 4-bit limbs and the
+    // previous output accumulator is zero.
     {
         let builder = &mut bitwise_builder.when(k_first);
 
@@ -103,8 +107,7 @@ pub fn enforce_bitwise_constraints<AB>(
     let (a_next, a_next_bits) = (cols_next.a, cols_next.a_bits);
     let (b_next, b_next_bits) = (cols_next.b, cols_next.b_bits);
 
-    // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
-    // Transition rows: inputs aggregate with 16x shift.
+    // On transition rows, append the next 4-bit limbs to each aggregate input.
     {
         let builder = &mut bitwise_builder.when(k_transition);
 
@@ -119,7 +122,7 @@ pub fn enforce_bitwise_constraints<AB>(
     // OUTPUT AGGREGATION CONSTRAINTS
     // ==========================================================================
 
-    // Transition rows (k1=1): output_prev' = output
+    // On transition rows, carry the output accumulator into the next row.
     let output = cols.output;
     let prev_output_next = cols_next.prev_output;
     bitwise_builder.when(k_transition).assert_eq(output, prev_output_next);

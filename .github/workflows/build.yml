@@ -4,6 +4,7 @@ name: build
 
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
@@ -12,15 +13,46 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
+  diffs:
+    name: detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
+      isVm: ${{ steps.diffs.outputs.isVm }}
+      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
+      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
+      isRelease: ${{ steps.diffs.outputs.isRelease }}
+      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: diffs
+        uses: ./.github/actions/diffs
+
+  workspace-versions:
+    name: Check workspace versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Check workspace versions
+        run: make check-versions
+
   no-std:
     name: Build for no-std
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -31,21 +63,43 @@ jobs:
           rustup +${{ matrix.toolchain }} target add wasm32-unknown-unknown
           rustup default ${{ matrix.toolchain }}
           make build-no-std
-  fuzz-check:
-    name: Check for miden-core-fuzz crate
+
+  target-miden:
+    name: Build for Miden target
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Build for Miden target
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32-wasip2
+          make build-target-miden
+
+  fuzz-check:
+    name: Check fuzz workspaces
+    needs: diffs
+    if: ${{ needs.diffs.outputs.isFuzz == 'true' || needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Install Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
-          # We need to explicitly cache the miden-core-fuzz workspace, as only the root workspace is
+          # We need to explicitly cache the tools/miden-core-fuzz workspace, as only the root workspace is
           # cached by default.
           workspaces: |
             .
-            miden-core-fuzz
-      - name: Check miden-core-fuzz crate
-        run: cd miden-core-fuzz && cargo check --locked
+            tools/miden-core-fuzz
+            tools/miden-crypto-fuzz
+            tools/miden-serde-utils-fuzz
+      - name: Check fuzz workspaces
+        run: make check-fuzz

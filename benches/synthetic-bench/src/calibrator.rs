@@ -1,8 +1,7 @@
 //! Calibration and measurement helpers.
 //!
 //! Each snippet is run as a `repeat.K` loop, measured through the real trace builder, and
-//! converted into per-iteration row costs. Calibration happens on every bench run so the synthetic
-//! adapts to the current VM's row accounting.
+//! converted into per-iteration row costs. Calibration happens on every bench run.
 
 use std::collections::BTreeMap;
 
@@ -47,12 +46,11 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let totals = TraceTotals {
         core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
+        poseidon2_permutation_rows: summary.poseidon2_permutation_trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };
 
-    // Cross-check our derived formulas against the processor's authoritative values; a drift here
-    // means the AIR-side definitions have moved and the rest of the pipeline will silently
-    // miscalibrate.
+    // Cross-check derived formulas against the processor's authoritative values.
     let derived_chiplets = breakdown.chiplets_sum();
     if totals.chiplets_rows != derived_chiplets {
         return Err(MeasurementError::InvariantDrift {
@@ -82,10 +80,10 @@ pub enum MeasurementError {
     Execution(String),
     #[error("failed to build trace: {0}")]
     TraceBuild(String),
-    /// One of our derived formulas drifted from the processor's authoritative value; AIR-side
-    /// definitions have probably changed and the snapshot/verifier formulas need updating.
+    /// A derived formula drifted from the processor's authoritative value; AIR-side
+    /// definitions changed and the snapshot/verifier formulas need updating.
     #[error(
-        "invariant drift: {quantity} from processor = {processor}, but our derivation = {derived}"
+        "invariant drift: {quantity} from processor = {processor}, derived formula = {derived}"
     )]
     InvariantDrift {
         quantity: &'static str,
@@ -139,7 +137,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
     let k = iters as f64;
     IterCost {
         core: shape.totals.core_rows as f64 / k,
-        hasher: shape.breakdown.hasher_rows as f64 / k,
+        hasher: shape.hasher_work_rows() as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
         range: shape.totals.range_rows as f64 / k,
@@ -168,10 +166,10 @@ mod tests {
         let with_hperm =
             measure_program("begin padw padw padw hperm dropw dropw dropw end").expect("hperm");
         assert!(
-            with_hperm.breakdown.hasher_rows > baseline.breakdown.hasher_rows,
-            "hperm should add hasher rows above the baseline ({} vs {})",
-            with_hperm.breakdown.hasher_rows,
-            baseline.breakdown.hasher_rows,
+            with_hperm.hasher_work_rows() > baseline.hasher_work_rows(),
+            "hperm should add hasher work above the baseline ({} vs {})",
+            with_hperm.hasher_work_rows(),
+            baseline.hasher_work_rows(),
         );
     }
 

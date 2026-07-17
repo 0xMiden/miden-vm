@@ -1,8 +1,9 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! The Miden VM's LogUp buses use 7 columns. Most columns host one bus. Some host two or
-//! more linearly independent buses that share one running accumulator through distinct
-//! `bus_prefix[bus]` bases.
+//! The Miden VM's LogUp buses are emitted per AIR: 4 columns for Core, 3 for Chiplets, and 1 for
+//! Poseidon2Permutation. Most columns host a single bus, but several host two or more
+//! linearly-independent buses sharing one running accumulator via distinct `bus_prefix[bus]`
+//! additive bases (see per-bus module docs for the merges).
 //! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
 //! opens a single [`super::LookupBuilder::column`] closure and describes the bus's
 //! interactions via [`super::LookupColumn::group`] or
@@ -24,6 +25,9 @@
 //!   `LookupAir` impl.
 //! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
 //!   [`crate::ChipletsAir`]'s `LookupAir` impl.
+//! - [`super::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns`] for the
+//!   Poseidon2-permutation trace column, driven by [`crate::Poseidon2PermutationAir`]'s `LookupAir`
+//!   impl.
 //!
 //! ## Shared precompute contexts
 //!
@@ -35,9 +39,10 @@
 //!
 //! Each context is built once per `eval` through an extension-trait hook
 //! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
-//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover adapters can
-//! override those hooks without changing emitter code. [`ChipletActiveFlags`] lives here
-//! because both the default chiplet hook and prover overrides can use it.
+//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover-side
+//! implementations can override those hooks with boolean fast paths without changing
+//! emitter code. [`ChipletActiveFlags`] lives in this module because it is the pure
+//! helper used by the default chiplet hook and by optimized implementations.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -68,10 +73,8 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
 pub(crate) struct ChipletActiveFlags<E> {
-    /// `is_active` for the hasher controller sub-chiplet (= `s_01`).
+    /// `is_active` for the hasher controller sub-chiplet (= `1 - s0`).
     pub controller: E,
-    /// `is_active` for the hasher permutation sub-chiplet (= `s_00`).
-    pub permutation: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
     pub bitwise: E,
     /// `is_active` for the memory chiplet (= `s01 - s012`).
@@ -90,9 +93,9 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s_00`, `s_01`
-    /// - virtual `s0 = 1 - s_00 - s_01`
+    /// - `s0 = chiplets[0]`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
+    /// - `is_controller = 1 - s0`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
@@ -100,29 +103,26 @@ where
         V: Copy,
         E: Algebra<V>,
     {
-        let s_ctrl: E = local.s_01.into();
-        let s_perm: E = local.s_00.into();
-        let s1: E = local.chiplets[0].into();
-        let s2: E = local.chiplets[1].into();
-        let s3: E = local.chiplets[2].into();
-        let s4: E = local.chiplets[3].into();
+        let s0: E = local.chiplets[0].into();
+        let s1: E = local.chiplets[1].into();
+        let s2: E = local.chiplets[2].into();
+        let s3: E = local.chiplets[3].into();
+        let s4: E = local.chiplets[4].into();
 
-        // Virtual non-hasher selector and prefix products.
-        let s0 = E::ONE - s_ctrl.clone() - s_perm.clone();
+        let controller = E::ONE - s0.clone();
         let s01 = s0.clone() * s1;
         let s012 = s01.clone() * s2;
         let s0123 = s012.clone() * s3;
         let s01234 = s0123.clone() * s4;
 
-        // Active flags via the subtraction trick.
+        // Active flags are prefix * (1 - section_selector).
         let bitwise = s0 - s01.clone();
         let memory = s01 - s012.clone();
         let ace = s012 - s0123.clone();
         let kernel_rom = s0123 - s01234;
 
         Self {
-            controller: s_ctrl,
-            permutation: s_perm,
+            controller,
             bitwise,
             memory,
             ace,

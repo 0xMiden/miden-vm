@@ -58,9 +58,9 @@ use miden_assembly_syntax::{
         Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    module::{ItemInfo, ModuleInfo},
+    module::{ItemInfo, ModuleDescriptor},
 };
-use miden_core::{Word, advice::AdviceMap, mast::MastNodeId, program::Kernel};
+use miden_core::{Word, advice::AdviceMap, mast::MastNodeId, program::KernelDescriptor};
 use miden_mast_package::Package as MastPackage;
 use smallvec::{SmallVec, smallvec};
 
@@ -145,7 +145,7 @@ pub struct Linker {
     /// The kernel library being linked against.
     ///
     /// This is always provided, with an empty kernel being the default.
-    kernel: Kernel,
+    kernel: KernelDescriptor,
     kernel_package: Option<Arc<MastPackage>>,
     /// The source manager to use when emitting diagnostics.
     source_manager: Arc<dyn SourceManager>,
@@ -173,11 +173,12 @@ impl Linker {
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
-        let module_infos =
-            library.module_infos().map_err(|err| LinkerError::InvalidPackageModuleSurface {
+        let module_descriptors = library.module_descriptors().map_err(|err| {
+            LinkerError::InvalidPackageModuleSurface {
                 package: library.package.name.to_string(),
                 reason: err.to_string(),
-            })?;
+            }
+        })?;
         let library_interface_digest = library.package.interface_digest().map_err(|err| {
             LinkerError::InvalidPackageModuleSurface {
                 package: library.package.name.to_string(),
@@ -189,7 +190,7 @@ impl Linker {
         let result = match self.libraries.entry(library_interface_digest) {
             Entry::Vacant(entry) => {
                 entry.insert(library);
-                self.link_assembled_modules(module_infos)
+                self.link_assembled_modules(module_descriptors)
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
@@ -221,7 +222,7 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link a set of assembled modules.
     pub fn link_assembled_modules(
         &mut self,
-        modules: impl IntoIterator<Item = ModuleInfo>,
+        modules: impl IntoIterator<Item = ModuleDescriptor>,
     ) -> Result<(), LinkerError> {
         for module in modules {
             self.link_assembled_module(module)?;
@@ -236,7 +237,7 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link `module`.
     pub fn link_assembled_module(
         &mut self,
-        module: ModuleInfo,
+        module: ModuleDescriptor,
     ) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding pre-assembled module {} to module graph", module.path());
 
@@ -408,7 +409,7 @@ impl Linker {
         if !kernel_package.is_kernel() {
             return Err(Report::msg("invalid kernel package: not a kernel"));
         }
-        let kernel = kernel_package.to_kernel()?;
+        let kernel = kernel_package.to_kernel_descriptor()?;
         if kernel.is_empty() {
             return Err(Report::msg("invalid kernel package: kernel cannot be empty"));
         }
@@ -418,15 +419,15 @@ impl Linker {
         log::debug!(target: "linker", "modifying linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
         let mut kernel_index = None;
-        let module_infos = kernel_package.try_module_infos().map_err(|err| {
+        let module_descriptors = kernel_package.try_module_descriptors().map_err(|err| {
             LinkerError::InvalidPackageModuleSurface {
                 package: kernel_package.name.to_string(),
                 reason: err.to_string(),
             }
         })?;
-        for module_info in module_infos {
-            let is_kernel_module = module_info.path().is_kernel_path();
-            let module_index = self.link_assembled_module(module_info)?;
+        for module_descriptor in module_descriptors {
+            let is_kernel_module = module_descriptor.path().is_kernel_path();
+            let module_index = self.link_assembled_module(module_descriptor)?;
             if is_kernel_module {
                 kernel_index = Some(module_index);
             }
@@ -440,7 +441,7 @@ impl Linker {
         Ok(())
     }
 
-    pub fn kernel(&self) -> &Kernel {
+    pub fn kernel(&self) -> &KernelDescriptor {
         &self.kernel
     }
 
@@ -770,7 +771,7 @@ impl Linker {
         }
 
         library
-            .module_infos()
+            .module_descriptors()
             .ok()?
             .into_iter()
             .flat_map(|module| {

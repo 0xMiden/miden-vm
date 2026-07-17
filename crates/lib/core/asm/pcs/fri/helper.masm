@@ -110,7 +110,6 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 21 + 225 * num_fri_layers
 pub proc load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
     padw exec.constants::get_lde_domain_info_word
@@ -138,15 +137,9 @@ pub proc load_fri_layer_commitments
         mem_storew_le
         #=> [COM, num_layers, ptr_layer + 4, y, y, ...]
 
-        # Reseed with commitment and absorb per-round PoW witness in one shot.
+        # Reseed with commitment, check the per-round PoW witness, and sample alpha.
         adv_push
-        exec.random_coin::reseed_with_felt
-        # => [num_layers, ptr_layer + 4, y, y, ...]
-
-        # Verify per-round FRI folding PoW and sample folding challenge in one shot.
-        # Reads folding_pow_bits from memory. Bypasses buffer API since sponge state
-        # is known after reseed_with_felt.
-        exec.random_coin::sample_folding_pow_and_ext
+        exec.random_coin::reseed_check_folding_pow_and_sample_alpha
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
         exec.constants::tmp1 mem_loadw_le

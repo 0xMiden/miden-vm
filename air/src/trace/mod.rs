@@ -17,7 +17,7 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)    (22 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_WIDTH: usize = 6;
@@ -26,7 +26,7 @@ pub const DECODER_TRACE_WIDTH: usize = 24;
 
 pub const STACK_TRACE_WIDTH: usize = 19;
 
-pub mod log_precompile {
+pub mod log_deferred {
     use core::ops::Range;
 
     use super::chiplets::hasher::{CAPACITY_LEN, Hasher};
@@ -34,7 +34,7 @@ pub mod log_precompile {
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
 
-    /// Decoder helper register index where the hasher address is stored for `log_precompile`.
+    /// Decoder helper register index where the hasher address is stored for `log_deferred`.
     pub const HELPER_ADDR_IDX: usize = 0;
     /// Range covering the four helper registers holding `STATE_PREV`.
     pub const HELPER_STATE_PREV_RANGE: Range<usize> = Range {
@@ -51,6 +51,7 @@ pub mod log_precompile {
     //
     //   Input  (current row): `[_, STMNT, _, ...]`
     //     - stack[4..8] = STMNT — the per-call statement word.
+    //     - capacity is fixed by the opcode to the deferred-root folding domain `[1, 0, 0, 0]`.
     //   Output (next row):    `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
     //     - stack[0..4] = STATE_NEW (rate0 output, kept by the wrapper);
     //     - stack[4..12] hold output rate1 / capacity (discarded).
@@ -60,7 +61,7 @@ pub mod log_precompile {
 
     /// Stack range containing the precomputed statement word on opcode entry.
     pub const STACK_STMNT_RANGE: Range<usize> = Hasher::RATE1_RANGE;
-    /// Stack range that receives the new transcript state (output rate0) on opcode exit.
+    /// Stack range that receives the new deferred-root state (output rate0) on opcode exit.
     pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
 }
 
@@ -68,10 +69,16 @@ pub mod log_precompile {
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
 
 // Chiplets trace
-// s_00 + s_01 + chip_clk + 4 selectors + 15 shared chiplet data columns = 22.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
 // hasher responder address on the chiplet side.
-pub const CHIPLETS_WIDTH: usize = 22;
+pub const CHIPLET_CONTROLLER_OFFSET: usize = 1;
+pub const CHIPLET_CLK_WIDTH: usize = 1;
+pub const CHIPLET_PAYLOAD_WIDTH: usize = CHIPLET_CONTROLLER_OFFSET + chiplets::hasher::TRACE_WIDTH;
+pub const CHIPLETS_WIDTH: usize = CHIPLET_PAYLOAD_WIDTH + CHIPLET_CLK_WIDTH;
+
+pub mod poseidon2_permutation {
+    pub use crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS;
+}
 
 pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
     + DECODER_TRACE_WIDTH
@@ -82,12 +89,8 @@ pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `build_aux_trace`: 4 main-trace LogUp columns for Core and 3
-// chiplet-trace LogUp columns for Chiplets. See
-// [`crate::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
-// per-column contents.
+// Auxiliary columns materialize the per-AIR LogUp lookup arguments:
+// 4 columns for Core, 3 for Chiplets, and 1 for Poseidon2Permutation.
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

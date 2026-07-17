@@ -1,6 +1,6 @@
 [package]
 name = "miden-processor"
-version = "0.25.5"
+version = "0.28.0"
 description = "Miden VM processor"
 documentation = "https://docs.rs/miden-processor"
 readme = "README.md"
@@ -39,13 +39,14 @@ miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
+miden-precompiles.workspace = true
 miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
 itertools.workspace = true
 paste.workspace = true
-rayon = { version = "1.10", default-features = false }
+rayon.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 

@@ -35,7 +35,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/permutation split design these rows are consecutive, so their addresses differ by exactly $1$.
+The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region. These controller rows are consecutive, so their addresses differ by exactly $1$.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $12$.
@@ -73,7 +73,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
+The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -120,7 +120,7 @@ The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation l
 > b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
 > $$
 
-The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the trace of the hash chiplet. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the hash-controller region. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
@@ -192,13 +192,13 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $8$, except for the pointer updates above.
 
 ## FRIE2F4
-The `FRIE2F4` operation performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2 extension of the base field. It also performs several computations needed for checking correctness of the folding from the previous layer as well as simplifying folding of the next FRI layer.
+The `FRIE2F4` operation performs one factor-4 FRI layer fold over the quadratic extension field. It also checks consistency with the previous folded layer and writes the loop state consumed by the next FRI layer.
 
 The stack for the operation is expected to be arranged as follows:
-- The first $8$ stack elements contain $4$ query points to be folded. Each point is represented by two field elements because points to be folded are in the extension field. We denote these points as $q_0 = (v_0, v_1)$, $q_1 = (v_2, v_3)$, $q_2 = (v_4, v_5)$, $q_3 = (v_6, v_7)$.
+- The first $8$ stack elements contain $4$ opened leaf values to be folded. Each value is represented by two field elements. The leaf values are stored in bit-reversed order: $q_0 = (v_0, v_1)$, $q_2 = (v_2, v_3)$, $q_1 = (v_4, v_5)$, $q_3 = (v_6, v_7)$.
 - The next element $f\_pos$ is the query position in the folded domain. It can be computed as $pos \mod n$, where $pos$ is the position in the source domain, and $n$ is size of the folded domain.
-- The next element $d\_seg$ is a value indicating domain segment from which the position in the original domain was folded. It can be computed as $\lfloor \frac{pos}{n} \rfloor$. Since the size of the source domain is always $4$ times bigger than the size of the folded domain, possible domain segment values can be $0$, $1$, $2$, or $3$.
-- The next element $poe$ is a power of initial domain generator which aids in a computation of the domain point $x$.
+- The next element is the natural coset index $\lfloor \frac{pos}{n} \rfloor$. Since the size of the source domain is always $4$ times bigger than the size of the folded domain, possible coset values are $0$, $1$, $2$, and $3$.
+- The next element $poe$ is a power of the current source-domain generator used to compute the domain point $x$.
 - The next two elements contain the result of the previous layer folding - a single element in the extension field denoted as $pe = (pe_0, pe_1)$.
 - The next two elements specify a random verifier challenge $\alpha$ for the current layer defined as $\alpha = (a_0, a_1)$.
 - The last element on the top of the stack ($cptr$) is expected to be a memory address of the layer currently being folded.
@@ -208,14 +208,14 @@ The diagram below illustrates stack transition for `FRIE2F4` operation.
 ![frie2f4](../../img/design/stack/crypto_ops/FRIE2F4.png)
 
 At the high-level, the operation does the following:
-- Computes the domain value $x$ based on values of $poe$ and $d\_seg$.
+- Computes the domain value $x$ based on values of $poe$ and the coset index.
 - Using $x$ and $\alpha$, folds the query values $q_0, ..., q_3$ into a single value $r$.
-- Compares the previously folded value $pe$ to the appropriate value of $q_0, ..., q_3$ to verify that the folding of the previous layer was done correctly.
+- Compares the previously folded value $pe$ to the leaf value selected by the coset index.
 - Computes the new value of $poe$ as $poe' = poe^4$ (this is done in two steps to keep the constraint degree low).
 - Increments the layer address pointer by $8$.
 - Shifts the stack by $1$ to the left. This moves an element from the stack overflow table into the last position on the stack top.
 
-To keep the degree of the constraints low, a number of intermediate values are used. Specifically, the operation relies on all $6$ helper registers, and also uses the first $10$ elements of the stack at the next state for degree reduction purposes. Thus, once the operation has been executed, the top $10$ elements of the stack can be considered to be "garbage".
+To keep the constraint degree low, the operation uses all $6$ helper registers and the first $8$ next-state stack elements as degree-reduction intermediates. Callers should treat those $8$ output elements as scratch.
 
 > TODO: add detailed constraint descriptions. See discussion [here](https://github.com/0xMiden/miden-vm/issues/567#issuecomment-1398088792).
 
@@ -382,48 +382,50 @@ $$
 b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
 $$
 
-## LOG_PRECOMPILE
+## LOG_DEFERRED
 
-The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling precompile-transcript state. The transcript is a linear hash tree over Poseidon2:
-`STATE_NEW = Poseidon2::merge(STATE_PREV, STMNT)`. Initialization and boundary enforcement are
-handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a
-high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
+root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
+merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
+`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The final root is a public input;
+proofs carry `DeferredStateWire`, and the public verifier rehydrates that wire under the built-in
+`miden_precompiles::registry()`. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
 4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
-opcode entry. Callers normally produce `STMNT` via the `sys::log_precompile_request` helper,
-which computes `STMNT = Poseidon2::merge(COMM, TAG)` from the user-provided commitment halves
-and seats it at stack[4..8] before invoking the opcode (see
-[Precompiles](./precompiles.md#core-data) for the commitment model).
+opcode entry. `STMNT` must already be present in the processor's deferred state and evaluate to
+`TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and precompile
+support code wrap this low-level opcode by registering nodes and logging statement digests.
 
-Additionally, the processor maintains a persistent rolling transcript state word that is updated
-with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑deterministically via
-helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
-matching insertion, ensuring a single, consistent state sequence.
+Additionally, the processor maintains a persistent rolling deferred root that is updated with each
+`LOG_DEFERRED` invocation. The previous root is provided non‑deterministically via helper
+registers and is denoted `ROOT_PREV`. The hasher bus links the constrained Poseidon2 permutation to
+the stack transition, while the deferred state enforces that the logged statement evaluates to
+`TRUE`.
 
-The operation evaluates `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`,
-with the following stack transition:
+The operation evaluates
+`[ROOT_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]])`, with the following
+stack transition:
 
 ```
-Before:  [_,         STMNT,      _,       ...]
-After:   [STATE_NEW, OUT_RATE1,  OUT_CAP, ...]
+Before:  [_,        STMNT,      _,       ...]
+After:   [ROOT_NEW, OUT_RATE1,  OUT_CAP, ...]
 ```
 
 `STMNT` placement on rate1 lets the chiplet bus's β⁶..β⁹ products coincide with HPERM's rate1
 products, so they share gates after circuit memoization. The output uses the identity HPERM
-lane→slot mapping: `rate0_out -> stack[0..4]` (= `STATE_NEW`), `rate1_out -> stack[4..8]`,
+lane→slot mapping: `rate0_out -> stack[0..4]` (= `ROOT_NEW`), `rate1_out -> stack[4..8]`,
 `cap_out -> stack[8..12]`. `OUT_RATE1` and `OUT_CAP` are unused and are typically dropped by
 the caller immediately.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
-- $h_1, h_2, h_3, h_4$: Previous transcript state `STATE_PREV`
+- $h_1, h_2, h_3, h_4$: Previous deferred root `ROOT_PREV`
 
-Note: helper registers expose `STATE_PREV` for bus constraints only; the VM maintains the
-transcript state internally between invocations.
+Note: helper registers expose `ROOT_PREV` for bus constraints only; the VM maintains the deferred
+root internally between invocations.
 
 ### Bus Communication
 
@@ -435,27 +437,27 @@ elements appearing on the bus are:
 
 $$
 \begin{aligned}
-\mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
+\mathsf{ROOT}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
 \mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-0                              &              &&\text{(constant capacity input)}
+\mathsf{ANDTAG}_i              &= \bigl([1,0,0,0]\bigr)_i &&\text{(`Tag::AND` capacity word)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
 The input message reduces the Poseidon2 state in the canonical order
-`[STATE_PREV, STMNT, ZERO]`:
+`[ROOT_PREV, STMNT, [1,0,0,0]]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{ROOT}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{ANDTAG}_i.
 $$
 
 One controller row later, the `op_retstate` response provides the permuted state
-`[STATE_NEW, OUT_RATE1, OUT_CAP]`. Denote the stack after the instruction by $s'_i$; the top
-twelve elements are `[STATE_NEW, OUT_RATE1, OUT_CAP]`. Thus
+`[ROOT_NEW, OUT_RATE1, OUT_CAP]`. Denote the stack after the instruction by $s'_i$; the top
+twelve elements are `[ROOT_NEW, OUT_RATE1, OUT_CAP]`. Thus
 
 $$
 \begin{aligned}
-\mathsf{STATE}^{\text{new}}_i &= s'_{i},\\
+\mathsf{ROOT}^{\text{new}}_i &= s'_{i},
 \mathsf{OUT\_RATE1}_i         &= s'_{4+i},\\
 \mathsf{OUT\_CAP}_i           &= s'_{8+i},
 \end{aligned}
@@ -465,7 +467,7 @@ $$
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{new}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{OUT\_RATE1}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{OUT\_CAP}_i.
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{ROOT}^{\text{new}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{OUT\_RATE1}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{OUT\_CAP}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -475,26 +477,24 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
 The above constraint enforces that the specified input and output controller rows must be present
-in the trace of the hash chiplet. In the controller/permutation split design these two controller
-rows are consecutive, so their addresses differ by exactly 1.
+in the hash-controller region. These two controller rows are consecutive, so their addresses differ
+by exactly 1.
 
-Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
-variables in the trace, it should be possible to combine the bus constraint in a way that avoids
-increasing the degree of the overall bus expression.
 
-### Transcript-state Initialization
 
-Inside the VM, the transcript state is tracked via the virtual-table bus: each update removes the
-previous entry before inserting the next one.
+### Deferred-root Initialization
 
-We denote the messages for removing and inserting the message as
+Inside the VM, the deferred root is tracked via the virtual-table bus: each `log_deferred` update
+removes the previous root before inserting the next one.
+
+We denote the messages for removing and inserting the root as
 
 $$
-v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_PREV}_j
+v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_PREV}_j
 $$
 
 $$
-v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_NEW}_j
+v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_NEW}_j
 $$
 
 The bus constraint is applied to the virtual table column as follows.
@@ -503,27 +503,26 @@ $$
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final transcript state, the verifier initializes
-the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it
+To ensure the column accounts for the initial and final deferred roots, the verifier initializes the
+bus with fixed public values: the initial root is `TRUE_DIGEST` (the zero word) and the final
+deferred root is the four-felt public value committed by the VM trace. More specifically, it
 constrains the first value of the bus to be equal to
 
 $$
 b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
 $$
 
-Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be
-used to extend an existing running state from a previous execution. The final transcript state is
-provided to the verifier (as a variable‑length public input) and enforced via the boundary
-constraint. The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
 $$
-v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
+v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred},
 $$
 
 $$
-v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
+v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_FINAL}_j.
 $$
 
-Because the fold is a 2‑to‑1 hash (`merge(STATE_PREV, STMNT)`), the state is itself a complete
-digest at every step. The transcript digest is just the final state — no extra finalization step
-is required.
+Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
+itself the digest at every step. The proof carries the root-reachable DAG as `DeferredStateWire`; the
+final deferred root is a fixed four-field-element public value, not a variable-length request
+transcript.

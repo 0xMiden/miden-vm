@@ -23,7 +23,7 @@ on:
       regression_min_delta_ms:
         description: Minimum absolute slowdown before the workflow fails.
         required: false
-        default: "1"
+        default: "5"
         type: string
       rayon_num_threads:
         description: RAYON_NUM_THREADS value used for the benchmark.
@@ -79,7 +79,7 @@ jobs:
       max_delta_pct: ${{ steps.compare.outputs.max_delta_pct }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -158,7 +158,7 @@ jobs:
             current_ref="${GITHUB_SHA}"
             baseline_ref="${BEFORE_SHA}"
             threshold_pct="5"
-            min_delta_ms="1"
+            min_delta_ms="5"
             rayon_threads="8"
             sample_size="10"
             measurement_time_secs="10"
@@ -187,7 +187,7 @@ jobs:
           fi
 
           if [[ -z "${min_delta_ms}" ]]; then
-            min_delta_ms="1"
+            min_delta_ms="5"
           fi
 
           if [[ -z "${rayon_threads}" ]]; then
@@ -402,7 +402,7 @@ jobs:
 
       - name: Upload benchmark artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: synthetic-tx-kernel-nonregression
           path: ${{ steps.dirs.outputs.artifact_dir }}
@@ -436,12 +436,12 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - benchmark
-    if: always() && github.event_name == 'push' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
+    if: always() && github.event_name == 'push' && needs.benchmark.outputs.regression == 'true' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
     permissions:
       contents: write
     steps:
       - name: Create or update commit comment
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         env:
           CURRENT_SHA: ${{ needs.benchmark.outputs.current_sha }}
           MARKER: "<!-- synthetic-tx-kernel-nonregression -->"

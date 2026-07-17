@@ -81,7 +81,7 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Emit once-per-proof boundary interactions that don't come from any main-trace row.
     ///
     /// Typical sources are committed-final terminals and public-input-driven seed
-    /// emissions (kernel ROM init, block hash seed, log-precompile terminals).
+    /// emissions (kernel ROM init, block hash seed, log-deferred terminals).
     /// These close out buses whose per-row [`eval`](Self::eval) contributions alone
     /// don't cancel.
     ///

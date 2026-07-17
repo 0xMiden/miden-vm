@@ -91,6 +91,9 @@ For example, a new change to the AIR crate might have the following message: `fe
     // CODE SECTION HEADER
     // ================================================================================
     ```
+- Add one [`CHANGELOG.md`](./CHANGELOG.md) entry for user-facing changes. The
+  entry should describe the Miden change, whether it affects VM crates, crypto
+  crates, or both. Trivial changes can use the `no changelog` label.
 
 - [Rustfmt](https://github.com/rust-lang/rustfmt) and [Clippy](https://github.com/rust-lang/rust-clippy) linting is included in CI pipeline. Anyways it's preferable to run linting locally before push:
     ```
@@ -108,8 +111,9 @@ We use [semver](https://semver.org/) naming convention.
 3. Commit messages and code style follow conventions.
 4. Tests added for new functionality.
 5. Documentation/comments updated for all changes according to our documentation convention.
-6. Clippy and Rustfmt linting passed.
-7. New branch rebased from `next`.
+6. Changelog entry added to `CHANGELOG.md`, unless the PR is labeled `no changelog`.
+7. Clippy and Rustfmt linting passed.
+8. New branch rebased from `next`.
 
 &nbsp;
 

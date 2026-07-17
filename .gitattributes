@@ -1,1 +1,4 @@
 CHANGELOG.md merge=union
+crates/lib/core/precompiles/asm/u256.masm linguist-generated=true
+crates/lib/core/precompiles/asm/fields/*.masm linguist-generated=true
+crates/lib/core/precompiles/asm/curves/*.masm linguist-generated=true

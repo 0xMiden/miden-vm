@@ -2,25 +2,32 @@ use alloc::vec::Vec;
 use core::{borrow::BorrowMut, ops::Range};
 
 use miden_air::{
-    ControllerCols, PermutationCols,
-    trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH},
+    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, ControllerCols, INITIAL_EXTERNAL_ROUND_END,
+    INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
+    NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
+    PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols,
+    trace::{
+        chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
+        poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
+    },
 };
 use miden_core::chiplets::hasher::Hasher;
 
-use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, ZERO};
-
-// The hasher row is wider than the typed overlay by one column (s_00).
-const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
+use super::{
+    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
+    perm_id_felt,
+};
 
 // HASHER OPERATION
 // ================================================================================================
 
-/// A single logical operation appended to the hasher trace. Each variant maps deterministically
-/// to a known number of trace rows; the actual row materialization happens once in
-/// [`HasherTrace::fill_trace`].
+/// A single logical operation appended to the hasher controller trace.
+///
+/// Each variant maps deterministically to a known number of controller rows. Actual row
+/// materialization happens once in [`HasherTrace::fill_trace`].
 #[derive(Debug, Clone)]
 enum HasherOp {
-    /// A single controller row (s_perm = 0).
+    /// A single controller row.
     Controller {
         selectors: Selectors,
         state: HasherState,
@@ -28,22 +35,17 @@ enum HasherOp {
         mrupdate_id: Felt,
         is_boundary: Felt,
         direction_bit: Felt,
+        perm_id: Felt,
     },
-    /// A 16-row Poseidon2 permutation cycle (s_perm = 1).
-    Permutation {
-        init_state: HasherState,
-        multiplicity: Felt,
-    },
-    /// Padding rows filling the controller region up to a `HASH_CYCLE_LEN` boundary.
+    /// Padding rows used to align the controller region inside `ChipletsAir`.
     Padding { count: usize, mrupdate_id: Felt },
 }
 
 impl HasherOp {
-    /// Number of trace rows this op contributes when materialized.
+    /// Number of controller rows this op contributes when materialized.
     fn row_count(&self) -> usize {
         match self {
             Self::Controller { .. } => 1,
-            Self::Permutation { .. } => HASH_CYCLE_LEN,
             Self::Padding { count, .. } => *count,
         }
     }
@@ -52,23 +54,23 @@ impl HasherOp {
 // HASHER TRACE
 // ================================================================================================
 
-/// Execution trace of the hasher component.
+/// Execution trace for hasher controller rows.
 ///
-/// The trace consists of 20 columns grouped logically as follows:
-/// - 3 selector columns (s0, s1, s2).
-/// - 12 columns describing hasher state (h0..h11).
-/// - 1 node_index column: holds the Merkle tree node index on controller rows. This column is
-///   reused to hold the permutation request multiplicity on perm segment rows.
-/// - 1 mrupdate_id column (domain separator for sibling table).
-/// - 1 is_boundary column (1 on boundary rows: first input or last output, 0 otherwise).
-/// - 1 direction_bit column (Merkle direction bit on controller rows, 0 elsewhere).
-/// - 1 s_perm column (0 = controller region, 1 = permutation segment).
+/// The controller trace contains only the dispatch rows in `ChipletsAir`: one input row and one
+/// output row per permutation request, plus padding rows. The requested Poseidon2 cycles are
+/// materialized into the separate Poseidon2 permutation AIR by
+/// [`fill_poseidon2_permutation_trace`].
 ///
-/// The trace is divided into two regions:
-/// - Controller region (s_perm=0): pairs of (input, output) rows per permutation request.
-/// - Permutation segment (s_perm=1): one 16-row cycle per unique input state.
+/// Controller rows use the hasher trace layout:
+/// - 3 hasher-internal selector columns (`s0`, `s1`, `s2`).
+/// - 12 Poseidon2 state columns (`h0..h11`).
+/// - `node_index`, used by Merkle operations.
+/// - `mrupdate_id`, the domain separator for MRUPDATE sibling-table entries.
+/// - `is_boundary`, set on operation boundaries.
+/// - `direction_bit`, used by Merkle path operations.
+/// - `perm_id`, the Poseidon2 permutation cycle id for input/output rows.
 #[derive(Debug, Default)]
-pub struct HasherTrace {
+pub(super) struct HasherTrace {
     ops: Vec<HasherOp>,
     row_count: usize,
 }
@@ -77,31 +79,31 @@ impl HasherTrace {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns current length of this execution trace.
-    pub fn trace_len(&self) -> usize {
+    /// Returns the current controller trace length.
+    pub(super) fn trace_len(&self) -> usize {
         self.row_count
     }
 
-    /// Returns the next row address. The address is equal to the current trace length + 1.
+    /// Returns the next row address.
     ///
-    /// The above means that row addresses start at ONE (rather than ZERO), and are incremented by
-    /// ONE at every row. Starting at ONE is needed for the decoder so that the address of the
-    /// first code block is a non-zero value.
-    pub fn next_row_addr(&self) -> Felt {
+    /// Row addresses start at ONE rather than ZERO so the first code-block address is non-zero for
+    /// the decoder.
+    pub(super) fn next_row_addr(&self) -> Felt {
         Felt::new_unchecked(self.row_count as u64 + 1)
     }
 
-    /// Returns the index that the next op pushed will occupy. Used to bracket memoization-eligible
-    /// op ranges in the caller.
-    pub fn next_op_index(&self) -> usize {
+    /// Returns the index that the next op will occupy.
+    ///
+    /// Callers use this to bracket memoization-eligible op ranges.
+    pub(super) fn next_op_index(&self) -> usize {
         self.ops.len()
     }
 
     // CONTROLLER ROW METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a single controller row to the trace.
-    pub fn append_controller_row(
+    /// Appends a single controller row to the logical op log.
+    pub(super) fn append_controller_row(
         &mut self,
         selectors: Selectors,
         state: &HasherState,
@@ -109,6 +111,7 @@ impl HasherTrace {
         mrupdate_id: Felt,
         is_boundary: Felt,
         direction_bit: Felt,
+        perm_id: Felt,
     ) {
         self.ops.push(HasherOp::Controller {
             selectors,
@@ -117,31 +120,19 @@ impl HasherTrace {
             mrupdate_id,
             is_boundary,
             direction_bit,
+            perm_id,
         });
         self.row_count += 1;
     }
 
-    // PERMUTATION SEGMENT METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Appends a 16-row permutation cycle to the trace.
+    /// Pads controller rows so the following chiplet section starts on its periodic boundary.
     ///
-    /// The `multiplicity` is stored in the node_index column on all rows of the cycle and constant
-    /// within a cycle.
-    pub fn append_permutation_cycle(&mut self, init_state: &HasherState, multiplicity: Felt) {
-        self.ops.push(HasherOp::Permutation { init_state: *init_state, multiplicity });
-        self.row_count += HASH_CYCLE_LEN;
-    }
-
-    /// Appends padding rows to fill the controller region to a multiple of HASH_CYCLE_LEN.
-    ///
-    /// Padding rows have all columns set to zero except mrupdate_id, which must carry the
-    /// last value to satisfy the AIR progression constraint (mrupdate_id is constant on
-    /// non-MV-start transitions).
-    pub fn pad_to_cycle_boundary(&mut self, mrupdate_id: Felt) {
-        let remainder = self.row_count % HASH_CYCLE_LEN;
+    /// Padding rows carry the current `mrupdate_id` because that column is constrained to remain
+    /// stable except at MV-start transitions.
+    pub(super) fn pad_to_controller_boundary(&mut self, mrupdate_id: Felt) {
+        let remainder = self.row_count % CONTROLLER_TRACE_ALIGNMENT;
         if remainder != 0 {
-            let count = HASH_CYCLE_LEN - remainder;
+            let count = CONTROLLER_TRACE_ALIGNMENT - remainder;
             self.ops.push(HasherOp::Padding { count, mrupdate_id });
             self.row_count += count;
         }
@@ -150,26 +141,25 @@ impl HasherTrace {
     // MEMOIZATION SUPPORT
     // --------------------------------------------------------------------------------------------
 
-    /// Re-pushes the ops in `range` with `new_mrupdate_id` substituted on every controller and
-    /// padding row. Returns the post-permutation state (i.e. the state of the last controller
-    /// op in the range, which is by construction an output row) and the input states of every
-    /// controller input row encountered (s0 == ONE).
+    /// Replays a previously recorded op range with a new MRUPDATE domain separator.
     ///
-    /// Used to memoize identical controller blocks: the source op range is identified by
-    /// digest in the caller's memoization map.
-    pub fn replay_ops_range(
+    /// Returns the state of the last controller row in the range and the input states of all
+    /// controller input rows encountered. The caller uses those input states to update Poseidon2
+    /// permutation multiplicities for memoized controller blocks.
+    pub(super) fn replay_ops_range(
         &mut self,
         range: Range<usize>,
         new_mrupdate_id: Felt,
     ) -> (HasherState, Vec<HasherState>) {
-        let copied: Vec<HasherOp> = self.ops[range].to_vec();
         let mut last_state = [ZERO; STATE_WIDTH];
-        let mut input_states = Vec::new();
-        for mut op in copied {
+        let mut input_states = Vec::with_capacity(range.len() / 2);
+        for idx in range {
+            let mut op = self.ops[idx].clone();
             match &mut op {
                 HasherOp::Controller { mrupdate_id, selectors, state, .. } => {
                     *mrupdate_id = new_mrupdate_id;
-                    if selectors[0] == ONE {
+                    let [is_input, _, _] = *selectors;
+                    if is_input == ONE {
                         input_states.push(*state);
                     }
                     last_state = *state;
@@ -177,7 +167,6 @@ impl HasherTrace {
                 HasherOp::Padding { mrupdate_id, .. } => {
                     *mrupdate_id = new_mrupdate_id;
                 },
-                HasherOp::Permutation { .. } => {},
             }
             self.row_count += op.row_count();
             self.ops.push(op);
@@ -189,17 +178,16 @@ impl HasherTrace {
     // --------------------------------------------------------------------------------------------
 
     /// Fills the provided trace fragment by materializing the op log row by row.
-    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
+    pub(super) fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        let mut chunk = [ZERO; TRACE_WIDTH * HASH_CYCLE_LEN];
+        let mut chunk = [ZERO; TRACE_WIDTH * CONTROLLER_TRACE_ALIGNMENT];
 
         let mut row_idx = 0usize;
         for op in &self.ops {
             let n = op.row_count();
-            debug_assert!(n <= HASH_CYCLE_LEN);
-            let is_ctrl = matches!(op, HasherOp::Controller { .. } | HasherOp::Padding { .. });
+            debug_assert!(n <= CONTROLLER_TRACE_ALIGNMENT);
             let (chunk_rows, _) = chunk.as_mut_slice().as_chunks_mut::<TRACE_WIDTH>();
             match op {
                 HasherOp::Controller {
@@ -209,6 +197,7 @@ impl HasherTrace {
                     mrupdate_id,
                     is_boundary,
                     direction_bit,
+                    perm_id,
                 } => {
                     write_controller_row(
                         &mut chunk_rows[0],
@@ -218,20 +207,11 @@ impl HasherTrace {
                         *mrupdate_id,
                         *is_boundary,
                         *direction_bit,
-                    );
-                },
-                HasherOp::Permutation { init_state, multiplicity } => {
-                    write_permutation_cycle(
-                        &mut chunk_rows[..HASH_CYCLE_LEN],
-                        init_state,
-                        *multiplicity,
+                        *perm_id,
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
-                    // Padding selectors: [0, 1, 0]. This combination is unused in the controller
-                    // region (s0=0, s1=1 only appears in perm segment rows which have s_perm=1).
-                    // Using it prevents padding rows from being mistaken for HOUT output rows
-                    // ([0,0,0]) by the bus response builder.
+                    // The controller flags classify [0, 1, 0] as padding.
                     let padding_selectors = [ZERO, ONE, ZERO];
                     for row in &mut chunk_rows[..*count] {
                         write_controller_row(
@@ -242,28 +222,20 @@ impl HasherTrace {
                             *mrupdate_id,
                             ZERO,
                             ZERO,
+                            ZERO,
                         );
                     }
                 },
             }
 
             trace.copy_rows_into(row_idx, &chunk[..n * TRACE_WIDTH]);
-
-            // Write `s_01 = ONE` on controller/padding rows; perm rows stay ZERO.
-            // No-op when the fragment has no prefix space.
-            if is_ctrl {
-                for i in 0..n {
-                    trace.set_s_01(row_idx + i);
-                }
-            }
-
             row_idx += n;
         }
         debug_assert_eq!(row_idx, self.row_count);
     }
 }
 
-// ROW WRITERS
+// CONTROLLER ROW WRITERS
 // ================================================================================================
 
 fn write_controller_row(
@@ -274,107 +246,190 @@ fn write_controller_row(
     mrupdate_id: Felt,
     is_boundary: Felt,
     direction_bit: Felt,
+    perm_id: Felt,
 ) {
-    let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
-    let cols: &mut ControllerCols<Felt> = overlay.borrow_mut();
-    cols.s0 = selectors[0];
-    cols.s1 = selectors[1];
-    cols.s2 = selectors[2];
+    let cols: &mut ControllerCols<Felt> = row.as_mut_slice().borrow_mut();
+    let [s0, s1, s2] = selectors;
+    cols.s0 = s0;
+    cols.s1 = s1;
+    cols.s2 = s2;
     cols.state = *state;
     cols.node_index = node_index;
     cols.mrupdate_id = mrupdate_id;
     cols.is_boundary = is_boundary;
     cols.direction_bit = direction_bit;
-    tail[0] = ZERO;
+    cols.perm_id = perm_id;
 }
 
-/// Writes the 16-row packed schedule:
-/// - Row 0:     init linear + ext1 (merged)
-/// - Rows 1-3:  ext2, ext3, ext4
-/// - Rows 4-10: 7 packed triples of internal rounds (needs extra witnesses in s0,s1,s2)
-/// - Row 11:    int22 + ext5 (merged, extra witness in s0)
-/// - Rows 12-14: ext6, ext7, ext8
-/// - Row 15:    boundary (final state, no transition)
-fn write_permutation_cycle(
-    rows: &mut [[Felt; TRACE_WIDTH]],
+// POSEIDON2 PERMUTATION TRACE
+// ================================================================================================
+
+/// Writes one 16-row packed Poseidon2 permutation cycle.
+///
+/// The emitted rows match `Poseidon2PermutationPeriodicCols`:
+///
+/// ```text
+/// row 0       input state, then init linear layer + external round 0
+/// rows 1..=3  state before initial external rounds 1..=3
+/// rows 4..=10 state before three packed internal rounds; witnesses are S-box outputs
+/// row 11      state before final internal round; witness[0] is its S-box output
+/// rows 12..=14 state before terminal external rounds 1..=3
+/// row 15      output state
+/// ```
+pub(super) fn write_poseidon2_permutation_cycle(
+    rows: &mut [[Felt; NUM_POSEIDON2_PERMUTATION_COLS]],
     init_state: &HasherState,
+    perm_id: Felt,
     multiplicity: Felt,
 ) {
     debug_assert_eq!(rows.len(), HASH_CYCLE_LEN);
     let mut state = *init_state;
 
-    // Row 0: initial state
-    write_perm_row(&mut rows[0], &state, multiplicity, [ZERO; 3]);
+    let zero_witnesses = [ZERO; NUM_SBOX_WITNESSES];
+    let multiplicity_witnesses = witnesses_with_first(multiplicity);
 
-    // Apply init linear + ext1 (merged: M_E, add RC, S-box, M_E)
+    write_perm_row(&mut rows[CYCLE_INPUT_ROW], &state, perm_id, multiplicity_witnesses);
+
     Hasher::apply_matmul_external(&mut state);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
 
-    // Rows 1-3: ext2, ext3, ext4
-    for (r, row) in rows.iter_mut().enumerate().take(3 + 1).skip(1) {
-        write_perm_row(row, &state, multiplicity, [ZERO; 3]);
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+    for (offset, row) in rows[INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END]
+        .iter_mut()
+        .enumerate()
+    {
+        let round = INITIAL_EXTERNAL_ROUND_START + offset;
+        write_perm_row(row, &state, perm_id, zero_witnesses);
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
-    // Rows 4-10: packed 3x internal rounds
-    for triple in 0..7_usize {
-        let base = triple * 3;
+    for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
+        let base = triple * NUM_SBOX_WITNESSES;
         let pre_state = state;
-        let mut witnesses = [ZERO; 3];
+        let mut witnesses = zero_witnesses;
         for (k, witness) in witnesses.iter_mut().enumerate() {
-            // Witness = S-box output for lane 0
             let sbox_out = (state[0] + Hasher::ARK_INT[base + k]).exp_const_u64::<7>();
             *witness = sbox_out;
             state[0] = sbox_out;
             Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
         }
-        write_perm_row(&mut rows[4 + triple], &pre_state, multiplicity, witnesses);
+        write_perm_row(
+            &mut rows[PACKED_INTERNAL_ROUND_START + triple],
+            &pre_state,
+            perm_id,
+            witnesses,
+        );
     }
 
-    // Row 11: int22 + ext5 (merged)
     let pre_state = state;
-    let w0 = (state[0] + Hasher::ARK_INT[21]).exp_const_u64::<7>();
+    let w0 = (state[0] + Hasher::ARK_INT[LAST_INTERNAL_ROUND_ARK_IDX]).exp_const_u64::<7>();
     state[0] = w0;
     Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
-    write_perm_row(&mut rows[11], &pre_state, multiplicity, [w0, ZERO, ZERO]);
+    let final_internal_witnesses = witnesses_with_first(w0);
+    write_perm_row(
+        &mut rows[INTERNAL_PLUS_EXTERNAL_ROW],
+        &pre_state,
+        perm_id,
+        final_internal_witnesses,
+    );
 
-    // Rows 12-14: ext6, ext7, ext8
-    for r in 1..=3 {
-        write_perm_row(&mut rows[11 + r], &state, multiplicity, [ZERO; 3]);
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+    for round in 1..=NUM_TRAILING_EXTERNAL_ROUND_ROWS {
+        write_perm_row(
+            &mut rows[INTERNAL_PLUS_EXTERNAL_ROW + round],
+            &state,
+            perm_id,
+            zero_witnesses,
+        );
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
     }
 
-    // Row 15: boundary (final state)
-    write_perm_row(&mut rows[15], &state, multiplicity, [ZERO; 3]);
+    write_perm_row(&mut rows[CYCLE_OUTPUT_ROW], &state, perm_id, multiplicity_witnesses);
 }
 
-/// Writes a single permutation segment row (s_perm = 1).
+/// Materializes the Poseidon2 permutation trace from deduplicated permutation requests.
 ///
-/// On permutation rows, `s0, s1, s2` serve as witness columns for packed internal
-/// rounds. The `witnesses` array provides values to write into these columns.
-/// Control columns (mrupdate_id, is_boundary, direction_bit) are zero.
-fn write_perm_row(
-    row: &mut [Felt; TRACE_WIDTH],
-    state: &HasherState,
-    multiplicity: Felt,
-    witnesses: [Felt; 3],
+/// Requests are emitted in cycle-id order. Padding uses zero-multiplicity cycles: they satisfy the
+/// permutation constraints and do not contribute to the perm-link LogUp sum.
+pub(super) fn fill_poseidon2_permutation_trace(
+    perm_requests: Vec<PermRequest>,
+    trace: &mut [Felt],
 ) {
-    let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
-    let cols: &mut PermutationCols<Felt> = overlay.borrow_mut();
+    const W: usize = NUM_POSEIDON2_PERMUTATION_COLS;
+    debug_assert_eq!(trace.len() % W, 0, "Poseidon2 trace buffer is not row-aligned");
+
+    let (rows, _) = trace.as_chunks_mut::<W>();
+    debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "Poseidon2 height must align to cycles");
+    debug_assert!(
+        (perm_requests.len() + 1) * HASH_CYCLE_LEN <= rows.len(),
+        "Poseidon2 trace buffer is too short for permutation requests",
+    );
+
+    let request_count = perm_requests.len();
+    let mut row_idx = 0;
+    for (perm_id, request) in perm_requests.into_iter().enumerate() {
+        let state = request.state.map(Felt::new_unchecked);
+        write_poseidon2_permutation_cycle(
+            &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
+            &state,
+            perm_id_felt(perm_id),
+            Felt::new_unchecked(request.multiplicity),
+        );
+        row_idx += HASH_CYCLE_LEN;
+    }
+
+    // Padding cycles use zero multiplicity and continue the cycle-id sequence.
+    let mut perm_id = request_count;
+    let zero_state = [ZERO; STATE_WIDTH];
+    if row_idx < rows.len() {
+        let padding_start = row_idx;
+        write_poseidon2_permutation_cycle(
+            &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
+            &zero_state,
+            perm_id_felt(perm_id),
+            ZERO,
+        );
+        row_idx += HASH_CYCLE_LEN;
+        perm_id += 1;
+
+        while row_idx < rows.len() {
+            rows.copy_within(padding_start..padding_start + HASH_CYCLE_LEN, row_idx);
+            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], perm_id_felt(perm_id));
+            row_idx += HASH_CYCLE_LEN;
+            perm_id += 1;
+        }
+    }
+}
+
+fn witnesses_with_first(value: Felt) -> [Felt; NUM_SBOX_WITNESSES] {
+    let mut witnesses = [ZERO; NUM_SBOX_WITNESSES];
+    witnesses[0] = value;
+    witnesses
+}
+
+fn set_perm_id(rows: &mut [[Felt; NUM_POSEIDON2_PERMUTATION_COLS]], perm_id: Felt) {
+    debug_assert_eq!(rows.len(), HASH_CYCLE_LEN);
+    for row in rows {
+        let cols: &mut Poseidon2PermutationCols<Felt> = row[..].borrow_mut();
+        cols.perm_id = perm_id;
+    }
+}
+
+fn write_perm_row(
+    row: &mut [Felt; NUM_POSEIDON2_PERMUTATION_COLS],
+    state: &HasherState,
+    perm_id: Felt,
+    witnesses: [Felt; NUM_SBOX_WITNESSES],
+) {
+    let cols: &mut Poseidon2PermutationCols<Felt> = row[..].borrow_mut();
     cols.witnesses = witnesses;
     cols.state = *state;
-    cols.multiplicity = multiplicity;
-    // Physical slots for controller's mrupdate_id, is_boundary, direction_bit must be
-    // zero on perm rows (PermutationCols::_unused).
-    cols.set_unused_padding(ZERO);
-    tail[0] = ONE;
+    cols.perm_id = perm_id;
 }

@@ -1,0 +1,29 @@
+[package]
+description            = "AIR traits for the Miden lifted STARK protocol, with symbolic constraint analysis."
+edition.workspace      = true
+homepage.workspace     = true
+license.workspace      = true
+name                   = "miden-lifted-air"
+readme.workspace       = true
+repository.workspace   = true
+rust-version.workspace = true
+version = "0.28.0"
+
+[lib]
+doctest = true
+test    = false
+
+[dependencies]
+p3-air.workspace        = true
+p3-challenger.workspace = true
+p3-field.workspace      = true
+p3-matrix.workspace     = true
+p3-util.workspace       = true
+
+thiserror.workspace = true
+
+[dev-dependencies]
+miden-field.workspace = true
+
+[lints]
+workspace = true

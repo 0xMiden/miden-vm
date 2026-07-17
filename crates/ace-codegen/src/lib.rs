@@ -2,7 +2,7 @@
 //!
 //! The pipeline is:
 //! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
-//! 2. Lower symbolic expressions into a DAG that mirrors verifier constraints evaluation.
+//! 2. Lower symbolic expressions into a DAG that matches verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
 //! The resulting circuit is intended to run inside the recursive verifier. All

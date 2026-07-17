@@ -222,8 +222,8 @@ end
 > to the compiled procedure.
 >
 > These options are also available to `syscall`, with the caveat that whatever
-> method is used, it _must_ resolve to a procedure in the root kernel module 
-> of the kernel package given to the assembler, or compilation will fail with 
+> method is used, it _must_ resolve to a procedure in the root kernel module
+> of the kernel package given to the assembler, or compilation will fail with
 > an error.
 
 ## Putting it all together

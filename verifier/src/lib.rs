@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{Felt, field::QuadFelt};
@@ -16,16 +16,15 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_DEFERRED_ELEMENTS;
 
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
         Word,
-        precompile::{
-            PrecompileTranscriptState, PrecompileVerificationError, PrecompileVerifierRegistry,
-        },
-        program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
+        deferred::{DeferredState, IntegrityError},
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
     pub mod math {
@@ -56,70 +55,52 @@ pub use exports::*;
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The proof contains one or more precompile requests. When precompile requests are present, use
-///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
-///   verify the precompile computations.
+/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within the
+///   default deferred-state verifier budget.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let (security_level, _commitment) = verify_with_precompiles(
+    verify_with_max_deferred_elements(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
-        &PrecompileVerifierRegistry::new(),
-    )?;
-    Ok(security_level)
+        DEFAULT_MAX_DEFERRED_ELEMENTS,
+    )
 }
 
-/// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
-/// against the commitment computed by the VM.
+/// Returns the security level of the proof if the specified program was executed correctly against
+/// the specified inputs and outputs, using an explicit deferred-state verifier budget.
 ///
-/// # Returns
-/// Returns a tuple `(security_level, transcript_state)` where:
-/// - `security_level`: The security level (in bits) of the verified proof.
-/// - `transcript_state`: A [`Word`] containing the rolling commitment to all precompile requests,
-///   computed by recomputing and recording each precompile commitment in a transcript. The state is
-///   itself a complete digest — no separate finalization step is needed.
+/// Use this when verifying proofs produced with a non-default deferred-state execution budget.
 ///
 /// # Errors
-/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification.
-#[tracing::instrument("verify_program", skip_all)]
-pub fn verify_with_precompiles(
+/// Returns an error if:
+/// - The provided proof does not prove a correct execution of the program.
+/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within
+///   `max_deferred_elements`.
+pub fn verify_with_max_deferred_elements(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-    precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
+    max_deferred_elements: usize,
+) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
+    let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
-    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
-
-    // Recompute the precompile transcript by verifying all precompile requests and recording the
-    // commitments.
-    // If no verifiers were provided (e.g. when this function was called from `verify()`),
-    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_transcript = precompile_verifiers
-        .requests_transcript(&precompile_requests)
-        .map_err(VerificationError::PrecompileVerificationError)?;
-    let pc_transcript_state = recomputed_transcript.state();
-
-    verify_stark(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        pc_transcript_state,
-        hash_fn,
-        proof_bytes,
+    let state = DeferredState::from_wire(
+        Arc::new(miden_precompiles::registry()),
+        &deferred_wire,
+        max_deferred_elements,
     )?;
 
-    Ok((security_level, pc_transcript_state))
+    verify_stark(program_info, stack_inputs, stack_outputs, state.root(), hash_fn, proof_bytes)?;
+
+    Ok(security_level)
 }
 
 // HELPER FUNCTIONS
@@ -129,37 +110,37 @@ fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    final_deferred_root: Word,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
 
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
+    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
 
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, &aux_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -175,8 +156,8 @@ fn verify_stark(
 pub enum VerificationError {
     #[error("failed to verify STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
-    #[error("failed to verify precompile calls")]
-    PrecompileVerificationError(#[source] PrecompileVerificationError),
+    #[error("deferred-DAG integrity check failed: {0}")]
+    DeferredIntegrity(#[from] IntegrityError),
 }
 
 // STARK PROOF VERIFICATION
@@ -193,15 +174,14 @@ pub enum StarkVerificationError {
     Verifier(#[from] VerifierError),
 }
 
-/// Verifies a multi-AIR STARK proof for the given (Core, Chiplets) split.
+/// Verifies a multi-AIR STARK proof for the Miden VM statement.
 ///
-/// Pre-seeds the challenger with the protocol parameters, public values, and the
-/// concatenated kernel-procedure digests (the only variable-length public input today,
-/// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR verifier.
+/// Pre-seeds the challenger with the protocol parameters, public values, and statement aux inputs,
+/// then delegates to the lifted multi-AIR verifier.
 fn verify_stark_proof<SC>(
     config: &SC,
     public_values: &[Felt],
-    aux_inputs: &[Felt],
+    kernel_felts: &[Felt],
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
@@ -226,14 +206,13 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
-    // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
-    // digests). The lifted verifier absorbs both into Fiat-Shamir internally, and derives the
-    // multi-AIR ordering deterministically from the proof's per-AIR trace heights.
+    // `air_inputs` are the fixed public values; `aux_inputs` are the kernel-procedure
+    // digests. The lifted verifier absorbs both into Fiat-Shamir internally, and derives
+    // the multi-AIR ordering deterministically from the proof's per-AIR trace heights.
     let statement = Statement::<Felt, QuadFelt, _>::new(
         MidenMultiAir::new(),
         public_values.to_vec(),
-        aux_inputs.to_vec(),
+        kernel_felts.to_vec(),
     )
     .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 

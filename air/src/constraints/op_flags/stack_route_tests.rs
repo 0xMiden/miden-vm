@@ -175,16 +175,13 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
         opcodes::U32ADD | opcodes::U32SUB | opcodes::U32MUL | opcodes::U32DIV => {
             set(&mut no_shift, 2..16);
         },
-        opcodes::HPERM | opcodes::LOGPRECOMPILE => set(&mut no_shift, 12..16),
+        opcodes::HPERM | opcodes::LOGDEFERRED => set(&mut no_shift, 12..16),
         opcodes::MSTREAM | opcodes::PIPE => {
             set(&mut no_shift, 8..12);
             set(&mut no_shift, 13..16);
         },
-        opcodes::FRIE2F4
-        | opcodes::HORNERBASE
-        | opcodes::HORNEREXT
-        | opcodes::CRYPTOSTREAM
-        | UNUSED_DEGREE_5_ROUTE_OPCODE => {},
+        opcodes::HORNERBASE | opcodes::HORNEREXT => set(&mut no_shift, 0..14),
+        opcodes::FRIE2F4 | opcodes::CRYPTOSTREAM | UNUSED_DEGREE_5_ROUTE_OPCODE => {},
 
         _ => panic!("missing route table entry for opcode {opcode}"),
     }

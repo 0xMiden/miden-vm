@@ -36,7 +36,8 @@ jobs:
           - advice_inputs_deserialize
           - operation_deserialize
           - execution_proof_deserialize
-          - precompile_request_deserialize
+          - deferred_state_wire_deserialize
+          - deferred_state_wire_serde_deserialize
           - package_deserialize
           - package_semantic_deserialize
           - project_toml_parse
@@ -44,7 +45,7 @@ jobs:
           - project_assemble
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -60,8 +61,8 @@ jobs:
           GENERATED_CORPUS_TARGETS: >-
             mast_forest_deserialize program_deserialize kernel_deserialize
             stack_io_deserialize advice_inputs_deserialize operation_deserialize
-            execution_proof_deserialize precompile_request_deserialize
-            package_deserialize package_semantic_deserialize
+            execution_proof_deserialize deferred_state_wire_deserialize
+            deferred_state_wire_serde_deserialize package_deserialize package_semantic_deserialize
         run: |
           if [[ " $GENERATED_CORPUS_TARGETS " == *" $TARGET "* ]]; then
             make fuzz-seeds
@@ -83,13 +84,105 @@ jobs:
           ')"
           test -n "$FUZZ_TARGET"
           # Build the fuzz target first
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir miden-core-fuzz "$TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-core-fuzz "$TARGET"
           # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
-          FUZZ_BIN="miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          FUZZ_BIN="tools/miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
-          CORPUS_DIR="miden-core-fuzz/corpus/$TARGET"
+          CORPUS_DIR="tools/miden-core-fuzz/corpus/$TARGET"
           if [ -d "$CORPUS_DIR" ]; then
             "$FUZZ_BIN" "$CORPUS_DIR" -max_total_time=60 -runs=10000
           else
             "$FUZZ_BIN" -max_total_time=60 -runs=10000
           fi
+
+  fuzz-miden-crypto:
+    name: fuzz miden-crypto (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - smt
+          - word
+          - merkle
+          - merkle_store
+          - smt_serde
+          - partial_smt
+          - mmr
+          - crypto
+          - aead
+          - signatures
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: rustup update --no-self-update nightly
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzz target (smoke test)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+            $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
+            in_target && /\[default:/ {
+              sub(/^.*\[default: /, "")
+              sub(/\].*$/, "")
+              print
+              exit
+            }
+          ')"
+          test -n "$FUZZ_TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-crypto-fuzz "$TARGET"
+          FUZZ_BIN="tools/miden-crypto-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          test -x "$FUZZ_BIN"
+          "$FUZZ_BIN" -max_total_time=60 -runs=10000
+
+  fuzz-miden-serde-utils:
+    name: fuzz miden-serde-utils (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - primitives
+          - collections
+          - string
+          - vint64
+          - goldilocks
+          - budgeted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: rustup update --no-self-update nightly
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzz target (smoke test)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+            $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
+            in_target && /\[default:/ {
+              sub(/^.*\[default: /, "")
+              sub(/\].*$/, "")
+              print
+              exit
+            }
+          ')"
+          test -n "$FUZZ_TARGET"
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-serde-utils-fuzz "$TARGET"
+          FUZZ_BIN="tools/miden-serde-utils-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          test -x "$FUZZ_BIN"
+          "$FUZZ_BIN" -max_total_time=60 -runs=10000

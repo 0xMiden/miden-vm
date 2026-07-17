@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-sync"
-version = "0.25.5"
+version = "0.28.0"
 description = "no-std compatible locking primitives for the Miden project"
 documentation = "https://docs.rs/miden-utils-sync"
 readme = "README.md"
@@ -20,7 +20,7 @@ std = ["dep:parking_lot"]
 
 [dependencies]
 lock_api = { version = "0.4", features = ["arc_lock"] }
-once_cell = { version = "1.21", default-features = false, features = ["alloc", "race"] }
+once_cell = { workspace = true, features = ["alloc", "race"] }
 parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]

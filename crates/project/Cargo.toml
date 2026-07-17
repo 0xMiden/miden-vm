@@ -1,6 +1,6 @@
 [package]
 name = "miden-project"
-version = "0.25.5"
+version = "0.28.0"
 description = "Interface for working with Miden projects"
 documentation = "https://docs.rs/miden-project"
 readme = "README.md"

@@ -1,0 +1,25 @@
+[package]
+description            = "Stateful sponge-like hashers for cryptographic hashing"
+edition.workspace      = true
+homepage.workspace     = true
+license.workspace      = true
+name                   = "miden-stateful-hasher"
+readme.workspace       = true
+repository.workspace   = true
+rust-version.workspace = true
+version = "0.28.0"
+
+[lib]
+doctest = false
+
+[dependencies]
+p3-field.workspace     = true
+p3-symmetric.workspace = true
+
+[dev-dependencies]
+p3-bn254.workspace       = true
+p3-goldilocks.workspace  = true
+p3-mersenne-31.workspace = true
+
+[lints]
+workspace = true

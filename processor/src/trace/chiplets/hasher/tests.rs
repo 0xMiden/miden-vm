@@ -1,15 +1,16 @@
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{borrow::Borrow, ops::Range};
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
-
-// Chiplet-local column indices used by the hasher trace tests.
-const STATE_COL_RANGE: Range<usize> = 3..15;
-const NODE_INDEX_COL_IDX: usize = 15;
-const MRUPDATE_ID_COL_IDX: usize = 16;
-const IS_BOUNDARY_COL_IDX: usize = 17;
-const DIRECTION_BIT_COL_IDX: usize = 18;
-const S_PERM_COL_IDX: usize = 19;
+use miden_air::{
+    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, ControllerCols, INITIAL_EXTERNAL_ROUND_END,
+    INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
+    NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
+    PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols,
+    trace::{
+        chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
+        poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
+    },
+};
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
@@ -42,18 +43,15 @@ fn hasher_permute() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 2 rows (1 pair), padded to 16 rows total.
-    // Perm segment: 1 packed 16-row cycle (1 unique state).
-    // Total hasher rows: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(2));
+    assert_eq!(trace.poseidon2.len(), 2 * HASH_CYCLE_LEN);
 
-    // Row 0: input (LINEAR_HASH, is_boundary=1, s_perm=0)
-    check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
-    // Row 1: output (RETURN_STATE, is_boundary=1, s_perm=0)
-    check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
+    // Row 0: input (LINEAR_HASH, is_boundary=1)
+    check_controller_input(&trace.controller, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
+    // Row 1: output (RETURN_STATE, is_boundary=1)
+    check_controller_output(&trace.controller, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
 
-    // Perm segment starts at row 16 (after padding)
-    check_perm_segment(&trace, HASH_CYCLE_LEN, &init_state, ONE);
+    check_perm_segment(&trace.poseidon2, 0, &init_state, ONE);
 }
 
 #[test]
@@ -74,17 +72,15 @@ fn hasher_permute_two() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 4 rows (2 pairs), padded to 16 rows total.
-    // Perm segment: 2 packed 16-row cycles = 32 rows.
-    // Total hasher rows: 48.
-    assert_eq!(trace[0].len(), HASH_CYCLE_LEN + 2 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(4));
+    assert_eq!(trace.poseidon2.len(), 3 * HASH_CYCLE_LEN);
 
     // Pair 1
-    check_controller_input(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO);
-    check_controller_output(&trace, 1, RETURN_STATE, &final_state1, ZERO, ONE, ZERO);
+    check_controller_input(&trace.controller, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO);
+    check_controller_output(&trace.controller, 1, RETURN_STATE, &final_state1, ZERO, ONE, ZERO);
     // Pair 2
-    check_controller_input(&trace, 2, LINEAR_HASH, &init_state2, ZERO, ONE, ZERO, ZERO);
-    check_controller_output(&trace, 3, RETURN_STATE, &final_state2, ZERO, ONE, ZERO);
+    check_controller_input(&trace.controller, 2, LINEAR_HASH, &init_state2, ZERO, ONE, ZERO, ZERO);
+    check_controller_output(&trace.controller, 3, RETURN_STATE, &final_state2, ZERO, ONE, ZERO);
 }
 
 // TREE MODE TESTS
@@ -114,10 +110,10 @@ fn hasher_build_merkle_root_depth_1() {
 
     // Row 0: input (MP_VERIFY, is_boundary=1, node_index=0)
     let init_state = init_state_from_words(&leaves[0], &path0[0]);
-    check_controller_input(&trace, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO);
+    check_controller_input(&trace.controller, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO);
     // Row 1: output (RETURN_HASH, is_boundary=1, node_index=0)
     check_controller_output(
-        &trace,
+        &trace.controller,
         1,
         RETURN_HASH,
         &apply_permutation(init_state),
@@ -157,19 +153,17 @@ fn hasher_build_merkle_root_depth_3() {
     // Depth 3: 3 controller pairs = 6 rows
     // Index=5 (binary 101): direction bits are LSBs at each level
     // Pair 0 (rows 0-1): node_index 5 -> 2, b_0=5&1=1, b_next=(5>>1)&1=0
-    check_merkle_controller_pair(&trace, 0, MP_VERIFY, 5, true, false, ZERO, ONE, ZERO);
+    check_merkle_controller_pair(&trace.controller, 0, MP_VERIFY, 5, true, false, ZERO, ONE, ZERO);
     // Pair 1 (rows 2-3): node_index 2 -> 1, b_1=2&1=0, b_next=(2>>1)&1=1
-    check_merkle_controller_pair(&trace, 2, MP_VERIFY, 2, false, false, ZERO, ZERO, ONE);
+    check_merkle_controller_pair(&trace.controller, 2, MP_VERIFY, 2, false, false, ZERO, ZERO, ONE);
     // Pair 2 (rows 4-5): node_index 1 -> 0, b_2=1&1=1, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 4, MP_VERIFY, 1, false, true, ZERO, ONE, ZERO);
+    check_merkle_controller_pair(&trace.controller, 4, MP_VERIFY, 1, false, true, ZERO, ONE, ZERO);
 
     // Capacity is zero on all tree-mode input rows
     for row in [0, 2, 4] {
-        for cap_col in 11..15 {
-            assert_eq!(
-                trace[cap_col][row], ZERO,
-                "capacity should be zero on tree input row {row}, col {cap_col}"
-            );
+        for (i, value) in controller_row(&trace.controller, row).capacity().into_iter().enumerate()
+        {
+            assert_eq!(value, ZERO, "capacity[{i}] should be zero on tree input row {row}");
         }
     }
 }
@@ -201,24 +195,64 @@ fn hasher_update_merkle_root() {
     // MV leg (old path): rows 0-3
     // Index=1 (binary 01): direction bits are LSBs at each level
     // Pair 0 (rows 0-1): node_index 1 -> 0, b_0=1&1=1, b_next=(1>>1)&1=0
-    check_merkle_controller_pair(&trace, 0, MR_UPDATE_OLD, 1, true, false, ONE, ONE, ZERO);
+    check_merkle_controller_pair(
+        &trace.controller,
+        0,
+        MR_UPDATE_OLD,
+        1,
+        true,
+        false,
+        ONE,
+        ONE,
+        ZERO,
+    );
     // Pair 1 (rows 2-3): node_index 0 -> 0, b_1=0&1=0, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 2, MR_UPDATE_OLD, 0, false, true, ONE, ZERO, ZERO);
+    check_merkle_controller_pair(
+        &trace.controller,
+        2,
+        MR_UPDATE_OLD,
+        0,
+        false,
+        true,
+        ONE,
+        ZERO,
+        ZERO,
+    );
 
     // MU leg (new path): rows 4-7
     // Same index, same direction bits
     // Pair 0 (rows 4-5): node_index 1 -> 0, b_0=1&1=1, b_next=(1>>1)&1=0
-    check_merkle_controller_pair(&trace, 4, MR_UPDATE_NEW, 1, true, false, ONE, ONE, ZERO);
+    check_merkle_controller_pair(
+        &trace.controller,
+        4,
+        MR_UPDATE_NEW,
+        1,
+        true,
+        false,
+        ONE,
+        ONE,
+        ZERO,
+    );
     // Pair 1 (rows 6-7): node_index 0 -> 0, b_1=0&1=0, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 6, MR_UPDATE_NEW, 0, false, true, ONE, ZERO, ZERO);
+    check_merkle_controller_pair(
+        &trace.controller,
+        6,
+        MR_UPDATE_NEW,
+        0,
+        false,
+        true,
+        ONE,
+        ZERO,
+        ZERO,
+    );
 }
 
-// PERM SEGMENT TESTS
+// POSEIDON2 TRACE TESTS
 // ================================================================================================
 
 #[test]
-fn perm_segment_structure() {
-    // One permutation -> perm segment has 1 cycle with multiplicity 1
+fn poseidon2_trace_structure() {
+    // One request produces one multiplicity-1 cycle plus one zero-multiplicity padding cycle.
     let mut hasher = Hasher::default();
     let init_state: HasherState = rand_array();
     let (addr, result) = hasher.permute(init_state);
@@ -229,44 +263,52 @@ fn perm_segment_structure() {
 
     let trace = build_trace(hasher);
 
-    // Perm segment starts at HASH_CYCLE_LEN (after padding)
-    let perm_start = HASH_CYCLE_LEN;
+    assert_eq!(trace.poseidon2.len(), 2 * HASH_CYCLE_LEN);
+    let perm_start = 0;
 
-    // All perm rows have s_perm=1
-    for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[S_PERM_COL_IDX][row], ONE, "s_perm should be 1 at row {row}");
-    }
-
-    // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
-    // They are zero on external and boundary rows, but hold S-box witnesses on
-    // packed-internal rows (4-10) and the mixed int+ext row (11).
-    // Rows 0-3, 12-15: witnesses should be zero
-    for offset in [0, 1, 2, 3, 12, 13, 14, 15] {
+    // Witness columns are zero on external rows. Packed-internal rows
+    // (4-10) use all three witnesses; the mixed int+ext row (11) uses only witness 0.
+    // Rows 1-3 and 12-14: witnesses should be zero.
+    for offset in [1, 2, 3, 12, 13, 14] {
         let row = perm_start + offset;
-        assert_eq!(trace[0][row], ZERO, "perm row {row}: s0 should be zero");
-        assert_eq!(trace[1][row], ZERO, "perm row {row}: s1 should be zero");
-        assert_eq!(trace[2][row], ZERO, "perm row {row}: s2 should be zero");
+        let cols = poseidon2_row(&trace.poseidon2, row);
+        assert_eq!(cols.witnesses[0], ZERO, "perm row {row}: witness 0 should be zero");
+        assert_eq!(cols.witnesses[1], ZERO, "perm row {row}: witness 1 should be zero");
+        assert_eq!(cols.witnesses[2], ZERO, "perm row {row}: witness 2 should be zero");
     }
-    // Rows 4-10: s0, s1, s2 hold witness values (non-zero for non-trivial states)
-    // Row 11: s0 holds witness, s1 and s2 are zero
+    // Rows 0 and 15 carry the link multiplicity in witness 0.
+    for offset in [0, 15] {
+        let row = perm_start + offset;
+        let cols = poseidon2_row(&trace.poseidon2, row);
+        assert_eq!(cols.witnesses[0], ONE, "perm row {row}: multiplicity mismatch");
+        assert_eq!(cols.witnesses[1], ZERO, "perm row {row}: witness 1 should be zero");
+        assert_eq!(cols.witnesses[2], ZERO, "perm row {row}: witness 2 should be zero");
+    }
+    // Row 11: witnesses 1 and 2 are zero.
     let row_11 = perm_start + 11;
-    assert_eq!(trace[1][row_11], ZERO, "perm row {row_11}: s1 should be zero on int+ext row");
-    assert_eq!(trace[2][row_11], ZERO, "perm row {row_11}: s2 should be zero on int+ext row");
+    let row_11_cols = poseidon2_row(&trace.poseidon2, row_11);
+    assert_eq!(
+        row_11_cols.witnesses[1], ZERO,
+        "perm row {row_11}: witness 1 should be zero on int+ext row"
+    );
+    assert_eq!(
+        row_11_cols.witnesses[2], ZERO,
+        "perm row {row_11}: witness 2 should be zero on int+ext row"
+    );
 
-    // Multiplicity in node_index column
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], ONE);
-
-    // is_boundary, direction_bit, mrupdate_id all zero on perm rows
-    for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], ZERO);
-        assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], ZERO);
-        assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], ZERO);
-    }
+    assert_eq!(poseidon2_row(&trace.poseidon2, perm_start).witnesses[0], ONE);
+    assert_eq!(
+        poseidon2_row(&trace.poseidon2, HASH_CYCLE_LEN).witnesses[0],
+        ZERO,
+        "the final Poseidon2 cycle closes the accumulator"
+    );
+    assert_eq!(poseidon2_row(&trace.poseidon2, perm_start).perm_id, ZERO);
+    assert_eq!(poseidon2_row(&trace.poseidon2, HASH_CYCLE_LEN).perm_id, ONE);
 }
 
 #[test]
-fn perm_deduplication() {
-    // Two permutations with the SAME input state -> perm segment has 1 cycle with multiplicity 2
+fn poseidon2_trace_deduplication() {
+    // Two requests with the same input share one multiplicity-2 cycle.
     let mut hasher = Hasher::default();
     let init_state: HasherState = rand_array();
     let (addr1, result1) = hasher.permute(init_state);
@@ -278,12 +320,10 @@ fn perm_deduplication() {
 
     let trace = build_trace(hasher);
 
-    // Controller: 4 rows (2 pairs), padded to 16. Perm: 1 cycle = 16 rows (deduped). Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(4));
+    assert_eq!(trace.poseidon2.len(), 2 * HASH_CYCLE_LEN);
 
-    // Perm segment: multiplicity should be 2
-    let perm_start = HASH_CYCLE_LEN;
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    assert_eq!(poseidon2_row(&trace.poseidon2, 0).witnesses[0], Felt::from_u8(2));
 }
 
 // MEMOIZATION TESTS
@@ -312,13 +352,10 @@ fn hash_memoization_control_blocks() {
 
     let trace = build_trace(hasher);
 
-    // Both calls produce controller pairs (4 rows), but share perm requests.
-    // Controller: 4 rows, padded to 16. Perm: 1 cycle (deduped). Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(4));
+    assert_eq!(trace.poseidon2.len(), 2 * HASH_CYCLE_LEN);
 
-    // Perm segment has multiplicity 2 (two requests for same state)
-    let perm_start = HASH_CYCLE_LEN;
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    assert_eq!(poseidon2_row(&trace.poseidon2, 0).witnesses[0], Felt::from_u8(2));
 }
 
 // BASIC BLOCK MEMOIZATION TESTS
@@ -342,13 +379,12 @@ fn hash_memoization_basic_blocks_single_batch() {
 
     let trace = build_trace(hasher);
 
-    // Single batch -> 1 controller pair per call = 4 rows total, padded to 16.
-    // Perm: 1 unique state with multiplicity 2 = 16 rows. Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(4));
+    assert_eq!(trace.poseidon2.len(), 2 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-1
     check_controller_input(
-        &trace,
+        &trace.controller,
         0,
         LINEAR_HASH,
         &init_state(batches[0].groups(), ZERO),
@@ -358,7 +394,7 @@ fn hash_memoization_basic_blocks_single_batch() {
         ZERO,
     );
     check_controller_output(
-        &trace,
+        &trace.controller,
         1,
         RETURN_HASH,
         &apply_permutation(init_state(batches[0].groups(), ZERO)),
@@ -368,11 +404,9 @@ fn hash_memoization_basic_blocks_single_batch() {
     );
 
     // Verify memoized call: rows 2-3 should match rows 0-1 in selectors and state
-    check_memoized_trace(&trace, 0..2, 2..4);
+    check_memoized_trace(&trace.controller, 0..2, 2..4);
 
-    // Perm segment: multiplicity should be 2 (original + memoized)
-    let perm_start = HASH_CYCLE_LEN;
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    assert_eq!(poseidon2_row(&trace.poseidon2, 0).witnesses[0], Felt::from_u8(2));
 }
 
 #[test]
@@ -393,34 +427,31 @@ fn hash_memoization_basic_blocks_multi_batch() {
 
     let trace = build_trace(hasher);
 
-    // 3 batches -> 3 controller pairs per call = 12 rows total, padded to 16.
-    // 3 unique perm states (each with multiplicity 2) = 3 * 16 = 48 rows.
-    // Total: 16 + 48 = 64 rows.
-    assert_eq!(trace[0].len(), HASH_CYCLE_LEN + 3 * HASH_CYCLE_LEN);
+    assert_eq!(trace.controller.len(), controller_len(12));
+    assert_eq!(trace.poseidon2.len(), 4 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-5 (3 pairs)
     // Row 0: first batch input, is_boundary=1 (start)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][0], ONE);
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][0], ZERO);
+    assert_eq!(controller_row(&trace.controller, 0).is_boundary, ONE);
+    assert_eq!(controller_row(&trace.controller, 0).direction_bit, ZERO);
     // Row 1: first batch output, is_boundary=0 (not final)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][1], ZERO);
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][1], ZERO);
+    assert_eq!(controller_row(&trace.controller, 1).is_boundary, ZERO);
+    assert_eq!(controller_row(&trace.controller, 1).direction_bit, ZERO);
     // Row 2: second batch input, is_boundary=0 (continuation)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][2], ZERO);
+    assert_eq!(controller_row(&trace.controller, 2).is_boundary, ZERO);
     // Row 4: third batch input, is_boundary=0 (continuation)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][4], ZERO);
+    assert_eq!(controller_row(&trace.controller, 4).is_boundary, ZERO);
     // Row 5: third batch output, is_boundary=1 (final)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][5], ONE);
+    assert_eq!(controller_row(&trace.controller, 5).is_boundary, ONE);
 
     // Verify memoized call: rows 6-11 should match rows 0-5
-    check_memoized_trace(&trace, 0..6, 6..12);
+    check_memoized_trace(&trace.controller, 0..6, 6..12);
 
     // Perm segment: each of the 3 unique states should have multiplicity 2
-    let perm_start = HASH_CYCLE_LEN;
     for i in 0..3 {
-        let cycle_start = perm_start + i * HASH_CYCLE_LEN;
+        let cycle_start = i * HASH_CYCLE_LEN;
         assert_eq!(
-            trace[NODE_INDEX_COL_IDX][cycle_start],
+            poseidon2_row(&trace.poseidon2, cycle_start).witnesses[0],
             Felt::from_u8(2),
             "perm cycle {i} should have multiplicity 2"
         );
@@ -496,24 +527,18 @@ fn hash_memoization_basic_blocks_check() {
     // Join1 is at rows 12..14.
     let bb1_start = bb1_addr.as_canonical_u64() as usize - 1;
     let bb2_start = bb2_addr.as_canonical_u64() as usize - 1;
-    check_memoized_trace(&trace, bb1_start..bb1_start + 4, bb2_start..bb2_start + 4);
+    check_memoized_trace(&trace.controller, bb1_start..bb1_start + 4, bb2_start..bb2_start + 4);
 
     // Verify perm multiplicities: BB1's 2 perm states should each have multiplicity 2
     // (original from BB1 + memoized from BB2). The loop body's perm state and the two
     // join perm states should each have multiplicity 1.
-    let controller_rows: usize = 14; // 4 + 2 + 2 + 4 + 2
-    let controller_padded_len = controller_rows.next_multiple_of(HASH_CYCLE_LEN);
-
     // Count unique perm states: BB1 has 2 unique states (2 batches), loop body has 1,
     // join2 has 1, join1 has 1 = 5 unique states total (unless some coincide, which is
     // astronomically unlikely with random groups).
     // BB2 is memoized so its 2 states are the same as BB1's.
-    // Total perm cycles: at most 5 (could be less if join states happen to match).
+    // The Poseidon2 trace also contains one zero-multiplicity cycle for accumulator closure.
 
-    // Verify that the perm segment has correct multiplicities
-    let perm_start = controller_padded_len;
-    let total_len = trace[0].len();
-    let num_perm_cycles = (total_len - perm_start) / HASH_CYCLE_LEN;
+    let num_perm_cycles = trace.poseidon2.len() / HASH_CYCLE_LEN;
 
     // We should have at least 5 perm cycles (2 from BB + 1 loop + 2 joins)
     assert!(num_perm_cycles >= 5, "expected at least 5 perm cycles, got {num_perm_cycles}");
@@ -522,8 +547,8 @@ fn hash_memoization_basic_blocks_check() {
     let mut mult_2_count = 0;
     let mut mult_1_count = 0;
     for i in 0..num_perm_cycles {
-        let cycle_start = perm_start + i * HASH_CYCLE_LEN;
-        let mult = trace[NODE_INDEX_COL_IDX][cycle_start];
+        let cycle_start = i * HASH_CYCLE_LEN;
+        let mult = poseidon2_row(&trace.poseidon2, cycle_start).witnesses[0];
         if mult == Felt::from_u8(2) {
             mult_2_count += 1;
         } else if mult == ONE {
@@ -540,20 +565,53 @@ fn hash_memoization_basic_blocks_check() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Builds the full hasher trace (controller + perm segment).
-fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
+struct HasherTestTrace {
+    controller: Vec<[Felt; TRACE_WIDTH]>,
+    poseidon2: Vec<[Felt; NUM_POSEIDON2_PERMUTATION_COLS]>,
+}
+
+fn controller_len(controller_rows: usize) -> usize {
+    controller_rows.next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
+}
+
+/// Builds the hasher controller and Poseidon2-permutation traces.
+fn build_trace(hasher: Hasher) -> HasherTestTrace {
     let trace_len = hasher.trace_len();
     let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
     let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
-    hasher.fill_trace(&mut fragment);
-    (0..TRACE_WIDTH)
-        .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())
-        .collect()
+
+    let poseidon2_len = hasher.poseidon2_permutation_trace_len();
+    let mut poseidon2_band = Felt::zero_vec(NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_len);
+
+    hasher.fill_trace(&mut fragment, &mut poseidon2_band);
+
+    let (controller, controller_remainder) = band.as_chunks::<TRACE_WIDTH>();
+    debug_assert!(controller_remainder.is_empty());
+
+    let (poseidon2, poseidon2_remainder) =
+        poseidon2_band.as_chunks::<NUM_POSEIDON2_PERMUTATION_COLS>();
+    debug_assert!(poseidon2_remainder.is_empty());
+
+    HasherTestTrace {
+        controller: controller.to_vec(),
+        poseidon2: poseidon2.to_vec(),
+    }
+}
+
+fn controller_row(trace: &[[Felt; TRACE_WIDTH]], row: usize) -> &ControllerCols<Felt> {
+    trace[row][..].borrow()
+}
+
+fn poseidon2_row(
+    trace: &[[Felt; NUM_POSEIDON2_PERMUTATION_COLS]],
+    row: usize,
+) -> &Poseidon2PermutationCols<Felt> {
+    trace[row][..].borrow()
 }
 
 /// Checks a controller input row.
 fn check_controller_input(
-    trace: &[Vec<Felt>],
+    trace: &[[Felt; TRACE_WIDTH]],
     row: usize,
     selectors: Selectors,
     state: &HasherState,
@@ -562,27 +620,19 @@ fn check_controller_input(
     mrupdate_id: Felt,
     direction_bit: Felt,
 ) {
-    // Selectors
-    assert_eq!(trace[0][row], selectors[0], "s0 at row {row}");
-    assert_eq!(trace[1][row], selectors[1], "s1 at row {row}");
-    assert_eq!(trace[2][row], selectors[2], "s2 at row {row}");
+    let cols = controller_row(trace, row);
 
-    // State
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row}");
-    }
-
-    // Control columns
-    assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
-    assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], mrupdate_id, "mrupdate_id at row {row}");
+    assert_eq!([cols.s0, cols.s1, cols.s2], selectors, "selectors at row {row}");
+    assert_eq!(cols.state, *state, "state at row {row}");
+    assert_eq!(cols.node_index, node_index, "node_index at row {row}");
+    assert_eq!(cols.is_boundary, is_boundary, "is_boundary at row {row}");
+    assert_eq!(cols.direction_bit, direction_bit, "direction_bit at row {row}");
+    assert_eq!(cols.mrupdate_id, mrupdate_id, "mrupdate_id at row {row}");
 }
 
 /// Checks a controller output row.
 fn check_controller_output(
-    trace: &[Vec<Felt>],
+    trace: &[[Felt; TRACE_WIDTH]],
     row: usize,
     selectors: Selectors,
     state: &HasherState,
@@ -590,18 +640,20 @@ fn check_controller_output(
     is_boundary: Felt,
     direction_bit: Felt,
 ) {
-    assert_eq!(trace[0][row], selectors[0], "s0 at row {row}");
-    assert_eq!(trace[1][row], selectors[1], "s1 at row {row}");
-    assert_eq!(trace[2][row], selectors[2], "s2 at row {row}");
+    let cols = controller_row(trace, row);
+    let input_cols = controller_row(trace, row - 1);
 
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row}");
-    }
-
-    assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
+    assert_eq!([cols.s0, cols.s1, cols.s2], selectors, "selectors at row {row}");
+    assert_eq!(cols.state, *state, "state at row {row}");
+    assert_eq!(cols.node_index, node_index, "node_index at row {row}");
+    assert_eq!(cols.is_boundary, is_boundary, "is_boundary at row {row}");
+    assert_eq!(cols.direction_bit, direction_bit, "direction_bit at row {row}");
+    assert_eq!(
+        cols.perm_id,
+        input_cols.perm_id,
+        "perm_id mismatch between controller rows {} and {row}",
+        row - 1
+    );
 }
 
 /// Checks both the input and output rows of a Merkle controller pair.
@@ -610,9 +662,9 @@ fn check_controller_output(
 /// - Input row (`input_row`): has `input_selectors`, `node_index`, `is_boundary_input` flag.
 /// - Output row (`input_row + 1`): has `node_index >> 1`, `is_boundary_output` flag.
 ///
-/// Both rows must have `s_perm=0` and the given `mrupdate_id`.
+/// Both rows must have the given `mrupdate_id`.
 fn check_merkle_controller_pair(
-    trace: &[Vec<Felt>],
+    trace: &[[Felt; TRACE_WIDTH]],
     input_row: usize,
     input_selectors: Selectors,
     node_index: u64,
@@ -625,52 +677,52 @@ fn check_merkle_controller_pair(
     let output_row = input_row + 1;
     let is_boundary_input_felt = if is_boundary_input { ONE } else { ZERO };
     let is_boundary_output_felt = if is_boundary_output { ONE } else { ZERO };
+    let input_cols = controller_row(trace, input_row);
+    let output_cols = controller_row(trace, output_row);
 
-    // Input row: selectors, node_index, is_boundary, direction_bit, s_perm=0
-    assert_eq!(trace[0][input_row], input_selectors[0], "s0 at input row {input_row}");
-    assert_eq!(trace[1][input_row], input_selectors[1], "s1 at input row {input_row}");
-    assert_eq!(trace[2][input_row], input_selectors[2], "s2 at input row {input_row}");
+    // Input row: selectors, node_index, is_boundary, direction_bit.
     assert_eq!(
-        trace[NODE_INDEX_COL_IDX][input_row],
+        [input_cols.s0, input_cols.s1, input_cols.s2],
+        input_selectors,
+        "selectors at input row {input_row}"
+    );
+    assert_eq!(
+        input_cols.node_index,
         Felt::new_unchecked(node_index),
         "node_index at input row {input_row}"
     );
     assert_eq!(
-        trace[IS_BOUNDARY_COL_IDX][input_row], is_boundary_input_felt,
+        input_cols.is_boundary, is_boundary_input_felt,
         "is_boundary at input row {input_row}"
     );
     assert_eq!(
-        trace[DIRECTION_BIT_COL_IDX][input_row], input_direction_bit,
+        input_cols.direction_bit, input_direction_bit,
         "direction_bit at input row {input_row}"
     );
-    assert_eq!(trace[S_PERM_COL_IDX][input_row], ZERO, "s_perm at input row {input_row}");
-    assert_eq!(
-        trace[MRUPDATE_ID_COL_IDX][input_row], mrupdate_id,
-        "mrupdate_id at input row {input_row}"
-    );
+    assert_eq!(input_cols.mrupdate_id, mrupdate_id, "mrupdate_id at input row {input_row}");
 
-    // Output row: node_index >> 1, is_boundary, direction_bit, s_perm=0
+    // Output row: node_index >> 1, is_boundary, direction_bit.
     assert_eq!(
-        trace[NODE_INDEX_COL_IDX][output_row],
+        output_cols.node_index,
         Felt::new_unchecked(node_index >> 1),
         "node_index at output row {output_row}"
     );
     assert_eq!(
-        trace[IS_BOUNDARY_COL_IDX][output_row], is_boundary_output_felt,
+        output_cols.is_boundary, is_boundary_output_felt,
         "is_boundary at output row {output_row}"
     );
     assert_eq!(
-        trace[DIRECTION_BIT_COL_IDX][output_row], output_direction_bit,
+        output_cols.direction_bit, output_direction_bit,
         "direction_bit at output row {output_row}"
     );
-    assert_eq!(trace[S_PERM_COL_IDX][output_row], ZERO, "s_perm at output row {output_row}");
+    assert_eq!(output_cols.mrupdate_id, mrupdate_id, "mrupdate_id at output row {output_row}");
     assert_eq!(
-        trace[MRUPDATE_ID_COL_IDX][output_row], mrupdate_id,
-        "mrupdate_id at output row {output_row}"
+        output_cols.perm_id, input_cols.perm_id,
+        "perm_id mismatch between input row {input_row} and output row {output_row}"
     );
 }
 
-/// Checks a 16-row permutation cycle in the perm segment.
+/// Checks a 16-row permutation cycle in the Poseidon2-permutation trace.
 ///
 /// The packed schedule records the PRE-transition state on each row:
 /// - Row 0: initial state
@@ -683,7 +735,7 @@ fn check_merkle_controller_pair(
 /// - Rows 13-14: state after ext6, ext7
 /// - Row 15: state after ext8 (= final permutation output)
 fn check_perm_segment(
-    trace: &[Vec<Felt>],
+    trace: &[[Felt; NUM_POSEIDON2_PERMUTATION_COLS]],
     start_row: usize,
     init_state: &HasherState,
     expected_multiplicity: Felt,
@@ -692,76 +744,89 @@ fn check_perm_segment(
 
     let mut state = *init_state;
 
-    // Row 0: initial state
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(
-            trace[STATE_COL_RANGE.start + i][start_row],
-            val,
-            "state[{i}] at perm row 0 (row {start_row})"
-        );
-    }
-    assert_eq!(trace[NODE_INDEX_COL_IDX][start_row], expected_multiplicity);
-    assert_eq!(trace[S_PERM_COL_IDX][start_row], ONE);
+    let first_row = poseidon2_row(trace, start_row);
+    assert_eq!(first_row.state, state, "state at perm row {CYCLE_INPUT_ROW} (row {start_row})");
+    assert_eq!(first_row.witnesses[0], expected_multiplicity);
+    assert_eq!(
+        poseidon2_row(trace, start_row + CYCLE_OUTPUT_ROW).witnesses[0],
+        expected_multiplicity
+    );
+    let expected_perm_id =
+        Felt::new_unchecked((start_row / HASH_CYCLE_LEN).try_into().expect("perm id exceeds u64"));
+    assert_eq!(first_row.perm_id, expected_perm_id);
 
     // Apply init+ext1, check row 1
     Hasher::apply_matmul_external(&mut state);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
-    check_state_at_row(trace, start_row + 1, &state, "after init+ext1");
+    check_state_at_row(trace, start_row + INITIAL_EXTERNAL_ROUND_START, &state, "after init+ext1");
 
     // Apply ext2-4, check rows 2-4
-    for r in 1..=3 {
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+    for round in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
-        check_state_at_row(trace, start_row + 1 + r, &state, &alloc::format!("after ext{}", r + 1));
+        check_state_at_row(
+            trace,
+            start_row + round + 1,
+            &state,
+            &alloc::format!("after ext{}", round + 1),
+        );
     }
 
     // Apply 7 packed internal triples, check rows 5-11
-    for triple in 0..7_usize {
-        let base = triple * 3;
-        for k in 0..3 {
+    for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
+        let base = triple * NUM_SBOX_WITNESSES;
+        for k in 0..NUM_SBOX_WITNESSES {
             state[0] += Hasher::ARK_INT[base + k];
             state[0] = state[0].exp_const_u64::<7>();
             Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
         }
         check_state_at_row(
             trace,
-            start_row + 5 + triple,
+            start_row + PACKED_INTERNAL_ROUND_START + 1 + triple,
             &state,
             &alloc::format!("after int triple {triple}"),
         );
     }
 
     // Apply int22+ext5, check row 12
-    state[0] += Hasher::ARK_INT[21];
+    state[0] += Hasher::ARK_INT[LAST_INTERNAL_ROUND_ARK_IDX];
     state[0] = state[0].exp_const_u64::<7>();
     Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
     Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
     Hasher::apply_sbox(&mut state);
     Hasher::apply_matmul_external(&mut state);
-    check_state_at_row(trace, start_row + 12, &state, "after int22+ext5");
+    check_state_at_row(
+        trace,
+        start_row + INTERNAL_PLUS_EXTERNAL_ROW + 1,
+        &state,
+        "after int22+ext5",
+    );
 
     // Apply ext6-8, check rows 13-15
-    for r in 1..=3 {
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+    for round in 1..=NUM_TRAILING_EXTERNAL_ROUND_ROWS {
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[round]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
         check_state_at_row(
             trace,
-            start_row + 12 + r,
+            start_row + INTERNAL_PLUS_EXTERNAL_ROW + 1 + round,
             &state,
-            &alloc::format!("after ext{}", r + 5),
+            &alloc::format!("after ext{}", round + 5),
         );
     }
 }
 
 /// Helper to check the hasher state at a specific trace row.
-fn check_state_at_row(trace: &[Vec<Felt>], row: usize, state: &HasherState, label: &str) {
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row} ({label})");
-    }
+fn check_state_at_row(
+    trace: &[[Felt; NUM_POSEIDON2_PERMUTATION_COLS]],
+    row: usize,
+    state: &HasherState,
+    label: &str,
+) {
+    assert_eq!(poseidon2_row(trace, row).state, *state, "state at row {row} ({label})");
 }
 
 fn apply_permutation(mut state: HasherState) -> HasherState {
@@ -779,9 +844,13 @@ fn init_leaf(value: u64) -> Digest {
 
 /// Verifies that a memoized (copied) range of controller rows matches the original range.
 ///
-/// Checks selectors (s0, s1, s2), state columns (h0..h11), and node_index.
+/// Checks selectors (s0, s1, s2), state columns (h0..h11), and controller metadata.
 /// Does NOT check mrupdate_id (which is overwritten by the hasher on copy).
-fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Range<usize>) {
+fn check_memoized_trace(
+    trace: &[[Felt; TRACE_WIDTH]],
+    original: Range<usize>,
+    copied: Range<usize>,
+) {
     assert_eq!(
         original.len(),
         copied.len(),
@@ -789,42 +858,33 @@ fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Ran
     );
 
     for (orig_row, copy_row) in original.zip(copied) {
-        // Selectors s0, s1, s2
-        for col in 0..3 {
-            assert_eq!(
-                trace[col][orig_row], trace[col][copy_row],
-                "selector col {col} mismatch: original row {orig_row} vs copied row {copy_row}"
-            );
-        }
+        let original = controller_row(trace, orig_row);
+        let copied = controller_row(trace, copy_row);
 
-        // State columns h0..h11
-        for col in STATE_COL_RANGE {
-            assert_eq!(
-                trace[col][orig_row], trace[col][copy_row],
-                "state col {col} mismatch: original row {orig_row} vs copied row {copy_row}"
-            );
-        }
-
-        // node_index
         assert_eq!(
-            trace[NODE_INDEX_COL_IDX][orig_row], trace[NODE_INDEX_COL_IDX][copy_row],
+            [original.s0, original.s1, original.s2],
+            [copied.s0, copied.s1, copied.s2],
+            "selector mismatch: original row {orig_row} vs copied row {copy_row}"
+        );
+        assert_eq!(
+            original.state, copied.state,
+            "state mismatch: original row {orig_row} vs copied row {copy_row}"
+        );
+        assert_eq!(
+            original.node_index, copied.node_index,
             "node_index mismatch: original row {orig_row} vs copied row {copy_row}"
         );
-
-        // is_boundary, direction_bit should also match
         assert_eq!(
-            trace[IS_BOUNDARY_COL_IDX][orig_row], trace[IS_BOUNDARY_COL_IDX][copy_row],
+            original.is_boundary, copied.is_boundary,
             "is_boundary mismatch: original row {orig_row} vs copied row {copy_row}"
         );
         assert_eq!(
-            trace[DIRECTION_BIT_COL_IDX][orig_row], trace[DIRECTION_BIT_COL_IDX][copy_row],
+            original.direction_bit, copied.direction_bit,
             "direction_bit mismatch: original row {orig_row} vs copied row {copy_row}"
         );
-
-        // s_perm should be 0 on all controller rows
         assert_eq!(
-            trace[S_PERM_COL_IDX][copy_row], ZERO,
-            "s_perm should be 0 on copied controller row {copy_row}"
+            original.perm_id, copied.perm_id,
+            "perm_id mismatch: original row {orig_row} vs copied row {copy_row}"
         );
     }
 }

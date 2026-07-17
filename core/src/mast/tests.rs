@@ -13,7 +13,7 @@ use crate::{
         MastNodeId,
     },
     operations::Operation,
-    program::{Kernel, ProgramInfo},
+    program::{KernelDescriptor, ProgramInfo},
     serde::{Deserializable, Serializable},
     utils::IndexVec,
 };
@@ -42,7 +42,7 @@ proptest! {
                 Some(digest_from_seed(*seed))
             })
             .collect();
-        let kernel = Kernel::new(&kernel).unwrap();
+        let kernel = KernelDescriptor::new(&kernel).unwrap();
         let program_info = ProgramInfo::new(program_hash, kernel);
         let bytes = program_info.to_bytes();
         let deser = ProgramInfo::read_from_bytes(&bytes).unwrap();

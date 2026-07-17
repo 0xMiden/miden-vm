@@ -206,11 +206,13 @@ use super::*;
         Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6), Felt::from_u32(5), Felt::from_u32(4),
         Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
-// ---- log precompile ops --------------------------------
-// Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
-#[case(None, "begin log_precompile end",
+// ---- log deferred ops --------------------------------
+// Drift marker only: this snapshot guards the `log_deferred` deferred-root output against
+// silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
+// Stack: [1, 2, 3, 4, 0, 0, 0, 0] with 1 at top; TRUE_DIGEST is at offsets 4..8.
+#[case(None, "begin log_deferred end",
     vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
-         Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
+         ZERO, ZERO, ZERO, ZERO],
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected
@@ -366,35 +368,41 @@ fn test_masm_errors_consistency(
     insta::assert_debug_snapshot!(testname, fast_err);
 }
 
-/// Tests that `log_precompile` correctly folds a precomputed statement word into the rolling
-/// transcript via Poseidon2.
+/// Tests that `log_deferred` correctly folds a verified statement digest into the rolling
+/// deferred root via Poseidon2.
 ///
 /// Verifies:
-/// 1. Poseidon2 input layout `[STATE_PREV, STMNT, ZERO]` (rate0, rate1, capacity).
-/// 2. Output identity-mapped to the stack: rate0_out → `stack[0..4]` (= `STATE_NEW`), rate1_out →
-///    `stack[4..8]`, cap_out → `stack[8..12]`.
-/// 3. Transcript state initialised to `[0, 0, 0, 0]` for the first call.
+/// 1. Poseidon2 input layout `[DEFERRED_ROOT_PREV, STATEMENT, Tag::AND]`.
+/// 2. Output identity-mapped to the stack: rate0_out → `stack[0..4]` (= `DEFERRED_ROOT_NEW`),
+///    rate1_out → `stack[4..8]`, cap_out → `stack[8..12]`.
+/// 3. Deferred root initialised to `[0, 0, 0, 0]` (`TRUE_DIGEST`) for the first call.
 #[test]
-fn test_log_precompile_correctness() {
-    use miden_core::crypto::hash::Poseidon2;
+fn test_log_deferred_correctness() {
+    use miden_core::{
+        crypto::hash::Poseidon2,
+        deferred::{Node, TRUE_DIGEST, Tag},
+    };
 
-    // The opcode reads STMNT from stack[4..8]; stack[0..4] and stack[8..12] are ignored.
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(Felt::new_unchecked);
-    let stmnt: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
-    let state_prev = Word::empty();
+    // The opcode reads STATEMENT from stack[4..8]; use implicit TRUE so the empty deferred registry
+    // can verify the statement.
+    let stack_inputs = [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12].map(Felt::new_unchecked);
+    let statement = TRUE_DIGEST;
+    let state_prev = TRUE_DIGEST;
 
-    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAP = ZERO].
+    // Hasher input: [RATE0 = DEFERRED_ROOT_PREV, RATE1 = STATEMENT, CAP = Tag::AND].
     let mut hasher_state = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(state_prev.as_slice());
-    hasher_state[4..8].copy_from_slice(stmnt.as_slice());
+    hasher_state[4..8].copy_from_slice(statement.as_slice());
+    hasher_state[8..12].copy_from_slice(&Tag::AND.as_word());
 
     Poseidon2::apply_permutation(&mut hasher_state);
 
     let expected_state_new: Word = hasher_state[0..4].try_into().unwrap();
+    assert_eq!(expected_state_new, Node::and(state_prev, statement).digest());
     let expected_out_rate1: Word = hasher_state[4..8].try_into().unwrap();
     let expected_out_cap: Word = hasher_state[8..12].try_into().unwrap();
 
-    let program_source = "begin log_precompile end";
+    let program_source = "begin log_deferred end";
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
         Assembler::new(source_manager)

@@ -3,9 +3,9 @@
 //! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
 //! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
 
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
@@ -15,6 +15,7 @@ use miden_crypto::{
         rpo::RpoPermutation256,
         rpx::RpxPermutation256,
     },
+    merkle::MerkleTree,
     stark::{
         GenericStarkConfig,
         challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
@@ -28,6 +29,8 @@ use miden_crypto::{
         },
     },
 };
+
+use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH};
 
 // SHARED TYPES
 // ================================================================================================
@@ -80,16 +83,98 @@ pub fn pcs_params() -> PcsParams {
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
 // ================================================================================================
 
-/// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, CIRCUIT_COMMITMENT]).
+/// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2795405418319799191),
-    Felt::new_unchecked(12271653592413561980),
-    Felt::new_unchecked(12429945506697789964),
-    Felt::new_unchecked(17099343032831989679),
+    Felt::new_unchecked(1054594910562052599),
+    Felt::new_unchecked(11984096228624862183),
+    Felt::new_unchecked(16222035304856376939),
+    Felt::new_unchecked(17104265933749949296),
 ];
+
+/// Root of the accepted ACE circuit registry.
+///
+/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
+pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
+    Felt::new_unchecked(15847950920222870147),
+    Felt::new_unchecked(7047508041269431782),
+    Felt::new_unchecked(16167476278294667840),
+    Felt::new_unchecked(12153679197399633766),
+];
+
+/// Smallest ACE circuit registry depth covering every proof-order tag.
+///
+/// With `n` AIRs, proof-order tags range over the `n!` AIR permutations.
+pub const ACE_CIRCUIT_REGISTRY_DEPTH: usize = PROOF_ORDER_REGISTRY_DEPTH;
+
+/// Number of leaves in the ACE circuit registry tree.
+pub const ACE_CIRCUIT_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
+const _: () = assert!(
+    PROOF_ORDER_COUNT <= ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
+    "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
+);
+
+/// Leaves in the ACE circuit registry tree.
+///
+/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
+/// Inactive leaves are deterministic padding.
+pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
+    [
+        Felt::new_unchecked(14350200979877962472),
+        Felt::new_unchecked(103089701495165480),
+        Felt::new_unchecked(9854064066123798283),
+        Felt::new_unchecked(12174181773921540602),
+    ],
+    [
+        Felt::new_unchecked(5246651242980857613),
+        Felt::new_unchecked(1618297549716024731),
+        Felt::new_unchecked(1061405701969296361),
+        Felt::new_unchecked(17297391313466625441),
+    ],
+    [
+        Felt::new_unchecked(16036278270407702678),
+        Felt::new_unchecked(8080086475134229442),
+        Felt::new_unchecked(17598264714838810328),
+        Felt::new_unchecked(8480121305785686269),
+    ],
+    [
+        Felt::new_unchecked(5978319484544539769),
+        Felt::new_unchecked(11472236488368657853),
+        Felt::new_unchecked(16907876063844059339),
+        Felt::new_unchecked(16419555801865071852),
+    ],
+    [
+        Felt::new_unchecked(15319518752942062709),
+        Felt::new_unchecked(2570562416486635634),
+        Felt::new_unchecked(16366026173493615048),
+        Felt::new_unchecked(11052119545944915459),
+    ],
+    [
+        Felt::new_unchecked(17327818317567783689),
+        Felt::new_unchecked(5978149467245783274),
+        Felt::new_unchecked(12627338572399706497),
+        Felt::new_unchecked(13452413375315601834),
+    ],
+    [
+        Felt::new_unchecked(1422687632582465263),
+        Felt::new_unchecked(6762842649754512176),
+        Felt::new_unchecked(204555358186721414),
+        Felt::new_unchecked(14644894839315568530),
+    ],
+    [
+        Felt::new_unchecked(17922044667460564880),
+        Felt::new_unchecked(15528373781338840444),
+        Felt::new_unchecked(17550563904831590003),
+        Felt::new_unchecked(14149524031833665710),
+    ],
+];
+
+pub fn ace_circuit_registry_tree() -> MerkleTree {
+    let leaves = ACE_CIRCUIT_REGISTRY_LEAVES.iter().copied().map(Word::new).collect::<Vec<_>>();
+    MerkleTree::new(&leaves).expect("ACE circuit registry has power-of-two leaves")
+}
 
 /// Observes PCS protocol parameters into the challenger.
 ///
@@ -259,42 +344,93 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_ace_codegen::{AceConfig, LayoutKind};
-    use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
+    use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+    use miden_crypto::merkle::MerkleTree;
 
-    use crate::ace;
+    use crate::{ProofOrder, ace};
 
     const PROTOCOL_ID: u64 = 0;
+    const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
+
+    fn padding_leaf(index: usize) -> Word {
+        Poseidon2::hash_elements(&[
+            Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN),
+            Felt::new_unchecked(index as u64),
+        ])
+    }
 
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
     ///
     /// If this test fails, regenerate with:
-    ///   cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints --
-    /// --write
+    /// ```text
+    /// cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+    /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        let config = AceConfig {
-            num_quotient_chunks: 8,
-            layout: LayoutKind::Masm,
-            num_airs: 2,
-        };
-        let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
-        let encoded = circuit.to_ace().unwrap();
-        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
-
-        let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
-            .chain(circuit_commitment.iter().copied())
-            .collect();
-        let digest = Poseidon2::hash_elements(&input);
-        let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
-
-        let snapshot = format!(
-            "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
-            encoded.num_vars(),
-            encoded.num_eval_rows(),
-            expected,
+        assert_eq!(
+            super::ACE_CIRCUIT_REGISTRY_LEAVES.len(),
+            super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
+            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
         );
+
+        let mut expected_leaves = (0..super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT)
+            .map(padding_leaf)
+            .collect::<Vec<_>>();
+        let mut snapshot_lines = Vec::new();
+        let mut expected_metadata = None;
+
+        for order in ProofOrder::variants() {
+            let circuit = ace::build_recursive_verifier_ace_circuit(&order).unwrap();
+            let metadata = (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len);
+            if let Some(expected) = expected_metadata {
+                assert_eq!(metadata, expected, "ACE circuit metadata must be uniform");
+            } else {
+                expected_metadata = Some(metadata);
+            }
+
+            let tag = order.tag() as usize;
+            assert!(tag < expected_leaves.len(), "proof-order tag does not fit registry tree");
+            expected_leaves[tag] = circuit.commitment;
+
+            let commitment: Vec<u64> =
+                circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
+            snapshot_lines.push(format!(
+                "{}:\n  num_inputs: {}\n  num_eval_gates: {}\n  stream_len: {}\n  commitment: {:?}",
+                order.file_stem(),
+                circuit.num_inputs,
+                circuit.num_eval_gates,
+                circuit.stream_len,
+                commitment,
+            ));
+        }
+
+        let actual_leaves = super::ACE_CIRCUIT_REGISTRY_LEAVES
+            .iter()
+            .copied()
+            .map(Word::new)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_leaves.as_slice(),
+            expected_leaves.as_slice(),
+            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
+        );
+
+        let tree = MerkleTree::new(expected_leaves).expect("registry tree");
+        let registry_root = tree.root();
+        assert_eq!(
+            Word::new(super::ACE_CIRCUIT_REGISTRY_ROOT),
+            registry_root,
+            "ACE_CIRCUIT_REGISTRY_ROOT in config.rs is stale. Regenerate with: {REGEN_HINT}"
+        );
+
+        let relation_input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
+            .chain(registry_root.iter().copied())
+            .collect();
+        let digest = Poseidon2::hash_elements(&relation_input);
+        let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
+
+        let snapshot = format!("{}\nrelation_digest: {:?}", snapshot_lines.join("\n"), expected);
         insta::assert_snapshot!(snapshot);
 
         let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();

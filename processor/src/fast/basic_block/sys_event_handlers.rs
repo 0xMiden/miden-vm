@@ -3,10 +3,15 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
+    deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
+use super::deferred_handlers::{
+    handle_deferred_evaluate, handle_deferred_evaluate_payload, handle_deferred_evaluate_tag,
+    handle_deferred_register, handle_deferred_register_data,
+};
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
 
 // CONSTANTS
@@ -31,6 +36,8 @@ pub enum SystemEventError {
     Operation(#[from] OperationError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
+    #[error(transparent)]
+    Deferred(#[from] PrecompileError),
 }
 
 // SYSTEM EVENT HANDLERS
@@ -63,6 +70,11 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
+        SystemEvent::DeferredRegister => handle_deferred_register(processor),
+        SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
+        SystemEvent::DeferredEvaluateTag => handle_deferred_evaluate_tag(processor),
+        SystemEvent::DeferredEvaluatePayload => handle_deferred_evaluate_payload(processor),
+        SystemEvent::DeferredRegisterData => handle_deferred_register_data(processor),
     }
 }
 

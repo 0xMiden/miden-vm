@@ -63,7 +63,7 @@ pub struct LookupOpFlags<E> {
     mstream: E,
     pipe: E,
     evalcircuit: E,
-    log_precompile: E,
+    log_deferred: E,
     hornerbase: E,
     hornerext: E,
 
@@ -154,7 +154,7 @@ where
         let push = deg5(opcodes::PUSH);
         let dyncall = deg5(opcodes::DYNCALL);
         let evalcircuit = deg5(opcodes::EVALCIRCUIT);
-        let log_precompile = deg5(opcodes::LOGPRECOMPILE);
+        let log_deferred = deg5(opcodes::LOGDEFERRED);
         let hornerbase = deg5(opcodes::HORNERBASE);
         let hornerext = deg5(opcodes::HORNEREXT);
 
@@ -200,6 +200,7 @@ where
 
         // left_shift_scalar (degree 5):
         //   prefix_010 + u32_add3_madd_group + SPLIT + REPEAT + END*is_loop + DYN.
+        //   prefix_010 includes FRIE2F4, which rewrites s0..s14 but still decrements stack depth.
         // DYNCALL intentionally excluded (see OpFlags::left_shift doc). LOOP is also excluded:
         // under do-while semantics the LOOP op reads no stack input.
         let prefix_010 = prefix_01 * bits[4][0].clone();
@@ -237,7 +238,7 @@ where
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,
@@ -297,7 +298,7 @@ impl LookupOpFlags<Felt> {
             opcodes::MSTREAM => f.mstream = Felt::ONE,
             opcodes::PIPE => f.pipe = Felt::ONE,
             opcodes::EVALCIRCUIT => f.evalcircuit = Felt::ONE,
-            opcodes::LOGPRECOMPILE => f.log_precompile = Felt::ONE,
+            opcodes::LOGDEFERRED => f.log_deferred = Felt::ONE,
             opcodes::HORNERBASE => f.hornerbase = Felt::ONE,
             opcodes::HORNEREXT => f.hornerext = Felt::ONE,
             opcodes::END => f.end = Felt::ONE,
@@ -330,8 +331,9 @@ impl LookupOpFlags<Felt> {
         f.right_shift = bool_to_felt(
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
-        // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/REPEAT/DYN
-        // + END*is_loop. DYNCALL and LOOP are excluded; see OpFlags::left_shift.
+        // left_shift_scalar: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
+        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see
+        // OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)
@@ -381,7 +383,7 @@ impl LookupOpFlags<Felt> {
             mstream: Felt::ZERO,
             pipe: Felt::ZERO,
             evalcircuit: Felt::ZERO,
-            log_precompile: Felt::ZERO,
+            log_deferred: Felt::ZERO,
             hornerbase: Felt::ZERO,
             hornerext: Felt::ZERO,
             mload: Felt::ZERO,
@@ -445,7 +447,7 @@ impl LookupOpFlags<Felt> {
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,
@@ -522,7 +524,7 @@ accessors!(
     mstream,
     pipe,
     evalcircuit,
-    log_precompile,
+    log_deferred,
     hornerbase,
     hornerext,
     // Degree-7 individual ops
@@ -754,7 +756,7 @@ mod tests {
             ("u32and", opcodes::U32AND, LookupOpFlags::<Felt>::u32and),
             ("u32xor", opcodes::U32XOR, LookupOpFlags::<Felt>::u32xor),
             ("evalcircuit", opcodes::EVALCIRCUIT, LookupOpFlags::<Felt>::evalcircuit),
-            ("log_precompile", opcodes::LOGPRECOMPILE, LookupOpFlags::<Felt>::log_precompile),
+            ("log_deferred", opcodes::LOGDEFERRED, LookupOpFlags::<Felt>::log_deferred),
         ];
 
         for (name, opcode, get_flag) in cases {
@@ -810,7 +812,7 @@ mod tests {
             mstream,
             pipe,
             evalcircuit,
-            log_precompile,
+            log_deferred,
             hornerbase,
             hornerext,
             mload,

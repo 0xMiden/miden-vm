@@ -8,4 +8,4 @@
 - Relevant issues are linked in the PR description.
 - Tests added for new functionality.
 - Documentation/comments updated according to changes.
-- Updated `CHANGELOG.md'
+- Updated `CHANGELOG.md`

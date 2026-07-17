@@ -100,7 +100,7 @@ The following instructions are designed mainly for use in recursive verification
 | eval_circuit <br /> - *(1 cycle)*     | [ptr, n_read, n_eval, ...]                                                                        | [ptr, n_read, n_eval, ...]                                                                          | Evaluates an arithmetic circuit, and checks that its output is equal to zero. `ptr` specifies the memory address at which the circuit description is stored with the number of input extension field elements specified by `n_read` and the number of evaluation gates, encoded as base field elements, specified by `n_eval`. |
 | horner_eval_base <br /> - *(1 cycle)* | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1, acc0, ...]          | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1', acc0', ...]          | Performs 8 steps of the Horner evaluation method to update the accumulator using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((((((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3) * alpha + c4) * alpha + c5) * alpha + c6) * alpha + c7`.                                          |
 | horner_eval_ext <br /> - *(1 cycle)*  | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1, acc0, ...] | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1', acc0', ...] | Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over the quadratic extension field using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3` where coefficients are extension field elements `c0 = (c0_1, c0_0)`, `c1 = (c1_1, c1_0)`, `c2 = (c2_1, c2_0)`, `c3 = (c3_1, c3_0)`.                                                                                        |
-| log_precompile <br /> - *(1 cycle)*   | [COMM, TAG, PAD, ...]                                                                                 | [R0, R1, CAP_NEXT, ...]                                                                               | Absorbs words `TAG` and `COMM` into the precompile sponge.<br />The hasher computes `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])` and updates the processor's precompile sponge capacity. The `PAD` word on the stack is required as scratch space for the capacity input.<br />The top 3 stack words are replaced with `[R0, R1, CAP_NEXT]`, and callers typically drop them right away.                   |
+| log_deferred <br /> - *(1 cycle)*   | [_, STMNT, _, ...]                                                                                 | [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]                                                                                | Folds `STMNT` from stack offsets 4..8 into the VM's rolling deferred root via `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`, using the internally maintained previous root and the `Tag::AND` capacity word `[1, 0, 0, 0]`.<br />`STMNT` must be a registered deferred statement that evaluates to `TRUE`. The top 3 stack words are replaced with `[ROOT_NEW, OUT_RATE1, OUT_CAP]`, and wrappers typically drop them right away. Core-library facades and internal support code wrap this low-level opcode when deferred statements need to be logged. |
 | crypto_stream <br /> - *(1 cycle)*    | [rate(8), cap(4), src_ptr, dst_ptr, ...]                                                          | [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]                                                  | Performs one Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces the rate on the stack with the ciphertext, preserves capacity, and increments both pointers by 8. Used as the primitive underlying `miden::core::crypto::aead`. |
 
 
@@ -110,23 +110,23 @@ The following instructions are used during the FRI protocol as part of recursive
 
 | Instruction                    | Stack_input                                                               | Stack_output                                                                        | Notes                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| fri_ext2fold4<br />- *(1 cycle)* | [v7, ..., v0, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...] | [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, ...] | Performs one step of FRI folding with folding factor 4 in the quadratic extension field |
+| fri_ext2fold4<br />- *(1 cycle)* | [v7, ..., v0, f_pos, coset, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...] | [x, x, x, x, x, x, x, x, layer_ptr + 8, layer_ptr + 8, poe^4, f_pos, ne1, ne0, layer_ptr + 8, rem_ptr, ...] | Performs one step of FRI folding with folding factor 4 in the quadratic extension field |
 
  In more details:
-- $q_0 = (v_0, v_1)$, $q_1 = (v_2, v_3)$, $q_2 = (v_4, v_5)$, $q_3 = (v_6, v_7)$ are the query points to be folded,
+- $q_0 = (v_0, v_1)$, $q_2 = (v_2, v_3)$, $q_1 = (v_4, v_5)$, $q_3 = (v_6, v_7)$ are the opened leaf values, stored in bit-reversed order,
 - $f_{pos}$ is the query position in the folded domain, i.e., it is `pos mod n`, where `pos` is the position in the source domain, and `n` is size of the folded domain,
-- $d_{seg} := \lfloor \frac{pos}{n} \rfloor$, which can be either `0`, `1`, `2`, or `3`,
-- $poe := g^{pos}$ where `g` is current domain generator,
+- `coset` is the natural coset index $\lfloor \frac{pos}{n} \rfloor$, which can be either `0`, `1`, `2`, or `3`,
+- $poe := g^{pos}$ where `g` is the current source-domain generator,
 - $e := (e_0, e_1)$ is the result of the previous layer folding,
 - $\alpha := (a_0, a_1)$ is the folding challenge,
 - `layer_ptr` is memory address of the layer currently being folded,
 - `rem_ptr` is memory address of the stored remainder polynomial used to define the condition to break the folding loop,
 
 At the high-level, the operation does the following:
-- Computes the domain value `x` based on values of `poe` and `d_seg`.
+- Computes the domain value `x` based on values of `poe` and `coset`.
 - Using `x` and $\alpha$, folds the query values $q_0, ..., q_3$ into a single value `ne`.
-- Compares the previously folded value `e` to the appropriate value of $q_0, ..., q_3$ to verify that the folding of the previous layer was done correctly.
+- Compares the previously folded value `e` to the leaf value selected by `coset`.
 - Computes the new value of `poe` as $poe' = poe^4$ (this is done in two steps to keep the constraint degree low).
 - Increments the layer address pointer by `8`.
 - Shifts the stack by `1` to the left. This moves an element from the stack overflow table (i.e., `rem_ptr`) into the last position on the stack top.
-- Note that the top 10 output stack elements can be considered as garbage values.
+- The top 8 output stack elements are degree-reduction intermediates and are not used by callers.

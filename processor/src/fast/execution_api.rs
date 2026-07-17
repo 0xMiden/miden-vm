@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeId},
-    program::{Kernel, MIN_STACK_DEPTH, Program, StackOutputs},
+    program::{KernelDescriptor, MIN_STACK_DEPTH, Program, StackOutputs},
 };
 use miden_mast_package::debug_info::{
     DebugSourceGraphLookupError, DebugSourceNodeId, PackageDebugInfo,
@@ -681,7 +681,7 @@ impl FastProcessor {
         flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         mut continuation_stack: ContinuationStack<Arc<MastForest>>,
         current_forest: Arc<MastForest>,
-        kernel: Kernel,
+        kernel: KernelDescriptor,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         match flow {
@@ -726,7 +726,7 @@ impl FastProcessor {
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
-        kernel: &Kernel,
+        kernel: &KernelDescriptor,
         host: &mut impl SyncHost,
         tracer: &mut T,
         stopper: &S,
@@ -848,7 +848,7 @@ impl FastProcessor {
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
-        kernel: &Kernel,
+        kernel: &KernelDescriptor,
         host: &mut impl Host,
         tracer: &mut T,
         stopper: &S,

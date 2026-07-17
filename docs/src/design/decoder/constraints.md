@@ -148,7 +148,7 @@ For *basic* blocks, the hash is computed by absorbing a linear sequence of instr
 The decoder communicates with the hash chiplet via the [chiplets bus](../chiplets/index.md#chiplets-bus). This works by dividing values of the multiset check column $b_{chip}$ by the values of operations providing inputs to or reading outputs from the hash chiplet. A constraint to enforce this would look as $b_{chip}' \cdot u = b_{chip}$, where $u$ is the value which defines the operation.
 
 In constructing values for decoder bus requests, we use the hasher message format
-described in the [hasher chiplet](../chiplets/hasher.md#multiset-check-constraints).
+described in the [hasher chiplet](../chiplets/hasher.md#lookup-buses).
 For decoder requests, the node index is always $0$, so the message reduces to:
 
 $$

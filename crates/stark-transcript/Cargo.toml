@@ -1,0 +1,23 @@
+[package]
+description            = "Transcript channels for Fiat-Shamir protocols with raw field/commitment storage"
+edition.workspace      = true
+homepage.workspace     = true
+license.workspace      = true
+name                   = "miden-stark-transcript"
+readme.workspace       = true
+repository.workspace   = true
+rust-version.workspace = true
+version = "0.28.0"
+
+[lib]
+doctest = false
+test    = false
+
+[dependencies]
+p3-challenger.workspace = true
+p3-field.workspace      = true
+serde.workspace         = true
+thiserror.workspace     = true
+
+[lints]
+workspace = true

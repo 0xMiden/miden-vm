@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Resolve author permission
         id: perm
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const login = (context.payload.pull_request.user?.login || '').toLowerCase();
@@ -51,7 +51,7 @@ jobs:
       - name: Check for unsigned commits
         if: steps.perm.outputs.enforce == 'true'
         id: check
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
@@ -83,7 +83,7 @@ jobs:
 
       - name: Comment with remediation steps
         if: failure() && steps.perm.outputs.enforce == 'true' && steps.check.outputs.unsigned != ''
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           UNSIGNED: ${{ steps.check.outputs.unsigned }}
           PRNUM: ${{ steps.check.outputs.pr_number }}

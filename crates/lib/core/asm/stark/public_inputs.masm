@@ -2,36 +2,8 @@ use miden::core::stark::constants
 
 #! Processes the public inputs.
 #!
-#! This is a generic dispatch procedure that calls the instance-specific implementation
-#! via `dynexec`. The instance-specific implementation populates the FLPI section of the ACE
-#! READ region with the fixed-length public inputs and absorbs every public input into the
-#! Fiat-Shamir transcript in a rate-aligned schedule (mirroring the Rust-side `MultiAir::observe`).
-#! The reduced variable-length public inputs (the `reduced_inputs` block) are staged by the
-#! instance's `verify_proof` before the transcript starts; this procedure only absorbs them.
-#!
-#! Memory layout populated (low -> high addresses):
-#!
-#!   reduced_inputs (16 felts, at a fixed standalone address, NOT in the ACE READ region)
-#!   [..., pi (FLPI EF, m base felts -> 2m slots),
-#!         beta0, beta1, alpha0, alpha1, <pad>, OOD-start, ...]
-#!
-#! where:
-#!   a) `reduced_inputs` holds [kernel_H (4) | program_digest (4) | transcript_state (4) |
-#!      zero_pad (4)] — the caller-facing summary of the variable-length public inputs.
-#!      `kernel_H` is the hash of all kernel-procedure digests; `program_digest` and
-#!      `transcript_state` are passed through unchanged. The trailing pad rate-aligns the FS
-#!      observation. This block lives at a fixed standalone address (see `stark/constants.masm`),
-#!      not contiguous with `pi`.
-#!   b) `pi` holds the fixed-length public inputs (stack i/o) as extension field elements.
-#!      Each base felt sits at `pi + 2*i`, with zero in the high coordinate.
-#!   c) `[beta0, beta1, alpha0, alpha1]` is the auxiliary randomness (loaded
-#!      non-deterministically, verified in step II).
-#!   d) `<pad>` is the codegen alignment word; OOD-start is the first felt of the OOD
-#!      evaluations section.
-#!
-#! The variable-length inputs are also folded into a running `c_total` accumulator (using
-#! the non-deterministically supplied alpha/beta), stored at `C_TOTAL_PTR` for the
-#! outer-LogUp boundary check in step II.
+#! This generic procedure dispatches to the relation-specific public-input handler via `dynexec`.
+#! The relation handler owns its public-input schema and Fiat-Shamir observation schedule.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
@@ -41,66 +13,40 @@ pub proc process_public_inputs
     exec.constants::get_procedure_digest_process_public_inputs_ptr dynexec
 end
 
-#! Computes the addresses where the public inputs are to be stored.
+#! Computes and stores the start address of the ACE public-input region.
 #!
-#! In order to call `eval_circuit`, we need to lay out the inputs to the constraint evaluation
-#! circuit in a contiguous region of memory (called READ section in the ACE chiplet documentation)
-#! right before the region storing the circuit description (called EVAL section).
+#! The public-input region stores `num_fixed_len_pi` base-field public values as extension-field
+#! slots, i.e. two base-field memory cells per public value. It is placed immediately before the
+#! aux-randomness word in ACE READ.
 #!
-#! As the number of public inputs is a per-instance parameter, while the sizes of the OOD
-#! evaluation frames and the number of auxiliary random values are fixed, we lay out the public
-#! inputs right before the auxiliary random values and OOD evaluations.
-#! Hence the address where public inputs are stored is computed using a negative offset from the
-#! address where the OOD evaluations are stored.
-#!
-#! We compute one pointer:
-#!   pi_ptr = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
-#!
-#! The `* 2` converts the FLPI base-felt count to EF slots (each base felt is stored as
-#! `[val, 0]`). The `-8` skips the two words between FLPI and OOD: the auxiliary randomness word
-#! and the codegen alignment pad. The reduced-inputs block is no longer carved out of this region;
-#! it lives at the fixed standalone `REDUCED_INPUTS_PTR` (see `stark/constants.masm`), and this
-#! procedure publishes that fixed address into the reduced-inputs pointer cell.
+#! This helper only computes the ACE READ public-input pointer. Relation-specific code owns any
+#! additional statement inputs that are not read by the ACE circuit.
 #!
 #! Inputs:  [num_fixed_len_pi, ...]
 #! Outputs: [...]
 #!
 #! Invocation: exec
 pub proc compute_and_store_public_inputs_address
-    # 1) pi_ptr = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
-    exec.constants::ood_evaluations_ptr
-    sub.8
-    # => [ood_evals_ptr - 8, num_fixed_len_pi, ...]
+    exec.constants::aux_rand_elem_ptr
+    # => [aux_rand_ptr, num_fixed_len_pi, ...]
     swap mul.2 sub
-    # => [pi_ptr, ...]
-    exec.constants::public_inputs_address_ptr mem_store
+    # => [public_inputs_ptr, ...]
 
-    # 2) Publish the fixed reduced-inputs block address into the reduced-inputs pointer cell.
-    exec.constants::reduced_inputs_ptr
-    exec.constants::reduced_inputs_address_ptr mem_store
+    exec.constants::public_inputs_address_ptr mem_store
 end
 
-#! Reads 8 base field elements from caller memory at `src`, stores them as extension field elements
-#! at `dst`, and returns the original base words in the rate positions for absorption by the caller
-#! via `poseidon2::permute`.
+#! Loads 8 base-field elements from memory, stores them as 8 extension-field elements, and leaves
+#! the base elements in the rate slots for a direct full-rate absorption.
 #!
-#! The procedure does NOT absorb the elements into the transcript -- the caller is responsible
-#! for calling `poseidon2::permute` after this procedure to complete the absorption.
-#!
-#! Inputs:  [Y, Y, C, dst, src, ...]
-#! Outputs: [A0, A1, C, dst + 16, src + 8, ...]
-#!
-#! where A0 and A1 are the original base element words (from memory), positioned in the rate slots
-#! so that a subsequent `poseidon2::permute` absorbs them into the sponge state.
+#! Input:  [R1, R2, C, dst, src, ...]
+#! Output: [R1', R2', C, dst + 16, src + 8, ...]
 #!
 #! Invocation: exec
 pub proc load_base_store_extension_double_word_from_mem
-    # 1) Load the first 4 base elements from `src` and save them temporarily; advance `src`.
     dup.13 mem_loadw_le
     exec.constants::tmp1 mem_storew_le
     movup.13 add.4 movdn.13
 
-    # 2) Represent the first 4 base field elements as elements in the quadratic extension field
     swapw
     exec.constants::zeroize_stack_word
     # => [0, 0, 0, 0, a3, a2, a1, a0, C, dst, src, ...]
@@ -110,22 +56,18 @@ pub proc load_base_store_extension_double_word_from_mem
     swap
     # => [a3, 0, a2, 0, a1, 0, a0, 0, C, dst, src, ...]
 
-    # 3) Save the first 2 extension field elements
     dup.12
     mem_storew_le
 
-    # 4) Load the second 4 base elements from `src` and save them temporarily; advance `src`.
     dup.13 mem_loadw_le
     exec.constants::tmp2 mem_storew_le
     movup.13 add.4 movdn.13
     swapw
     # => [a3, 0, a2, 0, a7, a6, a5, a4, C, dst, src, ...]
 
-    # 5) Save the second 2 extension field elements
     dup.12 add.4
     mem_storew_le
 
-    # 6) Represent the second 4 base field elements as elements in the quadratic extension field
     exec.constants::zeroize_stack_word
     movdn.7
     movdn.5
@@ -133,15 +75,12 @@ pub proc load_base_store_extension_double_word_from_mem
     swap
     # => [a7, 0, a6, 0, a5, 0, a4, 0, C, dst, src, ...]
 
-    # 7) Save the third 2 extension field elements; reload the second base word into R2.
     dup.12
     add.8
     mem_storew_le
     exec.constants::tmp2 mem_loadw_le
     swapw
 
-    # 8) Save the fourth 2 extension field elements; reload the first base word into R1 and advance
-    #    `dst`. First word on top = R1, second word below = R2 (matches the challenger order).
     dup.12
     add.16 swap.13
     add.12

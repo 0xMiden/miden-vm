@@ -113,6 +113,11 @@ where
                 message: "ACE circuit has no operations to encode".to_string(),
             });
         }
+        if self.root != AceNode::Operation(num_op_nodes - 1) {
+            return Err(AceError::InvalidInputLayout {
+                message: "ACE circuit root must be the last operation before padding".to_string(),
+            });
+        }
 
         // Constants are serialized as EF elements (2 base felts per EF).
         let num_const_felts = num_const_nodes * BASE_FELTS_PER_EF;
@@ -179,6 +184,8 @@ where
             instructions.push(encode_operation(op)?);
         }
 
+        // The ACE chiplet checks the last EVAL row. Padding preserves zero-ness by repeatedly
+        // squaring the current root, so the unpadded root must be the last emitted operation.
         let mut last_node_index = num_op_nodes - 1;
         while instructions.len() < len_circuit_padded {
             let last_node = AceNode::Operation(last_node_index);

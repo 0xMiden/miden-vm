@@ -121,58 +121,99 @@ fn prove_execution_trace(
     trace: ExecutionTrace,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let trace_len_summary = trace.trace_len_summary();
     tracing::event!(
         tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps (padded from {})",
-        miden_air::trace::TRACE_WIDTH,
-        trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().trace_len()
+        "Generated execution traces: core={}, range={}, chiplets={}, poseidon2={}, padded={}",
+        trace_len_summary.core_trace_len(),
+        trace_len_summary.range_trace_len(),
+        trace_len_summary.chiplets_trace_len().trace_len(),
+        trace_len_summary.poseidon2_permutation_trace_len(),
+        trace_len_summary.padded_trace_len()
     );
 
     let stack_outputs = *trace.stack_outputs();
-    let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
+    let deferred_wire = trace
+        .deferred_state()
+        .to_wire()
+        .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
-    let (core_matrix, chiplets_matrix) = {
-        let _span = tracing::info_span!("to_core_chiplets_matrices").entered();
-        trace.into_core_chiplets_matrices()
+    let (core_matrix, chiplets_matrix, poseidon2_matrix) = {
+        let _span = tracing::info_span!("into_air_matrices").entered();
+        trace.into_air_matrices()
     };
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+            prove_stark(
+                &config,
+                core_matrix,
+                chiplets_matrix,
+                poseidon2_matrix,
+                &public_values,
+                &aux_inputs,
+            )
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+            prove_stark(
+                &config,
+                core_matrix,
+                chiplets_matrix,
+                poseidon2_matrix,
+                &public_values,
+                &aux_inputs,
+            )
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+            prove_stark(
+                &config,
+                core_matrix,
+                chiplets_matrix,
+                poseidon2_matrix,
+                &public_values,
+                &aux_inputs,
+            )
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+            prove_stark(
+                &config,
+                core_matrix,
+                chiplets_matrix,
+                poseidon2_matrix,
+                &public_values,
+                &aux_inputs,
+            )
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+            prove_stark(
+                &config,
+                core_matrix,
+                chiplets_matrix,
+                poseidon2_matrix,
+                &public_values,
+                &aux_inputs,
+            )
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
 
     Ok((stack_outputs, proof))
 }
 // STARK PROOF GENERATION
 // ================================================================================================
 
-/// Generates a multi-AIR STARK proof for the (Core, Chiplets) trace pair and public values.
+/// Generates a multi-AIR STARK proof for the Miden trace set and public values.
 ///
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
 /// statement `aux_inputs` (program hash, transcript state, and the concatenated kernel-procedure
@@ -181,6 +222,7 @@ pub fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
     chiplets_trace: RowMajorMatrix<Felt>,
+    poseidon2_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
     aux_inputs: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
@@ -192,14 +234,13 @@ where
     config::observe_protocol_params(&mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
-    // statement inputs the AIRs do not read (program hash, transcript state, and kernel-procedure
-    // digests). The lifted prover absorbs both into Fiat-Shamir internally, along with the per-AIR
-    // trace heights.
+    // statement inputs read during observation/boundary correction.
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let prover_statement = ProverStatement::new(statement, vec![core_trace, chiplets_trace])
-        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let prover_statement =
+        ProverStatement::new(statement, vec![core_trace, chiplets_trace, poseidon2_trace])
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
     let output: StarkOutput<Felt, QuadFelt, SC> =
         ProverInstance::new(config, &prover_statement, None)

@@ -1,6 +1,6 @@
-//! Hasher chiplet trace constants and types.
+//! Hasher controller trace constants and types.
 //!
-//! This module defines the structure of the hasher chiplet's execution trace, including:
+//! This module defines the structure of the hasher controller trace, including:
 //! - Trace selectors that determine which hash operation is being performed
 //! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
 //!
@@ -29,7 +29,7 @@ pub type HasherState = [Felt; STATE_WIDTH];
 // CONSTANTS
 // ================================================================================================
 
-/// Number of field element needed to represent the sponge state for the hash function.
+/// Number of field elements needed to represent the sponge state for the hash function.
 ///
 /// This value is set to 12: 8 elements are reserved for rate and the remaining 4 elements are
 /// reserved for capacity. This configuration enables computation of 2-to-1 hash in a single
@@ -72,13 +72,26 @@ pub const NUM_SELECTORS: usize = 3;
 /// The 16-row packed cycle compresses the 31 permutation steps by:
 /// - Merging init linear + ext1 into one row
 /// - Packing 3 internal rounds per row (7 rows for 21 rounds)
-/// - Merging int22 + ext5 into one row Result: 1 + 3 + 7 + 1 + 3 + 1 = 16 rows.
+/// - Merging int22 + ext5 into one row
+///
+/// This gives `1 + 3 + 7 + 1 + 3 + 1 = 16` rows.
 pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
-/// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_00 = 20.
-pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 5;
+/// Row alignment for the hasher controller region inside `ChipletsAir`.
+pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
+
+const _: () = assert!(
+    CONTROLLER_TRACE_ALIGNMENT.is_multiple_of(super::bitwise::OP_CYCLE_LEN),
+    "controller region alignment must keep the bitwise section on a cycle boundary"
+);
+
+/// Controller metadata columns after the selector and state columns.
+pub const NUM_METADATA_COLS: usize = 5;
+
+/// Number of columns in Hasher controller trace.
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + perm_id = 20.
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + NUM_METADATA_COLS;
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
@@ -113,4 +126,4 @@ pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
 /// h11) is returned.
 pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
 
-// NOTE: Selectors s0/s1/s2 are unconstrained on perm segment rows.
+// NOTE: Selectors s0/s1/s2 are hasher-controller internal selectors.
