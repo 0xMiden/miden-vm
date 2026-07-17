@@ -1,6 +1,6 @@
 [package]
 name = "miden-package-registry"
-version = "0.25.3"
+version = "0.25.4"
 description = "Package registry interfaces and dependency resolution for Miden packages"
 documentation = "https://docs.rs/miden-package-registry"
 readme = "README.md"

@@ -1,11 +1,11 @@
 # Changelog
 
-## v0.25.3 (2026-07-16)
+## v0.25.4 (2026-07-16)
 
 - Add package post-processing hooks to the `ProjectSourceProvider` trait ([#3375](https://github.com/0xMiden/miden-vm/pull/3375)).
 - Expose some assembler configuration methods, and `ProjectAssembler::assemble_source_project` ([#3383](https://github.com/0xMiden/miden-vm/pull/3383)).
 
-## v0.25.2 (2026-07-12)
+## v0.25.3 (2026-07-12)
 
 - Update `wincode` dependency to v0.5.5.
 
