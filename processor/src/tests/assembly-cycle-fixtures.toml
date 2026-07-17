@@ -1,4 +1,5 @@
 # Assembly instruction cycle fixtures measured with clk.
+# Source of truth for assembly cycle fixtures (shared by processor tests and scripts/check_user_doc_cycles.py).
 # See processor::tests::user_doc_assembly_cycle_fixtures_match_documentation and issue #3111.
 
 [[case]]

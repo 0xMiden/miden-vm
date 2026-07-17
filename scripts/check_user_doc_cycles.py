@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MAPPINGS = Path(__file__).resolve().parent / "user-doc-cycle-mappings.toml"
-ASSEMBLY_FIXTURES = Path(__file__).resolve().parent / "assembly-cycle-fixtures.toml"
+ASSEMBLY_FIXTURES = ROOT / "processor/src/tests/assembly-cycle-fixtures.toml"
 
 
 def extract_cycles_from_description(description: str) -> str:
@@ -121,16 +121,15 @@ def check_core_lib_mappings() -> list[str]:
         generated_path = ROOT / entry["generated_doc"]
         section = entry.get("section")
         procedure = entry["procedure"]
-        generated_procedure = entry["generated_procedure"]
 
         try:
             user_content = user_path.read_text(encoding="utf-8")
             user_cycles = extract_user_procedure_cycles(user_content, section, procedure)
-            generated_cycles = extract_generated_procedure_cycles(generated_path, generated_procedure)
+            generated_cycles = extract_generated_procedure_cycles(generated_path, procedure)
         except KeyError as err:
             errors.append(
                 f"{user_path}: {procedure}: {err} "
-                f"(generated: {generated_path}, procedure: {generated_procedure})"
+                f"(generated: {generated_path}, procedure: {procedure})"
             )
             continue
 
@@ -144,6 +143,35 @@ def check_core_lib_mappings() -> list[str]:
     return errors
 
 
+def _normalize_table_cell(cell: str) -> str:
+    text = html.unescape(cell)
+    text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?[^>]+>", "", text)
+    text = text.replace("`", "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def extract_cycle_cell_from_row(row: str) -> str | None:
+    """Return the cycle cell text from a marked markdown table row.
+
+    Prefer a dedicated Cycles column (instruction_reference style). Fall back to
+    an embedded `*(N cycles)*` fragment in the instruction cell (u32_operations).
+    """
+    cells = [c.strip() for c in row.strip().strip("|").split("|")]
+    for cell in cells:
+        text = _normalize_table_cell(cell)
+        if re.fullmatch(r"\d+(?: cycles?)?", text, re.IGNORECASE):
+            return text.lower()
+        if re.fullmatch(r"\d+(?: \d+)+", text):
+            return text.lower()
+    for cell in cells:
+        match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", cell, re.IGNORECASE)
+        if match:
+            return re.sub(r"\s+", " ", match.group(1).lower())
+    return None
+
+
 def check_assembly_fixtures() -> list[str]:
     cases = tomllib.loads(ASSEMBLY_FIXTURES.read_text(encoding="utf-8"))["case"]
     errors: list[str] = []
@@ -152,7 +180,7 @@ def check_assembly_fixtures() -> list[str]:
         case_id = case["id"]
         doc_path = ROOT / case["doc"]
         marker = f"<!-- cycle-check: {case['marker']} -->"
-        expected = case["expected"]
+        expected = case["expected"].strip().lower()
 
         content = doc_path.read_text(encoding="utf-8")
         if marker not in content:
@@ -160,21 +188,22 @@ def check_assembly_fixtures() -> list[str]:
             continue
 
         marker_at = content.index(marker)
-        # Compare against the marked table row only (not a loose substring window).
         row_start = content.rfind("\n", 0, marker_at) + 1
         row_end = content.find("\n", marker_at)
         if row_end == -1:
             row_end = len(content)
         row = content[row_start:row_end]
-        # Reject larger numbers that contain the expected digits (e.g. 138 vs 38).
-        if re.search(rf"(?<!\d){re.escape(expected)}(?!\d)", row) is None:
+        actual = extract_cycle_cell_from_row(row)
+        if actual is None:
             errors.append(
-                f"{doc_path}: marker {case_id!r} row does not contain exact cycle text {expected!r}"
+                f"{doc_path}: marker {case_id!r} row has no cycle cell matching {expected!r}"
+            )
+        elif actual != expected:
+            errors.append(
+                f"{doc_path}: marker {case_id!r} cycle cell is {actual!r}, expected {expected!r}"
             )
 
     return errors
-
-
 def main() -> int:
     errors = check_core_lib_mappings()
     errors.extend(check_assembly_fixtures())

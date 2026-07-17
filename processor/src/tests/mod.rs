@@ -1461,12 +1461,8 @@ fn test_assert_message_without_debug_info_reports_error_code() {
 #[test]
 fn user_doc_assembly_cycle_fixtures_match_documentation() {
     for case in load_assembly_cycle_fixtures() {
-        let measured = measure_program_cycles(&case.program, case.stack_inputs.as_deref());
-        let baseline = case
-            .baseline_program
-            .as_deref()
-            .map(|program| measure_program_cycles(program, case.stack_inputs.as_deref()))
-            .unwrap_or(0);
+        let measured = measure_program_cycles(&case.program);
+        let baseline = measure_program_cycles(&case.baseline_program);
         let delta = measured.saturating_sub(baseline);
         assert_eq!(
             delta, case.expected_cycles,
@@ -1479,13 +1475,13 @@ fn user_doc_assembly_cycle_fixtures_match_documentation() {
 struct AssemblyCycleFixture {
     id: String,
     program: String,
-    baseline_program: Option<String>,
-    stack_inputs: Option<Vec<u64>>,
-    expected_cycles: u8,
+    baseline_program: String,
+    expected_cycles: u32,
 }
 
 fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
-    const FIXTURES: &str = include_str!("../../../scripts/assembly-cycle-fixtures.toml");
+    // Packaged with the crate so `cargo test -p miden-processor` works outside the workspace.
+    const FIXTURES: &str = include_str!("assembly-cycle-fixtures.toml");
 
     let table: toml::Table =
         FIXTURES.parse().expect("assembly cycle fixtures should be valid TOML");
@@ -1518,24 +1514,15 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                 baseline_program: case
                     .get("baseline_program")
                     .and_then(toml::Value::as_str)
-                    .map(str::to_string),
-                stack_inputs: case.get("stack_inputs").and_then(|value| {
-                    value.as_array().map(|items| {
-                        items
-                            .iter()
-                            .map(|item| {
-                                item.as_integer().expect("stack input should be an integer") as u64
-                            })
-                            .collect()
-                    })
-                }),
+                    .expect("baseline_program")
+                    .to_string(),
                 expected_cycles,
             }
         })
         .collect()
 }
 
-fn measure_program_cycles(program: &str, stack_inputs: Option<&[u64]>) -> u8 {
+fn measure_program_cycles(program: &str) -> u32 {
     use miden_utils_testing::Test;
 
     const TRUNCATE_STACK: &str = r"@locals(4)
@@ -1551,22 +1538,19 @@ end
 ";
 
     let body = program.trim();
-    let source = if body.starts_with("begin") {
-        format!("{TRUNCATE_STACK}{body}")
-    } else {
-        format!("{TRUNCATE_STACK}begin\n{body}\nexec.truncate_stack\nend")
-    };
+    let source = format!(
+        "{TRUNCATE_STACK}begin
+{body}
+exec.truncate_stack
+end"
+    );
 
-    let mut test = Test::new("program", &source, false);
-    if let Some(stack_inputs) = stack_inputs {
-        test = test.with_stack_inputs(stack_inputs);
-    }
-
+    let test = Test::new("program", &source, false);
     let outputs = test.get_last_stack_state();
     let measured = outputs
         .iter()
         .next()
         .expect("program should leave a cycle delta on the stack")
         .as_canonical_u64();
-    u8::try_from(measured).expect("measured cycle count should fit in u8")
+    u32::try_from(measured).expect("measured cycle count should fit in u32")
 }

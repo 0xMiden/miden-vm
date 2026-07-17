@@ -6,203 +6,172 @@ user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "add"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
-generated_procedure = "add"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "pack"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
-generated_procedure = "pack"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "unpack"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
-generated_procedure = "unpack"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "num_leaves_to_num_peaks"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
-generated_procedure = "num_leaves_to_num_peaks"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "num_peaks_to_message_size"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
-generated_procedure = "num_peaks_to_message_size"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Sorted Array"
 procedure = "find_word"
 generated_doc = "crates/lib/core/docs/collections/sorted_array.md"
-generated_procedure = "find_word"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "reverse"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "reverse"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "store_word_u32s_le"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "store_word_u32s_le"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "eqz"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "eqz"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "testz"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "testz"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "gt"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "gt"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "gte"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "gte"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "lt"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "lt"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "lte"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "lte"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "eq"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "eq"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "test_eq"
 generated_doc = "crates/lib/core/docs/word.md"
-generated_procedure = "test_eq"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/sys.md"
 procedure = "truncate_stack"
 generated_doc = "crates/lib/core/docs/sys.md"
-generated_procedure = "truncate_stack"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "init_no_padding"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "init_no_padding"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "squeeze_digest"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "squeeze_digest"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "copy_digest"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "copy_digest"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "absorb_double_words_from_memory"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "absorb_double_words_from_memory"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_double_words"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "hash_double_words"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_words"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "hash_words"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_elements"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "hash_elements"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "pad_and_hash_elements"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "pad_and_hash_elements"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "hash"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "merge"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "merge"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "permute"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
-generated_procedure = "permute"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/aead.md"
 section = "encrypt"
 procedure = "encrypt"
 generated_doc = "crates/lib/core/docs/crypto/aead.md"
-generated_procedure = "encrypt"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/aead.md"
 section = "decrypt"
 procedure = "decrypt"
 generated_doc = "crates/lib/core/docs/crypto/aead.md"
-generated_procedure = "decrypt"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/pcs/fri.md"
 section = "FRI Extension 2, Fold 4"
 procedure = "verify"
 generated_doc = "crates/lib/core/docs/pcs/fri/frie2f4.md"
-generated_procedure = "verify"
