@@ -1,6 +1,6 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
@@ -436,18 +436,9 @@ impl Deserializable for DebugSourceMapSection {
             min_source_map_asm_op_row_serialized_size(),
         )?;
         let mut asm_ops = Vec::with_capacity(asm_ops_len);
-        let mut used_locations = alloc::vec![false; locations.len()];
-        let mut used_strings = alloc::vec![false; strings.len()];
         for _ in 0..asm_ops_len {
-            asm_ops.push(read_source_asm_op(
-                source,
-                &locations,
-                &strings,
-                &mut used_locations,
-                &mut used_strings,
-            )?);
+            asm_ops.push(read_source_asm_op(source, &locations, &strings)?);
         }
-        validate_source_map_tables(&locations, &strings, &used_locations, &used_strings)?;
 
         let debug_vars_len = read_bounded_len(source, "debug_source_map debug vars", 1)?;
         let debug_vars = source.read_many_iter(debug_vars_len)?.collect::<Result<_, _>>()?;
@@ -484,8 +475,6 @@ fn read_source_asm_op<R: ByteReader>(
     source: &mut R,
     locations: &[Arc<Location>],
     strings: &[Arc<str>],
-    used_locations: &mut [bool],
-    used_strings: &mut [bool],
 ) -> Result<DebugSourceAsmOp, DeserializationError> {
     let source_node = DebugSourceNodeId::read_from(source)?;
     let op_idx = source.read_u32()?;
@@ -497,13 +486,12 @@ fn read_source_asm_op<R: ByteReader>(
                 locations.len()
             ))
         })?;
-        used_locations[location_idx] = true;
         Some(Arc::clone(location))
     } else {
         None
     };
-    let context_name = read_source_map_string_ref(source, strings, used_strings)?;
-    let op = read_source_map_string_ref(source, strings, used_strings)?;
+    let context_name = read_source_map_string_ref(source, strings)?;
+    let op = read_source_map_string_ref(source, strings)?;
     let num_cycles = source.read_u8()?;
     Ok(DebugSourceAsmOp::from_shared(
         source_node,
@@ -535,7 +523,6 @@ fn write_source_map_string_ref<W: ByteWriter>(
 fn read_source_map_string_ref<R: ByteReader>(
     source: &mut R,
     strings: &[Arc<str>],
-    used_strings: &mut [bool],
 ) -> Result<Arc<str>, DeserializationError> {
     let string_idx = source.read_u32()? as usize;
     let string = strings.get(string_idx).ok_or_else(|| {
@@ -544,47 +531,7 @@ fn read_source_map_string_ref<R: ByteReader>(
             strings.len()
         ))
     })?;
-    used_strings[string_idx] = true;
     Ok(Arc::clone(string))
-}
-
-fn validate_source_map_tables(
-    locations: &[Arc<Location>],
-    strings: &[Arc<str>],
-    used_locations: &[bool],
-    used_strings: &[bool],
-) -> Result<(), DeserializationError> {
-    let mut unique_locations = BTreeSet::new();
-    for (idx, location) in locations.iter().enumerate() {
-        if !unique_locations.insert(Arc::clone(location)) {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_source_map location table entry {idx} duplicates an earlier location"
-            )));
-        }
-    }
-
-    let mut unique_strings = BTreeSet::new();
-    for (idx, string) in strings.iter().enumerate() {
-        if !unique_strings.insert(Arc::clone(string)) {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_source_map string table entry {idx} duplicates an earlier string"
-            )));
-        }
-    }
-
-    if let Some(idx) = used_locations.iter().position(|used| !*used) {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "debug_source_map location table entry {idx} is not referenced by asm ops"
-        )));
-    }
-
-    if let Some(idx) = used_strings.iter().position(|used| !*used) {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "debug_source_map string table entry {idx} is not referenced by asm ops"
-        )));
-    }
-
-    Ok(())
 }
 
 // DEBUG ERROR MESSAGES SECTION SERIALIZATION
@@ -1340,7 +1287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_source_map_deserialization_rejects_duplicate_interned_strings() {
+    fn test_debug_source_map_deserialization_accepts_duplicate_interned_strings() {
         let mut bytes = Vec::new();
         bytes.write_u8(DEBUG_SOURCE_MAP_VERSION);
         bytes.write_usize(0);
@@ -1360,11 +1307,14 @@ mod tests {
         bytes.write_usize(0);
         bytes.write_usize(0);
 
-        assert!(DebugSourceMapSection::read_from_bytes(&bytes).is_err());
+        let section = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(section.strings().len(), 2);
+        assert_eq!(section.asm_ops()[0].context_name(), "test::ctx");
+        assert_eq!(section.asm_ops()[0].op(), "test::ctx");
     }
 
     #[test]
-    fn test_debug_source_map_deserialization_rejects_unused_interned_locations() {
+    fn test_debug_source_map_deserialization_accepts_unused_interned_locations() {
         let location =
             Location::new(Uri::new("file://test.masm"), ByteIndex::new(10), ByteIndex::new(14));
         let unused_location =
@@ -1392,7 +1342,9 @@ mod tests {
         bytes.write_usize(0);
         bytes.write_usize(0);
 
-        assert!(DebugSourceMapSection::read_from_bytes(&bytes).is_err());
+        let section = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(section.locations().len(), 2);
+        assert_eq!(section.asm_ops()[0].location(), Some(&location));
     }
 
     #[test]
