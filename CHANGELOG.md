@@ -26,6 +26,7 @@
 - [BREAKING] Add missing constraint in Bitwise chiplet ([#3386](https://github.com/0xMiden/miden-vm/pull/3386)).
 - [BREAKING] Fixed a soundness gap in the chiplets AIR where a chiplet section's first-row initialization was skipped when the preceding section was empty. A program that uses memory but performs no `u32and`/`u32xor` operations produces an empty bitwise section, which caused the memory chiplet to skip its "values not being written must be zero" reset; a malicious prover could exploit this to forge a read of never-written memory. Each section's first row is now identified from the chiplet selectors at the boundary rather than from the previous chiplet's last row, so the initialization holds no matter which preceding sections are empty. The ACE section-start reset was hardened the same way as a precaution ([#3387](https://github.com/0xMiden/miden-vm/pull/3387)).
 - [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
+- [BREAKING] Reused serialized debug source map tables during package load, avoiding a slow table rebuild and changing `DebugSourceAsmOp` fields to shared values ([#3395](https://github.com/0xMiden/miden-vm/pull/3395)).
 
 #### Fixes
 
