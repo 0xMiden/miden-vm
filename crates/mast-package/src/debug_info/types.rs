@@ -1196,11 +1196,11 @@ pub struct DebugSourceAsmOp {
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Optional source location for the assembly operation.
-    pub location: Option<Location>,
+    pub location: Option<Arc<Location>>,
     /// Assembly context name.
-    pub context_name: String,
+    pub context_name: Arc<str>,
     /// Assembly operation text.
-    pub op: String,
+    pub op: Arc<str>,
     /// Number of VM cycles taken by the operation.
     pub num_cycles: u8,
 }
@@ -1215,6 +1215,24 @@ impl DebugSourceAsmOp {
         op: String,
         num_cycles: u8,
     ) -> Self {
+        Self::from_shared(
+            source_node,
+            op_idx,
+            location.map(Arc::new),
+            Arc::from(context_name),
+            Arc::from(op),
+            num_cycles,
+        )
+    }
+
+    pub(crate) fn from_shared(
+        source_node: DebugSourceNodeId,
+        op_idx: u32,
+        location: Option<Arc<Location>>,
+        context_name: Arc<str>,
+        op: Arc<str>,
+        num_cycles: u8,
+    ) -> Self {
         Self {
             source_node,
             op_idx,
@@ -1223,6 +1241,21 @@ impl DebugSourceAsmOp {
             op,
             num_cycles,
         }
+    }
+
+    /// Returns the source location for this operation, if present.
+    pub fn location(&self) -> Option<&Location> {
+        self.location.as_deref()
+    }
+
+    /// Returns the assembly context name.
+    pub fn context_name(&self) -> &str {
+        self.context_name.as_ref()
+    }
+
+    /// Returns the assembly operation text.
+    pub fn op(&self) -> &str {
+        self.op.as_ref()
     }
 }
 
@@ -1288,9 +1321,9 @@ pub struct DebugSourceMapSection {
     /// Version of the debug source map format.
     version: u8,
     /// Deduplicated source locations referenced by assembly operation rows.
-    locations: Vec<Location>,
+    locations: Vec<Arc<Location>>,
     /// Deduplicated strings referenced by assembly operation rows.
-    strings: Vec<String>,
+    strings: Vec<Arc<str>>,
     /// Source-keyed assembly operation rows.
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Source-keyed debug variable rows.
@@ -1319,12 +1352,22 @@ impl DebugSourceMapSection {
 
     /// Creates a source-keyed debug metadata section from rows, including inline calls.
     pub fn from_parts_with_inline_calls(
+        mut asm_ops: Vec<DebugSourceAsmOp>,
+        debug_vars: Vec<DebugSourceVar>,
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Self {
+        let locations = intern_locations(&mut asm_ops);
+        let strings = intern_source_map_strings(&mut asm_ops);
+        Self::from_interned_parts(locations, strings, asm_ops, debug_vars, inline_calls)
+    }
+
+    pub(crate) fn from_interned_parts(
+        locations: Vec<Arc<Location>>,
+        strings: Vec<Arc<str>>,
         asm_ops: Vec<DebugSourceAsmOp>,
         debug_vars: Vec<DebugSourceVar>,
         inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Self {
-        let locations = intern_locations(&asm_ops);
-        let strings = intern_source_map_strings(&asm_ops);
         Self {
             version: DEBUG_SOURCE_MAP_VERSION,
             locations,
@@ -1346,12 +1389,12 @@ impl DebugSourceMapSection {
     }
 
     /// Returns the deduplicated source locations referenced by assembly operation rows.
-    pub fn locations(&self) -> &[Location] {
+    pub fn locations(&self) -> &[Arc<Location>] {
         &self.locations
     }
 
     /// Returns the deduplicated strings referenced by assembly operation rows.
-    pub fn strings(&self) -> &[String] {
+    pub fn strings(&self) -> &[Arc<str>] {
         &self.strings
     }
 
@@ -1434,30 +1477,39 @@ impl DebugSourceMapSection {
     }
 }
 
-fn intern_locations(asm_ops: &[DebugSourceAsmOp]) -> Vec<Location> {
+fn intern_locations(asm_ops: &mut [DebugSourceAsmOp]) -> Vec<Arc<Location>> {
     let mut locations = Vec::new();
     let mut by_location = BTreeMap::new();
-    for location in asm_ops.iter().filter_map(|row| row.location.as_ref()) {
-        by_location.entry(location.clone()).or_insert_with(|| {
-            let idx = locations.len();
-            locations.push(location.clone());
-            idx
+    for location in asm_ops.iter_mut().filter_map(|row| row.location.as_mut()) {
+        let idx = *by_location.entry(Arc::clone(location)).or_insert_with(|| {
+            locations.push(Arc::clone(location));
+            locations.len() - 1
         });
+        *location = Arc::clone(&locations[idx]);
     }
     locations
 }
 
-fn intern_source_map_strings(asm_ops: &[DebugSourceAsmOp]) -> Vec<String> {
+fn intern_source_map_strings(asm_ops: &mut [DebugSourceAsmOp]) -> Vec<Arc<str>> {
     let mut strings = Vec::new();
     let mut by_string = BTreeMap::new();
-    for value in asm_ops.iter().flat_map(|row| [&row.context_name, &row.op]) {
-        by_string.entry(value.clone()).or_insert_with(|| {
-            let idx = strings.len();
-            strings.push(value.clone());
-            idx
-        });
+    for row in asm_ops {
+        intern_source_map_string(&mut row.context_name, &mut strings, &mut by_string);
+        intern_source_map_string(&mut row.op, &mut strings, &mut by_string);
     }
     strings
+}
+
+fn intern_source_map_string(
+    value: &mut Arc<str>,
+    strings: &mut Vec<Arc<str>>,
+    by_string: &mut BTreeMap<Arc<str>, usize>,
+) {
+    let idx = *by_string.entry(Arc::clone(value)).or_insert_with(|| {
+        strings.push(Arc::clone(value));
+        strings.len() - 1
+    });
+    *value = Arc::clone(&strings[idx]);
 }
 
 // DEBUG ERROR MESSAGES SECTION
@@ -1943,11 +1995,11 @@ mod tests {
         let source_b = source_graph.roots[1];
         assert_ne!(source_a, source_b);
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(source_a).unwrap().context_name,
+            merged_debug.first_asm_op_for_source_node(source_a).unwrap().context_name(),
             "alias_a",
         );
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            merged_debug.first_asm_op_for_source_node(source_b).unwrap().context_name(),
             "alias_b",
         );
         assert_eq!(
@@ -2039,7 +2091,7 @@ mod tests {
         let merged_child = source_graph.nodes[source_graph.roots[0].as_u32() as usize].children[0];
         assert_eq!(source_graph.nodes[merged_child.as_u32() as usize].exec_node, merged_callee,);
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(merged_child).unwrap().context_name,
+            merged_debug.first_asm_op_for_source_node(merged_child).unwrap().context_name(),
             "callee",
         );
     }
@@ -2082,10 +2134,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name, "alias_a",);
-        assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name, "alias_b",);
+        assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name(), "alias_a",);
+        assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name(), "alias_b",);
         assert_eq!(
-            source_map.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            source_map.first_asm_op_for_source_node(source_b).unwrap().context_name(),
             "alias_b",
         );
         let vars_b = source_map.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();

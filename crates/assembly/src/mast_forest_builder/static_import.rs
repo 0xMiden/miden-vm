@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
@@ -450,10 +450,10 @@ impl MastForestBuilder {
                 (
                     row.op_idx as usize,
                     AssemblyOp::new(
-                        row.location.clone(),
-                        row.context_name.clone(),
+                        row.location().cloned(),
+                        String::from(row.context_name()),
                         row.num_cycles,
-                        row.op.clone(),
+                        String::from(row.op()),
                     ),
                 )
             })

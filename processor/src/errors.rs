@@ -499,7 +499,7 @@ impl<'a> PackageSourceDebugContext<'a> {
             None => self.debug_info.first_asm_op_for_source_node(source_node_id),
         }?;
 
-        assembly_op.location.as_ref()
+        assembly_op.location()
     }
 }
 

@@ -584,7 +584,7 @@ end
             .expect("root package should contain source map")
             .asm_ops()
             .iter()
-            .find(|row| row.context_name == context_name)
+            .find(|row| row.context_name() == context_name)
             .map(|row| row.source_node)
             .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
     };
@@ -603,11 +603,7 @@ end
         .into_iter()
         .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
         .map(|source_node| {
-            debug_info
-                .first_asm_op_for_source_node(source_node)
-                .unwrap()
-                .context_name
-                .as_str()
+            debug_info.first_asm_op_for_source_node(source_node).unwrap().context_name()
         })
         .collect::<Vec<_>>();
     assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
@@ -635,7 +631,7 @@ end
         round_tripped_debug_info
             .first_asm_op_for_source_node(depa_source)
             .unwrap()
-            .context_name,
+            .context_name(),
         "depa_ctx",
     );
     assert_eq!(

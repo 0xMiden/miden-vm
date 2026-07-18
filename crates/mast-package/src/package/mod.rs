@@ -1593,7 +1593,7 @@ mod tests {
 
         assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, exec_node);
         assert_eq!(
-            debug_info.asm_op_for_operation(source_node, 0).unwrap().context_name,
+            debug_info.asm_op_for_operation(source_node, 0).unwrap().context_name(),
             "app::entry"
         );
     }
@@ -2072,7 +2072,7 @@ mod tests {
 
         assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, entrypoint_node);
         assert_eq!(
-            debug_info.first_asm_op_for_source_node(source_node).unwrap().context_name,
+            debug_info.first_asm_op_for_source_node(source_node).unwrap().context_name(),
             "alias_b"
         );
 
@@ -2198,11 +2198,14 @@ mod tests {
             merged_debug
                 .first_asm_op_for_source_node(placeholder_source)
                 .unwrap()
-                .context_name,
+                .context_name(),
             "placeholder",
         );
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(concrete_source).unwrap().context_name,
+            merged_debug
+                .first_asm_op_for_source_node(concrete_source)
+                .unwrap()
+                .context_name(),
             "concrete",
         );
     }
@@ -2241,8 +2244,8 @@ mod tests {
             debug_info
                 .first_asm_op_for_source_node(source_node)
                 .unwrap()
-                .context_name
-                .clone()
+                .context_name()
+                .into()
         }
 
         assert_eq!(
