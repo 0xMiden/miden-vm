@@ -1,12 +1,19 @@
 //! Rust-evaluator backend: emits a captured constraint graph as a flat,
 //! builder-generic Rust module.
 //!
-//! Per AIR, one `eval_{name}<AB: LiftedAirBuilder<F = Felt>>` function containing
-//! one `let` per unique graph node in topological id order — leaf reads named
-//! `h{n}` in first-use order, ops named `b{id}` (base) / `e{id}` (ext) — followed
-//! by the constraint asserts replayed in the exact global order of the captured
-//! eval, so `ConstraintLayout` (and hence alpha assignment and all proof
-//! artifacts) is unchanged.
+//! Per AIR, one `eval_{name}<AB: LiftedAirBuilder<F = Felt>>` function. Every
+//! unique graph node gets one `let` (global CSE), emitted at its first use —
+//! leaf reads named `h{n}` in first-use order, ops named `b{id}` (base) /
+//! `e{id}` (ext) — and each constraint assert is placed directly after its
+//! root, replayed in the exact global order of the captured eval, so
+//! `ConstraintLayout` (and hence alpha assignment and all proof artifacts) is
+//! unchanged.
+//!
+//! Interleaving the asserts with the node `let`s bounds value live ranges:
+//! each constraint root dies at its assert. The alternative — all `let`s
+//! first, all asserts last — keeps every root live to the end of the
+//! function, and the resulting register spills measurably regress the prover
+//! on register-starved or cache-contended targets.
 //!
 //! Emission is deterministic: the same graph always produces byte-identical
 //! output (crate invariant 3).
@@ -74,9 +81,10 @@ struct Token {
 
 struct Emitter<'g> {
     graph: &'g Graph,
-    /// Token per node, filled in id order (children precede parents).
+    /// Token per emitted node, memoized on first use.
     tokens: Vec<Option<Token>>,
-    /// Emitted `let` lines, in evaluation order.
+    /// Emitted lines — node `let`s and constraint asserts, interleaved in
+    /// evaluation order.
     lines: Vec<String>,
     /// Number of hoisted leaf `let`s so far, for `h{n}` naming.
     hoisted: usize,
@@ -92,25 +100,22 @@ impl<'g> Emitter<'g> {
         }
     }
 
-    /// Emit every node in topological (id) order.
-    fn emit_all(&mut self) {
-        for (id, node) in self.graph.iter() {
-            match node {
-                Node::Leaf(leaf) => {
-                    let tok = self.leaf_token(leaf);
-                    self.tokens[id.index()] = Some(tok);
-                },
-                Node::Op { class, op, x, y } => self.emit_op(id, class, op, x, y),
-            }
+    /// Token for `id`, emitting the node — and, recursively, any children not
+    /// yet emitted — at its first use.
+    fn token(&mut self, id: NodeId) -> Token {
+        if let Some(tok) = &self.tokens[id.index()] {
+            return tok.clone();
         }
+        let tok = match self.graph.node(id) {
+            Node::Leaf(leaf) => self.leaf_token(leaf),
+            Node::Op { class, op, x, y } => self.op_token(id, class, op, x, y),
+        };
+        self.tokens[id.index()] = Some(tok.clone());
+        tok
     }
 
-    fn token(&self, id: NodeId) -> Token {
-        self.tokens[id.index()].clone().expect("children precede parents in id order")
-    }
-
-    /// Emit a `let` for a leaf value. Hash-consing guarantees each leaf node is
-    /// visited exactly once, so every hoist gets a fresh name.
+    /// Emit a `let` for a leaf value. `token` memoizes, so each leaf node is
+    /// emitted exactly once and every hoist gets a fresh name.
     fn hoist(&mut self, ty: &str, expr: String) -> String {
         let name = format!("h{}", self.hoisted);
         self.hoisted += 1;
@@ -164,45 +169,42 @@ impl<'g> Emitter<'g> {
         }
     }
 
-    fn emit_op(&mut self, id: NodeId, class: Class, op: OpKind, x: NodeId, y: Option<NodeId>) {
+    fn op_token(
+        &mut self,
+        id: NodeId,
+        class: Class,
+        op: OpKind,
+        x: NodeId,
+        y: Option<NodeId>,
+    ) -> Token {
+        let xt = self.token(x);
+        let yt = y.map(|y| self.token(y));
         let rhs = match class {
-            Class::Base => {
-                let xt = self.token(x);
-                match y {
-                    None => format!("-{}.clone()", xt.code),
-                    Some(y) => {
-                        let yt = self.token(y);
+            Class::Base => match &yt {
+                None => format!("-{}.clone()", xt.code),
+                Some(yt) => format!("{}.clone() {} {}.clone()", xt.code, sym(op), yt.code),
+            },
+            Class::Ext => match &yt {
+                None => match xt.class {
+                    Class::Ext => format!("-{}.clone()", xt.code),
+                    Class::Base => format!("-AB::ExprEF::from({}.clone())", xt.code),
+                },
+                Some(yt) => match (xt.class, yt.class) {
+                    (Class::Ext, _) => {
                         format!("{}.clone() {} {}.clone()", xt.code, sym(op), yt.code)
                     },
-                }
-            },
-            Class::Ext => {
-                let xt = self.token(x);
-                match y {
-                    None => match xt.class {
-                        Class::Ext => format!("-{}.clone()", xt.code),
-                        Class::Base => format!("-AB::ExprEF::from({}.clone())", xt.code),
+                    // Commutative ops flip so the ext operand drives the
+                    // mixed-op impl; subtraction promotes the base operand.
+                    (Class::Base, Class::Ext) if op != OpKind::Sub => {
+                        format!("{}.clone() {} {}.clone()", yt.code, sym(op), xt.code)
                     },
-                    Some(y) => {
-                        let yt = self.token(y);
-                        match (xt.class, yt.class) {
-                            (Class::Ext, _) => {
-                                format!("{}.clone() {} {}.clone()", xt.code, sym(op), yt.code)
-                            },
-                            // Commutative ops flip so the ext operand drives the
-                            // mixed-op impl; subtraction promotes the base operand.
-                            (Class::Base, Class::Ext) if op != OpKind::Sub => {
-                                format!("{}.clone() {} {}.clone()", yt.code, sym(op), xt.code)
-                            },
-                            (Class::Base, _) => format!(
-                                "AB::ExprEF::from({}.clone()) {} {}.clone()",
-                                xt.code,
-                                sym(op),
-                                yt.code
-                            ),
-                        }
-                    },
-                }
+                    (Class::Base, _) => format!(
+                        "AB::ExprEF::from({}.clone()) {} {}.clone()",
+                        xt.code,
+                        sym(op),
+                        yt.code
+                    ),
+                },
             },
         };
         let prefix = match class {
@@ -210,24 +212,24 @@ impl<'g> Emitter<'g> {
             Class::Ext => 'e',
         };
         self.lines.push(format!("    let {prefix}{} = {rhs};", id.index()));
-        self.tokens[id.index()] = Some(Token {
+        Token {
             class,
             code: format!("{prefix}{}", id.index()),
-        });
+        }
     }
 }
 
-/// Place an assert line at its global constraint index, validating range and
+/// Place a value at its global constraint index, validating range and
 /// uniqueness. With every index placed exactly once, index density follows by
 /// pigeonhole.
-fn place(asserts: &mut [Option<String>], global: usize, line: String) {
+fn place<T>(slots: &mut [Option<T>], global: usize, value: T) {
     assert!(
-        global < asserts.len(),
+        global < slots.len(),
         "global constraint index {global} out of range ({} constraints)",
-        asserts.len()
+        slots.len()
     );
-    assert!(asserts[global].is_none(), "duplicate global constraint index {global}");
-    asserts[global] = Some(line);
+    assert!(slots[global].is_none(), "duplicate global constraint index {global}");
+    slots[global] = Some(value);
 }
 
 /// Binary-operator symbol; `Neg` is emitted as a prefix, never through here.
@@ -242,35 +244,43 @@ fn sym(op: OpKind) -> char {
 
 /// Append one `eval_{name}` function (preceded by a blank line) to `out`.
 fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
-    let mut e = Emitter::new(eval.graph);
-    e.emit_all();
-
-    // Replay asserts in the exact global order of the captured eval so the
-    // constraint layout (and alpha assignment) is unchanged.
+    // Order the constraint roots by global index; emission then walks them in
+    // that order, so the asserts replay the hand-written eval's layout (and
+    // alpha assignment) exactly.
     let cons = eval.constraints;
     let total = cons.base_roots.len() + cons.ext_roots.len();
-    let mut asserts: Vec<Option<String>> = vec![None; total];
+    let mut roots: Vec<Option<(NodeId, bool)>> = vec![None; total];
     for (local, &global) in cons.base_global_indices.iter().enumerate() {
-        let t = e.token(cons.base_roots[local]);
-        assert!(t.class == Class::Base, "base constraint root must be base-class");
-        place(&mut asserts, global, format!("    builder.assert_zero({}.clone());", t.code));
+        place(&mut roots, global, (cons.base_roots[local], false));
     }
     for (local, &global) in cons.ext_global_indices.iter().enumerate() {
-        let t = e.token(cons.ext_roots[local]);
-        let line = match t.class {
-            Class::Ext => format!("    builder.assert_zero_ext({}.clone());", t.code),
-            Class::Base => {
-                format!("    builder.assert_zero_ext(AB::ExprEF::from({}.clone()));", t.code)
-            },
+        place(&mut roots, global, (cons.ext_roots[local], true));
+    }
+
+    let mut e = Emitter::new(eval.graph);
+    for entry in roots {
+        let (root, is_ext) = entry.expect("every global constraint index must be assigned");
+        let t = e.token(root);
+        let line = if is_ext {
+            match t.class {
+                Class::Ext => format!("    builder.assert_zero_ext({}.clone());", t.code),
+                Class::Base => {
+                    format!("    builder.assert_zero_ext(AB::ExprEF::from({}.clone()));", t.code)
+                },
+            }
+        } else {
+            assert!(t.class == Class::Base, "base constraint root must be base-class");
+            format!("    builder.assert_zero({}.clone());", t.code)
         };
-        place(&mut asserts, global, line);
+        e.lines.push(line);
     }
 
     writeln!(
         out,
         "\n/// Generated globally-CSE'd evaluator for `{}`.\n\
          ///\n\
-         /// Emits constraints in the exact global order of the hand-written `eval`.\n\
+         /// Emits constraints in the exact global order of the hand-written `eval`,\n\
+         /// with each node's `let` placed at its first use.\n\
          #[inline(never)]\n\
          pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {{",
         eval.air_label, eval.name,
@@ -279,14 +289,6 @@ fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
     writeln!(out, "{FN_PROLOGUE}").unwrap();
     for line in &e.lines {
         writeln!(out, "{line}").unwrap();
-    }
-    writeln!(
-        out,
-        "    // ---- constraint asserts, in the hand-written eval's global order ----"
-    )
-    .unwrap();
-    for line in asserts.into_iter() {
-        writeln!(out, "{}", line.expect("every global constraint index must be assigned")).unwrap();
     }
     writeln!(out, "}}").unwrap();
 }
@@ -351,7 +353,8 @@ use miden_crypto::{
 
 /// Generated globally-CSE'd evaluator for `MockAir::BASE`.
 ///
-/// Emits constraints in the exact global order of the hand-written `eval`.
+/// Emits constraints in the exact global order of the hand-written `eval`,
+/// with each node's `let` placed at its first use.
 #[inline(never)]
 pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let main = builder.main();
@@ -361,23 +364,22 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let a0 = aux.current_slice();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);
-    let h0: AB::Expr = m0[0].into();
-    let h1: AB::Expr = m1[0].into();
-    let b2 = h1.clone() - h0.clone();
-    let h2: AB::Expr = builder.is_first_row();
-    let b4 = h2.clone() * b2.clone();
-    let b5 = -b4.clone();
-    let h3: AB::Expr = builder.public_values()[2].into();
-    let h4: AB::Expr = builder.periodic_values()[1].into();
-    let b8 = h3.clone() + h4.clone();
-    let h5: AB::Expr = builder.is_last_row();
-    let h6: AB::Expr = builder.is_transition();
-    let b11 = h5.clone() * h6.clone();
-    let h7: AB::Expr = AB::Expr::from(Felt::from_u64(3));
-    let b13 = b11.clone() + h7.clone();
-    // ---- constraint asserts, in the hand-written eval's global order ----
+    let h0: AB::Expr = builder.public_values()[2].into();
+    let h1: AB::Expr = builder.periodic_values()[1].into();
+    let b8 = h0.clone() + h1.clone();
     builder.assert_zero(b8.clone());
+    let h2: AB::Expr = builder.is_last_row();
+    let h3: AB::Expr = builder.is_transition();
+    let b11 = h2.clone() * h3.clone();
+    let h4: AB::Expr = AB::Expr::from(Felt::from_u64(3));
+    let b13 = b11.clone() + h4.clone();
     builder.assert_zero(b13.clone());
+    let h5: AB::Expr = builder.is_first_row();
+    let h6: AB::Expr = m1[0].into();
+    let h7: AB::Expr = m0[0].into();
+    let b2 = h6.clone() - h7.clone();
+    let b4 = h5.clone() * b2.clone();
+    let b5 = -b4.clone();
     builder.assert_zero(b5.clone());
 }
 ";
@@ -428,24 +430,23 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let a0 = aux.current_slice();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);
-    let h0: AB::ExprEF = a0[0].into();
-    let h1: AB::ExprEF = builder.permutation_randomness()[0].into();
-    let e2 = h0.clone() + h1.clone();
-    let h2: AB::Expr = m0[1].into();
-    let e5 = e2.clone() * h2.clone();
-    let e6 = AB::ExprEF::from(h2.clone()) - e2.clone();
-    let e7 = e2.clone() - h2.clone();
-    let e8 = -AB::ExprEF::from(h2.clone());
+    let h0: AB::Expr = m0[1].into();
+    let h1: AB::ExprEF = a0[0].into();
+    let h2: AB::ExprEF = builder.permutation_randomness()[0].into();
+    let e2 = h1.clone() + h2.clone();
+    let e5 = e2.clone() * h0.clone();
+    builder.assert_zero_ext(e5.clone());
+    let e7 = e2.clone() - h0.clone();
+    builder.assert_zero_ext(e7.clone());
+    let e8 = -AB::ExprEF::from(h0.clone());
+    builder.assert_zero_ext(e8.clone());
+    let e6 = AB::ExprEF::from(h0.clone()) - e2.clone();
     let h3: AB::ExprEF = AB::ExprEF::from(AB::Expr::from(Felt::from_u64(7)));
     let e10 = e6.clone() + h3.clone();
     let h4: AB::ExprEF = builder.permutation_values()[0].clone().into();
     let e12 = e10.clone() - h4.clone();
-    // ---- constraint asserts, in the hand-written eval's global order ----
-    builder.assert_zero_ext(e5.clone());
-    builder.assert_zero_ext(e7.clone());
-    builder.assert_zero_ext(e8.clone());
     builder.assert_zero_ext(e12.clone());
-    builder.assert_zero_ext(AB::ExprEF::from(h2.clone()));
+    builder.assert_zero_ext(AB::ExprEF::from(h0.clone()));
 }
 ";
         // The module wrapper (header + imports) is pinned by the base golden;
