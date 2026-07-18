@@ -3,6 +3,7 @@
 ## v0.25.8 (2026-07-22)
 
 - Fix validation of procedure names in package manifest exports when extracting module info
+- [BREAKING] Consolidate all package debug info sections into `PackageDebugInfo`, and rewrite its serialization format to remove as much excess overhead as possible. This addresses the issue where the presence of package debug info causes massive execution-time overhead when requesting the debug info for the package. It also simplifies construction/maintenance of debug info, and provides more ergonomic APIs for accessing specific types of information. ([#3398](https://github.com/0xMiden/miden-vm/pull/3398))
 
 ## v0.25.7 (2026-07-20)
 

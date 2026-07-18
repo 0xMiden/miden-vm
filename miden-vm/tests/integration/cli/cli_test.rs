@@ -122,9 +122,7 @@ fn cli_bundle_debug() {
         lib.debug_info()
             .expect("package debug info should decode")
             .is_some_and(|debug_info| {
-                debug_info
-                    .source_map()
-                    .is_some_and(|source_map| !source_map.asm_ops().is_empty())
+                debug_info.nodes().iter().any(|source_node| !source_node.asm_ops.is_empty())
             });
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();

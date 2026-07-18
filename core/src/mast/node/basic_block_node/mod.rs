@@ -111,32 +111,20 @@ impl BasicBlockNode {
     ///
     /// Adjusts AssemblyOp mappings `(raw_idx, id)` to account for padding NOOPs inserted into
     /// op_batches.
-    pub fn adjust_asm_op_indices<T: Copy>(
-        asm_ops: Vec<(usize, T)>,
-        op_batches: &[OpBatch],
-    ) -> Vec<(usize, T)> {
+    pub fn adjust_asm_op_indices(asm_op_indices: Vec<usize>, op_batches: &[OpBatch]) -> Vec<usize> {
         let raw2pad = RawToPaddedPrefix::new(op_batches);
-        asm_ops
-            .into_iter()
-            .map(|(raw_idx, id)| {
-                let padded = raw_idx + raw2pad[raw_idx];
-                (padded, id)
-            })
-            .collect()
+        asm_op_indices.into_iter().map(|raw_idx| raw_idx + raw2pad[raw_idx]).collect()
     }
 
     /// Adjusts padded operation indices back to raw indices for AssemblyOp mappings.
-    pub fn unadjust_asm_op_indices<T: Copy>(
-        asm_ops: Vec<(usize, T)>,
+    pub fn unadjust_asm_op_indices(
+        asm_op_indices: Vec<usize>,
         op_batches: &[OpBatch],
-    ) -> Vec<(usize, T)> {
+    ) -> Vec<usize> {
         let pad2raw = PaddedToRawPrefix::new(op_batches);
-        asm_ops
+        asm_op_indices
             .into_iter()
-            .map(|(padded_idx, id)| {
-                let raw = padded_idx - pad2raw[padded_idx];
-                (raw, id)
-            })
+            .map(|padded_idx| padded_idx - pad2raw[padded_idx])
             .collect()
     }
 }

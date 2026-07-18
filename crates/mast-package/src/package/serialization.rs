@@ -855,8 +855,7 @@ mod tests {
         Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
         PackageSubmodule, ProcedureExport, SectionId, TargetType,
         debug_info::{
-            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
-            DebugSourceNodeId,
+            DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfoBuilder,
         },
     };
 
@@ -936,20 +935,31 @@ mod tests {
             None,
         )
         .expect("test package should be valid");
-        let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceNode::new(node_id, Vec::new(), 0, 1)],
-            vec![source_node],
-        );
-        let source_map = DebugSourceMapSection::from_parts(
-            vec![DebugSourceAsmOp::new(source_node, 0, None, "trusted".into(), "add".into(), 1)],
-            Vec::new(),
-        );
+        let mut debug_info = PackageDebugInfoBuilder::default();
+        let context_name_idx = debug_info.add_string("trusted");
+        let op_name_idx = debug_info.add_string("add");
+        let added_source_node = debug_info
+            .add_node(DebugSourceNode {
+                exec_node: node_id,
+                children: Vec::new(),
+                op_start: 0,
+                op_end: 1,
+                asm_ops: vec![DebugSourceAsmOp {
+                    op_idx: 0,
+                    location_idx: None,
+                    context_name_idx,
+                    op_name_idx,
+                    num_cycles: 1,
+                }],
+                debug_vars: Vec::new(),
+                inline_calls: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(added_source_node, source_node);
+        debug_info.add_root(source_node);
         package
             .sections
-            .push(Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()));
-        package
-            .sections
-            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()));
+            .push(Section::new(SectionId::DEBUG_INFO, debug_info.build().to_bytes()));
         package
     }
 
@@ -1042,12 +1052,12 @@ mod tests {
             "untrusted package reads should discard debug sections"
         );
         assert!(deserialized.debug_info().unwrap().is_none());
-        let debug_source_map_id = SectionId::DEBUG_SOURCE_MAP.as_str().as_bytes();
+        let debug_info_id = SectionId::DEBUG_INFO.as_str().as_bytes();
         assert!(
             !deserialized
                 .to_bytes()
-                .windows(debug_source_map_id.len())
-                .any(|window| window == debug_source_map_id),
+                .windows(debug_info_id.len())
+                .any(|window| window == debug_info_id),
             "discarded debug sections should not be reserialized"
         );
     }
@@ -1059,12 +1069,7 @@ mod tests {
 
         let deserialized = Package::read_from_bytes_trusted(&bytes).unwrap();
 
-        assert!(
-            deserialized
-                .sections
-                .iter()
-                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        );
+        assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
         assert!(deserialized.debug_info().unwrap().is_some());
     }
 
@@ -1075,12 +1080,7 @@ mod tests {
 
         let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
 
-        assert!(
-            deserialized
-                .sections
-                .iter()
-                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        );
+        assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
         assert!(deserialized.debug_info().unwrap().is_some());
     }
 
@@ -1119,12 +1119,7 @@ mod tests {
         let deserialized = Package::deserialize_from_file_trusted(&path).unwrap();
         fs::remove_file(&path).unwrap();
 
-        assert!(
-            deserialized
-                .sections
-                .iter()
-                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        );
+        assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
         assert!(deserialized.debug_info().unwrap().is_some());
     }
 

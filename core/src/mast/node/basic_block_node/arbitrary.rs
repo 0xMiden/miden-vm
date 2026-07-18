@@ -525,10 +525,12 @@ impl Arbitrary for AssemblyOp {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<bool>(),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
+            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
+                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
+            }),
+            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
+                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
+            }),
             any::<u8>(),
         )
             .prop_map(|(has_location, context_name, op, num_cycles)| {

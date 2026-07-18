@@ -22,6 +22,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,6 +870,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "fs-err"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1034,6 +1046,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "heck"
@@ -1602,13 +1619,16 @@ dependencies = [
 name = "miden-mast-package"
 version = "0.25.8"
 dependencies = [
+ "hashbrown",
  "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
+ "miden-utils-indexing",
  "proptest",
  "proptest-derive",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror",
@@ -1839,7 +1859,7 @@ dependencies = [
 name = "miden-utils-indexing"
 version = "0.25.8"
 dependencies = [
- "miden-crypto",
+ "miden-serde-utils",
  "miden-test-serde-macros",
  "proptest",
  "serde",

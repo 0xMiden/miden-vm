@@ -1,7 +1,7 @@
 use alloc::{format, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
-use miden_debug_types::FileLineCol;
+use miden_debug_types::Location;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -30,10 +30,10 @@ pub struct DebugVarInfo {
     type_id: Option<u32>,
     /// If this is a function parameter, its 1-based index.
     arg_index: Option<NonZeroU32>,
-    /// Source file location (file:line:column).
+    /// Source location.
     /// This should only be set when the location differs from the AssemblyOp location associated
     /// with the same instruction, to avoid package bloat.
-    location: Option<FileLineCol>,
+    location: Option<Location>,
     /// Where to find the variable's value at this point
     value_location: DebugVarLocation,
 }
@@ -51,7 +51,7 @@ impl DebugVarInfo {
     }
 
     /// Returns the variable name.
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &Arc<str> {
         &self.name
     }
 
@@ -82,14 +82,14 @@ impl DebugVarInfo {
 
     /// Returns the source location if set.
     /// This is only set when the location differs from the AssemblyOp location.
-    pub fn location(&self) -> Option<&FileLineCol> {
+    pub fn location(&self) -> Option<&Location> {
         self.location.as_ref()
     }
 
     /// Sets the source location for this variable.
     /// Only set this when the location differs from the AssemblyOp location
     /// to avoid package bloat.
-    pub fn set_location(&mut self, location: FileLineCol) {
+    pub fn set_location(&mut self, location: Location) {
         self.location = Some(location);
     }
 
@@ -126,7 +126,7 @@ impl fmt::Display for DebugVarInfo {
         write!(f, " = {}", self.value_location)?;
 
         if let Some(loc) = &self.location {
-            write!(f, " {loc}")?;
+            write!(f, " [{}@{}..{}]", loc.uri, loc.start, loc.end)?;
         }
 
         Ok(())
@@ -286,7 +286,7 @@ impl Deserializable for DebugVarInfo {
                 })
             })
             .transpose()?;
-        let location = Option::<FileLineCol>::read_from(source)?;
+        let location = Option::<Location>::read_from(source)?;
 
         Ok(Self {
             name,
@@ -321,7 +321,7 @@ fn read_bounded_bytes<R: ByteReader>(
 mod tests {
     use alloc::string::ToString;
 
-    use miden_debug_types::{ColumnNumber, LineNumber, Uri};
+    use miden_debug_types::{ByteIndex, Uri};
 
     use super::*;
     use crate::serde::{Deserializable, Serializable, SliceReader};
@@ -366,12 +366,12 @@ mod tests {
     #[test]
     fn debug_var_info_display_with_location() {
         let mut var = DebugVarInfo::new("y", DebugVarLocation::Memory(100));
-        var.set_location(FileLineCol::new(
+        var.set_location(Location::new(
             Uri::new("test.rs"),
-            LineNumber::new(42).unwrap(),
-            ColumnNumber::new(5).unwrap(),
+            ByteIndex::from(0u32),
+            ByteIndex::from(5u32),
         ));
-        assert_eq!(var.to_string(), "var.y = mem[100] [test.rs@42:5]");
+        assert_eq!(var.to_string(), "var.y = mem[100] [test.rs@0..5]");
     }
 
     #[test]
@@ -415,10 +415,10 @@ mod tests {
         let mut var = DebugVarInfo::new("full", DebugVarLocation::Expression(vec![0xaa, 0xbb]));
         var.set_type_id(7);
         var.set_arg_index(2);
-        var.set_location(FileLineCol::new(
+        var.set_location(Location::new(
             Uri::new("lib.rs"),
-            LineNumber::new(50).unwrap(),
-            ColumnNumber::new(10).unwrap(),
+            ByteIndex::from(10u32),
+            ByteIndex::from(50u32),
         ));
 
         let mut bytes = Vec::new();

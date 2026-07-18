@@ -9,12 +9,14 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_core::serde::{Deserializable, SliceReader};
-use miden_mast_package::{
-    Package, SectionId, TargetType,
-    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
-};
+use miden_mast_package::{Package, SectionId, TargetType, debug_info::PackageDebugInfo};
 
 fuzz_target!(|data: &[u8]| {
+    if let Ok(package) = Package::read_from_bytes_trusted(data) {
+        validate_debug_sections(&package);
+        let _ = package.debug_info();
+    }
+
     let Ok(package) = Package::read_from_bytes(data) else {
         return;
     };
@@ -39,15 +41,9 @@ fuzz_target!(|data: &[u8]| {
 
 fn validate_debug_sections(package: &Package) {
     for section in &package.sections {
-        if section.id == SectionId::DEBUG_SOURCES {
+        if section.id == SectionId::DEBUG_INFO {
             let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugSourcesSection::read_from(&mut reader);
-        } else if section.id == SectionId::DEBUG_FUNCTIONS {
-            let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugFunctionsSection::read_from(&mut reader);
-        } else if section.id == SectionId::DEBUG_TYPES {
-            let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugTypesSection::read_from(&mut reader);
+            let _ = PackageDebugInfo::read_from(&mut reader);
         }
     }
 }

@@ -3,16 +3,15 @@ use std::{path::Path, process::Command, string::String, sync::Arc};
 use miden_assembly_syntax::source_file;
 use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt},
-    operations::{DebugVarInfo, DebugVarLocation, Operation},
+    operations::{DebugVarLocation, Operation},
     serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,
 };
 use miden_mast_package::{
     PackageExport, PackageModule, ProcedureExport, Section, SectionId,
     debug_info::{
-        DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection, DebugSourceAsmOp,
-        DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
-        DebugSourceVar, DebugSourcesSection, DebugTypesSection,
+        DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
+        PackageDebugInfo, PackageDebugInfoBuilder,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -59,11 +58,11 @@ end
         dev.debug_info()
             .expect("dev package debug info should decode")
             .expect("dev package should contain debug info")
-            .source_map()
-            .is_some_and(|source_map| !source_map.asm_ops().is_empty())
+            .nodes()
+            .iter()
+            .any(|node| !node.asm_ops.is_empty())
     );
-    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
-    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
@@ -74,13 +73,7 @@ end
             .expect("release package debug info should decode")
             .is_none()
     );
-    assert!(
-        !release
-            .sections
-            .iter()
-            .any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-    );
-    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
+    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
 }
 
 #[test]
@@ -225,61 +218,21 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_sources = package
+    let debug_info = package
         .sections
         .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCES)
-        .expect("package should contain DEBUG_SOURCES");
-    let debug_functions = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_FUNCTIONS)
-        .expect("package should contain DEBUG_FUNCTIONS");
-    let debug_types = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_TYPES)
-        .expect("package should contain DEBUG_TYPES");
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
+        .find(|section| section.id == SectionId::DEBUG_INFO)
+        .expect("package should contain DEBUG_INFO");
 
-    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
-    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
-        .expect("DEBUG_SOURCES should deserialize");
-    assert_eq!(debug_sources.version, 1);
-    assert_eq!(debug_sources.files.len(), 1);
-
-    let mut functions_reader = SliceReader::new(debug_functions.data.as_ref());
-    let debug_functions = DebugFunctionsSection::read_from(&mut functions_reader)
-        .expect("DEBUG_FUNCTIONS should deserialize");
-    assert_eq!(debug_functions.version, DEBUG_FUNCTIONS_VERSION);
-    assert_eq!(debug_functions.functions.len(), 1);
-
-    let mut types_reader = SliceReader::new(debug_types.data.as_ref());
-    let debug_types =
-        DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
-    assert_eq!(debug_types.version, 1);
-
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    assert_eq!(debug_source_graph.version(), 1);
-    assert!(!debug_source_graph.nodes().is_empty());
-    assert!(!debug_source_graph.roots().is_empty());
-
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
-    assert_eq!(debug_source_map.version(), DEBUG_SOURCE_MAP_VERSION);
-    assert!(!debug_source_map.asm_ops().is_empty());
+    let mut reader = SliceReader::new(debug_info.data.as_ref());
+    let debug_info =
+        PackageDebugInfo::read_from(&mut reader).expect("DEBUG_INFO should deserialize");
+    assert_eq!(debug_info.version(), DEBUG_INFO_VERSION);
+    assert_eq!(debug_info.files().len(), 1);
+    assert_eq!(debug_info.functions().len(), 1);
+    assert!(!debug_info.nodes().is_empty());
+    assert!(!debug_info.roots().is_empty());
+    assert!(debug_info.nodes().iter().any(|node| !node.asm_ops.is_empty()));
 }
 
 #[test]
@@ -315,32 +268,19 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
-
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
 
     let mut source_nodes_by_exec = BTreeMap::new();
-    for row in debug_source_map.asm_ops() {
-        let source_node = row.source_node.as_u32() as usize;
-        let exec_node = debug_source_graph.nodes()[source_node].exec_node;
-        source_nodes_by_exec
-            .entry(exec_node)
-            .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
-            .insert(row.source_node);
+    for (source_idx, source_node) in debug_info.nodes().iter().enumerate() {
+        if !source_node.asm_ops.is_empty() {
+            source_nodes_by_exec
+                .entry(source_node.exec_node)
+                .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
+                .insert(DebugSourceNodeId::from(source_idx as u32));
+        }
     }
 
     assert!(
@@ -379,34 +319,16 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
 
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
-
-    let exec_with_split_ranges = debug_source_graph
+    let exec_with_split_ranges = debug_info
         .nodes()
         .iter()
-        .enumerate()
-        .fold(BTreeMap::new(), |mut ranges_by_exec, (source_idx, source_node)| {
-            let has_asm_op = debug_source_map
-                .asm_ops()
-                .iter()
-                .any(|row| row.source_node.as_u32() as usize == source_idx);
-            if has_asm_op {
+        .fold(BTreeMap::new(), |mut ranges_by_exec, source_node| {
+            if !source_node.asm_ops.is_empty() {
                 ranges_by_exec
                     .entry(source_node.exec_node)
                     .or_insert_with(Vec::new)
@@ -447,11 +369,6 @@ fn debug_bearing_static_package(
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
     push_export_module_path(&mut module_paths, &export_path);
-    let source_root = DebugSourceNodeId::from(0);
-    let export = ProcedureExport::new(export_path, Some(root), digest, None)
-        .with_source_node(Some(source_root));
-    exports.push(PackageExport::Procedure(export));
-
     if let Some((marker_export, marker_op)) = marker_export {
         let marker_root = BasicBlockNodeBuilder::new(vec![marker_op])
             .add_to_forest(&mut forest)
@@ -471,25 +388,40 @@ fn debug_bearing_static_package(
         )));
     }
 
-    let source_graph = DebugSourceGraphSection::from_parts(
-        vec![DebugSourceNode::new(root, vec![], 0, 1)],
-        vec![source_root],
-    );
-    let source_map = DebugSourceMapSection::from_parts(
-        vec![DebugSourceAsmOp::new(
-            source_root,
-            0,
-            None,
-            context.to_string(),
-            "add".to_string(),
-            1,
-        )],
-        vec![DebugSourceVar::new(
-            source_root,
-            0,
-            DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
-        )],
-    );
+    let mut debug_info = PackageDebugInfoBuilder::default();
+    let context_name_idx = debug_info.add_string(context);
+    let op_name_idx = debug_info.add_string("add");
+    let name_idx = debug_info.add_string(var_name);
+    let source_root = debug_info
+        .add_node(DebugSourceNode {
+            exec_node: root,
+            children: vec![],
+            op_start: 0,
+            op_end: 1,
+            asm_ops: vec![DebugSourceAsmOp {
+                op_idx: 0,
+                location_idx: None,
+                context_name_idx,
+                op_name_idx,
+                num_cycles: 1,
+            }],
+            debug_vars: vec![DebugSourceVar {
+                op_idx: 0,
+                name_idx,
+                type_id: None,
+                arg_idx: None,
+                location_idx: None,
+                value_location: DebugVarLocation::Stack(0),
+            }],
+            inline_calls: vec![],
+        })
+        .expect("test package source node should build");
+    debug_info.add_root(source_root);
+    let debug_info = debug_info.build();
+
+    let export = ProcedureExport::new(export_path, Some(root), digest, None)
+        .with_source_node(Some(source_root));
+    exports.insert(0, PackageExport::Procedure(export));
 
     let modules = module_paths.into_iter().map(|path| PackageModule::new(path, []));
     let mut package = MastPackage::create_with_modules(
@@ -502,10 +434,7 @@ fn debug_bearing_static_package(
         [],
     )
     .expect("test package should be valid");
-    package.sections = vec![
-        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
-        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
-    ];
+    package.sections = vec![Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes())];
     package
 }
 
@@ -580,12 +509,15 @@ end
         .expect("root package should contain debug info");
     let source_for_context = |context_name: &str| {
         debug_info
-            .source_map()
-            .expect("root package should contain source map")
-            .asm_ops()
+            .nodes()
             .iter()
-            .find(|row| row.context_name == context_name)
-            .map(|row| row.source_node)
+            .enumerate()
+            .find(|(_, node)| {
+                node.asm_ops.iter().any(|row| {
+                    debug_info.get_string(row.context_name_idx).as_deref() == Some(context_name)
+                })
+            })
+            .map(|(source_idx, _)| DebugSourceNodeId::from(source_idx as u32))
             .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
     };
     let depa_source = source_for_context("depa_ctx");
@@ -603,27 +535,26 @@ end
         .into_iter()
         .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
         .map(|source_node| {
-            debug_info
-                .first_asm_op_for_source_node(source_node)
-                .unwrap()
-                .context_name
-                .as_str()
+            let row = debug_info.first_asm_op_for_source_node(source_node).unwrap();
+            debug_info.get_string(row.context_name_idx).unwrap()
         })
         .collect::<Vec<_>>();
-    assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
-    assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depa_ctx"));
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depb_ctx"));
 
     let vars_at_source_start = |source_node_id| {
         let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
         debug_info
             .debug_vars_for_operation(source_node_id, op_start)
-            .map(|row| row.var.name())
+            .map(|row| debug_info.get_string(row.name_idx).unwrap())
             .collect::<Vec<_>>()
     };
     let depa_vars = vars_at_source_start(depa_source);
     let depb_vars = vars_at_source_start(depb_source);
-    assert_eq!(depa_vars, vec!["depa_var"]);
-    assert_eq!(depb_vars, vec!["depb_var"]);
+    assert_eq!(depa_vars.len(), 1);
+    assert_eq!(depa_vars[0].as_ref(), "depa_var");
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 
     let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
         .expect("root package should deserialize as trusted");
@@ -631,22 +562,19 @@ end
         .debug_info()
         .expect("round-tripped debug sections should decode")
         .expect("round-tripped package should contain debug info");
+    let depa_asm_op = round_tripped_debug_info.first_asm_op_for_source_node(depa_source).unwrap();
     assert_eq!(
-        round_tripped_debug_info
-            .first_asm_op_for_source_node(depa_source)
-            .unwrap()
-            .context_name,
-        "depa_ctx",
+        round_tripped_debug_info.get_string(depa_asm_op.context_name_idx).as_deref(),
+        Some("depa_ctx"),
     );
-    assert_eq!(
-        {
-            let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
-            round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
-        }
-        .map(|row| row.var.name())
-        .collect::<Vec<_>>(),
-        vec!["depb_var"],
-    );
+    let depb_vars = {
+        let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
+        round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
+    }
+    .map(|row| round_tripped_debug_info.get_string(row.name_idx).unwrap())
+    .collect::<Vec<_>>();
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 }
 
 #[test]
@@ -683,15 +611,20 @@ end
         .expect("trim-paths build should succeed");
     let tempdir_prefix = tempdir.path().display().to_string();
 
-    let asm_op_path = package
+    let debug_info = package
         .debug_info()
         .expect("package debug info should decode")
-        .expect("package should contain debug info")
-        .source_map()
-        .expect("package should contain source map")
-        .asm_ops()
+        .expect("package should contain debug info");
+    let asm_op_path = debug_info
+        .nodes()
         .iter()
-        .find_map(|asm_op| asm_op.location.as_ref().map(|location| location.uri.path().to_string()))
+        .flat_map(|node| node.asm_ops.iter())
+        .find_map(|asm_op| {
+            asm_op
+                .location_idx
+                .and_then(|location_idx| debug_info.get_location(location_idx))
+                .map(|location| location.uri.path().to_string())
+        })
         .expect("assembled package should contain asm-op locations");
     assert!(
         !asm_op_path.contains(tempdir_prefix.as_str()),
@@ -702,16 +635,9 @@ end
         "asm-op path remained absolute: {asm_op_path}"
     );
 
-    let debug_sources = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCES)
-        .expect("package should contain DEBUG_SOURCES");
-    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
-    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
-        .expect("DEBUG_SOURCES should deserialize");
-    assert!(!debug_sources.files.is_empty());
-    for path in debug_sources.strings.iter() {
+    assert!(!debug_info.files().is_empty());
+    for file in debug_info.files() {
+        let path = debug_info.get_string(file.path_idx).expect("source file path should exist");
         assert!(
             !path.contains(tempdir_prefix.as_str()),
             "package debug path was not trimmed: {path}"
