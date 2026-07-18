@@ -8,7 +8,9 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_mast_package::{PackageDebugInfoError, debug_info::PackageDebugInfo};
 
-use super::handlers::{EventError, EventHandler, EventHandlerRegistry};
+use super::handlers::{
+    EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
+};
 use crate::{
     BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
     ProcessorState, SyncHost, advice::AdviceMutation,
@@ -22,6 +24,7 @@ use crate::{
 pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
+    trace_handlers: TraceHandlerRegistry,
     source_manager: Arc<S>,
 }
 
@@ -30,6 +33,7 @@ impl Default for DefaultHost {
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
+            trace_handlers: TraceHandlerRegistry::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
@@ -48,6 +52,7 @@ where
         DefaultHost::<O> {
             store: self.store,
             event_handlers: self.event_handlers,
+            trace_handlers: self.trace_handlers,
             source_manager,
         }
     }
@@ -99,6 +104,38 @@ where
         self.register_handler(event, handler).unwrap();
         existed
     }
+
+    /// Registers a single [`TraceHandler`] into this host.
+    ///
+    /// Trace handlers observe VM state for optional, read-only trace events; they cannot mutate the
+    /// advice provider. Unhandled trace event IDs are ignored. The handler can be either a closure
+    /// or a free function.
+    pub fn register_trace_handler(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn TraceHandler>,
+    ) -> Result<(), ExecutionError> {
+        self.trace_handlers.register(event, handler)
+    }
+
+    /// Un-registers a trace handler with the given id, returning a flag indicating whether a
+    /// handler was previously registered with this id.
+    pub fn unregister_trace_handler(&mut self, id: EventId) -> bool {
+        self.trace_handlers.unregister(id)
+    }
+
+    /// Replaces a trace handler with the given event, returning a flag indicating whether a
+    /// handler was previously registered with this event ID.
+    pub fn replace_trace_handler(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn TraceHandler>,
+    ) -> bool {
+        let event_id = event.to_event_id();
+        let existed = self.trace_handlers.unregister(event_id);
+        self.register_trace_handler(event, handler).unwrap();
+        existed
+    }
 }
 
 impl<S> BaseHost for DefaultHost<S>
@@ -116,6 +153,10 @@ where
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         self.event_handlers.resolve_event(event_id)
+    }
+
+    fn resolve_trace(&self, trace_id: EventId) -> Option<&EventName> {
+        self.trace_handlers.resolve_trace(trace_id)
     }
 }
 
@@ -141,6 +182,17 @@ where
 
                 Err(UnhandledEvent.into())
             },
+            Err(e) => Err(e),
+        }
+    }
+
+    fn on_trace(&mut self, process: &ProcessorState<'_>) -> Result<(), TraceError> {
+        // The trace id sits one below the `SystemEvent::TraceEvent` id.
+        let trace_id = EventId::from_felt(process.get_stack_item(1));
+        match self.trace_handlers.handle_trace(trace_id, process) {
+            Ok(Some(())) => Ok(()),
+            // Traces are optional/readonly, so an unhandled trace is not an error.
+            Ok(None) => Ok(()),
             Err(e) => Err(e),
         }
     }

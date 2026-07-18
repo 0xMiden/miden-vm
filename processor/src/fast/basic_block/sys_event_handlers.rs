@@ -75,6 +75,9 @@ pub fn handle_system_event(
         SystemEvent::DeferredEvaluateTag => handle_deferred_evaluate_tag(processor),
         SystemEvent::DeferredEvaluatePayload => handle_deferred_evaluate_payload(processor),
         SystemEvent::DeferredRegisterData => handle_deferred_register_data(processor),
+        // `TraceEvent` does not have a handler. Its purpose is signaling the processor to trigger
+        // a `TraceEvent` for the host.
+        SystemEvent::TraceEvent => Ok(()),
     }
 }
 

@@ -172,9 +172,10 @@ pub enum Operation {
     /// - User-defined events are conventionally derived from strings via
     ///   `hash_string_to_word(name)[0]` (Blake3-based) and may be emitted via immediate forms in
     ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
-    /// - System events are still identified by specific 32-bit codes; the VM attempts to interpret
-    ///   the stack `Felt` as `u32` to dispatch known system events, and otherwise forwards the
-    ///   event to the host.
+    /// - System events are identified by reserved [`SystemEvent`](crate::events::SystemEvent) IDs.
+    ///   Most are handled by the VM; `SystemEvent::TraceEvent` triggers the host's optional
+    ///   read-only trace handler for the trace event id at stack position 1.
+    /// - Any non system event ID is forwarded to the host's regular event handler.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
     Emit = opcodes::EMIT,

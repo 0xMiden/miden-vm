@@ -6,16 +6,17 @@ use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
-    event::{EventError, EventName},
+    event::{EventError, EventName, SystemEvent, TraceError},
 };
 
 struct YieldingAsyncHost {
     event_calls: usize,
+    trace_calls: usize,
 }
 
 impl YieldingAsyncHost {
     fn new() -> Self {
-        Self { event_calls: 0 }
+        Self { event_calls: 0, trace_calls: 0 }
     }
 }
 
@@ -46,6 +47,17 @@ impl Host for YieldingAsyncHost {
             Ok(Vec::new())
         }
     }
+
+    fn on_trace(
+        &mut self,
+        _process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<(), TraceError>> {
+        async move {
+            tokio::task::yield_now().await;
+            self.trace_calls += 1;
+            Ok(())
+        }
+    }
 }
 
 fn simple_program() -> miden_processor::Program {
@@ -58,6 +70,20 @@ fn simple_program() -> miden_processor::Program {
                 add
             end
             "#,
+        )
+        .expect("program should compile")
+        .unwrap_program()
+}
+
+fn emit_trace_program() -> miden_processor::Program {
+    let trace_name = EventName::new("test::async::trace_emit");
+    let trace_id = trace_name.to_event_id().as_u64();
+    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
+
+    Assembler::default()
+        .assemble_program(
+            "program",
+            format!("begin push.{trace_id} push.{trace_sys_event_id} emit drop drop end"),
         )
         .expect("program should compile")
         .unwrap_program()
@@ -136,5 +162,19 @@ async fn execute_async_supports_async_only_host_events() {
         .expect("async execution should succeed");
 
     assert_eq!(host.event_calls, 1);
+    assert_eq!(output.stack.get_num_elements(16).len(), 16);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_async_supports_async_only_host_traces() {
+    let program = emit_trace_program();
+
+    let mut host = YieldingAsyncHost::new();
+    let output = FastProcessor::new(StackInputs::default())
+        .execute(&program, &mut host)
+        .await
+        .expect("async execution should succeed");
+
+    assert_eq!(host.trace_calls, 1);
     assert_eq!(output.stack.get_num_elements(16).len(), 16);
 }

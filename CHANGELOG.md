@@ -7,6 +7,7 @@
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Added optional read-only trace events: processor recognizes `sys::trace_event` and forwards the user trace ID below it to `SyncHost::on_trace`/`Host::on_trace`. Unhandled trace events are no-ops, and `DefaultHost` supports named trace-handler registration ([#3396](https://github.com/0xMiden/miden-vm/pull/3396)).
 - [BREAKING] Restored `AeadPoseidon2::key_from_bytes` to upstream canonical-Felt decoding. The SHA-256 KDF that briefly appeared on this branch is removed; keys persisted under the KDF contract must be re-derived ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Restored the `ExactSizeIterator` impl on `miden-serde-utils::ReadManyIter`, matching upstream, and corrected `size_hint` to advertise the exact remaining count ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Documented the `SharedSecret` zeroization contract on the k256 and x25519 ECDH paths: the type now holds owned `[u8; 32]` bytes and zeroizes on drop ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).

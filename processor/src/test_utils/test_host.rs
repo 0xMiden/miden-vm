@@ -7,7 +7,10 @@ use miden_debug_types::{
 
 use crate::{
     BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    Word,
+    advice::AdviceMutation,
+    event::{EventError, TraceError},
+    mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -63,6 +66,32 @@ impl ProcessorStateSnapshot {
             mem_state: state.get_mem_state(state.ctx()),
         }
     }
+
+    /// Captures the user-visible state at a trace checkpoint.
+    ///
+    /// The checkpoint pattern used by tests is `push.<trace_id> push.<sys::trace_event> emit drop
+    /// drop`, so the host observes the `SystemEvent::TraceEvent` id at the top of the stack  and
+    /// the trace id below it (position 1). The checkpoint snapshot skips both synthetic stack items
+    /// to match the state after the trailing `drop drop`.
+    fn from_trace_checkpoint(state: &ProcessorState) -> Self {
+        let mut stack_state = state.get_stack_state();
+        if stack_state.len() >= 2 {
+            stack_state.drain(0..2);
+        }
+
+        ProcessorStateSnapshot {
+            clk: state.clock().into(),
+            ctx: state.ctx().into(),
+            stack_state,
+            stack_words: [
+                state.get_stack_word(2),
+                state.get_stack_word(6),
+                state.get_stack_word(10),
+                state.get_stack_word(14),
+            ],
+            mem_state: state.get_mem_state(state.ctx()),
+        }
+    }
 }
 
 /// A unified testing host that combines event handling, debug handling, and external node
@@ -72,8 +101,14 @@ pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
 
+    /// List of trace IDs that have been received
+    pub trace_handler: Vec<u32>,
+
     /// Process state snapshots captured at emitted test checkpoints.
     snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
+
+    /// Process state snapshots captured at trace checkpoints.
+    trace_snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
@@ -87,7 +122,9 @@ impl TestHost {
     pub fn new() -> Self {
         Self {
             event_handler: Vec::new(),
+            trace_handler: Vec::new(),
             snapshots: BTreeMap::new(),
+            trace_snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
@@ -99,7 +136,9 @@ impl TestHost {
         store.insert(kernel_forest);
         Self {
             event_handler: Vec::new(),
+            trace_handler: Vec::new(),
             snapshots: BTreeMap::new(),
+            trace_snapshots: BTreeMap::new(),
             store,
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
@@ -108,6 +147,11 @@ impl TestHost {
     /// Gets the processor state snapshots captured by emitted test checkpoints.
     pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
         &self.snapshots
+    }
+
+    /// Gets the processor state snapshots captured at trace checkpoints.
+    pub fn trace_snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
+        &self.trace_snapshots
     }
 }
 
@@ -147,5 +191,71 @@ where
             .or_default()
             .push(ProcessorStateSnapshot::from_emit_checkpoint(process));
         Ok(Vec::new())
+    }
+
+    fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
+        let trace_id: u32 = process.get_stack_item(1).as_canonical_u64().try_into().unwrap();
+        self.trace_handler.push(trace_id);
+        self.trace_snapshots
+            .entry(trace_id)
+            .or_default()
+            .push(ProcessorStateSnapshot::from_trace_checkpoint(process));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_assembly::Assembler;
+
+    use super::TestHost;
+    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs, event::SystemEvent};
+
+    #[test]
+    fn test_host_records_trace_and_snapshot() {
+        const TRACE_ID_1: u32 = 100;
+        const TRACE_ID_2: u32 = 200;
+        let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_u64();
+
+        let source = format!(
+            "\
+    begin
+        push.{TRACE_ID_1}
+        push.{trace_sys_event_id}
+        emit
+        drop
+        drop
+        push.{TRACE_ID_2}
+        push.{trace_sys_event_id}
+        emit
+        drop
+        drop
+    end"
+        );
+        let program: Program = Assembler::default()
+            .assemble_program("program", &source)
+            .unwrap()
+            .unwrap_program();
+        let mut host = TestHost::default();
+        crate::execute_sync(
+            &program,
+            StackInputs::default(),
+            AdviceInputs::default(),
+            &mut host,
+            ExecutionOptions::default(),
+        )
+        .unwrap();
+
+        // Each trace id is recorded, in emission order.
+        assert_eq!(host.trace_handler, vec![TRACE_ID_1, TRACE_ID_2]);
+        // A snapshot is captured at each trace checkpoint, keyed by trace id.
+        assert_eq!(host.trace_snapshots().get(&TRACE_ID_1).map(Vec::len), Some(1));
+        assert_eq!(host.trace_snapshots().get(&TRACE_ID_2).map(Vec::len), Some(1));
+
+        // Traces do not trigger non-trace handlers.
+        assert!(host.event_handler.is_empty());
+        assert!(host.snapshots().is_empty());
     }
 }

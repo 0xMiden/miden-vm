@@ -14,6 +14,7 @@ use crate::{
     },
     event::EventError,
     fast::{BreakReason, FastProcessor},
+    host::handlers::TraceError,
 };
 
 mod deferred_handlers;
@@ -87,6 +88,42 @@ impl FastProcessor {
         }
     }
 
+    /// `trace_id` refers to the event defined by the user, which is on the stack below
+    /// `SystemEvent::TraceEvent`.
+    #[inline(always)]
+    fn handle_trace_result<F>(
+        &mut self,
+        host: &impl BaseHost,
+        op_idx: usize,
+        trace_id: EventId,
+        result: Result<(), TraceError>,
+        package_debug_info: Option<&PackageDebugInfo>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) -> ControlFlow<BreakReason<F>> {
+        match result {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => {
+                let event_name = host.resolve_trace(trace_id).cloned();
+                let context = package_source_context(package_debug_info, source_node_id);
+                if let Some(context) = context {
+                    return ControlFlow::Break(BreakReason::Err(
+                        event_error_with_package_source_context(
+                            err,
+                            context,
+                            host,
+                            Some(op_idx),
+                            trace_id,
+                            event_name,
+                        ),
+                    ));
+                }
+                ControlFlow::Break(BreakReason::Err(event_error_with_context(
+                    err, trace_id, event_name,
+                )))
+            },
+        }
+    }
+
     #[inline(always)]
     pub(super) fn op_emit_sync<F>(
         &mut self,
@@ -97,27 +134,44 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
-        // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            return self.handle_system_event(
+        match SystemEvent::from_event_id(event_id) {
+            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
+            Some(SystemEvent::TraceEvent) => {
+                let processor_state = self.state();
+                let result = host.on_trace(&processor_state);
+                // The trace id is below `SystemEvent::TraceEvent`.
+                let trace_id = EventId::from_felt(self.stack_get(1));
+                self.handle_trace_result(
+                    host,
+                    op_idx,
+                    trace_id,
+                    result,
+                    package_debug_info,
+                    source_node_id,
+                )
+            },
+            // Other system events are handled directly.
+            Some(system_event) => self.handle_system_event(
                 system_event,
                 host,
                 op_idx,
                 package_debug_info,
                 source_node_id,
-            );
+            ),
+            // If it's not a system event, forward it to the host.
+            None => {
+                let processor_state = self.state();
+                let mutations = host.on_event(&processor_state);
+                self.apply_host_event_mutations(
+                    host,
+                    op_idx,
+                    event_id,
+                    mutations,
+                    package_debug_info,
+                    source_node_id,
+                )
+            },
         }
-
-        let processor_state = self.state();
-        let mutations = host.on_event(&processor_state);
-        self.apply_host_event_mutations(
-            host,
-            op_idx,
-            event_id,
-            mutations,
-            package_debug_info,
-            source_node_id,
-        )
     }
 
     #[inline(always)]
@@ -130,26 +184,44 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
-        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            return self.handle_system_event(
+        match SystemEvent::from_event_id(event_id) {
+            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
+            Some(SystemEvent::TraceEvent) => {
+                let processor_state = self.state();
+                let result = host.on_trace(&processor_state).await;
+                // The trace id is below `SystemEvent::TraceEvent`.
+                let trace_id = EventId::from_felt(self.stack_get(1));
+                self.handle_trace_result(
+                    host,
+                    op_idx,
+                    trace_id,
+                    result,
+                    package_debug_info,
+                    source_node_id,
+                )
+            },
+            // Other system events are handled directly.
+            Some(system_event) => self.handle_system_event(
                 system_event,
                 host,
                 op_idx,
                 package_debug_info,
                 source_node_id,
-            );
+            ),
+            // If it's not a system event, forward it to the host.
+            None => {
+                let processor_state = self.state();
+                let mutations = host.on_event(&processor_state).await;
+                self.apply_host_event_mutations(
+                    host,
+                    op_idx,
+                    event_id,
+                    mutations,
+                    package_debug_info,
+                    source_node_id,
+                )
+            },
         }
-
-        let processor_state = self.state();
-        let mutations = host.on_event(&processor_state).await;
-        self.apply_host_event_mutations(
-            host,
-            op_idx,
-            event_id,
-            mutations,
-            package_debug_info,
-            source_node_id,
-        )
     }
 }
 
