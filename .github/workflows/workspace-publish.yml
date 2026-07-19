@@ -8,6 +8,7 @@ name: Publish workspace to crates.io
 # rulesets may require deployment to the release environment and may make tags
 # immutable, so failures below print recovery commands instead of suggesting
 # force-pushing, deleting, or moving a tag.
+#
 on:
   workflow_dispatch:
     inputs:
@@ -62,9 +63,20 @@ jobs:
         run: |
           ./scripts/prepare-release.sh
 
+  package-version-gate:
+    name: check package versions
+    needs: prepare-release
+    if: ${{ github.repository_owner == '0xMiden' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package-version-gate.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.sha }}
+      packages: ${{ github.event.inputs.packages || '' }}
+
   create-draft:
     name: create draft release
-    needs: prepare-release
+    needs: [prepare-release, package-version-gate]
     if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
     runs-on: ubuntu-latest
     environment: release
@@ -212,8 +224,8 @@ jobs:
 
   publish:
     name: publish workspace crates
-    needs: [prepare-release, upload-artifacts]
-    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
+    needs: [prepare-release, package-version-gate, upload-artifacts]
+    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && needs.package-version-gate.result == 'success' && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
     runs-on: warp-ubuntu-latest-x64-8x
     environment: release
     permissions:
