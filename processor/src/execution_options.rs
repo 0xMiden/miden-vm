@@ -21,6 +21,9 @@ pub struct ExecutionOptions {
     max_adv_map_value_size: usize,
     /// Maximum total number of field elements allowed in live advice map keys and values.
     max_adv_map_elements: usize,
+    /// Whether the synchronous prover overlaps hasher-chiplet trace building with program
+    /// execution (std-only; the sequential path is used on no_std regardless).
+    overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
     /// Maximum approximate number of field elements allowed in durable deferred-state nodes.
@@ -58,6 +61,7 @@ impl Default for ExecutionOptions {
             max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            overlapped_trace_build: true,
         }
     }
 }
@@ -177,6 +181,7 @@ impl ExecutionOptions {
             max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            overlapped_trace_build: true,
         })
     }
 
@@ -243,6 +248,19 @@ impl ExecutionOptions {
     }
 
     /// Sets the maximum number of field elements allowed in a single live advice map value.
+    /// Sets whether the synchronous prover overlaps hasher-chiplet trace building with
+    /// program execution (defaults to `true`; ignored on no_std, which always uses the
+    /// sequential path).
+    pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
+        self.overlapped_trace_build = overlapped;
+        self
+    }
+
+    /// Returns whether the synchronous prover overlaps trace building with execution.
+    pub fn overlapped_trace_build(&self) -> bool {
+        self.overlapped_trace_build
+    }
+
     pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
         self.max_adv_map_value_size = size;
         self

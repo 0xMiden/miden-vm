@@ -20,19 +20,19 @@ use crate::{
 };
 
 mod bitwise;
-use bitwise::Bitwise;
+pub(crate) use bitwise::Bitwise;
 
 mod hasher;
-use hasher::Hasher;
+pub(crate) use hasher::Hasher;
 
 mod memory;
-use memory::Memory;
+pub(crate) use memory::Memory;
 
 mod ace;
 pub use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
 
 mod kernel_rom;
-use kernel_rom::KernelRom;
+pub(crate) use kernel_rom::KernelRom;
 
 #[cfg(test)]
 mod tests;
@@ -115,19 +115,6 @@ pub struct Chiplets {
 }
 
 impl Chiplets {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-    /// Returns a new [Chiplets] component instantiated with the provided KernelDescriptor.
-    pub fn new(kernel: KernelDescriptor) -> Self {
-        Self {
-            hasher: Hasher::default(),
-            bitwise: Bitwise::default(),
-            memory: Memory::default(),
-            kernel_rom: KernelRom::new(kernel),
-            ace: Ace::default(),
-        }
-    }
-
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 

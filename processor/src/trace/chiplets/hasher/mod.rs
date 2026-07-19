@@ -1,5 +1,6 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 
+use hashbrown::HashMap;
 use miden_air::trace::chiplets::hasher::{
     CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
     MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
@@ -32,13 +33,13 @@ pub(super) struct PermRequest {
     multiplicity: u64,
 }
 
-/// Converts a Digest to a DigestKey for BTreeMap lookup.
+/// Converts a Digest to a DigestKey for map lookup.
 fn digest_to_key(digest: Digest) -> DigestKey {
     let elems = digest.as_elements();
     core::array::from_fn(|i| elems[i].as_canonical_u64())
 }
 
-/// Converts a HasherState to a StateKey for BTreeMap lookup.
+/// Converts a HasherState to a StateKey for map lookup.
 fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
@@ -65,9 +66,9 @@ fn state_to_key(state: &HasherState) -> StateKey {
 pub struct Hasher {
     trace: HasherTrace,
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
-    memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
+    memoized_trace_map: HashMap<DigestKey, (usize, usize)>,
     /// Maps input state -> Poseidon2 cycle id.
-    perm_request_map: BTreeMap<StateKey, usize>,
+    perm_request_map: HashMap<StateKey, usize>,
     /// Deduplicated Poseidon2 requests in cycle-id order.
     perm_requests: Vec<PermRequest>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
@@ -84,7 +85,7 @@ impl Hasher {
     ///
     /// Before finalization, this returns the padded controller-region estimate. The estimate is
     /// checked against the actual length during `fill_trace()`.
-    pub(super) fn trace_len(&self) -> usize {
+    pub(crate) fn trace_len(&self) -> usize {
         if self.finalized {
             self.trace.trace_len()
         } else {

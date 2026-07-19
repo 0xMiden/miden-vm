@@ -12,6 +12,7 @@ use miden_air::{
     },
 };
 use miden_core::chiplets::hasher::Hasher;
+use rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
@@ -373,17 +374,23 @@ pub(super) fn fill_poseidon2_permutation_trace(
     );
 
     let request_count = perm_requests.len();
-    let mut row_idx = 0;
-    for (perm_id, request) in perm_requests.into_iter().enumerate() {
-        let state = request.state.map(Felt::new_unchecked);
-        write_poseidon2_permutation_cycle(
-            &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
-            &state,
-            perm_id_felt(perm_id),
-            Felt::new_unchecked(request.multiplicity),
-        );
-        row_idx += HASH_CYCLE_LEN;
-    }
+    // Each cycle is an independent permutation writing a disjoint row chunk;
+    // sequentially this loop is tens of milliseconds of single-thread work on
+    // large traces, so it runs in parallel.
+    rows[..request_count * HASH_CYCLE_LEN]
+        .par_chunks_exact_mut(HASH_CYCLE_LEN)
+        .zip(perm_requests.par_iter())
+        .enumerate()
+        .for_each(|(perm_id, (cycle_rows, request))| {
+            let state = request.state.map(Felt::new_unchecked);
+            write_poseidon2_permutation_cycle(
+                cycle_rows,
+                &state,
+                perm_id_felt(perm_id),
+                Felt::new_unchecked(request.multiplicity),
+            );
+        });
+    let mut row_idx = request_count * HASH_CYCLE_LEN;
 
     // Padding cycles use zero multiplicity and continue the cycle-id sequence.
     let mut perm_id = request_count;

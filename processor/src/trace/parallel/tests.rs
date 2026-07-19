@@ -23,7 +23,7 @@ use rstest::{fixture, rstest};
 use super::*;
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
-    trace::trace_state::MemoryReadsReplay,
+    trace::trace_state::{HasherOp, MemoryReadsReplay},
 };
 
 const DEFAULT_STACK: &[Felt] =
@@ -978,7 +978,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     trace_inputs
         .trace_generation_context_mut()
         .hasher_for_chiplet
-        .record_hash_basic_block(forest_id, bogus_node_id, [ZERO; 4].into());
+        .record_raw(HasherOp::HashBasicBlock((forest_id, bogus_node_id, [ZERO; 4].into())));
 
     let result = build_trace(trace_inputs);
     assert!(
