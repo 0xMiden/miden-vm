@@ -1155,7 +1155,7 @@ fn mark_unreachable_nodes_as_roots(
         mark_reachable(forest, root, &mut reachable);
     }
 
-    let num_nodes = crate::mast::MastNodeContext::node_count(forest) as u32;
+    let num_nodes = MastNodeContext::node_count(forest) as u32;
     let mut promoted = Vec::new();
     for idx in (0..num_nodes).rev() {
         let id = MastNodeId::new_unchecked(idx);
