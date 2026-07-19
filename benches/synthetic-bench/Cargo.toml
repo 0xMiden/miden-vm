@@ -25,6 +25,9 @@ miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
 miden-prover = { workspace = true, features = ["concurrent"] }
 miden-utils-testing = { workspace = true, features = ["std"] }
+tracing = "0.1"
+tracing-forest = { version = "0.2", features = ["ansi", "smallvec"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[bench]]
 name = "synthetic_bench"
@@ -33,3 +36,7 @@ harness = false
 [[bench]]
 name = "recursive_verify"
 harness = false
+
+[features]
+# Install miden-prover's huge-page global allocator in the bench binaries.
+huge-alloc = []

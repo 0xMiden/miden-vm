@@ -39,6 +39,13 @@ use std::{
 };
 
 use codspeed_criterion_compat as criterion;
+
+// Large prover buffers on 2 MiB huge pages: measured -9% end-to-end on
+// Graviton4 (dtlb_walk down 31x) under the default THP=madvise host setting.
+#[cfg(feature = "huge-alloc")]
+#[global_allocator]
+static GLOBAL: miden_prover::huge_alloc::HugePageAlloc = miden_prover::huge_alloc::HugePageAlloc;
+
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_assembly::Linkage;
 use miden_core::{
@@ -901,6 +908,34 @@ fn bench_recursive_verify(c: &mut Criterion) {
     let shapes = cases.iter().map(print_case_shape).collect::<Vec<_>>();
     print_trace_shape_summary(&shapes);
     if std::env::var_os("RECURSION_PROFILE_ONLY").is_some() {
+        return;
+    }
+    if std::env::var_os("RECURSION_TRACE_PROVE").is_some() {
+        let runs = env_usize("RECURSION_TRACE_PROVE_REPEATS", 1);
+        let warmups = env_usize_allow_zero("RECURSION_TRACE_PROVE_WARMUPS", 1);
+        for case in &cases {
+            for warmup_idx in 1..=warmups {
+                let (elapsed_ms, _) = prove_recursive_once(case, config.hash_fn);
+                eprintln!(
+                    "recursive_trace warmup {warmup_idx}/{warmups}/{} proofs: {elapsed_ms:.3} ms",
+                    case.proof_count,
+                );
+            }
+            for run_idx in 1..=runs {
+                println!("=== prove span tree: {} proofs, run {run_idx}/{runs}", case.proof_count);
+                let subscriber = tracing_subscriber::layer::SubscriberExt::with(
+                    tracing_subscriber::Registry::default(),
+                    tracing_forest::ForestLayer::default(),
+                );
+                tracing::subscriber::with_default(subscriber, || {
+                    let (elapsed_ms, _) = prove_recursive_once(case, config.hash_fn);
+                    eprintln!(
+                        "recursive_trace run {run_idx}/{runs}/{} proofs: {elapsed_ms:.3} ms",
+                        case.proof_count,
+                    );
+                });
+            }
+        }
         return;
     }
     if std::env::var_os("RECURSION_PROFILE_PROVE").is_some() {

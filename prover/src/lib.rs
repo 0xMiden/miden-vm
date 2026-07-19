@@ -22,6 +22,7 @@ use miden_processor::{
 use serde_wincode::SerdeCompat;
 use tracing::instrument;
 
+pub mod huge_alloc;
 mod proving_options;
 
 // EXPORTS
