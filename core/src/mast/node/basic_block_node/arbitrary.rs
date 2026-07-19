@@ -1666,7 +1666,7 @@ mod proptests {
     use proptest::prelude::*;
 
     use super::{MastForestParams, forest_kernel_strategy};
-    use crate::mast::{MastForest, MastNode, MastNodeExt, MastNodeId};
+    use crate::mast::{MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch};
 
     /// Returns the IDs of the immediate children of `id` in `forest`.
     ///
@@ -1893,7 +1893,7 @@ mod proptests {
         ) {
             for node in forest.nodes() {
                 let MastNode::Block(block) = node else { continue };
-                for op_or_dec in block.op_batches().iter().flat_map(|batch| batch.ops()) {
+                for op_or_dec in block.op_batches().iter().flat_map(OpBatch::ops) {
                     prop_assert!(
                         super::is_infallible_op(op_or_dec),
                         "executable block contains fallible operation {op_or_dec:?}",
