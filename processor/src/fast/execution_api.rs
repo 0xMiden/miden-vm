@@ -136,6 +136,54 @@ impl FastProcessor {
         .await
     }
 
+    /// Executes the program and builds its execution trace, overlapping the two: the hasher
+    /// chiplet — the dominant serial part of trace building — is built on a second thread from a
+    /// live stream of requests while execution is still running, hiding its cost behind the
+    /// (inherently sequential) execution itself.
+    ///
+    /// Produces the same trace as `execute_trace_inputs_sync` followed by
+    /// [`crate::trace::build_trace`].
+    #[cfg(feature = "std")]
+    #[instrument(name = "execute_and_build_trace_sync", skip_all)]
+    pub fn execute_and_build_trace_sync(
+        self,
+        program: &Program,
+        host: &mut impl SyncHost,
+    ) -> Result<crate::trace::ExecutionTrace, ExecutionError> {
+        use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut tracer = ExecutionTracer::new_with_streamed_hasher(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+            sender,
+        );
+
+        std::thread::scope(|scope| {
+            // Only the receiver crosses threads; execution (and the host) stay on this one.
+            let hasher = scope
+                .spawn(move || build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN));
+
+            let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
+
+            let mut inputs = match execution_output {
+                Ok(output) => Self::trace_build_inputs_from_parts(program, output, tracer),
+                Err(err) => {
+                    // Dropping the tracer drops the stream's sender; the builder then sees
+                    // end-of-input and finishes, letting the scope join it cleanly.
+                    drop(tracer);
+                    let _ = hasher.join().expect("hasher chiplet builder panicked");
+                    return Err(err);
+                },
+            };
+            // End the stream before joining the builder.
+            drop(inputs.take_hasher_replay());
+            let hasher = hasher.join().expect("hasher chiplet builder panicked")?;
+
+            build_trace_with_prebuilt_hasher(inputs, hasher)
+        })
+    }
+
     /// Executes the given program synchronously and returns the bundled trace inputs required by
     /// [`crate::trace::build_trace`].
     ///
