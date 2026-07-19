@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.25.6 (2026-07-19)
+
+- Update `wincode` dependency to v0.6.
+
 ## v0.25.5 (2026-07-16)
 
 - Use `Package::read_from_bytes_trusted` when loading preassembled packages from registry/cache during project assembly

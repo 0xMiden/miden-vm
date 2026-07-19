@@ -1,6 +1,6 @@
 [package]
 name = "miden-ace-codegen"
-version = "0.25.5"
+version = "0.25.6"
 description = "ACE circuit codegen for Plonky3-based Miden AIRs."
 documentation = "https://docs.rs/miden-ace-codegen"
 readme = "README.md"
