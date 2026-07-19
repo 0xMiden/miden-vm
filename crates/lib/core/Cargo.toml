@@ -52,6 +52,11 @@ miden-ace-codegen = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-prover = { workspace = true, features = ["concurrent"] }
+miden-signature = { path = "/Users/al/Code/miden-signature" }
+p3-field = { version = "0.6", default-features = false }
+p3-goldilocks = { version = "0.6", default-features = false }
+p3-symmetric = { version = "0.6", default-features = false }
 criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true

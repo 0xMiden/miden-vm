@@ -204,4 +204,5 @@ mod stark_asserts;
 mod sys;
 mod word;
 
+mod sig;
 mod stark;

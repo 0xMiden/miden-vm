@@ -6,6 +6,7 @@ pub mod debug
 pub mod math
 pub mod mem
 pub mod pcs
+pub mod sig
 pub mod stark
 pub mod sys
 pub mod word

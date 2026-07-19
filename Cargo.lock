@@ -1598,9 +1598,14 @@ dependencies = [
  "miden-package-registry",
  "miden-precompiles",
  "miden-processor",
+ "miden-prover",
+ "miden-signature",
  "miden-test-utils",
  "miden-utils-sync",
  "num",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-symmetric",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rstest",
@@ -1973,6 +1978,21 @@ version = "0.28.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+]
+
+[[package]]
+name = "miden-signature"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "p3-dft",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "rand 0.9.5",
+ "rand_chacha 0.9.0",
 ]
 
 [[package]]
