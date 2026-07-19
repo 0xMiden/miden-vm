@@ -45,7 +45,59 @@ fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
 ))]
 #[inline(always)]
 pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDTH]) {
+    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2"))]
+    sve2_kernel::permute_packed(state);
+
+    #[cfg(not(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2")))]
     P3_POSEIDON2.permute_mut(miden_field::PackedFelt::as_goldilocks_array_mut(state));
+}
+
+/// SVE2 packed-permutation C kernel (compiler-scheduled intrinsics; see
+/// `arch/arm64-sve/poseidon2/poseidon2_w12.c`, compiled by `build.rs` — the
+/// same pattern as the RPO SVE kernels). Layout contract: `[PackedFelt; 12]`
+/// is 12 elements × 2 lanes contiguous. Round constants are the module's own
+/// `ARK_*` tables (asserted equal to Plonky3's in `constants` tests).
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2"))]
+mod sve2_kernel {
+    use super::*;
+
+    unsafe extern "C" {
+        fn poseidon2_w12_packed_sve2(
+            state: *mut u64,
+            init_rc: *const u64,
+            n_init: usize,
+            int_rc: *const u64,
+            n_int: usize,
+            term_rc: *const u64,
+            n_term: usize,
+        );
+    }
+
+    static RC_INIT_RAW: Lazy<[u64; 12 * NUM_EXTERNAL_ROUNDS_HALF]> =
+        Lazy::new(|| core::array::from_fn(|i| ARK_EXT_INITIAL[i / 12][i % 12].as_canonical_u64()));
+    static RC_TERM_RAW: Lazy<[u64; 12 * NUM_EXTERNAL_ROUNDS_HALF]> =
+        Lazy::new(|| core::array::from_fn(|i| ARK_EXT_TERMINAL[i / 12][i % 12].as_canonical_u64()));
+    static RC_INT_RAW: Lazy<[u64; NUM_INTERNAL_ROUNDS]> =
+        Lazy::new(|| core::array::from_fn(|i| ARK_INT[i].as_canonical_u64()));
+
+    #[inline(always)]
+    pub(super) fn permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDTH]) {
+        // SAFETY: `PackedFelt` is `repr(transparent)` over `[Felt; 2]` and
+        // `Felt` over a `u64`, so the state is 24 contiguous u64 values — the
+        // kernel's declared layout. The kernel reads and writes exactly those
+        // 24 values and the constant tables passed alongside.
+        unsafe {
+            poseidon2_w12_packed_sve2(
+                state.as_mut_ptr() as *mut u64,
+                RC_INIT_RAW.as_ptr(),
+                NUM_EXTERNAL_ROUNDS_HALF,
+                RC_INT_RAW.as_ptr(),
+                NUM_INTERNAL_ROUNDS,
+                RC_TERM_RAW.as_ptr(),
+                NUM_EXTERNAL_ROUNDS_HALF,
+            );
+        }
+    }
 }
 
 /// Implementation of the Poseidon2 hash function with 256-bit output.
