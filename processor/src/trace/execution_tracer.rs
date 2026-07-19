@@ -161,6 +161,20 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
+    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
+    /// recorded, instead of buffering for post-execution replay. Everything else records as in
+    /// [`Self::new`].
+    #[cfg(feature = "std")]
+    pub fn new_with_streamed_hasher(
+        fragment_size: usize,
+        max_stack_depth: usize,
+        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp>,
+    ) -> Self {
+        let mut tracer = Self::new(fragment_size, max_stack_depth);
+        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
+        tracer
+    }
+
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -667,7 +681,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node.digest(),
+                        basic_block_node,
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
