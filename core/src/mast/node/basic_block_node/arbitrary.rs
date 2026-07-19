@@ -1,7 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use alloc::{collections::BTreeMap, sync::Arc};
 use core::ops::RangeInclusive;
 
 use proptest::{arbitrary::Arbitrary, prelude::*};
@@ -15,7 +12,7 @@ use crate::{
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
     },
     operations::{AssemblyOp, Operation},
-    program::{KernelDescriptor, Program},
+    program::{KernelDescriptor, KernelError, Program},
 };
 
 // Strategy for operations without immediate values (non-control flow)
@@ -188,7 +185,7 @@ pub enum GenerationMode {
 ///    Because externals are emitted in topological order and reference only roots that already
 ///    exist at emission time, this is automatic; the property test `externals_form_a_dag` verifies
 ///    the invariant on every sample.
-/// 4. **Kernel closure.** Every syscall's callee is a procedure root whose MAST root is a member of
+/// 4. **KernelDescriptor closure.** Every syscall's callee is a procedure root whose MAST root is a member of
 ///    the paired kernel's procedure hashes; the generator never falls back to a plain `Call` when a
 ///    kernel-eligible callee is unavailable.
 ///
@@ -263,7 +260,7 @@ pub struct MastForestParams {
     /// Optional user-supplied kernel procedure hashes.
     ///
     /// When `Some(hs)`, the strategy validates `hs` once at construction time and panics if
-    /// it contains duplicates or more than [`Kernel::MAX_NUM_PROCEDURES`] entries. The
+    /// it contains duplicates or more than [`KernelDescriptor::MAX_NUM_PROCEDURES`] entries. The
     /// generator then freezes the kernel to exactly `hs` and only emits syscalls whose
     /// callee digest is in this set; it will not emit a syscall when no procedure root in
     /// the forest matches a kernel hash. When `None`, the generator derives the kernel from
@@ -332,7 +329,7 @@ pub(crate) enum ExternalPick {
 /// This struct is computed once per sample and consumed by either [`build_executable_forest`]
 /// or [`build_structure_only_forest`] depending on the selected
 /// [`GenerationMode`]. The field layout is frozen per the strategy composition
-/// order to ensure deterministic shrinking: basic blocks and decorators are sampled first,
+/// order to ensure deterministic shrinking: basic blocks are sampled first,
 /// then counts, then pair/index vectors sized by those counts, and finally the selection
 /// bits for roots and kernel inclusion.
 ///
@@ -353,8 +350,6 @@ pub(crate) enum ExternalPick {
 pub(crate) struct ForestSeeds {
     /// Basic block nodes to be added in Phase 1.
     pub basic_blocks: Vec<BasicBlockNode>,
-    /// Decorators to be registered before any nodes are added.
-    pub decorators: Vec<Decorator>,
     /// Counts of each control-flow node type to be generated.
     pub counts: NodeCounts,
     /// Child index pairs for join nodes (Phase 2).
@@ -451,8 +446,8 @@ impl KernelPool {
     ///
     /// When `frozen` is `true`, this is a no-op. This allows the generator to call `insert`
     /// unconditionally during syscall emission without branching on whether the kernel is
-    /// user-supplied or co-generated. The dedup behaviour mirrors the [`Kernel`] invariant
-    /// (`Kernel::from_hashes` rejects duplicates) so callers cannot accidentally produce a
+    /// user-supplied or co-generated. The dedup behaviour mirrors the [`KernelDescriptor`] invariant
+    /// (`KernelDescriptor::from_hashes` rejects duplicates) so callers cannot accidentally produce a
     /// kernel that fails to construct.
     pub fn insert(&mut self, h: Word) {
         if !self.frozen && !self.hashes.contains(&h) {
@@ -483,7 +478,7 @@ impl KernelPool {
 ///
 /// The composition order is fixed per the design to keep proptest shrinking effective:
 ///
-/// 1. Basic blocks and decorators are sampled first (independent of everything else).
+/// 1. Basic blocks are sampled first (independent of everything else).
 /// 2. Control-flow node counts (`num_joins`, `num_splits`, `num_loops`, `num_calls`,
 ///    `num_syscalls`, `num_externals`, `num_dyns`) are sampled next.
 /// 3. Pair / index vectors (`join_pairs`, `split_pairs`, `loop_indices`, `call_indices`) are sized
@@ -501,12 +496,8 @@ impl KernelPool {
 /// [`GenerationMode::StructureOnly`] it yields [`ExternalPick::Random`] digest
 /// seeds.
 pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<ForestSeeds> {
-    let bb_params = BasicBlockNodeParams {
-        max_decorator_id_u32: params.decorators,
-        ..Default::default()
-    };
+    let bb_params = BasicBlockNodeParams::default();
     let blocks_end = *params.blocks.end();
-    let decorators_count = params.decorators as usize;
     let max_joins = params.max_joins;
     let max_splits = params.max_splits;
     let max_loops = params.max_loops;
@@ -516,16 +507,12 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
     let max_dyns = params.max_dyns;
     let mode = params.mode;
 
-    // Stage 1: basic blocks + decorators (independent of everything else).
-    (
-        prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=blocks_end),
-        prop::collection::vec(any::<Decorator>(), decorators_count),
-    )
+    // Stage 1: basic blocks (independent of everything else).
+    prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=blocks_end)
         // Stage 2: control-flow counts, each bounded by the corresponding `max_*`.
-        .prop_flat_map(move |(basic_blocks, decorators)| {
+        .prop_flat_map(move |basic_blocks| {
             (
                 Just(basic_blocks),
-                Just(decorators),
                 (
                     0..=max_joins,
                     0..=max_splits,
@@ -538,7 +525,7 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
             )
         })
         // Stage 3 + 4: pair/index vectors sized by counts, then selection vectors.
-        .prop_flat_map(move |(basic_blocks, decorators, counts_tuple)| {
+        .prop_flat_map(move |(basic_blocks, counts_tuple)| {
             let (
                 num_joins,
                 num_splits,
@@ -590,7 +577,6 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
 
             (
                 Just(basic_blocks),
-                Just(decorators),
                 Just(counts),
                 // Pair / index vectors, sized exactly by the counts above.
                 (
@@ -612,14 +598,12 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
         .prop_map(
             |(
                 basic_blocks,
-                decorators,
                 counts,
                 (join_pairs, split_pairs, loop_indices, call_indices),
                 (syscall_picks, external_picks, dyn_selectors, root_selection, kernel_inclusion),
             )| {
                 ForestSeeds {
                     basic_blocks,
-                    decorators,
                     counts,
                     join_pairs,
                     split_pairs,
@@ -636,21 +620,21 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
         .boxed()
 }
 
-// ---------- (MastForest, Kernel) strategy ----------
+// ---------- (MastForest, KernelDescriptor) strategy ----------
 
 /// Validates a caller-supplied `kernel_procedures` slice using the same rules as
-/// [`Kernel::from_hashes`].
+/// [`KernelDescriptor::from_hashes`].
 ///
-/// Returns `Ok(())` if the slice is `None` or accepted by `Kernel::from_hashes`; otherwise
+/// Returns `Ok(())` if the slice is `None` or accepted by `KernelDescriptor::from_hashes`; otherwise
 /// returns the underlying [`KernelError`].
 fn validate_kernel_procedures(kernel_procedures: &Option<Vec<Word>>) -> Result<(), KernelError> {
     match kernel_procedures.as_ref() {
         None => Ok(()),
-        Some(hs) => Kernel::from_hashes(hs.clone()).map(|_| ()),
+        Some(hs) => KernelDescriptor::from_hashes(hs.clone()).map(|_| ()),
     }
 }
 
-/// Strategy yielding `(MastForest, Kernel)` pairs for proptest.
+/// Strategy yielding `(MastForest, KernelDescriptor)` pairs for proptest.
 ///
 /// Dispatches to either `build_executable_forest` or `build_structure_only_forest`
 /// depending on `params.mode`.
@@ -658,14 +642,16 @@ fn validate_kernel_procedures(kernel_procedures: &Option<Vec<Word>>) -> Result<(
 /// # Panics
 ///
 /// Panics at construction time if `params.kernel_procedures` is `Some(hs)` and `hs` would be
-/// rejected by [`Kernel::from_hashes`] (duplicates or more than [`Kernel::MAX_NUM_PROCEDURES`]
+/// rejected by [`KernelDescriptor::from_hashes`] (duplicates or more than [`KernelDescriptor::MAX_NUM_PROCEDURES`]
 /// entries). The validity check is independent of the proptest seed, so this is treated as
 /// a caller bug rather than a per-sample rejection — validating once at construction time
 /// avoids burning the proptest reject budget on every sample.
 ///
 /// See the module-level docs on [`MastForestParams`] for the full list of structural
 /// closure invariants this strategy enforces in `Executable` mode.
-pub fn forest_kernel_strategy(params: MastForestParams) -> BoxedStrategy<(MastForest, Kernel)> {
+pub fn forest_kernel_strategy(
+    params: MastForestParams,
+) -> BoxedStrategy<(MastForest, KernelDescriptor)> {
     if let Err(err) = validate_kernel_procedures(&params.kernel_procedures) {
         panic!("MastForestParams::kernel_procedures is invalid: {err}");
     }
@@ -680,7 +666,7 @@ pub fn forest_kernel_strategy(params: MastForestParams) -> BoxedStrategy<(MastFo
 
 // ---------- Shared skeleton (Phases 1, 2, 2.5) ----------
 
-/// Result of building the shared portion of a `MastForest` sample: decorators, basic
+/// Result of building the shared portion of a `MastForest` sample: basic
 /// blocks, control-flow nodes (joins/splits/loops/calls), and an initial root selection.
 ///
 /// The skeleton is identical for both [`GenerationMode::Executable`] and
@@ -697,21 +683,19 @@ struct ForestSkeleton {
 
 /// Builds the shared skeleton for a single sample.
 ///
-/// Performs four phases identically for both generation modes:
+/// Performs three phases identically for both generation modes:
 ///
-/// 1. **Decorators.** Registers every decorator in `seeds.decorators` on a fresh [`MastForest`].
-/// 2. **Basic blocks.** Appends every block in `seeds.basic_blocks` and records its ID.
-/// 3. **Control-flow nodes.** Appends joins, splits, loops, and calls using the index vectors in
+/// 1. **Basic blocks.** Appends every block in `seeds.basic_blocks` and records its ID.
+/// 2. **Control-flow nodes.** Appends joins, splits, loops, and calls using the index vectors in
 ///    `seeds`. Each count is clamped against the number of basic blocks so the generator emits a
 ///    contiguous prefix even when proptest samples a count that exceeds the available children.
-/// 4. **Initial roots.** Marks a subset of the committed nodes as procedure roots according to
+/// 3. **Initial roots.** Marks a subset of the committed nodes as procedure roots according to
 ///    `seeds.root_selection`. If no node was selected and at least one basic block exists, the
 ///    first basic block becomes the fallback root so externals and syscalls have something to
 ///    target.
 fn build_skeleton(seeds: &SkeletonInput<'_>) -> ForestSkeleton {
     let SkeletonInput {
         basic_blocks,
-        decorators,
         counts,
         join_pairs,
         split_pairs,
@@ -721,10 +705,6 @@ fn build_skeleton(seeds: &SkeletonInput<'_>) -> ForestSkeleton {
     } = *seeds;
 
     let mut forest = MastForest::new();
-
-    for decorator in decorators {
-        forest.add_decorator(decorator.clone()).expect("Failed to add decorator");
-    }
 
     let num_basic_blocks = basic_blocks.len();
     let mut basic_block_ids: Vec<MastNodeId> = Vec::with_capacity(num_basic_blocks);
@@ -820,7 +800,6 @@ fn build_skeleton(seeds: &SkeletonInput<'_>) -> ForestSkeleton {
 #[derive(Clone, Copy)]
 struct SkeletonInput<'a> {
     basic_blocks: &'a [BasicBlockNode],
-    decorators: &'a [Decorator],
     counts: NodeCounts,
     join_pairs: &'a [(usize, usize)],
     split_pairs: &'a [(usize, usize)],
@@ -833,7 +812,6 @@ impl<'a> From<&'a ForestSeeds> for SkeletonInput<'a> {
     fn from(seeds: &'a ForestSeeds) -> Self {
         Self {
             basic_blocks: &seeds.basic_blocks,
-            decorators: &seeds.decorators,
             counts: seeds.counts,
             join_pairs: &seeds.join_pairs,
             split_pairs: &seeds.split_pairs,
@@ -846,12 +824,15 @@ impl<'a> From<&'a ForestSeeds> for SkeletonInput<'a> {
 
 // ---------- Executable build (mode-specific tail) ----------
 
-/// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
+/// Builds an executable `(MastForest, KernelDescriptor)` pair from the provided seeds.
 ///
 /// After [`build_skeleton`] produces the shared portion of the forest, this function appends
 /// externals and syscalls under the closure invariants and finalises the paired kernel. Dyn
 /// nodes are not emitted in this mode (see [`MastForestParams`] for the rationale).
-fn build_executable_forest(seeds: ForestSeeds, params: &MastForestParams) -> (MastForest, Kernel) {
+fn build_executable_forest(
+    seeds: ForestSeeds,
+    params: &MastForestParams,
+) -> (MastForest, KernelDescriptor) {
     let mut kernel_pool = match params.kernel_procedures.as_ref() {
         Some(hs) => KernelPool::new_frozen(hs.clone()),
         None => KernelPool::new(),
@@ -967,9 +948,10 @@ fn finalise_kernel(
     kernel_pool: &KernelPool,
     kernel_inclusion: &[bool],
     params: &MastForestParams,
-) -> Kernel {
+) -> KernelDescriptor {
     if let Some(hs) = params.kernel_procedures.as_ref() {
-        return Kernel::from_hashes(hs.clone()).expect("kernel_procedures validated at entry");
+        return KernelDescriptor::from_hashes(hs.clone())
+            .expect("kernel_procedures validated at entry");
     }
 
     let root_ids: Vec<MastNodeId> = root_pool.iter().collect();
@@ -992,16 +974,16 @@ fn finalise_kernel(
         hashes.push(forest.get_node_by_id(first).expect("root id is valid").digest());
     }
 
-    if hashes.len() > Kernel::MAX_NUM_PROCEDURES {
-        hashes.truncate(Kernel::MAX_NUM_PROCEDURES);
+    if hashes.len() > KernelDescriptor::MAX_NUM_PROCEDURES {
+        hashes.truncate(KernelDescriptor::MAX_NUM_PROCEDURES);
     }
 
-    Kernel::from_hashes(hashes).expect("bounded and deduplicated")
+    KernelDescriptor::from_hashes(hashes).expect("bounded and deduplicated")
 }
 
 // ---------- Structure-only build (mode-specific tail) ----------
 
-/// Builds a structure-only `(MastForest, Kernel)` pair from the provided seeds.
+/// Builds a structure-only `(MastForest, KernelDescriptor)` pair from the provided seeds.
 ///
 /// This preserves the pre-feature generator behaviour: externals use randomly generated
 /// digests via [`ExternalPick::Random`] (and so will not resolve inside the forest),
@@ -1009,14 +991,14 @@ fn finalise_kernel(
 /// and dyn nodes are emitted using [`ForestSeeds::dyn_selectors`] to pick between
 /// `DynNodeBuilder::new_dyn` and `DynNodeBuilder::new_dyncall`.
 ///
-/// The shared phases (decorators, basic blocks, control-flow nodes, initial root seeding)
+/// The shared phases (basic blocks, control-flow nodes, initial root seeding)
 /// are produced by [`build_skeleton`], so any seed for which `num_syscalls = num_externals
 /// = num_dyns = 0` yields a [`MastForest`] that is byte-identical to the one produced by
 /// [`build_executable_forest`].
 fn build_structure_only_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
-) -> (MastForest, Kernel) {
+) -> (MastForest, KernelDescriptor) {
     let input = SkeletonInput::from(&seeds);
     let ForestSkeleton { mut forest, mut all_node_ids, .. } = build_skeleton(&input);
 
@@ -1077,8 +1059,10 @@ fn build_structure_only_forest(
     }
 
     let kernel = match params.kernel_procedures.as_ref() {
-        Some(hs) => Kernel::from_hashes(hs.clone()).expect("kernel_procedures validated at entry"),
-        None => Kernel::default(),
+        Some(hs) => {
+            KernelDescriptor::from_hashes(hs.clone()).expect("kernel_procedures validated at entry")
+        },
+        None => KernelDescriptor::default(),
     };
 
     (forest, kernel)
@@ -1094,7 +1078,7 @@ impl Arbitrary for MastForest {
     /// See [`MastForestParams`] for the full set of structural closure invariants enforced
     /// in [`GenerationMode::Executable`] (the default) and the permissive,
     /// structure-focused behaviour in [`GenerationMode::StructureOnly`].
-    /// Callers that also need the paired [`Kernel`] should use
+    /// Callers that also need the paired [`KernelDescriptor`] should use
     /// [`forest_kernel_strategy`] directly.
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         forest_kernel_strategy(params).prop_map(|(forest, _kernel)| forest).boxed()
@@ -1238,7 +1222,7 @@ mod tests {
     use crate::{
         Felt, Word,
         mast::{MastForest, MastNode, MastNodeExt},
-        program::Kernel,
+        program::KernelDescriptor,
     };
 
     /// Returns a deterministic [`Word`] built from `seed`.
@@ -1251,11 +1235,14 @@ mod tests {
         ])
     }
 
-    /// Draws one concrete sample from `strategy`.
-    fn sample(strategy: &BoxedStrategy<(MastForest, Kernel)>) -> (MastForest, Kernel) {
-        let mut runner = TestRunner::default();
+    /// Draws one concrete sample from `strategy`, advancing `runner`'s RNG state so that
+    /// repeated calls yield distinct samples.
+    fn sample(
+        strategy: &BoxedStrategy<(MastForest, KernelDescriptor)>,
+        runner: &mut TestRunner,
+    ) -> (MastForest, KernelDescriptor) {
         strategy
-            .new_tree(&mut runner)
+            .new_tree(runner)
             .expect("strategy must not reject a default seed")
             .current()
     }
@@ -1267,7 +1254,6 @@ mod tests {
     #[allow(dead_code, clippy::no_effect_underscore_binding)]
     fn _compile_test_api_shape() {
         let MastForestParams {
-            decorators,
             blocks,
             max_joins,
             max_splits,
@@ -1280,12 +1266,11 @@ mod tests {
             kernel_procedures,
         } = MastForestParams::default();
 
-        let _strategy: BoxedStrategy<(MastForest, Kernel)> =
+        let _strategy: BoxedStrategy<(MastForest, KernelDescriptor)> =
             forest_kernel_strategy(MastForestParams::default());
 
         let _: GenerationMode = mode;
         let _ = (
-            decorators,
             &blocks,
             max_joins,
             max_splits,
@@ -1312,7 +1297,6 @@ mod tests {
         assert_eq!(p.max_dyns, 0);
         assert_eq!(p.max_syscalls, 0);
         assert_eq!(p.max_externals, 0);
-        assert_eq!(p.decorators, 3);
         assert_eq!(p.blocks, 1..=3);
         assert_eq!(p.max_joins, 1);
         assert_eq!(p.max_splits, 1);
@@ -1333,13 +1317,15 @@ mod tests {
         let _ = forest_kernel_strategy(params);
     }
 
-    /// Verifies that a `kernel_procedures` list longer than [`Kernel::MAX_NUM_PROCEDURES`]
+    /// Verifies that a `kernel_procedures` list longer than [`KernelDescriptor::MAX_NUM_PROCEDURES`]
     /// panics at strategy construction time.
     #[test]
     #[should_panic(expected = "MastForestParams::kernel_procedures is invalid")]
     fn kernel_procedures_over_max_panics_at_construction() {
         let params = MastForestParams {
-            kernel_procedures: Some((0u64..=Kernel::MAX_NUM_PROCEDURES as u64).map(word).collect()),
+            kernel_procedures: Some(
+                (0u64..=KernelDescriptor::MAX_NUM_PROCEDURES as u64).map(word).collect(),
+            ),
             ..Default::default()
         };
         let _ = forest_kernel_strategy(params);
@@ -1352,7 +1338,7 @@ mod tests {
     fn kernel_procedures_with_duplicates_and_over_max_panics_at_construction() {
         let params = MastForestParams {
             kernel_procedures: Some(
-                (0u64..Kernel::MAX_NUM_PROCEDURES as u64)
+                (0u64..KernelDescriptor::MAX_NUM_PROCEDURES as u64)
                     .map(word)
                     .chain(core::iter::once(word(0)))
                     .collect(),
@@ -1376,8 +1362,9 @@ mod tests {
         let strategy = forest_kernel_strategy(params);
 
         let (mut saw_dyn, mut saw_external, mut saw_syscall) = (false, false, false);
+        let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let (forest, _) = sample(&strategy);
+            let (forest, _) = sample(&strategy, &mut runner);
             for node in forest.nodes() {
                 match node {
                     MastNode::Dyn(_) => saw_dyn = true,
@@ -1408,8 +1395,9 @@ mod tests {
         let strategy = forest_kernel_strategy(params);
 
         let (mut saw_dynexec, mut saw_dyncall) = (false, false);
+        let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let (forest, _) = sample(&strategy);
+            let (forest, _) = sample(&strategy, &mut runner);
             for node in forest.nodes() {
                 if let MastNode::Dyn(d) = node {
                     if d.is_dyncall() {
@@ -1440,8 +1428,9 @@ mod tests {
         };
         let strategy = forest_kernel_strategy(params);
 
+        let mut runner = TestRunner::default();
         for _ in 0..64 {
-            let (forest, kernel) = sample(&strategy);
+            let (forest, kernel) = sample(&strategy, &mut runner);
             assert!(kernel.proc_hashes().is_empty());
             for node in forest.nodes() {
                 assert!(
@@ -1465,7 +1454,6 @@ mod tests {
         use proptest::test_runner::{Config as ProptestConfig, RngAlgorithm, TestRng};
 
         let make_params = |mode: GenerationMode| MastForestParams {
-            decorators: 5,
             blocks: 1..=5,
             max_joins: 3,
             max_splits: 2,
