@@ -306,8 +306,9 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // These programs are deferred-free, so an empty registry is intentional; still resolve the
-    // proof-carried deferred root instead of assuming TRUE.
+    // Resolve the proof-carried deferred root instead of assuming TRUE. This helper tests the
+    // recursive verifier for the outer VM STARK only; `prove_sync` constructed any nested deferred
+    // STARK proof locally, so its public root is the outer proof's public input.
     let stark_proof = proof.miden_proof();
     let deferred_proof = proof.deferred_proof();
     let final_deferred_root = match deferred_proof {
@@ -317,9 +318,7 @@ pub fn generate_recursive_verifier_data(
                 .unwrap()
                 .root()
         },
-        DeferredProof::Stark { .. } => {
-            panic!("recursive verifier does not support deferred STARK proofs")
-        },
+        DeferredProof::Stark { public_root, .. } => *public_root,
     };
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
