@@ -3,7 +3,11 @@ use std::{hint::black_box, time::Duration};
 use codspeed_criterion_compat as criterion;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm::HashFunction;
-use miden_vm_precompiles_bench::{
+
+#[path = "precompiles_bench/support.rs"]
+mod support;
+
+use support::{
     DEFAULT_ECDSAS, DEFAULT_KECCAKS, PrecompileFixture, PrecompileWorkload, prove_once_with_hash,
     verify_once,
 };

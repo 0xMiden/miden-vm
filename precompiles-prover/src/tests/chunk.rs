@@ -136,7 +136,7 @@ fn log_quotient_degree_matches_design_target() {
     // degree-1 `is_transition` selector adds the +1 to 6. (The old σ/n-cyclic
     // adapter kept this recurrence ungated at degree 5 → lqd 2, paid for with
     // an `inv_n` public input we dropped under 0.26's shared `air_inputs`.)
-    // See `docs/airs/chunk.md`.
+    // See the design notes.
     let air = ChunkAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 3);
 }

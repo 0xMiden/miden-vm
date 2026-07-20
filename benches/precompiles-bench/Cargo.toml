@@ -11,20 +11,15 @@ publish = false
 [lints]
 workspace = true
 
-[dependencies]
+[dev-dependencies]
+codspeed-criterion-compat = { workspace = true }
 miden-core = { workspace = true }
 miden-core-lib = { workspace = true }
 miden-crypto = { workspace = true }
 miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }
 rand_chacha = { workspace = true }
 
-[dev-dependencies]
-codspeed-criterion-compat = { workspace = true }
-
-[lib]
-doctest = false
-test = false
-
 [[bench]]
 name = "precompiles_bench"
+path = "../../precompiles/benches/precompiles_bench.rs"
 harness = false

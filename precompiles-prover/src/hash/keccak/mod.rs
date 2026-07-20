@@ -8,8 +8,8 @@
 //! [`memory64`](super::memory64) bus and consumes input chunks from the
 //! [`chunk`](super::chunk) chiplet.
 //!
-//! See `docs/chiplets/keccak.md`, `docs/chiplets/keccak-sponge.md`, and
-//! `docs/chiplets/keccak-node.md` for the design rationale.
+//! See the design notes, the design notes, and
+//! the design notes for the design rationale.
 
 pub mod digest;
 pub mod node;

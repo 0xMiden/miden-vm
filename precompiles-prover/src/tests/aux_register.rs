@@ -2,7 +2,7 @@
 //! out of σ.
 //!
 //! De-risks the vertical Schwartz–Zippel layout the field chiplet needs
-//! (`docs/chiplets/field.md`). A β-dependent accumulator cannot live in
+//! (the design notes). A β-dependent accumulator cannot live in
 //! the main trace — that's committed before β is Fiat-Shamir-sampled — so
 //! it must be an aux column. But the σ/n running-sum constraint folds in
 //! every aux column past col 0, which would pull the register into σ and

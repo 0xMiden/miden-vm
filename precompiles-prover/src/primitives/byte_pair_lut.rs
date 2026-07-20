@@ -17,7 +17,7 @@
 //! multiplicities together through a combined `[preprocessed ++ main]`
 //! window (`logup::CombinedWindow`).
 //!
-//! See [`logup`](crate::logup) and `docs/lookup-argument.md` for the
+//! See [`logup`](crate::logup) and the design notes for the
 //! lookup-argument architecture.
 //!
 //! # Soundness
@@ -32,7 +32,7 @@
 //! [`BytePairLutMsg`] / [`Range16Msg`] inherit sound range checks and
 //! bitwise-op results. Only the three multiplicity columns are witness
 //! (range-unchecked under the fixed-consume invariant — see
-//! `docs/lookup-argument.md`).
+//! the design notes).
 
 use alloc::{vec, vec::Vec};
 

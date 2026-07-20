@@ -14,7 +14,7 @@
 //! via [`Poseidon2Requires::require_digest`] bumps `out_mult` on that
 //! range. The multiplicities are plain `ProvideMult` counts pinned to their
 //! In/Out consumer counts by bus balance (not range-checked — see
-//! `docs/lookup-argument.md`), so this is a true dedup: one span per
+//! the design notes), so this is a true dedup: one span per
 //! digest at any count, no cap and no spill.
 //!
 //! ## Trace generation
@@ -305,7 +305,7 @@ impl Poseidon2Requires {
 /// The multiplicities are plain consumer counts, each pinned to its In /
 /// Out consumer count by bus balance and *not* range-checked (so the
 /// `activity = in + out` gate can't be wrapped — see
-/// `docs/lookup-argument.md`); the chiplet consumes no `Range16`.
+/// the design notes); the chiplet consumes no `Range16`.
 pub fn generate_trace(requires: Poseidon2Requires) -> RowMajorMatrix<Felt> {
     let total_cycles = requires.next_seq as usize;
     let height = (total_cycles * PERIOD).next_power_of_two().max(PERIOD);

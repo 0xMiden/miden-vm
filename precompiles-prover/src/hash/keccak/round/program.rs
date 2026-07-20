@@ -39,7 +39,7 @@
 //! `RC[r]` sits at addr 25 (= IP of slot 0 in each round); `zero[r]` at
 //! addr 26 (= IP of slot 1).
 //!
-//! See `docs/chiplets/keccak.md` for the address-space layout
+//! See the design notes for the address-space layout
 //! and sponge contract.
 
 use alloc::{vec, vec::Vec};

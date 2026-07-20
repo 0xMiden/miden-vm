@@ -201,7 +201,7 @@ fn resolve_final_deferred_root(
         DeferredProof::Empty => Ok((TRUE_DIGEST, None)),
         DeferredProof::Wire(_) => Err(VerificationError::UnsupportedDeferredProof),
         DeferredProof::Stark { proof, .. } => {
-            let root = miden_precompiles_prover::session::verify_deferred(deferred_proof)?;
+            let root = miden_precompiles_prover::verify_deferred(deferred_proof)?;
             Ok((root, Some(stark_security_level(proof))))
         },
     }
@@ -282,7 +282,7 @@ pub enum VerificationError {
     #[error("deferred-DAG integrity check failed: {0}")]
     DeferredIntegrity(#[from] IntegrityError),
     #[error("failed to verify STARK-backed deferred proof: {0}")]
-    DeferredStarkVerification(#[from] miden_precompiles_prover::session::VerifyError),
+    DeferredStarkVerification(#[from] miden_precompiles_prover::VerifyError),
     #[error("deferred proof form is not supported by this verification mode")]
     UnsupportedDeferredProof,
 }

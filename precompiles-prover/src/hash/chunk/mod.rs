@@ -7,7 +7,7 @@
 //! row per 32-byte chunk = 8 u32 felts = one Poseidon2 absorption
 //! block (`rate0[4] || rate1[4]`).
 //!
-//! See [`docs/chiplets/chunk.md`](../../../docs/chiplets/chunk.md) for
+//! See the design notes for
 //! the design. The chiplet does not read the Poseidon2 digest —
 //! `OutRate0` is the downstream digest consumer's to consume.
 
@@ -46,7 +46,7 @@ use crate::{
 // - Selector (1):   is_head.
 // - Content (8):    f[0..8] — the chunk's 8 u32 felts.
 //
-// See `docs/chiplets/chunk.md` §"Columns".
+// See the design notes §"Columns".
 
 /// Sequential chunk index; +1 per row, row 0 = 0. `4·chunk_seq_id` is
 /// the chunk's Memory64 tape base (the chiplet is the sole producer of

@@ -3,7 +3,7 @@
 //! Standalone Poseidon2-f\[12] permutation exposed over the
 //! [`BusId::Poseidon2In`](crate::relations::BusId::Poseidon2In) and
 //! [`BusId::Poseidon2Out`](crate::relations::BusId::Poseidon2Out) buses.
-//! See [`docs/chiplets/poseidon2.md`](../../../docs/chiplets/poseidon2.md)
+//! See the design notes
 //! for the design.
 
 pub mod digest;
@@ -57,7 +57,7 @@ use crate::{
 // - S-box witnesses (3): w[0..3], used on packed-internal rows 4..10 and (`w[0]` only) on int+ext
 //   row 11.
 //
-// See `docs/chiplets/poseidon2.md` §"Per-row format".
+// See the design notes §"Per-row format".
 
 /// Cycle-constant permutation identifier (increments by 1 per cycle).
 pub const COL_PERM_SEQ_ID: usize = 0;
@@ -447,7 +447,7 @@ where
                         // (The multiplicities are no longer range-checked:
                         // each is pinned to its consumer count by bus
                         // balance, so the activity gate `in + out` can't
-                        // wrap — see `docs/lookup-argument.md`.)
+                        // wrap — see the design notes.)
                         g.batch(
                             "row15",
                             p_last_in_cycle.clone(),

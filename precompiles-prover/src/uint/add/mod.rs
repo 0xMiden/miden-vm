@@ -7,7 +7,7 @@
 //! [`UintAdd`](crate::relations::BusId::UintAdd) relation, consumed by the
 //! eval chip's add / sub / neg `UintOp` nodes.
 //!
-//! See `docs/chiplets/uint-add.md` for the full design.
+//! See the design notes for the full design.
 //!
 //! ## The identity (vertical Schwartz–Zippel)
 //!

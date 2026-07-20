@@ -1,4 +1,3 @@
-use input_generation::generate_advice_inputs;
 use miden_core::Felt;
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
@@ -6,6 +5,9 @@ use miden_vm::{
     ProvingOptions, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
 };
 
+use self::input_generation::generate_advice_inputs;
+
+#[path = "input_generation.rs"]
 pub mod input_generation;
 pub use input_generation::{DEFAULT_ECDSAS, DEFAULT_KECCAKS, PrecompileWorkload};
 

@@ -215,7 +215,7 @@ fn ec_stores_hold_and_balance() {
 
 #[test]
 fn ec_store_ed25519_image_torsion_point() {
-    // The ed25519 SW image (docs/ed25519-sw-image.md) and its single
+    // The ed25519 SW image (the design notes) and its single
     // rational 2-torsion point (A/3, 0): a finite point whose y is the
     // stored zero — cleanly distinct from PAI — passing membership with
     // w = y² = 0. Constants machine-verified against the map derivation.

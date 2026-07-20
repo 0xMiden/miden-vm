@@ -50,4 +50,3 @@ wincode.workspace = true
 k256 = "0.13"
 miden-air = { workspace = true, features = ["std"] }
 rand.workspace = true
-tracing-subscriber.workspace = true

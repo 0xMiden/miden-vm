@@ -17,7 +17,7 @@
 //! MACs sharing a result ptr, group-op field math to the uint relation
 //! chiplets.
 //!
-//! See `docs/chiplets/ec-group-store.md` for the full design.
+//! See the design notes for the full design.
 //!
 //! ## Point rows
 //!
