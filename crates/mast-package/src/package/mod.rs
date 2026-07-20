@@ -394,7 +394,7 @@ impl Package {
     pub fn get_export_node_id(&self, path: impl AsRef<Path>) -> MastNodeId {
         self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
-            .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
+            .and_then(|export| self.get_export_node(export))
             .expect("procedure not exported from this package")
     }
 
@@ -402,7 +402,7 @@ impl Package {
     pub fn is_reexport(&self, path: impl AsRef<Path>) -> bool {
         self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
-            .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
+            .and_then(|export| self.get_export_node(export))
             .map(|node| self.mast[node].is_external())
             .unwrap_or(false)
     }
@@ -419,7 +419,36 @@ impl Package {
     pub fn get_procedure_node_by_path(&self, path: impl AsRef<Path>) -> Option<MastNodeId> {
         self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
-            .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
+            .and_then(|export| self.get_export_node(export))
+    }
+
+    /// Resolves the MAST node corresponding to `export`, or `None` if it cannot be found.
+    ///
+    /// The returned node is the recorded `export.node` only when it points at a procedure
+    /// root in this package's forest whose digest matches `export.digest`; otherwise this
+    /// falls back to a digest-based lookup.
+    ///
+    /// This is the non-panicking counterpart to [`Package::get_export_node_id`], though the
+    /// two take different arguments: `get_export_node_id` resolves an export by path and
+    /// panics if not found, while this method resolves an already-known `&ProcedureExport`
+    /// and treats its recorded `node` as an untrusted hint rather than authoritative.
+    pub fn get_export_node(&self, export: &ProcedureExport) -> Option<MastNodeId> {
+        export
+            .node
+            .filter(|&node| self.mast.is_procedure_root_with_exact_digest(node, export.digest))
+            .or_else(|| self.mast.find_procedure_root(export.digest))
+    }
+
+    /// Returns an iterator over the procedures exported by this package that carry the attribute
+    /// named `attr`.
+    pub fn procedures_with_attribute<'a>(
+        &'a self,
+        attr: &'a str,
+    ) -> impl Iterator<Item = &'a ProcedureExport> + 'a {
+        self.manifest
+            .exports()
+            .filter_map(PackageExport::as_procedure)
+            .filter(move |export| export.attributes.has(attr))
     }
 
     fn get_export_by_lookup_path(&self, path: &Path) -> Option<&PackageExport> {
@@ -2035,6 +2064,122 @@ mod tests {
         assert_eq!(package.get_procedure_node_by_path("::app::entry"), Some(node_id));
         assert_eq!(package.get_export_node_id("::app::entry"), node_id);
         assert!(!package.is_reexport("::app::entry"));
+    }
+
+    #[test]
+    fn get_export_node_prefers_recorded_node_id() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = relative_path("app::entry");
+        let export = ProcedureExport::new(path, Some(node_id), digest, None);
+        let package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        assert_eq!(package.get_export_node(&export), Some(node_id));
+    }
+
+    #[test]
+    fn get_export_node_falls_back_to_digest_lookup_when_node_is_missing() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = absolute_path("app::entry");
+        let export = ProcedureExport::new(Arc::clone(&path), None, digest, None);
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![PackageExport::Procedure(export.clone())],
+            None,
+        )
+        .expect("package should be valid");
+
+        assert_eq!(package.get_export_node(&export), Some(node_id));
+    }
+
+    #[test]
+    fn get_export_node_returns_none_when_procedure_is_not_in_forest() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = absolute_path("app::entry");
+        let export = ProcedureExport::new(Arc::clone(&path), Some(node_id), digest, None);
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![PackageExport::Procedure(export)],
+            None,
+        )
+        .expect("package should be valid");
+
+        let dangling_export = ProcedureExport::new(path, None, Word::default(), None);
+        assert_eq!(package.get_export_node(&dangling_export), None);
+    }
+
+    #[test]
+    fn get_export_node_falls_back_when_recorded_node_digest_mismatches() {
+        let mut forest = MastForest::new();
+        let matching_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build matching basic block");
+        forest.make_root(matching_id);
+        let stale_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .expect("failed to build stale basic block");
+        forest.make_root(stale_id);
+
+        let matching_digest = forest[matching_id].digest();
+        let path = absolute_path("app::entry");
+        let valid_export =
+            ProcedureExport::new(path.clone(), Some(matching_id), matching_digest, None);
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![PackageExport::Procedure(valid_export)],
+            None,
+        )
+        .expect("package should be valid");
+
+        // A caller-supplied export (not part of the package's own manifest) whose recorded
+        // node id points at a real root, but one whose digest no longer matches
+        // `export.digest` — e.g. a stale or hand-constructed `ProcedureExport`.
+        let stale_export = ProcedureExport::new(path, Some(stale_id), matching_digest, None);
+
+        // Must fall back to the digest-based lookup and return `matching_id`, never the
+        // mismatched `stale_id` recorded on the export — this is the regression a future
+        // "simplification" back to `export.node.or_else(...)` would silently reintroduce.
+        assert_eq!(package.get_export_node(&stale_export), Some(matching_id));
+    }
+
+    #[test]
+    fn procedures_with_attribute_filters_by_attribute_name() {
+        use miden_assembly_syntax::ast::{Attribute, Ident};
+
+        let (mast, exports, _) = build_same_digest_package_exports(&[
+            ("app::tagged", "tagged"),
+            ("app::untagged", "untagged"),
+        ]);
+        let mut exports = exports;
+        if let PackageExport::Procedure(proc) = &mut exports[0] {
+            proc.attributes.insert(Attribute::Marker(Ident::new("account").unwrap()));
+        }
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("package should be valid");
+
+        let tagged: Vec<_> = package
+            .procedures_with_attribute("account")
+            .map(|proc| proc.path.to_string())
+            .collect();
+        assert_eq!(tagged, vec![absolute_path("app::tagged").to_string()]);
+        assert!(package.procedures_with_attribute("missing").next().is_none());
     }
 
     #[test]
