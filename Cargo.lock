@@ -1984,6 +1984,7 @@ dependencies = [
 name = "miden-signature"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "libm",
  "p3-dft",
  "p3-field",

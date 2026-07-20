@@ -78,7 +78,7 @@ const COSET_OFFSET_INV = 2635249152773512046
 # relation descriptor: protocol id/version, trace height, max constraint degree,
 # trace width, constraint count, OOD point count, and hasher id.
 #
-# Regenerated for the Plonky3 Poseidon2 instance (= VM hperm) and the e2_115
+# Regenerated for the Plonky3 Poseidon2 instance (= VM hperm) and the e2_110
 # config via miden_signature::internal::proof::instance_seed_for_config::<Rpo12>.
 
 const SIG_RELATION_DIGEST_0 = 233486777786800190

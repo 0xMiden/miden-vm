@@ -1,7 +1,7 @@
 #! STARK-based signature verifier (e2_110 variant, 0-fold / no FRI).
 #!
 #! Verifies a STARK proof that the signer knows a secret key `sk` such that
-#! `RPO8_permute(sk) = pk`, bound to a message via Fiat-Shamir.
+#! `RPO12_permute(sk) = pk`, bound to a message via Fiat-Shamir.
 #!
 #! # Protocol overview
 #!
@@ -11,7 +11,7 @@
 #! ```text
 #!   Phase 0:  Init transcript from INSTANCE_SEED + pk + msg
 #!   Round 1:  Absorb witness_commitment  -> grind(0) -> sample lambda
-#!   Round 2:  Absorb quotient_commitment -> grind(2) -> sample z, compute z^8
+#!   Round 2:  Absorb quotient_commitment -> grind(5) -> sample z, compute z^8
 #!   Round 3:  Absorb OOD evaluations     -> grind(17) -> sample alpha, beta
 #!   Round 4:  Load DEEP poly coeffs      -> grind(19) -> sample 56 query indices
 #!             Precompute DEEP constants, then verify all 56 DEEP queries
