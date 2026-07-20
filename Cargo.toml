@@ -210,3 +210,21 @@ wycheproof-ng-eddsa = { version = "0.1.1", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+# Prover-optimization integration: p3-goldilocks with the SVE2 backport
+# (0xMiden/Plonky3 branch p3-goldilocks-v0.6.1-sve2 = v0.6.1 + the
+# sve2-goldilocks PR diff). Its p3 siblings pin to the same rev so every
+# p3 crate resolves from a single source. Remove once the upstream PR
+# ships in a release.
+[patch.crates-io]
+p3-goldilocks = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-challenger = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-dft = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-field = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-mds = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-poseidon1 = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-symmetric = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-util = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-matrix = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
