@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.25.7 (2026-07-20)
+
+- Use the `wincode` crate re-exported by `serde-wincode` for proof encoding.
+
 ## v0.25.6 (2026-07-19)
 
 - Update `wincode` dependency to v0.6.

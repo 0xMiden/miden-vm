@@ -1,6 +1,6 @@
 [package]
 name = "miden-package-registry-local"
-version = "0.25.6"
+version = "0.25.7"
 description = "Filesystem-backed local package registry for Miden packages"
 documentation = "https://docs.rs/miden-package-registry-local"
 readme = "README.md"
