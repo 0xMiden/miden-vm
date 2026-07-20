@@ -212,6 +212,7 @@ impl<EF> DeepPoly<EF> {
         // full-domain allocation and improving cache locality.
 
         let deep_evals = info_span!("DEEP reduce + assemble").in_scope(|| {
+            let _reduce_span = info_span!("column reduction").entered();
             // Fast path: when every matrix has the same height (the common single-AIR /
             // uniform-height case for `prove_*`), accumulate every group directly into one
             // shared buffer.
@@ -220,31 +221,53 @@ impl<EF> DeepPoly<EF> {
 
             let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
             let mut neg_f_reduced = if uniform_height {
-                let mut acc = EF::zero_vec(n);
-                let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
-                for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
+                // One matrix = one column-reduction pass. Running the passes as
+                // sequential parallel regions costs a fork-join barrier and a
+                // full re-stream of the accumulator per matrix; instead, all
+                // passes run concurrently into per-matrix partials (work
+                // stealing overlaps them), followed by a single parallel
+                // elementwise sum.
+                let per_matrix: Vec<(&M, Vec<EF::ExtensionPacking>)> = zip(
+                    matrices_groups.iter(),
+                    &group_sizes,
+                )
+                .flat_map(|(matrices_group, &size)| {
                     let group_coeffs: Vec<&Vec<EF>> =
                         neg_column_coeffs_iter.by_ref().take(size).collect();
-                    for (&matrix, coeffs) in zip(matrices_group, group_coeffs.iter()) {
-                        let active_coeffs = &coeffs[..matrix.width()];
-                        packed_coeffs.clear();
-                        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
-                            if chunk.len() == w {
-                                EF::ExtensionPacking::from_ext_slice(chunk)
-                            } else {
-                                let mut padded = EF::zero_vec(w);
-                                padded[..chunk.len()].copy_from_slice(chunk);
-                                EF::ExtensionPacking::from_ext_slice(&padded)
-                            }
-                        }));
-                        matrix
-                            .rowwise_packed_dot_product::<EF>(&packed_coeffs)
-                            .zip(acc.par_iter_mut())
-                            .for_each(|(dot_result, acc_val)| {
-                                *acc_val += dot_result;
-                            });
+                    zip(matrices_group, group_coeffs)
+                        .map(|(&matrix, coeffs)| {
+                            let active_coeffs = &coeffs[..matrix.width()];
+                            let packed: Vec<EF::ExtensionPacking> = active_coeffs
+                                .chunks(w)
+                                .map(|chunk| {
+                                    if chunk.len() == w {
+                                        EF::ExtensionPacking::from_ext_slice(chunk)
+                                    } else {
+                                        let mut padded = EF::zero_vec(w);
+                                        padded[..chunk.len()].copy_from_slice(chunk);
+                                        EF::ExtensionPacking::from_ext_slice(&padded)
+                                    }
+                                })
+                                .collect();
+                            (matrix, packed)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+
+                let mut partials: Vec<Vec<EF>> = per_matrix
+                    .par_iter()
+                    .map(|(matrix, packed_coeffs)| {
+                        matrix.rowwise_packed_dot_product::<EF>(packed_coeffs).collect()
+                    })
+                    .collect();
+
+                let mut acc = partials.swap_remove(0);
+                acc.par_iter_mut().enumerate().for_each(|(i, out)| {
+                    for p in &partials {
+                        *out += p[i];
                     }
-                }
+                });
                 acc
             } else {
                 zip(matrices_groups.iter(), &group_sizes)
@@ -259,6 +282,8 @@ impl<EF> DeepPoly<EF> {
                     .unwrap_or_else(|| EF::zero_vec(n))
             };
 
+            drop(_reduce_span);
+            let _transform_span = info_span!("quotient transform").entered();
             // Pre-compute βʲ for all N points
             let point_coeffs: [EF; N] =
                 core::array::from_fn(|j| challenge_points.exp_u64(j as u64));

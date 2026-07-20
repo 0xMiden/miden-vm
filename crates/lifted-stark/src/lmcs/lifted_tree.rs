@@ -11,6 +11,7 @@ use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
 use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
+use crate::util::par_filled_vec;
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -249,13 +250,15 @@ where
                 // the Merkle tree is indexed naturally.
                 let n = leaf_states.len();
                 let log_n = log2_strict_usize(n);
-                (0..n)
-                    .into_par_iter()
-                    .map(|i| {
-                        let src = reverse_bits_len(i, log_n);
-                        h.squeeze(&leaf_states[src])
-                    })
-                    .collect()
+                info_span!("squeeze leaves", n).in_scope(|| {
+                    (0..n)
+                        .into_par_iter()
+                        .map(|i| {
+                            let src = reverse_bits_len(i, log_n);
+                            h.squeeze(&leaf_states[src])
+                        })
+                        .collect()
+                })
             });
 
         // Build digest layers by repeatedly compressing until we reach the root,
@@ -380,8 +383,11 @@ where
     // - states: Per-leaf scalar states (one per final row), maintained across matrices.
     // - scratch_states: Temporary buffer used when duplicating states during upsampling.
     let default_state = [PD::Value::default(); WIDTH];
-    let mut states = vec![default_state; final_height];
-    let mut scratch_states = vec![default_state; final_height];
+    let mut states = info_span!("alloc states", final_height, width = WIDTH)
+        .in_scope(|| par_filled_vec(default_state, final_height));
+    // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
+    // rounds) never need the scratch buffer.
+    let mut scratch_states: Vec<[PD::Value; WIDTH]> = Vec::new();
 
     let mut active_height = matrices.first().unwrap().height();
 
@@ -394,12 +400,19 @@ where
         if height > active_height {
             let scaling_factor = height / active_height;
 
+            if scratch_states.is_empty() {
+                scratch_states = info_span!("alloc scratch", final_height)
+                    .in_scope(|| par_filled_vec(default_state, final_height));
+            }
+
             // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
             // so we keep the accumulated sponge states aligned with the taller matrix.
-            scratch_states[..height]
-                .par_chunks_mut(scaling_factor)
-                .zip(states[..active_height].par_iter())
-                .for_each(|(chunk, state)| chunk.fill(*state));
+            info_span!("upsample states", from = active_height, to = height).in_scope(|| {
+                scratch_states[..height]
+                    .par_chunks_mut(scaling_factor)
+                    .zip(states[..active_height].par_iter())
+                    .for_each(|(chunk, state)| chunk.fill(*state));
+            });
 
             // Copy upsampled states back to canonical buffer
             mem::swap(&mut scratch_states, &mut states);
