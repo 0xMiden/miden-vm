@@ -112,12 +112,12 @@ pub fn lane_base(lane: usize) -> usize {
 /// row-major matrix, each lane's `LANE_WIDTH` cells placed at its band base.
 fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMajorMatrix<Felt> {
     let mut trace = vec![Felt::ZERO; height * NUM_MAIN_COLS];
-    for (lane, cells) in lane_cells.iter().enumerate() {
-        let base = lane_base(lane);
-        for r in 0..height {
+    for r in 0..height {
+        let row_start = r * NUM_MAIN_COLS;
+        for (lane, cells) in lane_cells.iter().enumerate() {
+            let base = lane_base(lane);
             let src = &cells[r * LANE_WIDTH..(r + 1) * LANE_WIDTH];
-            let row_start = r * NUM_MAIN_COLS + base;
-            trace[row_start..row_start + LANE_WIDTH].copy_from_slice(src);
+            trace[row_start + base..row_start + base + LANE_WIDTH].copy_from_slice(src);
         }
     }
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
