@@ -4,7 +4,7 @@ use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST},
+    deferred::{DeferredState, TRUE_DIGEST},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     proof::{DeferredProof, HashFunction},
 };
@@ -314,7 +314,7 @@ pub fn generate_recursive_verifier_data(
     let final_deferred_root = match deferred_proof {
         DeferredProof::Empty => TRUE_DIGEST,
         DeferredProof::Wire(wire) => {
-            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), wire, usize::MAX)
+            DeferredState::from_wire(Arc::new(miden_precompiles::registry()), wire, usize::MAX)
                 .unwrap()
                 .root()
         },
