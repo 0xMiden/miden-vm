@@ -750,6 +750,7 @@ mod op_batch_tests {
             // Generate BasicBlockNodes with 73-200 operations to ensure multiple batches
             basic_block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
                 max_ops_len: 200,        // Generate blocks with up to 200 operations
+                ..Default::default()
             })
         ) {
             // Verify that we actually have a multi-batch block
