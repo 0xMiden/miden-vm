@@ -1554,7 +1554,7 @@ dependencies = [
  "postcard",
  "rand 0.10.2",
  "tracing",
- "tracing-forest",
+ "tracing-forest 0.3.1",
  "tracing-subscriber",
 ]
 
@@ -1956,6 +1956,7 @@ dependencies = [
 name = "miden-prover"
 version = "0.28.0"
 dependencies = [
+ "libc",
  "miden-air",
  "miden-assembly",
  "miden-core",
@@ -2121,7 +2122,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-forest",
+ "tracing-forest 0.3.1",
  "tracing-subscriber",
  "walkdir",
 ]
@@ -2156,6 +2157,9 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
+ "tracing-forest 0.2.0",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3819,6 +3823,19 @@ checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
  "valuable",
+]
+
+[[package]]
+name = "tracing-forest"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3298fe855716711a00474eceb89cc7dc254bbe67f6bc4afafdeec5f0c538771c"
+dependencies = [
+ "ansi_term",
+ "smallvec",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

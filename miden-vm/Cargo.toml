@@ -52,6 +52,8 @@ path = "tests/integration/main.rs"
 arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
+# Install the huge-page global allocator (prover working sets on 2 MiB pages).
+huge-alloc = []
 executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [

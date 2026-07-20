@@ -35,3 +35,6 @@ wincode.workspace = true
 miden-assembly.workspace = true
 miden-debug-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

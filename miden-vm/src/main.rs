@@ -10,6 +10,13 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::{EnvFilter, prelude::*};
 
+// Large prover buffers on 2 MiB huge pages: measured -7..-9% end-to-end prove
+// on Graviton under the default THP=madvise host setting; pass-through for
+// allocations under 2 MiB and on non-Linux targets.
+#[cfg(feature = "huge-alloc")]
+#[global_allocator]
+static GLOBAL: miden_prover::huge_alloc::HugePageAlloc = miden_prover::huge_alloc::HugePageAlloc;
+
 mod cli;
 
 /// Root CLI struct
