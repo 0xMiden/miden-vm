@@ -37,6 +37,7 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
+use serde_wincode::{SerdeCompat, wincode};
 
 use crate::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 
@@ -86,12 +87,11 @@ pub fn generate_advice_inputs(
     // 1. Deserialize STARK proof bytes.
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProofData<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
-        StarkProofData<Felt, QuadFelt, P2Config>,
-    > as wincode::config::Deserialize<_>>::deserialize(
-        proof_bytes, proof_encoding_config
-    )
-    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let proof: StarkProofData<Felt, QuadFelt, P2Config> =
+        <SerdeCompat<StarkProofData<Felt, QuadFelt, P2Config>> as wincode::config::Deserialize<
+            _,
+        >>::deserialize(proof_bytes, proof_encoding_config)
+        .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
     // 2. Build domain-separated challenger. Statement-owned inputs (fixed public values and kernel
     //    digests) plus the per-AIR trace heights are absorbed by the lifted verifier internally

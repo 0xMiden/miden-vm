@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-indexing"
-version = "0.25.6"
+version = "0.25.7"
 description = "Type-safe u32-indexed vector utilities for Miden"
 readme = "README.md"
 categories = ["development-tools", "no-std"]

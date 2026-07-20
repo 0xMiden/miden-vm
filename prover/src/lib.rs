@@ -19,7 +19,7 @@ use miden_processor::{
     FastProcessor, Program,
     trace::{ExecutionTrace, build_trace},
 };
-use serde_wincode::SerdeCompat;
+use serde_wincode::{SerdeCompat, wincode};
 use tracing::instrument;
 
 mod proving_options;
