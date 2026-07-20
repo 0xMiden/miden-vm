@@ -1740,7 +1740,6 @@ dependencies = [
  "serde-wincode",
  "tokio",
  "tracing",
- "wincode",
 ]
 
 [[package]]
@@ -1816,7 +1815,6 @@ dependencies = [
  "serde-wincode",
  "test-case",
  "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -1870,7 +1868,6 @@ dependencies = [
  "serde-wincode",
  "thiserror",
  "tracing",
- "wincode",
 ]
 
 [[package]]

@@ -13,7 +13,7 @@ use miden_crypto::stark::{
     StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
 };
 use serde::de::DeserializeOwned;
-use serde_wincode::SerdeCompat;
+use serde_wincode::{SerdeCompat, wincode};
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
