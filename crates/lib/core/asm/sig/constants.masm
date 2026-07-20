@@ -1,14 +1,14 @@
 #! Memory layout and hardcoded parameters for the STARK-based signature verifier.
 #!
-#! # Variant: e2_105
+#! # Variant: e2_110 (JSN, recursion-optimized)
 #!
-#! - Trace:     8 columns x 8 rows (RPO8 permutation: 7 rounds + input state)
+#! - Trace:     12 columns x 8 rows (RPO12 permutation: 7 rounds + input state)
 #! - Code domain: |D| = 2048, blowup = 256 (= 2048 / 8)
 #! - Extension: quadratic (e = 2), 128-bit challenge field
-#! - Queries:   q = 53
-#! - Mask degree: md = |H| + 2*(e+q) - 1 = 8 + 110 - 1 = 117
-#! - Message size: ms = md + 1 = 118  (number of masked witness coefficients)
-#! - Quotient:  7*md - 6 = 813 coefficients, segmented into 15 chunks of length 55
+#! - Queries:   q = 56
+#! - Mask degree: md = |H| + 2*(e+q) - 1 = 8 + 116 - 1 = 123
+#! - Message size: ms = md + 1 = 124  (number of masked witness coefficients)
+#! - Quotient:  7*md - 6 = 855 coefficients, segmented into 15 chunks of length 57
 #! - Aux width: 15 chunks + 1 DEEP mask R = 16 committed EF columns
 #!
 #! # Sponge memory
@@ -26,21 +26,21 @@ use miden::core::stark::constants
 
 const CODE_SIZE = 2048
 const LOG_CODE_SIZE = 11
-const NUM_QUERIES = 53
+const NUM_QUERIES = 56
 const TRACE_HEIGHT = 8
 const LOG_TRACE_HEIGHT = 3
-const WITNESS_WIDTH = 8
+const WITNESS_WIDTH = 12
 const AUX_WIDTH = 16
 const NUM_QUOTIENT_CHUNKS = 15
-const SEGMENT_LEN = 55
-const MESSAGE_SIZE = 118
+const SEGMENT_LEN = 57
+const MESSAGE_SIZE = 124
 
 # OOD evaluation counts:
-#   witness_z(8 EF) + witness_gz(8 EF) + quotient_z(16 EF) + quotient_gz(16 EF) = 48 EF
-#   = 96 base felts. Absorbed in 12 blocks of 8.
-const NUM_OOD_EF_ELEMENTS = 48
-const NUM_OOD_BASE_FELTS = 96
-const NUM_OOD_ABSORPTIONS = 12
+#   witness_z(12 EF) + witness_gz(12 EF) + quotient_z(16 EF) + quotient_gz(16 EF) = 56 EF
+#   = 112 base felts. Absorbed in 14 blocks of 8.
+const NUM_OOD_EF_ELEMENTS = 56
+const NUM_OOD_BASE_FELTS = 112
+const NUM_OOD_ABSORPTIONS = 14
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Domain generators (precomputed from ROOT_UNITY = 1753635133440165772)
@@ -69,43 +69,42 @@ const COSET_OFFSET_INV = 2635249152773512046
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # INSTANCE_SEED = capacity after:
-# (num_constraints=16 for the width-8 RPO AIR)
-#   hperm(R1=[code_size=2048, num_queries=53, grind_prox=15, grind_query=14],
-#         R2=[log_trace_height=3, num_constraints=16, grind_ali=0, grind_ood=2],
+# (num_constraints=24 for the width-12 RPO AIR)
+#   hperm(R1=[code_size=2048, num_queries=56, grind_prox=17, grind_query=19],
+#         R2=[log_trace_height=3, num_constraints=24, grind_ali=0, grind_ood=5],
 #         C=SIG_RELATION_DIGEST)
 #
 # SIG_RELATION_DIGEST is derived by miden-signature from the fixed signature
 # relation descriptor: protocol id/version, trace height, max constraint degree,
 # trace width, constraint count, OOD point count, and hasher id.
 #
-# Regenerated for the Plonky3 Poseidon2 instance (= VM hperm) and the e2_105_w8
-# config via miden_signature::internal::proof::instance_seed_for_config::<Rpo8>.
+# Regenerated for the Plonky3 Poseidon2 instance (= VM hperm) and the e2_115
+# config via miden_signature::internal::proof::instance_seed_for_config::<Rpo12>.
 
-const SIG_RELATION_DIGEST_0 = 13685778999084002819
-const SIG_RELATION_DIGEST_1 = 5962766878550115680
-const SIG_RELATION_DIGEST_2 = 5581686184492707813
-const SIG_RELATION_DIGEST_3 = 6285643066701100695
+const SIG_RELATION_DIGEST_0 = 233486777786800190
+const SIG_RELATION_DIGEST_1 = 14977671287399219501
+const SIG_RELATION_DIGEST_2 = 9200360977739006828
+const SIG_RELATION_DIGEST_3 = 13964022728347191575
 
-const SIG_INSTANCE_SEED_0 = 848007072446334185
-const SIG_INSTANCE_SEED_1 = 10326602068804488667
-const SIG_INSTANCE_SEED_2 = 16166033456705425879
-const SIG_INSTANCE_SEED_3 = 16746533194494649849
+const SIG_INSTANCE_SEED_0 = 14350876600472793560
+const SIG_INSTANCE_SEED_1 = 5398233744932340953
+const SIG_INSTANCE_SEED_2 = 13570276446505663048
+const SIG_INSTANCE_SEED_3 = 12740591338637192245
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Grinding bits per round
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# From the GrindingSchedule for e2_105 (JSN(m=3), target=108 bits):
-#   ALI  = 0   (constraint batching error already > 108 bits)
-#   OOD  = 2   (OOD error carries L^2 -- one list per commitment, ethSTARK
-#              Thm 5 -- leaving a 106.7-bit baseline; 2 bits restore 108)
-#   PROX = 15  (proximity gap needs 15 bits of grinding)
-#   QUERY = 14 (query agreement needs 14 bits of grinding)
+# From the GrindingSchedule for e2_110 (JSN(m=2), target=112 bits):
+#   ALI  = 0   (constraint batching error already > 112 bits)
+#   OOD  = 5   (OOD baseline 107.9; grinding restores 112)
+#   PROX = 17  (JSN proximity gap baseline 95.8)
+#   QUERY = 19 (query agreement baseline 93.9; +2 over PROX to hold 110 at q=56)
 
 const GRIND_ALI_BITS = 0
-const GRIND_OOD_BITS = 2
-const GRIND_PROX_BITS = 15
-const GRIND_QUERY_BITS = 14
+const GRIND_OOD_BITS = 5
+const GRIND_PROX_BITS = 17
+const GRIND_QUERY_BITS = 19
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Memory layout (sig-specific region)
@@ -126,22 +125,22 @@ const GRIND_QUERY_BITS = 14
 #   3240099868  [4]   alpha_nd    -- [alpha0, alpha1, 0, 0] for OOD Horner lockstep
 #   3240099872  [4]   horner_fix  -- [-fz0, -fz1, -fgz0, -fgz1] precomputed Horner terms
 #   3240099876  [4]   neg_z_gz    -- [-z0, -z1, -gz0, -gz1] for DEEP denominators
-#   3240099880  [96]  ood_evals   -- OOD evaluations in point-major order:
-#                                   --   witness_z(16), quotient_z(32),
-#                                   --   witness_gz(16), quotient_gz(32)
-#   3240099976  [256] deep_poly   -- DEEP polynomial coefficients (padded to 128 EF)
-#   3240100232  [212] queries     -- 53 query indices (word-stride)
+#   3240099880  [112] ood_evals   -- OOD evaluations in point-major order:
+#                                   --   witness_z(24), quotient_z(32),
+#                                   --   witness_gz(24), quotient_gz(32)
+#   3240099992  [256] deep_poly   -- DEEP polynomial coefficients (padded to 128 EF)
+#   3240100248  [224] queries     -- 56 query indices (word-stride)
 #
 #   --- per-query DEEP scratch (defined locally in deep_queries.masm) ---
-#   3240100448  [40]  opened_row  -- opened witness+quotient leaf row (adv_pipe target)
-#   3240100488  [4]   witness_leaf-- recomputed salted witness leaf digest
-#   3240100492  [4]   quotient_leaf- recomputed salted quotient leaf digest
-#   3240100496  [4]   leaf_salt   -- per-leaf salt loaded into Poseidon2 capacity
-#   3240100500  [..]  ace_read    -- ACE circuit read cursor (ood_check.masm)
-#   3240100444  [--]  (queries end; scratch above must not overlap it)
+#   3240100472  [48]  opened_row  -- opened witness(16, zero-padded)+quotient(32) row
+#   3240100520  [4]   witness_leaf-- recomputed salted witness leaf digest
+#   3240100524  [4]   quotient_leaf- recomputed salted quotient leaf digest
+#   3240100528  [4]   leaf_salt   -- per-leaf salt loaded into Poseidon2 capacity
+#   3240100532  [..]  ace_read    -- ACE READ section + circuit (ood_check.masm)
+#   3240100472  [--]  (queries end; scratch starts exactly there)
 #
 # NOTE: the scratch block (opened_row..leaf_salt) and ACE_READ_PTR are packed
-# with NO gap. If the opened-row width (currently 40 felts for w8/e2_105) or the
+# with NO gap. If the opened-row width (currently 48 felts for e2_110, q=56: witness 16 zero-padded + quotient 32) or the
 # query count changes, re-check that opened_row does not run into witness_leaf,
 # and that leaf_salt does not run into ACE_READ_PTR (ood_check.masm:const).
 
@@ -158,10 +157,10 @@ const SIG_ALPHA_INV_PTR = 3240099868
 const SIG_HORNER_FIXED_PTR = 3240099872
 const SIG_NEG_Z_GZ_PTR = 3240099876
 const SIG_OOD_PTR = 3240099880
-const SIG_DEEP_POLY_PTR = 3240099976
-const SIG_QUERIES_PTR = 3240100232
-const SIG_QUERIES_END_PTR = 3240100444
-const SIG_OPENED_ROW_PTR = 3240100448
+const SIG_DEEP_POLY_PTR = 3240099992
+const SIG_QUERIES_PTR = 3240100248
+const SIG_QUERIES_END_PTR = 3240100472
+const SIG_OPENED_ROW_PTR = 3240100472
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Accessor procedures

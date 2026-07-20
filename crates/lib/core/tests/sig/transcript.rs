@@ -169,7 +169,7 @@ impl SigTranscript {
     }
 }
 
-/// Compute INSTANCE_SEED for e2_105 from protocol parameters.
+/// Compute INSTANCE_SEED for e2_110 from protocol parameters.
 ///
 /// INSTANCE_SEED = capacity after:
 ///   hperm(R1=[code_size, num_queries, grind_prox, grind_query],
@@ -177,13 +177,13 @@ impl SigTranscript {
 ///         C=RELATION_DIGEST)
 ///
 /// RELATION_DIGEST is derived in `miden-signature` from the fixed signature
-/// relation descriptor and the width-8 AIR dimensions.
+/// relation descriptor and the width-12 AIR dimensions.
 pub fn compute_instance_seed() -> [Felt; 4] {
-    let config = miden_signature::internal::signer::Config::e2_105bit::<
-        miden_signature::internal::air8::Rpo8,
+    let config = miden_signature::internal::signer::Config::e2_110bit::<
+        miden_signature::internal::air::Rpo12,
     >();
     let seed = miden_signature::internal::proof::instance_seed_for_config::<
-        miden_signature::internal::air8::Rpo8,
+        miden_signature::internal::air::Rpo12,
     >(&config.stark);
     core::array::from_fn(|i| seed[i].into())
 }
@@ -276,8 +276,8 @@ mod tests {
     #[test]
     fn instance_seed_matches_masm_constants() {
         let relation_digest = miden_signature::internal::masm_transcript::compute_relation_digest(
-            8,
-            <miden_signature::internal::air8::Rpo8 as miden_signature::internal::air::SignatureAir>::NUM_CONSTRAINTS,
+            12,
+            <miden_signature::internal::air::Rpo12 as miden_signature::internal::air::SignatureAir>::NUM_CONSTRAINTS,
         );
         let relation_vals = relation_digest.map(|f| Felt::from(f).as_canonical_u64());
         let seed = compute_instance_seed();

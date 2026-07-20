@@ -1,4 +1,4 @@
-#! STARK-based signature verifier (e2_105 variant, 0-fold / no FRI).
+#! STARK-based signature verifier (e2_110 variant, 0-fold / no FRI).
 #!
 #! Verifies a STARK proof that the signer knows a secret key `sk` such that
 #! `RPO8_permute(sk) = pk`, bound to a message via Fiat-Shamir.
@@ -10,11 +10,11 @@
 #!
 #! ```text
 #!   Phase 0:  Init transcript from INSTANCE_SEED + pk + msg
-#!   Round 1:  Absorb witness_commitment  -> grind(0)  -> sample lambda
-#!   Round 2:  Absorb quotient_commitment -> grind(2)  -> sample z, compute z^8
-#!   Round 3:  Absorb OOD evaluations     -> grind(15) -> sample alpha, beta
-#!   Round 4:  Load DEEP poly coeffs      -> grind(14) -> sample 53 query indices
-#!             Precompute DEEP constants, then verify all 53 DEEP queries
+#!   Round 1:  Absorb witness_commitment  -> grind(0) -> sample lambda
+#!   Round 2:  Absorb quotient_commitment -> grind(2) -> sample z, compute z^8
+#!   Round 3:  Absorb OOD evaluations     -> grind(17) -> sample alpha, beta
+#!   Round 4:  Load DEEP poly coeffs      -> grind(19) -> sample 56 query indices
+#!             Precompute DEEP constants, then verify all 56 DEEP queries
 #! ```
 #!
 #! # Transcript
@@ -36,7 +36,7 @@
 #!   quotient_commitment (4 felts)   -- Phase 2: padw adv_loadw
 #!   ood_nonce            (1 felt)   -- Phase 2: adv_push
 #!   deep_alpha_nd       (2 felts)   -- Phase 3: adv_push adv_push
-#!   OOD evaluations    (96 felts)   -- Phase 3
+#!   OOD evaluations   (112 felts)   -- Phase 3
 #!   prox_nonce           (1 felt)   -- Phase 3: adv_push
 #!   DEEP coefficients (256 felts)   -- Phase 4: 32x adv_pipe
 #!   query_nonce          (1 felt)   -- Phase 4: adv_push
@@ -55,19 +55,17 @@ use miden::core::stark::random_coin
 # Constants used with `push.X` must be defined in the file that uses them.
 # See sig/constants.masm for derivation and full memory layout.
 
-const SIG_INSTANCE_SEED_0 = 848007072446334185
-const SIG_INSTANCE_SEED_1 = 10326602068804488667
-const SIG_INSTANCE_SEED_2 = 16166033456705425879
-const SIG_INSTANCE_SEED_3 = 16746533194494649849
+const SIG_INSTANCE_SEED_0 = 14350876600472793560
+const SIG_INSTANCE_SEED_1 = 5398233744932340953
+const SIG_INSTANCE_SEED_2 = 13570276446505663048
+const SIG_INSTANCE_SEED_3 = 12740591338637192245
 
-const NUM_QUERIES = 53
+const NUM_QUERIES = 56
 const QUERY_INDEX_MASK = 2047
 const RANDOM_COIN_RATE = 8
 const RANDOM_COIN_RATE_MINUS_ONE = 7
-const OOD_ROW_ABSORB_BLOCKS = 6
+const OOD_ROW_ABSORB_BLOCKS = 7
 const DEEP_POLY_ABSORB_BLOCKS = 32
-const QUERY_FELTS_BEFORE_REFILL = 7
-const QUERY_FELTS_AFTER_REFILL = 6
 
 # The shared random-coin sponge pointers (R1, input_len, output_len) are read
 # through sig::constants::rc_* wrappers, which re-export stark::constants so the
@@ -177,7 +175,7 @@ pub proc verify_signature_setup
     #   Phase 1 (Round 1): Witness commitment -> lambda
     # ══════════════════════════════════════════════════════════════════════════
     #
-    # Absorb the Merkle root of the witness trace (8-column RPO8 state codeword).
+    # Absorb the Merkle root of the witness trace (12-column RPO12 state codeword).
     # reseed_direct: overwrites R1 with commitment, preserves R2', permutes.
     # Then sample the constraint-batching challenge lambda in EF.
 
@@ -247,9 +245,9 @@ pub proc verify_signature_setup
     #
     # Load OOD evaluations from advice and absorb into transcript.
     # OOD data layout (point-major):
-    #   z-row  = witness_z(16)  + quotient_z(32)  = 48 felts (6 full-rate absorbs)
-    #   gz-row = witness_gz(16) + quotient_gz(32) = 48 felts (6 full-rate absorbs)
-    # Total: 96 felts on the advice stack = 12 full-rate absorbs.
+    #   z-row  = witness_z(24)  + quotient_z(32)  = 56 felts (7 full-rate absorbs)
+    #   gz-row = witness_gz(24) + quotient_gz(32) = 56 felts (7 full-rate absorbs)
+    # Total: 112 felts on the advice stack = 14 full-rate absorbs.
     #
     # `alpha` is supplied via advice so we can compute Horner fixed terms while
     # absorbing OOD rows, then checked against the transcript challenge below.
@@ -358,10 +356,10 @@ end
 #!   - quotient_z/gz: observe_elements_aligned → absorb_full_rate (8 felts per permutation)
 #!
 #! Absorption counts (point-major rows):
-#!   z-row:  witness_z(16) + quotient_z(32)   = 48 felts = 6 absorb_full_rate
-#!   gz-row: witness_gz(16) + quotient_gz(32) = 48 felts = 6 absorb_full_rate
+#!   z-row:  witness_z(24) + quotient_z(32)   = 56 felts = 7 absorb_full_rate
+#!   gz-row: witness_gz(24) + quotient_gz(32) = 56 felts = 7 absorb_full_rate
 #!
-#! Advice stack order: wz(16), qz(32), wgz(16), qgz(32) = 96 felts total.
+#! Advice stack order: wz(24), qz(32), wgz(24), qgz(32) = 112 felts total.
 proc load_and_absorb_ood_evaluations
     # Keep the duplex state on stack and absorb OOD stream directly into it.
     # The Horner accumulator frame is:
@@ -420,14 +418,14 @@ end
 
 #! Load DEEP polynomial coefficients from advice, absorb them into transcript,
 #! and store them at SIG_DEEP_POLY_PTR in evaluation order:
-#!   [0, 0, ..., 0, c117, c116, ..., c0]  (128 EF = 256 base felts).
-#! 
+#!   [0, 0, ..., 0, c125, c124, ..., c0]  (128 EF = 256 base felts).
+#!
 #! Advice is pre-packed in this exact order, split into 32 full-rate blocks.
 #! Each `adv_pipe` writes one block to memory and provides the same block to
 #! the sponge rate; `permute` then absorbs it.
 #! 
 #! This binds DEEP coefficients before query grinding and leaves memory ready
-#! for eval_deep_poly_at_x (32 rounds of mem_stream + horner_eval_ext).
+#! for eval_deep_poly_at_x (64 rounds of mem_stream + horner_eval_ext).
 #!
 #! Stack transition:
 #! Input:  [...]
@@ -458,15 +456,14 @@ end
 #! Query sampling uses a packed extraction scheme:
 #! - read one felt from sponge output,
 #! - split it into four u16 lanes,
-#! - map each lane to [0, 2048) with `& QUERY_INDEX_MASK`.
+#! - map each lane to [0, 4096) with `& QUERY_INDEX_MASK`.
 #! This yields 4 indices per felt and significantly reduces permutation pressure.
 #!
-#! In signature flow, query grinding (bits=14) always consumes one fresh rate
-#! element right before this routine, so output_len is deterministically 7 here.
-#! We exploit this fixed schedule:
-#!   - consume 7 felts from current output,
-#!   - permute once,
-#!   - consume 7 felts from fresh output.
+#! In signature flow, query grinding always consumes one fresh rate element
+#! right before this routine, so output_len is deterministically 7 here. The
+#! 56 indices need exactly 14 felts (4 indices each), consumed on a fixed
+#! schedule:
+#!   7 felts -> refill -> 7 felts.
 #!
 #! Stack transition:
 #! Input:  [...]
@@ -479,38 +476,39 @@ proc sample_sig_query_indices
     # => [output_len, query_ptr]
 
     # 7 felts -> 28 indices.
-    repeat.QUERY_FELTS_BEFORE_REFILL
+    repeat.7
         sub.1
         dup exec.constants::rc_r1_ptr add mem_load
         exec.store_four_query_indices_from_felt
     end
-
-    # Refill once.
     drop
-    exec.random_coin::load_random_coin_state
-    exec.poseidon2::permute
-    exec.random_coin::store_random_coin_state
-    push.RANDOM_COIN_RATE
+    exec.refill_sig_sponge
     # => [output_len=8, query_ptr]
 
-    # Next 6 felts -> 24 indices.
-    repeat.QUERY_FELTS_AFTER_REFILL
+    # 7 felts -> 28 indices (56 total).
+    repeat.7
         sub.1
         dup exec.constants::rc_r1_ptr add mem_load
         exec.store_four_query_indices_from_felt
     end
-
-    # Final felt -> 1 index (53 total).
-    sub.1
-    dup exec.constants::rc_r1_ptr add mem_load
-    exec.store_one_query_index_from_felt
-    # => [output_len=1, query_ptr]
 
     # Persist remaining output_len back to random coin state.
     exec.constants::rc_output_len_ptr mem_store
     # => [query_ptr]
     drop
 end
+
+#! Permute the sponge and reset output_len to a full fresh rate.
+#!
+#! Input:  [...]
+#! Output: [output_len=8, ...]
+proc refill_sig_sponge
+    exec.random_coin::load_random_coin_state
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+    push.RANDOM_COIN_RATE
+end
+
 
 #! Consume one felt and store four query indices (u16 lanes, masked to 11 bits).
 #!
@@ -563,22 +561,6 @@ proc store_four_query_indices_from_felt
     # => [output_len, query_ptr + 16]
 end
 
-#! Consume one felt and store one query index from lane 0.
-#!
-#! Input:  [felt, output_len, query_ptr, ...]
-#! Output: [output_len, query_ptr + 4, ...]
-proc store_one_query_index_from_felt
-    u32split
-    swap
-    drop
-    push.QUERY_INDEX_MASK
-    u32and
-    movup.2
-    swap
-    dup.1 mem_store
-    add.4
-    swap
-end
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Grinding checks
@@ -586,7 +568,7 @@ end
 #
 # Each round has a proof-of-work check:
 # - ALI (bits = 0): consume the nonce witness and assert it is zero.
-# - OOD/PROX/QUERY (bits = 2/15/14): absorb the nonce, permute, and check the
+# - OOD/PROX/QUERY (bits = 5/17/19): absorb the nonce, permute, and check the
 #   low bits of rate[7] against the round's mask via check_sig_grind_nonzero.
 
 #! Zero-bit grinding check.
@@ -630,21 +612,20 @@ proc check_sig_grind_nonzero
     assertz.err="grinding_pow_check_failed"
 end
 
-#! OOD grinding check (bits = 2, mask = 3).
-#! Must match miden-signature's GrindingSchedule.ood for e2_105_w8
-#! (the OOD round carries the L^2 list term; see security.rs).
+#! OOD grinding check (bits = 5, mask = 31).
+#! Must match miden-signature's GrindingSchedule.ood for e2_110.
 proc check_sig_grind_ood_nonzero
-    push.3 exec.check_sig_grind_nonzero
+    push.31 exec.check_sig_grind_nonzero
 end
 
-#! PROX grinding check (bits = 15, mask = 32767).
-#! Must match miden-signature's GrindingSchedule.prox for e2_105_w8.
+#! PROX grinding check (bits = 17, mask = 131071).
+#! Must match miden-signature's GrindingSchedule.prox for e2_110.
 proc check_sig_grind_prox_nonzero
-    push.32767 exec.check_sig_grind_nonzero
+    push.131071 exec.check_sig_grind_nonzero
 end
 
-#! QUERY grinding check (bits = 14, mask = 16383).
-#! Must match miden-signature's GrindingSchedule.query for e2_105_w8.
+#! QUERY grinding check (bits = 19, mask = 524287).
+#! Must match miden-signature's GrindingSchedule.query for e2_110.
 proc check_sig_grind_query_nonzero
-    push.16383 exec.check_sig_grind_nonzero
+    push.524287 exec.check_sig_grind_nonzero
 end

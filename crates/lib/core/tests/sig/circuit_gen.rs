@@ -16,19 +16,19 @@
 //! - Q_recon: power-sum quotient reconstruction from flattened base-field coords
 //! - vanishing = z^N - 1
 //!
-//! # Input layout (56 EF slots = 112 base felts = 28 words)
+//! # Input layout (64 EF slots = 128 base felts = 32 words)
 //!
 //! ```text
-//! Slots 0-3:    pk[0..3]         (base field as EF)
-//! Slots 4-11:   witness_z[0..7]  (EF)
-//! Slots 12-19:  witness_gz[0..7] (EF)
-//! Slots 20-49:  quotient_z_coords[0..29] (base field as EF, 15 chunks * 2)
-//! Slots 50:     alpha            (EF)
-//! Slots 51:     z^N              (EF)
-//! Slots 52:     z_k = z          (EF)
-//! Slots 53:     is_first         (EF)
-//! Slots 54:     is_last          (EF)
-//! Slots 55:     is_transition    (EF)
+//! Slots 0-3:    pk[0..3]          (base field as EF)
+//! Slots 4-15:   witness_z[0..11]  (EF)
+//! Slots 16-27:  witness_gz[0..11] (EF)
+//! Slots 28-57:  quotient_z_coords[0..29] (base field as EF, 15 chunks * 2)
+//! Slot 58:      alpha             (EF)
+//! Slot 59:      z^N               (EF)
+//! Slot 60:      z_k = z           (EF)
+//! Slot 61:      is_first          (EF)
+//! Slot 62:      is_last           (EF)
+//! Slot 63:      is_transition     (EF)
 //! ```
 
 use alloc::vec::Vec;
@@ -37,29 +37,29 @@ use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, QuadFelt, TwoAdicField},
 };
-use miden_signature::e2_105_w8 as e2_105;
+use miden_signature::e2_110 as sig_variant;
 
 use crate::sig::{
-    instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig_w8, test_message,
-    verify_sig_w8,
+    instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig, test_message,
+    verify_sig,
 };
 
 /// Input slot indices (EF slots).
 pub const PK_START: usize = 0;
 pub const WZ_START: usize = 4;
-pub const WGZ_START: usize = 12;
-pub const QZ_COORDS_START: usize = 20;
-pub const ALPHA_SLOT: usize = 50;
-pub const ZPN_SLOT: usize = 51;
-pub const ZK_SLOT: usize = 52;
-pub const IS_FIRST_SLOT: usize = 53;
-pub const IS_LAST_SLOT: usize = 54;
-pub const IS_TRANS_SLOT: usize = 55;
-pub const NUM_INPUTS: usize = 56;
+pub const WGZ_START: usize = 16;
+pub const QZ_COORDS_START: usize = 28;
+pub const ALPHA_SLOT: usize = 58;
+pub const ZPN_SLOT: usize = 59;
+pub const ZK_SLOT: usize = 60;
+pub const IS_FIRST_SLOT: usize = 61;
+pub const IS_LAST_SLOT: usize = 62;
+pub const IS_TRANS_SLOT: usize = 63;
+pub const NUM_INPUTS: usize = 64;
 
 const NUM_QUOTIENT_CHUNKS: usize = 15;
-const SEGMENT_LEN: usize = 55;
-const STATE_WIDTH: usize = 8;
+const SEGMENT_LEN: usize = 57;
+const STATE_WIDTH: usize = 12;
 
 /// Gate operations.
 const OP_SUB: u64 = 0;
@@ -148,7 +148,7 @@ pub fn build_sig_circuit() -> (Vec<QuadFelt>, Vec<u64>, usize) {
     // EF basis element beta for quotient reconstruction
 
     // Add MDS constants (as base-field-in-EF)
-    let mds = miden_signature::internal::rpo8::MDS_U64;
+    let mds = miden_signature::internal::rpo::MDS_U64;
     let mut mds_const = [[0usize; STATE_WIDTH]; STATE_WIDTH];
     for r in 0..STATE_WIDTH {
         for c in 0..STATE_WIDTH {
@@ -267,15 +267,16 @@ pub fn build_sig_circuit() -> (Vec<QuadFelt>, Vec<u64>, usize) {
         trans_constraints[j] = b.sub(gz7, rhs[j]);
     }
 
-    // ── Phase 3: Boundary constraints ──
-    // boundary_first: rate1=0 (witness_z[4..8])
-    let bf_indices = [4, 5, 6, 7]; // column indices
+    // ── Phase 3: Boundary constraints (RPO12 state layout) ──
+    // boundary_first: capacity(cols 0..4) = 0, then rate1(cols 8..12) = 0,
+    // matching Rpo12::boundary_first_base's order.
+    let bf_indices = [0, 1, 2, 3, 8, 9, 10, 11]; // column indices
     let bf_constraints: Vec<usize> = bf_indices.iter().map(|&j| WZ_START + j).collect();
 
-    // boundary_last: witness_z[0..4] - pk[0..4]
+    // boundary_last: rate0 (cols 4..8) - pk[0..4]
     let mut bl_constraints = [0usize; 4];
     for (j, slot) in bl_constraints.iter_mut().enumerate() {
-        *slot = b.sub(WZ_START + j, PK_START + j);
+        *slot = b.sub(WZ_START + 4 + j, PK_START + j);
     }
 
     // ── Phase 4: Apply selectors and Horner-fold ──
@@ -339,13 +340,18 @@ pub fn build_sig_circuit() -> (Vec<QuadFelt>, Vec<u64>, usize) {
     let q_times_v = b.mul(q_acc, vanishing);
 
     // root = acc - Q * vanishing (must be zero)
-    let _root = b.sub(acc, q_times_v);
+    let root = b.sub(acc, q_times_v);
 
     // ── Pad for alignment ──
-    // num_eval must be multiple of 4
+    // num_eval must be a multiple of 4. Padding gates compute root - 0, so the
+    // final wire still carries the root: the VM's eval_circuit asserts the
+    // LAST gate's output is zero, and constant-zero padding would silently
+    // drop the root check whenever padding is needed.
+    let mut last = root;
     while !b.ops.len().is_multiple_of(4) {
-        b.ops.push(encode_gate(zero, zero, OP_SUB));
+        last = b.sub(last, zero);
     }
+    let _ = last;
 
     let num_vars = NUM_INPUTS + b.constants.len();
     (b.constants, b.ops, num_vars)
@@ -379,7 +385,7 @@ fn pow_circuit(ops: &mut Vec<u64>, next_wire: &mut usize, base: usize, exp: usiz
 /// Returns (ark1_coeffs, ark2_coeffs) where each is [column][coeff_idx] as QuadFelt.
 fn compute_round_constant_coefficients()
 -> ([[QuadFelt; 8]; STATE_WIDTH], [[QuadFelt; 8]; STATE_WIDTH]) {
-    use miden_signature::internal::rpo8::{ARK1_U64, ARK2_U64, NUM_ROUNDS};
+    use miden_signature::internal::rpo::{ARK1_U64, ARK2_U64, NUM_ROUNDS};
 
     let omega = Felt::two_adic_generator(3); // trace_gen = omega_8
     let n_inv = Felt::new_unchecked(8).inverse();
@@ -521,7 +527,7 @@ mod tests {
         let is_trans = inputs[IS_TRANS_SLOT];
 
         // Transition constraints.
-        let mds = miden_signature::internal::rpo8::MDS_U64;
+        let mds = miden_signature::internal::rpo::MDS_U64;
         let (ark1_coeffs, ark2_coeffs) = compute_round_constant_coefficients();
         let mut ark1_eval = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         let mut ark2_eval = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
@@ -584,12 +590,14 @@ mod tests {
             trans[j] = gz7 - rhs[j];
         }
 
-        let bf = [wz[4], wz[5], wz[6], wz[7]];
+        // RPO12 boundary structure: first = capacity(0..4) + rate1(8..12) zero,
+        // last = rate0(4..8) - pk. Order matches Rpo12::boundary_*_base.
+        let bf = [wz[0], wz[1], wz[2], wz[3], wz[8], wz[9], wz[10], wz[11]];
         let bl = [
-            wz[0] - inputs[PK_START],
-            wz[1] - inputs[PK_START + 1],
-            wz[2] - inputs[PK_START + 2],
-            wz[3] - inputs[PK_START + 3],
+            wz[4] - inputs[PK_START],
+            wz[5] - inputs[PK_START + 1],
+            wz[6] - inputs[PK_START + 2],
+            wz[7] - inputs[PK_START + 3],
         ];
 
         let mut acc = is_trans * trans[0];
@@ -647,29 +655,29 @@ mod tests {
         eprintln!("  circuit hash: {:?}", hash.map(|f| f.as_canonical_u64()));
 
         // Verify hash matches the MASM constants
-        assert_eq!(hash[0].as_canonical_u64(), 11874291165108386607u64);
-        assert_eq!(hash[1].as_canonical_u64(), 10303956255768834816u64);
-        assert_eq!(hash[2].as_canonical_u64(), 9586034038532075853u64);
-        assert_eq!(hash[3].as_canonical_u64(), 10531319539594320294u64);
+        assert_eq!(hash[0].as_canonical_u64(), 18249844043687129308u64);
+        assert_eq!(hash[1].as_canonical_u64(), 17126546483133503200u64);
+        assert_eq!(hash[2].as_canonical_u64(), 8473203744354398138u64);
+        assert_eq!(hash[3].as_canonical_u64(), 6636593801951406526u64);
     }
 
     #[test]
     fn circuit_evaluates_to_zero_on_valid_proof() {
         use miden_signature::{
             QuadExt,
-            internal::{air8::Rpo8, serialize, signer::Config},
+            internal::{air::Rpo12, serialize, signer::Config},
         };
 
         // Sign and deserialize
-        let (sk, pk) = e2_105::keygen(seed_from_label(b"circuit-gen-test"));
+        let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-test"));
         let message = test_message(2000);
-        let signature = sign_sig_w8(&sk, message);
-        assert!(verify_sig_w8(&pk, message, &signature).is_ok());
+        let signature = sign_sig(&sk, message);
+        assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_105bit::<Rpo8>();
+        let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo8, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
             &signature,
             stark,
             11,
@@ -712,11 +720,11 @@ mod tests {
         }
 
         // witness_z (EF)
-        for i in 0..8 {
+        for i in 0..STATE_WIDTH {
             inputs[WZ_START + i] = qe_to_qf(proof.witness_z[i]);
         }
         // witness_gz (EF)
-        for i in 0..8 {
+        for i in 0..STATE_WIDTH {
             inputs[WGZ_START + i] = qe_to_qf(proof.witness_gz[i]);
         }
 
@@ -756,18 +764,18 @@ mod tests {
     fn circuit_detects_tampered_quotient_coord() {
         use miden_signature::{
             QuadExt,
-            internal::{air8::Rpo8, serialize, signer::Config},
+            internal::{air::Rpo12, serialize, signer::Config},
         };
 
-        let (sk, pk) = e2_105::keygen(seed_from_label(b"circuit-gen-tamper-test"));
+        let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-tamper-test"));
         let message = test_message(2001);
-        let signature = sign_sig_w8(&sk, message);
-        assert!(verify_sig_w8(&pk, message, &signature).is_ok());
+        let signature = sign_sig(&sk, message);
+        assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_105bit::<Rpo8>();
+        let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo8, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
             &signature,
             stark,
             11,
@@ -805,10 +813,10 @@ mod tests {
         for i in 0..4 {
             inputs[PK_START + i] = QuadFelt::from(pk_m[i]);
         }
-        for i in 0..8 {
+        for i in 0..STATE_WIDTH {
             inputs[WZ_START + i] = qe_to_qf(proof.witness_z[i]);
         }
-        for i in 0..8 {
+        for i in 0..STATE_WIDTH {
             inputs[WGZ_START + i] = qe_to_qf(proof.witness_gz[i]);
         }
         for i in 0..30 {
@@ -842,18 +850,18 @@ mod tests {
     fn round_constants_horner_matches_signature_lagrange() {
         use miden_signature::{
             QuadExt,
-            internal::{air8, proof::lagrange_interp_at_vec, serialize, signer::Config},
+            internal::{air, proof::lagrange_interp_at_vec, serialize, signer::Config},
         };
 
-        let (sk, pk) = e2_105::keygen(seed_from_label(b"circuit-gen-ark-test"));
+        let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-ark-test"));
         let message = test_message(2002);
-        let signature = sign_sig_w8(&sk, message);
-        assert!(verify_sig_w8(&pk, message, &signature).is_ok());
+        let signature = sign_sig(&sk, message);
+        assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_105bit::<air8::Rpo8>();
+        let config = Config::e2_110bit::<air::Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<air8::Rpo8, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct::<air::Rpo12, QuadExt>(
             &signature,
             stark,
             11,
@@ -901,13 +909,13 @@ mod tests {
         // Evaluate periodic columns in the same way as miden-signature verifier (Lagrange).
         let mut ark1_rows = vec![vec![Goldilocks::from(Felt::ZERO); STATE_WIDTH]; 8];
         let mut ark2_rows = vec![vec![Goldilocks::from(Felt::ZERO); STATE_WIDTH]; 8];
-        for r in 0..miden_signature::internal::rpo8::NUM_ROUNDS {
+        for r in 0..miden_signature::internal::rpo::NUM_ROUNDS {
             for j in 0..STATE_WIDTH {
                 ark1_rows[r][j] = Goldilocks::from(Felt::new_unchecked(
-                    miden_signature::internal::rpo8::ARK1_U64[r][j],
+                    miden_signature::internal::rpo::ARK1_U64[r][j],
                 ));
                 ark2_rows[r][j] = Goldilocks::from(Felt::new_unchecked(
-                    miden_signature::internal::rpo8::ARK2_U64[r][j],
+                    miden_signature::internal::rpo::ARK2_U64[r][j],
                 ));
             }
         }
@@ -930,22 +938,24 @@ mod tests {
             QuadExt,
             internal::{
                 air::SignatureAir,
-                air8::{NUM_BOUNDARY_FIRST, NUM_BOUNDARY_LAST, NUM_TRANSITION, Rpo8, Rpo8Air},
+                air::{
+                    MultiRowRpoAir, NUM_BOUNDARY_FIRST, NUM_BOUNDARY_LAST, NUM_TRANSITION, Rpo12,
+                },
                 proof::lagrange_interp_at_vec,
                 serialize,
                 signer::Config,
             },
         };
 
-        let (sk, pk) = e2_105::keygen(seed_from_label(b"circuit-gen-ood-identity-test"));
+        let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-ood-identity-test"));
         let message = test_message(2003);
-        let signature = sign_sig_w8(&sk, message);
-        assert!(verify_sig_w8(&pk, message, &signature).is_ok());
+        let signature = sign_sig(&sk, message);
+        assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_105bit::<Rpo8>();
+        let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo8, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
             &signature,
             stark,
             11,
@@ -976,17 +986,18 @@ mod tests {
         let z_qf = QuadFelt::new(z);
         let z_sig = qf_to_qe(z_qf);
 
-        let (ark1_rows, ark2_rows) = Rpo8::round_constants();
+        let (ark1_rows, ark2_rows) = Rpo12::round_constants();
         let trace_gen = Goldilocks::from(Felt::two_adic_generator(3));
         let ark1_z = lagrange_interp_at_vec::<QuadExt>(&ark1_rows, z_sig, trace_gen);
         let ark2_z = lagrange_interp_at_vec::<QuadExt>(&ark2_rows, z_sig, trace_gen);
 
-        let wz_arr: [QuadExt; 8] = proof.witness_z.as_slice().try_into().expect("witness_z len");
-        let wgz_arr: [QuadExt; 8] = proof.witness_gz.as_slice().try_into().expect("witness_gz len");
-        let ark1_arr: [QuadExt; 8] = ark1_z.as_slice().try_into().expect("ark1 len");
-        let ark2_arr: [QuadExt; 8] = ark2_z.as_slice().try_into().expect("ark2 len");
+        let wz_arr: [QuadExt; 12] = proof.witness_z.as_slice().try_into().expect("witness_z len");
+        let wgz_arr: [QuadExt; 12] =
+            proof.witness_gz.as_slice().try_into().expect("witness_gz len");
+        let ark1_arr: [QuadExt; 12] = ark1_z.as_slice().try_into().expect("ark1 len");
+        let ark2_arr: [QuadExt; 12] = ark2_z.as_slice().try_into().expect("ark2 len");
 
-        let air = Rpo8Air { pk: pk_felts };
+        let air = MultiRowRpoAir { pk: pk_felts };
         let constraints_sig =
             air.evaluate_constraints_at_ood(&wz_arr, &wgz_arr, &ark1_arr, &ark2_arr);
         let constraints: Vec<QuadFelt> = constraints_sig.iter().map(|c| qe_to_qf(*c)).collect();
@@ -1011,7 +1022,7 @@ mod tests {
             ark2_eval[j] = a2;
         }
 
-        let mds = miden_signature::internal::rpo8::MDS_U64;
+        let mds = miden_signature::internal::rpo::MDS_U64;
         let mut t_state = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         for r in 0..STATE_WIDTH {
             let mut acc = QuadFelt::new([Felt::ZERO, Felt::ZERO]);
@@ -1051,15 +1062,14 @@ mod tests {
             let c = gz7 - rhs[j];
             assert_eq!(c, constraints[j], "transition constraint {j} mismatch");
         }
+        // RPO12 boundary-first order: capacity cols 0..4, then rate1 cols 8..12.
         for j in 0..NUM_BOUNDARY_FIRST {
-            assert_eq!(
-                wz_qf[4 + j],
-                constraints[NUM_TRANSITION + j],
-                "boundary-first {j} mismatch"
-            );
+            let col = if j < 4 { j } else { 4 + j };
+            assert_eq!(wz_qf[col], constraints[NUM_TRANSITION + j], "boundary-first {j} mismatch");
         }
+        // RPO12 boundary-last: rate0 cols 4..8 minus pk.
         for j in 0..NUM_BOUNDARY_LAST {
-            let expected = wz_qf[j] - QuadFelt::from(pk_m[j]);
+            let expected = wz_qf[4 + j] - QuadFelt::from(pk_m[j]);
             assert_eq!(
                 expected,
                 constraints[NUM_TRANSITION + NUM_BOUNDARY_FIRST + j],

@@ -4,9 +4,9 @@ use alloc::vec::Vec;
 
 use miden_core::{Felt, Word};
 use miden_signature::{
-    Goldilocks, QuadExt, e2_105_w8 as e2_105,
+    Goldilocks, QuadExt, e2_110 as sig_variant,
     internal::{
-        air8::Rpo8,
+        air::Rpo12,
         merkle::{MerkleOpening, hash_row},
         proof::Poseidon2Proof,
         serialize,
@@ -22,16 +22,16 @@ use super::{
         append_base_group_full_rate_advice, append_deep_poly_full_rate_advice,
         append_ext_group_full_rate_advice, g4_to_felt4, g4_to_u64,
     },
-    instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig_w8, test_message,
+    instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig, test_message,
     transcript::SigTranscript,
-    verify_sig_w8,
+    verify_sig,
 };
 
 pub(crate) struct SigFixture {
     pub(crate) config: Config,
     pub(crate) proof: Poseidon2Proof<QuadExt>,
     pub(crate) data: SigVerifierData,
-    pub(crate) pk: e2_105::PublicKey,
+    pub(crate) pk: sig_variant::PublicKey,
     pub(crate) message: [Felt; 4],
 }
 
@@ -40,12 +40,12 @@ pub(crate) fn build_fixture(seed: &[u8], msg_tag: u64) -> SigFixture {
 }
 
 pub(crate) fn build_fixture_with_message(seed: &[u8], message: [Felt; 4]) -> SigFixture {
-    let (sk, pk) = e2_105::keygen(seed_from_label(seed));
-    let signature = sign_sig_w8(&sk, message);
-    assert!(verify_sig_w8(&pk, message, &signature).is_ok());
+    let (sk, pk) = sig_variant::keygen(seed_from_label(seed));
+    let signature = sign_sig(&sk, message);
+    assert!(verify_sig(&pk, message, &signature).is_ok());
 
-    let config = Config::e2_105bit::<Rpo8>();
-    let proof = serialize::deserialize_and_reconstruct::<Rpo8, QuadExt>(
+    let config = Config::e2_110bit::<Rpo12>();
+    let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
         &signature,
         &config.stark,
         11,
@@ -61,7 +61,7 @@ pub(crate) fn build_fixture_with_message(seed: &[u8], message: [Felt; 4]) -> Sig
 
 /// Extract all proof components and pack into SigVerifierData for MASM execution.
 pub(crate) fn pack_proof_for_masm(
-    pk: &e2_105::PublicKey,
+    pk: &sig_variant::PublicKey,
     message: [Felt; 4],
     proof: &Poseidon2Proof<QuadExt>,
     config: &Config,
@@ -207,13 +207,19 @@ fn extend_merkle_paths(
         let digest_g = hash_row(&opening.row, &opening.salt);
         let leaf_word = Word::new(g4_to_felt4(&digest_g));
 
-        // Advice-map value: salt(4) ++ row. The MASM loads the salt into the
-        // sponge capacity, then absorbs the row into the rate.
+        // Advice-map value: salt(4) ++ [0…0] ++ row. The MASM loads the salt
+        // into the sponge capacity, then `adv_pipe`s the left-padded row into
+        // the rate one full 8-felt block at a time. The leading zeros pad the
+        // row to a multiple of the rate (matching `merkle::hash_row`), so the
+        // witness (12 felts) and quotient (32 felts) leaves both stream as
+        // whole blocks with no partial-block handling.
+        const RATE: usize = 8;
+        let pad = (RATE - opening.row.len() % RATE) % RATE;
         let salt_felts = g4_to_felt4(&opening.salt);
-        let row_felts = opening.row.iter().map(|&g| Felt::from(g));
-        let mut leaf_adv = Vec::with_capacity(4 + opening.row.len());
+        let mut leaf_adv = Vec::with_capacity(4 + pad + opening.row.len());
         leaf_adv.extend_from_slice(&salt_felts);
-        leaf_adv.extend(row_felts);
+        leaf_adv.extend(core::iter::repeat_n(Felt::from(Goldilocks::new(0)), pad));
+        leaf_adv.extend(opening.row.iter().map(|&g| Felt::from(g)));
         advice_map.push((leaf_word, leaf_adv));
 
         let merkle_path =

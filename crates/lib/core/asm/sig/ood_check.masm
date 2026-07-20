@@ -6,38 +6,38 @@
 #! where acc is the Horner-folded constraint accumulator and Q_recon is the
 #! power-sum quotient reconstruction from flattened base-field coords.
 #!
-#! # Input layout (56 EF slots = 112 base felts = 28 words)
+#! # Input layout (64 EF slots = 128 base felts = 32 words)
 #!
 #!   Slots 0-3:    pk[0..3]              (base field as EF)
-#!   Slots 4-11:   witness_z[0..7]       (EF)
-#!   Slots 12-19:  witness_gz[0..7]      (EF)
-#!   Slots 20-49:  quotient_z_coords     (30 base-field-as-EF, 15 chunks * 2 coords)
-#!   Slot 50:      alpha                 (EF)
-#!   Slot 51:      z^N                   (EF)
-#!   Slot 52:      z_k = z               (EF)
-#!   Slot 53:      is_first              (EF)
-#!   Slot 54:      is_last               (EF)
-#!   Slot 55:      is_transition         (EF)
+#!   Slots 4-15:   witness_z[0..11]      (EF)
+#!   Slots 16-27:  witness_gz[0..11]     (EF)
+#!   Slots 28-57:  quotient_z_coords     (30 base-field-as-EF, 15 chunks * 2 coords)
+#!   Slot 58:      alpha                 (EF)
+#!   Slot 59:      z^N                   (EF)
+#!   Slot 60:      z_k = z               (EF)
+#!   Slot 61:      is_first              (EF)
+#!   Slot 62:      is_last               (EF)
+#!   Slot 63:      is_transition         (EF)
 
 use miden::core::sig::constants
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::random_coin
 
 # Circuit dimensions (from circuit_gen.rs).
-const ACE_NUM_VARS = 252
-const ACE_NUM_EVAL = 672
-const ACE_NUM_ADV_PIPE = 133
-const ACE_READ_WORDS = 28
+const ACE_NUM_VARS = 404
+const ACE_NUM_EVAL = 1164
+const ACE_NUM_ADV_PIPE = 231
+const ACE_READ_WORDS = 32
 
 # Circuit commitment hash (with reversed wire IDs for chiplet convention).
-const ACE_CIRCUIT_HASH_0 = 11874291165108386607
-const ACE_CIRCUIT_HASH_1 = 10303956255768834816
-const ACE_CIRCUIT_HASH_2 = 9586034038532075853
-const ACE_CIRCUIT_HASH_3 = 10531319539594320294
+const ACE_CIRCUIT_HASH_0 = 18249844043687129308
+const ACE_CIRCUIT_HASH_1 = 17126546483133503200
+const ACE_CIRCUIT_HASH_2 = 8473203744354398138
+const ACE_CIRCUIT_HASH_3 = 6636593801951406526
 
-# ACE READ section base address (after sig query region).
-# 56 EF slots = 112 base felts = 28 words.
-const ACE_READ_PTR = 3240100500
+# ACE READ section base address (after sig query region + DEEP scratch).
+# 64 EF slots = 128 base felts = 32 words.
+const ACE_READ_PTR = 3240100532
 
 # Domain constants.
 const TRACE_GEN = 18446744069397807105
@@ -66,20 +66,20 @@ pub proc verify_constraints_at_ood
     drop drop drop
 end
 
-#! Populate READ section slots 0-49 from sig memory.
-#! STARK vars (slots 50-55) are handled by setup_stark_vars.
+#! Populate READ section slots 0-57 from sig memory.
+#! STARK vars (slots 58-63) are handled by setup_stark_vars.
 #!
 #! OOD memory layout (point-major):
-#!   SIG_OOD_PTR + [0..15]   = witness_z
-#!   SIG_OOD_PTR + [16..47]  = quotient_z
-#!   SIG_OOD_PTR + [48..63]  = witness_gz
-#!   SIG_OOD_PTR + [64..95]  = quotient_gz
+#!   SIG_OOD_PTR + [0..23]   = witness_z
+#!   SIG_OOD_PTR + [24..55]  = quotient_z
+#!   SIG_OOD_PTR + [56..79]  = witness_gz
+#!   SIG_OOD_PTR + [80..111] = quotient_gz
 #!
 #! READ memory layout:
 #!   Slots 0-3:    pk (base field → EF with zero second coord)
-#!   Slots 4-11:   witness_z (8 EF = 16 felts)
-#!   Slots 12-19:  witness_gz (8 EF = 16 felts)
-#!   Slots 20-49:  quotient_z coords (30 base felts → 30 EF with zero second coord)
+#!   Slots 4-15:   witness_z (12 EF = 24 felts)
+#!   Slots 16-27:  witness_gz (12 EF = 24 felts)
+#!   Slots 28-57:  quotient_z coords (30 base felts → 30 EF with zero second coord)
 #!
 #! Each EF slot = 2 base felts in memory. For base-field-as-EF: (val, 0).
 proc populate_read_section
@@ -104,34 +104,34 @@ proc populate_read_section
     exec.constants::sig_pk_ptr add.3 mem_load
     push.ACE_READ_PTR add.6 mem_store              # pk[3] at slot 3
 
-    # Slots 4-11: witness_z (8 EF = 16 felts, direct copy)
-    # Source: SIG_OOD_PTR offsets [0..15]
+    # Slots 4-15: witness_z (12 EF = 24 felts, direct copy)
+    # Source: SIG_OOD_PTR offsets [0..23]
     # Dest: ACE_READ_PTR + 4*2 = ACE_READ_PTR + 8
     exec.constants::sig_ood_ptr
     push.ACE_READ_PTR add.8
-    repeat.16
+    repeat.24
         dup.1 mem_load dup.1 mem_store
         swap add.1 swap add.1
     end
     drop drop
 
-    # Slots 12-19: witness_gz (8 EF = 16 felts)
-    # Source: SIG_OOD_PTR + 48 (point-major OOD layout)
-    # Dest: ACE_READ_PTR + 12*2 = ACE_READ_PTR + 24
-    exec.constants::sig_ood_ptr add.48
-    push.ACE_READ_PTR add.24
-    repeat.16
+    # Slots 16-27: witness_gz (12 EF = 24 felts)
+    # Source: SIG_OOD_PTR + 56 (point-major OOD layout)
+    # Dest: ACE_READ_PTR + 16*2 = ACE_READ_PTR + 32
+    exec.constants::sig_ood_ptr add.56
+    push.ACE_READ_PTR add.32
+    repeat.24
         dup.1 mem_load dup.1 mem_store
         swap add.1 swap add.1
     end
     drop drop
 
-    # Slots 20-49: quotient_z coords (30 base felts → 30 EF with zero second coord)
-    # Source: SIG_OOD_PTR + 16 (first 30 of 32 flattened base felts, excluding R mask)
-    # Dest: ACE_READ_PTR + 20*2 = ACE_READ_PTR + 40
+    # Slots 28-57: quotient_z coords (30 base felts → 30 EF with zero second coord)
+    # Source: SIG_OOD_PTR + 24 (first 30 of 32 flattened base felts, excluding R mask)
+    # Dest: ACE_READ_PTR + 28*2 = ACE_READ_PTR + 56
     # Each base felt f → (f, 0) at dest, dest+1
-    exec.constants::sig_ood_ptr add.16
-    push.ACE_READ_PTR add.40
+    exec.constants::sig_ood_ptr add.24
+    push.ACE_READ_PTR add.56
     repeat.30
         dup.1 mem_load dup.1 mem_store    # copy f to dest (dest+1 already 0 from zeroing)
         swap add.1 swap add.2             # src += 1, dest += 2 (skip the zero slot)
@@ -139,15 +139,15 @@ proc populate_read_section
     drop drop
 end
 
-#! Compute and store STARK variables at slots 50-55.
-#! ACE_READ_PTR + 50*2 = ACE_READ_PTR + 100.
+#! Compute and store STARK variables at slots 58-63.
+#! ACE_READ_PTR + 58*2 = ACE_READ_PTR + 116.
 #!
-#!   Slot 50: alpha = lambda (from SIG_LAMBDA_PTR)
-#!   Slot 51: z^N = z^8 (from SIG_Z_PTR+2..3)
-#!   Slot 52: z_k = z (from SIG_Z_PTR)
-#!   Slot 53: is_first = (z^N - 1) / (z - 1)
-#!   Slot 54: is_last = (z^N - 1) / (z - g^{-1})
-#!   Slot 55: is_transition = z - g^{-1}
+#!   Slot 58: alpha = lambda (from SIG_LAMBDA_PTR)
+#!   Slot 59: z^N = z^8 (from SIG_Z_PTR+2..3)
+#!   Slot 60: z_k = z (from SIG_Z_PTR)
+#!   Slot 61: is_first = (z^N - 1) / (z - 1)
+#!   Slot 62: is_last = (z^N - 1) / (z - g^{-1})
+#!   Slot 63: is_transition = z - g^{-1}
 proc setup_stark_vars
     # Load z and z^8
     padw exec.constants::sig_z_ptr mem_loadw_le
@@ -155,17 +155,17 @@ proc setup_stark_vars
 
     # ── Slot 50: alpha ──
     exec.constants::sig_lambda_ptr mem_load
-    push.ACE_READ_PTR add.100 mem_store
+    push.ACE_READ_PTR add.116 mem_store
     exec.constants::sig_lambda_ptr add.1 mem_load
-    push.ACE_READ_PTR add.101 mem_store
+    push.ACE_READ_PTR add.117 mem_store
 
     # ── Slot 51: z^N = z^8 ──
-    dup.2 push.ACE_READ_PTR add.102 mem_store    # z8_0
-    dup.3 push.ACE_READ_PTR add.103 mem_store    # z8_1
+    dup.2 push.ACE_READ_PTR add.118 mem_store    # z8_0
+    dup.3 push.ACE_READ_PTR add.119 mem_store    # z8_1
 
     # ── Slot 52: z_k = z ──
-    dup push.ACE_READ_PTR add.104 mem_store      # z0
-    dup.1 push.ACE_READ_PTR add.105 mem_store    # z1
+    dup push.ACE_READ_PTR add.120 mem_store      # z0
+    dup.1 push.ACE_READ_PTR add.121 mem_store    # z1
 
     # ── Compute vanishing = z^N - 1 ──
     movup.3 movup.3
@@ -182,8 +182,8 @@ proc setup_stark_vars
     # => [van_0, van_1, inv0, inv1, van_0, van_1, z0, z1]
     ext2mul
     # => [if0, if1, van_0, van_1, z0, z1]
-    push.ACE_READ_PTR add.106 mem_store    # is_first_0
-    push.ACE_READ_PTR add.107 mem_store    # is_first_1
+    push.ACE_READ_PTR add.122 mem_store    # is_first_0
+    push.ACE_READ_PTR add.123 mem_store    # is_first_1
     # => [van_0, van_1, z0, z1]
 
     # ── is_transition = z - g^{-1} ──
@@ -207,7 +207,7 @@ proc setup_stark_vars
 
     # Store slots 54-55 in one word:
     # [is_last_0, is_last_1, is_trans_0, is_trans_1]
-    push.ACE_READ_PTR add.108
+    push.ACE_READ_PTR add.124
     mem_storew_le
     dropw
 end
@@ -231,7 +231,7 @@ proc load_circuit
     dropw
 
     # Circuit data destination
-    push.ACE_READ_PTR add.112
+    push.ACE_READ_PTR add.128
 
     # Fresh Poseidon2 state for circuit hashing (does NOT use the random coin)
     padw padw padw

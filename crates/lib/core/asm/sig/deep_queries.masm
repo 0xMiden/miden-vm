@@ -2,7 +2,7 @@
 #!
 #! # What this module does
 #!
-#! For each of 53 query indices, verifies that the committed trace polynomials
+#! For each of 56 query indices, verifies that the committed trace polynomials
 #! (witness + quotient) are consistent with their OOD evaluations via the DEEP
 #! polynomial identity:
 #!
@@ -12,8 +12,8 @@
 #!
 #! # Column layout
 #!
-#! The Horner reduction covers 24 extension-field columns (all committed polynomials):
-#!   - Witness:  8 base-field columns (from the RPO8 state trace, lifted to EF)
+#! The Horner reduction covers 28 extension-field columns (all committed polynomials):
+#!   - Witness:  12 base-field columns (from the RPO12 state trace, lifted to EF)
 #!   - Quotient: 16 extension-field columns (15 quotient chunks + 1 DEEP mask R)
 #!
 #! # Data sources
@@ -33,12 +33,12 @@ const SIG_BETA_PTR = 3240099866
 const SIG_HORNER_FIXED_PTR = 3240099872
 const SIG_NEG_Z_GZ_PTR = 3240099876
 const SIG_Z_PTR = 3240099856
-const SIG_DEEP_POLY_PTR = 3240099976
-const SIG_QUERIES_PTR = 3240100232
-const SIG_OPENED_ROW_PTR = 3240100448
-const SIG_WITNESS_LEAF_PTR = 3240100488
-const SIG_QUOTIENT_LEAF_PTR = 3240100492
-const SIG_LEAF_SALT_PTR = 3240100496
+const SIG_DEEP_POLY_PTR = 3240099992
+const SIG_QUERIES_PTR = 3240100248
+const SIG_OPENED_ROW_PTR = 3240100472
+const SIG_WITNESS_LEAF_PTR = 3240100520
+const SIG_QUOTIENT_LEAF_PTR = 3240100524
+const SIG_LEAF_SALT_PTR = 3240100528
 const SIG_WITNESS_COM_PTR = 3240099848
 const SIG_QUOTIENT_COM_PTR = 3240099852
 
@@ -51,7 +51,7 @@ const COSET_OFFSET = 7
 # sig/constants.masm header on sponge-memory sharing), and ood_check.masm's
 # use of TMP1-3 (Phase 3) does not overlap the query loop's lifetime.
 const TMP1_PTR = 3223322684
-const NUM_QUERIES = 53
+const NUM_QUERIES = 56
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Precomputation (called once before the query loop)
@@ -168,7 +168,7 @@ end
 #!
 #! 1. Compute x = COSET_OFFSET * CODE_GEN^p  (LDE domain point)
 #! 2. Verify witness Merkle opening: mtree_get + adv.push_mapval
-#! 3. Horner-reduce 8 base-field witness values with alpha
+#! 3. Horner-reduce 12 base-field witness values with alpha (left-padded to 16)
 #! 4. Verify quotient Merkle opening: mtree_get + adv.push_mapval
 #! 5. Continue Horner with 16 EF quotient values (32 flattened base coords)
 #! 6. Compute expected DEEP value from f_red(x), f_red(z), f_red(gz)
@@ -232,9 +232,14 @@ proc open_and_reduce_query_leaves
     padw push.SIG_LEAF_SALT_PTR mem_loadw_le
     padw padw
 
-    adv_pipe
-    horner_eval_base
-    exec.poseidon2::permute
+    # Witness leaf: 12 felts left-padded to 16 (= 2 full rate blocks) in the
+    # advice, so it streams uniformly like the quotient leaf. The 4 leading
+    # zeros vanish in the Horner reduction, so f_red is exactly f_red(row).
+    repeat.2
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
     padw push.SIG_WITNESS_LEAF_PTR mem_loadw_le
     swapw
     assert_eqw.err="witness leaf digest mismatch"
@@ -377,9 +382,9 @@ end
 
 #! Evaluate the DEEP polynomial at a base-field point x via Horner's method.
 #!
-#! Memory at SIG_DEEP_POLY_PTR holds a padded 128-coefficient descending layout:
-#!   [0, ..., 0, c117, c116, ..., c0]
-#! where c0..c117 are the 118 logical DEEP coefficients.
+#! Memory at SIG_DEEP_POLY_PTR holds a padded 256-coefficient descending layout:
+#!   [0, ..., 0, c125, c124, ..., c0]
+#! where c0..c125 are the 126 logical DEEP coefficients.
 #! This lets us evaluate with the native 4-EF Horner instruction:
 #!   repeat.32 { mem_stream; horner_eval_ext }.
 #!

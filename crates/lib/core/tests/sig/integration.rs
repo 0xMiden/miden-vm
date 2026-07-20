@@ -29,7 +29,7 @@ fn build_sig_test(source: &str, data: &SigVerifierData) -> miden_utils_testing::
 #[test]
 fn sign_and_extract_proof_components() {
     let fixture = build_fixture(b"test-seed-for-recursive-verification", 1001);
-    assert_eq!(fixture.proof.witness_z.len(), 8);
+    assert_eq!(fixture.proof.witness_z.len(), 12);
     assert_eq!(fixture.proof.deep_coeffs.len(), fixture.config.stark.message_size());
 }
 
@@ -45,7 +45,7 @@ fn transcript_matches_prover() {
 fn masm_query_indices_match_transcript_replay() {
     use miden_processor::ContextId;
 
-    const SIG_QUERIES_PTR: u32 = 3240100232;
+    const SIG_QUERIES_PTR: u32 = 3240100248;
 
     let fixture = build_fixture(b"masm-query-indices-match-replay", 1003);
     let expected =
@@ -106,7 +106,7 @@ fn masm_verify_signature_phases_0_to_4() {
 
 #[test]
 fn masm_prox_grinding_guard_rejects_bad_nonce() {
-    const PROX_NONCE_ADVICE_INDEX: usize = 4 + 4 + 1 + 4 + 1 + 2 + 96;
+    const PROX_NONCE_ADVICE_INDEX: usize = 4 + 4 + 1 + 4 + 1 + 2 + 112;
 
     let fixture = build_fixture(b"masm-bad-prox-nonce", 1012);
     let mut bad_nonce = None;
@@ -373,8 +373,8 @@ fn masm_verify_signature_single_query_slot0() {
 fn masm_deep_poly_layout_padded_descending() {
     use miden_processor::ContextId;
 
-    const SIG_DEEP_POLY_PTR: u32 = 3240099976;
-    const DEEP_EF_LOGICAL: usize = 118;
+    const SIG_DEEP_POLY_PTR: u32 = 3240099992;
+    const DEEP_EF_LOGICAL: usize = 124;
     const DEEP_EF_PADDED: usize = 128;
     const DEEP_ZERO_PREFIX: usize = DEEP_EF_PADDED - DEEP_EF_LOGICAL;
 
