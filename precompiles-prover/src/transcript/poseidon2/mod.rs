@@ -426,9 +426,10 @@ where
         // column) so each column's fraction count stays small. The row
         // selector is folded into each insert's own multiplicity instead of
         // an outer batch gate — col 0: in_rate0. col 1: in_rate1 + out_rate0.
-        // col 2: in_cap.
-        let m_in_rate0 = is_init_ext.clone() * neg_in_mult.clone();
-        let m_in_rate1 = is_init_ext.clone() * neg_in_mult;
+        // col 2: in_cap. in_rate0 and in_rate1 share the same gate
+        // (`is_init_ext · neg_in_mult`): both provides fire together at row 0
+        // under the cycle-constant `in_multiplicity`.
+        let m_in = is_init_ext.clone() * neg_in_mult;
         let m_in_cap = is_init_ext * neg_in_mult_cap;
         let m_out = p_last_in_cycle * neg_out_mult;
         builder.next_column(
@@ -442,7 +443,7 @@ where
                             |b| {
                                 b.insert(
                                     "in_rate0",
-                                    m_in_rate0,
+                                    m_in.clone(),
                                     Poseidon2InMsg::rate0(perm_seq_id.clone(), rate0_chunk),
                                     interaction_deg,
                                 );
@@ -466,7 +467,7 @@ where
                             |b| {
                                 b.insert(
                                     "in_rate1",
-                                    m_in_rate1,
+                                    m_in,
                                     Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
                                     interaction_deg,
                                 );
