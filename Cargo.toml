@@ -19,6 +19,7 @@ members = [
     "crates/lifted-air",
     "crates/lifted-stark",
     "crates/mast-package",
+    "crates/miden-constraint-compiler",
     "crates/midenc-hir-type",
     "crates/package-registry",
     "crates/package-registry-local",
@@ -85,6 +86,7 @@ miden-air               = { path = "./air", version = "0.28", default-features =
 miden-assembly          = { path = "./crates/assembly", version = "0.28", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.28", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.28", default-features = false }
+miden-constraint-compiler = { path = "./crates/miden-constraint-compiler", version = "0.28", default-features = false }
 miden-core              = { path = "./core", version = "0.28", default-features = false }
 miden-crypto            = { path = "./crates/crypto", version = "0.28", default-features = false }
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "0.28", default-features = false }
@@ -134,6 +136,7 @@ derive_more     = { version = "2.0", features = ["from"] }
 ed25519-dalek   = { version = "3.0.0", default-features = false }
 env_logger      = { version = "0.11" }
 flume           = { version = "0.12.0", default-features = false }
+hashbrown       = { version = "0.17", default-features = false, features = ["default-hasher"] }
 hex             = { version = "0.4", default-features = false }
 hkdf            = { version = "0.13", default-features = false }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
@@ -211,3 +214,21 @@ wycheproof-ng-eddsa = { version = "0.1.1", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+# Prover-optimization integration: p3-goldilocks with the SVE2 backport
+# (0xMiden/Plonky3 branch p3-goldilocks-v0.6.1-sve2 = v0.6.1 + the
+# sve2-goldilocks PR diff). Its p3 siblings pin to the same rev so every
+# p3 crate resolves from a single source. Remove once the upstream PR
+# ships in a release.
+[patch.crates-io]
+p3-goldilocks = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-challenger = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-dft = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-field = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-mds = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-poseidon1 = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-symmetric = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-util = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-matrix = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }
+p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3", rev = "a2bcc68ab83eb3de886d74a4a2e28ca6433e2525" }

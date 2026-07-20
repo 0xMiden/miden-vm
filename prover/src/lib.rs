@@ -22,6 +22,7 @@ use miden_processor::{
 use serde_wincode::SerdeCompat;
 use tracing::instrument;
 
+pub mod huge_alloc;
 mod proving_options;
 
 // EXPORTS
@@ -112,7 +113,11 @@ pub async fn prove_partial(
     prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
-/// Synchronous wrapper for [`prove()`].
+/// Synchronous variant of [`prove()`].
+///
+/// Unlike `prove`, the sync path can overlap hasher-chiplet trace building with program
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
+/// default); the produced trace and proof are identical either way.
 #[instrument("prove_program_sync", skip_all)]
 pub fn prove_sync(
     program: &Program,
@@ -122,14 +127,25 @@ pub fn prove_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    #[cfg(feature = "std")]
+    let overlapped_trace_build = execution_options.overlapped_trace_build();
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = {
+    // Overlapped path (std only): the hasher chiplet builds concurrently with
+    // execution, hiding the dominant serial part of trace building.
+    #[cfg(feature = "std")]
+    {
+        if overlapped_trace_build {
+            let trace = processor.execute_and_build_trace_sync(program, host)?;
+            return prove_final_execution_trace(trace, proving_options);
+        }
+    }
+    {
         let _span = tracing::info_span!("execute_miden_vm").entered();
-        processor.execute_trace_inputs_sync(program, host)?
-    };
-    prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
+        let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+        prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
+    }
 }
 
 /// Synchronous wrapper for [`prove_partial()`].

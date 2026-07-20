@@ -4,26 +4,25 @@ use miden_ace_codegen::{
     AceArtifacts, AceCircuit, AceConfig, AceDag, AceError, DagBuilder, InputCounts, InputKey,
     InputLayout, NodeId, NodeKind, build_ace_dag_for_air,
 };
-use miden_core::{Felt, field::ExtensionField};
+use miden_core::{
+    Felt,
+    field::{ExtensionField, QuadFelt},
+};
 use miden_crypto::{
-    field::{Algebra, Field},
-    stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
+    field::Field,
+    stark::air::{BaseAir, LiftedAir},
 };
 
-use crate::{AIRS, MIDEN_AIR_COUNT, MidenAir, ProofOrder};
+use crate::{AIRS, HandwrittenMidenAir, MIDEN_AIR_COUNT, MidenAir, ProofOrder};
 
 /// Build the combined ACE circuit for the supplied proof order.
 ///
 /// The output circuit evaluates the proof-order Horner fold of the per-AIR alpha-folded
 /// constraint roots.
-pub fn build_multi_air_ace_circuit_for_order<EF>(
+pub fn build_multi_air_ace_circuit_for_order(
     config: AceConfig,
     order: &ProofOrder,
-) -> Result<AceCircuit<EF>, AceError>
-where
-    EF: ExtensionField<Felt>,
-    SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
-{
+) -> Result<AceCircuit<QuadFelt>, AceError> {
     // Per-AIR main and aux regions are padded to this width before concatenation.
     const LMCS_ALIGNMENT: usize = 8;
 
@@ -41,8 +40,10 @@ where
     let sub_config = AceConfig { num_airs: 1, ..config };
     let mut sub_dags = Vec::with_capacity(AIRS.len());
     for air in AIRS.iter().copied() {
-        let artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&air, sub_config)?;
-        sub_dags.push(build_air_sub_dag::<EF>(air, artifacts, LMCS_ALIGNMENT));
+        // Capture through the handwritten-routing wrapper: production artifacts
+        // are always derived from the hand-written constraint definitions.
+        let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), sub_config)?;
+        sub_dags.push(build_air_sub_dag(air, artifacts, LMCS_ALIGNMENT));
     }
 
     let global_periodic_max = sub_dags.iter().map(|air| air.periodic_max).max().unwrap_or(0);
@@ -93,7 +94,7 @@ where
     };
 
     let offsets_by_air = air_offsets(&sub_dags, order)?;
-    let mut builder = DagBuilder::<EF>::new();
+    let mut builder = DagBuilder::<QuadFelt>::new();
     let mut constraint_acc_by_air = [None; MIDEN_AIR_COUNT];
     // Each per-AIR DAG root has the form `acc - q*v`. The combined circuit folds the
     // per-AIR accumulators in proof order and subtracts one shared quotient binding.

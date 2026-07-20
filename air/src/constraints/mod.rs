@@ -19,6 +19,11 @@ pub mod columns;
 pub mod constants;
 pub mod decoder;
 pub mod ext_field;
+// Generated code clones every operand unconditionally: the clones are free on
+// the Copy packed types the prover instantiates, and required in the general
+// builder-generic case.
+#[allow(clippy::redundant_clone)]
+pub mod generated;
 pub mod lookup;
 pub(crate) mod op_flags;
 pub mod poseidon2_permutation;

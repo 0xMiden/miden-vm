@@ -34,6 +34,8 @@ mod tests;
 pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
+pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+pub(crate) use trace_state::ResolvedHasherOp;
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
@@ -42,6 +44,16 @@ pub struct TraceBuildInputs {
     trace_output: TraceBuildOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
+}
+
+impl TraceBuildInputs {
+    /// Takes the hasher replay out, leaving an empty buffered one.
+    ///
+    /// The streaming path uses this to drop the replay's channel sender once execution has
+    /// finished, so the concurrently running hasher builder sees its input stream end.
+    pub(crate) fn take_hasher_replay(&mut self) -> trace_state::HasherRequestReplay {
+        core::mem::take(&mut self.trace_generation_context.hasher_for_chiplet)
+    }
 }
 
 #[derive(Debug)]

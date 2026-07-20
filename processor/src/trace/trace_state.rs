@@ -1,9 +1,10 @@
-use alloc::{collections::VecDeque, string::ToString};
+use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, STATE_WIDTH},
 };
+use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
 
 use crate::{
     ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
@@ -11,11 +12,12 @@ use crate::{
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForestId, MastNodeId},
+    mast::{MastForestId, MastNodeId, SparseMastForest},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
     trace::chiplets::CircuitEvaluation,
+    utils::Idx,
 };
 
 // TRACE FRAGMENT CONTEXT
@@ -1014,20 +1016,112 @@ pub enum HasherOp {
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
 
+impl HasherOp {
+    /// Resolves the four forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
+    /// needs forest access.
+    fn resolve_forest_free(self) -> Option<ResolvedHasherOp> {
+        match self {
+            HasherOp::Permute(s) => Some(ResolvedHasherOp::Permute(s)),
+            HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
+            HasherOp::HashBasicBlock(_) => None,
+            HasherOp::BuildMerkleRoot(x) => Some(ResolvedHasherOp::BuildMerkleRoot(x)),
+            HasherOp::UpdateMerkleRoot(x) => Some(ResolvedHasherOp::UpdateMerkleRoot(x)),
+        }
+    }
+}
+
+/// A hasher-chiplet request with all operands resolved, so it can be replayed
+/// without access to the MAST forest store.
+///
+/// This is what the hasher-chiplet builder consumes: the buffered replay
+/// resolves its recorded [`HasherOp`]s into this type at drain time (when the
+/// finalized forest store exists), while the streaming path resolves at record
+/// time and forwards each op to the concurrently running builder.
+#[derive(Debug)]
+pub enum ResolvedHasherOp {
+    Permute([Felt; STATE_WIDTH]),
+    HashControlBlock((Word, Word, Felt, Word)),
+    HashBasicBlock((Vec<OpBatch>, Word)),
+    BuildMerkleRoot((Word, MerklePath, Felt)),
+    UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
+}
+
 /// Records and replays all the requests made to the hasher chiplet during the execution of a
 /// program, for the purposes of generating the hasher chiplet's trace.
 ///
-/// The hasher requests are recorded during fast processor execution and then replayed during hasher
-/// chiplet trace generation.
+/// In buffered mode (the default) requests are recorded during fast-processor execution and
+/// replayed during hasher chiplet trace generation. In streamed mode
+/// ([`HasherRequestReplay::streamed`]) each request is resolved at record time and forwarded to
+/// a hasher-chiplet builder running concurrently with execution; see
+/// `FastProcessor::execute_and_build_trace_sync`.
 #[derive(Debug, Default)]
 pub struct HasherRequestReplay {
-    hasher_ops: VecDeque<HasherOp>,
+    sink: HasherOpSink,
+}
+
+#[derive(Debug)]
+enum HasherOpSink {
+    Buffered(VecDeque<HasherOp>),
+    #[cfg(feature = "std")]
+    Streamed(std::sync::mpsc::Sender<ResolvedHasherOp>),
+}
+
+impl Default for HasherOpSink {
+    fn default() -> Self {
+        Self::Buffered(VecDeque::new())
+    }
 }
 
 impl HasherRequestReplay {
+    /// Creates a replay that forwards each request, resolved, to the receiving end as it is
+    /// recorded.
+    ///
+    /// Send failures are ignored: they mean the consumer stopped early, and its error surfaces
+    /// when the caller joins it.
+    #[cfg(feature = "std")]
+    pub fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp>) -> Self {
+        Self { sink: HasherOpSink::Streamed(sender) }
+    }
+
+    fn record_resolved(&mut self, op: HasherOp, resolved: impl FnOnce() -> ResolvedHasherOp) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(sender) => {
+                let _ = sender.send(resolved());
+            },
+        }
+    }
+
+    /// Records a forest-free op: buffered sinks store it as is, streamed sinks resolve and
+    /// forward it. [`HasherOp::HashBasicBlock`] must go through
+    /// [`Self::record_hash_basic_block`] instead.
+    fn record(&mut self, op: HasherOp) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(sender) => {
+                let resolved =
+                    op.resolve_forest_free().expect("`record` is only called with forest-free ops");
+                let _ = sender.send(resolved);
+            },
+        }
+    }
+
+    /// Records a raw, unresolved op — test-only escape hatch for injecting
+    /// malformed ids to exercise the drain-time resolution error paths.
+    #[cfg(test)]
+    pub(crate) fn record_raw(&mut self, op: HasherOp) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => panic!("record_raw is for buffered replays"),
+        }
+    }
+
     /// Records a `Hasher::permute()` request.
     pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.hasher_ops.push_back(HasherOp::Permute(state));
+        self.record(HasherOp::Permute(state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.
@@ -1038,24 +1132,31 @@ impl HasherRequestReplay {
         domain: Felt,
         expected_hash: Word,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
+        self.record(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
+    ///
+    /// `basic_block_node` must be the node identified by `(forest_id, node_id)`; streamed
+    /// replays clone its op batches so the concurrent builder needs no forest access.
     pub fn record_hash_basic_block(
         &mut self,
         forest_id: MastForestId,
         node_id: MastNodeId,
-        expected_hash: Word,
+        basic_block_node: &BasicBlockNode,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)));
+        let expected_hash = basic_block_node.digest();
+        self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
+            ResolvedHasherOp::HashBasicBlock((
+                basic_block_node.op_batches().to_vec(),
+                expected_hash,
+            ))
+        });
     }
 
     /// Records a `Hasher::build_merkle_root()` request.
     pub fn record_build_merkle_root(&mut self, leaf: Word, path: MerklePath, index: Felt) {
-        self.hasher_ops.push_back(HasherOp::BuildMerkleRoot((leaf, path, index)));
+        self.record(HasherOp::BuildMerkleRoot((leaf, path, index)));
     }
 
     /// Records a `Hasher::update_merkle_root()` request.
@@ -1066,17 +1167,44 @@ impl HasherRequestReplay {
         path: MerklePath,
         index: Felt,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
+        self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
-}
 
-impl IntoIterator for HasherRequestReplay {
-    type Item = HasherOp;
-    type IntoIter = <VecDeque<HasherOp> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.hasher_ops.into_iter()
+    /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
+    /// forest store.
+    ///
+    /// Streamed replays yield nothing here: their ops were already delivered to the concurrent
+    /// builder.
+    pub fn into_resolved_ops<'a>(
+        self,
+        mast_forest_store: &'a [Arc<SparseMastForest>],
+    ) -> impl Iterator<Item = Result<ResolvedHasherOp, ExecutionError>> + 'a {
+        let ops = match self.sink {
+            HasherOpSink::Buffered(ops) => ops,
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => VecDeque::new(),
+        };
+        ops.into_iter().map(move |op| match op {
+            HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
+                let forest =
+                    mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
+                        "MAST forest id in hasher replay out of range of mast_forest_store",
+                    ))?;
+                let node = forest
+                    .get_node_by_id(node_id)
+                    .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
+                let MastNode::Block(basic_block_node) = node else {
+                    return Err(ExecutionError::Internal(
+                        "expected basic block node in hasher replay",
+                    ));
+                };
+                Ok(ResolvedHasherOp::HashBasicBlock((
+                    basic_block_node.op_batches().to_vec(),
+                    expected_hash,
+                )))
+            },
+            op => Ok(op.resolve_forest_free().expect("all other variants are forest-free")),
+        })
     }
 }
 
