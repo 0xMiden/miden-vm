@@ -11,7 +11,7 @@
 
 use std::{format, string::String, vec};
 
-use k256::{ProjectivePoint, elliptic_curve::sec1::ToEncodedPoint};
+use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
@@ -49,7 +49,7 @@ fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
 
 /// Affine coordinates of a finite k256 point as our `U256` pair.
 fn k256_coords(p: &ProjectivePoint) -> (U256, U256) {
-    let enc = p.to_affine().to_encoded_point(false);
+    let enc = p.to_affine().to_sec1_point(false);
     (
         be_to_u256(enc.x().expect("finite point")),
         be_to_u256(enc.y().expect("finite point")),

@@ -47,6 +47,6 @@ wincode.workspace = true
 [dev-dependencies]
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
-k256 = "0.13"
+k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std"] }
 rand.workspace = true
