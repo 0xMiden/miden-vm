@@ -61,10 +61,12 @@ mod tests {
 
     const LANES: usize = PackedFelt::WIDTH;
 
-    /// Checks that permuting a packed state equals permuting each lane's scalar state.
-    fn check(
+    /// Checks that permuting a packed state equals permuting each lane's scalar state,
+    /// with element `i` of lane `lane` set to `value(i, lane)`.
+    fn check_with(
         scalar_permute: fn(&mut [Felt; STATE_WIDTH]),
         packed_permute: impl Fn(&mut [PackedFelt; STATE_WIDTH]),
+        value: impl Fn(usize, usize) -> Felt,
     ) {
         let mut packed = [PackedFelt::ZERO; STATE_WIDTH];
         let mut scalar_states = [[Felt::ZERO; STATE_WIDTH]; LANES];
@@ -72,7 +74,7 @@ mod tests {
             for (i, (packed_elem, scalar)) in
                 packed.iter_mut().zip(scalar_state.iter_mut()).enumerate()
             {
-                let value = Felt::new_unchecked((1 + i * LANES + lane) as u64);
+                let value = value(i, lane);
                 packed_elem.as_slice_mut()[lane] = value;
                 *scalar = value;
             }
@@ -86,6 +88,16 @@ mod tests {
                 assert_eq!(packed[i].as_slice()[lane], scalar_state[i]);
             }
         }
+    }
+
+    /// Checks that permuting a packed state equals permuting each lane's scalar state.
+    fn check(
+        scalar_permute: fn(&mut [Felt; STATE_WIDTH]),
+        packed_permute: impl Fn(&mut [PackedFelt; STATE_WIDTH]),
+    ) {
+        check_with(scalar_permute, packed_permute, |i, lane| {
+            Felt::new_unchecked((1 + i * LANES + lane) as u64)
+        });
     }
 
     #[test]
@@ -103,5 +115,51 @@ mod tests {
         check(Poseidon2Permutation256::apply_permutation, |s| {
             Poseidon2Permutation256.permute_mut(s)
         });
+    }
+
+    /// Canonical values that stress the wraparound corrections in vectorized
+    /// kernels: field extremes and the 2^32 epsilon window.
+    ///
+    /// Entry values must be canonical: the vectorized permutations (Plonky3's
+    /// NEON path and the SVE2 kernel that mirrors it) use single-correction
+    /// modular ops whose input contract all production `Felt` constructors
+    /// satisfy. Non-canonical entries diverge from the scalar path even on
+    /// unmodified upstream Plonky3.
+    const EDGE_VALS: [u64; 6] = [0, 1, (1 << 32) - 1, 1 << 32, 1 << 63, Felt::ORDER - 1];
+
+    #[test]
+    fn poseidon2_packed_permutation_edge_values() {
+        for rotation in 0..EDGE_VALS.len() {
+            check_with(
+                Poseidon2Permutation256::apply_permutation,
+                |s| Poseidon2Permutation256.permute_mut(s),
+                |i, lane| {
+                    Felt::new_unchecked(EDGE_VALS[(i + 3 * lane + rotation) % EDGE_VALS.len()])
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn poseidon2_packed_permutation_random_sweep() {
+        let mut seed = 0x243F_6A88_85A3_08D3u64; // deterministic; digits of pi
+        let mut next = move || {
+            // splitmix64
+            seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = seed;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        for _ in 0..256 {
+            let state: [[Felt; STATE_WIDTH]; LANES] = core::array::from_fn(|_| {
+                core::array::from_fn(|_| Felt::new_unchecked(next() % Felt::ORDER))
+            });
+            check_with(
+                Poseidon2Permutation256::apply_permutation,
+                |s| Poseidon2Permutation256.permute_mut(s),
+                |i, lane| state[lane][i],
+            );
+        }
     }
 }
