@@ -9,10 +9,10 @@
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word, proof::HashFunction};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, HostLibrary, Program};
+use miden_processor::{DefaultHost, ExecutionOptions, HostLibrary, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, crypto::MerkleStore, prove_sync,
-    stack_inputs_from_ints,
+    stack_inputs_from_ints, verify,
 };
 
 use super::{
@@ -219,4 +219,64 @@ fn bench_prove_sig_batch_shared_message() {
         );
         eprintln!("-----------------------------------------------------------");
     }
+}
+
+#[test]
+#[ignore = "run manually - proves and verifies one shared-message signature batch"]
+fn prove_verify_sig_batch_shared_message_once() {
+    use std::time::Instant;
+
+    let params = BenchParams::from_env();
+    let num_signatures = 1usize << params.min_k;
+    let fixture = build_same_msg_batch_fixture(num_signatures);
+    let program = build_shared_message_program(num_signatures);
+
+    let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
+    let mut host = build_sig_host();
+    let processor = miden_processor::FastProcessor::new_with_options(
+        stack_inputs,
+        advice_inputs,
+        ExecutionOptions::default(),
+    )
+    .expect("processor init failed");
+    let trace_inputs = processor
+        .execute_trace_inputs_sync(&program, &mut host)
+        .expect("batch execution failed");
+    let trace = miden_processor::trace::build_trace(trace_inputs).expect("trace build failed");
+    let trace_len = trace.get_trace_len();
+
+    let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
+    let verifier_stack_inputs = stack_inputs;
+    let mut host = build_sig_host();
+    let options = ProvingOptions::new(HashFunction::Poseidon2);
+    let t_prove = Instant::now();
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("failed to generate proof");
+    let prove_secs = t_prove.elapsed().as_secs_f64();
+
+    let proof_bytes = proof.to_bytes().len();
+    let t_verify = Instant::now();
+    let security = verify(ProgramInfo::from(program), verifier_stack_inputs, stack_outputs, proof)
+        .expect("failed to verify proof");
+    let verify_secs = t_verify.elapsed().as_secs_f64();
+
+    eprintln!(
+        "sig_recursive_bench k={} signatures={} trace_len={} trace_log2={} prove_s={:.3} proof_bytes={} proof_kib={:.2} verify_ms={:.3} security_bits={}",
+        params.min_k,
+        num_signatures,
+        trace_len,
+        trace_len.trailing_zeros(),
+        prove_secs,
+        proof_bytes,
+        proof_bytes as f64 / 1024.0,
+        verify_secs * 1000.0,
+        security,
+    );
 }
