@@ -163,6 +163,7 @@ test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest
 		FEATURES=$(FEATURES_$*) \
 		EXPR=$(if $(test),$(test),)
 
+
 # -- workspace-wide tests -------------------------------------------------------------------------
 
 .PHONY: test-build
@@ -294,9 +295,13 @@ run-examples: exec ## Runs all masm examples to verify they execute correctly
 check-bench: ## Builds all benchmarks
 	cargo check --benches --features internal
 
+# -- pattern rule: `make bench [benchmark=...]` ------------------------------
+# Primary method for executing invididual benchmarks:
+#   make bench                                   # Run all benchmarks
+#   make bench benchmark="deserialize_core_lib"  # Run the deserialize_core_lib benchmark
 .PHONY: bench
-bench: ## Runs benchmarks
-	cargo bench --profile optimized --features internal
+bench: ## Benchmarks either a specific bench or all; accepts 'benchmark=' to select a benchmark
+	cargo bench --profile optimized --features internal $(if $(benchmark),--bench $(benchmark),)
 
 # ============================================================
 # Fuzzing targets
