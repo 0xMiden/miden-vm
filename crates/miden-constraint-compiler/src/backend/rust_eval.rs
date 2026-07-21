@@ -18,6 +18,10 @@
 //! Emission is deterministic: the same graph always produces byte-identical
 //! output (crate invariant 3).
 //!
+//! Representation: trace-window reads stay the builder's Copy `Var`/`VarEF`
+//! rather than promoting to `Expr`, mirroring the hand-written eval and avoiding
+//! an `Expr` materialization per trace cell on builders where the two differ.
+//!
 //! Class handling: base subexpressions stay in `AB::Expr` and are promoted to
 //! `AB::ExprEF` exactly where an ext op consumes them. Since the builder bound
 //! does not name `EF`, only ext constants liftable from the base field can be
@@ -57,7 +61,7 @@ pub fn emit_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
 const MODULE_IMPORTS: &str = r"
 use miden_core::Felt;
 use miden_crypto::{
-    field::PrimeCharacteristicRing,
+    field::{Dup, PrimeCharacteristicRing},
     stark::air::{LiftedAirBuilder, WindowAccess},
 };
 ";
@@ -72,11 +76,63 @@ const FN_PROLOGUE: &str = r"    let main = builder.main();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);";
 
-/// The emitted variable name for one graph node, and the class it evaluates in.
+/// Whether a binding is a Copy builder `Var`/`VarEF` (a trace-window read) or a
+/// materialized `Expr`/`ExprEF` (every op result and every non-trace leaf).
+///
+/// A `Var` reuses for free (Copy) and stays bare in base arithmetic; an `Expr`
+/// is reused via `.dup()`. The [`operand`], [`as_expr`], and [`lift_base_to_ext`]
+/// renderers turn a [`Token`] into source under this distinction.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Repr {
+    Var,
+    Expr,
+}
+
+/// One emitted graph node: its class, representation, and identifier.
 #[derive(Clone)]
 struct Token {
     class: Class,
+    repr: Repr,
+    /// The emitted identifier — `h{n}` for a leaf, `b{id}`/`e{id}` for an op.
     code: String,
+}
+
+/// Render `t` as an `Expr` value **in its own class** (`AB::Expr` for base,
+/// `AB::ExprEF` for ext): `.dup()` a materialized `Expr`, else promote the Copy
+/// `Var` leaf. A base `Var` promotes with `AB::Expr::from` (`AB::Expr:
+/// Algebra<AB::Var>` gives `From<AB::Var>`); an ext `VarEF` has no such `From`
+/// (only `VarEF: Into<ExprEF>`), so it uses an explicit `Into::<ExprEF>` — a
+/// bare `.into()` would be ambiguous against the reflexive `Into` impl.
+fn as_expr(t: &Token) -> String {
+    match t.repr {
+        Repr::Expr => format!("{}.dup()", t.code),
+        Repr::Var => match t.class {
+            Class::Base => format!("AB::Expr::from({})", t.code),
+            Class::Ext => format!("Into::<AB::ExprEF>::into({})", t.code),
+        },
+    }
+}
+
+/// Render a base-class `t` lifted into `AB::ExprEF`. `AB::ExprEF: From<AB::Expr>`
+/// (via `Algebra<AB::Expr>`), so a base `Expr` lifts with `from`; a base `Var` is
+/// promoted to `AB::Expr` (also `from`) and then lifted.
+fn lift_base_to_ext(t: &Token) -> String {
+    debug_assert!(matches!(t.class, Class::Base), "lift_base_to_ext on a non-base token");
+    match t.repr {
+        Repr::Expr => format!("AB::ExprEF::from({}.dup())", t.code),
+        Repr::Var => format!("AB::ExprEF::from(AB::Expr::from({}))", t.code),
+    }
+}
+
+/// Render `t` as an operand that may stay a `Var`: bare when it is a Copy `Var`
+/// leaf, else `.dup()`. Valid only where the consuming context accepts the `Var`
+/// directly — base arithmetic, or `Into`-bounded sinks (`assert_zero`,
+/// `assert_zero_ext`).
+fn operand(t: &Token) -> String {
+    match t.repr {
+        Repr::Var => t.code.clone(),
+        Repr::Expr => format!("{}.dup()", t.code),
+    }
 }
 
 struct Emitter<'g> {
@@ -114,32 +170,58 @@ impl<'g> Emitter<'g> {
         tok
     }
 
-    /// Emit a `let` for a leaf value. `token` memoizes, so each leaf node is
-    /// emitted exactly once and every hoist gets a fresh name.
-    fn hoist(&mut self, ty: &str, expr: String) -> String {
+    /// Emit `let h{n} = expr;` — or `let h{n}: ty = expr;` when `ty` is given —
+    /// with a fresh `h{n}` name that it returns. A `Var` leaf passes no `ty` so
+    /// its type is inferred from the trace-window read and stays `Copy`.
+    fn hoist(&mut self, ty: Option<&str>, expr: String) -> String {
         let name = format!("h{}", self.hoisted);
         self.hoisted += 1;
-        self.lines.push(format!("    let {name}: {ty} = {expr};"));
+        match ty {
+            Some(ty) => self.lines.push(format!("    let {name}: {ty} = {expr};")),
+            None => self.lines.push(format!("    let {name} = {expr};")),
+        }
         name
     }
 
+    /// A materialized base `Expr` leaf.
     fn base_leaf(&mut self, expr: String) -> Token {
         Token {
             class: Class::Base,
-            code: self.hoist("AB::Expr", expr),
+            repr: Repr::Expr,
+            code: self.hoist(Some("AB::Expr"), expr),
         }
     }
 
+    /// A materialized ext `ExprEF` leaf.
     fn ext_leaf(&mut self, expr: String) -> Token {
         Token {
             class: Class::Ext,
-            code: self.hoist("AB::ExprEF", expr),
+            repr: Repr::Expr,
+            code: self.hoist(Some("AB::ExprEF"), expr),
+        }
+    }
+
+    /// A Copy base `Var` leaf (a main trace-window read), bound bare.
+    fn base_var_leaf(&mut self, expr: String) -> Token {
+        Token {
+            class: Class::Base,
+            repr: Repr::Var,
+            code: self.hoist(None, expr),
+        }
+    }
+
+    /// A Copy ext `VarEF` leaf (an aux trace-window read), bound bare.
+    fn ext_var_leaf(&mut self, expr: String) -> Token {
+        Token {
+            class: Class::Ext,
+            repr: Repr::Var,
+            code: self.hoist(None, expr),
         }
     }
 
     fn leaf_token(&mut self, leaf: Leaf) -> Token {
         match leaf {
-            Leaf::Main { offset, index } => self.base_leaf(format!("m{offset}[{index}].into()")),
+            Leaf::Main { offset, index } => self.base_var_leaf(format!("m{offset}[{index}]")),
             Leaf::Public(index) => {
                 self.base_leaf(format!("builder.public_values()[{index}].into()"))
             },
@@ -152,11 +234,13 @@ impl<'g> Emitter<'g> {
             Leaf::BaseConst(raw) => {
                 self.base_leaf(format!("AB::Expr::from(Felt::from_u64({raw}))"))
             },
-            Leaf::Aux { offset, index } => self.ext_leaf(format!("a{offset}[{index}].into()")),
+            Leaf::Aux { offset, index } => self.ext_var_leaf(format!("a{offset}[{index}]")),
             Leaf::Challenge(index) => {
                 self.ext_leaf(format!("builder.permutation_randomness()[{index}].into()"))
             },
             Leaf::PermValue(index) => {
+                // PermutationVar is Clone-only (not Copy), so it cannot be kept as
+                // a reusable Var; it stays a materialized ExprEF via `.clone().into()`.
                 self.ext_leaf(format!("builder.permutation_values()[{index}].clone().into()"))
             },
             Leaf::ExtConst([c0, c1]) => {
@@ -181,29 +265,33 @@ impl<'g> Emitter<'g> {
         let yt = y.map(|y| self.token(y));
         let rhs = match class {
             Class::Base => match &yt {
-                None => format!("-{}.clone()", xt.code),
-                Some(yt) => format!("{}.clone() {} {}.clone()", xt.code, sym(op), yt.code),
+                // `AB::Var` has no `Neg`, so a Var operand is promoted by `as_expr`.
+                None => format!("-{}", as_expr(&xt)),
+                // Base arithmetic accepts a `Var` on either side directly
+                // (`AB::Var`'s own ops and `AB::Expr: Algebra<AB::Var>`), so
+                // operands stay bare where they are Vars.
+                Some(yt) => format!("{} {} {}", operand(&xt), sym(op), operand(yt)),
             },
             Class::Ext => match &yt {
                 None => match xt.class {
-                    Class::Ext => format!("-{}.clone()", xt.code),
-                    Class::Base => format!("-AB::ExprEF::from({}.clone())", xt.code),
+                    Class::Ext => format!("-{}", as_expr(&xt)),
+                    Class::Base => format!("-{}", lift_base_to_ext(&xt)),
                 },
                 Some(yt) => match (xt.class, yt.class) {
+                    // The ext operand drives; the other side is rendered as an
+                    // `Expr` in its own class (`AB::ExprEF: Algebra<AB::Expr>`
+                    // consumes a base `Expr`).
                     (Class::Ext, _) => {
-                        format!("{}.clone() {} {}.clone()", xt.code, sym(op), yt.code)
+                        format!("{} {} {}", as_expr(&xt), sym(op), as_expr(yt))
                     },
                     // Commutative ops flip so the ext operand drives the
                     // mixed-op impl; subtraction promotes the base operand.
                     (Class::Base, Class::Ext) if op != OpKind::Sub => {
-                        format!("{}.clone() {} {}.clone()", yt.code, sym(op), xt.code)
+                        format!("{} {} {}", as_expr(yt), sym(op), as_expr(&xt))
                     },
-                    (Class::Base, _) => format!(
-                        "AB::ExprEF::from({}.clone()) {} {}.clone()",
-                        xt.code,
-                        sym(op),
-                        yt.code
-                    ),
+                    (Class::Base, _) => {
+                        format!("{} {} {}", lift_base_to_ext(&xt), sym(op), as_expr(yt))
+                    },
                 },
             },
         };
@@ -214,6 +302,7 @@ impl<'g> Emitter<'g> {
         self.lines.push(format!("    let {prefix}{} = {rhs};", id.index()));
         Token {
             class,
+            repr: Repr::Expr,
             code: format!("{prefix}{}", id.index()),
         }
     }
@@ -263,14 +352,14 @@ fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
         let t = e.token(root);
         let line = if is_ext {
             match t.class {
-                Class::Ext => format!("    builder.assert_zero_ext({}.clone());", t.code),
+                Class::Ext => format!("    builder.assert_zero_ext({});", operand(&t)),
                 Class::Base => {
-                    format!("    builder.assert_zero_ext(AB::ExprEF::from({}.clone()));", t.code)
+                    format!("    builder.assert_zero_ext({});", lift_base_to_ext(&t))
                 },
             }
         } else {
             assert!(t.class == Class::Base, "base constraint root must be base-class");
-            format!("    builder.assert_zero({}.clone());", t.code)
+            format!("    builder.assert_zero({});", operand(&t))
         };
         e.lines.push(line);
     }
@@ -347,7 +436,7 @@ mod tests {
 
 use miden_core::Felt;
 use miden_crypto::{
-    field::PrimeCharacteristicRing,
+    field::{Dup, PrimeCharacteristicRing},
     stark::air::{LiftedAirBuilder, WindowAccess},
 };
 
@@ -366,21 +455,21 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let _ = (&m1, &a0, &a1);
     let h0: AB::Expr = builder.public_values()[2].into();
     let h1: AB::Expr = builder.periodic_values()[1].into();
-    let b8 = h0.clone() + h1.clone();
-    builder.assert_zero(b8.clone());
+    let b8 = h0.dup() + h1.dup();
+    builder.assert_zero(b8.dup());
     let h2: AB::Expr = builder.is_last_row();
     let h3: AB::Expr = builder.is_transition();
-    let b11 = h2.clone() * h3.clone();
+    let b11 = h2.dup() * h3.dup();
     let h4: AB::Expr = AB::Expr::from(Felt::from_u64(3));
-    let b13 = b11.clone() + h4.clone();
-    builder.assert_zero(b13.clone());
+    let b13 = b11.dup() + h4.dup();
+    builder.assert_zero(b13.dup());
     let h5: AB::Expr = builder.is_first_row();
-    let h6: AB::Expr = m1[0].into();
-    let h7: AB::Expr = m0[0].into();
-    let b2 = h6.clone() - h7.clone();
-    let b4 = h5.clone() * b2.clone();
-    let b5 = -b4.clone();
-    builder.assert_zero(b5.clone());
+    let h6 = m1[0];
+    let h7 = m0[0];
+    let b2 = h6 - h7;
+    let b4 = h5.dup() * b2.dup();
+    let b5 = -b4.dup();
+    builder.assert_zero(b5.dup());
 }
 ";
         assert_eq!(out, expected);
@@ -430,23 +519,23 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let a0 = aux.current_slice();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);
-    let h0: AB::Expr = m0[1].into();
-    let h1: AB::ExprEF = a0[0].into();
+    let h0 = m0[1];
+    let h1 = a0[0];
     let h2: AB::ExprEF = builder.permutation_randomness()[0].into();
-    let e2 = h1.clone() + h2.clone();
-    let e5 = e2.clone() * h0.clone();
-    builder.assert_zero_ext(e5.clone());
-    let e7 = e2.clone() - h0.clone();
-    builder.assert_zero_ext(e7.clone());
-    let e8 = -AB::ExprEF::from(h0.clone());
-    builder.assert_zero_ext(e8.clone());
-    let e6 = AB::ExprEF::from(h0.clone()) - e2.clone();
+    let e2 = Into::<AB::ExprEF>::into(h1) + h2.dup();
+    let e5 = e2.dup() * AB::Expr::from(h0);
+    builder.assert_zero_ext(e5.dup());
+    let e7 = e2.dup() - AB::Expr::from(h0);
+    builder.assert_zero_ext(e7.dup());
+    let e8 = -AB::ExprEF::from(AB::Expr::from(h0));
+    builder.assert_zero_ext(e8.dup());
+    let e6 = AB::ExprEF::from(AB::Expr::from(h0)) - e2.dup();
     let h3: AB::ExprEF = AB::ExprEF::from(AB::Expr::from(Felt::from_u64(7)));
-    let e10 = e6.clone() + h3.clone();
+    let e10 = e6.dup() + h3.dup();
     let h4: AB::ExprEF = builder.permutation_values()[0].clone().into();
-    let e12 = e10.clone() - h4.clone();
-    builder.assert_zero_ext(e12.clone());
-    builder.assert_zero_ext(AB::ExprEF::from(h0.clone()));
+    let e12 = e10.dup() - h4.dup();
+    builder.assert_zero_ext(e12.dup());
+    builder.assert_zero_ext(AB::ExprEF::from(AB::Expr::from(h0)));
 }
 ";
         // The module wrapper (header + imports) is pinned by the base golden;

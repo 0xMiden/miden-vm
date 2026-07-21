@@ -36,9 +36,9 @@ pub mod word;
 // ================================================================================================
 #[cfg(not(all(target_family = "wasm", miden)))]
 pub use p3_field::{
-    Algebra, BasedVectorSpace, BoundedPowers, ExtensionField, Field, InjectiveMonomial, Packable,
-    PackedValue, PermutationMonomial, Powers, PrimeCharacteristicRing, PrimeField, PrimeField64,
-    RawDataSerializable, TwoAdicField, batch_multiplicative_inverse,
+    Algebra, BasedVectorSpace, BoundedPowers, Dup, ExtensionField, Field, InjectiveMonomial,
+    Packable, PackedValue, PermutationMonomial, Powers, PrimeCharacteristicRing, PrimeField,
+    PrimeField64, RawDataSerializable, TwoAdicField, batch_multiplicative_inverse,
     extension::{
         Binomial, BinomialExtensionField, BinomiallyExtendable, ExtensionAlgebra,
         HasTwoAdicBinomialExtension,
