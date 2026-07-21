@@ -230,16 +230,48 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
             .map(|pos| DebugFileIdx::from(pos as u32))
     }
 
-    /// Apply `trimmer` to every string in the strings table which represents a file path
+    /// Apply `trimmer` to every distinct file path referenced by the file table.
     ///
-    /// If `trimmer` returns `None`, the table entry is left unmodified; otherwise, the table
-    /// entry is replaced with the string that is returned.
+    /// If `trimmer` returns `None`, the file path is left unmodified. Otherwise, the returned path
+    /// is interned and the corresponding file records are retargeted to it. Other debug records
+    /// which reference the original string are left unchanged.
     pub fn trim_file_paths(&mut self, mut trimmer: impl FnMut(&str) -> Option<Arc<str>>) {
-        for file in self.files.iter() {
-            let string = &mut self.strings[file.path_idx];
-            if let Some(new_string) = trimmer(string.as_ref()) {
-                *string = new_string;
-            }
+        use alloc::collections::btree_map::Entry;
+
+        let mut string_indices = BTreeMap::<Arc<str>, DebugStringIdx>::new();
+        for (index, string) in self.strings.iter().enumerate() {
+            string_indices
+                .entry(string.clone())
+                .or_insert_with(|| DebugStringIdx::from(index as u32));
+        }
+
+        // Multiple file rows may share a path string (for example, when they have different
+        // checksums). Apply the trimmer once per path and retarget each file row to the result.
+        // Appending/reusing a string rather than mutating the original preserves unrelated records
+        // which happen to reference the same globally-interned string.
+        let mut remapped_paths = BTreeMap::<DebugStringIdx, DebugStringIdx>::new();
+        for file in self.files.iter_mut() {
+            let old_path_idx = file.path_idx;
+            let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
+                *new_path_idx
+            } else {
+                let path = self.strings[old_path_idx].clone();
+                let new_path_idx = match trimmer(path.as_ref()) {
+                    None => old_path_idx,
+                    Some(new_path) => match string_indices.entry(new_path.clone()) {
+                        Entry::Occupied(entry) => *entry.get(),
+                        Entry::Vacant(entry) => {
+                            let index =
+                                self.strings.push(new_path).expect("too many debug info strings");
+                            entry.insert(index);
+                            index
+                        },
+                    },
+                };
+                remapped_paths.insert(old_path_idx, new_path_idx);
+                new_path_idx
+            };
+            file.path_idx = new_path_idx;
         }
     }
 
