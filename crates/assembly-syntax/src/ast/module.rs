@@ -859,10 +859,8 @@ impl crate::prettier::PrettyPrint for Module {
             + display(self.path().to_relative())
             + nl();
 
-        for (i, package) in self.extern_packages.iter().enumerate() {
-            if i > 0 {
-                doc += nl();
-            }
+        for package in self.extern_packages.iter() {
+            doc += nl();
             doc += const_text("extern package") + const_text(" ") + package.render();
         }
 

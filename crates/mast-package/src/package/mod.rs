@@ -466,9 +466,9 @@ impl Package {
                     signature,
                     attributes,
                 }) => {
-                    let name = path.last().unwrap();
+                    let name = path.procedure_name().expect("valid procedure name").unwrap();
                     module.add_procedure_with_provenance(
-                        ast::ProcedureName::new(name).expect("valid procedure name"),
+                        name,
                         *digest,
                         signature.clone().map(Arc::new),
                         attributes.clone(),
@@ -478,11 +478,15 @@ impl Package {
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
-                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    let name =
+                        path.components().next_back().unwrap().expect("valid path component");
+                    let name = name.to_ident().expect("valid identifier");
                     module.add_constant(name, value.clone());
                 },
                 PackageExport::Type(TypeExport { path, ty }) => {
-                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    let name =
+                        path.components().next_back().unwrap().expect("valid path component");
+                    let name = name.to_ident().expect("valid identifier");
                     module.add_type(name, ty.clone());
                 },
             }
@@ -561,9 +565,9 @@ impl Package {
                     signature,
                     attributes,
                 }) => {
-                    let name = path.last().unwrap();
+                    let name = path.procedure_name().expect("valid procedure name").unwrap();
                     module.add_procedure_with_provenance(
-                        ast::ProcedureName::new(name).expect("valid procedure name"),
+                        name,
                         *digest,
                         signature.clone().map(Arc::new),
                         attributes.clone(),
@@ -573,11 +577,15 @@ impl Package {
                     );
                 },
                 PackageExport::Constant(ConstantExport { path, value }) => {
-                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    let name =
+                        path.components().next_back().unwrap().expect("valid path component");
+                    let name = name.to_ident().expect("valid identifier");
                     module.add_constant(name, value.clone());
                 },
                 PackageExport::Type(TypeExport { path, ty }) => {
-                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    let name =
+                        path.components().next_back().unwrap().expect("valid path component");
+                    let name = name.to_ident().expect("valid identifier");
                     module.add_type(name, ty.clone());
                 },
             }
