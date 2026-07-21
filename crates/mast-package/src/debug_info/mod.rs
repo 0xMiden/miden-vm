@@ -5,6 +5,8 @@
 //! This information is used by debuggers to map between the Miden VM execution state
 //! and the original source code.
 
+#[cfg(feature = "arbitrary")]
+mod arbitrary;
 mod builder;
 mod serialization;
 mod types;
@@ -13,6 +15,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 pub use builder::*;
 use miden_core::mast::{MastForestRootMap, MastNodeId};
+#[cfg(all(feature = "arbitrary", test))]
+use miden_core::serde::{Deserializable, Serializable};
 use miden_debug_types::{Location, Uri};
 use miden_utils_indexing::{Idx, IndexVec};
 pub use types::*;
@@ -25,6 +29,10 @@ pub const DEBUG_INFO_VERSION: u8 = 2;
 // ================================================================================================
 
 /// Trusted package-owned debug information decoded from well-known debug sections.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 pub type PackageDebugInfo = DebugInfo<MastNodeId, DebugSourceNodeId>;
 
 /// Represents debug information bound to a pending/finalized [`miden_core::mast::MastForest`].
@@ -32,6 +40,7 @@ pub type PackageDebugInfo = DebugInfo<MastNodeId, DebugSourceNodeId>;
 /// This includes all debug information needed for source-level debugging, and recovery of program
 /// state during execution (such as the types of local variables in the source program, and their
 /// location in memory or on the operand stack).
+#[derive(Eq, PartialEq)]
 pub struct DebugInfo<Exec: Idx, Src: Idx> {
     /// The version tag associated with this debug info instance
     version: u8,
