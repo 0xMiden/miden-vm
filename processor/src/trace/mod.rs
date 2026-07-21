@@ -205,7 +205,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; MIN_STACK_DEPTH];
         let row = RowIndex::from(0_u32);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, row);
+            *result = self.main_trace.core_row(row).stack.get(i);
         }
         result.into()
     }
@@ -215,7 +215,7 @@ impl ExecutionTrace {
         let last_step = RowIndex::from(self.last_step());
         let mut result = [ZERO; MIN_STACK_DEPTH];
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, last_step);
+            *result = self.main_trace.core_row(last_step).stack.get(i);
         }
         result.into()
     }
@@ -225,7 +225,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.helper_register(i, row);
+            *result = self.main_trace.core_row(row).decoder.user_op_helpers()[i];
         }
         result
     }

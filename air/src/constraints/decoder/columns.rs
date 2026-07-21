@@ -1,3 +1,5 @@
+use miden_core::{Felt, Word, field::PrimeCharacteristicRing};
+
 use crate::trace::decoder::{
     NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
     NUM_USER_OP_HELPERS,
@@ -46,6 +48,32 @@ impl<T: Copy> DecoderCols<T> {
             is_call: self.hasher_state[6],
             is_syscall: self.hasher_state[7],
         }
+    }
+}
+
+impl DecoderCols<Felt> {
+    /// Constructs the op code value from its individual bits.
+    pub fn op_code(&self) -> Felt {
+        let bits = &self.op_bits;
+        bits[0]
+            + bits[1] * Felt::from_u64(2)
+            + bits[2] * Felt::from_u64(4)
+            + bits[3] * Felt::from_u64(8)
+            + bits[4] * Felt::from_u64(16)
+            + bits[5] * Felt::from_u64(32)
+            + bits[6] * Felt::from_u64(64)
+    }
+
+    /// Returns the first half of the hasher state.
+    pub fn hasher_state_first_half(&self) -> Word {
+        let hs = &self.hasher_state;
+        Word::from([hs[0], hs[1], hs[2], hs[3]])
+    }
+
+    /// Returns the second half of the hasher state.
+    pub fn hasher_state_second_half(&self) -> Word {
+        let hs = &self.hasher_state;
+        Word::from([hs[4], hs[5], hs[6], hs[7]])
     }
 }
 

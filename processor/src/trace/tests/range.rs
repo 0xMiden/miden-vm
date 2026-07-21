@@ -34,7 +34,7 @@ fn u32_stack_op_emits_range_check_removes() {
 
     let mut exp = Expectations::new(&log);
     for i in 0..4 {
-        let value = main.helper_register(i, u32add_row);
+        let value = main.core_row(u32add_row).decoder.user_op_helpers()[i];
         exp.remove(usize::from(u32add_row), &RangeMsg { value });
     }
 
@@ -86,8 +86,8 @@ fn memory_chiplet_row_emits_range_check_removes() {
         let mem = main.chiplet_cols(*mem_row).memory();
         let d0 = mem.d0;
         let d1 = mem.d1;
-        let w0 = main.chiplet_memory_word_addr_lo(*mem_row);
-        let w1 = main.chiplet_memory_word_addr_hi(*mem_row);
+        let w0 = main.chiplet_cols(*mem_row).memory_word_addr_lo();
+        let w1 = main.chiplet_cols(*mem_row).memory_word_addr_hi();
         let four_w1 = w1 * Felt::from_u8(4);
 
         for value in [d0, d1, w0, w1, four_w1] {
@@ -140,7 +140,7 @@ fn range_checker_table_emits_per_row_adds() {
 fn find_op_row(main: &MainTrace, opcode: u8) -> RowIndex {
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        if main.get_op_code(idx) == Felt::from_u8(opcode) {
+        if main.core_row(idx).decoder.op_code() == Felt::from_u8(opcode) {
             return idx;
         }
     }

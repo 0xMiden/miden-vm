@@ -75,37 +75,37 @@ fn memory_chiplet_bus_request_response_pairs() {
     let mut request_exps_added = 0usize;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let ctx = main.ctx(idx);
-        let clk = main.clk(idx);
+        let ctx = main.core_row(idx).system.ctx;
+        let clk = main.core_row(idx).system.clk;
         let next = RowIndex::from(row + 1);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op == opcodes::MLOAD as u64 {
-            let addr = main.stack_element(0, idx);
-            let value = main.stack_element(0, next);
+            let addr = main.core_row(idx).stack.get(0);
+            let value = main.core_row(next).stack.get(0);
             exp.remove(row, &MemoryMsg::read_element(ctx, addr, clk, value));
             request_exps_added += 1;
         } else if op == opcodes::MSTORE as u64 {
-            let addr = main.stack_element(0, idx);
-            let value = main.stack_element(1, idx);
+            let addr = main.core_row(idx).stack.get(0);
+            let value = main.core_row(idx).stack.get(1);
             exp.remove(row, &MemoryMsg::write_element(ctx, addr, clk, value));
             request_exps_added += 1;
         } else if op == opcodes::MLOADW as u64 {
-            let addr = main.stack_element(0, idx);
+            let addr = main.core_row(idx).stack.get(0);
             let word = next_word(main, next, 0);
             exp.remove(row, &MemoryMsg::read_word(ctx, addr, clk, word));
             request_exps_added += 1;
         } else if op == opcodes::MSTOREW as u64 {
-            let addr = main.stack_element(0, idx);
+            let addr = main.core_row(idx).stack.get(0);
             let word = [
-                main.stack_element(1, idx),
-                main.stack_element(2, idx),
-                main.stack_element(3, idx),
-                main.stack_element(4, idx),
+                main.core_row(idx).stack.get(1),
+                main.core_row(idx).stack.get(2),
+                main.core_row(idx).stack.get(3),
+                main.core_row(idx).stack.get(4),
             ];
             exp.remove(row, &MemoryMsg::write_word(ctx, addr, clk, word));
             request_exps_added += 1;
         } else if op == opcodes::MSTREAM as u64 {
-            let base = main.stack_element(12, idx);
+            let base = main.core_row(idx).stack.get(12);
             let word0 = next_word(main, next, 0);
             let word1 = next_word(main, next, 4);
             exp.remove(row, &MemoryMsg::read_word(ctx, base, clk, word0));
@@ -128,17 +128,17 @@ fn memory_chiplet_bus_request_response_pairs() {
         let mem = main.chiplet_cols(idx).memory();
         let is_read = mem.is_read;
         let is_word = mem.is_word;
-        let mem_ctx = main.chiplet_memory_ctx(idx);
-        let word_addr = main.chiplet_memory_word(idx);
-        let idx0 = main.chiplet_memory_idx0(idx);
-        let idx1 = main.chiplet_memory_idx1(idx);
+        let mem_ctx = main.chiplet_cols(idx).memory().ctx;
+        let word_addr = main.chiplet_cols(idx).memory().word_addr;
+        let idx0 = main.chiplet_cols(idx).memory().idx0;
+        let idx1 = main.chiplet_cols(idx).memory().idx1;
         let addr = word_addr + idx1.double() + idx0;
-        let mem_clk = main.chiplet_memory_clk(idx);
+        let mem_clk = main.chiplet_cols(idx).memory().clk;
         let word = [
-            main.chiplet_memory_value_0(idx),
-            main.chiplet_memory_value_1(idx),
-            main.chiplet_memory_value_2(idx),
-            main.chiplet_memory_value_3(idx),
+            main.chiplet_cols(idx).memory().values[0],
+            main.chiplet_cols(idx).memory().values[1],
+            main.chiplet_cols(idx).memory().values[2],
+            main.chiplet_cols(idx).memory().values[3],
         ];
         // `element` is ignored by `MemoryResponseMsg::encode` when `is_word = 1`, so on
         // word-access rows the fallback `ZERO` is harmless. `element_idx` uses `u64`
@@ -279,9 +279,9 @@ fn hornerext_emits_one_memory_request() {
 
 fn next_word(main: &MainTrace, next: RowIndex, start: usize) -> [Felt; 4] {
     [
-        main.stack_element(start, next),
-        main.stack_element(start + 1, next),
-        main.stack_element(start + 2, next),
-        main.stack_element(start + 3, next),
+        main.core_row(next).stack.get(start),
+        main.core_row(next).stack.get(start + 1),
+        main.core_row(next).stack.get(start + 2),
+        main.core_row(next).stack.get(start + 3),
     ]
 }

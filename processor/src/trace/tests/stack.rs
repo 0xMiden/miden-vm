@@ -13,7 +13,8 @@ use alloc::vec::Vec;
 
 use miden_air::logup::StackOverflowMsg;
 use miden_core::{
-    Felt,
+    Felt, ONE,
+    field::PrimeCharacteristicRing,
     operations::{Operation, opcodes},
 };
 
@@ -53,26 +54,29 @@ fn stack_overflow_bus_emits_per_interaction_row() {
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        let op = main.get_op_code(idx);
+        let op = main.core_row(idx).decoder.op_code();
 
         if op == Felt::from_u8(opcodes::PAD) {
             // Right shift: `add (clk, s15, b1)`.
             exp.add(
                 row,
                 &StackOverflowMsg {
-                    clk: main.clk(idx),
-                    val: main.stack_element(15, idx),
-                    prev: main.parent_overflow_address(idx),
+                    clk: main.core_row(idx).system.clk,
+                    val: main.core_row(idx).stack.get(15),
+                    prev: main.core_row(idx).stack.b1,
                 },
             );
-        } else if op == Felt::from_u8(opcodes::DROP) && main.is_non_empty_overflow(idx) {
+        } else if op == Felt::from_u8(opcodes::DROP)
+            && (main.core_row(idx).stack.b0 - Felt::from_u64(16)) * main.core_row(idx).stack.h0
+                == ONE
+        {
             // Left shift with non-empty overflow: `remove (b1, s15', b1')`.
             exp.remove(
                 row,
                 &StackOverflowMsg {
-                    clk: main.parent_overflow_address(idx),
-                    val: main.stack_element(15, next),
-                    prev: main.parent_overflow_address(next),
+                    clk: main.core_row(idx).stack.b1,
+                    val: main.core_row(next).stack.get(15),
+                    prev: main.core_row(next).stack.b1,
                 },
             );
         }

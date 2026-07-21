@@ -40,7 +40,7 @@ use crate::{RowIndex, StackInputs, trace::MainTrace};
 /// 7-bit opcodes, at most one term is non-zero per row, so the arithmetic form collapses to
 /// the trace-level OR — but we encode it arithmetically to mirror the constraint expression.
 fn next_op_first_child_flag(main: &MainTrace, next: RowIndex) -> Felt {
-    let op_next = main.get_op_code(next);
+    let op_next = main.core_row(next).decoder.op_code();
     let is = |code: u8| if op_next == Felt::from_u8(code) { ONE } else { ZERO };
     ONE - is(opcodes::END) - is(opcodes::REPEAT) - is(opcodes::RESPAN) - is(opcodes::HALT)
 }
@@ -57,7 +57,7 @@ where
     let core_h = main.core_height();
     for row in 0..core_h - 1 {
         let idx = RowIndex::from(row);
-        f(row, main.get_op_code(idx));
+        f(row, main.core_row(idx).decoder.op_code());
     }
 }
 
@@ -75,8 +75,8 @@ fn block_stack_span_push_pop() {
     let mut exp = Expectations::new(&log);
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
-        let addr = main.addr(idx);
-        let addr_next = main.addr(RowIndex::from(row + 1));
+        let addr = main.core_row(idx).decoder.addr;
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
 
         if op == Felt::from_u8(opcodes::SPAN) {
             exp.add(
@@ -131,13 +131,13 @@ fn block_stack_call_full_push_pop() {
             exp.add(
                 row,
                 &BlockStackMsg::Full {
-                    block_id: main.addr(next),
-                    parent_id: main.addr(idx),
+                    block_id: main.core_row(next).decoder.addr,
+                    parent_id: main.core_row(idx).decoder.addr,
                     is_loop: ZERO,
-                    ctx: main.ctx(idx),
-                    fmp: main.stack_depth(idx),
-                    depth: main.parent_overflow_address(idx),
-                    fn_hash: main.fn_hash(idx),
+                    ctx: main.core_row(idx).system.ctx,
+                    fmp: main.core_row(idx).stack.b0,
+                    depth: main.core_row(idx).stack.b1,
+                    fn_hash: main.core_row(idx).system.fn_hash,
                 },
             );
         }
@@ -145,17 +145,19 @@ fn block_stack_call_full_push_pop() {
         // END-of-CALL branch: `is_call_flag` at the END row selects the Full variant. Caller
         // context is restored on the *next* row, so the emitter reads ctx/b0/b1/fn_hash from
         // row+1.
-        if op == Felt::from_u8(opcodes::END) && main.is_call_flag(idx) == ONE {
+        if op == Felt::from_u8(opcodes::END)
+            && main.core_row(idx).decoder.end_block_flags().is_call == ONE
+        {
             exp.remove(
                 row,
                 &BlockStackMsg::Full {
-                    block_id: main.addr(idx),
-                    parent_id: main.addr(next),
+                    block_id: main.core_row(idx).decoder.addr,
+                    parent_id: main.core_row(next).decoder.addr,
                     is_loop: ZERO,
-                    ctx: main.ctx(next),
-                    fmp: main.stack_depth(next),
-                    depth: main.parent_overflow_address(next),
-                    fn_hash: main.fn_hash(next),
+                    ctx: main.core_row(next).system.ctx,
+                    fmp: main.core_row(next).stack.b0,
+                    depth: main.core_row(next).stack.b1,
+                    fn_hash: main.core_row(next).system.fn_hash,
                 },
             );
         }
@@ -190,8 +192,8 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
     let mut exp = Expectations::new(&log);
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
-        let addr = main.addr(idx);
-        let addr_next = main.addr(RowIndex::from(row + 1));
+        let addr = main.core_row(idx).decoder.addr;
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
 
         if op == Felt::from_u8(opcodes::SPLIT) {
             exp.add(
@@ -203,11 +205,13 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
                 },
             );
             split_adds += 1;
-        } else if op == Felt::from_u8(opcodes::END) && main.is_call_flag(idx) == ZERO {
+        } else if op == Felt::from_u8(opcodes::END)
+            && main.core_row(idx).decoder.end_block_flags().is_call == ZERO
+        {
             // is_loop on the END overlay comes from the typed END flags; for non-loop ENDs it
             // is zero. We can read it back from the trace to stay agnostic about which END row
             // matches which push.
-            let is_loop = main.is_loop_flag(idx);
+            let is_loop = main.core_row(idx).decoder.end_block_flags().is_loop;
             exp.remove(
                 row,
                 &BlockStackMsg::Simple {
@@ -252,11 +256,11 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
     let mut exp = Expectations::new(&log);
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
-        let addr = main.addr(idx);
-        let addr_next = main.addr(RowIndex::from(row + 1));
+        let addr = main.core_row(idx).decoder.addr;
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
 
         if op == Felt::from_u8(opcodes::LOOP) {
-            let is_loop = main.stack_element(0, idx);
+            let is_loop = main.core_row(idx).stack.get(0);
             assert_eq!(is_loop, expected_is_loop, "s0 sanity at LOOP row");
             exp.add(
                 row,
@@ -268,9 +272,9 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
             );
             loop_pushes += 1;
         } else if op == Felt::from_u8(opcodes::END)
-            && main.is_call_flag(idx) == ZERO
-            && main.is_loop_flag(idx) == expected_is_loop
-            && main.is_loop_body_flag(idx) == ZERO
+            && main.core_row(idx).decoder.end_block_flags().is_call == ZERO
+            && main.core_row(idx).decoder.end_block_flags().is_loop == expected_is_loop
+            && main.core_row(idx).decoder.end_block_flags().is_loop_body == ZERO
         {
             exp.remove(
                 row,
@@ -328,14 +332,14 @@ fn block_stack_split_wrapped_loop_uses_constant_is_loop() {
         let idx = RowIndex::from(row);
         if op == Felt::from_u8(opcodes::LOOP) {
             assert_eq!(
-                main.stack_element(0, idx),
+                main.core_row(idx).stack.get(0),
                 ZERO,
                 "test setup: expected s_0 = 0 at LOOP row to expose the bug",
             );
             loop_push_row = Some(row);
         } else if op == Felt::from_u8(opcodes::END)
-            && main.is_loop_flag(idx) == ONE
-            && main.is_loop_body_flag(idx) == ZERO
+            && main.core_row(idx).decoder.end_block_flags().is_loop == ONE
+            && main.core_row(idx).decoder.end_block_flags().is_loop_body == ZERO
         {
             loop_end_row = Some(row);
         }
@@ -346,10 +350,10 @@ fn block_stack_split_wrapped_loop_uses_constant_is_loop() {
 
     let push_idx = RowIndex::from(push_row);
     let pop_idx = RowIndex::from(pop_row);
-    let push_block_id = main.addr(RowIndex::from(push_row + 1));
-    let push_parent_id = main.addr(push_idx);
-    let pop_block_id = main.addr(pop_idx);
-    let pop_parent_id = main.addr(RowIndex::from(pop_row + 1));
+    let push_block_id = main.core_row(RowIndex::from(push_row + 1)).decoder.addr;
+    let push_parent_id = main.core_row(push_idx).decoder.addr;
+    let pop_block_id = main.core_row(pop_idx).decoder.addr;
+    let pop_parent_id = main.core_row(RowIndex::from(pop_row + 1)).decoder.addr;
 
     let mut exp = Expectations::new(&log);
     // Correct push: `is_loop` is a constant `1`, regardless of `s_0`.
@@ -393,10 +397,10 @@ fn block_stack_respan_add_and_remove() {
         }
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        let addr = main.addr(idx);
-        let addr_next = main.addr(next);
+        let addr = main.core_row(idx).decoder.addr;
+        let addr_next = main.core_row(next).decoder.addr;
         // The RESPAN emitter uses `h1_next` as the parent link for both the add and remove.
-        let parent = main.decoder_hasher_state_element(1, next);
+        let parent = main.core_row(next).decoder.hasher_state[1];
 
         exp.add(
             row,
@@ -449,10 +453,10 @@ fn block_hash_join_enqueue_dequeue() {
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        let addr_next = main.addr(next);
-        let first = main.decoder_hasher_state_first_half(idx);
+        let addr_next = main.core_row(next).decoder.addr;
+        let first = main.core_row(idx).decoder.hasher_state_first_half();
         let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
-        let second = main.decoder_hasher_state_second_half(idx);
+        let second = main.core_row(idx).decoder.hasher_state_second_half();
         let h1: [Felt; 4] = [second[0], second[1], second[2], second[3]];
 
         if op == Felt::from_u8(opcodes::JOIN) {
@@ -462,7 +466,7 @@ fn block_hash_join_enqueue_dequeue() {
 
         if op == Felt::from_u8(opcodes::END) {
             let is_first_child = next_op_first_child_flag(main, next);
-            let is_loop_body = main.is_loop_body_flag(idx);
+            let is_loop_body = main.core_row(idx).decoder.end_block_flags().is_loop_body;
             exp.remove(
                 row,
                 &BlockHashMsg::End {
@@ -514,9 +518,9 @@ fn block_hash_loop_body_with_repeat() {
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        let first = main.decoder_hasher_state_first_half(idx);
+        let first = main.core_row(idx).decoder.hasher_state_first_half();
         let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
-        let addr_next = main.addr(next);
+        let addr_next = main.core_row(next).decoder.addr;
 
         // Under do-while the LOOP unconditionally enqueues the body for the first iteration,
         // and each REPEAT enqueues for a subsequent iteration. The AIR's `f_loop_body` expression
@@ -529,7 +533,9 @@ fn block_hash_loop_body_with_repeat() {
         }
 
         // END of the loop body: `is_loop_body` bit is set on the END overlay.
-        if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
+        if op == Felt::from_u8(opcodes::END)
+            && main.core_row(idx).decoder.end_block_flags().is_loop_body == ONE
+        {
             let is_first_child = next_op_first_child_flag(main, next);
             exp.remove(
                 row,
@@ -574,12 +580,12 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        let addr_next = main.addr(next);
-        let first = main.decoder_hasher_state_first_half(idx);
-        let second = main.decoder_hasher_state_second_half(idx);
+        let addr_next = main.core_row(next).decoder.addr;
+        let first = main.core_row(idx).decoder.hasher_state_first_half();
+        let second = main.core_row(idx).decoder.hasher_state_second_half();
 
         if op == Felt::from_u8(opcodes::SPLIT) {
-            let s0 = main.stack_element(0, idx);
+            let s0 = main.core_row(idx).stack.get(0);
             let one_minus_s0 = ONE - s0;
             let child_hash: [Felt; 4] =
                 std::array::from_fn(|i| s0 * first[i] + one_minus_s0 * second[i]);
@@ -588,7 +594,7 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
         }
 
         if op == Felt::from_u8(opcodes::END) {
-            let is_loop_body = main.is_loop_body_flag(idx);
+            let is_loop_body = main.core_row(idx).decoder.end_block_flags().is_loop_body;
             let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
             let is_first_child = next_op_first_child_flag(main, next);
             exp.remove(
@@ -635,16 +641,16 @@ fn op_group_span_8_groups_inserts() {
         if op != Felt::from_u8(opcodes::SPAN) && op != Felt::from_u8(opcodes::RESPAN) {
             return;
         }
-        let batch_flags = main.op_batch_flag(idx);
+        let batch_flags = main.core_row(idx).decoder.batch_flags;
         if batch_flags[0] != ONE {
             return;
         }
         g8_rows_seen += 1;
 
-        let addr_next = main.addr(RowIndex::from(row + 1));
-        let gc = main.group_count(idx);
-        let first = main.decoder_hasher_state_first_half(idx);
-        let second = main.decoder_hasher_state_second_half(idx);
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
+        let gc = main.core_row(idx).decoder.group_count;
+        let first = main.core_row(idx).decoder.hasher_state_first_half();
+        let second = main.core_row(idx).decoder.hasher_state_second_half();
         for i in 1u16..=3 {
             let group_value = first[i as usize];
             exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, group_value));
@@ -695,23 +701,23 @@ fn op_group_span_removal_covers_decode_rows() {
     for_each_op(&trace, |row, op| {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
-        if main.is_in_span(idx) != ONE {
+        if main.core_row(idx).decoder.in_span != ONE {
             return;
         }
-        let gc = main.group_count(idx);
-        let gc_next = main.group_count(next);
+        let gc = main.core_row(idx).decoder.group_count;
+        let gc_next = main.core_row(next).decoder.group_count;
         if gc == gc_next {
             return;
         }
 
-        let addr = main.addr(idx);
+        let addr = main.core_row(idx).decoder.addr;
         let group_value = if op == Felt::from_u8(opcodes::PUSH) {
             fired_push_branch = true;
-            main.stack_element(0, next)
+            main.core_row(next).stack.get(0)
         } else {
             fired_nonpush_branch = true;
-            let h0_next = main.decoder_hasher_state_element(0, next);
-            let opcode_next = main.get_op_code(next);
+            let h0_next = main.core_row(next).decoder.hasher_state[0];
+            let opcode_next = main.core_row(next).decoder.op_code();
             h0_next * Felt::from_u16(128) + opcode_next
         };
         exp.remove(
@@ -775,12 +781,12 @@ fn op_group_span_two_batch_transition_inserts(
         if op == Felt::from_u8(opcodes::RESPAN) {
             respan_observed = true;
         }
-        let batch_flags = main.op_batch_flag(idx);
+        let batch_flags = main.core_row(idx).decoder.batch_flags;
         let (c0, c1, c2) = (batch_flags[0], batch_flags[1], batch_flags[2]);
-        let addr_next = main.addr(RowIndex::from(row + 1));
-        let gc = main.group_count(idx);
-        let first = main.decoder_hasher_state_first_half(idx);
-        let second = main.decoder_hasher_state_second_half(idx);
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
+        let gc = main.core_row(idx).decoder.group_count;
+        let first = main.core_row(idx).decoder.hasher_state_first_half();
+        let second = main.core_row(idx).decoder.hasher_state_second_half();
 
         if c0 == ONE && c1 == ZERO && c2 == ZERO {
             g8_rows += 1;
@@ -881,7 +887,7 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
     let row = (0..main.core_height())
         .map(RowIndex::from)
-        .find(|&i| main.get_op_code(i) == dyncall_opcode)
+        .find(|&i| main.core_row(i).decoder.op_code() == dyncall_opcode)
         .expect("DYNCALL row not found in trace");
 
     // second_hasher_state[0] = parent_stack_depth        → decoder_hasher_state_element(4)
@@ -891,12 +897,12 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     // DYNCALL drops those 4 elements the post-drop depth is 12 = MIN_STACK_DEPTH, which
     // means no overflow entry was pushed, so parent_next_overflow_addr must be ZERO.
     assert_eq!(
-        main.decoder_hasher_state_element(4, row),
+        main.core_row(row).decoder.hasher_state[4],
         Felt::new_unchecked(MIN_STACK_DEPTH as u64),
         "parent_stack_depth should equal MIN_STACK_DEPTH"
     );
     assert_eq!(
-        main.decoder_hasher_state_element(5, row),
+        main.core_row(row).decoder.hasher_state[5],
         ZERO,
         "parent_next_overflow_addr should be ZERO when stack is at MIN_STACK_DEPTH"
     );
@@ -961,11 +967,11 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
     let dyncall_row = (0..main.core_height())
         .map(RowIndex::from)
-        .find(|&i| main.get_op_code(i) == dyncall_opcode)
+        .find(|&i| main.core_row(i).decoder.op_code() == dyncall_opcode)
         .expect("DYNCALL row not found in trace");
 
-    let recorded_depth = main.decoder_hasher_state_element(4, dyncall_row);
-    let recorded_overflow_addr = main.decoder_hasher_state_element(5, dyncall_row);
+    let recorded_depth = main.core_row(dyncall_row).decoder.hasher_state[4];
+    let recorded_overflow_addr = main.core_row(dyncall_row).decoder.hasher_state[5];
 
     // At DYNCALL time depth=18 (>MIN_STACK_DEPTH), so post-drop depth = 17.
     assert_eq!(
@@ -978,14 +984,14 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     let push_opcode = Felt::from_u8(opcodes::PUSH);
     let push_rows_before_dyncall: Vec<_> = (0..main.core_height())
         .map(RowIndex::from)
-        .filter(|&i| i < dyncall_row && main.get_op_code(i) == push_opcode)
+        .filter(|&i| i < dyncall_row && main.core_row(i).decoder.op_code() == push_opcode)
         .collect();
     let n = push_rows_before_dyncall.len();
     assert!(n >= 2, "expected at least 2 PUSH rows before DYNCALL, found {n}");
     let t1_row = push_rows_before_dyncall[n - 2]; // push(0) → overflow[0]
     let t2_row = push_rows_before_dyncall[n - 1]; // push(HASH_ADDR) → overflow[1]
-    let t1 = main.clk(t1_row);
-    let t2 = main.clk(t2_row);
+    let t1 = main.core_row(t1_row).system.clk;
+    let t2 = main.core_row(t2_row).system.clk;
     assert_eq!(t2, t1 + ONE, "push(0) and push(HASH_ADDR) must be at consecutive clocks");
 
     // clk_after_pop_in_current_ctx() returns T1 (the second-to-last overflow entry's clock).

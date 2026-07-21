@@ -70,7 +70,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     let mut xor_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op == opcodes::U32AND as u64 {
             and_rows.push(idx);
         } else if op == opcodes::U32XOR as u64 {
@@ -119,9 +119,9 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         response_rows_seen += 1;
 
         let op = main.chiplet_cols(idx).bitwise().op_flag;
-        let a = main.chiplet_bitwise_a(idx);
-        let b = main.chiplet_bitwise_b(idx);
-        let z = main.chiplet_bitwise_z(idx);
+        let a = main.chiplet_cols(idx).bitwise().a;
+        let b = main.chiplet_cols(idx).bitwise().b;
+        let z = main.chiplet_cols(idx).bitwise().output;
         exp.add(row, &BitwiseMsg { op, a, b, result: z });
     }
     let expected_responses = and_expected.len() + xor_expected.len();

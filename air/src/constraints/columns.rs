@@ -10,6 +10,8 @@ use core::{
     mem::size_of,
 };
 
+use miden_core::{Felt, ONE, ZERO};
+
 use super::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
@@ -157,6 +159,21 @@ impl<T> ChipletCols<T> {
     /// Returns a typed borrow of the controller sub-chiplet columns.
     pub fn controller(&self) -> &ControllerCols<T> {
         self.chiplets[Self::CONTROLLER_OFFSET..Self::CONTROLLER_END].borrow()
+    }
+}
+
+impl ChipletCols<Felt> {
+    /// Returns `true` if the row's selectors indicate a bitwise-chiplet row (`s0=1`, `s1=0`).
+    pub fn is_bitwise_row(&self) -> bool {
+        let s = self.chiplet_selectors();
+        s[0] == ONE && s[1] == ZERO
+    }
+
+    /// Returns `true` if the row's selectors indicate a memory-chiplet row
+    /// (`s0=1`, `s1=1`, `s2=0`).
+    pub fn is_memory_row(&self) -> bool {
+        let s = self.chiplet_selectors();
+        s[0] == ONE && s[1] == ONE && s[2] == ZERO
     }
 }
 

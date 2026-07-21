@@ -74,10 +74,10 @@ fn hasher_response_rows(
         if !is_hasher_controller_row(main, idx) {
             return None;
         }
-        let hs0 = as_bit(main.chiplet_selector_1(idx))?;
-        let hs1 = as_bit(main.chiplet_selector_2(idx))?;
-        let hs2 = as_bit(main.chiplet_selector_3(idx))?;
-        let is_boundary = as_bit(main.chiplet_is_boundary(idx))?;
+        let hs0 = as_bit(main.chiplet_cols(idx).chiplet_selectors()[1])?;
+        let hs1 = as_bit(main.chiplet_cols(idx).chiplet_selectors()[2])?;
+        let hs2 = as_bit(main.chiplet_cols(idx).chiplet_selectors()[3])?;
+        let is_boundary = as_bit(main.chiplet_cols(idx).controller().is_boundary)?;
         // Selector table — see `docs/src/design/chiplets/hasher.md`.
         let kind = match (hs0, hs1, hs2, is_boundary) {
             (true, false, false, true) => HasherResponseKind::SpongeStart,
@@ -109,15 +109,15 @@ fn span_end_hasher_bus() {
 
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
 
         if op == opcodes::SPAN as u64 {
-            let addr_next = main.addr(RowIndex::from(row + 1));
+            let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
             let rate = rate_from_hasher_state(main, idx);
             exp.remove(row, &HasherMsg::control_block(addr_next, &rate, 0));
             request_count += 1;
         } else if op == opcodes::END as u64 {
-            let parent = main.addr(idx) + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+            let parent = main.core_row(idx).decoder.addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
             let h = rate_from_hasher_state(main, idx);
             let digest: [Felt; 4] = [h[0], h[1], h[2], h[3]];
             exp.remove(row, &HasherMsg::return_hash(parent, digest));
@@ -127,8 +127,8 @@ fn span_end_hasher_bus() {
 
     let mut response_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         match kind {
             HasherResponseKind::SpongeStart => {
                 exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
@@ -162,11 +162,11 @@ fn respan_hasher_bus() {
 
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::RESPAN as u64 {
             continue;
         }
-        let addr_next = main.addr(RowIndex::from(row + 1));
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
         let rate = rate_from_hasher_state(main, idx);
         exp.remove(row, &HasherMsg::absorption(addr_next, rate));
         respan_request_count += 1;
@@ -177,8 +177,8 @@ fn respan_hasher_bus() {
         if kind != HasherResponseKind::SpongeRespan {
             continue;
         }
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         let rate: [Felt; 8] =
             [state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7]];
         exp.add(usize::from(idx), &HasherMsg::absorption(addr, rate));
@@ -219,11 +219,11 @@ fn merge_hasher_bus() {
 
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::SPLIT as u64 {
             continue;
         }
-        let addr_next = main.addr(RowIndex::from(row + 1));
+        let addr_next = main.core_row(RowIndex::from(row + 1)).decoder.addr;
         let rate = rate_from_hasher_state(main, idx);
         exp.remove(row, &HasherMsg::control_block(addr_next, &rate, opcodes::SPLIT));
         split_request_count += 1;
@@ -234,8 +234,8 @@ fn merge_hasher_bus() {
         if kind != HasherResponseKind::SpongeStart {
             continue;
         }
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         // SPLIT's own hasher response carries opcode `SPLIT` at capacity[1] (position 9 of the
         // 12-lane state); sibling SPAN sponge_start rows carry opcode 0.
         if state[9] == Felt::from(opcodes::SPLIT) {
@@ -265,16 +265,16 @@ fn hperm_hasher_bus() {
     let mut hperm_helper0: Option<Felt> = None;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::HPERM as u64 {
             continue;
         }
 
-        let helper0 = main.helper_register(0, idx);
+        let helper0 = main.core_row(idx).decoder.user_op_helpers()[0];
         hperm_helper0 = Some(helper0);
         let next = RowIndex::from(row + 1);
-        let stk_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, idx));
-        let stk_next_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
+        let stk_state: [Felt; 12] = core::array::from_fn(|i| main.core_row(idx).stack.get(i));
+        let stk_next_state: [Felt; 12] = core::array::from_fn(|i| main.core_row(next).stack.get(i));
         exp.remove(row, &HasherMsg::linear_hash_init(helper0, stk_state));
         exp.remove(
             row,
@@ -288,8 +288,8 @@ fn hperm_hasher_bus() {
     let mut sponge_start_count = 0usize;
     let mut sout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         match kind {
             HasherResponseKind::SpongeStart => {
                 exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
@@ -328,29 +328,29 @@ fn logdeferred_hasher_bus() {
     let mut logdeferred_addr: Option<Felt> = None;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::LOGDEFERRED as u64 {
             continue;
         }
 
         let next = RowIndex::from(row + 1);
-        let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
+        let log_addr = main.core_row(idx).decoder.user_op_helpers()[HELPER_ADDR_IDX];
         logdeferred_addr = Some(log_addr);
 
         // Input: [DEFERRED_ROOT_PREV, STATEMENT, Tag::AND] — 4 helpers + 4 stack lanes + fixed
         // capacity.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
+                main.core_row(idx).decoder.user_op_helpers()[HELPER_STATE_PREV_RANGE.start + i]
             } else if i < 8 {
-                main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
+                main.core_row(idx).stack.get(STACK_STMNT_RANGE.start + (i - 4))
             } else {
                 Tag::AND.as_word()[i - 8]
             }
         });
 
         // Output (next row): [STATE_NEW, OUT_RATE1, OUT_CAP] identity-mapped to stack[0..12].
-        let output_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
+        let output_state: [Felt; 12] = core::array::from_fn(|i| main.core_row(next).stack.get(i));
 
         exp.remove(row, &HasherMsg::linear_hash_init(log_addr, input_state));
         exp.remove(
@@ -365,8 +365,8 @@ fn logdeferred_hasher_bus() {
     let mut sponge_start_count = 0usize;
     let mut sout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         match kind {
             HasherResponseKind::SpongeStart => {
                 exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
@@ -418,15 +418,15 @@ fn mpverify_hasher_bus() {
 
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::MPVERIFY as u64 {
             continue;
         }
-        let helper0 = main.helper_register(0, idx);
-        let mp_depth = main.stack_element(4, idx);
-        let mp_index = main.stack_element(5, idx);
-        let leaf_word: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, idx));
-        let old_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(6 + i, idx));
+        let helper0 = main.core_row(idx).decoder.user_op_helpers()[0];
+        let mp_depth = main.core_row(idx).stack.get(4);
+        let mp_index = main.core_row(idx).stack.get(5);
+        let leaf_word: [Felt; 4] = core::array::from_fn(|i| main.core_row(idx).stack.get(i));
+        let old_root: [Felt; 4] = core::array::from_fn(|i| main.core_row(idx).stack.get(6 + i));
 
         let return_addr = helper0 + mp_depth * CONTROLLER_ROWS_PER_PERM_FELT - ONE;
         exp.remove(row, &HasherMsg::merkle_verify_init(helper0, mp_index, leaf_word));
@@ -437,13 +437,13 @@ fn mpverify_hasher_bus() {
     let mut mp_input_count = 0usize;
     let mut hout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
         let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
         match kind {
             HasherResponseKind::MpInput => {
-                let node_index = main.chiplet_node_index(idx);
+                let node_index = main.chiplet_cols(idx).controller().node_index;
                 // Match the emitter's own `bit = node_index - 2·node_index_next` formula rather
                 // than reading `chiplet_direction_bit`: keeps this assertion independent of the
                 // column whose constraints are under test.
@@ -497,18 +497,18 @@ fn mrupdate_hasher_bus() {
 
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx).as_canonical_u64();
+        let op = main.core_row(idx).decoder.op_code().as_canonical_u64();
         if op != opcodes::MRUPDATE as u64 {
             continue;
         }
-        let helper0 = main.helper_register(0, idx);
+        let helper0 = main.core_row(idx).decoder.user_op_helpers()[0];
         let next = RowIndex::from(row + 1);
-        let mr_depth = main.stack_element(4, idx);
-        let mr_index = main.stack_element(5, idx);
-        let old_leaf: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, idx));
-        let old_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(6 + i, idx));
-        let new_leaf: [Felt; 4] = core::array::from_fn(|i| main.stack_element(10 + i, idx));
-        let new_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, next));
+        let mr_depth = main.core_row(idx).stack.get(4);
+        let mr_index = main.core_row(idx).stack.get(5);
+        let old_leaf: [Felt; 4] = core::array::from_fn(|i| main.core_row(idx).stack.get(i));
+        let old_root: [Felt; 4] = core::array::from_fn(|i| main.core_row(idx).stack.get(6 + i));
+        let new_leaf: [Felt; 4] = core::array::from_fn(|i| main.core_row(idx).stack.get(10 + i));
+        let new_root: [Felt; 4] = core::array::from_fn(|i| main.core_row(next).stack.get(i));
 
         let old_return = helper0 + mr_depth * CONTROLLER_ROWS_PER_PERM_FELT - ONE;
         let new_init = helper0 + mr_depth * CONTROLLER_ROWS_PER_PERM_FELT;
@@ -527,11 +527,11 @@ fn mrupdate_hasher_bus() {
     let mut mu_count = 0usize;
     let mut hout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
-        let state = main.chiplet_hasher_state(idx);
+        let addr = main.core_row(idx).system.clk + ONE;
+        let state = main.chiplet_cols(idx).controller().state;
         let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
         let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
-        let node_index = main.chiplet_node_index(idx);
+        let node_index = main.chiplet_cols(idx).controller().node_index;
         let bit = merkle_direction_bit(main, idx);
         let word: [Felt; 4] = if bit == ZERO { rate_0 } else { rate_1 };
 
@@ -574,8 +574,8 @@ fn single_block_program(ops: Vec<Operation>) -> Program {
 }
 
 fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
-    let first = main.decoder_hasher_state_first_half(row);
-    let second = main.decoder_hasher_state_second_half(row);
+    let first = main.core_row(row).decoder.hasher_state_first_half();
+    let second = main.core_row(row).decoder.hasher_state_second_half();
     [
         first[0], first[1], first[2], first[3], second[0], second[1], second[2], second[3],
     ]
@@ -585,7 +585,7 @@ fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     if usize::from(row) >= main.chiplets_height() {
         return false;
     }
-    main.chiplet_selector_0(row) == ZERO
+    main.chiplet_cols(row).chiplet_selectors()[0] == ZERO
 }
 
 /// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
@@ -607,7 +607,8 @@ fn as_bit(val: Felt) -> Option<bool> {
 /// column, so bugs in that column don't make the assertion vacuously pass.
 fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
     let next = RowIndex::from(usize::from(row) + 1);
-    main.chiplet_node_index(row) - main.chiplet_node_index(next).double()
+    main.chiplet_cols(row).controller().node_index
+        - main.chiplet_cols(next).controller().node_index.double()
 }
 
 // SIBLING TABLE BUS (MRUPDATE add/remove pairing)
@@ -655,12 +656,12 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ZERO {
+        if main.chiplet_cols(idx).chiplet_selectors()[0] != ZERO {
             continue;
         }
-        let hs0 = main.chiplet_selector_1(idx);
-        let hs1 = main.chiplet_selector_2(idx);
-        let hs2 = main.chiplet_selector_3(idx);
+        let hs0 = main.chiplet_cols(idx).chiplet_selectors()[1];
+        let hs1 = main.chiplet_cols(idx).chiplet_selectors()[2];
+        let hs2 = main.chiplet_cols(idx).chiplet_selectors()[3];
         if hs0 == ONE && hs1 == ONE && hs2 == ZERO {
             mv_rows.push(idx);
         } else if hs0 == ONE && hs1 == ONE && hs2 == ONE {
@@ -687,15 +688,15 @@ enum SiblingSide {
 }
 
 fn push_sibling(exp: &mut Expectations<'_>, row: RowIndex, main: &MainTrace, side: SiblingSide) {
-    let mrupdate_id = main.chiplet_mrupdate_id(row);
-    let node_index = main.chiplet_node_index(row);
-    let state = main.chiplet_hasher_state(row);
+    let mrupdate_id = main.chiplet_cols(row).controller().mrupdate_id;
+    let node_index = main.chiplet_cols(row).controller().node_index;
+    let state = main.chiplet_cols(row).controller().state;
     let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
     let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
 
     // Direction bit drives which rate half the sibling lives in. The trace's
     // `chiplet_direction_bit` column carries the extracted bit on Merkle controller rows.
-    let bit = main.chiplet_direction_bit(row);
+    let bit = main.chiplet_cols(row).controller().direction_bit;
     let row_usize = usize::from(row);
     let (bit_tag, h) = if bit == ZERO {
         (SiblingBit::Zero, rate_1)
