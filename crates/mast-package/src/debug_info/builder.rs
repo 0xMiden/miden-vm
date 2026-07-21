@@ -341,7 +341,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     pub fn add_error_message(&mut self, err_code: u64, message: Arc<str>) -> bool {
         if !self.debug_info.error_messages.iter().any(|msg| msg.err_code == err_code) {
             let message = self.add_string(message);
-            self.debug_info.error_messages.push(DebugErrorMessage { err_code, message });
+            self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
             true
         } else {
             false
@@ -359,7 +359,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             "invalid string index for message"
         );
         if !self.debug_info.error_messages.iter().any(|msg| msg.err_code == err_code) {
-            self.debug_info.error_messages.push(DebugErrorMessage { err_code, message });
+            self.debug_info.error_messages.push(DebugErrorMessage::new(err_code, message));
         }
     }
 }

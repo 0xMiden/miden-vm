@@ -486,7 +486,10 @@ impl<'a> PackageSourceDebugContext<'a> {
             None => self.debug_info.first_asm_op_for_source_node(source_node_id),
         }?;
 
-        assembly_op.location_idx.and_then(|idx| self.debug_info.get_location(idx))
+        assembly_op
+            .location_idx
+            .into_option()
+            .and_then(|idx| self.debug_info.get_location(idx))
     }
 }
 
@@ -1081,13 +1084,13 @@ mod error_assertions {
         context_name: &str,
         op_name: &str,
     ) -> DebugSourceAsmOp {
-        DebugSourceAsmOp {
+        DebugSourceAsmOp::new(
             op_idx,
-            location_idx: location.map(|location| builder.add_location(location)),
-            context_name_idx: builder.add_string(context_name),
-            op_name_idx: builder.add_string(op_name),
-            num_cycles: 1,
-        }
+            location.map(|location| builder.add_location(location)),
+            builder.add_string(context_name),
+            builder.add_string(op_name),
+            1,
+        )
     }
 
     fn debug_source_node(exec_node: u32, asm_ops: Vec<DebugSourceAsmOp>) -> DebugSourceNode {

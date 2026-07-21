@@ -384,13 +384,13 @@ impl MastForestBuilder {
         let location_idx = asm_op.location().map(|loc| self.debug_info.add_location(loc.clone()));
         let context_name_idx = self.debug_info.add_string(asm_op.context_name().clone());
         let op_name_idx = self.debug_info.add_string(asm_op.op().clone());
-        draft.asm_ops = vec![DebugSourceAsmOp {
-            op_idx: 0,
+        draft.asm_ops = vec![DebugSourceAsmOp::new(
+            0,
             location_idx,
             context_name_idx,
             op_name_idx,
-            num_cycles: asm_op.num_cycles(),
-        }];
+            asm_op.num_cycles(),
+        )];
         let node_ref =
             if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
                 node_ref
@@ -1124,13 +1124,7 @@ mod tests {
             .map(|location| builder.debug_info_mut().add_location(location.clone()));
         let context_name_idx = builder.debug_info_mut().add_string(asm_op.context_name().clone());
         let op_name_idx = builder.debug_info_mut().add_string(asm_op.op().clone());
-        DebugSourceAsmOp {
-            op_idx: 0,
-            location_idx,
-            context_name_idx,
-            op_name_idx,
-            num_cycles: asm_op.num_cycles(),
-        }
+        DebugSourceAsmOp::new(0, location_idx, context_name_idx, op_name_idx, asm_op.num_cycles())
     }
 
     fn add_test_debug_var(
@@ -1875,11 +1869,11 @@ mod tests {
         let source_id = source_ids[&source_ref];
         let function = &debug_info.functions()[0];
 
-        assert_eq!(function.source_node, Some(source_id));
+        assert_eq!(function.source_node.into_option(), Some(source_id));
         assert_eq!(function.mast_root, mast_root);
         assert_eq!(debug_info[source_id].exec_node, node_ids[&block_ref]);
         assert_eq!(debug_info[function.name_idx].as_ref(), "debug_test::entry");
-        assert_eq!(debug_info[function.linkage_name_idx.unwrap()].as_ref(), "entry");
+        assert_eq!(debug_info[function.linkage_name_idx.into_option().unwrap()].as_ref(), "entry");
         let function_file = debug_info.get_file(function.file_idx).unwrap();
         assert_eq!(
             function.file_idx,
@@ -1891,13 +1885,13 @@ mod tests {
         assert_eq!(debug_info.error_message(7).as_deref(), Some("debug failure"));
 
         let dead_function = &debug_info.functions()[1];
-        assert_eq!(dead_function.source_node, None);
+        assert_eq!(dead_function.source_node.into_option(), None);
         assert_eq!(dead_function.mast_root, dead_mast_root);
 
         let DebugTypeInfo::Function {
             return_type_idx: Some(return_type_idx),
             param_type_indices,
-        } = &debug_info[function.type_idx.unwrap()]
+        } = &debug_info[function.type_idx.into_option().unwrap()]
         else {
             panic!("expected remapped function type");
         };

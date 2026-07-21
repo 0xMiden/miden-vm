@@ -609,6 +609,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 for row in source_node.asm_ops.iter() {
                     let location_idx = row
                         .location_idx
+                        .into_option()
                         .map(|location_idx| {
                             remapped_locations.get(&location_idx).copied().ok_or(
                                 DebugInfoMergeError::MissingSourceLocationMapping {
@@ -631,13 +632,13 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                             string_idx: row.op_name_idx,
                         },
                     )?;
-                    asm_ops.push(DebugSourceAsmOp {
-                        op_idx: row.op_idx,
+                    asm_ops.push(DebugSourceAsmOp::new(
+                        row.op_idx,
                         location_idx,
                         context_name_idx,
                         op_name_idx,
-                        num_cycles: row.num_cycles,
-                    });
+                        row.num_cycles,
+                    ));
                 }
 
                 let mut debug_vars = Vec::with_capacity(source_node.debug_vars.len());
@@ -701,6 +702,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
 
                 let source_node = function
                     .source_node
+                    .into_option()
                     .map(|id| {
                         remapped_nodes.get(&id).copied().ok_or(
                             DebugInfoMergeError::MissingSourceNodeMapping {
@@ -718,6 +720,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 )?;
                 let linkage_name_idx = function
                     .linkage_name_idx
+                    .into_option()
                     .map(|idx| {
                         remapped_strings.get(&idx).copied().ok_or(
                             DebugInfoMergeError::MissingSourceStringMapping {
@@ -735,19 +738,20 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 )?;
                 let type_idx = function
                     .type_idx
+                    .into_option()
                     .map(|idx| remap_type_idx(forest_index, idx, &remapped_types))
                     .transpose()?;
                 let new_index = builder
                     .debug_info_mut()
                     .functions
                     .push(FunctionInfo {
-                        source_node,
+                        source_node: source_node.into(),
                         name_idx,
-                        linkage_name_idx,
+                        linkage_name_idx: linkage_name_idx.into(),
                         file_idx,
                         line: function.line,
                         column: function.column,
-                        type_idx,
+                        type_idx: type_idx.into(),
                         mast_root: function.mast_root,
                     })
                     .expect("too many functions");

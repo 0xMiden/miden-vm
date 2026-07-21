@@ -193,13 +193,13 @@ impl BasicBlockBuilder<'_> {
                 let location_idx = pending.location.map(|loc| debug_info.add_location(loc));
                 let context_name_idx = debug_info.add_string(pending.context_name);
                 let op_name_idx = debug_info.add_string(pending.op);
-                let asm_op = DebugSourceAsmOp {
-                    op_idx: pending.op_start as u32,
+                let asm_op = DebugSourceAsmOp::new(
+                    pending.op_start as u32,
                     location_idx,
                     context_name_idx,
                     op_name_idx,
-                    num_cycles: cycle_count as u8,
-                };
+                    cycle_count as u8,
+                );
                 self.asm_ops.push(asm_op);
                 None
             },

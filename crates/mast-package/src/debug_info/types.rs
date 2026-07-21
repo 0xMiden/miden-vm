@@ -23,7 +23,7 @@ use miden_core::{
     mast::MastNodeId,
     operations::{AssemblyOp, DebugVarInfo, DebugVarLocation},
 };
-use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber};
+use miden_debug_types::{ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber};
 use miden_utils_indexing::{Idx, newtype_id};
 
 use super::{DebugInfo, PackageDebugInfo, SourceNodeIdMarker};
@@ -186,6 +186,53 @@ newtype_id!(
 
 impl SourceNodeIdMarker for DebugSourceNodeId {}
 
+// STABLE OPTION TYPE
+// ================================================================================================
+
+/// A custom `Option<T>` type that has a stable memory layout
+///
+/// This type is meant to be converted to/from an `Option<T>` for actual use
+#[repr(u32)]
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum OptionC<T> {
+    None,
+    Some(T),
+}
+
+impl<T> OptionC<T> {
+    #[inline(always)]
+    pub fn into_option(self) -> Option<T> {
+        self.into()
+    }
+}
+
+impl<T: core::fmt::Debug> core::fmt::Debug for OptionC<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Some(arg0) => f.debug_tuple("Some").field(arg0).finish(),
+        }
+    }
+}
+
+impl<T> From<Option<T>> for OptionC<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(t) => Self::Some(t),
+            None => Self::None,
+        }
+    }
+}
+
+impl<T> From<OptionC<T>> for Option<T> {
+    fn from(value: OptionC<T>) -> Self {
+        match value {
+            OptionC::Some(t) => Self::Some(t),
+            OptionC::None => Self::None,
+        }
+    }
+}
+
 // PACKAGE DEBUG INFO
 // ================================================================================================
 
@@ -197,6 +244,14 @@ pub struct DebugLoc {
     pub start: ByteIndex,
     pub end: ByteIndex,
 }
+
+// Ensure that DebugLoc records adhere to size/alignment requirements we assume elsewhere
+const _DEBUG_LOC_SIZE_CHECK: () = const {
+    assert!(
+        size_of::<DebugLoc>().is_multiple_of(align_of::<DebugLoc>()),
+        "expected the size of DebugLoc to be a multiple of its alignment"
+    );
+};
 
 // DEBUG SOURCE GRAPH SECTION
 // ================================================================================================
@@ -279,18 +334,45 @@ pub struct DebugSourceAsmOp {
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Source location index in the locations table
-    pub location_idx: Option<DebugLocIdx>,
+    pub location_idx: OptionC<DebugLocIdx>,
     /// Assembly context name index in the strings table
     pub context_name_idx: DebugStringIdx,
     /// Assembly operation text index in the strings table
     pub op_name_idx: DebugStringIdx,
     /// Number of VM cycles taken by the operation.
     pub num_cycles: u8,
+    _padding: [u8; 3],
 }
 
 impl DebugSourceAsmOp {
+    // Ensure that DebugSourceAsmOp records adhere to size/alignment requirements we assume
+    // elsewhere
+    const _ASM_OP_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugSourceAsmOp>().is_multiple_of(align_of::<DebugSourceAsmOp>()),
+            "expected the size of DebugSourceAsmOp to be a multiple of its alignment"
+        );
+    };
+
+    pub fn new(
+        op_idx: u32,
+        location_idx: Option<DebugLocIdx>,
+        context_name_idx: DebugStringIdx,
+        op_name_idx: DebugStringIdx,
+        num_cycles: u8,
+    ) -> Self {
+        Self {
+            op_idx,
+            location_idx: location_idx.into(),
+            context_name_idx,
+            op_name_idx,
+            num_cycles,
+            _padding: [0; _],
+        }
+    }
+
     pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> AssemblyOp {
-        let location = self.location_idx.and_then(|loc| debug_info.get_location(loc));
+        let location = self.location_idx.into_option().and_then(|loc| debug_info.get_location(loc));
         let context_name = debug_info[self.context_name_idx].clone();
         let op = debug_info[self.op_name_idx].clone();
         AssemblyOp::new(location, context_name, self.num_cycles, op)
@@ -342,6 +424,21 @@ pub struct DebugErrorMessage {
     pub err_code: u64,
     /// String table index of the error message content
     pub message: DebugStringIdx,
+}
+
+impl DebugErrorMessage {
+    // Ensure that DebugErrorMessage records adhere to size/alignment requirements we assume
+    // elsewhere
+    const _DEBUG_ERROR_MESSAGE_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugErrorMessage>().is_multiple_of(align_of::<DebugErrorMessage>()),
+            "expected the size of DebugErrorMessage to be a multiple of its alignment"
+        );
+    };
+
+    pub fn new(err_code: u64, message: DebugStringIdx) -> Self {
+        Self { err_code, message }
+    }
 }
 
 // DEBUG TYPE INFO
@@ -517,6 +614,14 @@ pub struct DebugFileInfo {
 }
 
 impl DebugFileInfo {
+    // Ensure that DebugFileInfo records adhere to size/alignment requirements we assume elsewhere
+    const _DEBUG_FILE_INFO_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugFileInfo>().is_multiple_of(align_of::<DebugFileInfo>()),
+            "expected the size of DebugFileInfo to be a multiple of its alignment"
+        );
+    };
+
     pub(crate) const EMPTY_CHECKSUM: [u8; 32] = [0u8; 32];
 
     /// Creates a new file info with a path.
@@ -547,30 +652,41 @@ impl DebugFileInfo {
 /// Links source-level function information to the compiled MAST representation.
 pub type DebugFunctionInfo = FunctionInfo<DebugSourceNodeId>;
 
+// The ordering of fields in this struct is carefully chosen to ensure there are no padding bytes
+// between fields - you must ensure that adding new fields or removing them is done such that this
+// property is perserved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct FunctionInfo<N: Idx> {
-    /// The source occurrance this function is linked to, if known
-    pub source_node: Option<N>,
-    /// Name of the function (index into string table)
-    pub name_idx: DebugStringIdx,
-    /// Linkage name / mangled name (index into string table, optional)
-    pub linkage_name_idx: Option<DebugStringIdx>,
-    /// File containing this function (index into file table)
-    pub file_idx: DebugFileIdx,
-    /// Line number where the function starts (1-indexed)
-    pub line: LineNumber,
-    /// Column number where the function starts (1-indexed)
-    pub column: ColumnNumber,
-    /// Type of this function (index into type table, optional)
-    pub type_idx: Option<DebugTypeIdx>,
     /// MAST root digest of this function.
     ///
     /// This links the debug info to the compiled code if `source_node` is unknown
     pub mast_root: Word,
+    /// The source occurrance this function is linked to, if known
+    pub source_node: OptionC<N>,
+    /// Type signature of this function (index into type table, optional)
+    pub type_idx: OptionC<DebugTypeIdx>,
+    /// Linkage name / mangled name (index into string table, optional)
+    pub linkage_name_idx: OptionC<DebugStringIdx>,
+    /// Name of the function (index into string table)
+    pub name_idx: DebugStringIdx,
+    /// File containing this function (index into file table)
+    pub file_idx: DebugFileIdx,
+    /// Line index where the function starts (0-indexed)
+    pub line: LineIndex,
+    /// Column index where the function starts (0-indexed)
+    pub column: ColumnIndex,
 }
 
 impl<N: Idx> FunctionInfo<N> {
+    // Ensure that FunctionInfo records adhere to size/alignment requirements we assume elsewhere
+    const _FUNCTION_INFO_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<FunctionInfo<N>>().is_multiple_of(align_of::<FunctionInfo<N>>()),
+            "expected the size of FunctionInfo to be a multiple of its alignment"
+        );
+    };
+
     /// Creates a new function info.
     pub fn new(
         source_node: Option<N>,
@@ -581,26 +697,26 @@ impl<N: Idx> FunctionInfo<N> {
         mast_root: Word,
     ) -> Self {
         Self {
-            source_node,
+            source_node: source_node.into(),
             name_idx,
-            linkage_name_idx: None,
+            linkage_name_idx: OptionC::None,
             file_idx,
-            line,
-            column,
-            type_idx: None,
+            line: line.to_index(),
+            column: column.to_index(),
+            type_idx: OptionC::None,
             mast_root,
         }
     }
 
     /// Sets the linkage name.
     pub fn with_linkage_name(mut self, linkage_name_idx: DebugStringIdx) -> Self {
-        self.linkage_name_idx = Some(linkage_name_idx);
+        self.linkage_name_idx = OptionC::Some(linkage_name_idx);
         self
     }
 
     /// Sets the type index.
     pub fn with_type(mut self, type_idx: DebugTypeIdx) -> Self {
-        self.type_idx = Some(type_idx);
+        self.type_idx = OptionC::Some(type_idx);
         self
     }
 }
@@ -781,13 +897,7 @@ mod tests {
                 children: Vec::new(),
                 op_start: 0,
                 op_end: 1,
-                asm_ops: vec![DebugSourceAsmOp {
-                    op_idx: 0,
-                    location_idx: None,
-                    context_name_idx,
-                    op_name_idx,
-                    num_cycles: 1,
-                }],
+                asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                 debug_vars: vec![DebugSourceVar {
                     op_idx: 0,
                     name_idx: var_name_idx,
@@ -970,13 +1080,9 @@ mod tests {
         let context_name_idx = debug_builder.add_string("callee");
         let op_name_idx = debug_builder.add_string("add");
         let mut child = source_node(callee, Vec::new(), 0, 1);
-        child.asm_ops.push(DebugSourceAsmOp {
-            op_idx: 0,
-            location_idx: None,
-            context_name_idx,
-            op_name_idx,
-            num_cycles: 1,
-        });
+        child
+            .asm_ops
+            .push(DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1));
         let child_source = debug_builder.add_node(child).unwrap();
         let root_source =
             debug_builder.add_node(source_node(call, vec![child_source], 0, 1)).unwrap();
@@ -1013,13 +1119,7 @@ mod tests {
         let x_idx = builder.add_string("x");
         let y_idx = builder.add_string("y");
         let mut node_a = source_node(exec_node, Vec::new(), 0, 1);
-        node_a.asm_ops.push(DebugSourceAsmOp {
-            op_idx: 0,
-            location_idx: None,
-            context_name_idx: alias_a_idx,
-            op_name_idx: add_idx,
-            num_cycles: 1,
-        });
+        node_a.asm_ops.push(DebugSourceAsmOp::new(0, None, alias_a_idx, add_idx, 1));
         node_a.debug_vars.push(DebugSourceVar {
             op_idx: 0,
             name_idx: x_idx,
@@ -1031,20 +1131,8 @@ mod tests {
         let source_a = builder.add_node(node_a).unwrap();
         let mut node_b = source_node(exec_node, Vec::new(), 0, 3);
         node_b.asm_ops.extend([
-            DebugSourceAsmOp {
-                op_idx: 0,
-                location_idx: None,
-                context_name_idx: alias_b_idx,
-                op_name_idx: add_idx,
-                num_cycles: 1,
-            },
-            DebugSourceAsmOp {
-                op_idx: 2,
-                location_idx: None,
-                context_name_idx: alias_b_later_idx,
-                op_name_idx: mul_idx,
-                num_cycles: 1,
-            },
+            DebugSourceAsmOp::new(0, None, alias_b_idx, add_idx, 1),
+            DebugSourceAsmOp::new(2, None, alias_b_later_idx, mul_idx, 1),
         ]);
         node_b.debug_vars.push(DebugSourceVar {
             op_idx: 0,

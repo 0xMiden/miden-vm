@@ -687,7 +687,7 @@ impl Package {
                 self.validate_string_index(row.op_name_idx, debug_info, || {
                     format!("debug source node {source_id:?} assembly op name")
                 })?;
-                if let Some(location_idx) = row.location_idx {
+                if let Some(location_idx) = row.location_idx.into_option() {
                     self.validate_location_index(location_idx, debug_info, || {
                         format!("debug source node {source_id:?} assembly op location")
                     })?;
@@ -896,7 +896,7 @@ impl Package {
         self.validate_string_index(function.name_idx, debug_info, || {
             format!("debug function {function_index} name")
         })?;
-        if let Some(linkage_name_idx) = function.linkage_name_idx {
+        if let Some(linkage_name_idx) = function.linkage_name_idx.into_option() {
             self.validate_string_index(linkage_name_idx, debug_info, || {
                 format!("debug function {function_index} linkage name")
             })?;
@@ -910,7 +910,7 @@ impl Package {
                 ),
             });
         }
-        if let Some(source_node) = function.source_node
+        if let Some(source_node) = function.source_node.into_option()
             && debug_info.source_node(source_node).is_none()
         {
             return Err(PackageDebugInfoError::InvalidReference {
@@ -920,7 +920,7 @@ impl Package {
                 ),
             });
         }
-        if let Some(type_idx) = function.type_idx {
+        if let Some(type_idx) = function.type_idx.into_option() {
             self.validate_type_index(type_idx, debug_info, || {
                 format!("debug function {function_index} type")
             })?;
@@ -1465,13 +1465,7 @@ mod tests {
                     children: Vec::new(),
                     op_start: 0,
                     op_end: num_ops,
-                    asm_ops: vec![DebugSourceAsmOp {
-                        op_idx: 0,
-                        location_idx: None,
-                        context_name_idx,
-                        op_name_idx,
-                        num_cycles: 1,
-                    }],
+                    asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                     debug_vars: Vec::new(),
                     inline_calls: Vec::new(),
                 })
@@ -1579,13 +1573,7 @@ mod tests {
                 children: Vec::new(),
                 op_start: 0,
                 op_end: 1,
-                asm_ops: vec![DebugSourceAsmOp {
-                    op_idx: 0,
-                    location_idx: None,
-                    context_name_idx,
-                    op_name_idx,
-                    num_cycles: 1,
-                }],
+                asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                 debug_vars: Vec::new(),
                 inline_calls: Vec::new(),
             })
@@ -1740,13 +1728,13 @@ mod tests {
             let mut builder = PackageDebugInfoBuilder::default();
             builder.add_string("valid");
             let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
-            node.asm_ops.push(DebugSourceAsmOp {
-                op_idx: 0,
+            node.asm_ops.push(DebugSourceAsmOp::new(
+                0,
                 location_idx,
                 context_name_idx,
                 op_name_idx,
-                num_cycles: 1,
-            });
+                1,
+            ));
             builder.add_node(node).unwrap();
             let debug_info = builder.build();
             assert_invalid_debug_reference(&mut package, debug_info.as_ref(), expected);
@@ -2240,13 +2228,7 @@ mod tests {
                     children: Vec::new(),
                     op_start: 0,
                     op_end: 1,
-                    asm_ops: vec![DebugSourceAsmOp {
-                        op_idx: 0,
-                        location_idx: None,
-                        context_name_idx,
-                        op_name_idx,
-                        num_cycles: 1,
-                    }],
+                    asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                     debug_vars: Vec::new(),
                     inline_calls: Vec::new(),
                 })

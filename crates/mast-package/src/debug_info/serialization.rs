@@ -4,7 +4,6 @@ use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 
 use miden_core::{
-    Word,
     mast::MastNodeId,
     operations::DebugVarLocation,
     serde::{
@@ -12,14 +11,13 @@ use miden_core::{
         read_bounded_len,
     },
 };
-use miden_debug_types::{ColumnNumber, LineNumber};
 use miden_utils_indexing::IndexVec;
 
 use super::{
-    DEBUG_INFO_VERSION, DebugErrorMessage, DebugFieldInfo, DebugFileIdx, DebugFileInfo,
-    DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
-    DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-    DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, PackageDebugInfo,
+    DEBUG_INFO_VERSION, DebugErrorMessage, DebugFieldInfo, DebugFileInfo, DebugFunctionIdx,
+    DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType, DebugSourceAsmOp,
+    DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar, DebugStringIdx,
+    DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, PackageDebugInfo,
 };
 
 /// The minimum alignment required for buffers containing directly decoded debug-info rows.
@@ -562,48 +560,6 @@ impl Deserializable for DebugFileInfo {
     }
 }
 
-// DEBUG FUNCTION INFO SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugFunctionInfo {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.source_node.write_into(target);
-        self.name_idx.write_into(target);
-        self.linkage_name_idx.write_into(target);
-        self.file_idx.write_into(target);
-        target.write_u32(self.line.to_u32());
-        target.write_u32(self.column.to_u32());
-        self.type_idx.write_into(target);
-        self.mast_root.write_into(target);
-    }
-}
-
-impl Deserializable for DebugFunctionInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let source_node = Option::<DebugSourceNodeId>::read_from(source)?;
-        let name_idx = DebugStringIdx::read_from(source)?;
-        let linkage_name_idx = Option::<DebugStringIdx>::read_from(source)?;
-        let file_idx = DebugFileIdx::read_from(source)?;
-        let line_raw = source.read_u32()?;
-        let column_raw = source.read_u32()?;
-        let line = LineNumber::new(line_raw).unwrap_or_default();
-        let column = ColumnNumber::new(column_raw).unwrap_or_default();
-        let type_idx = Option::<DebugTypeIdx>::read_from(source)?;
-        let mast_root = Word::read_from(source)?;
-
-        Ok(Self {
-            source_node,
-            name_idx,
-            linkage_name_idx,
-            file_idx,
-            line,
-            column,
-            type_idx,
-            mast_root,
-        })
-    }
-}
-
 // HELPER FUNCTIONS
 // ================================================================================================
 
@@ -796,11 +752,11 @@ fn read_debug_type_indices<R: ByteReader>(
 
 #[cfg(test)]
 mod tests {
-    use miden_core::operations::DebugVarLocation;
-    use miden_debug_types::{ByteIndex, Location, Uri};
+    use miden_core::{Word, operations::DebugVarLocation};
+    use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
     use super::*;
-    use crate::debug_info::PackageDebugInfoBuilder;
+    use crate::debug_info::{DebugFileIdx, PackageDebugInfoBuilder};
 
     struct FixedBudgetReader<'a> {
         inner: miden_core::serde::SliceReader<'a>,
@@ -1078,13 +1034,13 @@ mod tests {
                 children: alloc::vec![],
                 op_start: 0,
                 op_end: 3,
-                asm_ops: alloc::vec![DebugSourceAsmOp {
-                    op_idx: 2,
-                    location_idx: Some(location_idx),
+                asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                    2,
+                    Some(location_idx),
                     context_name_idx,
                     op_name_idx,
-                    num_cycles: 1,
-                }],
+                    1,
+                )],
                 debug_vars: alloc::vec![DebugSourceVar {
                     op_idx: 2,
                     name_idx: var_name_idx,
@@ -1131,20 +1087,20 @@ mod tests {
                 op_start: 0,
                 op_end: 2,
                 asm_ops: alloc::vec![
-                    DebugSourceAsmOp {
-                        op_idx: 0,
-                        location_idx: Some(first_location_idx),
+                    DebugSourceAsmOp::new(
+                        0,
+                        Some(first_location_idx),
                         context_name_idx,
-                        op_name_idx: push_name_idx,
-                        num_cycles: 1,
-                    },
-                    DebugSourceAsmOp {
-                        op_idx: 1,
-                        location_idx: Some(second_location_idx),
+                        push_name_idx,
+                        1,
+                    ),
+                    DebugSourceAsmOp::new(
+                        1,
+                        Some(second_location_idx),
                         context_name_idx,
-                        op_name_idx: add_name_idx,
-                        num_cycles: 1,
-                    },
+                        add_name_idx,
+                        1,
+                    ),
                 ],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
@@ -1180,27 +1136,9 @@ mod tests {
                 op_start: 0,
                 op_end: 3,
                 asm_ops: alloc::vec![
-                    DebugSourceAsmOp {
-                        op_idx: 0,
-                        location_idx: None,
-                        context_name_idx,
-                        op_name_idx: add_name_idx,
-                        num_cycles: 1,
-                    },
-                    DebugSourceAsmOp {
-                        op_idx: 1,
-                        location_idx: None,
-                        context_name_idx: same_context_name_idx,
-                        op_name_idx: mul_name_idx,
-                        num_cycles: 1,
-                    },
-                    DebugSourceAsmOp {
-                        op_idx: 2,
-                        location_idx: None,
-                        context_name_idx: other_context_idx,
-                        op_name_idx: same_add_name_idx,
-                        num_cycles: 1,
-                    },
+                    DebugSourceAsmOp::new(0, None, context_name_idx, add_name_idx, 1,),
+                    DebugSourceAsmOp::new(1, None, same_context_name_idx, mul_name_idx, 1,),
+                    DebugSourceAsmOp::new(2, None, other_context_idx, same_add_name_idx, 1,),
                 ],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
@@ -1296,22 +1234,6 @@ mod tests {
     fn test_file_info_with_checksum_roundtrip() {
         let file = DebugFileInfo::new(DebugStringIdx::from(0)).with_checksum([42u8; 32]);
         roundtrip(&file);
-    }
-
-    #[test]
-    fn test_function_with_mast_root_roundtrip() {
-        let function = DebugFunctionInfo::new(
-            Some(DebugSourceNodeId::from(0)),
-            DebugStringIdx::from(0),
-            DebugFileIdx::from(0),
-            LineNumber::new(1).unwrap(),
-            ColumnNumber::new(1).unwrap(),
-            Word::default(),
-        )
-        .with_linkage_name(DebugStringIdx::from(1))
-        .with_type(DebugTypeIdx::from(2));
-
-        roundtrip(&function);
     }
 
     #[test]

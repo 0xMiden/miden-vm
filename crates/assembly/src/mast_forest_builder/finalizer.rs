@@ -414,18 +414,19 @@ impl MastForestFinalizer {
                 .map(|(asm_op, op_idx)| {
                     let location_idx = asm_op
                         .location_idx
+                        .into_option()
                         .map(|index| remapped(&tables.locations, index, "location"))
                         .transpose()?;
                     let context_name_idx =
                         remapped(&tables.strings, asm_op.context_name_idx, "string")?;
                     let op_name_idx = remapped(&tables.strings, asm_op.op_name_idx, "string")?;
-                    Ok(DebugSourceAsmOp {
-                        op_idx: u32::try_from(op_idx).unwrap(),
+                    Ok(DebugSourceAsmOp::new(
+                        u32::try_from(op_idx).unwrap(),
                         location_idx,
                         context_name_idx,
                         op_name_idx,
-                        num_cycles: asm_op.num_cycles,
-                    })
+                        asm_op.num_cycles,
+                    ))
                 })
                 .collect::<Result<Vec<_>, Report>>()?;
             let (_, debug_var_indices) = compute_operations_and_adjust_mappings(
@@ -489,25 +490,28 @@ impl MastForestFinalizer {
             // the function record anchored by its MAST root, but clear the stale source-node link.
             let source_node = function
                 .source_node
+                .into_option()
                 .and_then(|source_ref| source_id_by_ref.get(&source_ref).copied());
             let name_idx = remapped(&tables.strings, function.name_idx, "string")?;
             let linkage_name_idx = function
                 .linkage_name_idx
+                .into_option()
                 .map(|index| remapped(&tables.strings, index, "string"))
                 .transpose()?;
             let file_idx = remapped(&tables.files, function.file_idx, "file")?;
             let type_idx = function
                 .type_idx
+                .into_option()
                 .map(|index| remapped(&tables.types, index, "type"))
                 .transpose()?;
             let new_function_idx = debug_info.add_function(FunctionInfo {
-                source_node,
+                source_node: source_node.into(),
                 name_idx,
-                linkage_name_idx,
+                linkage_name_idx: linkage_name_idx.into(),
                 file_idx,
                 line: function.line,
                 column: function.column,
-                type_idx,
+                type_idx: type_idx.into(),
                 mast_root: function.mast_root,
             });
             tables.functions.insert(old_function_idx, new_function_idx);

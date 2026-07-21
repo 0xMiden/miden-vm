@@ -398,13 +398,7 @@ fn debug_bearing_static_package(
             children: vec![],
             op_start: 0,
             op_end: 1,
-            asm_ops: vec![DebugSourceAsmOp {
-                op_idx: 0,
-                location_idx: None,
-                context_name_idx,
-                op_name_idx,
-                num_cycles: 1,
-            }],
+            asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
             debug_vars: vec![DebugSourceVar {
                 op_idx: 0,
                 name_idx,
@@ -622,6 +616,7 @@ end
         .find_map(|asm_op| {
             asm_op
                 .location_idx
+                .into_option()
                 .and_then(|location_idx| debug_info.get_location(location_idx))
                 .map(|location| location.uri.path().to_string())
         })

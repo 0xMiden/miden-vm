@@ -57,13 +57,13 @@ fn debug_asm_op(
     op_name: &str,
     num_cycles: u8,
 ) -> DebugSourceAsmOp {
-    DebugSourceAsmOp {
+    DebugSourceAsmOp::new(
         op_idx,
-        location_idx: location.map(|location| builder.add_location(location)),
-        context_name_idx: builder.add_string(context_name),
-        op_name_idx: builder.add_string(op_name),
+        location.map(|location| builder.add_location(location)),
+        builder.add_string(context_name),
+        builder.add_string(op_name),
         num_cycles,
-    }
+    )
 }
 
 fn debug_source_node(
@@ -688,6 +688,7 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
     let asm_ops = package_debug_info.nodes().iter().flat_map(|node| node.asm_ops.iter());
     let selected_row_found = asm_ops.clone().any(|row| {
         row.location_idx
+            .into_option()
             .and_then(|location_idx| package_debug_info.get_location(location_idx))
             .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
     });
@@ -696,6 +697,7 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
     assert!(
         !asm_ops.clone().any(|row| {
             row.location_idx
+                .into_option()
                 .and_then(|location_idx| package_debug_info.get_location(location_idx))
                 .is_some_and(|location| location.uri().as_str() == "lib/a.masm")
         }),

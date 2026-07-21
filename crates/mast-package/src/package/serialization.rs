@@ -944,13 +944,7 @@ mod tests {
                 children: Vec::new(),
                 op_start: 0,
                 op_end: 1,
-                asm_ops: vec![DebugSourceAsmOp {
-                    op_idx: 0,
-                    location_idx: None,
-                    context_name_idx,
-                    op_name_idx,
-                    num_cycles: 1,
-                }],
+                asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                 debug_vars: Vec::new(),
                 inline_calls: Vec::new(),
             })

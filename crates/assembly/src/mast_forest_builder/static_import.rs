@@ -421,20 +421,22 @@ impl MastForestBuilder {
         let asm_ops = package_debug_info
             .asm_ops_for_source_node(source_node_id)
             .map(|row| {
-                let location =
-                    row.location_idx.map(|idx| package_debug_info.get_location(idx).unwrap());
+                let location = row
+                    .location_idx
+                    .into_option()
+                    .map(|idx| package_debug_info.get_location(idx).unwrap());
                 let context_name = package_debug_info.get_string(row.context_name_idx).unwrap();
                 let op = package_debug_info.get_string(row.op_name_idx).unwrap();
                 let location_idx = location.map(|loc| self.debug_info.add_location(loc));
                 let context_name_idx = self.debug_info.add_string(context_name);
                 let op_name_idx = self.debug_info.add_string(op);
-                DebugSourceAsmOp {
-                    op_idx: row.op_idx,
+                DebugSourceAsmOp::new(
+                    row.op_idx,
                     location_idx,
                     context_name_idx,
                     op_name_idx,
-                    num_cycles: row.num_cycles,
-                }
+                    row.num_cycles,
+                )
             })
             .collect();
         let debug_vars = package_debug_info
