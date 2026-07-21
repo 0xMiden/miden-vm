@@ -1,6 +1,7 @@
 //! Serialization and deserialization for the debug_info section.
 
 use alloc::{sync::Arc, vec::Vec};
+use core::{alloc::Layout, ptr::NonNull};
 
 use miden_core::{
     Word,
@@ -19,6 +20,29 @@ use super::{
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
     DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
     DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, PackageDebugInfo,
+};
+
+/// The minimum alignment required for buffers containing directly decoded debug-info rows.
+const DEBUG_INFO_BUFFER_ALIGNMENT: usize = max_alignment(
+    max_alignment(
+        max_alignment(align_of::<DebugFileInfo>(), align_of::<DebugLoc>()),
+        max_alignment(align_of::<DebugFunctionInfo>(), align_of::<DebugSourceNodeId>()),
+    ),
+    max_alignment(align_of::<DebugErrorMessage>(), align_of::<DebugSourceAsmOp>()),
+);
+
+const fn max_alignment(lhs: usize, rhs: usize) -> usize {
+    if lhs > rhs { lhs } else { rhs }
+}
+
+const _: () = {
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT.is_power_of_two());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugFileInfo>());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugLoc>());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugFunctionInfo>());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugSourceNodeId>());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugErrorMessage>());
+    assert!(DEBUG_INFO_BUFFER_ALIGNMENT >= align_of::<DebugSourceAsmOp>());
 };
 
 // PACKAGE DEBUG INFO SERIALIZATION
@@ -103,22 +127,12 @@ impl Deserializable for PackageDebugInfo {
         // are emitted based relative to the start of the buffer.
         let data_len = read_bounded_len(source, "package debug info", 1)?;
         let data = source.read_slice(data_len)?;
-        // Copy the data to an allocation guaranteed to be u32-aligned - this is sufficient to
-        // guarantee proper alignment of all the contained data.
-        let layout = alloc::alloc::Layout::from_size_align(data_len, align_of::<u32>())
-            .expect("data is too large");
-        let data = unsafe {
-            let ptr = alloc::alloc::alloc(layout);
-            if ptr.is_null() {
-                alloc::alloc::handle_alloc_error(layout)
-            } else {
-                let ptr = core::slice::from_raw_parts_mut(ptr, data_len);
-                ptr.copy_from_slice(data);
-                alloc::boxed::Box::<[u8]>::from_raw(ptr)
-            }
-        };
+        // Copy the data to an allocation whose base alignment satisfies every row type decoded
+        // directly from this buffer. The owner retains the allocation layout so it can deallocate
+        // the buffer with the same layout later.
+        let data = AlignedBytes::copy_from_slice(data, DEBUG_INFO_BUFFER_ALIGNMENT)?;
 
-        let mut source = AlignedSliceReader::new(&data);
+        let mut source = AlignedSliceReader::new(data.as_slice());
 
         let strings =
             IndexVec::read_from_bounded_with(&mut source, "debug_info strings", 1, read_string)?;
@@ -215,22 +229,11 @@ impl Deserializable for DebugSourceNode {
         // are emitted based relative to the start of the buffer.
         let data_len = read_bounded_len(source, "debug source node", 1)?;
         let data = source.read_slice(data_len)?;
-        // Copy the data to an allocation guaranteed to be u32-aligned - this is sufficient to
-        // guarantee proper alignment of all the contained data.
-        let layout = alloc::alloc::Layout::from_size_align(data_len, align_of::<u32>())
-            .expect("data is too large");
-        let data = unsafe {
-            let ptr = alloc::alloc::alloc(layout);
-            if ptr.is_null() {
-                alloc::alloc::handle_alloc_error(layout)
-            } else {
-                let ptr = core::slice::from_raw_parts_mut(ptr, data_len);
-                ptr.copy_from_slice(data);
-                alloc::boxed::Box::<[u8]>::from_raw(ptr)
-            }
-        };
+        // Keep the same base-alignment guarantee as the package-level buffer so every directly
+        // decoded row remains aligned even if new row types are shared between the two payloads.
+        let data = AlignedBytes::copy_from_slice(data, DEBUG_INFO_BUFFER_ALIGNMENT)?;
 
-        let mut source = AlignedSliceReader::new(&data);
+        let mut source = AlignedSliceReader::new(data.as_slice());
 
         let exec_node = MastNodeId::new_unchecked(source.read_u32()?);
 
@@ -604,6 +607,62 @@ impl Deserializable for DebugFunctionInfo {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+/// An owned byte buffer whose allocation layout is preserved until deallocation.
+struct AlignedBytes {
+    ptr: Option<NonNull<u8>>,
+    layout: Layout,
+}
+
+impl AlignedBytes {
+    fn copy_from_slice(source: &[u8], alignment: usize) -> Result<Self, DeserializationError> {
+        let layout = Layout::from_size_align(source.len(), alignment).map_err(|_| {
+            DeserializationError::InvalidValue(format!(
+                "debug info payload size {} is too large: unable to allocate aligned buffer of sufficient size",
+                source.len()
+            ))
+        })?;
+
+        if source.is_empty() {
+            return Ok(Self { ptr: None, layout });
+        }
+
+        // SAFETY: `layout` has non-zero size in this branch and was constructed successfully above.
+        let ptr = unsafe { alloc::alloc::alloc(layout) };
+        let Some(ptr) = NonNull::new(ptr) else {
+            alloc::alloc::handle_alloc_error(layout)
+        };
+        // SAFETY: `ptr` points to a newly allocated block of `source.len()` bytes and therefore
+        // does not overlap `source`. Both pointers are valid for reads/writes of
+        // `source.len()` bytes.
+        unsafe {
+            ptr.as_ptr().copy_from_nonoverlapping(source.as_ptr(), source.len());
+        }
+
+        Ok(Self { ptr: Some(ptr), layout })
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        let Some(ptr) = self.ptr else {
+            return &[];
+        };
+        // SAFETY: `ptr` was allocated for `layout` and remains owned by `self`, so it is valid for
+        // reads of `layout.size()` bytes for the lifetime of this borrow.
+        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), self.layout.size()) }
+    }
+}
+
+impl Drop for AlignedBytes {
+    fn drop(&mut self) {
+        if let Some(ptr) = self.ptr {
+            // SAFETY: `ptr` was allocated with this exact layout in `copy_from_slice`, has not been
+            // deallocated, and is never present for the zero-sized layout.
+            unsafe {
+                alloc::alloc::dealloc(ptr.as_ptr(), self.layout);
+            }
+        }
+    }
+}
+
 struct AlignedSliceReader<'a> {
     source: &'a [u8],
     pos: usize,
@@ -617,9 +676,28 @@ impl<'a> AlignedSliceReader<'a> {
 
     fn read_aligned_slice_of<T>(&mut self, len: usize) -> Result<&[T], DeserializationError> {
         self.skip_alignment_padding::<T>()?;
-        let bytes = self.read_slice(len * size_of::<T>())?;
+        let byte_len = len.checked_mul(size_of::<T>()).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "aligned slice count {len} overflows element size {}",
+                size_of::<T>()
+            ))
+        })?;
+        if len == 0 {
+            return Ok(&[]);
+        }
+        let bytes = self.read_slice(byte_len)?;
         let ptr = bytes.as_ptr().cast::<T>();
-        assert!(ptr.is_aligned());
+        if !ptr.is_aligned() {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "aligned slice at byte offset {} does not satisfy alignment {}",
+                self.pos - byte_len,
+                align_of::<T>(),
+            )));
+        }
+        // SAFETY: The byte range was bounds-checked above, starts at an address aligned for `T`,
+        // and spans exactly `len * size_of::<T>()` bytes. The high-throughput wire format
+        // separately requires callers to use row types whose encoded bytes are valid values
+        // of `T`.
         Ok(unsafe { core::slice::from_raw_parts(ptr, len) })
     }
 
@@ -685,7 +763,7 @@ fn pad_to_align<T>(output: &mut Vec<u8>) {
 unsafe fn copy_slice_memory_to_output<T: Copy>(slice: &[T], output: &mut Vec<u8>) {
     unsafe {
         let ptr = slice.as_ptr() as *const u8;
-        let slice_layout = alloc::alloc::Layout::array::<T>(slice.len()).unwrap();
+        let slice_layout = Layout::array::<T>(slice.len()).unwrap();
         let range = slice.as_ptr_range();
         let actual_size = range.end.byte_offset_from_unsigned(range.start);
         let layout_size = slice_layout.size();
@@ -788,6 +866,45 @@ mod tests {
         value.write_into(&mut bytes);
         let result = T::read_from(&mut miden_core::serde::SliceReader::new(&bytes)).unwrap();
         assert_eq!(value, &result);
+    }
+
+    #[test]
+    fn aligned_bytes_preserves_contents_and_required_alignment() {
+        let payload = [1, 2, 3, 4, 5];
+        let data = AlignedBytes::copy_from_slice(&payload, DEBUG_INFO_BUFFER_ALIGNMENT).unwrap();
+
+        assert_eq!(data.as_slice(), payload);
+        assert_eq!(data.as_slice().as_ptr().addr() % DEBUG_INFO_BUFFER_ALIGNMENT, 0);
+    }
+
+    #[test]
+    fn aligned_bytes_handles_empty_payload() {
+        let data = AlignedBytes::copy_from_slice(&[], DEBUG_INFO_BUFFER_ALIGNMENT).unwrap();
+
+        assert!(data.ptr.is_none());
+        assert!(data.as_slice().is_empty());
+        assert_eq!(data.layout.size(), 0);
+        assert_eq!(data.layout.align(), DEBUG_INFO_BUFFER_ALIGNMENT);
+    }
+
+    #[test]
+    fn aligned_slice_reader_rejects_byte_length_overflow() {
+        let mut reader = AlignedSliceReader::new(&[]);
+        let error = reader.read_aligned_slice_of::<u64>(usize::MAX).unwrap_err();
+
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("overflows element size"));
+    }
+
+    #[test]
+    fn aligned_slice_reader_supports_maximum_row_alignment() {
+        let bytes = [0u8; size_of::<DebugErrorMessage>()];
+        let data = AlignedBytes::copy_from_slice(&bytes, DEBUG_INFO_BUFFER_ALIGNMENT).unwrap();
+        let mut reader = AlignedSliceReader::new(data.as_slice());
+
+        assert_eq!(reader.read_aligned_slice_of::<DebugErrorMessage>(1).unwrap().len(), 1);
     }
 
     fn roundtrip_debug_info(value: &PackageDebugInfo) -> PackageDebugInfo {
