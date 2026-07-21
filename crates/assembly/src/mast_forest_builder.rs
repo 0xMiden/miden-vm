@@ -689,11 +689,9 @@ impl MastForestBuilder {
     ) -> Result<(), Report> {
         use miden_assembly_syntax::ast::types::Type;
 
-        if let Ok(loc) = source_manager.location(*procedure.span()) {
+        if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
             let source_ref = self.latest_source_ref_for_node_ref(procedure.body_node_ref());
-            let file_line_col = source_manager.file_line_col(*procedure.span()).unwrap();
-            let location_id = self.debug_info.add_location(loc);
-            let file_idx = self.debug_info.debug_info().locations()[location_id].file_idx;
+            let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
             let name_idx = self.debug_info.add_string(procedure.path().as_str());
             let type_idx = if let Some(signature) = procedure.signature() {
                 Some(self.debug_info.register_debug_type(
