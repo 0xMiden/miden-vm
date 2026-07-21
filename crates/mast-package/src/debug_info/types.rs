@@ -874,6 +874,82 @@ mod tests {
     }
 
     #[test]
+    fn test_package_source_debug_merge_remaps_first_input_execution_nodes() {
+        use miden_core::{
+            mast::{
+                BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
+            },
+            operations::Operation,
+        };
+
+        let mut source_builder = DenseMastForestBuilder::new();
+        let block = source_builder
+            .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
+            .unwrap();
+        source_builder.mark_root(block);
+        let (source_forest, source_remapping) = source_builder.finish_with_id_map().unwrap();
+        let block = source_remapping.get(block).unwrap();
+
+        // External nodes are finalized before basic blocks, forcing the first forest's block ID to
+        // move in the merged forest.
+        let mut other_builder = DenseMastForestBuilder::new();
+        let external = other_builder.push_node(ExternalNodeBuilder::new(Word::default())).unwrap();
+        other_builder.mark_root(external);
+        let (other_forest, _) = other_builder.finish_with_id_map().unwrap();
+
+        let (_merged_forest, root_map) =
+            MastForest::merge([&source_forest, &other_forest]).unwrap();
+        let merged_block = root_map.map_node(0, &block).unwrap();
+        assert_ne!(merged_block, block, "test setup must renumber the first forest's block");
+
+        let mut debug_builder = PackageDebugInfoBuilder::default();
+        let source_root = debug_builder.add_node(source_node(block, Vec::new(), 0, 1)).unwrap();
+        debug_builder.add_root(source_root);
+        let debug_info = debug_builder.build();
+
+        let merged_debug =
+            PackageDebugInfo::merge_source_debug([(0, debug_info.as_ref())], &root_map).unwrap();
+
+        assert_eq!(merged_debug[source_root].exec_node, merged_block);
+    }
+
+    #[test]
+    fn test_package_source_debug_merge_supports_forward_and_cyclic_type_references() {
+        use miden_core::mast::MastForestRootMap;
+
+        let mut base_builder = PackageDebugInfoBuilder::default();
+        let base_type = base_builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        assert_eq!(base_type, DebugTypeIdx::from(0));
+        let base = base_builder.build();
+
+        let mut cyclic_builder = PackageDebugInfoBuilder::default();
+        let first = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(1) });
+        let second = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(0) });
+        assert_eq!(first, DebugTypeIdx::from(0));
+        assert_eq!(second, DebugTypeIdx::from(1));
+        let cyclic = cyclic_builder.build();
+
+        let merged = PackageDebugInfo::merge_source_debug(
+            [(0, base.as_ref()), (1, cyclic.as_ref())],
+            &MastForestRootMap::default(),
+        )
+        .unwrap();
+
+        let merged_first = DebugTypeIdx::from(1);
+        let merged_second = DebugTypeIdx::from(2);
+        assert_eq!(
+            merged[merged_first],
+            DebugTypeInfo::Pointer { pointee_type_idx: merged_second }
+        );
+        assert_eq!(
+            merged[merged_second],
+            DebugTypeInfo::Pointer { pointee_type_idx: merged_first }
+        );
+    }
+
+    #[test]
     fn test_package_source_debug_merge_remaps_non_root_execution_nodes() {
         use miden_core::{
             mast::{BasicBlockNodeBuilder, CallNodeBuilder, DenseMastForestBuilder, MastForest},

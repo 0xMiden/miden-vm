@@ -9,13 +9,15 @@ mod builder;
 mod serialization;
 mod types;
 
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 pub use builder::*;
 use miden_core::mast::{MastForestRootMap, MastNodeId};
 use miden_debug_types::{Location, Uri};
 use miden_utils_indexing::{Idx, IndexVec};
 pub use types::*;
+
+type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 
 pub const DEBUG_INFO_VERSION: u8 = 2;
 
@@ -175,7 +177,7 @@ impl<Exec: Idx, Src: Idx> core::ops::Index<DebugLocIdx> for DebugInfo<Exec, Src>
 /// A marker trait for [Idx] impls that may be used as a source node index with [DebugInfo]
 ///
 /// This is needed to avoid coherence issues with [core::ops::Index] impls for [DebugInfo]
-pub trait SourceNodeIdMarker: Idx {}
+pub trait SourceNodeIdMarker: Idx + core::hash::Hash {}
 
 impl<Exec: Idx, Src: SourceNodeIdMarker> core::ops::Index<Src> for DebugInfo<Exec, Src> {
     type Output = SourceNode<Exec, Src>;
@@ -234,9 +236,9 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
     /// is interned and the corresponding file records are retargeted to it. Other debug records
     /// which reference the original string are left unchanged.
     pub fn trim_file_paths(&mut self, mut trimmer: impl FnMut(&str) -> Option<Arc<str>>) {
-        use alloc::collections::btree_map::Entry;
+        use hashbrown::hash_map::Entry;
 
-        let mut string_indices = BTreeMap::<Arc<str>, DebugStringIdx>::new();
+        let mut string_indices = FxHashMap::<Arc<str>, DebugStringIdx>::default();
         for (index, string) in self.strings.iter().enumerate() {
             string_indices
                 .entry(string.clone())
@@ -247,7 +249,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         // checksums). Apply the trimmer once per path and retarget each file row to the result.
         // Appending/reusing a string rather than mutating the original preserves unrelated records
         // which happen to reference the same globally-interned string.
-        let mut remapped_paths = BTreeMap::<DebugStringIdx, DebugStringIdx>::new();
+        let mut remapped_paths = FxHashMap::<DebugStringIdx, DebugStringIdx>::default();
         for file in self.files.iter_mut() {
             let old_path_idx = file.path_idx;
             let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
@@ -465,14 +467,27 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
         Src: 'a,
     {
         let mut inputs = inputs.into_iter();
-        let Some((_, base)) = inputs.next() else {
+        let Some((base_forest_index, base)) = inputs.next() else {
             return Ok(Default::default());
         };
 
-        let mut builder = DebugInfoBuilder::from(Box::from(base.clone()));
+        // Preserve the first input's table indices exactly so that subsequent inputs continue to
+        // deduplicate strings, files, and locations against the base tables. Execution node IDs are
+        // positional, however, so they must be remapped just like every later input.
+        let mut base = base.clone();
+        for source_node in base.nodes.iter_mut() {
+            source_node.exec_node = root_map
+                .map_node(base_forest_index, &source_node.exec_node)
+                .ok_or(DebugInfoMergeError::MissingExecNodeMapping {
+                    forest_index: base_forest_index,
+                    exec_node: source_node.exec_node,
+                })?;
+        }
+
+        let mut builder = DebugInfoBuilder::from(Box::new(base));
 
         for (forest_index, debug_info) in inputs {
-            let mut remapped_strings = BTreeMap::<DebugStringIdx, DebugStringIdx>::default();
+            let mut remapped_strings = FxHashMap::<DebugStringIdx, DebugStringIdx>::default();
             for (i, string) in debug_info.strings.iter().enumerate() {
                 let prev_index =
                     DebugStringIdx::from(u32::try_from(i).expect("invalid string table index"));
@@ -480,7 +495,20 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 remapped_strings.insert(prev_index, new_index);
             }
 
-            let mut remapped_types = BTreeMap::<DebugTypeIdx, DebugTypeIdx>::default();
+            // Type records may contain forward or cyclic references. Reserve every output index
+            // before rewriting any record, then append records without interning so that those
+            // reserved indices remain stable. This mirrors the pre-consolidation merge behavior;
+            // each input table is already internally uniqued by its builder.
+            let type_offset = builder.debug_info().types.len();
+            let mut remapped_types = FxHashMap::<DebugTypeIdx, DebugTypeIdx>::default();
+            for i in 0..debug_info.types.len() {
+                let prev_index =
+                    DebugTypeIdx::from(u32::try_from(i).expect("invalid types table index"));
+                let new_index = DebugTypeIdx::from(
+                    u32::try_from(type_offset + i).expect("too many types after merging"),
+                );
+                remapped_types.insert(prev_index, new_index);
+            }
             for (i, debug_type) in debug_info.types.iter().enumerate() {
                 let prev_index =
                     DebugTypeIdx::from(u32::try_from(i).expect("invalid types table index"));
@@ -490,11 +518,15 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     &remapped_strings,
                     &remapped_types,
                 )?;
-                let new_index = builder.add_type(debug_type);
-                remapped_types.insert(prev_index, new_index);
+                let new_index = builder
+                    .debug_info_mut()
+                    .types
+                    .push(debug_type)
+                    .expect("too many types after merging");
+                debug_assert_eq!(new_index, remapped_types[&prev_index]);
             }
 
-            let mut remapped_files = BTreeMap::<DebugFileIdx, DebugFileIdx>::default();
+            let mut remapped_files = FxHashMap::<DebugFileIdx, DebugFileIdx>::default();
             for (i, file) in debug_info.files.iter().enumerate() {
                 let prev_index =
                     DebugFileIdx::from(u32::try_from(i).expect("invalid sources table index"));
@@ -510,7 +542,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 remapped_files.insert(prev_index, new_index);
             }
 
-            let mut remapped_locations = BTreeMap::<DebugLocIdx, DebugLocIdx>::default();
+            let mut remapped_locations = FxHashMap::<DebugLocIdx, DebugLocIdx>::default();
             for (i, loc) in debug_info.locations.iter().enumerate() {
                 let prev_index =
                     DebugLocIdx::from(u32::try_from(i).expect("invalid locations table index"));
@@ -541,7 +573,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 builder.add_error_message_with_index(error_message.err_code, message);
             }
 
-            let mut remapped_nodes = BTreeMap::<Src, Src>::default();
+            let mut remapped_nodes = FxHashMap::<Src, Src>::default();
             let start_node_index = builder.debug_info().nodes().len();
             for i in 0..debug_info.nodes.len() {
                 let prev_index = Src::from(u32::try_from(i).expect("too many nodes"));
@@ -662,7 +694,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                 )?);
             }
 
-            let mut remapped_functions = BTreeMap::<DebugFunctionIdx, DebugFunctionIdx>::new();
+            let mut remapped_functions = FxHashMap::<DebugFunctionIdx, DebugFunctionIdx>::default();
             for (i, function) in debug_info.functions.iter().enumerate() {
                 let prev_index =
                     DebugFunctionIdx::from(u32::try_from(i).expect("too many functions"));
@@ -757,8 +789,8 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
 fn remap_debug_type_info<Exec: Idx, Src: Idx>(
     forest_index: usize,
     ty: &DebugTypeInfo,
-    string_map: &BTreeMap<DebugStringIdx, DebugStringIdx>,
-    type_map: &BTreeMap<DebugTypeIdx, DebugTypeIdx>,
+    string_map: &FxHashMap<DebugStringIdx, DebugStringIdx>,
+    type_map: &FxHashMap<DebugTypeIdx, DebugTypeIdx>,
 ) -> Result<DebugTypeInfo, DebugInfoMergeError<Exec, Src>> {
     Ok(match ty {
         DebugTypeInfo::Primitive(primitive) => DebugTypeInfo::Primitive(*primitive),
@@ -861,7 +893,7 @@ fn remap_debug_type_info<Exec: Idx, Src: Idx>(
 fn remap_string_index<Exec: Idx, Src: Idx>(
     forest_index: usize,
     string_idx: DebugStringIdx,
-    string_map: &BTreeMap<DebugStringIdx, DebugStringIdx>,
+    string_map: &FxHashMap<DebugStringIdx, DebugStringIdx>,
     error: impl FnOnce(usize, DebugStringIdx) -> DebugInfoMergeError<Exec, Src>,
 ) -> Result<DebugStringIdx, DebugInfoMergeError<Exec, Src>> {
     string_map
@@ -873,7 +905,7 @@ fn remap_string_index<Exec: Idx, Src: Idx>(
 fn remap_type_idx<Exec: Idx, Src: Idx>(
     forest_index: usize,
     type_idx: DebugTypeIdx,
-    type_map: &BTreeMap<DebugTypeIdx, DebugTypeIdx>,
+    type_map: &FxHashMap<DebugTypeIdx, DebugTypeIdx>,
 ) -> Result<DebugTypeIdx, DebugInfoMergeError<Exec, Src>> {
     type_map
         .get(&type_idx)

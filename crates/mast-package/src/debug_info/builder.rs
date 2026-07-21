@@ -5,11 +5,9 @@ use miden_core::mast::MastNodeId;
 use miden_debug_types::{Location, Uri};
 use miden_utils_indexing::{Idx, IndexedVecError};
 
-type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
-
 use super::{
     DebugErrorMessage, DebugInfo, DebugLoc, DebugLocIdx, DebugSourceNodeId, FunctionInfo,
-    SourceNode, SourceNodeIdMarker,
+    FxHashMap, SourceNode, SourceNodeIdMarker,
     types::{
         DebugFileIdx, DebugFileInfo, DebugFunctionIdx, DebugStringIdx, DebugTypeIdx, DebugTypeInfo,
     },
