@@ -17,18 +17,24 @@ echo "# VM branch: $vm_branch @ $(git -C "$repo_root" rev-parse --short HEAD)"
 echo "# signature dependency: $sig_dep"
 echo "# recursive benchmark: k=$SIG_BATCH_BENCH_MIN_K signatures=$((1 << SIG_BATCH_BENCH_MIN_K))"
 
+build_cmd=(
+  cargo test --release -p miden-core-lib --features "$features"
+  prove_verify_sig_batch_shared_message_once --no-run
+)
 cmd=(
   cargo test --release -p miden-core-lib --features "$features"
   prove_verify_sig_batch_shared_message_once -- --ignored --nocapture
 )
 
+cd "$repo_root"
+echo "# build step: ${build_cmd[*]}"
+"${build_cmd[@]}"
+echo "# timed step: ${cmd[*]}"
+
 if [[ "$(uname -s)" == "Darwin" && -x /usr/bin/time ]]; then
-  cd "$repo_root"
   /usr/bin/time -l "${cmd[@]}"
 elif [[ -x /usr/bin/time ]]; then
-  cd "$repo_root"
   /usr/bin/time -v "${cmd[@]}"
 else
-  cd "$repo_root"
   "${cmd[@]}"
 fi

@@ -2073,6 +2073,7 @@ source = "git+https://github.com/0xMiden/miden-signature.git?rev=5fe9334dd19bd48
 dependencies = [
  "blake3",
  "libm",
+ "metal",
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
@@ -2081,6 +2082,7 @@ dependencies = [
  "p3-symmetric",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
+ "rayon",
 ]
 
 [[package]]
