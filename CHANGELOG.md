@@ -333,6 +333,11 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 ## miden-vm v0.23.2 (2026-05-25)
 
 - Restored `DebugVarInfo::set_value_location` and `DebugVarLocation::FrameBase` for debug metadata compatibility ([#3189](https://github.com/0xMiden/miden-vm/pull/3189)).
+## Unreleased
+
+#### Features
+
+- Added authenticated rooted Merkle-frontier support to the core MMR (`mmr::root`, `mmr::root_with_len`, `mmr::unpack_frontier`) ([#3184](https://github.com/0xMiden/miden-vm/pull/3184)).
 
 ## miden-crypto v0.25.1 (2026-05-21)
 

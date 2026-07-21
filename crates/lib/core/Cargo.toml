@@ -21,6 +21,14 @@ doctest = false
 name = "compilation"
 harness = false
 
+[[bench]]
+name = "mmr"
+harness = false
+
+[[bench]]
+name = "hash_primitives"
+harness = false
+
 [[test]]
 name = "core-lib"
 path = "tests/main.rs"

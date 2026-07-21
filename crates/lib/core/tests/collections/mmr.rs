@@ -550,6 +550,688 @@ fn test_mmr_pack() {
 }
 
 #[test]
+fn test_mmr_root_empty() {
+    let source = "
+        use miden::core::collections::mmr
+
+        begin
+            push.0.1000 mem_store drop
+            push.1000 exec.mmr::root
+            swapw dropw
+        end
+    ";
+
+    build_test!(source).expect_stack(&word_to_ints(&Word::default()));
+}
+
+#[test]
+fn test_mmr_root_matches_frontier_fold() {
+    let cases = [
+        // single leaf: no leading zeros, single peak
+        (1_u64, vec![word_from_u64(1)]),
+        // single leading zero before the first (and only) set bit, exercising the phase 1 -> 2
+        // seam
+        (2, vec![word_from_u64(1)]),
+        // raw-root empty-padding collision shape: len 3 with an empty right leaf
+        (3, vec![Poseidon2::merge(&[Word::default(), Word::default()]), Word::default()]),
+        // mixed bits with a trailing all-ones run (skips the empty-square shortcut)
+        (13, vec![word_from_u64(8), word_from_u64(4), word_from_u64(1)]),
+        // leading zeros, then a set bit, then a gap of unset bits (exercises empty squaring after
+        // acc and empty have diverged): 0b101000
+        (0b10_1000, vec![word_from_u64(2), word_from_u64(1)]),
+        // all ones: phase 1 is skipped and empty is never squared
+        (0b1111_1111_1111_1111_u64, (1..=16).map(word_from_u64).collect::<Vec<_>>()),
+        // power of two: phase 1 folds every leading zero, single peak at the top
+        (0b1_0000_0000_0000_0000_u64, vec![word_from_u64(17)]),
+    ];
+
+    for (num_leaves, peaks) in cases {
+        let mmr_ptr = 1000_u32;
+        let mut source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                push.{num_leaves} push.{mmr_ptr} mem_store drop
+        "
+        );
+
+        for (idx, peak) in peaks.iter().enumerate() {
+            let stack = word_to_ints(peak);
+            source.push_str(&format!(
+                "
+                push.{}.{}.{}.{} push.{} mem_storew_le dropw
+                ",
+                stack[3],
+                stack[2],
+                stack[1],
+                stack[0],
+                mmr_ptr + 4 + idx as u32 * 4,
+            ));
+        }
+
+        source.push_str(&format!(
+            "
+                push.{mmr_ptr} exec.mmr::root
+                swapw dropw
+            end
+            "
+        ));
+
+        let expected_root = mmr_frontier_root(num_leaves as usize, &peaks);
+        build_test!(&source).expect_stack(&word_to_ints(&expected_root));
+    }
+}
+
+#[test]
+fn test_mmr_root_with_len_returns_authenticated_pair() {
+    let num_leaves = 13_u64;
+    let peaks = vec![word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let mmr_ptr = 1000_u32;
+    let mut source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            push.{num_leaves} push.{mmr_ptr} mem_store drop
+    "
+    );
+
+    for (idx, peak) in peaks.iter().enumerate() {
+        let stack = word_to_ints(peak);
+        source.push_str(&format!(
+            "
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+            ",
+            stack[3],
+            stack[2],
+            stack[1],
+            stack[0],
+            mmr_ptr + 4 + idx as u32 * 4,
+        ));
+    }
+
+    source.push_str(&format!(
+        "
+            push.{mmr_ptr} exec.mmr::root_with_len
+            dup.4 push.{num_leaves} assert_eq
+            movup.4 drop
+            swapw dropw
+        end
+        "
+    ));
+
+    let expected_root = mmr_frontier_root(num_leaves as usize, &peaks);
+    build_test!(&source).expect_stack(&word_to_ints(&expected_root));
+}
+
+#[test]
+fn test_mmr_root_with_len_disambiguates_empty_padding_collision() {
+    let empty_leaf = Word::default();
+    let empty_pair = Poseidon2::merge(&[empty_leaf, empty_leaf]);
+    let peaks_len2 = vec![empty_pair];
+    let peaks_len3 = vec![empty_pair, empty_leaf];
+
+    let root_len2 = mmr_frontier_root(2, &peaks_len2);
+    let root_len3 = mmr_frontier_root(3, &peaks_len3);
+    assert_eq!(root_len2, root_len3);
+
+    let mmr_len2_ptr = 1000_u32;
+    let mmr_len3_ptr = 2000_u32;
+    let empty_pair = word_to_ints(&empty_pair);
+    let empty_leaf = word_to_ints(&empty_leaf);
+    let raw_root = word_to_ints(&root_len2);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            push.2 push.{mmr_len2_ptr} mem_store drop
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+
+            push.3 push.{mmr_len3_ptr} mem_store drop
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+
+            push.{mmr_len2_ptr} exec.mmr::root_with_len
+            dup.4 push.2 assert_eq
+            movup.4 drop
+            push.{}.{}.{}.{} assert_eqw
+
+            push.{mmr_len3_ptr} exec.mmr::root_with_len
+            dup.4 push.3 assert_eq
+            movup.4 drop
+            push.{}.{}.{}.{} assert_eqw
+        end
+        ",
+        empty_pair[3],
+        empty_pair[2],
+        empty_pair[1],
+        empty_pair[0],
+        mmr_len2_ptr + 4,
+        empty_pair[3],
+        empty_pair[2],
+        empty_pair[1],
+        empty_pair[0],
+        mmr_len3_ptr + 4,
+        empty_leaf[3],
+        empty_leaf[2],
+        empty_leaf[1],
+        empty_leaf[0],
+        mmr_len3_ptr + 8,
+        raw_root[3],
+        raw_root[2],
+        raw_root[1],
+        raw_root[0],
+        raw_root[3],
+        raw_root[2],
+        raw_root[1],
+        raw_root[0],
+    );
+
+    build_test!(&source).expect_stack(&[]);
+}
+
+#[test]
+fn test_mmr_unpack_frontier_authenticates_pair() {
+    let num_leaves = 13_u64;
+    let peaks = [word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let root = mmr_frontier_root(num_leaves as usize, &peaks);
+    let mmr_ptr = 1000_u32;
+
+    // advice map value: [num_leaves, 0, 0, 0] || peaks (same layout as `unpack`), keyed by ROOT
+    let mut value = vec![Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO];
+    let mut padded_peaks = peaks.to_vec();
+    padded_peaks.resize(16, Word::default());
+    for peak in &padded_peaks {
+        value.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(*peak));
+    }
+    let advice_map: &[(Word, Vec<Felt>)] = &[(root, value)];
+
+    // operand stack: [ROOT, num_leaves, mmr_ptr]
+    let mut stack = word_to_ints(&root);
+    stack.push(num_leaves);
+    stack.push(mmr_ptr as u64);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+        begin
+            push.9.9.9.9 push.{} mem_storew_le dropw
+            exec.mmr::unpack_frontier
+        end
+    ",
+        mmr_ptr + 16
+    );
+    let test = build_test!(&source, &stack, &[], MerkleStore::new(), advice_map.iter().cloned());
+
+    // peaks must be loaded into memory exactly as `unpack` would leave them
+    let mut expected_memory = vec![num_leaves, 0, 0, 0];
+    expected_memory.extend(digests_to_ints(&padded_peaks));
+    test.expect_stack_and_memory(&[], mmr_ptr, &expected_memory);
+}
+
+#[test]
+fn test_mmr_unpack_frontier_rejects_wrong_len() {
+    // Same raw root, but a longer (empty-padded) length must be rejected: this is huitseeker's
+    // empty-padding ambiguity. We commit to `num_leaves + 1` against the root of `num_leaves`.
+    let num_leaves = 13_u64;
+    let peaks = [word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let root = mmr_frontier_root(num_leaves as usize, &peaks);
+    let mmr_ptr = 1000_u32;
+
+    let tampered_len = num_leaves + 1;
+    let mut value = vec![Felt::new_unchecked(tampered_len), ZERO, ZERO, ZERO];
+    let mut padded_peaks = peaks.to_vec();
+    padded_peaks.resize(16, Word::default());
+    for peak in &padded_peaks {
+        value.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(*peak));
+    }
+    let advice_map: &[(Word, Vec<Felt>)] = &[(root, value)];
+
+    // commit to a tampered length while presenting the genuine root
+    let mut stack = word_to_ints(&root);
+    stack.push(tampered_len);
+    stack.push(mmr_ptr as u64);
+
+    let source = "
+        use miden::core::collections::mmr
+        begin exec.mmr::unpack_frontier end
+    ";
+    build_test!(source, &stack, &[], MerkleStore::new(), advice_map.iter().cloned())
+        .execute()
+        .expect_err("frontier root must not authenticate a tampered length");
+}
+
+#[test]
+fn test_mmb_root_matches_crypto_belt_root() {
+    for num_leaves in (1usize..=64).chain([127, 128, 255, 257, 1024, 1337]) {
+        let mmb = TestMmb::from_len(num_leaves);
+        let mmb_ptr = 1000_u32;
+        let source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                {}
+                push.{mmb_ptr} exec.mmr::mmb_root
+                swapw dropw
+            end
+            ",
+            mmb_memory_source(mmb_ptr, &mmb),
+        );
+
+        build_test!(&source).expect_stack(&word_to_ints(&mmb.root()));
+    }
+}
+
+#[test]
+fn test_mmb_root_with_len_returns_authenticated_pair() {
+    let mmb = TestMmb::from_len(13);
+    let mmb_ptr = 1000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.{mmb_ptr} exec.mmr::mmb_root_with_len
+            dup.4 push.13 assert_eq
+            movup.4 drop
+            swapw dropw
+        end
+        ",
+        mmb_memory_source(mmb_ptr, &mmb),
+    );
+
+    build_test!(&source).expect_stack(&word_to_ints(&mmb.root()));
+}
+
+#[test]
+fn test_mmb_second_bagging_uses_plain_merkle_merge() {
+    let mmb = TestMmb::from_len(5);
+    let shape = shape_mountains(mmb.len);
+    let peaks = mmb.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+    let range_roots = shape_ranges(&shape)
+        .into_iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range]))
+        .collect::<Vec<_>>();
+    assert!(range_roots.len() > 1);
+
+    let expected = range_roots.iter().fold(EMPTY_WORD, |acc, root| Poseidon2::merge(&[acc, *root]));
+
+    assert_eq!(mmb.root(), expected);
+}
+
+#[test]
+fn test_mmb_range_bagging_uses_plain_merkle_merge() {
+    let mmb = TestMmb::from_len(9);
+    let shape = shape_mountains(mmb.len);
+    let peaks = mmb.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+    let first_range = shape_ranges(&shape).into_iter().next().unwrap();
+    assert!(first_range.len() > 1);
+
+    let expected = peaks[first_range.clone()]
+        .iter()
+        .fold(EMPTY_WORD, |acc, root| Poseidon2::merge(&[acc, *root]));
+
+    assert_eq!(bag_range(&shape[first_range.clone()], &peaks[first_range]), expected);
+}
+
+#[test]
+fn test_mmb_verify_leaf_accepts_all_positions() {
+    for num_leaves in [1usize, 2, 3, 5, 8, 13, 17, 33, 64] {
+        let mmb = TestMmb::from_len(num_leaves);
+        let root = mmb.root();
+
+        for position in 0..mmb.len {
+            let proof = mmb.open(position);
+            assert_eq!(proof_root(&proof), root);
+            let proof_ptr = 2000_u32;
+            let source = format!(
+                "
+                use miden::core::collections::mmr
+
+                begin
+                    {}
+                    push.{}
+                    {}
+                    push.{proof_ptr}
+                    exec.mmr::mmb_verify_leaf
+                end
+                ",
+                mmb_proof_memory_source(proof_ptr, &proof),
+                mmb.len,
+                push_word(&root),
+            );
+
+            build_test!(&source).expect_stack(&[]);
+        }
+    }
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_wrong_authenticated_len() {
+    let mmb = TestMmb::from_len(8);
+    let proof = mmb.open(7);
+    let proof_ptr = 2000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.7
+            {}
+            push.{proof_ptr}
+            exec.mmr::mmb_verify_leaf
+        end
+        ",
+        mmb_proof_memory_source(proof_ptr, &proof),
+        push_word(&mmb.root()),
+    );
+
+    build_test!(&source)
+        .execute()
+        .expect_err("tampered length must not authenticate the proof");
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_tampered_position() {
+    let mmb = TestMmb::from_len(17);
+    let root = mmb.root();
+
+    // A valid proof for position 0, relabeled to: a position in the same mountain (1), a
+    // position in a mountain of a different height (8), and a position in another range (16).
+    // All must fail to authenticate.
+    for tampered_position in [1usize, 8, 16] {
+        let mut proof = mmb.open(0);
+        proof.position = tampered_position;
+        let proof_ptr = 2000_u32;
+        let source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                {}
+                push.{}
+                {}
+                push.{proof_ptr}
+                exec.mmr::mmb_verify_leaf
+            end
+            ",
+            mmb_proof_memory_source(proof_ptr, &proof),
+            mmb.len,
+            push_word(&root),
+        );
+
+        build_test!(&source)
+            .execute()
+            .expect_err("tampered position must not authenticate the proof");
+    }
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_tampered_direction() {
+    let mmb = TestMmb::from_len(17);
+    let root = mmb.root();
+
+    let mut proof = mmb.open(5);
+    proof.siblings[0].is_right = !proof.siblings[0].is_right;
+    let proof_ptr = 2000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.{}
+            {}
+            push.{proof_ptr}
+            exec.mmr::mmb_verify_leaf
+        end
+        ",
+        mmb_proof_memory_source(proof_ptr, &proof),
+        mmb.len,
+        push_word(&root),
+    );
+
+    build_test!(&source)
+        .execute()
+        .expect_err("tampered direction must not authenticate the proof");
+}
+
+/// Validates the closed-form shape lemmas `mmb_verify_leaf` uses to derive the canonical proof
+/// path from `(position, num_leaves)` against a walk over the shape, for every position of every
+/// MMB shape up to 2048 leaves.
+#[test]
+fn test_mmb_closed_form_shape_matches_walk() {
+    for n in 1usize..=2048 {
+        let bits = n + 1;
+        let shape = shape_mountains(n);
+        let ranges = shape_ranges(&shape);
+        let mut starts = Vec::new();
+        let mut acc = 0;
+        for mountain in &shape {
+            starts.push(acc);
+            acc += 1usize << mountain.height;
+        }
+
+        for p in 0..n {
+            let midx = (0..shape.len())
+                .find(|&i| p >= starts[i] && p < starts[i] + (1usize << shape[i].height))
+                .unwrap();
+            let h_true = shape[midx].height;
+            let local_true = p - starts[midx];
+            let ridx = ranges.iter().position(|r| r.contains(&midx)).unwrap();
+            let rir_true = ranges[ridx].end - 1 - midx;
+            let ra_true = ranges.len() - 1 - ridx;
+
+            // closed forms
+            let g = n - p;
+            let m = floor_log2(g);
+            let pm = 1usize << m;
+            let pos = if (bits & (pm - 1)) <= g - pm { m } else { m - 1 };
+            let s = bits >> pos;
+            let h = pos + (s & 1);
+            let start = ((s >> 1) - 1) << (pos + 1);
+            let local = p - start;
+            let split_mask = bits & !((bits << 1) & (bits >> 1));
+            let low = split_mask & ((1usize << (pos + 1)) - 2);
+            let ra = low.count_ones() as usize;
+            let kstar = floor_log2(low | 1);
+            let rir = pos - kstar;
+
+            assert_eq!(
+                (h, local, rir, ra),
+                (h_true, local_true, rir_true, ra_true),
+                "n={n} p={p} pos={pos} midx={midx}"
+            );
+        }
+    }
+}
+
+/// Builds a proof with the canonical shape for `(num_leaves, position)` but synthetic sibling
+/// words, using the same closed forms `mmb_verify_leaf` derives (validated against the shape walk
+/// in `test_mmb_closed_form_shape_matches_walk`). The matching root is `proof_root` of the fold,
+/// so the proof verifies without materializing a `TestMmb` — this is what makes trace
+/// measurements at large `num_leaves` feasible.
+fn synthetic_mmb_proof(num_leaves: usize, position: usize) -> TestMmbProof {
+    assert!(position < num_leaves);
+    let bits = num_leaves + 1;
+    let g = num_leaves - position;
+    let m = floor_log2(g);
+    let pm = 1usize << m;
+    let pos = if (bits & (pm - 1)) <= g - pm { m } else { m - 1 };
+    let s = bits >> pos;
+    let height = pos + (s & 1);
+    let start = ((s >> 1) - 1) << (pos + 1);
+    let local = position - start;
+    let split_mask = bits & !((bits << 1) & (bits >> 1));
+    let low = split_mask & ((1usize << (pos + 1)) - 2);
+    let ranges_after = low.count_ones() as usize;
+    let right_in_range = pos - floor_log2(low | 1);
+
+    let mut siblings = Vec::new();
+    for i in 0..height {
+        siblings.push(TestMmbProofStep {
+            is_right: (local >> i) & 1 == 0,
+            sibling: word_from_u64(1_000 + i as u64),
+        });
+    }
+    siblings.push(TestMmbProofStep {
+        is_right: false,
+        sibling: word_from_u64(2_000),
+    });
+    for i in 0..right_in_range {
+        siblings.push(TestMmbProofStep {
+            is_right: true,
+            sibling: word_from_u64(3_000 + i as u64),
+        });
+    }
+    siblings.push(TestMmbProofStep {
+        is_right: false,
+        sibling: word_from_u64(4_000),
+    });
+    for i in 0..ranges_after {
+        siblings.push(TestMmbProofStep {
+            is_right: true,
+            sibling: word_from_u64(5_000 + i as u64),
+        });
+    }
+
+    TestMmbProof {
+        position,
+        leaf: word_from_u64(7),
+        siblings,
+    }
+}
+
+/// Prints the trace-segment breakdown of `mmb_verify_leaf` per (num_leaves, recency); the padded
+/// length is the proving-cost driver. Diagnostic only.
+#[test]
+#[ignore = "trace-cost diagnostic; run with --ignored --nocapture"]
+fn print_mmb_verify_trace_costs() {
+    for num_leaves in [1024usize, 65_536, 1 << 20, 1 << 26, (1 << 31) - 1] {
+        for recency in [1usize, 16, 256, 4_096, 65_536, 1 << 20, 1 << 26] {
+            if recency > num_leaves {
+                continue;
+            }
+            let position = num_leaves - recency;
+            let proof = synthetic_mmb_proof(num_leaves, position);
+            let root = proof_root(&proof);
+            let proof_ptr = 2000_u32;
+            let source = format!(
+                "
+                use miden::core::collections::mmr
+
+                begin
+                    {}
+                    push.{}
+                    {}
+                    push.{proof_ptr}
+                    exec.mmr::mmb_verify_leaf
+                end
+                ",
+                mmb_proof_memory_source(proof_ptr, &proof),
+                num_leaves,
+                push_word(&root),
+            );
+
+            let trace = build_test!(&source).execute().unwrap();
+            let s = trace.trace_len_summary();
+            let c = s.chiplets_trace_len();
+            println!(
+                "num_leaves={num_leaves:>10} recency={recency:>8} proof_len={:>3} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
+                proof.siblings.len(),
+                s.core_trace_len(),
+                s.range_trace_len(),
+                c.trace_len(),
+                c.hash_chiplet_len(),
+                c.bitwise_chiplet_len(),
+                c.memory_chiplet_len(),
+                s.trace_len(),
+                s.padded_trace_len(),
+            );
+        }
+    }
+}
+
+/// Prints the trace-segment breakdown of recomputing the commitment from peaks in memory, for
+/// the MMR rooted frontier (`root`) and the MMB belt (`mmb_root`). Peak values are synthetic;
+/// neither procedure asserts anything about them. Diagnostic only.
+#[test]
+#[ignore = "trace-cost diagnostic; run with --ignored --nocapture"]
+fn print_mmb_root_trace_costs() {
+    fn peaks_memory_source(ptr: u32, num_leaves: usize, num_peaks: usize) -> String {
+        let mut source = format!("push.{num_leaves} push.{ptr} mem_store drop\n");
+        for idx in 0..num_peaks {
+            source.push_str(&format!(
+                "{} push.{} mem_storew_le dropw\n",
+                push_word(&word_from_u64(100 + idx as u64)),
+                ptr + 4 + idx as u32 * 4,
+            ));
+        }
+        source
+    }
+
+    for num_leaves in [1024usize, 65_536, 1 << 20, 1 << 26, (1 << 31) - 1] {
+        let ptr = 1000_u32;
+        let variants = [
+            ("mmr_root", "root", num_leaves.count_ones() as usize),
+            ("mmb_root", "mmb_root", floor_log2(num_leaves + 1)),
+        ];
+        for (name, proc_name, num_peaks) in variants {
+            let source = format!(
+                "
+                use miden::core::collections::mmr
+
+                begin
+                    {}
+                    push.{ptr} exec.mmr::{proc_name}
+                    dropw
+                end
+                ",
+                peaks_memory_source(ptr, num_leaves, num_peaks),
+            );
+
+            let trace = build_test!(&source).execute().unwrap();
+            let s = trace.trace_len_summary();
+            let c = s.chiplets_trace_len();
+            println!(
+                "{name:>8} num_leaves={num_leaves:>10} peaks={num_peaks:>2} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
+                s.core_trace_len(),
+                s.range_trace_len(),
+                c.trace_len(),
+                c.hash_chiplet_len(),
+                c.bitwise_chiplet_len(),
+                c.memory_chiplet_len(),
+                s.trace_len(),
+                s.padded_trace_len(),
+            );
+        }
+    }
+}
+
+#[test]
+fn test_mmb_proof_length_tracks_recency() {
+    let mmb = TestMmb::from_len(65_536);
+
+    for recency in [1usize, 2, 4, 8, 16, 128, 1024, 16_384] {
+        let position = mmb.len - recency;
+        let proof = mmb.open(position);
+        let max_belt_len = 2 * floor_log2(recency) + 3;
+
+        assert!(
+            proof.siblings.len() <= max_belt_len,
+            "recency {recency} proof length {} exceeded {max_belt_len}",
+            proof.siblings.len()
+        );
+    }
+}
+
+#[test]
 fn test_mmr_add_single() {
     let mmr_ptr = 1000;
     let source = format!(
@@ -842,6 +1524,349 @@ fn test_mmr_large_add_roundtrip() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+struct TestMmb {
+    len: usize,
+    mountains: Vec<TestMountain>,
+}
+
+struct TestMountain {
+    start: usize,
+    height: u8,
+    root: Word,
+    node: Box<TestMmbNode>,
+}
+
+enum TestMmbNode {
+    Leaf(Word),
+    Inner {
+        root: Word,
+        left: Box<TestMmbNode>,
+        right: Box<TestMmbNode>,
+    },
+}
+
+struct TestMmbProof {
+    position: usize,
+    leaf: Word,
+    siblings: Vec<TestMmbProofStep>,
+}
+
+struct TestMmbProofStep {
+    is_right: bool,
+    sibling: Word,
+}
+
+#[derive(Clone, Copy)]
+struct ShapeMountain {
+    height: usize,
+}
+
+enum FoldDomain {
+    Range,
+    Belt,
+}
+
+impl TestMmb {
+    fn from_len(len: usize) -> Self {
+        let mut mmb = Self { len: 0, mountains: Vec::new() };
+
+        for idx in 0..len {
+            mmb.append(word_from_u64(idx as u64 + 1));
+        }
+
+        mmb
+    }
+
+    fn append(&mut self, leaf: Word) {
+        self.mountains.push(TestMountain::leaf(self.len, leaf));
+        self.len += 1;
+
+        if let Some(right_idx) = self.rightmost_mergeable_pair() {
+            let right = self.mountains.remove(right_idx);
+            let left = self.mountains.remove(right_idx - 1);
+            self.mountains.insert(right_idx - 1, TestMountain::merge(left, right));
+        }
+    }
+
+    fn root(&self) -> Word {
+        let shape = shape_mountains(self.len);
+        let peaks = self.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+        bag_peaks(&shape, &peaks)
+    }
+
+    fn open(&self, position: usize) -> TestMmbProof {
+        assert!(position < self.len);
+
+        let (mountain_idx, mountain) = self
+            .mountains
+            .iter()
+            .enumerate()
+            .find(|(_, mountain)| {
+                let end = mountain.start + mountain.size();
+                (mountain.start..end).contains(&position)
+            })
+            .expect("position should be in one MMB mountain");
+
+        let mut siblings = Vec::new();
+        let leaf = mountain.open(position - mountain.start, &mut siblings);
+        let shape = shape_mountains(self.len);
+        let peaks = self.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+        siblings.extend(bagging_path_nodes(&shape, &peaks, mountain_idx));
+
+        TestMmbProof { position, leaf, siblings }
+    }
+
+    fn rightmost_mergeable_pair(&self) -> Option<usize> {
+        self.mountains
+            .windows(2)
+            .enumerate()
+            .rev()
+            .find_map(|(idx, pair)| (pair[0].height == pair[1].height).then_some(idx + 1))
+    }
+}
+
+impl TestMountain {
+    fn leaf(start: usize, leaf: Word) -> Self {
+        Self {
+            start,
+            height: 0,
+            root: leaf,
+            node: Box::new(TestMmbNode::Leaf(leaf)),
+        }
+    }
+
+    fn merge(left: Self, right: Self) -> Self {
+        assert_eq!(left.height, right.height);
+
+        let root = Poseidon2::merge(&[left.root, right.root]);
+        Self {
+            start: left.start,
+            height: left.height + 1,
+            root,
+            node: Box::new(TestMmbNode::Inner { root, left: left.node, right: right.node }),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1 << self.height
+    }
+
+    fn open(&self, local_pos: usize, siblings: &mut Vec<TestMmbProofStep>) -> Word {
+        self.node.open(self.height, local_pos, siblings)
+    }
+}
+
+impl TestMmbNode {
+    fn root(&self) -> Word {
+        match self {
+            Self::Leaf(root) | Self::Inner { root, .. } => *root,
+        }
+    }
+
+    fn open(&self, height: u8, local_pos: usize, siblings: &mut Vec<TestMmbProofStep>) -> Word {
+        match self {
+            Self::Leaf(leaf) => {
+                assert_eq!(height, 0);
+                assert_eq!(local_pos, 0);
+                *leaf
+            },
+            Self::Inner { left, right, .. } => {
+                let half = 1 << (height - 1);
+                if local_pos < half {
+                    let leaf = left.open(height - 1, local_pos, siblings);
+                    siblings.push(TestMmbProofStep::mountain(true, right.root()));
+                    leaf
+                } else {
+                    let leaf = right.open(height - 1, local_pos - half, siblings);
+                    siblings.push(TestMmbProofStep::mountain(false, left.root()));
+                    leaf
+                }
+            },
+        }
+    }
+}
+
+impl TestMmbProofStep {
+    fn mountain(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+
+    fn range(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+
+    fn belt(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+}
+
+impl FoldDomain {
+    fn merge(&self, left: Word, right: Word) -> Word {
+        match self {
+            Self::Range => Poseidon2::merge(&[left, right]),
+            Self::Belt => Poseidon2::merge(&[left, right]),
+        }
+    }
+}
+
+fn shape_mountains(num_leaves: usize) -> Vec<ShapeMountain> {
+    if num_leaves == 0 {
+        return Vec::new();
+    }
+
+    let width = floor_log2(num_leaves + 1);
+    (0..width)
+        .rev()
+        .map(|pos| ShapeMountain {
+            height: pos + (((num_leaves + 1) >> pos) & 1),
+        })
+        .collect()
+}
+
+fn shape_ranges(mountains: &[ShapeMountain]) -> Vec<std::ops::Range<usize>> {
+    if mountains.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for idx in 0..mountains.len() - 1 {
+        if shape_range_split_after(mountains, idx) {
+            ranges.push(start..idx + 1);
+            start = idx + 1;
+        }
+    }
+    ranges.push(start..mountains.len());
+    ranges
+}
+
+fn shape_range_split_after(mountains: &[ShapeMountain], idx: usize) -> bool {
+    let left = mountains[idx].height;
+    let right = mountains[idx + 1].height;
+    left == right + 2 || (idx > 0 && mountains[idx - 1].height == left)
+}
+
+fn bag_peaks(shape: &[ShapeMountain], peaks: &[Word]) -> Word {
+    let range_roots = shape_ranges(shape)
+        .into_iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range]))
+        .collect::<Vec<_>>();
+    bag_belt(&range_roots)
+}
+
+fn bag_range(mountains: &[ShapeMountain], peaks: &[Word]) -> Word {
+    mountains.iter().zip(peaks).fold(EMPTY_WORD, |acc, (mountain, peak)| {
+        let _ = mountain;
+        FoldDomain::Range.merge(acc, *peak)
+    })
+}
+
+fn bag_belt(range_roots: &[Word]) -> Word {
+    range_roots
+        .iter()
+        .fold(EMPTY_WORD, |acc, root| FoldDomain::Belt.merge(acc, *root))
+}
+
+fn bagging_path_nodes(
+    shape: &[ShapeMountain],
+    peaks: &[Word],
+    mountain_idx: usize,
+) -> Vec<TestMmbProofStep> {
+    let ranges = shape_ranges(shape);
+    let range_idx = ranges
+        .iter()
+        .position(|range| range.contains(&mountain_idx))
+        .expect("mountain index should belong to a range");
+    let range = ranges[range_idx].clone();
+    let mut nodes = Vec::new();
+
+    let left_root = bag_range(&shape[range.start..mountain_idx], &peaks[range.start..mountain_idx]);
+    nodes.push(TestMmbProofStep::range(false, left_root));
+
+    for &peak in &peaks[mountain_idx + 1..range.end] {
+        nodes.push(TestMmbProofStep::range(true, peak));
+    }
+
+    let left_range_roots = ranges[..range_idx]
+        .iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range.clone()]))
+        .collect::<Vec<_>>();
+    nodes.push(TestMmbProofStep::belt(false, bag_belt(&left_range_roots)));
+
+    for range in &ranges[range_idx + 1..] {
+        nodes.push(TestMmbProofStep::belt(
+            true,
+            bag_range(&shape[range.clone()], &peaks[range.clone()]),
+        ));
+    }
+
+    nodes
+}
+
+fn mmb_memory_source(mmb_ptr: u32, mmb: &TestMmb) -> String {
+    let mut source = format!("push.{} push.{mmb_ptr} mem_store drop\n", mmb.len);
+
+    for (idx, mountain) in mmb.mountains.iter().enumerate() {
+        source.push_str(&format!(
+            "{} push.{} mem_storew_le dropw\n",
+            push_word(&mountain.root),
+            mmb_ptr + 4 + idx as u32 * 4,
+        ));
+    }
+
+    source
+}
+
+fn mmb_proof_memory_source(proof_ptr: u32, proof: &TestMmbProof) -> String {
+    let mut source = format!(
+        "
+        push.{} push.{proof_ptr} mem_store drop
+        push.{} push.{} mem_store drop
+        {} push.{} mem_storew_le dropw
+        ",
+        proof.siblings.len(),
+        proof.position,
+        proof_ptr + 1,
+        push_word(&proof.leaf),
+        proof_ptr + 4,
+    );
+
+    for (idx, step) in proof.siblings.iter().enumerate() {
+        let entry = proof_ptr + 8 + idx as u32 * 8;
+        source.push_str(&format!(
+            "
+            push.{} push.{entry} mem_store drop
+            {} push.{} mem_storew_le dropw
+            ",
+            u8::from(step.is_right),
+            push_word(&step.sibling),
+            entry + 4,
+        ));
+    }
+
+    source
+}
+
+fn proof_root(proof: &TestMmbProof) -> Word {
+    proof.siblings.iter().fold(proof.leaf, |acc, step| {
+        if step.is_right {
+            Poseidon2::merge(&[acc, step.sibling])
+        } else {
+            Poseidon2::merge(&[step.sibling, acc])
+        }
+    })
+}
+
+fn push_word(word: &Word) -> String {
+    let stack = word_to_ints(word);
+    format!("push.{}.{}.{}.{}", stack[3], stack[2], stack[1], stack[0])
+}
+
+fn floor_log2(value: usize) -> usize {
+    assert_ne!(value, 0);
+    usize::BITS as usize - 1 - value.leading_zeros() as usize
+}
+
 fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
     digests
         .iter()
@@ -853,4 +1878,35 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
     arr.iter().map(Felt::as_canonical_u64).collect()
+}
+
+fn word_from_u64(value: u64) -> Word {
+    [ZERO, ZERO, ZERO, Felt::new_unchecked(value)].into()
+}
+
+fn mmr_frontier_root(num_leaves: usize, peaks: &[Word]) -> Word {
+    if num_leaves == 0 {
+        return Word::default();
+    }
+
+    let mut bits = num_leaves;
+    let mut peak_idx = peaks.len();
+    let mut acc = Word::default();
+    let mut empty = Word::default();
+
+    while bits != 0 {
+        if bits & 1 == 1 {
+            peak_idx -= 1;
+            acc = Poseidon2::merge(&[peaks[peak_idx], acc]);
+        } else {
+            acc = Poseidon2::merge(&[acc, empty]);
+        }
+
+        bits >>= 1;
+        if bits != 0 {
+            empty = Poseidon2::merge(&[empty, empty]);
+        }
+    }
+
+    acc
 }
