@@ -1983,6 +1983,7 @@ dependencies = [
 [[package]]
 name = "miden-signature"
 version = "0.1.0"
+source = "git+https://github.com/0xMiden/miden-signature.git?rev=33e7b36e8d8ad41007a1a4a646c309177332e537#33e7b36e8d8ad41007a1a4a646c309177332e537"
 dependencies = [
  "blake3",
  "libm",

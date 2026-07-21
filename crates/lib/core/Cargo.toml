@@ -53,7 +53,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-prover = { workspace = true, features = ["concurrent"] }
-miden-signature = { path = "/Users/al/Code/miden-signature" }
+miden-signature = { git = "https://github.com/0xMiden/miden-signature.git", rev = "33e7b36e8d8ad41007a1a4a646c309177332e537" }
 p3-field = { version = "0.6", default-features = false }
 p3-goldilocks = { version = "0.6", default-features = false }
 p3-symmetric = { version = "0.6", default-features = false }

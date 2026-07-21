@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 k="${1:-${SIG_BATCH_BENCH_MIN_K:-0}}"
 runs="${SIG_BATCH_BENCH_RUNS:-1}"
-features="${MIDEN_VM_BENCH_FEATURES:-concurrent}"
+features="${MIDEN_VM_BENCH_FEATURES:-}"
 
 export SIG_BATCH_BENCH_MIN_K="$k"
 export SIG_BATCH_BENCH_MAX_K="$k"
@@ -40,9 +40,12 @@ fi
 echo "# recursive benchmark: k=$SIG_BATCH_BENCH_MIN_K signatures=$((1 << SIG_BATCH_BENCH_MIN_K))"
 
 cmd=(
-  cargo test --release -p miden-core-lib --features "$features"
-  prove_verify_sig_batch_shared_message_once -- --ignored --nocapture
+  cargo test --release -p miden-core-lib
 )
+if [[ -n "$features" ]]; then
+  cmd+=(--features "$features")
+fi
+cmd+=(prove_verify_sig_batch_shared_message_once -- --ignored --nocapture)
 
 if [[ "$(uname -s)" == "Darwin" && -x /usr/bin/time ]]; then
   cd "$repo_root"
