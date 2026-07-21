@@ -22,6 +22,13 @@
 - Expose some assembler configuration methods, and `ProjectAssembler::assemble_source_project` ([#3383](https://github.com/0xMiden/miden-vm/pull/3383)).
 
 ## v0.25.3 (2026-07-12)
+## v0.25.3 (TBD)
+
+#### Enhancements
+
+- Added a typed encoder/decoder for package debug info metadata, with range-checked felt decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
+## v0.25.2 (2026-07-12)
 
 - Update `wincode` dependency to v0.5.5.
 
