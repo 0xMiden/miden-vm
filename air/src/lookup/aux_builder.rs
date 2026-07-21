@@ -1,24 +1,20 @@
 //! Generic LogUp aux-trace construction.
 //!
-//! [`build_logup_aux_trace`] builds lookup fractions for an AIR and returns
-//! `(aux_trace, acc_final)`.
+//! [`build_logup_aux_trace`] builds lookup fractions for an AIR and returns an `n`-row cyclic
+//! auxiliary trace together with the normalized global sum `sigma_prime = sigma / n`.
 //!
 //! ## Aux trace shape
 //!
-//! [`accumulate`] returns a [`RowMajorMatrix`] with `num_rows + 1` rows:
+//! Let `t(r)` be the total lookup contribution on row `r`, and let
+//! `sigma = sum_r t(r)`. [`accumulate`] returns exactly `num_rows` rows:
 //!
-//! - row 0 is the all-`ZERO` initial accumulator
-//! - row `r` (for `1..=num_rows`) holds the running sum **after** row `r − 1`'s fraction
-//!   contributions have been folded in
-//! - row `num_rows` is therefore the global running sum across the entire trace
+//! - row 0 has accumulator value `a(0) = 0`
+//! - fraction columns store their per-row values on every row, including the last row
+//! - column 0 satisfies `a(r + 1) = a(r) - sigma_prime + t(r)` cyclically, so the next row of the
+//!   last row is row 0
 //!
-//! The return value of [`build_logup_aux_trace`] splits that matrix in two:
-//!
-//! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at `ZERO` and ends at
-//!   the running sum **before** the last row's contribution. The last row's fraction contribution
-//!   does **not** appear in the aux trace.
-//! - `committed_finals` is `[acc_final]`: the single accumulator terminal read out of row
-//!   `num_rows`.
+//! Summing the cyclic recurrence gives `num_rows * sigma_prime = sigma`. The single committed
+//! auxiliary value is therefore `sigma_prime`, not a terminal accumulator row.
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
@@ -40,8 +36,9 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 
 /// Generic `LiftedAir::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
 ///
-/// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns
-/// from the AIR, runs collection + accumulation, and returns `(aux_trace, vec![acc_final])`.
+/// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns from the AIR,
+/// runs collection + normalized cyclic accumulation, and returns
+/// `(aux_trace, vec![sigma_prime])`, where `sigma_prime = sigma / num_rows`.
 ///
 /// The challenges ordering (`challenges[0] = alpha`, `challenges[1] = beta`) mirrors the
 /// constraint-path adapter's `ConstraintLookupBuilder::new` so prover- and constraint-path
@@ -64,6 +61,8 @@ where
         "build_logup_aux_trace expects at least 2 challenges (alpha, beta), got {}",
         challenges.len(),
     );
+    assert!(main.height() > 0, "LogUp normalization requires a non-empty trace");
+
     let alpha = challenges[0];
     let beta = challenges[1];
     let lookup_challenges =
@@ -72,23 +71,10 @@ where
 
     let fractions = build_lookup_fractions(air, main, &periodic, &lookup_challenges);
 
-    let full = accumulate(&fractions);
-    let num_cols = full.width;
-    let num_rows = main.height();
-    debug_assert_eq!(
-        full.values.len(),
-        (num_rows + 1) * num_cols,
-        "accumulate output buffer is sized for num_rows + 1 rows",
-    );
+    let (aux_trace, sigma_prime) = accumulate(&fractions);
+    debug_assert_eq!(aux_trace.height(), main.height());
 
-    // `accumulate` emits `num_rows + 1` rows; take the committed final from col 0 of the
-    // trailing row and truncate in place to avoid allocating a throwaway last-row Vec.
-    let mut data = full.values;
-    let committed_final = data[num_rows * num_cols];
-    data.truncate(num_rows * num_cols);
-
-    let aux_trace = RowMajorMatrix::new(data, num_cols);
-    (aux_trace, vec![committed_final])
+    (aux_trace, vec![sigma_prime])
 }
 
 // LOOKUP FRACTIONS
@@ -206,23 +192,22 @@ where
 // SLOW ACCUMULATOR (REFERENCE ORACLE)
 // ================================================================================================
 
-/// Naive per-fraction partial-sum accumulator, used as the correctness oracle for the
+/// Naive per-fraction normalized cyclic accumulator, used as the correctness oracle for the
 /// fused batch-inversion + partial-sum pass.
 ///
-/// Column 0 is the sole running-sum accumulator; columns 1+ are fraction columns that
-/// store per-row values directly.
-///
-/// Returns `aux[col]` of length `num_rows + 1`:
-/// - `aux[0][0] = ZERO`, `aux[0][r+1] = aux[0][r] + Σ_col per_row_value[col]`
-/// - `aux[i>0][r] = per_row_value[i]` for main row `r`
-pub fn accumulate_slow<F, EF>(fractions: &LookupFractions<F, EF>) -> Vec<Vec<EF>>
+/// Returns `(aux, sigma_prime)`, where every auxiliary column has exactly `num_rows` entries.
+/// Column 0 starts at zero and follows the normalized cyclic recurrence; columns 1+ store their
+/// per-row values directly.
+pub fn accumulate_slow<F, EF>(fractions: &LookupFractions<F, EF>) -> (Vec<Vec<EF>>, EF)
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     let num_cols = fractions.num_columns();
     let num_rows = fractions.num_rows();
-    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows + 1]).collect();
+    assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
+    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
+    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows]).collect();
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
@@ -235,7 +220,7 @@ where
     );
 
     let mut per_row_value = vec![EF::ZERO; num_cols];
-    let mut running_sum = EF::ZERO;
+    let mut row_totals = vec![EF::ZERO; num_rows];
 
     let mut cursor = 0usize;
     for (row, row_counts) in flat_counts.chunks(num_cols).enumerate() {
@@ -256,10 +241,7 @@ where
             aux[col][row] = per_row_value[col];
         }
 
-        // Accumulator (col 0): running sum of ALL columns' per-row values.
-        let row_total: EF = per_row_value.iter().copied().sum();
-        running_sum += row_total;
-        aux[0][row + 1] = running_sum;
+        row_totals[row] = per_row_value.iter().copied().sum();
     }
     debug_assert_eq!(
         cursor,
@@ -268,25 +250,33 @@ where
         flat_fractions.len(),
     );
 
-    aux
+    let sigma: EF = row_totals.iter().copied().sum();
+    let n_inv = EF::from_usize(num_rows)
+        .try_inverse()
+        .expect("LogUp trace length must be non-zero in the field");
+    let sigma_prime = sigma * n_inv;
+
+    let mut acc = EF::ZERO;
+    for (row, &row_total) in row_totals.iter().enumerate() {
+        aux[0][row] = acc;
+        acc += row_total - sigma_prime;
+    }
+    debug_assert_eq!(acc, EF::ZERO, "normalized LogUp accumulator must close cyclically");
+
+    (aux, sigma_prime)
 }
 
 // FUSED ACCUMULATOR (FAST PATH)
 // ================================================================================================
 
-/// Materialise the LogUp auxiliary trace from collected fractions.
+/// Materialise the normalized cyclic LogUp auxiliary trace from collected fractions.
 ///
-/// Takes the flat `(multiplicity, denominator)` buffer produced by the prover collection
-/// phase and returns the complete aux trace as a row-major matrix. Column 0 is the
-/// running-sum accumulator; columns 1+ store per-row fraction sums directly.
-///
-/// ## Output layout
-///
-/// Returns a [`RowMajorMatrix<EF>`] with `num_rows + 1` rows and `num_cols` columns.
-/// Let `fᵢ(r) = Σⱼ mⱼ · dⱼ⁻¹` be the sum of fractions assigned to column `i` on row `r`:
+/// Returns `(aux_trace, sigma_prime)`, where the matrix has exactly `num_rows` rows. Let
+/// `fᵢ(r) = Σⱼ mⱼ · dⱼ⁻¹`, `t(r) = Σᵢ fᵢ(r)`, and `sigma_prime = Σᵣ t(r) / num_rows`:
 ///
 /// - Fraction columns (i > 0): `output[r][i] = fᵢ(r)`
-/// - Accumulator (col 0): `output[0][0] = 0`, `output[r+1][0] = output[r][0] + Σᵢ fᵢ(r)`
+/// - Accumulator (col 0): `output[0][0] = 0` and `output[(r+1) mod n][0] = output[r][0] -
+///   sigma_prime + t(r)`
 ///
 /// ## Algorithm
 ///
@@ -297,19 +287,19 @@ where
 /// `fᵢ(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
 /// records the row total `t(r) = Σᵢ fᵢ(r)` into a side buffer.
 ///
-/// **Phase 2 (sequential).** Prefix-sum over `t(r)` to fill the accumulator column:
-/// `acc(r+1) = acc(r) + t(r)`. This step is inherently sequential (cross-row dependency)
-/// but touches only one scalar per row.
-pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> RowMajorMatrix<EF>
+/// **Phase 2 (sequential).** Compute `sigma_prime`, then scan `t(r) - sigma_prime` to fill the
+/// accumulator column. This step is inherently sequential but touches only one scalar per row.
+pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> (RowMajorMatrix<EF>, EF)
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     let num_cols = fractions.num_columns();
     let num_rows = fractions.num_rows();
-    let out_rows = num_rows + 1;
+    assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
+    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
 
-    let mut output_data = vec![EF::ZERO; out_rows * num_cols];
+    let mut output_data = vec![EF::ZERO; num_rows * num_cols];
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
@@ -321,10 +311,6 @@ where
         num_rows * num_cols,
     );
 
-    if num_rows == 0 || flat_fractions.is_empty() {
-        return RowMajorMatrix::new(output_data, num_cols);
-    }
-
     // Prepass: fraction-start offset for every row (length num_rows + 1). row_frac_offsets[r] =
     // start of row r's fractions in flat_fractions; row_frac_offsets[num_rows] = total count.
     let row_frac_offsets = compute_row_frac_offsets(flat_counts, num_rows, num_cols);
@@ -333,7 +319,7 @@ where
 
     // Phase 1 operates on rows 0..num_rows of the output buffer. It writes fraction
     // columns (i > 0) and leaves col 0 untouched (still zero). The side buffer
-    // row_totals collects t(r) = Σᵢ fᵢ(r) for phase 2's prefix sum.
+    // row_totals collects t(r) = Σᵢ fᵢ(r) for phase 2's normalization and centered scan.
     let frac_region = &mut output_data[..num_rows * num_cols];
     let mut row_totals: Vec<EF> = vec![EF::ZERO; num_rows];
 
@@ -401,15 +387,26 @@ where
             .for_each(phase1);
     }
 
-    // Phase 2: acc(0) = 0, acc(r+1) = acc(r) + t(r).
-    // Writes col 0 of rows 1..=num_rows; row 0 col 0 stays at zero from the allocation.
+    // Phase 2: reduce the global sum, then scan the centered row totals. The parallel-iterator
+    // shim uses Rayon when concurrency is enabled and executes sequentially otherwise. The
+    // accumulator scan remains sequential because each row depends on its predecessor.
+    use miden_crypto::parallel::*;
+    let sigma: EF = row_totals.par_iter().copied().sum();
+    let n_inv = EF::from_usize(num_rows)
+        .try_inverse()
+        .expect("LogUp trace length must be non-zero in the field");
+    let sigma_prime = sigma * n_inv;
+
+    // Writing the current accumulator before updating gives a(0) = 0 and leaves the final update
+    // as the cyclic last-to-first edge.
     let mut acc = EF::ZERO;
     for r in 0..num_rows {
-        acc += row_totals[r];
-        output_data[(r + 1) * num_cols] = acc;
+        output_data[r * num_cols] = acc;
+        acc += row_totals[r] - sigma_prime;
     }
+    debug_assert_eq!(acc, EF::ZERO, "normalized LogUp accumulator must close cyclically");
 
-    RowMajorMatrix::new(output_data, num_cols)
+    (RowMajorMatrix::new(output_data, num_cols), sigma_prime)
 }
 
 /// Forward scan over the flat `counts` buffer producing per-row fraction-start offsets.
@@ -558,15 +555,18 @@ mod tests {
     /// multi-chunk regression tests.
     fn assert_matrix_matches_slow(
         slow: &[Vec<QuadFelt>],
+        slow_sigma_prime: QuadFelt,
         fast: &RowMajorMatrix<QuadFelt>,
+        fast_sigma_prime: QuadFelt,
         num_cols: usize,
         num_rows: usize,
     ) {
         assert_eq!(fast.width(), num_cols, "fast.width() mismatch");
-        assert_eq!(fast.height(), num_rows + 1, "fast.height() mismatch");
+        assert_eq!(fast.height(), num_rows, "fast.height() mismatch");
+        assert_eq!(slow_sigma_prime, fast_sigma_prime, "sigma_prime mismatch");
         assert_eq!(slow.len(), num_cols, "slow column count mismatch");
         for (col, slow_col) in slow.iter().enumerate() {
-            assert_eq!(slow_col.len(), num_rows + 1, "slow col {col} row count mismatch");
+            assert_eq!(slow_col.len(), num_rows, "slow col {col} row count mismatch");
             for (row, &s) in slow_col.iter().enumerate() {
                 let f = fast.get(row, col).expect("Accessed element is in bounds");
                 assert_eq!(s, f, "row {row} col {col} differs: slow={s:?} fast={f:?}",);
@@ -601,9 +601,8 @@ mod tests {
         LookupFractions::from_shape(shape.to_vec(), num_rows)
     }
 
-    /// `accumulate_slow` returns `num_rows + 1` entries per column. Column 0 is a running
-    /// sum that also folds in column 1's per-row values. Column 1 is a fraction column
-    /// storing only per-row values (no cross-row accumulation).
+    /// `accumulate_slow` returns `num_rows` entries per column plus the normalized global sum.
+    /// Column 0 is the centered cyclic accumulator; column 1 stores per-row values directly.
     ///
     /// Layout fed in:
     ///
@@ -633,10 +632,10 @@ mod tests {
         fx.fractions.push((two, d2));
         fx.counts.push(1); // col 1
 
-        let aux = accumulate_slow(&fx);
+        let (aux, sigma_prime) = accumulate_slow(&fx);
         assert_eq!(aux.len(), 2);
-        assert_eq!(aux[0].len(), 3);
-        assert_eq!(aux[1].len(), 3);
+        assert_eq!(aux[0].len(), 2);
+        assert_eq!(aux[1].len(), 2);
 
         let d1_inv = d1.try_inverse().unwrap();
         let d2_inv = d2.try_inverse().unwrap();
@@ -647,15 +646,15 @@ mod tests {
         let row1_col0 = d1_inv;
         let row1_col1 = d2_inv.double();
 
-        // Column 0 (accumulator): [0, row0_col0+0, prev + row1_col0 + row1_col1]
-        assert_eq!(aux[0][0], QuadFelt::ZERO);
-        assert_eq!(aux[0][1], row0_col0);
-        assert_eq!(aux[0][2], row0_col0 + row1_col0 + row1_col1);
+        let row0_total = row0_col0;
+        let row1_total = row1_col0 + row1_col1;
+        assert_eq!(sigma_prime.double(), row0_total + row1_total);
 
-        // Column 1 (fraction, aux_curr): [0, 2/d2, 0]
-        // Row 0: col 1 has no fractions → aux[1][0] = 0
-        // Row 1: col 1 has 2/d2 → aux[1][1] = 2/d2
-        // Row 2 (extra row): don't care (committed final)
+        // Column 0 stores a(0), a(1); the second row closes cyclically back to a(0).
+        assert_eq!(aux[0][0], QuadFelt::ZERO);
+        assert_eq!(aux[0][1], row0_total - sigma_prime);
+        assert_eq!(aux[0][0], aux[0][1] + row1_total - sigma_prime);
+
         assert_eq!(aux[1][0], QuadFelt::ZERO);
         assert_eq!(aux[1][1], row1_col1);
     }
@@ -678,10 +677,8 @@ mod tests {
         assert!(fx.counts.is_empty());
     }
 
-    /// Single-chunk random cross-check: a tiny fixture (32 rows) fits inside one
-    /// [`ACCUMULATE_ROWS_PER_CHUNK`] chunk, so phase 2's prefix scan and phase 3's offset
-    /// add are both trivial (zero offset), and this test only exercises phase 1's fused
-    /// Montgomery + walk path.
+    /// Single-chunk random cross-check: a tiny fixture (32 rows) exercises one phase-1 fused
+    /// Montgomery/walk chunk followed by the global normalization and centered scan.
     #[test]
     fn accumulate_matches_accumulate_slow_random() {
         const SHAPE: [usize; 3] = [2, 1, 3];
@@ -692,31 +689,44 @@ mod tests {
         );
 
         let fx = random_fixture(&SHAPE, NUM_ROWS, 0x00c0_ffee_beef_c0de);
-        let slow = accumulate_slow(&fx);
-        let fast = accumulate(&fx);
-        assert_matrix_matches_slow(&slow, &fast, SHAPE.len(), NUM_ROWS);
+        let (slow, slow_sigma_prime) = accumulate_slow(&fx);
+        let (fast, fast_sigma_prime) = accumulate(&fx);
+        assert_matrix_matches_slow(
+            &slow,
+            slow_sigma_prime,
+            &fast,
+            fast_sigma_prime,
+            SHAPE.len(),
+            NUM_ROWS,
+        );
     }
 
     /// Multi-chunk regression test: a fixture spanning multiple
-    /// [`ACCUMULATE_ROWS_PER_CHUNK`]-row chunks (with a deliberately short trailing chunk)
-    /// exercises phase 2's prefix-sum path. The trailing `+ 7` rows ensure the last
-    /// chunk is smaller than the others and that `num_rows % rows_per_chunk != 0`, catching
-    /// any off-by-one in the last-chunk bounds.
+    /// [`ACCUMULATE_ROWS_PER_CHUNK`]-row chunks exercises parallel row-total computation followed
+    /// by global normalization and the centered scan. The trailing `+ 7` rows make the last chunk
+    /// shorter and catch off-by-one errors in the chunk bounds.
     #[test]
     fn accumulate_multi_chunk_matches_accumulate_slow() {
         const SHAPE: [usize; 4] = [1, 2, 3, 1];
         const NUM_ROWS: usize = ACCUMULATE_ROWS_PER_CHUNK * 3 + 7;
 
         let fx = random_fixture(&SHAPE, NUM_ROWS, 0xdead_beef_cafe_babe);
-        let slow = accumulate_slow(&fx);
-        let fast = accumulate(&fx);
-        assert_matrix_matches_slow(&slow, &fast, SHAPE.len(), NUM_ROWS);
+        let (slow, slow_sigma_prime) = accumulate_slow(&fx);
+        let (fast, fast_sigma_prime) = accumulate(&fx);
+        assert_matrix_matches_slow(
+            &slow,
+            slow_sigma_prime,
+            &fast,
+            fast_sigma_prime,
+            SHAPE.len(),
+            NUM_ROWS,
+        );
     }
 
-    /// Empty-trace smoke test: `num_rows = 0` must return a 1-row, `num_cols`-wide zero
-    /// matrix (the initial condition) without touching the inversion path.
+    /// Normalization is undefined for an empty trace.
     #[test]
-    fn accumulate_empty_trace() {
+    #[should_panic(expected = "LogUp normalization requires a non-empty trace")]
+    fn accumulate_rejects_empty_trace() {
         let shape = vec![2usize, 3, 1];
         let num_cols = shape.len();
         let fx: LookupFractions<Felt, QuadFelt> = LookupFractions {
@@ -726,9 +736,54 @@ mod tests {
             num_rows: 0,
             num_cols,
         };
-        let aux = accumulate(&fx);
-        assert_eq!(aux.width(), num_cols);
+        let _ = num_cols;
+        let _ = accumulate(&fx);
+    }
+
+    #[test]
+    fn accumulate_no_interactions_is_zero() {
+        const NUM_ROWS: usize = 4;
+        let mut fx = fixture([1, 1], NUM_ROWS);
+        fx.counts.resize(NUM_ROWS * 2, 0);
+
+        let (aux, sigma_prime) = accumulate(&fx);
+        assert_eq!(aux.height(), NUM_ROWS);
+        assert_eq!(sigma_prime, QuadFelt::ZERO);
+        assert!(aux.values.iter().all(|&value| value == QuadFelt::ZERO));
+    }
+
+    #[test]
+    fn accumulate_last_row_only_closes_cyclically() {
+        const NUM_ROWS: usize = 4;
+        let denominator = QuadFelt::from_u32(7);
+        let contribution = denominator.try_inverse().unwrap();
+        let mut fx = fixture([1, 1], NUM_ROWS);
+        for row in 0..NUM_ROWS {
+            if row == NUM_ROWS - 1 {
+                fx.fractions.push((Felt::ONE, denominator));
+                fx.counts.extend([1, 0]);
+            } else {
+                fx.counts.extend([0, 0]);
+            }
+        }
+
+        let (aux, sigma_prime) = accumulate(&fx);
+        assert_eq!(QuadFelt::from_usize(NUM_ROWS) * sigma_prime, contribution);
+        let last_acc = aux.get(NUM_ROWS - 1, 0).unwrap();
+        assert_eq!(QuadFelt::ZERO, last_acc + contribution - sigma_prime);
+    }
+
+    #[test]
+    fn accumulate_single_row_commits_its_row_total() {
+        let denominator = QuadFelt::from_u32(11);
+        let contribution = denominator.try_inverse().unwrap().double();
+        let mut fx = fixture([1, 1], 1);
+        fx.fractions.push((Felt::from_u32(2), denominator));
+        fx.counts.extend([1, 0]);
+
+        let (aux, sigma_prime) = accumulate(&fx);
         assert_eq!(aux.height(), 1);
-        assert!(aux.values.iter().all(|v| *v == QuadFelt::ZERO));
+        assert_eq!(aux.get(0, 0).unwrap(), QuadFelt::ZERO);
+        assert_eq!(sigma_prime, contribution);
     }
 }

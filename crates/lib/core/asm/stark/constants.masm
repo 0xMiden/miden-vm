@@ -120,8 +120,9 @@ const TMP4 = 3223322696
 const BUS_GAMMA_PTR = 3223322700
 
 ### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
-### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
-### statement values materialized in step I, then asserted via `c_total + aux_sum == 0`.
+### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the statement
+### values materialized in step I, then asserted via the unscaled correction identity
+### `c_total + sum_i(n_i * sigma_prime_i) == 0`.
 const C_TOTAL_PTR = 3223322704
 
 ### Address of the cell holding the number of kernel-procedure digests `N`, persisted by
@@ -224,7 +225,8 @@ const AUX_RAND_ELEM_PTR = 3225419776
 const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 4 (rand word) + 4 (codegen pad)
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
+### One normalized LogUp sum `sigma_prime` per AIR. Values arrive in proof order; after
+### `swap_air_regions_if_chip_first`, ACE sees Core at slot 0 and Chiplets at slot 1.
 const AUX_BUS_BOUNDARY_PTR = 3225420232       # OOD_EVALUATIONS_PTR + 448
 
 ### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):

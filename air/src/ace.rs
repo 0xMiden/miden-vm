@@ -4,13 +4,14 @@
 //! LogUp auxiliary-trace boundary identity
 //!
 //! ```text
-//! 0  =  Σ aux_bound[0..NUM_LOGUP_COMMITTED_FINALS]
+//! 0  =  Σ_i n_i · sigma_prime_i
 //!         + c_block_hash
 //!         + c_log_precompile
 //!         + c_kernel_rom
 //! ```
 //!
-//! is checked outside the circuit, against the absorbed per-AIR LogUp finals.
+//! is checked outside the circuit, where `sigma_prime_i` is the normalized committed LogUp sum
+//! for AIR `i` and `n_i` is its trace length.
 
 use alloc::vec::Vec;
 
@@ -35,7 +36,8 @@ use crate::MidenAir;
 ///   `combined = 0`
 /// where `combined = Σ_i MultiAirBeta(i) · acc_i - q·v` is the β-folded sum of the per-AIR
 /// alpha-folded constraint roots minus the shared quotient binding. The cross-AIR LogUp
-/// boundary identity is checked separately, outside the circuit.
+/// boundary identity over trace-length-weighted normalized LogUp sums is checked separately,
+/// outside the circuit.
 ///
 /// Implementation strategy:
 /// 1. Build each AIR's sub-DAG with its own (single-AIR) layout via [`build_ace_dag_for_air`].

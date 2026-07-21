@@ -3,6 +3,33 @@ use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::public_inputs
 
+#! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
+#! count `n = 2^log_height`.
+#!
+#! `log_height` comes from the cells populated by `random_coin::init_seed`. It was u32-constrained
+#! to `6..=29` by `stark::utils::validate_inputs` and authenticated by the instance-shape transcript
+#! observation, so `pow2` produces the exact row count.
+#!
+#! Input:  [log_height, boundary_offset, ...]
+#! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
+proc load_weighted_aux_sum
+    pow2
+    # => [n, boundary_offset, ...]
+
+    exec.constants::aux_bus_boundary_ptr movup.2 add
+    # => [boundary_ptr, n, ...]
+
+    dup mem_load
+    # => [sigma_prime_0, boundary_ptr, n, ...]
+    dup.2 mul
+    # => [n_sigma_prime_0, boundary_ptr, n, ...]
+
+    swap add.1 mem_load
+    # => [sigma_prime_1, n_sigma_prime_0, n, ...]
+    movup.2 mul swap
+    # => [n_sigma_prime_0, n_sigma_prime_1, ...]
+end
+
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
@@ -14,9 +41,9 @@ use miden::core::sys::vm::public_inputs
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
 #! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
 #! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
-#! step I), then once the per-AIR LogUp finals are absorbed asserts the boundary identity
-#! `c_total + aux_sum == 0`, where `aux_sum` is the sum of the two absorbed finals
-#! (order-independent, so the proof_order shuffle does not matter).
+#! step I), then once the normalized per-AIR LogUp sums are absorbed asserts
+#! `c_total + sum_i(n_i * sigma_prime_i) == 0`. The values are still in proof order here, so each
+#! value is paired with the trace length in the same proof-order position.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -65,18 +92,43 @@ pub proc observe_aux_trace
     # Mark output buffer as full (8 elements available for sampling).
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Outer-LogUp boundary check: assert c_total + aux_sum == 0 coordinate-wise ---
+    # --- Outer-LogUp boundary check ---
+    #
+    # The absorbed values are still in proof order. Core occupies proof position 0 iff
+    # log_core <= log_chip (including the caller-index tiebreak); otherwise Chiplets is first.
+    # Scale each normalized sum by the corresponding row count before adding `c_total`.
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, ...]
+    u32lte
+    # => [core_first?, ...]
+    if.true
+        push.0 exec.constants::get_core_trace_length_log
+        exec.load_weighted_aux_sum
+        # => [n_core*sigma_prime_proof0_0, n_core*sigma_prime_proof0_1, ...]
 
-    # aux_sum = sum of the two per-AIR LogUp finals absorbed above.
-    padw exec.constants::aux_bus_boundary_ptr mem_loadw_le
-    # => [b0_0, b0_1, b1_0, b1_1, ...]
+        push.2 exec.constants::get_chiplets_trace_length_log
+        exec.load_weighted_aux_sum
+        # => [n_chip*sigma_prime_proof1_0, n_chip*sigma_prime_proof1_1,
+        #     n_core*sigma_prime_proof0_0, n_core*sigma_prime_proof0_1, ...]
+    else
+        push.0 exec.constants::get_chiplets_trace_length_log
+        exec.load_weighted_aux_sum
+        # => [n_chip*sigma_prime_proof0_0, n_chip*sigma_prime_proof0_1, ...]
+
+        push.2 exec.constants::get_core_trace_length_log
+        exec.load_weighted_aux_sum
+        # => [n_core*sigma_prime_proof1_0, n_core*sigma_prime_proof1_1,
+        #     n_chip*sigma_prime_proof0_0, n_chip*sigma_prime_proof0_1, ...]
+    end
+
     ext2add
-    # => [sum0, sum1, ...]
+    # => [weighted_aux_sum_0, weighted_aux_sum_1, ...]
     exec.constants::c_total_ptr add.1 mem_load
     exec.constants::c_total_ptr mem_load
-    # => [c_total0, c_total1, sum0, sum1, ...]
+    # => [c_total_0, c_total_1, weighted_aux_sum_0, weighted_aux_sum_1, ...]
     ext2add
-    # => [r0, r1, ...]
-    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 0"
-    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 1"
+    # => [residual_0, residual_1, ...]
+    assertz.err="outer-LogUp boundary mismatch: weighted sums coord 0"
+    assertz.err="outer-LogUp boundary mismatch: weighted sums coord 1"
 end

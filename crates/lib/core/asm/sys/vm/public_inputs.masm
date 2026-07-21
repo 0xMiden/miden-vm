@@ -42,7 +42,7 @@ use miden::core::crypto::hashes::poseidon2
 # `msg(w) = Σ_{j<4} w_j·β^j` (the empty message of the init term gives `msg = 0`). It is
 # computed in step II (`observe_aux_trace`) from the FS-sampled `α, β`, over the kernel digests,
 # program digest and transcript state materialized in step I; `observe_aux_trace` then asserts
-# the boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals.
+# `c_total + sum_i(n_i * sigma_prime_i) == 0` against the normalized per-AIR LogUp sums.
 # Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
 # is accumulated as `requests − response`.
 #

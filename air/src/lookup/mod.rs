@@ -49,6 +49,8 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// - [`num_bus_ids()`](Self::num_bus_ids) must be ≥ the largest bus ID any message in the AIR
 ///   emits, plus one; the adapter precomputes exactly that many bus prefixes and indexes into the
 ///   table with `bus_id as usize`.
+/// - The auxiliary trace must have a positive row count. Its single committed value is the
+///   normalized sum `sigma_prime = sigma / n`, bound by the all-row cyclic recurrence.
 pub trait LookupAir<LB: LookupBuilder> {
     /// Number of permutation columns this argument occupies.
     fn num_columns(&self) -> usize;
@@ -80,8 +82,8 @@ pub trait LookupAir<LB: LookupBuilder> {
 
     /// Emit once-per-proof boundary interactions that don't come from any main-trace row.
     ///
-    /// Typical sources are committed-final terminals and public-input-driven seed
-    /// emissions (kernel ROM init, block hash seed, log-precompile terminals).
+    /// Typical sources are statement-supplied terminals and public-input-driven seed emissions
+    /// (kernel ROM init, block hash seed, log-precompile terminals).
     /// These close out buses whose per-row [`eval`](Self::eval) contributions alone
     /// don't cancel.
     ///

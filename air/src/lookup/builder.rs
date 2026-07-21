@@ -174,8 +174,8 @@ pub trait LookupBuilder: Sized {
     ///    the constraint path; the per-column fraction buffer slot for the prover path).
     /// 2. Running the closure, which must describe at least one group via [`LookupColumn::group`]
     ///    or [`LookupColumn::group_with_cached_encoding`].
-    /// 3. Finalizing the column on close (emitting boundary + transition constraints, or draining
-    ///    the column's fraction pair).
+    /// 3. Finalizing the column on close (emitting the normalized cyclic row constraint and first
+    ///    row anchor where applicable, or draining the column's fraction pair).
     /// 4. Advancing to the next permutation column index so the next call targets a fresh
     ///    accumulator.
     ///
@@ -481,8 +481,8 @@ pub trait LookupBatch {
 /// Handle for emitting **once-per-proof** "outer" interactions — contributions to the
 /// LogUp sum that are not tied to any main-trace row.
 ///
-/// Typical sources are committed-final boundary terminals (kernel ROM init, block hash
-/// seed, log-precompile terminals, public-input bus seeds). Each emission contributes
+/// Typical sources are statement-supplied boundary seeds and terminals (kernel ROM init, block
+/// hash seed, log-precompile terminals, public-input bus seeds). Each emission contributes
 /// one signed fraction to the overall balance; no column / row / group scoping, no
 /// flag gating, no `Deg` (boundary terms are plain field elements, not polynomials).
 ///

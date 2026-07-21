@@ -1,4 +1,4 @@
-//! Boundary corrections and committed-final metadata for the Miden VM LogUp argument.
+//! Boundary corrections and normalized committed-sum metadata for the Miden VM LogUp argument.
 
 use alloc::vec::Vec;
 
@@ -7,10 +7,10 @@ use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
 use crate::lookup::BoundaryBuilder;
 
-// COMMITTED-FINALS COUNT
+// COMMITTED NORMALIZED SUM COUNT
 // ================================================================================================
 
-/// Number of final aux values.
+/// Number of committed normalized LogUp sums (`sigma_prime`, one per AIR).
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 // BOUNDARY EMITTERS
@@ -175,7 +175,7 @@ mod tests {
 
     /// Lookup-structure validation for `ChipletsAir` — the standalone Chiplets-half AIR.
     /// Symmetric to `core_air_lookup_validates`: 21-col main trace, 3 LogUp accumulator
-    /// columns, 1 committed final, all periodic columns owned here.
+    /// columns, 1 committed normalized sum, all periodic columns owned here.
     #[test]
     fn chiplets_air_lookup_validates() {
         let num_periodic = ChipletsAir.periodic_columns().len();

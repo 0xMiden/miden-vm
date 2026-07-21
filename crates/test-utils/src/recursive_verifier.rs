@@ -206,8 +206,9 @@ fn build_advice(
     // 5. Aux trace commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-    // 6. Aux finals (bus boundary values), one slot per AIR in proof_order; MASM swaps to
-    //    caller_order if needed.
+    // 6. Normalized LogUp sums (`sigma_prime`), one slot per AIR in proof order. MASM forms
+    //    trace-length-weighted copies for the outer check; the stored unscaled values are later
+    //    reordered to [Core, Chiplets] instance order for ACE.
     for aux_values in &stark.all_aux_values {
         advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
     }

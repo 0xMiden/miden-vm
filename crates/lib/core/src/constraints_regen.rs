@@ -22,7 +22,7 @@ const MASM_CONFIG: AceConfig = AceConfig {
 pub const RELATION_DIGEST_PATHS: (&str, &str) =
     ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");
 
-const PROTOCOL_ID: u64 = 0;
+const PROTOCOL_ID: u64 = 1;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = RELATION_DIGEST_PATHS.0;

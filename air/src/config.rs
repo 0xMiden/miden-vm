@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2795405418319799191),
-    Felt::new_unchecked(12271653592413561980),
-    Felt::new_unchecked(12429945506697789964),
-    Felt::new_unchecked(17099343032831989679),
+    Felt::new_unchecked(16425439672220351667),
+    Felt::new_unchecked(7070993701867434214),
+    Felt::new_unchecked(12325228474615399270),
+    Felt::new_unchecked(6755922354705436926),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -264,7 +264,7 @@ mod tests {
 
     use crate::ace;
 
-    const PROTOCOL_ID: u64 = 0;
+    const PROTOCOL_ID: u64 = 1;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 
     /// Snapshot test: catches any AIR change that alters the constraint circuit.

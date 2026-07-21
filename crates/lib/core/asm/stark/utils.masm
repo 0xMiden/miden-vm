@@ -473,9 +473,9 @@ proc swap_aux_bus_boundary_word
     dropw
 end
 
-#! Shuffle the OOD frame and aux_bus_boundary from proof_order to caller_order if
-#! `log_chip < log_core` (i.e. proof_order = [Chiplets, Core]). No-op otherwise.
-#! MUST run after OOD streaming + aux observation, before eval_circuit.
+#! Shuffle the OOD frame and normalized aux bus sums from proof order to caller order if
+#! `log_chip < log_core` (i.e. proof order = [Chiplets, Core]). No-op otherwise.
+#! MUST run after OOD streaming and the proof-order weighted outer check, before eval_circuit.
 pub proc swap_air_regions_if_chip_first
     exec.constants::get_chiplets_trace_length_log
     exec.constants::get_core_trace_length_log

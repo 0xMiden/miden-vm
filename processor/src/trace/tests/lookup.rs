@@ -51,16 +51,17 @@ fn tiny_span() -> Vec<Operation> {
 fn assert_prover_matches_oracle(
     label: &str,
     aux: &RowMajorMatrix<QuadFelt>,
+    sigma_prime: QuadFelt,
     oracle_folds: &[Vec<(QuadFelt, QuadFelt)>],
     aux_width: usize,
 ) {
     let num_rows = oracle_folds.len();
     assert_eq!(aux.width(), aux_width, "{label}: aux width mismatch");
-    assert_eq!(aux.height(), num_rows + 1, "{label}: aux height mismatch");
+    assert_eq!(aux.height(), num_rows, "{label}: aux height mismatch");
     let aux_values = &aux.values;
 
-    // Col 0 (accumulator): aux[r+1][0] - aux[r][0] == Σ_col per_row_value[col].
-    // Cols 1+ (fraction): aux[r][col] == V/U per-row value.
+    // Col 0: aux[next][0] - aux[r][0] + sigma_prime == Σ_col per_row_value[col],
+    // where next wraps on the last row. Cols 1+ store V/U directly.
     for (r, row_folds) in oracle_folds.iter().enumerate() {
         assert_eq!(row_folds.len(), aux_width, "{label} row {r}: fold width mismatch");
         let per_row_values: Vec<QuadFelt> = row_folds
@@ -79,7 +80,8 @@ fn assert_prover_matches_oracle(
             .collect();
 
         let expected_delta: QuadFelt = per_row_values.iter().copied().sum();
-        let actual_delta = aux_values[(r + 1) * aux_width] - aux_values[r * aux_width];
+        let next = (r + 1) % num_rows;
+        let actual_delta = aux_values[next * aux_width] - aux_values[r * aux_width] + sigma_prime;
         assert_eq!(
             actual_delta, expected_delta,
             "{label} row {r} col 0 (accumulator): prover vs constraint path mismatch",
@@ -118,12 +120,13 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         !core_fractions.fractions().is_empty(),
         "no Core fractions collected — trace is degenerate or emitters are broken",
     );
-    let core_aux = accumulate(&core_fractions);
+    let (core_aux, core_sigma_prime) = accumulate(&core_fractions);
     let core_folds =
         collect_column_oracle_folds(&MidenAir::CORE, &core_matrix, &[], &public_vals, &challenges);
     assert_prover_matches_oracle(
         "Core",
         &core_aux,
+        core_sigma_prime,
         &core_folds,
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CORE),
     );
@@ -135,7 +138,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         !chip_fractions.fractions().is_empty(),
         "no Chiplets fractions collected — trace is degenerate or emitters are broken",
     );
-    let chip_aux = accumulate(&chip_fractions);
+    let (chip_aux, chip_sigma_prime) = accumulate(&chip_fractions);
     let chip_folds = collect_column_oracle_folds(
         &MidenAir::CHIPLETS,
         &chip_matrix,
@@ -146,6 +149,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     assert_prover_matches_oracle(
         "Chiplets",
         &chip_aux,
+        chip_sigma_prime,
         &chip_folds,
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CHIPLETS),
     );

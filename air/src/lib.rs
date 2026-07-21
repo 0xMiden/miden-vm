@@ -530,7 +530,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // One real committed LogUp final per AIR instance.
+        // One committed normalized LogUp sum `sigma_prime = sigma / n` per AIR instance.
         1
     }
 
@@ -545,7 +545,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         debug_assert_eq!(
             committed.len(),
             1,
-            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+            "build_logup_aux_trace returns one normalized LogUp sum per AIR"
         );
         (aux_trace, committed)
     }
@@ -618,7 +618,7 @@ where
 
 /// The cross-AIR statement for the `(Core, Chiplets)` proof: owns the AIR
 /// collection in instance order and carries the LogUp reduction over the
-/// committed aux finals.
+/// committed normalized sums.
 ///
 /// Instance order is `[Core, Chiplets]`; every per-AIR slice follows that
 /// ordering.
@@ -708,17 +708,19 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         }
     }
 
-    /// Cross-AIR LogUp closure: the sum of every committed aux final plus the
-    /// per-trace boundary corrections must vanish. `aux_inputs` carries the program hash and
-    /// transcript state (consumed by the core boundary) followed by the kernel digests
-    /// (consumed by the chiplets boundary).
+    /// Cross-AIR LogUp closure: each AIR commits `sigma_prime_i = sigma_i / n_i`, so the
+    /// trace-length-weighted sum `sum_i(n_i * sigma_prime_i)` plus the per-trace boundary
+    /// corrections must vanish. Boundary corrections are added once and are not trace-length
+    /// scaled. `aux_values` and `log_trace_heights` are parallel in instance order. `aux_inputs`
+    /// carries the program hash and transcript state followed by kernel digests.
+    /// digests.
     fn eval_external(
         &self,
         challenges: &[EF],
         air_inputs: &[Felt],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
         if aux_inputs.len() < AUX_KERNEL_DIGESTS {
             return Err(format!(
@@ -745,8 +747,43 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
         )?;
 
-        let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
-        Ok(vec![aux_sum + core_correction + chiplets_correction])
+        if aux_values.len() != self.airs.len() {
+            return Err(format!(
+                "expected {} per-AIR aux-value slices, got {}",
+                self.airs.len(),
+                aux_values.len()
+            )
+            .into());
+        }
+        if log_trace_heights.len() != self.airs.len() {
+            return Err(format!(
+                "expected {} log trace heights, got {}",
+                self.airs.len(),
+                log_trace_heights.len()
+            )
+            .into());
+        }
+
+        let mut weighted_aux_sum = EF::ZERO;
+        for (air_idx, (&values, &log_height)) in
+            aux_values.iter().zip(log_trace_heights).enumerate()
+        {
+            if values.len() != 1 {
+                return Err(format!(
+                    "AIR {air_idx} expected one normalized LogUp value, got {}",
+                    values.len()
+                )
+                .into());
+            }
+            let trace_length = 1_u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
+                ReductionError::from(format!(
+                    "AIR {air_idx} log trace height {log_height} does not fit in u64"
+                ))
+            })?;
+            weighted_aux_sum += values[0] * Felt::new_unchecked(trace_length);
+        }
+
+        Ok(vec![weighted_aux_sum + core_correction + chiplets_correction])
     }
 }
 
@@ -835,7 +872,7 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::QuadFelt;
+    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
     use super::*;
 
@@ -848,5 +885,56 @@ mod tests {
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn eval_external_weights_normalized_sums_by_trace_length() {
+        let multi_air = MidenMultiAir::new();
+        let raw_challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
+        let core_sigma_prime = QuadFelt::from_u32(13);
+        let chiplets_sigma_prime = QuadFelt::from_u32(17);
+        let core_values = [core_sigma_prime];
+        let chiplets_values = [chiplets_sigma_prime];
+        let aux_values: [&[QuadFelt]; 2] = [&core_values, &chiplets_values];
+        let log_trace_heights = [6, 9];
+
+        let lookup_challenges = Challenges::new(
+            raw_challenges[0],
+            raw_challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+        let core_correction = CoreAir
+            .boundary_correction(
+                &lookup_challenges,
+                &air_inputs,
+                &[&aux_inputs[..AUX_KERNEL_DIGESTS]],
+            )
+            .unwrap();
+        let chiplets_correction = ChipletsAir
+            .boundary_correction(
+                &lookup_challenges,
+                &air_inputs,
+                &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
+            )
+            .unwrap();
+
+        let result = <MidenMultiAir as MultiAir<Felt, QuadFelt>>::eval_external(
+            &multi_air,
+            &raw_challenges,
+            &air_inputs,
+            &aux_inputs,
+            &aux_values,
+            &log_trace_heights,
+        )
+        .unwrap();
+
+        let expected = core_sigma_prime * Felt::from_u32(1 << log_trace_heights[0])
+            + chiplets_sigma_prime * Felt::from_u32(1 << log_trace_heights[1])
+            + core_correction
+            + chiplets_correction;
+        assert_eq!(result, vec![expected]);
     }
 }
