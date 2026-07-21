@@ -52,9 +52,9 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Build tests
-        run: make test-build
+        run: make test-build NEXTEST_PROFILE=ci
       - name: test
-        run: make test
+        run: make test NEXTEST_PROFILE=ci
 
   crypto-test:
     name: crypto test on warpbuild
