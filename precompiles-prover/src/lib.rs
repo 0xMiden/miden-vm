@@ -1,4 +1,9 @@
 #![no_std]
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "the imported prover stack is intentionally retained behind a narrow crate API"
+)]
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
@@ -10,17 +15,17 @@ use miden_core::deferred::{DeferredState, TRUE_DIGEST};
 pub use miden_core::proof::{DeferredProof, HashFunction, StarkProof};
 pub use session::{VerifyError, verify_deferred};
 
-pub mod ec;
-pub mod hash;
-pub mod logup;
-pub mod math;
-pub mod primitives;
-pub mod relations;
-pub mod session;
-pub mod stark_config;
-pub mod transcript;
-pub mod uint;
-pub mod utils;
+pub(crate) mod ec;
+pub(crate) mod hash;
+pub(crate) mod logup;
+pub(crate) mod math;
+pub(crate) mod primitives;
+pub(crate) mod relations;
+pub(crate) mod session;
+pub(crate) mod stark_config;
+pub(crate) mod transcript;
+pub(crate) mod uint;
+pub(crate) mod utils;
 
 /// Proves the precompile claims accumulated in `state`.
 ///

@@ -363,8 +363,8 @@ impl SessionTraces {
     }
 }
 
-/// Verify a STARK-backed deferred proof produced by [`SessionTraces::prove`] or
-/// [`SessionTraces::prove_deferred`] and return the verified deferred root.
+/// Verify a STARK-backed deferred proof produced by this crate and return the verified deferred
+/// root.
 ///
 /// The proof must be a [`DeferredProof::Stark`] variant. Its `public_root` is used as the
 /// precompile STARK public input; only after that proof verifies is the root returned to callers.

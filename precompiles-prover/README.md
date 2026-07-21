@@ -5,8 +5,8 @@ claims for Miden VM execution proofs.
 
 The crate is an internal workspace component. Its supported integration entry
 points are the root-level deferred proving and verification helpers used by
-`miden-prover` and `miden-verifier`; the chiplet/session modules remain visible
-for now so this shrink branch does not turn into a broad internal cleanup.
+`miden-prover` and `miden-verifier`; the chiplet/session modules remain
+crate-private.
 
 ## What's here
 

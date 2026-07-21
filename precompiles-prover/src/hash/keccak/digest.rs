@@ -23,7 +23,7 @@ impl KeccakDigest {
 
     /// Lift to the 8-felt `(lo_0, hi_0, lo_1, hi_1, …, lo_3, hi_3)`
     /// wire format used by Memory64 reads + the digest-chunk P2 absorption.
-    pub fn to_felts(&self) -> [Felt; 8] {
+    pub fn to_felts(self) -> [Felt; 8] {
         let mut out = [Felt::ZERO; 8];
         for (i, &lane) in self.0.iter().enumerate() {
             let [lo, hi] = split_u64(lane);
@@ -36,7 +36,7 @@ impl KeccakDigest {
     /// Same as [`to_felts`](Self::to_felts) but as `[u32; 8]` — the
     /// raw u32 halves before lifting into the field. Used by
     /// `KeccakNodeRequires` to populate `KeccakNodeInvocation.d`.
-    pub fn to_u32s(&self) -> [u32; 8] {
+    pub fn to_u32s(self) -> [u32; 8] {
         let mut out = [0u32; 8];
         for (i, &lane) in self.0.iter().enumerate() {
             out[2 * i] = lane as u32;

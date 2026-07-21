@@ -38,6 +38,9 @@ pub(crate) enum DeferredSessionError {
 
     #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
     RootMismatch { expected: P2Digest, actual: P2Digest },
+
+    #[error("deferred MSM node {digest:?} has no nonzero scalar")]
+    UnsupportedMsmAllZeroScalars { digest: Digest },
 }
 
 pub(crate) fn session_from_deferred_state(
@@ -240,7 +243,7 @@ impl<'a> DeferredSessionBuilder<'a> {
 
     fn translate_ec_msm(
         &mut self,
-        _digest: Digest,
+        digest: Digest,
         curve: CurveId,
         pairs: Vec<(Digest, Digest)>,
     ) -> Result<EcNode, DeferredSessionError> {
@@ -253,8 +256,11 @@ impl<'a> DeferredSessionBuilder<'a> {
             terms.push((point, scalar));
         }
 
-        // TODO: Convert valid-but-currently-unsupported MSM shapes into typed errors:
-        // duplicate canonical bases and zero-scalar terms.
+        if terms.iter().all(|(_, scalar)| scalar.value == U256::ZERO) {
+            return Err(DeferredSessionError::UnsupportedMsmAllZeroScalars { digest });
+        }
+
+        // TODO: Normalize duplicate canonical bases before selecting an MSM strategy.
         if let Some((point, _)) = terms.first() {
             self.session
                 .constrain_scalar_bound(&point.node, curve.scalar_domain().bound_ptr());

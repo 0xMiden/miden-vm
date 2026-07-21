@@ -146,7 +146,7 @@ once_cell       = { version = "1.21", default-features = false }
 paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.7", default-features = false }
-rand            = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+rand            = { version = "0.10", default-features = false }
 rayon           = "1.10"
 rocksdb         = { version = "0.24", default-features = false }
 seq-macro       = "0.3"
