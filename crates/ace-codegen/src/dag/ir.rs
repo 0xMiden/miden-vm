@@ -252,6 +252,74 @@ impl<EF> AceDag<EF> {
     }
 }
 
+impl<EF: Clone> AceDag<EF> {
+    /// Remove nodes unreachable from `root` and compact the node vector.
+    ///
+    /// After compaction, `nodes` contains only nodes reachable from `root`, in the same
+    /// relative order. All `NodeId` references, including `root`, are remapped to the new
+    /// contiguous indices.
+    pub fn compact(&mut self) {
+        let n = self.nodes.len();
+        if n == 0 {
+            return;
+        }
+
+        let mut reachable = vec![false; n];
+        let mut stack = vec![self.root.index()];
+        while let Some(idx) = stack.pop() {
+            if reachable[idx] {
+                continue;
+            }
+            reachable[idx] = true;
+            match &self.nodes[idx] {
+                NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
+                    stack.push(a.index());
+                    stack.push(b.index());
+                },
+                NodeKind::Neg(a) => {
+                    stack.push(a.index());
+                },
+                NodeKind::Input(_) | NodeKind::Constant(_) => {},
+            }
+        }
+
+        let mut remap = vec![0usize; n];
+        let mut new_len = 0usize;
+        for i in 0..n {
+            if reachable[i] {
+                remap[i] = new_len;
+                new_len += 1;
+            }
+        }
+
+        if new_len == n {
+            return;
+        }
+
+        let dag_id = self.dag_id;
+        let remap_id = |id: NodeId| NodeId::in_dag(remap[id.index()], dag_id);
+
+        let mut new_nodes = Vec::with_capacity(new_len);
+        for (i, node) in self.nodes.iter().enumerate() {
+            if !reachable[i] {
+                continue;
+            }
+            let remapped = match node {
+                NodeKind::Input(k) => NodeKind::Input(*k),
+                NodeKind::Constant(v) => NodeKind::Constant(v.clone()),
+                NodeKind::Add(a, b) => NodeKind::Add(remap_id(*a), remap_id(*b)),
+                NodeKind::Sub(a, b) => NodeKind::Sub(remap_id(*a), remap_id(*b)),
+                NodeKind::Mul(a, b) => NodeKind::Mul(remap_id(*a), remap_id(*b)),
+                NodeKind::Neg(a) => NodeKind::Neg(remap_id(*a)),
+            };
+            new_nodes.push(remapped);
+        }
+
+        self.nodes = new_nodes;
+        self.root = remap_id(self.root);
+    }
+}
+
 impl<EF> DagSnapshot<EF> {
     /// Root node of the verifier equation.
     pub fn root(&self) -> NodeId {
