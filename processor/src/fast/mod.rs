@@ -707,7 +707,7 @@ impl Tracer for NoopTracer {
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
-        // do nothing
+    ) -> Result<(), ExecutionError> {
+        Ok(())
     }
 }
