@@ -1058,12 +1058,15 @@ impl Assembler {
             .get_procedure(entrypoint)
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
+        let entry_source_ref = mast_forest_builder.latest_source_ref_for_node_ref(entry_node_ref);
 
-        let (mast_forest, node_id_by_ref, debug_info, _) =
+        let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
             mast_forest_builder.build()?.into_parts_with_debug_info();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
+        let entry_source_id =
+            entry_source_ref.and_then(|source_ref| source_id_by_ref.get(&source_ref).copied());
 
         let kernel_package = self.linker.kernel_package();
         self.finish_program_product(
@@ -1072,6 +1075,7 @@ impl Assembler {
             mast_forest,
             debug_info,
             entry_node_id,
+            entry_source_id,
             kernel_package,
         )
     }
@@ -1139,13 +1143,12 @@ impl Assembler {
         mast_forest: miden_core::mast::MastForest,
         #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         entrypoint: MastNodeId,
+        entrypoint_source_id: Option<DebugSourceNodeId>,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
-        let entry_source_node =
-            debug_info.unique_source_root_for_exec_node(entrypoint).into_diagnostic()?;
         let package = Box::new(
             Package::create(
                 name,
@@ -1154,7 +1157,7 @@ impl Assembler {
                 mast,
                 vec![PackageExport::Procedure(
                     ProcedureExport::new(entry, Some(entrypoint), entry_digest, None)
-                        .with_source_node(entry_source_node),
+                        .with_source_node(entrypoint_source_id),
                 )],
                 None,
             )
