@@ -2,18 +2,19 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, Word};
+use miden_core::{Felt, Word, crypto::hash::Rpo256};
 use miden_signature::{
     Goldilocks, QuadExt, e2_110 as sig_variant,
     internal::{
         air::Rpo12,
-        merkle::{MerkleOpening, hash_row},
+        merkle::MerkleOpening,
         proof::Poseidon2Proof,
         serialize,
         signer::Config,
+        transcript::{HashSuite, RpoSuite},
     },
 };
-use miden_utils_testing::crypto::{MerklePath, MerkleStore, PartialMerkleTree, Poseidon2};
+use miden_utils_testing::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 
 use super::{
     SigVerifierData,
@@ -45,7 +46,7 @@ pub(crate) fn build_fixture_with_message(seed: &[u8], message: [Felt; 4]) -> Sig
     assert!(verify_sig(&pk, message, &signature).is_ok());
 
     let config = Config::e2_110bit::<Rpo12>();
-    let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
+    let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
         &signature,
         &config.stark,
         11,
@@ -204,7 +205,7 @@ fn extend_merkle_paths(
 
         // Salted leaf digest: Poseidon2 sponge over the row with the per-leaf
         // salt loaded into the capacity (BCS hiding). Same as the MASM computes.
-        let digest_g = hash_row(&opening.row, &opening.salt);
+        let digest_g = RpoSuite::hash_row(&opening.row, &opening.salt);
         let leaf_word = Word::new(g4_to_felt4(&digest_g));
 
         // Advice-map value: salt(4) ++ [0…0] ++ row. The MASM loads the salt
@@ -250,7 +251,7 @@ pub(crate) fn sig_proof_key_from_stack(stack: &[u64]) -> Word {
         Felt::new_unchecked(stack[6]),
         Felt::new_unchecked(stack[7]),
     ]);
-    Poseidon2::merge(&[pk, msg])
+    Rpo256::merge(&[pk, msg])
 }
 
 pub(crate) fn advice_map_with_sig_proof(data: &SigVerifierData) -> Vec<(Word, Vec<Felt>)> {

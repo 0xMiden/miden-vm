@@ -2,10 +2,8 @@ use alloc::vec::Vec;
 use core::{borrow::BorrowMut, ops::Range};
 
 use miden_air::{
-    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, ControllerCols, INITIAL_EXTERNAL_ROUND_END,
-    INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
-    NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
-    PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols,
+    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, ControllerCols, NUM_SBOX_WITNESSES,
+    Poseidon2PermutationCols,
     trace::{
         chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
         poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
@@ -283,6 +281,7 @@ pub(super) fn write_poseidon2_permutation_cycle(
     multiplicity: Felt,
 ) {
     debug_assert_eq!(rows.len(), HASH_CYCLE_LEN);
+    debug_assert_eq!(Hasher::NUM_ROUNDS + 1, HASH_CYCLE_LEN);
     let mut state = *init_state;
 
     let zero_witnesses = [ZERO; NUM_SBOX_WITNESSES];
@@ -290,68 +289,15 @@ pub(super) fn write_poseidon2_permutation_cycle(
 
     write_perm_row(&mut rows[CYCLE_INPUT_ROW], &state, perm_id, multiplicity_witnesses);
 
-    Hasher::apply_matmul_external(&mut state);
-    Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
-    Hasher::apply_sbox(&mut state);
-    Hasher::apply_matmul_external(&mut state);
-
-    for (offset, row) in rows[INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END]
-        .iter_mut()
-        .enumerate()
-    {
-        let round = INITIAL_EXTERNAL_ROUND_START + offset;
-        write_perm_row(row, &state, perm_id, zero_witnesses);
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[round]);
-        Hasher::apply_sbox(&mut state);
-        Hasher::apply_matmul_external(&mut state);
+    for round in 0..Hasher::NUM_ROUNDS {
+        Hasher::apply_round(&mut state, round);
+        let witnesses = if round + 1 == CYCLE_OUTPUT_ROW {
+            multiplicity_witnesses
+        } else {
+            zero_witnesses
+        };
+        write_perm_row(&mut rows[round + 1], &state, perm_id, witnesses);
     }
-
-    for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
-        let base = triple * NUM_SBOX_WITNESSES;
-        let pre_state = state;
-        let mut witnesses = zero_witnesses;
-        for (k, witness) in witnesses.iter_mut().enumerate() {
-            let sbox_out = (state[0] + Hasher::ARK_INT[base + k]).exp_const_u64::<7>();
-            *witness = sbox_out;
-            state[0] = sbox_out;
-            Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
-        }
-        write_perm_row(
-            &mut rows[PACKED_INTERNAL_ROUND_START + triple],
-            &pre_state,
-            perm_id,
-            witnesses,
-        );
-    }
-
-    let pre_state = state;
-    let w0 = (state[0] + Hasher::ARK_INT[LAST_INTERNAL_ROUND_ARK_IDX]).exp_const_u64::<7>();
-    state[0] = w0;
-    Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
-    Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
-    Hasher::apply_sbox(&mut state);
-    Hasher::apply_matmul_external(&mut state);
-    let final_internal_witnesses = witnesses_with_first(w0);
-    write_perm_row(
-        &mut rows[INTERNAL_PLUS_EXTERNAL_ROW],
-        &pre_state,
-        perm_id,
-        final_internal_witnesses,
-    );
-
-    for round in 1..=NUM_TRAILING_EXTERNAL_ROUND_ROWS {
-        write_perm_row(
-            &mut rows[INTERNAL_PLUS_EXTERNAL_ROW + round],
-            &state,
-            perm_id,
-            zero_witnesses,
-        );
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[round]);
-        Hasher::apply_sbox(&mut state);
-        Hasher::apply_matmul_external(&mut state);
-    }
-
-    write_perm_row(&mut rows[CYCLE_OUTPUT_ROW], &state, perm_id, multiplicity_witnesses);
 }
 
 /// Materializes the Poseidon2 permutation trace from deduplicated permutation requests.

@@ -149,7 +149,7 @@ fn bench_prove_sig_batch_shared_message() {
     let params = BenchParams::from_env();
     eprintln!("\n=== Signature Batch Proving Benchmark (shared message) ===");
     eprintln!("k range: [{}, {}], runs per k: {}", params.min_k, params.max_k, params.runs);
-    eprintln!("proof hash: Poseidon2 (recursion-friendly)");
+    eprintln!("proof hash: Rpo256 (recursion-friendly)");
     eprintln!("-----------------------------------------------------------");
 
     for k in params.min_k..=params.max_k {
@@ -191,7 +191,7 @@ fn bench_prove_sig_batch_shared_message() {
             let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
             let mut host = build_sig_host();
 
-            let options = ProvingOptions::new(HashFunction::Poseidon2);
+            let options = ProvingOptions::new(HashFunction::Rpo256);
             let t_prove = Instant::now();
             let _ = prove_sync(
                 &program,

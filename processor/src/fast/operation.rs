@@ -5,11 +5,8 @@ use miden_air::{
     trace::{RowIndex, chiplets::hasher::HasherState},
 };
 use miden_core::{
-    WORD_SIZE, Word, ZERO,
-    crypto::{hash::Poseidon2, merkle::MerklePath},
-    deferred::Digest,
-    program::MIN_STACK_DEPTH,
-    utils::range,
+    WORD_SIZE, Word, ZERO, chiplets::hasher::apply_permutation, crypto::merkle::MerklePath,
+    deferred::Digest, program::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
@@ -73,7 +70,7 @@ impl HasherInterface for FastProcessor {
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
-        Poseidon2::apply_permutation(&mut input_state);
+        apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))

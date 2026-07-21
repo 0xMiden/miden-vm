@@ -505,8 +505,8 @@ pub fn encode_for_eval_circuit(
 
 /// Hash the encoded stream to get the circuit commitment.
 pub fn circuit_hash(stream: &[Felt]) -> [Felt; 4] {
-    use miden_utils_testing::crypto::Poseidon2;
-    let digest = Poseidon2::hash_elements(stream);
+    use miden_core::crypto::hash::Rpo256;
+    let digest = Rpo256::hash_elements(stream);
     let w = digest;
     w.into()
 }
@@ -655,17 +655,17 @@ mod tests {
         eprintln!("  circuit hash: {:?}", hash.map(|f| f.as_canonical_u64()));
 
         // Verify hash matches the MASM constants
-        assert_eq!(hash[0].as_canonical_u64(), 18249844043687129308u64);
-        assert_eq!(hash[1].as_canonical_u64(), 17126546483133503200u64);
-        assert_eq!(hash[2].as_canonical_u64(), 8473203744354398138u64);
-        assert_eq!(hash[3].as_canonical_u64(), 6636593801951406526u64);
+        assert_eq!(hash[0].as_canonical_u64(), 1450665829201445797u64);
+        assert_eq!(hash[1].as_canonical_u64(), 10046822553360383469u64);
+        assert_eq!(hash[2].as_canonical_u64(), 15650706673428320359u64);
+        assert_eq!(hash[3].as_canonical_u64(), 5553949992686977874u64);
     }
 
     #[test]
     fn circuit_evaluates_to_zero_on_valid_proof() {
         use miden_signature::{
             QuadExt,
-            internal::{air::Rpo12, serialize, signer::Config},
+            internal::{air::Rpo12, serialize, signer::Config, transcript::RpoSuite},
         };
 
         // Sign and deserialize
@@ -677,7 +677,7 @@ mod tests {
         let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
             &signature,
             stark,
             11,
@@ -764,7 +764,7 @@ mod tests {
     fn circuit_detects_tampered_quotient_coord() {
         use miden_signature::{
             QuadExt,
-            internal::{air::Rpo12, serialize, signer::Config},
+            internal::{air::Rpo12, serialize, signer::Config, transcript::RpoSuite},
         };
 
         let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-tamper-test"));
@@ -775,7 +775,7 @@ mod tests {
         let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
             &signature,
             stark,
             11,
@@ -850,7 +850,9 @@ mod tests {
     fn round_constants_horner_matches_signature_lagrange() {
         use miden_signature::{
             QuadExt,
-            internal::{air, proof::lagrange_interp_at_vec, serialize, signer::Config},
+            internal::{
+                air, proof::lagrange_interp_at_vec, serialize, signer::Config, transcript::RpoSuite,
+            },
         };
 
         let (sk, pk) = sig_variant::keygen(seed_from_label(b"circuit-gen-ark-test"));
@@ -861,7 +863,7 @@ mod tests {
         let config = Config::e2_110bit::<air::Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<air::Rpo12, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct_with::<air::Rpo12, QuadExt, RpoSuite>(
             &signature,
             stark,
             11,
@@ -944,6 +946,7 @@ mod tests {
                 proof::lagrange_interp_at_vec,
                 serialize,
                 signer::Config,
+                transcript::RpoSuite,
             },
         };
 
@@ -955,7 +958,7 @@ mod tests {
         let config = Config::e2_110bit::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
-        let proof = serialize::deserialize_and_reconstruct::<Rpo12, QuadExt>(
+        let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
             &signature,
             stark,
             11,

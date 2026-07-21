@@ -5,7 +5,14 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use miden_core::{Felt, Word};
-use miden_signature::{Goldilocks, VerifyError, e2_110};
+use miden_signature::{
+    Goldilocks, QuadExt, VerifyError, e2_110,
+    internal::{
+        air::Rpo12,
+        signer::{Config, Signer},
+        transcript::RpoSuite,
+    },
+};
 use miden_utils_testing::crypto::MerkleStore;
 
 mod bench;
@@ -71,7 +78,8 @@ pub fn instance_seed_goldilocks() -> [Goldilocks; 4] {
 // Signature helpers using 4-felt messages.
 
 pub fn sign_sig(sk: &e2_110::SecretKey, msg: [Felt; 4]) -> Vec<u8> {
-    e2_110::sign(sk, message_to_goldilocks(msg))
+    Signer::<Rpo12, QuadExt, _, RpoSuite>::new(Config::e2_110bit::<Rpo12>())
+        .sign(sk, message_to_goldilocks(msg))
 }
 
 pub fn verify_sig(
@@ -79,5 +87,9 @@ pub fn verify_sig(
     msg: [Felt; 4],
     signature: &[u8],
 ) -> Result<(), VerifyError> {
-    e2_110::verify(pk, message_to_goldilocks(msg), signature)
+    Signer::<Rpo12, QuadExt, _, RpoSuite>::new_verifier(Config::e2_110bit::<Rpo12>()).verify(
+        pk,
+        message_to_goldilocks(msg),
+        signature,
+    )
 }

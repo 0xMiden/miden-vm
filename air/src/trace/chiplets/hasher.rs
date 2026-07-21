@@ -12,7 +12,7 @@
 
 use core::ops::Range;
 
-pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
+pub use miden_core::{Word, crypto::hash::Rpo256 as Hasher};
 
 use super::{Felt, ONE, ZERO};
 
@@ -75,7 +75,7 @@ pub const NUM_SELECTORS: usize = 3;
 /// - Merging int22 + ext5 into one row
 ///
 /// This gives `1 + 3 + 7 + 1 + 3 + 1 = 16` rows.
-pub const HASH_CYCLE_LEN: usize = 16;
+pub const HASH_CYCLE_LEN: usize = 8;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
 /// Row alignment for the hasher controller region inside `ChipletsAir`.

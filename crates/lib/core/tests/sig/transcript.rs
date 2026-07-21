@@ -7,8 +7,7 @@
 //!
 //! Sponge state: [R1(4), R2(4), C(4)] -- width 12, rate 8, capacity 4.
 
-use miden_core::Felt;
-use miden_crypto::hash::poseidon2::Poseidon2Permutation256;
+use miden_core::{Felt, chiplets::hasher::apply_permutation};
 
 const STATE_WIDTH: usize = 12;
 const RATE: usize = 8;
@@ -34,7 +33,7 @@ impl SigTranscript {
         // C = instance_seed (state[8..12])
         state[8..12].copy_from_slice(&instance_seed);
 
-        Poseidon2Permutation256::apply_permutation(&mut state);
+        apply_permutation(&mut state);
 
         // Keep full state (R1', R2', PROOF_SEED). No rate zeroing —
         // R2' carries entropy and is preserved by the next reseed_direct.
@@ -45,7 +44,7 @@ impl SigTranscript {
     /// Matches MASM `reseed_direct`.
     pub fn reseed_direct(&mut self, word: [Felt; 4]) {
         self.state[0..4].copy_from_slice(&word);
-        Poseidon2Permutation256::apply_permutation(&mut self.state);
+        apply_permutation(&mut self.state);
         self.output_len = RATE;
     }
 
@@ -54,7 +53,7 @@ impl SigTranscript {
     pub fn absorb_full_rate(&mut self, r1: [Felt; 4], r2: [Felt; 4]) {
         self.state[0..4].copy_from_slice(&r1);
         self.state[4..8].copy_from_slice(&r2);
-        Poseidon2Permutation256::apply_permutation(&mut self.state);
+        apply_permutation(&mut self.state);
         self.output_len = RATE;
     }
 
@@ -63,7 +62,7 @@ impl SigTranscript {
     /// Auto-permutes when rate is exhausted (matches MASM `generate_list_indices`).
     pub fn sample_felt(&mut self) -> Felt {
         if self.output_len == 0 {
-            Poseidon2Permutation256::apply_permutation(&mut self.state);
+            apply_permutation(&mut self.state);
             self.output_len = RATE;
         }
         self.output_len -= 1;
@@ -94,7 +93,7 @@ impl SigTranscript {
             return nonce == 0;
         }
         self.state[0] = Felt::new_unchecked(nonce);
-        Poseidon2Permutation256::apply_permutation(&mut self.state);
+        apply_permutation(&mut self.state);
         self.output_len = RATE;
         self.sample_bits(bits) == 0
     }
@@ -244,17 +243,15 @@ mod tests {
 
     #[test]
     fn poseidon2_matches_miden_signature() {
-        // Verify that miden-crypto's Poseidon2Permutation256 matches
-        // miden-signature's Poseidon2Perm on the same input.
-        use miden_signature::{Goldilocks, internal::poseidon2::Poseidon2Perm};
+        use miden_signature::{Goldilocks, internal::rpo};
 
         let mut state_mc = [Felt::ZERO; 12];
         state_mc[0] = Felt::ONE;
-        Poseidon2Permutation256::apply_permutation(&mut state_mc);
+        apply_permutation(&mut state_mc);
 
-        let mut state_sig: [Goldilocks; 12] = unsafe { core::mem::zeroed() };
+        let mut state_sig = [Goldilocks::new(0); 12];
         state_sig[0] = Goldilocks::new(1);
-        Poseidon2Perm::permute(&mut state_sig);
+        state_sig = rpo::permute(state_sig);
 
         for i in 0..12 {
             let mc = state_mc[i].as_canonical_u64();

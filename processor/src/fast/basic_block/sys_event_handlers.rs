@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    crypto::hash::Poseidon2,
+    chiplets::hasher::{Hasher as HpermHasher, apply_permutation},
     deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -156,7 +156,7 @@ fn insert_hdword_into_adv_map(
     let b = processor.stack_get_word(5);
 
     // Hash as [A, B] to match `hmerge` behavior directly.
-    let key = Poseidon2::merge_in_domain(&[a, b], domain);
+    let key = HpermHasher::merge_in_domain(&[a, b], domain);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -190,7 +190,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
+    let key = HpermHasher::hash_elements(&[*a, *b, *c, *d].concat());
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
@@ -236,12 +236,12 @@ fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), System
     ];
 
     // Extract the rate portion (first 8 elements) as values to store.
-    let values = state[Poseidon2::RATE_RANGE].to_vec();
+    let values = state[HpermHasher::RATE_RANGE].to_vec();
 
     // Apply permutation and extract digest as the key.
-    Poseidon2::apply_permutation(&mut state);
+    apply_permutation(&mut state);
     let key = Word::new(
-        state[Poseidon2::DIGEST_RANGE]
+        state[HpermHasher::DIGEST_RANGE]
             .try_into()
             .expect("failed to extract digest from state"),
     );
@@ -549,7 +549,10 @@ fn push_transformed_stack_top(
 mod tests {
     use alloc::vec;
 
-    use miden_core::{Felt, ZERO, crypto::hash::Poseidon2};
+    use miden_core::{
+        Felt, ZERO,
+        chiplets::hasher::{Hasher as HpermHasher, apply_permutation},
+    };
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
@@ -575,12 +578,12 @@ mod tests {
 
         // Compute expected key by applying the permutation to the same state.
         let mut expected_state_after_perm = state_felts;
-        Poseidon2::apply_permutation(&mut expected_state_after_perm);
+        apply_permutation(&mut expected_state_after_perm);
         let expected_key =
-            Word::new(expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap());
+            Word::new(expected_state_after_perm[HpermHasher::DIGEST_RANGE].try_into().unwrap());
 
         // The expected values are the rate portion (first 8 elements) of the *input* state.
-        let expected_values = state_felts[Poseidon2::RATE_RANGE].to_vec();
+        let expected_values = state_felts[HpermHasher::RATE_RANGE].to_vec();
 
         // Verify the advice map contains the correct entry.
         let stored_values = processor

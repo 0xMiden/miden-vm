@@ -6,10 +6,8 @@ use alloc::{
 use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::{
-        hash::Poseidon2,
-        merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
-    },
+    chiplets::hasher::Hasher as HpermHasher,
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
 };
 #[cfg(test)]
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
@@ -668,7 +666,7 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        let root = Poseidon2::merge(&[lhs, rhs]);
+        let root = HpermHasher::merge(&[lhs, rhs]);
         let added = self.store.new_internal_node_count([root]);
         self.check_merkle_store_node_addition(added)?;
 

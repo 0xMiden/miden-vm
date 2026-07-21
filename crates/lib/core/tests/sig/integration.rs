@@ -2,7 +2,7 @@
 //! See README.md in this folder for how to run tests and benchmarks.
 
 use miden_core::Felt;
-use miden_signature::{QuadExt, internal::transcript::Poseidon2Suite};
+use miden_signature::{QuadExt, internal::transcript::RpoSuite};
 
 use super::{
     SigVerifierData,
@@ -48,15 +48,14 @@ fn masm_query_indices_match_transcript_replay() {
     const SIG_QUERIES_PTR: u32 = 3240100248;
 
     let fixture = build_fixture(b"masm-query-indices-match-replay", 1003);
-    let expected =
-        miden_signature::internal::proof::replay_query_indices::<QuadExt, Poseidon2Suite>(
-            &fixture.config.stark,
-            *fixture.pk.elements(),
-            &fixture.proof,
-            message_to_goldilocks(fixture.message),
-            instance_seed_goldilocks(),
-        )
-        .expect("fixture proof grinding must replay successfully");
+    let expected = miden_signature::internal::proof::replay_query_indices::<QuadExt, RpoSuite>(
+        &fixture.config.stark,
+        *fixture.pk.elements(),
+        &fixture.proof,
+        message_to_goldilocks(fixture.message),
+        instance_seed_goldilocks(),
+    )
+    .expect("fixture proof grinding must replay successfully");
 
     let setup_source = "
         use miden::core::sig
@@ -113,7 +112,7 @@ fn masm_prox_grinding_guard_rejects_bad_nonce() {
     for offset in 1..1024 {
         let mut proof = fixture.proof.clone();
         proof.prox_nonce = fixture.proof.prox_nonce.wrapping_add(offset);
-        if miden_signature::internal::proof::replay_query_indices::<QuadExt, Poseidon2Suite>(
+        if miden_signature::internal::proof::replay_query_indices::<QuadExt, RpoSuite>(
             &fixture.config.stark,
             *fixture.pk.elements(),
             &proof,
@@ -152,7 +151,7 @@ fn masm_ood_grinding_guard_rejects_bad_nonce() {
     for offset in 1..64 {
         let mut proof = fixture.proof.clone();
         proof.ood_nonce = fixture.proof.ood_nonce.wrapping_add(offset);
-        if miden_signature::internal::proof::replay_query_indices::<QuadExt, Poseidon2Suite>(
+        if miden_signature::internal::proof::replay_query_indices::<QuadExt, RpoSuite>(
             &fixture.config.stark,
             *fixture.pk.elements(),
             &proof,

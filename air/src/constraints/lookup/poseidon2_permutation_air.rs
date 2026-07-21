@@ -35,7 +35,7 @@ pub(crate) fn emit_poseidon2_permutation_lookup_columns<LB>(
     let periodic: &Poseidon2PermutationPeriodicCols<LB::PeriodicVar> =
         builder.periodic_values().borrow();
 
-    let f_row0: LB::Expr = periodic.is_init_ext.into();
+    let f_row0: LB::Expr = periodic.is_cycle_start.into();
     let f_row15 = LB::Expr::ONE - periodic.not_cycle_end();
     let multiplicity: LB::Expr = LB::Expr::ZERO - local.witnesses[0].into();
     let state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| local.state[i]);
