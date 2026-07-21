@@ -228,11 +228,14 @@ fn prove_verify_sig_batch_shared_message_once() {
 
     let params = BenchParams::from_env();
     let num_signatures = 1usize << params.min_k;
+    let t_setup = Instant::now();
     let fixture = build_same_msg_batch_fixture(num_signatures);
     let program = build_shared_message_program(num_signatures);
+    let setup_secs = t_setup.elapsed().as_secs_f64();
 
     let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
     let mut host = build_sig_host();
+    let t_trace = Instant::now();
     let processor = miden_processor::FastProcessor::new_with_options(
         stack_inputs,
         advice_inputs,
@@ -244,39 +247,72 @@ fn prove_verify_sig_batch_shared_message_once() {
         .expect("batch execution failed");
     let trace = miden_processor::trace::build_trace(trace_inputs).expect("trace build failed");
     let trace_len = trace.get_trace_len();
+    let trace_secs = t_trace.elapsed().as_secs_f64();
 
-    let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
-    let verifier_stack_inputs = stack_inputs;
-    let mut host = build_sig_host();
-    let options = ProvingOptions::new(HashFunction::Poseidon2);
-    let t_prove = Instant::now();
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .expect("failed to generate proof");
-    let prove_secs = t_prove.elapsed().as_secs_f64();
+    let mut prove_secs = Vec::with_capacity(params.runs);
+    let mut verify_secs = Vec::with_capacity(params.runs);
+    let mut proof_bytes = Vec::with_capacity(params.runs);
+    let mut security_bits = None;
 
-    let proof_bytes = proof.to_bytes().len();
-    let t_verify = Instant::now();
-    let security = verify(ProgramInfo::from(program), verifier_stack_inputs, stack_outputs, proof)
-        .expect("failed to verify proof");
-    let verify_secs = t_verify.elapsed().as_secs_f64();
+    for _ in 0..params.runs {
+        let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
+        let verifier_stack_inputs = stack_inputs.clone();
+        let mut host = build_sig_host();
+        let options = ProvingOptions::new(HashFunction::Poseidon2);
+        let t_prove = Instant::now();
+        let (stack_outputs, proof) = prove_sync(
+            &program,
+            stack_inputs,
+            advice_inputs,
+            &mut host,
+            ExecutionOptions::default(),
+            options,
+        )
+        .expect("failed to generate proof");
+        prove_secs.push(t_prove.elapsed().as_secs_f64());
+
+        proof_bytes.push(proof.to_bytes().len());
+        let t_verify = Instant::now();
+        let security =
+            verify(ProgramInfo::from(program.clone()), verifier_stack_inputs, stack_outputs, proof)
+                .expect("failed to verify proof");
+        verify_secs.push(t_verify.elapsed().as_secs_f64());
+
+        if let Some(expected) = security_bits {
+            assert_eq!(security, expected, "security level changed across runs");
+        } else {
+            security_bits = Some(security);
+        }
+    }
+
+    let avg = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+    let min = |values: &[f64]| values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = |values: &[f64]| values.iter().copied().fold(0.0, f64::max);
+    let proof_bytes_avg =
+        proof_bytes.iter().copied().sum::<usize>() as f64 / proof_bytes.len() as f64;
+    let proof_bytes_min = proof_bytes.iter().copied().min().expect("at least one run");
+    let proof_bytes_max = proof_bytes.iter().copied().max().expect("at least one run");
 
     eprintln!(
-        "sig_recursive_bench k={} signatures={} trace_len={} trace_log2={} prove_s={:.3} proof_bytes={} proof_kib={:.2} verify_ms={:.3} security_bits={}",
+        "sig_recursive_bench k={} signatures={} runs={} metal_feature={} trace_len={} trace_log2={} setup_s={:.3} trace_s={:.3} prove_s={:.3} prove_min_s={:.3} prove_max_s={:.3} proof_bytes_avg={:.0} proof_bytes_min={} proof_bytes_max={} proof_kib_avg={:.2} verify_ms={:.3} verify_min_ms={:.3} verify_max_ms={:.3} security_bits={}",
         params.min_k,
         num_signatures,
+        params.runs,
+        cfg!(all(feature = "metal", target_os = "macos")),
         trace_len,
         trace_len.trailing_zeros(),
-        prove_secs,
-        proof_bytes,
-        proof_bytes as f64 / 1024.0,
-        verify_secs * 1000.0,
-        security,
+        setup_secs,
+        trace_secs,
+        avg(&prove_secs),
+        min(&prove_secs),
+        max(&prove_secs),
+        proof_bytes_avg,
+        proof_bytes_min,
+        proof_bytes_max,
+        proof_bytes_avg / 1024.0,
+        avg(&verify_secs) * 1000.0,
+        min(&verify_secs) * 1000.0,
+        max(&verify_secs) * 1000.0,
+        security_bits.expect("at least one run"),
     );
 }

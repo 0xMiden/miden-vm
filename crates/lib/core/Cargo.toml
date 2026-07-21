@@ -36,6 +36,7 @@ std = [
 ]
 testing = ["arbitrary"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
+metal = ["miden-signature/metal", "miden-signature/parallel"]
 
 [dependencies]
 # Miden dependencies
