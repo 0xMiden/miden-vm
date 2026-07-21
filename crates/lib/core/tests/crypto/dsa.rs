@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, Word, deferred::DeferredState, serde::Serializable};
+use miden_core::{
+    Felt, Word,
+    deferred::DeferredState,
+    serde::{Deserializable, Serializable},
+};
 use miden_core_lib::{CoreLibrary, dsa::ecdsa_k256_keccak};
 use miden_crypto::{
     SequentialCommit,
@@ -29,6 +33,14 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
     assert_eq!(wire.entries.len(), VERIFY_EXPECTED_WIRE_ENTRIES);
     assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_accepts_generator_public_key() {
+    let fixture = generator_public_key_fixture();
+
+    let output = run_verify(&fixture).expect("generator public key must verify");
+    assert_deferred_state_round_trips(&output);
 }
 
 #[test]
@@ -160,6 +172,18 @@ struct Fixture {
 fn valid_fixture() -> Fixture {
     let mut rng = ChaCha20Rng::from_seed([0xe5; 32]);
     let sk = SigningKey::with_rng(&mut rng);
+    fixture_from_signing_key(sk)
+}
+
+fn generator_public_key_fixture() -> Fixture {
+    let mut secret_key_bytes = [0u8; 32];
+    secret_key_bytes[31] = 1;
+    let sk = SigningKey::read_from_bytes(&secret_key_bytes).expect("scalar 1 is a valid key");
+
+    fixture_from_signing_key(sk)
+}
+
+fn fixture_from_signing_key(sk: SigningKey) -> Fixture {
     let message = fixed_message();
     let public_key = sk.public_key();
     let signature = sk.sign(message);
