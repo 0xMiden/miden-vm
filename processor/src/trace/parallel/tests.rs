@@ -1281,7 +1281,7 @@ fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
         .filter_map(|row_idx| {
             let idx = RowIndex::from(row_idx);
             if read_opcode(main_trace, idx) == opcodes::END {
-                Some(main_trace.decoder_hasher_state_second_half(idx))
+                Some(main_trace.core_row(idx).decoder.hasher_state_second_half())
             } else {
                 None
             }
@@ -1290,7 +1290,7 @@ fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
 }
 
 fn read_opcode(main_trace: &MainTrace, row_idx: RowIndex) -> u8 {
-    let opcode = main_trace.get_op_code(row_idx).as_canonical_u64();
+    let opcode = main_trace.core_row(row_idx).decoder.op_code().as_canonical_u64();
     assert!(opcode <= u8::MAX as u64, "invalid opcode");
     opcode as u8
 }
