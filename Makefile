@@ -27,12 +27,6 @@ help:
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
 	@printf "  make test-skip-proptests         # All tests except proptests\n"
 	@printf "  make check-features              # Check all feature combinations with cargo-hack\n\n"
-	@printf "Suite boundaries:\n"
-	@printf "  make test                        # Standard workspace suite (includes proptests and CLI)\n"
-	@printf "  make test-docs                   # Documentation tests\n"
-	@printf "  make test-crypto                 # Persistent-storage and lifted-STARK configurations\n"
-	@printf "  make test-loom                   # Loom concurrency-model tests (opt-in)\n"
-	@printf "  make check-features              # Feature-combination compilation checks\n\n"
 
 
 # -- environment toggles --------------------------------------------------------------------------
