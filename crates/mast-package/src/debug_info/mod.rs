@@ -222,9 +222,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
             .position(|file| {
                 self.strings
                     .get(file.path_idx)
-                    .map(|p| {
-                        p.as_ref() == uri.as_str().strip_prefix("file://").unwrap_or(uri.as_str())
-                    })
+                    .map(|path| path.as_ref() == uri.as_str())
                     .unwrap_or(false)
             })
             .map(|pos| DebugFileIdx::from(pos as u32))

@@ -663,6 +663,43 @@ mod tests {
     }
 
     #[test]
+    fn file_uri_lookup_uses_the_stored_representation() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let uri = Uri::new("file:///src/main.masm");
+        let file_idx = builder.add_file(uri.clone(), None);
+
+        assert_eq!(builder.get_file_index_by_uri(&uri), Some(file_idx));
+
+        let debug_info = builder.build();
+        assert_eq!(debug_info.get_file_index_by_uri(&uri), Some(file_idx));
+    }
+
+    #[test]
+    fn trimming_file_paths_does_not_mutate_shared_strings() {
+        let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+        let trimmed_path: Arc<str> = Arc::from("src/main.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_a = builder.add_file(Uri::from(absolute_path.clone()), None);
+        let file_b = builder.add_file(Uri::from(absolute_path.clone()), Some([1; 32]));
+        let trimmed_path_idx = builder.add_string(trimmed_path.clone());
+        assert!(builder.add_error_message(7, absolute_path.clone()));
+        let mut debug_info = *builder.build();
+        let mut trim_calls = 0;
+
+        debug_info.trim_file_paths(|path| {
+            trim_calls += 1;
+            assert_eq!(path, absolute_path.as_ref());
+            Some(trimmed_path.clone())
+        });
+
+        assert_eq!(trim_calls, 1, "a shared file path should only be trimmed once");
+        assert_eq!(debug_info[file_a].path_idx, trimmed_path_idx);
+        assert_eq!(debug_info[file_b].path_idx, trimmed_path_idx);
+        assert_eq!(debug_info.error_message(7).as_deref(), Some(absolute_path.as_ref()));
+        assert_eq!(debug_info.strings().len(), 2, "the existing trimmed string should be reused");
+    }
+
+    #[test]
     fn test_debug_source_map_inline_calls_are_keyed_by_source_operation() {
         let inline_a = DebugSourceInlineCall {
             op_idx: 3,
