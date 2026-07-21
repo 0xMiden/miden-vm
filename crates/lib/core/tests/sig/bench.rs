@@ -234,6 +234,8 @@ fn bench_prove_sig_batch_shared_message() {
 #[test]
 #[ignore = "run manually - proves and verifies one shared-message signature batch"]
 fn prove_verify_sig_batch_shared_message_once() {
+    use std::time::Instant;
+
     init_trace_spans_if_requested();
 
     let params = BenchParams::from_env();
@@ -242,9 +244,24 @@ fn prove_verify_sig_batch_shared_message_once() {
     let program = build_shared_message_program(num_signatures);
 
     let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
+    let mut host = build_sig_host();
+    let processor = miden_processor::FastProcessor::new_with_options(
+        stack_inputs,
+        advice_inputs,
+        ExecutionOptions::default(),
+    )
+    .expect("processor init failed");
+    let trace_inputs = processor
+        .execute_trace_inputs_sync(&program, &mut host)
+        .expect("batch execution failed");
+    let trace = miden_processor::trace::build_trace(trace_inputs).expect("trace build failed");
+    let trace_len = trace.get_trace_len();
+
+    let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
     let verifier_stack_inputs = stack_inputs;
     let mut host = build_sig_host();
     let options = ProvingOptions::new(HashFunction::Rpo256);
+    let t_prove = Instant::now();
     let (stack_outputs, proof) = prove_sync(
         &program,
         stack_inputs,
@@ -254,8 +271,24 @@ fn prove_verify_sig_batch_shared_message_once() {
         options,
     )
     .expect("failed to generate proof");
+    let prove_secs = t_prove.elapsed().as_secs_f64();
 
+    let proof_bytes = proof.to_bytes().len();
+    let t_verify = Instant::now();
     let security = verify(ProgramInfo::from(program), verifier_stack_inputs, stack_outputs, proof)
         .expect("failed to verify proof");
-    eprintln!("verified 2^{}={} sigs at {security} bits", params.min_k, num_signatures);
+    let verify_secs = t_verify.elapsed().as_secs_f64();
+
+    eprintln!(
+        "sig_recursive_bench k={} signatures={} trace_len={} trace_log2={} prove_s={:.3} proof_bytes={} proof_kib={:.2} verify_ms={:.3} security_bits={}",
+        params.min_k,
+        num_signatures,
+        trace_len,
+        trace_len.trailing_zeros(),
+        prove_secs,
+        proof_bytes,
+        proof_bytes as f64 / 1024.0,
+        verify_secs * 1000.0,
+        security,
+    );
 }
