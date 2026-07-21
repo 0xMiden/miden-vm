@@ -10,7 +10,7 @@ name                   = "miden-crypto"
 readme.workspace       = true
 repository.workspace   = true
 rust-version.workspace = true
-version = "0.28.0"
+version = "0.28.1"
 
 [[bin]]
 bench             = false
