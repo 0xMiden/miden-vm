@@ -54,7 +54,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-prover = { workspace = true, features = ["concurrent"] }
-miden-signature = { git = "https://github.com/0xMiden/miden-signature.git", rev = "5fe9334dd19bd48948c4fea23f5de70d04fcc091" }
+miden-signature = { git = "https://github.com/0xMiden/miden-signature.git", branch = "paper/signature-bcs-backends" }
 p3-field = { version = "0.6", default-features = false }
 p3-goldilocks = { version = "0.6", default-features = false }
 p3-symmetric = { version = "0.6", default-features = false }
