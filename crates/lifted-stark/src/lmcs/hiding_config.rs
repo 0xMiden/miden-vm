@@ -125,6 +125,7 @@ where
             leaves,
             Some(salt),
             1,
+            None,
         )
     }
 
@@ -143,6 +144,7 @@ where
             leaves,
             Some(salt),
             <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT,
+            None,
         )
     }
 

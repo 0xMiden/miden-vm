@@ -58,6 +58,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(all(feature = "metal", target_os = "macos"))]
+extern crate std;
 
 // ============================================================================
 // Private implementation modules

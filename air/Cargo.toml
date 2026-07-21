@@ -22,6 +22,7 @@ default = ["std"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "thiserror/std"]
 concurrent = ["std"]
+metal = ["miden-crypto/metal"]
 testing = []
 
 [dependencies]

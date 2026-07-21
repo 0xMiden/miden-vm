@@ -36,6 +36,7 @@ std = [
 ]
 testing = ["arbitrary"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
+metal = ["miden-prover/metal"]
 
 [dependencies]
 # Miden dependencies
@@ -69,6 +70,7 @@ num = { workspace = true }
 rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true

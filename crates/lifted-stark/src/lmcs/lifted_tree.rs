@@ -10,7 +10,10 @@ use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
+use crate::lmcs::{
+    LmcsTree, config::LmcsAccelerator, proof::LeafOpening, row_list::RowList,
+    tree_indices::TreeIndices,
+};
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -199,12 +202,13 @@ where
     /// LMCS does not enforce that padded columns are zero.
     ///
     /// Panics if `leaves` is empty.
-    pub fn build_with_alignment<DomainM, PF, PD, H, C, const WIDTH: usize>(
+    pub(crate) fn build_with_alignment<DomainM, PF, PD, H, C, const WIDTH: usize>(
         h: &H,
         c: &C,
         leaves: Vec<DomainM>,
         salt: Option<RowMajorMatrix<F>>,
         alignment: usize,
+        accelerator: Option<LmcsAccelerator>,
     ) -> Self
     where
         DomainM: BitReversibleMatrix<F, BitRev = M>,
@@ -223,6 +227,42 @@ where
 
         let leaves: Vec<M> =
             leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
+
+        #[cfg(not(all(feature = "metal", target_os = "macos")))]
+        let _ = accelerator;
+
+        // Metal computes leaves and large lower tree levels; the configured compressor finishes
+        // any small top levels on CPU.
+        #[cfg(all(feature = "metal", target_os = "macos"))]
+        let accelerated_layers = if salt.is_none()
+            && accelerator == Some(LmcsAccelerator::Rpo)
+            && WIDTH == 12
+            && DIGEST_ELEMS == 4
+            && SALT_ELEMS == 0
+            && crate::lmcs::metal::has_u64_word_layout::<F>()
+            && crate::lmcs::metal::has_u64_word_layout::<PD::Value>()
+        {
+            crate::lmcs::metal::try_build_rpo_digest_layers::<F, PD::Value, M, DIGEST_ELEMS>(
+                &leaves,
+            )
+        } else {
+            None
+        };
+        #[cfg(all(feature = "metal", target_os = "macos"))]
+        if let Some(mut digest_layers) = accelerated_layers {
+            while digest_layers.last().expect("RPO Metal returns at least leaves").len() > 1 {
+                let prev_layer = digest_layers.last().unwrap();
+                let next_layer = compress_uniform::<PD, C, DIGEST_ELEMS>(prev_layer, c);
+                digest_layers.push(next_layer);
+            }
+            digest_layers.reverse();
+            return Self {
+                leaves,
+                digest_layers,
+                salt,
+                alignment: alignment.max(1),
+            };
+        }
 
         // Build leaf hashes: absorb all matrix rows into sponge states, then squeeze.
         let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =

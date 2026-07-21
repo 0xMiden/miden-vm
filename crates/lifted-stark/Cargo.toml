@@ -41,6 +41,9 @@ serde.workspace     = true
 thiserror.workspace = true
 tracing.workspace   = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { optional = true, workspace = true }
+
 [dev-dependencies]
 # Plonky3
 p3-blake3.workspace      = true
@@ -59,6 +62,7 @@ tracing-subscriber.workspace = true
 [features]
 concurrent = ["p3-maybe-rayon/parallel"]
 default    = ["concurrent"]
+metal      = ["dep:metal"]
 testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
 
 [[bench]]

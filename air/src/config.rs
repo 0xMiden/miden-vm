@@ -227,7 +227,9 @@ pub type Poseidon2Config =
 pub fn rpo_config(
     params: PcsParams,
 ) -> MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>> {
-    alg_config(params, RpoPermutation256)
+    let mut config = alg_config(params, RpoPermutation256);
+    config.lmcs = config.lmcs.with_rpo_acceleration();
+    config
 }
 
 /// Creates a Poseidon2-based STARK configuration.
@@ -263,6 +265,52 @@ where
         permutation: perm,
     };
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+#[cfg(all(test, feature = "metal", target_os = "macos"))]
+mod rpo_metal_tests {
+    use miden_crypto::{
+        hash::rpo::RpoPermutation256,
+        stark::{
+            StarkConfig,
+            lmcs::{Lmcs, LmcsTree},
+            matrix::RowMajorMatrix,
+        },
+    };
+
+    use super::*;
+
+    fn matrix(height: usize, width: usize, offset: u64) -> RowMajorMatrix<Felt> {
+        let values = (0..height * width)
+            .map(|i| {
+                let value = offset + (i as u64 * 0x1_0000_0001) + ((i as u64) << 7);
+                Felt::new_unchecked(value)
+            })
+            .collect();
+        RowMajorMatrix::new(values, width)
+    }
+
+    #[test]
+    fn rpo_metal_lmcs_root_matches_cpu_lmcs() {
+        let scenarios = [
+            vec![matrix(16, 8, 5)],
+            vec![matrix(16, 16, 13)],
+            vec![matrix(8, 7, 3), matrix(8, 16, 31), matrix(8, 23, 311)],
+            vec![matrix(2, 3, 11), matrix(4, 9, 101), matrix(8, 17, 1001)],
+            vec![matrix(16, 12, 7), matrix(32, 16, 17), matrix(64, 31, 27)],
+            vec![matrix(16_384, 3, 19), matrix(32_768, 8, 29)],
+        ];
+
+        for leaves in scenarios {
+            let cpu_config = alg_config(pcs_params(), RpoPermutation256);
+            let metal_config = rpo_config(pcs_params());
+
+            let cpu_tree = cpu_config.lmcs().build_aligned_tree(leaves.clone());
+            let metal_tree = metal_config.lmcs().build_aligned_tree(leaves);
+
+            assert_eq!(cpu_tree.root(), metal_tree.root());
+        }
+    }
 }
 
 // BLAKE3

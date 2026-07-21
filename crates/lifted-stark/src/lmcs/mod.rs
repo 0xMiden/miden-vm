@@ -73,6 +73,8 @@ pub mod config;
 pub mod hiding_config;
 pub(crate) mod lifted_tree;
 pub mod merkle_witness;
+#[cfg(all(feature = "metal", target_os = "macos"))]
+pub(crate) mod metal;
 pub(crate) mod node_id;
 pub mod proof;
 pub mod row_list;

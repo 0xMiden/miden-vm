@@ -1,24 +1,32 @@
 //! Benchmark and profiling helpers for the signature verifier.
 //!
-//! Restored from the `miden-signature-poc` branch and ported to `next`:
-//! - proving goes through the standard `prove_sync` pipeline with the
-//!   Poseidon2 proof hash (the recursion-friendly configuration);
-//! - the old "p3 prove-only" hasher path was dropped together with the
-//!   `p3_poseidon2` test module it depended on.
+//! The ignored tests run the MASM verifier through the standard proving
+//! pipeline with an RPO proof hash.
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word, proof::HashFunction};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, HostLibrary, Program};
+use miden_processor::{DefaultHost, ExecutionOptions, HostLibrary, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, crypto::MerkleStore, prove_sync,
-    stack_inputs_from_ints,
+    stack_inputs_from_ints, verify,
 };
 
 use super::{
     fixtures::{SigFixture, build_fixture_with_message, extend_advice_map_with_sig_proof},
     test_message,
 };
+
+fn init_trace_spans_if_requested() {
+    if std::env::var_os("SIG_BATCH_BENCH_TRACE").is_none() {
+        return;
+    }
+
+    let _ = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .try_init();
+}
 
 struct BatchFixture {
     stack: Vec<u64>,
@@ -139,12 +147,14 @@ impl BenchParams {
 ///
 /// Manual run:
 ///   SIG_BATCH_BENCH_MIN_K=0 SIG_BATCH_BENCH_MAX_K=5 SIG_BATCH_BENCH_RUNS=3 \
-///   cargo test --release -p miden-core-lib --features concurrent \
+///   cargo test --release -p miden-core-lib --features metal \
 ///     bench_prove_sig_batch_shared_message -- --ignored --nocapture
 #[test]
 #[ignore = "run manually - proving benchmark sweep for signature batch verifier"]
 fn bench_prove_sig_batch_shared_message() {
     use std::time::Instant;
+
+    init_trace_spans_if_requested();
 
     let params = BenchParams::from_env();
     eprintln!("\n=== Signature Batch Proving Benchmark (shared message) ===");
@@ -219,4 +229,33 @@ fn bench_prove_sig_batch_shared_message() {
         );
         eprintln!("-----------------------------------------------------------");
     }
+}
+
+#[test]
+#[ignore = "run manually - proves and verifies one shared-message signature batch"]
+fn prove_verify_sig_batch_shared_message_once() {
+    init_trace_spans_if_requested();
+
+    let params = BenchParams::from_env();
+    let num_signatures = 1usize << params.min_k;
+    let fixture = build_same_msg_batch_fixture(num_signatures);
+    let program = build_shared_message_program(num_signatures);
+
+    let (stack_inputs, advice_inputs) = batch_inputs(&fixture);
+    let verifier_stack_inputs = stack_inputs;
+    let mut host = build_sig_host();
+    let options = ProvingOptions::new(HashFunction::Rpo256);
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("failed to generate proof");
+
+    let security = verify(ProgramInfo::from(program), verifier_stack_inputs, stack_outputs, proof)
+        .expect("failed to verify proof");
+    eprintln!("verified 2^{}={} sigs at {security} bits", params.min_k, num_signatures);
 }

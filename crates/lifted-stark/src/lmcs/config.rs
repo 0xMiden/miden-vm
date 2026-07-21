@@ -18,6 +18,11 @@ use crate::lmcs::{
     tree_indices::TreeIndices,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LmcsAccelerator {
+    Rpo,
+}
+
 /// LMCS configuration holding cryptographic primitives (sponge + compression).
 ///
 /// This implementation defines the transcript hint layout used by
@@ -59,6 +64,8 @@ pub struct LmcsConfig<
     pub sponge: H,
     /// 2-to-1 compression function for building internal tree nodes.
     pub compress: C,
+    /// Optional construction-time acceleration hint.
+    pub(crate) accelerator: Option<LmcsAccelerator>,
     pub(crate) _phantom: PhantomData<(PF, PD)>,
 }
 
@@ -68,7 +75,20 @@ impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: us
     /// Create a new LMCS configuration.
     #[inline]
     pub const fn new(sponge: H, compress: C) -> Self {
-        Self { sponge, compress, _phantom: PhantomData }
+        Self {
+            sponge,
+            compress,
+            accelerator: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Internal hook used by Miden's RPO config factory.
+    #[doc(hidden)]
+    #[inline]
+    pub const fn with_rpo_acceleration(mut self) -> Self {
+        self.accelerator = Some(LmcsAccelerator::Rpo);
+        self
     }
 }
 
@@ -108,6 +128,7 @@ where
             leaves,
             None,
             1,
+            self.accelerator,
         )
     }
 
@@ -133,6 +154,7 @@ where
             leaves,
             None,
             <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT,
+            self.accelerator,
         )
     }
 
