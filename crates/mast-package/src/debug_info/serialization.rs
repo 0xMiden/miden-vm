@@ -303,7 +303,7 @@ impl Deserializable for DebugSourceVar {
     fn min_serialized_size() -> usize {
         4 + DebugStringIdx::min_serialized_size()
             + 1
-            + 1
+            + 4
             + 1
             + DebugVarLocation::min_serialized_size()
     }
