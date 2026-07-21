@@ -109,7 +109,7 @@ pub const COL_B_BEGIN: usize = 7;
 pub const NUM_B_SELECTORS: usize = 8;
 /// Range covered by the `b_j` selectors:
 /// `COL_B_RANGE = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS)`.
-pub const COL_B_RANGE: core::ops::Range<usize> = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS);
+pub const COL_B_RANGE: Range<usize> = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS);
 
 // Per-row lane-value columns.
 // --------------------------------------------------------------------

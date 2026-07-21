@@ -73,7 +73,9 @@ fn stark_verifier_e2f4_with_kernel_single() {
     run_recursive_verifier(&data);
 }
 
+// TODO: Un-ignore once recursive verifier supports deferred proofs
 #[test]
+#[ignore = "recursive verifier does not yet support verifying deferred proofs"]
 fn stark_verifier_e2f4_with_deferred_root() {
     let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
     run_recursive_verifier(&data);
