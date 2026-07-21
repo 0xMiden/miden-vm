@@ -14,7 +14,7 @@ use miden_precompiles::{
 };
 
 use crate::{
-    deferred::{DeferredSession, DeferredSessionError, session_from_deferred_state},
+    deferred::{DeferredSession, session_from_deferred_state},
     hash::keccak::sponge::trace::keccak_oracle,
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
@@ -147,20 +147,6 @@ fn register_curve_msm(state: &mut DeferredState, pairs: Vec<(Digest, Digest)>) -
                 .expect("curve msm pair list is non-empty"),
         )
         .expect("register curve msm node")
-}
-
-fn logged_self_equality_msm_state(num_terms: usize, scalar_value: U256) -> (DeferredState, Digest) {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
-        .expect("full precompile registry initializes");
-
-    let curve = CurveId::Secp256k1;
-    let point = register_curve_generator(&mut state, curve);
-    let scalar = register_uint_value(&mut state, curve.scalar_domain(), scalar_value);
-    let msm = register_curve_msm(&mut state, vec![(point, scalar); num_terms]);
-    let claim = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, msm);
-    state.log_statement(claim).expect("MSM self-equality logs");
-
-    (state, msm)
 }
 
 fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
@@ -388,17 +374,17 @@ fn deferred_session_translates_shared_uint_intermediate() {
 }
 
 #[test]
-fn deferred_session_rejects_msm_with_all_zero_scalars() {
-    let (state, msm) = logged_self_equality_msm_state(1, U256::ZERO);
+fn deferred_state_rejects_msm_with_all_zero_scalars() {
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+        .expect("full precompile registry initializes");
 
-    let error = session_from_deferred_state(&state)
-        .err()
-        .expect("all-zero MSM must return a translation error");
+    let curve = CurveId::Secp256k1;
+    let point = register_curve_generator(&mut state, curve);
+    let scalar = register_uint_value(&mut state, curve.scalar_domain(), U256::ZERO);
+    let msm = VmNode::try_pair_list(CurvePrecompile::msm_tag(), vec![(point, scalar)])
+        .expect("curve msm pair list is non-empty");
 
-    assert!(matches!(
-        error,
-        DeferredSessionError::UnsupportedMsmAllZeroScalars { digest } if digest == msm
-    ));
+    assert!(state.register(msm).is_err(), "all-zero MSM must be rejected");
 }
 
 #[test]

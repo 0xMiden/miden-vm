@@ -19,7 +19,7 @@ use miden_processor::{
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-const VERIFY_EXPECTED_CYCLES: u64 = 1_425;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_453;
 const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 

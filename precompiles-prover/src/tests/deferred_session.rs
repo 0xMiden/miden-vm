@@ -1,9 +1,9 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::deferred::{DeferredState, Node};
-use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
+use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
-use crate::deferred::{DeferredSessionError, session_from_deferred_state};
+use crate::deferred::session_from_deferred_state;
 
 fn state() -> DeferredState {
     DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
@@ -80,8 +80,25 @@ fn curve_msm_node(pairs: Vec<(Node, Node)>) -> Node {
     Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned")
 }
 
+fn register_affine_curve_value(
+    state: &mut DeferredState,
+    curve: CurveId,
+    point: CurvePoint,
+) -> Node {
+    let CurvePoint::Affine { x, y } = point else {
+        panic!("expected affine point");
+    };
+    let x = UintPrecompile::value_node(curve.base_domain(), x);
+    let y = UintPrecompile::value_node(curve.base_domain(), y);
+    state.register(x.clone()).expect("x coordinate must register");
+    state.register(y.clone()).expect("y coordinate must register");
+    let point = CurvePrecompile::affine_node_from_digests(curve, x.digest(), y.digest());
+    state.register(point.clone()).expect("point must register");
+    point
+}
+
 #[test]
-fn deferred_session_rejects_all_zero_msm_without_panicking() {
+fn deferred_session_inputs_reject_zero_scalar_msm() {
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -90,20 +107,11 @@ fn deferred_session_rejects_all_zero_msm_without_panicking() {
     state.register(zero.clone()).expect("zero scalar must register");
 
     let msm = curve_msm_node(vec![(generator, zero)]);
-    register_curve_equality(&mut state, msm.clone(), msm);
-
-    let err = match session_from_deferred_state(&state) {
-        Ok(_) => panic!("zero-scalar MSM must be rejected"),
-        Err(err) => err,
-    };
-    assert!(matches!(
-        err,
-        DeferredSessionError::UnsupportedMsmAllZeroScalars { .. }
-    ));
+    assert!(state.register(msm).is_err(), "zero-scalar MSM must be rejected");
 }
 
 #[test]
-fn deferred_session_lowers_duplicate_base_msm_without_panicking() {
+fn deferred_session_inputs_reject_duplicate_base_msm() {
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -114,21 +122,24 @@ fn deferred_session_lowers_duplicate_base_msm_without_panicking() {
     state.register(three.clone()).expect("scalar must register");
 
     let msm = curve_msm_node(vec![(generator.clone(), two), (generator, three)]);
-    register_curve_equality(&mut state, msm.clone(), msm);
-
-    session_from_deferred_state(&state).expect("duplicate-base MSM should lower");
+    assert!(state.register(msm).is_err(), "duplicate-base MSM must be rejected");
 }
 
 #[test]
 fn deferred_session_lowers_large_msm_without_panicking() {
     let mut state = state();
     let curve = CurveId::Secp256k1;
-    let generator = CurvePrecompile::generator_node(curve);
     let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
-    state.register(generator.clone()).expect("generator must register");
     state.register(one.clone()).expect("scalar must register");
 
-    let pairs = (0..17).map(|_| (generator.clone(), one.clone())).collect::<Vec<_>>();
+    let pairs = (1..=17)
+        .map(|scalar| {
+            let point = curve
+                .mul_scalar(curve.generator(), limbs(scalar))
+                .expect("generator multiple must be valid");
+            (register_affine_curve_value(&mut state, curve, point), one.clone())
+        })
+        .collect::<Vec<_>>();
     let msm = curve_msm_node(pairs);
     register_curve_equality(&mut state, msm.clone(), msm);
 
