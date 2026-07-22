@@ -449,6 +449,62 @@ pub proc hash_elements
     # => [HASH]
 end
 
+#! Computes the domain-tagged hash of Felt values starting at the specified memory address.
+#!
+#! Mirrors `Poseidon2::hash_elements_in_domain` on the Rust side: the first capacity element
+#! carries the padding rule (`num_elements % 8`), the second carries the domain tag, and the
+#! input is zero-padded to a rate multiple.
+#!
+#! Inputs:  [ptr, num_elements, domain]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the memory address of the first element to be hashed; must be word-aligned.
+#! - num_elements is the number of elements to be hashed.
+#! - domain is the domain-separation tag placed in the second capacity element.
+pub proc hash_elements_in_domain
+    # => [ptr, num_elements, domain]
+    swap u32divmod.8 swap
+    # => [num_elements/8, num_elements%8, ptr, domain]
+
+    # end address for the double-word absorption loop
+    mul.8 dup.2 add movup.2
+    # => [ptr, end_pairs_addr, num_elements%8, domain]
+
+    # capacity word = [num_elements%8, domain, 0, 0]
+    push.0.0 movup.5 dup.5
+    # => [num_elements%8, domain, 0, 0, ptr, end_pairs_addr, num_elements%8]
+
+    padw padw
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+
+    # Empty input with a nonzero domain absorbs a ONE padding marker into the first rate slot
+    # before permuting, mirroring the native rule (without it, the empty hash would collide with
+    # the hash of eight zeros under the same domain). Empty means ptr == end_pairs_addr and
+    # num_elements%8 == 0.
+    dup.14 eq.0
+    # => [rem_is_zero, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    dup.13 dup.15 eq
+    # => [ptr_eq_end, rem_is_zero, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    and
+    # => [input_is_empty, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    dup.10 eq.0 not and
+    # => [empty_and_domain_nonzero, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    if.true
+        # set rate[0] = 1, apply one permutation, and squeeze
+        drop push.1
+        # => [R0 = (1, 0, 0, 0), R1, C, ptr, end_pairs_addr, num_elements%8]
+        hperm
+        # => [R0', R1', C', ptr, end_pairs_addr, num_elements%8]
+        exec.squeeze_digest
+        swapw drop drop drop movdn.4
+        # => [HASH]
+    else
+        exec.hash_elements_with_state
+        # => [HASH]
+    end
+end
+
 #! Computes hash of Felt values starting at the specified memory address.
 #!
 #! Notice that this procedure essentially pads the elements to be hashed to the next multiple of 8

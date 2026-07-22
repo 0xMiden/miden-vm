@@ -12,8 +12,13 @@ use crate::{
     utils::ToElements,
 };
 
+mod claim;
+pub use claim::{CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS};
+
+pub mod domain;
+
 mod kernel;
-pub use kernel::{KernelDescriptor, KernelError};
+pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError};
 
 mod stack;
 pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutputs};

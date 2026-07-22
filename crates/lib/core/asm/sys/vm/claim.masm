@@ -1,0 +1,47 @@
+use miden::core::crypto::hashes::poseidon2
+
+# EXECUTION CLAIM
+# =================================================================================================
+#
+# The execution claim is the statement a Miden VM proof attests, encoded as a canonical 40-felt
+# memory region:
+#
+#   claim_ptr + 0   P   program_digest              (1 word)
+#   claim_ptr + 4   K   kernel_commitment           (1 word)
+#   claim_ptr + 8   I   stack_inputs                (16 felts, canonical zero-padded)
+#   claim_ptr + 24  O   stack_outputs               (16 felts, canonical zero-padded)
+#
+# The deferred root D is not part of the claim: it is the obligation a verified claim hands back.
+#
+# The claim commitment is the domain-tagged sequential hash of the region. 40 felts is exactly
+# five rate blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
+# resumable by callsites that pin the code context. Mirrors
+# miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
+
+# Domain tag for the claim commitment: the registered selector
+# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match miden_core::program::CLAIM_DOMAIN_TAG
+# (enforced by cross-tests).
+const CLAIM_DOMAIN_TAG = 8449
+
+# Number of field elements in the canonical claim encoding.
+const NUM_CLAIM_ELEMENTS = 40
+
+#! Computes the canonical claim commitment (CLAIM_HASH) over a claim region.
+#!
+#! The region must hold the fully populated 40-felt claim encoding P ‖ K ‖ I ‖ O. This procedure
+#! is pure: it does not verify anything, it only names the claim. It is the value used to form
+#! proof-request keys and to bind verified claims into a consumer's own statement.
+#!
+#! Inputs:  [claim_ptr, ...]
+#! Outputs: [CLAIM_HASH, ...]
+#!
+#! Where:
+#! - claim_ptr is the word-aligned address of the claim region.
+#! - CLAIM_HASH is the domain-tagged Poseidon2 hash of the 40-element encoding.
+pub proc claim_hash
+    push.CLAIM_DOMAIN_TAG push.NUM_CLAIM_ELEMENTS movup.2
+    # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
+    exec.poseidon2::hash_elements_in_domain
+    # => [CLAIM_HASH, ...]
+end

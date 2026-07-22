@@ -938,8 +938,9 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 /// Computes `kernel_H`, the fixed-size commitment to the kernel-procedure digests.
 ///
 /// This is the canonical [`KernelDescriptor::commitment`] value expressed over the flattened digest
-/// felts: the linear hash (`hash_elements`) of `kernel_felts`. The empty digest list yields
-/// `hash_elements(&[])`.
+/// felts: the domain-tagged linear hash (`hash_elements_in_domain` with
+/// [`miden_core::program::KERNEL_DOMAIN_TAG`]) of `kernel_felts`. The empty digest list yields
+/// the canonical empty-input value under the same domain.
 ///
 /// `kernel_H` is absorbed into the Fiat-Shamir transcript in place of the unbounded kernel
 /// digest list, committing to the kernel with a fixed-size value.
@@ -957,7 +958,11 @@ pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
 }
 
 fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
-    miden_core::chiplets::hasher::hash_elements(kernel_felts).into()
+    miden_core::chiplets::hasher::hash_elements_in_domain(
+        kernel_felts,
+        miden_core::program::KERNEL_DOMAIN_TAG,
+    )
+    .into()
 }
 
 // REDUCED-AUX BOUNDARY BUILDER
@@ -1080,6 +1085,27 @@ mod tests {
         assert!(err.to_string().contains(&format!(
             "aux_inputs length {actual_aux_inputs} exceeds maximum {max_aux_inputs}"
         )));
+    }
+
+    #[test]
+    fn hash_kernel_digests_matches_kernel_descriptor_commitment() {
+        // The transcript-side helper and `KernelDescriptor::commitment` are two computations of
+        // the same normative value; this pins them together (including the empty kernel).
+        use miden_core::Word;
+
+        let word = |a: u64| -> Word {
+            [Felt::new_unchecked(a), Felt::new_unchecked(a + 1), Felt::ZERO, Felt::ONE].into()
+        };
+        for procs in [vec![], vec![word(10)], vec![word(10), word(20), word(30)]] {
+            let descriptor = KernelDescriptor::from_hashes(procs).unwrap();
+            let flattened: Vec<Felt> =
+                descriptor.proc_hashes().iter().flat_map(|w| w.as_elements().to_vec()).collect();
+            assert_eq!(
+                Word::new(hash_kernel_digests(&flattened)),
+                descriptor.commitment(),
+                "hash_kernel_digests diverged from KernelDescriptor::commitment"
+            );
+        }
     }
 
     #[test]

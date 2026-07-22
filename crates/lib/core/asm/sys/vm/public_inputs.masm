@@ -70,6 +70,12 @@ use miden::core::crypto::hashes::poseidon2
 # Number of fixed length public inputs (in field elements): stack inputs (16) + stack
 # outputs (16). These are the only public values referenced by the ACE circuit; the program
 # digest and deferred root live in the caller-facing reduced-inputs block instead.
+# Domain tag for the kernel commitment: the registered selector
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (32 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match miden_core::program::KERNEL_DOMAIN_TAG
+# (enforced by cross-tests).
+const KERNEL_DOMAIN_TAG = 8193
+
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
 # Number of AIR instances in the Miden VM statement.
@@ -166,10 +172,14 @@ pub proc stage_reduced_inputs
     dup exec.constants::kernel_digests_address_ptr mem_store
     # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
 
-    # kernel_H = hash_elements(kernel_ptr, 4·N) -> reduced_inputs+0.
+    # kernel_H = hash_elements_in_domain(kernel_ptr, 4·N, KERNEL_DOMAIN_TAG) -> reduced_inputs+0.
+    # Mirrors KernelDescriptor::commitment on the Rust side (domain-tagged; length binding via
+    # the padding rule's capacity element).
     swap mul.4 swap
     # => [kernel_ptr, 4·N, stack_io_ptr, PROG..., ...]
-    exec.poseidon2::hash_elements
+    push.KERNEL_DOMAIN_TAG movdn.2
+    # => [kernel_ptr, 4·N, KERNEL_DOMAIN_TAG, stack_io_ptr, PROG..., ...]
+    exec.poseidon2::hash_elements_in_domain
     # => [kH0, kH1, kH2, kH3, stack_io_ptr, PROG..., ...]
     exec.constants::reduced_inputs_ptr mem_storew_le dropw
     # => [stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
