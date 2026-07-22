@@ -22,6 +22,7 @@ use miden_utils_indexing::{Idx, IndexVec};
 pub use types::*;
 
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
+type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
 pub const DEBUG_INFO_VERSION: u8 = 2;
 

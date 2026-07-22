@@ -1,9 +1,9 @@
 use std::{path::Path, process::Command, string::String, sync::Arc};
 
-use miden_assembly_syntax::source_file;
+use miden_assembly_syntax::{ast::DebugVarLocation, source_file};
 use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt},
-    operations::{DebugVarLocation, Operation},
+    operations::Operation,
     serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,
 };

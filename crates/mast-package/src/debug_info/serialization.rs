@@ -3,9 +3,9 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 
+use miden_assembly_syntax::ast::DebugVarLocation;
 use miden_core::{
     mast::MastNodeId,
-    operations::DebugVarLocation,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         read_bounded_len,
@@ -286,7 +286,7 @@ impl Deserializable for DebugSourceVar {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let op_idx = source.read_u32()?;
         let name_idx = DebugStringIdx::read_from(source)?;
-        let type_id = Option::<u32>::read_from(source)?;
+        let type_id = Option::<DebugTypeIdx>::read_from(source)?;
         let arg_idx = core::num::NonZeroU32::new(source.read_u32()?);
         let location_idx = Option::<DebugLocIdx>::read_from(source)?;
         let value_location = DebugVarLocation::read_from(source)?;
@@ -752,7 +752,8 @@ fn read_debug_type_indices<R: ByteReader>(
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Word, operations::DebugVarLocation};
+    use miden_assembly_syntax::ast::DebugVarLocation;
+    use miden_core::Word;
     use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
     use super::*;

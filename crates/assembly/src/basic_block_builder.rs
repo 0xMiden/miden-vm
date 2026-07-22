@@ -6,14 +6,14 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{DebugVarInfo, Instruction},
     debuginfo::{Location, Span},
     diagnostics::Report,
 };
 use miden_core::{
     Felt,
     events::SystemEvent,
-    operations::{AssemblyOp, DebugVarInfo, Operation},
+    operations::{AssemblyOp, Operation},
 };
 use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceVar};
 
@@ -215,10 +215,20 @@ impl BasicBlockBuilder<'_> {
         let debug_info = self.mast_forest_builder.debug_info_mut();
         let name_idx = debug_info.add_string(debug_var.name().clone());
         let location_idx = debug_var.location().cloned().map(|loc| debug_info.add_location(loc));
+        let type_id = if let Some(ty) = debug_var.ty() {
+            let declared_ty = debug_var.declared_type();
+            Some(
+                debug_info
+                    .register_debug_type(None, declared_ty.as_deref(), ty)
+                    .expect("invalid debug var info"),
+            )
+        } else {
+            None
+        };
         let debug_var = DebugSourceVar {
             op_idx: self.ops.len() as u32,
             name_idx,
-            type_id: debug_var.type_id(),
+            type_id,
             arg_idx: debug_var.arg_index(),
             location_idx,
             value_location: debug_var.value_location().clone(),

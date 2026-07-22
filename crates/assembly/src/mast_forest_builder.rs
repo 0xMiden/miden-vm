@@ -1159,10 +1159,13 @@ mod tests {
         sync::Arc,
     };
 
-    use miden_assembly_syntax::debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
+    use miden_assembly_syntax::{
+        ast::{DebugVarInfo, DebugVarLocation},
+        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+    };
     use miden_core::{
         mast::{MastNodeBuilder, MastNodeId},
-        operations::{DebugVarInfo, DebugVarLocation, Operation},
+        operations::Operation,
         serde::Serializable,
         utils::Idx,
     };
@@ -1204,7 +1207,7 @@ mod tests {
         DebugSourceVar {
             op_idx: 0,
             name_idx,
-            type_id: debug_var.type_id(),
+            type_id: None,
             arg_idx: debug_var.arg_index(),
             location_idx,
             value_location: debug_var.value_location().clone(),
@@ -1647,8 +1650,6 @@ mod tests {
     /// Same-ops blocks with different debug vars use the same execution node identity.
     #[test]
     fn test_ensure_node_preserving_debug_vars_prevents_aliasing() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let var_x_ref =
@@ -1679,8 +1680,6 @@ mod tests {
 
     #[test]
     fn test_source_graph_distinguishes_same_exec_debug_var_occurrences() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let var_x_ref =
@@ -1721,8 +1720,6 @@ mod tests {
     /// were allocated different builder refs.
     #[test]
     fn test_ensure_block_dedups_identical_debug_var_payloads() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let var_a =
@@ -2003,8 +2000,6 @@ mod tests {
 
     #[test]
     fn test_build_assigns_final_debug_var_ids_to_used_refs() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let _unused_var = add_test_debug_var(
@@ -2302,8 +2297,6 @@ mod tests {
     /// Statically linked nodes dedup with local nodes that have the same execution shape.
     #[test]
     fn test_statically_linked_nodes_preserve_metadata_in_dedup() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let static_block_id = MastNodeId::new_unchecked(0);
 
         let mut nodes = IndexVec::new();
@@ -2357,8 +2350,6 @@ mod tests {
 
     #[test]
     fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
         let ops = vec![
             Operation::Push(Felt::from_u32(1)),
@@ -2543,7 +2534,7 @@ mod tests {
     /// debug vars and asm ops, since the root node survives removal.
     #[test]
     fn test_merged_root_block_keeps_metadata() {
-        use miden_core::operations::{AssemblyOp, DebugVarInfo, DebugVarLocation};
+        use miden_core::operations::AssemblyOp;
 
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 

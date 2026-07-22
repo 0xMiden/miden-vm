@@ -4,7 +4,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 mod debug_metadata;
-pub use debug_metadata::{AssemblyOp, DebugVarInfo, DebugVarLocation};
+pub use debug_metadata::AssemblyOp;
 
 use crate::{
     Felt,

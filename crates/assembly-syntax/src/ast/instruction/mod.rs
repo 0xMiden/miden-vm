@@ -1,10 +1,14 @@
 pub mod advice;
+mod debug_var;
 mod print;
 
 use alloc::vec::Vec;
 use core::ops::Range;
 
-pub use self::advice::SystemEventNode;
+pub use self::{
+    advice::SystemEventNode,
+    debug_var::{DebugVarInfo, DebugVarLocation},
+};
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
@@ -278,7 +282,7 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
-    DebugVar(miden_core::operations::DebugVarInfo),
+    DebugVar(DebugVarInfo),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,

@@ -1315,7 +1315,7 @@ mod tests {
     use core::{assert_matches, str::FromStr};
 
     use miden_assembly_syntax::ast::{
-        Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
+        DebugVarLocation, Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
         Felt, Word,
@@ -1324,7 +1324,7 @@ mod tests {
             BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
             MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
         },
-        operations::{DebugVarLocation, Operation},
+        operations::Operation,
         serde::Serializable,
         utils::IndexVec,
     };

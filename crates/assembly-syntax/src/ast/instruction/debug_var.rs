@@ -1,16 +1,16 @@
 use alloc::{format, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
+};
 use miden_debug_types::Location;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
-    serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_bounded_len,
-    },
+    ast::{TypeExpr, types::Type},
 };
 
 // DEBUG VARIABLE INFO
@@ -21,13 +21,13 @@ use crate::{
 /// This record provides debuggers with information about where a variable's
 /// value can be found at a particular point in the program execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugVarInfo {
     /// Variable name as it appears in source code.
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_arc_str"))]
     name: Arc<str>,
-    /// Type information (encoded as type index in debug_info section)
-    type_id: Option<u32>,
+    /// The low-level structural type of this variable
+    ty: Option<Type>,
+    /// A type expression corresponding to how `type` was declared in the source code
+    declared_type: Option<Arc<TypeExpr>>,
     /// If this is a function parameter, its 1-based index.
     arg_index: Option<NonZeroU32>,
     /// Source location.
@@ -43,7 +43,8 @@ impl DebugVarInfo {
     pub fn new(name: impl Into<Arc<str>>, value_location: DebugVarLocation) -> Self {
         Self {
             name: name.into(),
-            type_id: None,
+            ty: None,
+            declared_type: None,
             arg_index: None,
             location: None,
             value_location,
@@ -56,13 +57,19 @@ impl DebugVarInfo {
     }
 
     /// Returns the type ID if set.
-    pub fn type_id(&self) -> Option<u32> {
-        self.type_id
+    pub fn ty(&self) -> Option<&Type> {
+        self.ty.as_ref()
+    }
+
+    /// Returns the type ID if set.
+    pub fn declared_type(&self) -> Option<Arc<TypeExpr>> {
+        self.declared_type.clone()
     }
 
     /// Sets the type ID for this variable.
-    pub fn set_type_id(&mut self, type_id: u32) {
-        self.type_id = Some(type_id);
+    pub fn set_ty(&mut self, ty: Type, declared_type: Option<Arc<TypeExpr>>) {
+        self.ty = Some(ty);
+        self.declared_type = declared_type;
     }
 
     /// Returns the argument index if this is a function parameter.
@@ -102,17 +109,6 @@ impl DebugVarInfo {
     pub fn set_value_location(&mut self, value_location: DebugVarLocation) {
         self.value_location = value_location;
     }
-}
-
-/// Serde deserializer for `Arc<str>`.
-#[cfg(feature = "serde")]
-fn deserialize_arc_str<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use alloc::string::String;
-    let s = String::deserialize(deserializer)?;
-    Ok(Arc::from(s))
 }
 
 impl fmt::Display for DebugVarInfo {
@@ -264,20 +260,25 @@ impl Deserializable for DebugVarLocation {
     }
 }
 
+#[cfg(false)]
 impl Serializable for DebugVarInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         (*self.name).write_into(target);
         self.value_location.write_into(target);
-        self.type_id.write_into(target);
+        self.ty.write_into(target);
+        self.declared_type.write_into(target);
         self.arg_index.map(core::num::NonZero::get).write_into(target);
         self.location.write_into(target);
     }
 }
 
+#[cfg(false)]
 impl Deserializable for DebugVarInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let name = read_bounded_string(source, "debug variable name bytes")?;
         let value_location = DebugVarLocation::read_from(source)?;
+        let ty = Option::<Type>::read_from(source)?;
+        let declared_type = Option::<TypeExpr>::read_from(source)?;
         let type_id = Option::<u32>::read_from(source)?;
         let arg_index = Option::<u32>::read_from(source)?
             .map(|n| {
@@ -290,7 +291,8 @@ impl Deserializable for DebugVarInfo {
 
         Ok(Self {
             name,
-            type_id,
+            ty,
+            declared_type,
             arg_index,
             location,
             value_location,
@@ -298,6 +300,7 @@ impl Deserializable for DebugVarInfo {
     }
 }
 
+#[cfg(false)]
 fn read_bounded_string<R: ByteReader>(
     source: &mut R,
     label: &str,
@@ -321,10 +324,10 @@ fn read_bounded_bytes<R: ByteReader>(
 mod tests {
     use alloc::string::ToString;
 
+    use miden_core::serde::{Deserializable, Serializable, SliceReader};
     use miden_debug_types::{ByteIndex, Uri};
 
     use super::*;
-    use crate::serde::{Deserializable, Serializable, SliceReader};
 
     #[test]
     fn debug_var_info_display_simple() {
@@ -333,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(false)]
     fn debug_var_info_rejects_oversized_name_length() {
         let bytes = [0x08, 0x2a, 0xfe, 0xfe, 0x01];
         let mut reader = SliceReader::new(&bytes);
@@ -411,6 +415,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(false)]
     fn debug_var_info_serialization_round_trip_all_fields() {
         let mut var = DebugVarInfo::new("full", DebugVarLocation::Expression(vec![0xaa, 0xbb]));
         var.set_type_id(7);

@@ -1,7 +1,8 @@
 use alloc::vec;
 use core::num::NonZeroU32;
 
-use miden_core::{Word, operations::DebugVarLocation};
+use miden_assembly_syntax::ast::DebugVarLocation;
+use miden_core::Word;
 use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber};
 use proptest::prelude::*;
 
@@ -91,7 +92,7 @@ impl Arbitrary for PackageDebugInfo {
                             debug_vars: vec![DebugSourceVar {
                                 op_idx: 0,
                                 name_idx: variable_a,
-                                type_id: Some(primitive_type.into()),
+                                type_id: Some(primitive_type),
                                 arg_idx: Some(NonZeroU32::new(1).unwrap()),
                                 location_idx: Some(location_a),
                                 value_location: DebugVarLocation::Stack(0),
@@ -115,7 +116,7 @@ impl Arbitrary for PackageDebugInfo {
                             debug_vars: vec![DebugSourceVar {
                                 op_idx: 0,
                                 name_idx: variable_b,
-                                type_id: Some(function_type.into()),
+                                type_id: Some(function_type),
                                 arg_idx: None,
                                 location_idx: Some(location_b),
                                 value_location: DebugVarLocation::Memory(error_code as u32),

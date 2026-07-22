@@ -15,18 +15,17 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use core::{mem::MaybeUninit, num::NonZeroU32};
 
-use miden_core::{
-    Word,
-    mast::MastNodeId,
-    operations::{AssemblyOp, DebugVarInfo, DebugVarLocation},
+use miden_assembly_syntax::ast::{DebugVarInfo, DebugVarLocation, TypeExpr, types::Type};
+use miden_core::{Word, mast::MastNodeId, operations::AssemblyOp};
+use miden_debug_types::{
+    ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceSpan, Span,
 };
-use miden_debug_types::{ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber};
 use miden_utils_indexing::{Idx, newtype_id};
 
-use super::{DebugInfo, PackageDebugInfo, SourceNodeIdMarker};
+use super::{DebugInfo, FxHashMap, FxHashSet, PackageDebugInfo, SourceNodeIdMarker};
 
 // DEBUG SOURCE GRAPH LOOKUP ERROR
 // ================================================================================================
@@ -404,7 +403,8 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
         op_idx: u32,
         debug_info: &DebugInfo<Exec, Src>,
     ) -> impl Iterator<Item = DebugVarInfo> {
-        self.debug_vars_for_operation(op_idx).map(|source_var| {
+        let mut type_cache = FxHashMap::<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>::default();
+        self.debug_vars_for_operation(op_idx).map(move |source_var| {
             let name = debug_info[source_var.name_idx].clone();
             let mut info = DebugVarInfo::new(name, source_var.value_location.clone());
             if let Some(arg_idx) = source_var.arg_idx {
@@ -414,7 +414,15 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
                 info.set_location(debug_info.get_location(loc).unwrap())
             }
             if let Some(tid) = source_var.type_id {
-                info.set_type_id(tid)
+                if let Some((ty, declared_ty)) = type_cache.get(&tid) {
+                    info.set_ty(ty.clone(), declared_ty.clone());
+                } else if let Some(type_info) = debug_info.get_type(tid)
+                    && let Some((ty, declared_type)) =
+                        type_info.recover_registered_type(debug_info, &mut type_cache)
+                {
+                    type_cache.insert(tid, (ty.clone(), declared_type.clone()));
+                    info.set_ty(ty, declared_type);
+                }
             }
             info
         })
@@ -480,11 +488,8 @@ pub struct DebugSourceVar {
     pub op_idx: u32,
     /// Variable name as it appears in source code.
     pub name_idx: DebugStringIdx,
-    /// Type information (encoded as type index in debug_info section)
-    ///
-    /// We do not use DebugTypeIdx here, as currently the relationship between this value
-    /// and the `types` table in the debug info is indirect
-    pub type_id: Option<u32>,
+    /// Low-level structural type information
+    pub type_id: Option<DebugTypeIdx>,
     /// If this is a function parameter, its 1-based index.
     pub arg_idx: Option<NonZeroU32>,
     /// Source file location (file:line:column).
@@ -597,6 +602,10 @@ pub enum DebugTypeInfo {
 #[repr(u8)]
 pub enum DebugPrimitiveType {
     /// Void type (0 bytes)
+    #[warn(
+        deprecated_in_future,
+        reason = "void is deprecated in favor of function types with no results"
+    )]
     Void = 0,
     /// Boolean (1 byte)
     Bool,
@@ -630,6 +639,32 @@ pub enum DebugPrimitiveType {
     Word,
     /// Unsigned 256-bit integer
     U256,
+}
+
+impl TryFrom<DebugPrimitiveType> for Type {
+    type Error = DebugPrimitiveType;
+
+    fn try_from(value: DebugPrimitiveType) -> Result<Self, Self::Error> {
+        Ok(match value {
+            value @ (DebugPrimitiveType::Void
+            | DebugPrimitiveType::Word
+            | DebugPrimitiveType::F32) => return Err(value),
+            DebugPrimitiveType::Bool => Type::I1,
+            DebugPrimitiveType::I8 => Type::I8,
+            DebugPrimitiveType::U8 => Type::U8,
+            DebugPrimitiveType::I16 => Type::I16,
+            DebugPrimitiveType::U16 => Type::U16,
+            DebugPrimitiveType::I32 => Type::I32,
+            DebugPrimitiveType::U32 => Type::U32,
+            DebugPrimitiveType::I64 => Type::I64,
+            DebugPrimitiveType::U64 => Type::U64,
+            DebugPrimitiveType::I128 => Type::I128,
+            DebugPrimitiveType::U128 => Type::U128,
+            DebugPrimitiveType::F64 => Type::F64,
+            DebugPrimitiveType::Felt => Type::Felt,
+            DebugPrimitiveType::U256 => Type::U256,
+        })
+    }
 }
 
 impl DebugPrimitiveType {
@@ -680,6 +715,317 @@ pub struct DebugVariantInfo {
     pub payload_offset: Option<u32>,
     /// Discriminant value for this variant.
     pub discriminant: u128,
+}
+
+impl DebugTypeInfo {
+    /// Recovers the structural and source-level types represented by this debug type.
+    ///
+    /// Returns `None` when the debug type contains an invalid reference, cannot be represented by
+    /// the assembly type system, or participates in a reference cycle.
+    pub fn recover_registered_type<Exec: Idx, Src: Idx>(
+        &self,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        let mut resolving = FxHashSet::default();
+        self.recover_registered_type_inner(debug_info, cached_types, &mut resolving)
+    }
+
+    fn recover_registered_type_inner<Exec: Idx, Src: Idx>(
+        &self,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+        resolving: &mut FxHashSet<DebugTypeIdx>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        use miden_assembly_syntax::ast;
+
+        match self {
+            Self::Primitive(ty) => {
+                let ty = Type::try_from(*ty).ok()?;
+                let declared_ty = Some(Arc::new(TypeExpr::Primitive(Span::unknown(ty.clone()))));
+                Some((ty, declared_ty))
+            },
+            Self::Pointer { pointee_type_idx } => {
+                let (pointee, declared_pointee) = Self::recover_type_index(
+                    *pointee_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                let declared_ty = declared_pointee
+                    .as_deref()
+                    .map(|t| Arc::new(TypeExpr::Ptr(ast::PointerType::new(t.clone()))));
+                let ty = Type::Ptr(Arc::new(ast::types::PointerType::new(pointee)));
+                Some((ty, declared_ty))
+            },
+            Self::Array { element_type_idx, count } => {
+                let (element, declared_element) = Self::recover_type_index(
+                    *element_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                match count {
+                    Some(count) => {
+                        let count = usize::try_from(*count).ok()?;
+                        let declared_ty = declared_element.as_deref().map(|element| {
+                            Arc::new(TypeExpr::Array(ast::ArrayType::new(element.clone(), count)))
+                        });
+                        let ty = Type::Array(Arc::new(ast::types::ArrayType::new(element, count)));
+                        Some((ty, declared_ty))
+                    },
+                    None => Some((Type::List(Arc::new(element)), None)),
+                }
+            },
+            Self::Struct { name_idx, size, fields } => {
+                if fields.len() > usize::from(u8::MAX) + 1 {
+                    return None;
+                }
+
+                let name = debug_info.get_string(*name_idx)?;
+                let mut structural_fields = Vec::with_capacity(fields.len());
+                let mut declared_fields = Vec::with_capacity(fields.len());
+                let mut has_declared_type = true;
+                for field in fields {
+                    let field_name = debug_info.get_string(field.name_idx)?;
+                    let (field_ty, declared_field_ty) = Self::recover_type_index(
+                        field.type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    structural_fields.push((field_name.clone(), field_ty));
+
+                    match (ast::Ident::new(field_name.as_ref()), declared_field_ty) {
+                        (Ok(name), Some(ty)) if has_declared_type => {
+                            declared_fields.push(ast::StructField {
+                                span: SourceSpan::UNKNOWN,
+                                name,
+                                ty: Arc::unwrap_or_clone(ty),
+                            });
+                        },
+                        _ => has_declared_type = false,
+                    }
+                }
+
+                let structural_types =
+                    structural_fields.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+                let (field_offsets, recovered_size) =
+                    checked_default_struct_layout(&structural_types)?;
+                if recovered_size != *size
+                    || field_offsets
+                        .iter()
+                        .zip(fields)
+                        .any(|(actual, field)| *actual != field.offset)
+                {
+                    return None;
+                }
+
+                let is_anonymous = name.as_ref() == "<anon>";
+                let structural_ty = if is_anonymous {
+                    ast::types::StructType::new(structural_fields)
+                } else {
+                    ast::types::StructType::named(name.clone(), structural_fields)
+                };
+                let ty = Type::Struct(Arc::new(structural_ty));
+
+                let declared_name = if is_anonymous {
+                    Some(None)
+                } else {
+                    ast::Ident::new(name.as_ref()).ok().map(Some)
+                };
+                let declared_ty = declared_name.filter(|_| has_declared_type).map(|name| {
+                    Arc::new(TypeExpr::Struct(ast::StructType::new(name, declared_fields)))
+                });
+
+                Some((ty, declared_ty))
+            },
+            Self::Function { return_type_idx, param_type_indices } => {
+                let mut params = Vec::with_capacity(param_type_indices.len());
+                for param_type_idx in param_type_indices {
+                    let (param, _) = Self::recover_type_index(
+                        *param_type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    params.push(param);
+                }
+
+                let mut results = Vec::with_capacity(1);
+                if let Some(return_type_idx) = return_type_idx
+                    && !matches!(
+                        debug_info.get_type(*return_type_idx),
+                        Some(Self::Primitive(DebugPrimitiveType::Void))
+                    )
+                {
+                    let (result, _) = Self::recover_type_index(
+                        *return_type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    results.push(result);
+                }
+
+                let ty = Type::Function(Arc::new(ast::types::FunctionType::new(
+                    ast::types::CallConv::Fast,
+                    params,
+                    results,
+                )));
+                Some((ty, None))
+            },
+            Self::Enum {
+                name_idx,
+                size,
+                discriminant_type_idx,
+                variants,
+            } => {
+                let name = debug_info.get_string(*name_idx)?;
+                let (discriminant, _) = Self::recover_type_index(
+                    *discriminant_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                let mut recovered_variants = Vec::with_capacity(variants.len());
+                for variant in variants {
+                    let variant_name = debug_info.get_string(variant.name_idx)?;
+                    let recovered_variant = match variant.type_idx {
+                        Some(type_idx) => {
+                            let (payload, _) = Self::recover_type_index(
+                                type_idx,
+                                debug_info,
+                                cached_types,
+                                resolving,
+                            )?;
+                            let (payload_offsets, _) = checked_default_struct_layout(&[
+                                discriminant.clone(),
+                                payload.clone(),
+                            ])?;
+                            let expected_offset = payload_offsets[1];
+                            if variant.payload_offset != Some(expected_offset) {
+                                return None;
+                            }
+                            ast::types::Variant::new(
+                                variant_name,
+                                payload,
+                                Some(variant.discriminant),
+                            )
+                        },
+                        None => {
+                            if variant.payload_offset.is_some() {
+                                return None;
+                            }
+                            ast::types::Variant::c_like(variant_name, Some(variant.discriminant))
+                        },
+                    };
+                    recovered_variants.push(recovered_variant);
+                }
+
+                let enum_ty =
+                    ast::types::EnumType::new(name, discriminant, recovered_variants).ok()?;
+                if enum_ty.size_in_bytes() != *size as usize {
+                    return None;
+                }
+                Some((Type::Enum(Arc::new(enum_ty)), None))
+            },
+            Self::Unknown => Some((Type::Unknown, None)),
+        }
+    }
+
+    fn recover_type_index<Exec: Idx, Src: Idx>(
+        type_idx: DebugTypeIdx,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+        resolving: &mut FxHashSet<DebugTypeIdx>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        if let Some(recovered) = cached_types.get(&type_idx) {
+            return Some(recovered.clone());
+        }
+        if !resolving.insert(type_idx) {
+            return None;
+        }
+
+        let recovered = debug_info.get_type(type_idx).and_then(|type_info| {
+            type_info.recover_registered_type_inner(debug_info, cached_types, resolving)
+        });
+        resolving.remove(&type_idx);
+
+        if let Some(recovered) = recovered.as_ref() {
+            cached_types.insert(type_idx, recovered.clone());
+        }
+        recovered
+    }
+}
+
+fn checked_default_struct_layout(types: &[Type]) -> Option<(Vec<u32>, u32)> {
+    let mut field_sizes = Vec::with_capacity(types.len());
+    let mut field_alignments = Vec::with_capacity(types.len());
+    for ty in types {
+        field_sizes.push(u32::try_from(checked_type_size_in_bytes(ty)?).ok()?);
+        field_alignments.push(u16::try_from(ty.min_alignment()).ok()?);
+    }
+
+    let struct_alignment = field_alignments.iter().copied().max().unwrap_or(1);
+    let mut offset = 0u32;
+    let mut offsets = Vec::with_capacity(types.len());
+    for (size, alignment) in field_sizes.into_iter().zip(field_alignments) {
+        offset = checked_align_up(offset, u32::from(alignment))?;
+        offsets.push(offset);
+        offset = offset.checked_add(size)?;
+    }
+    let size = checked_align_up(offset, u32::from(struct_alignment))?;
+    Some((offsets, size))
+}
+
+fn checked_align_up(value: u32, alignment: u32) -> Option<u32> {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(alignment - remainder)
+    }
+}
+
+fn checked_type_size_in_bytes(ty: &Type) -> Option<usize> {
+    let bits = checked_type_size_in_bits(ty)?;
+    (bits / 8).checked_add(usize::from(!bits.is_multiple_of(8)))
+}
+
+fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Unknown | Type::Never => Some(0),
+        Type::I1 => Some(1),
+        Type::I8 | Type::U8 => Some(8),
+        Type::I16 | Type::U16 => Some(16),
+        Type::I32 | Type::U32 | Type::Felt | Type::Ptr(_) | Type::Function(_) => Some(32),
+        Type::I64 | Type::U64 | Type::F64 => Some(64),
+        Type::I128 | Type::U128 => Some(128),
+        Type::U256 => Some(256),
+        Type::Struct(ty) => ty.size().checked_mul(8),
+        Type::Enum(ty) => ty.size_in_bytes().checked_mul(8),
+        Type::Array(ty) => match ty.len() {
+            0 => Some(0),
+            1 => checked_type_size_in_bits(ty.element_type()),
+            count => {
+                let element_size = checked_type_size_in_bits(ty.element_type())?;
+                let element_alignment = ty.element_type().min_alignment().checked_mul(8)?;
+                let padded_element_size = checked_align_up_usize(element_size, element_alignment)?;
+                padded_element_size.checked_mul(count - 1)?.checked_add(element_size)
+            },
+        },
+        Type::List(_) => None,
+    }
+}
+
+fn checked_align_up_usize(value: usize, alignment: usize) -> Option<usize> {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(alignment - remainder)
+    }
 }
 
 // DEBUG FILE INFO
@@ -873,6 +1219,188 @@ mod tests {
     }
 
     #[test]
+    fn recover_registered_pointer_caches_its_pointee() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let pointee_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let pointer_idx =
+            builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: pointee_idx });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, declared) = debug_info[pointer_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("pointer should be recoverable");
+
+        let Type::Ptr(pointer) = recovered else {
+            panic!("expected a recovered pointer");
+        };
+        assert_eq!(pointer.pointee(), &Type::U32);
+        assert!(matches!(declared.as_deref(), Some(TypeExpr::Ptr(_))));
+        assert_eq!(cache.get(&pointee_idx).map(|(ty, _)| ty), Some(&Type::U32));
+    }
+
+    #[test]
+    fn recover_registered_fixed_and_dynamic_arrays() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let element_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U16));
+        let fixed_idx = builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: Some(3),
+        });
+        let dynamic_idx = builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: None,
+        });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (fixed, fixed_declared) = debug_info[fixed_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("fixed array should be recoverable");
+        let Type::Array(fixed) = fixed else {
+            panic!("expected a recovered fixed array");
+        };
+        assert_eq!(fixed.element_type(), &Type::U16);
+        assert_eq!(fixed.len(), 3);
+        assert!(matches!(fixed_declared.as_deref(), Some(TypeExpr::Array(_))));
+
+        let (dynamic, dynamic_declared) = debug_info[dynamic_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("dynamic array should be recoverable as a list");
+        let Type::List(element) = dynamic else {
+            panic!("expected a recovered list");
+        };
+        assert_eq!(element.as_ref(), &Type::U16);
+        assert!(dynamic_declared.is_none());
+    }
+
+    #[test]
+    fn recover_registered_struct_and_enum_round_trip() {
+        use miden_assembly_syntax::ast::types::{ArrayType, EnumType, StructType, Variant};
+
+        let array = Type::Array(Arc::new(ArrayType::new(Type::U8, 2)));
+        let struct_ty = Type::Struct(Arc::new(StructType::named(
+            Arc::from("pair"),
+            [(Arc::from("left"), Type::U32), (Arc::from("right"), array)],
+        )));
+        let enum_ty = Type::Enum(Arc::new(
+            EnumType::new(
+                Arc::from("option_u32"),
+                Type::U8,
+                [
+                    Variant::c_like(Arc::from("none"), Some(0)),
+                    Variant::new(Arc::from("some"), Type::U32, Some(1)),
+                ],
+            )
+            .unwrap(),
+        ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_idx = builder.register_debug_type(None, None, &struct_ty).unwrap();
+        let enum_idx = builder.register_debug_type(None, None, &enum_ty).unwrap();
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered_struct, declared_struct) = debug_info[struct_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("struct should be recoverable");
+        assert_eq!(recovered_struct, struct_ty);
+        assert!(matches!(declared_struct.as_deref(), Some(TypeExpr::Struct(_))));
+
+        let (recovered_enum, declared_enum) = debug_info[enum_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("enum should be recoverable");
+        assert_eq!(recovered_enum, enum_ty);
+        assert!(declared_enum.is_none());
+    }
+
+    #[test]
+    fn recover_registered_functions_use_fast_calling_convention() {
+        use miden_assembly_syntax::ast::types::CallConv;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let u32_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let void_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void));
+        let no_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: None,
+            param_type_indices: vec![u32_idx],
+        });
+        let void_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: Some(void_idx),
+            param_type_indices: vec![u32_idx],
+        });
+        let value_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: Some(u32_idx),
+            param_type_indices: vec![u32_idx],
+        });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        for function_idx in [no_return_idx, void_return_idx] {
+            let (function, declared) = debug_info[function_idx]
+                .recover_registered_type(debug_info.as_ref(), &mut cache)
+                .expect("function should be recoverable");
+            let Type::Function(function) = function else {
+                panic!("expected a recovered function");
+            };
+            assert_eq!(function.calling_convention(), CallConv::Fast);
+            assert_eq!(function.params(), &[Type::U32]);
+            assert!(function.results().is_empty());
+            assert!(declared.is_none());
+        }
+
+        let (function, _) = debug_info[value_return_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("function should be recoverable");
+        let Type::Function(function) = function else {
+            panic!("expected a recovered function");
+        };
+        assert_eq!(function.calling_convention(), CallConv::Fast);
+        assert_eq!(function.results(), &[Type::U32]);
+    }
+
+    #[test]
+    fn recover_registered_type_rejects_cycles_and_unsized_aggregates() {
+        let mut cyclic_builder = PackageDebugInfoBuilder::default();
+        let first = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(1) });
+        let second = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(0) });
+        assert_eq!(first, DebugTypeIdx::from(0));
+        assert_eq!(second, DebugTypeIdx::from(1));
+        let cyclic = cyclic_builder.build();
+        assert!(
+            cyclic[first]
+                .recover_registered_type(cyclic.as_ref(), &mut FxHashMap::default())
+                .is_none()
+        );
+
+        let mut aggregate_builder = PackageDebugInfoBuilder::default();
+        let name_idx = aggregate_builder.add_string("unsized");
+        let field_name_idx = aggregate_builder.add_string("items");
+        let element_idx =
+            aggregate_builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let list_idx = aggregate_builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: None,
+        });
+        let struct_idx = aggregate_builder.add_type(DebugTypeInfo::Struct {
+            name_idx,
+            size: 0,
+            fields: vec![DebugFieldInfo {
+                name_idx: field_name_idx,
+                type_idx: list_idx,
+                offset: 0,
+            }],
+        });
+        let aggregate = aggregate_builder.build();
+        assert!(
+            aggregate[struct_idx]
+                .recover_registered_type(aggregate.as_ref(), &mut FxHashMap::default())
+                .is_none()
+        );
+    }
+
+    #[test]
     fn file_uri_lookup_uses_the_stored_representation() {
         let mut builder = PackageDebugInfoBuilder::default();
         let uri = Uri::new("file:///src/main.masm");
@@ -947,9 +1475,10 @@ mod tests {
 
     #[test]
     fn test_package_source_debug_merge_remaps_execution_nodes_without_collapsing_sources() {
+        use miden_assembly_syntax::ast::DebugVarLocation;
         use miden_core::{
             mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest},
-            operations::{DebugVarLocation, Operation},
+            operations::Operation,
         };
 
         fn forest_with_add_block() -> (MastForest, MastNodeId) {
