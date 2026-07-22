@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
+    advice::AdviceStack,
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 
@@ -21,8 +22,9 @@ use crate::{
 #[test]
 fn test_op_advpop() {
     // popping from the advice stack should push the value onto the operand stack
-    let advice_stack: Vec<u64> = vec![3];
-    let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_element(Felt::new_unchecked(3));
+    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");
@@ -43,11 +45,19 @@ fn test_op_advpop() {
 #[test]
 fn test_op_advpopw() {
     // popping a word from the advice stack should overwrite top 4 elements of the operand stack
-    // Advice stack: with_stack_values([3, 4, 5, 6]) puts 3 at front (top when popping).
-    // pop_stack_word() pops: 3, 4, 5, 6 -> Word([3, 4, 5, 6])
+    // pop_stack_word() consumes Word([3, 4, 5, 6])
     // word[0]=3 goes to stack position 0 (top), so result is [3, 4, 5, 6, 1].
-    let advice_stack: Vec<u64> = vec![3, 4, 5, 6];
-    let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_word(
+        [
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+        ]
+        .into(),
+    );
+    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");
@@ -390,10 +400,23 @@ fn test_op_mstore() {
 #[test]
 fn test_op_pipe() {
     // push words onto the advice stack
-    // with_stack_values([30, 29, ..., 23]) puts 30 at front (first to pop).
-    // pop_stack_dword pops: 30, 29, 28, 27 -> words[0], then 26, 25, 24, 23 -> words[1]
-    let advice_stack: Vec<u64> = vec![30, 29, 28, 27, 26, 25, 24, 23];
-    let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
+    let advice_word1: Word = [
+        Felt::new_unchecked(30),
+        Felt::new_unchecked(29),
+        Felt::new_unchecked(28),
+        Felt::new_unchecked(27),
+    ]
+    .into();
+    let advice_word2: Word = [
+        Felt::new_unchecked(26),
+        Felt::new_unchecked(25),
+        Felt::new_unchecked(24),
+        Felt::new_unchecked(23),
+    ]
+    .into();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_dword([advice_word1, advice_word2]);
+    let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
         .expect("advice inputs should fit advice map limits");

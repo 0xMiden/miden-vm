@@ -12,7 +12,7 @@ use miden_core::{
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
-    advice::{AdviceInputs, AdviceMutation},
+    advice::{AdviceInputs, AdviceMutation, AdviceStack},
     crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
@@ -91,7 +91,7 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let signature_result = falcon512_poseidon2::sign(&sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
-    Ok(vec![AdviceMutation::extend_stack(signature_result)])
+    Ok(vec![advice_stack_mutation(signature_result)])
 }
 
 // EVENT ERROR
@@ -371,8 +371,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
         let q_hi = Felt::new_unchecked(q >> 32);
         let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([ZERO]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([ZERO]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -424,8 +424,8 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([Felt::new_unchecked(FORGED_R)]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([Felt::new_unchecked(FORGED_R)]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -472,8 +472,8 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
         let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
-        let remainder = AdviceMutation::extend_stack([forged_remainder]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([forged_remainder]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -557,6 +557,12 @@ fn generate_test(
     let store = MerkleStore::new();
 
     (source, op_stack, adv_stack, store, advice_map)
+}
+
+fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements(values);
+    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 // HELPER FUNCTIONS
