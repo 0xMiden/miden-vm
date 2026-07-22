@@ -1902,6 +1902,7 @@ dependencies = [
 name = "miden-processor"
 version = "0.28.0"
 dependencies = [
+ "hashbrown",
  "insta",
  "itertools 0.15.0",
  "miden-air",
