@@ -351,7 +351,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
     }
 
     /// Returns all source/debug roots that point at `exec_node`.
-    fn source_roots_for_exec_node(
+    pub fn source_roots_for_exec_node(
         &self,
         exec_node: Exec,
     ) -> impl Iterator<Item = (Src, &SourceNode<Exec, Src>)> {
