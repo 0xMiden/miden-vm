@@ -746,7 +746,10 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
         node_mutations: impl IntoIterator<Item = (NodeIndex, NodeMutation)>,
         new_pairs: impl IntoIterator<Item = (K, V)>,
         new_root: Word,
-    ) -> Self {
+    ) -> Self
+    where
+        K: Ord,
+    {
         Self {
             old_root,
             node_mutations: node_mutations.into_iter().collect(),
