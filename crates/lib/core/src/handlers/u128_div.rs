@@ -5,10 +5,10 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::Felt;
+use miden_core::{Felt, Word};
 use miden_processor::{
     ProcessorState,
-    advice::AdviceMutation,
+    advice::{AdviceMutation, AdviceStack},
     event::{EventError, EventName},
 };
 
@@ -51,7 +51,11 @@ pub fn handle_u128_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let (q0, q1, q2, q3) = u128_to_u32_felts(quotient);
     let (r0, r1, r2, r3) = u128_to_u32_felts(remainder);
 
-    let mutation = AdviceMutation::extend_stack([r0, r1, r2, r3, q0, q1, q2, q3]);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack
+        .push_word(Word::new([r0, r1, r2, r3]))
+        .push_word(Word::new([q0, q1, q2, q3]));
+    let mutation = AdviceMutation::extend_advice_stack(advice_stack);
     Ok(vec![mutation])
 }
 
