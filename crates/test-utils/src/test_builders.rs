@@ -1,3 +1,79 @@
+// HELPERS
+// ================================================================================================
+
+use miden_core::field::QuotientMap;
+
+/// Converts macro advice stack inputs into the typed advice stack representation.
+pub trait IntoAdviceStackInput {
+    fn into_advice_stack_input(self)
+    -> Result<crate::AdviceStack, miden_core::program::InputError>;
+}
+
+impl IntoAdviceStackInput for crate::AdviceStack {
+    fn into_advice_stack_input(
+        self,
+    ) -> Result<crate::AdviceStack, miden_core::program::InputError> {
+        Ok(self)
+    }
+}
+
+impl IntoAdviceStackInput for ::alloc::vec::Vec<u64> {
+    fn into_advice_stack_input(
+        self,
+    ) -> Result<crate::AdviceStack, miden_core::program::InputError> {
+        advice_stack_from_ints(self)
+    }
+}
+
+impl IntoAdviceStackInput for &[u64] {
+    fn into_advice_stack_input(
+        self,
+    ) -> Result<crate::AdviceStack, miden_core::program::InputError> {
+        advice_stack_from_ints(self.iter().copied())
+    }
+}
+
+impl<const N: usize> IntoAdviceStackInput for [u64; N] {
+    fn into_advice_stack_input(
+        self,
+    ) -> Result<crate::AdviceStack, miden_core::program::InputError> {
+        advice_stack_from_ints(self)
+    }
+}
+
+impl<T> IntoAdviceStackInput for &T
+where
+    T: Clone + IntoAdviceStackInput,
+{
+    fn into_advice_stack_input(
+        self,
+    ) -> Result<crate::AdviceStack, miden_core::program::InputError> {
+        self.clone().into_advice_stack_input()
+    }
+}
+
+pub fn advice_stack_from<I>(stack: I) -> Result<crate::AdviceStack, miden_core::program::InputError>
+where
+    I: IntoAdviceStackInput,
+{
+    stack.into_advice_stack_input()
+}
+
+fn advice_stack_from_ints<I>(iter: I) -> Result<crate::AdviceStack, miden_core::program::InputError>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let stack = iter
+        .into_iter()
+        .map(|value| {
+            crate::Felt::from_canonical_checked(value)
+                .ok_or(miden_core::program::InputError::InvalidStackElement(value))
+        })
+        .collect::<Result<::alloc::vec::Vec<_>, _>>()?;
+
+    Ok(stack.into())
+}
+
 // MACROS TO BUILD TESTS
 // ================================================================================================
 
@@ -167,11 +243,10 @@ macro_rules! build_test_by_mode {
 
         let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
-        let stack_values: ::alloc::vec::Vec<u64> = $advice_stack.to_vec();
+        let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let store = $crate::crypto::MerkleStore::new();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_stack_values(stack_values)
-            .unwrap()
+            .with_advice_stack(advice_stack)
             .with_merkle_store(store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
@@ -200,10 +275,9 @@ macro_rules! build_test_by_mode {
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
-        let stack_values: Vec<u64> = $advice_stack.to_vec();
+        let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_stack_values(stack_values)
-            .unwrap()
+            .with_advice_stack(advice_stack)
             .with_merkle_store($advice_merkle_store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
@@ -233,10 +307,9 @@ macro_rules! build_test_by_mode {
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
-        let stack_values: Vec<u64> = $advice_stack.to_vec();
+        let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_stack_values(stack_values)
-            .unwrap()
+            .with_advice_stack(advice_stack)
             .with_merkle_store($advice_merkle_store)
             .with_map($advice_map);
         let name = format!("test{}", line!());
@@ -255,4 +328,32 @@ macro_rules! build_test_by_mode {
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::advice_stack_from;
+    use crate::{AdviceStack, Felt};
+
+    #[test]
+    fn advice_stack_from_accepts_integer_slices() {
+        let stack = advice_stack_from([1, 2, 3]).unwrap();
+
+        assert_eq!(
+            stack.into_elements(),
+            vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)]
+        );
+    }
+
+    #[test]
+    fn advice_stack_from_accepts_typed_advice_stack() {
+        let mut stack = AdviceStack::new();
+        stack.push_element(Felt::new_unchecked(7));
+
+        let converted = advice_stack_from(stack).unwrap();
+
+        assert_eq!(converted.into_elements(), vec![Felt::new_unchecked(7)]);
+    }
 }
