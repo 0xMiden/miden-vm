@@ -1121,15 +1121,19 @@ impl Package {
             )));
         }
 
-        Self::read_from_bytes(section.data.as_ref())
-            .map(Box::new)
-            .map(Some)
-            .map_err(|error| {
-                Report::msg(format!(
-                    "failed to decode embedded kernel package for '{}': {error}",
-                    self.name
-                ))
-            })
+        if self.debug_sections_trusted {
+            Self::read_from_bytes_trusted(section.data.as_ref())
+        } else {
+            Self::read_from_bytes(section.data.as_ref())
+        }
+        .map(Box::new)
+        .map(Some)
+        .map_err(|error| {
+            Report::msg(format!(
+                "failed to decode embedded kernel package for '{}': {error}",
+                self.name
+            ))
+        })
     }
 
     fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
