@@ -3,7 +3,7 @@ use core::future::Future;
 
 use miden_core::{
     Felt, Word,
-    advice::AdviceMap,
+    advice::{AdviceMap, AdviceStack},
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
 };
@@ -29,14 +29,20 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 /// Any possible way an event can modify the advice provider.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
-    ExtendStack { values: Vec<Felt> },
+    ExtendStack { stack: AdviceStack },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
 }
 
 impl AdviceMutation {
     pub fn extend_stack(iter: impl IntoIterator<Item = Felt>) -> Self {
-        Self::ExtendStack { values: Vec::from_iter(iter) }
+        let mut stack = AdviceStack::new();
+        stack.push_elements(iter);
+        Self::extend_advice_stack(stack)
+    }
+
+    pub fn extend_advice_stack(stack: AdviceStack) -> Self {
+        Self::ExtendStack { stack }
     }
 
     pub fn extend_map(other: AdviceMap) -> Self {
