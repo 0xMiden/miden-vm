@@ -2069,7 +2069,7 @@ dependencies = [
 [[package]]
 name = "miden-signature"
 version = "0.1.0"
-source = "git+https://github.com/0xMiden/miden-signature.git?branch=paper%2Fsignature-bcs-backends#beb1ba5eeb95219df9cbe6dfae685d0a43fed9c5"
+source = "git+https://github.com/0xMiden/miden-signature.git?branch=paper%2Foriginal-udr-ldr#2e83f7fa4ffda8a3960f7f46f64137f6dab72277"
 dependencies = [
  "blake3",
  "libm",

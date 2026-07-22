@@ -2,7 +2,7 @@
 #!
 #! # What this module does
 #!
-#! For each of 56 query indices, verifies that the committed trace polynomials
+#! For each of 121 query indices, verifies that the committed trace polynomials
 #! (witness + quotient) are consistent with their OOD evaluations via the DEEP
 #! polynomial identity:
 #!
@@ -34,11 +34,11 @@ const SIG_HORNER_FIXED_PTR = 3240099872
 const SIG_NEG_Z_GZ_PTR = 3240099876
 const SIG_Z_PTR = 3240099856
 const SIG_DEEP_POLY_PTR = 3240099992
-const SIG_QUERIES_PTR = 3240100248
-const SIG_OPENED_ROW_PTR = 3240100472
-const SIG_WITNESS_LEAF_PTR = 3240100520
-const SIG_QUOTIENT_LEAF_PTR = 3240100524
-const SIG_LEAF_SALT_PTR = 3240100528
+const SIG_QUERIES_PTR = 3240100504
+const SIG_OPENED_ROW_PTR = 3240100988
+const SIG_WITNESS_LEAF_PTR = 3240101036
+const SIG_QUOTIENT_LEAF_PTR = 3240101040
+const SIG_LEAF_SALT_PTR = 3240101044
 const SIG_WITNESS_COM_PTR = 3240099848
 const SIG_QUOTIENT_COM_PTR = 3240099852
 
@@ -51,7 +51,7 @@ const COSET_OFFSET = 7
 # sig/constants.masm header on sponge-memory sharing), and ood_check.masm's
 # use of TMP1-3 (Phase 3) does not overlap the query loop's lifetime.
 const TMP1_PTR = 3223322684
-const NUM_QUERIES = 56
+const NUM_QUERIES = 121
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Precomputation (called once before the query loop)
@@ -382,11 +382,12 @@ end
 
 #! Evaluate the DEEP polynomial at a base-field point x via Horner's method.
 #!
-#! Memory at SIG_DEEP_POLY_PTR holds a padded 256-coefficient descending layout:
-#!   [0, ..., 0, c125, c124, ..., c0]
-#! where c0..c125 are the 126 logical DEEP coefficients.
+#! Memory at SIG_DEEP_POLY_PTR holds a 256-EF-coefficient descending layout:
+#!   [c255, c254, ..., c0]
+#! where c0..c255 are the 256 logical DEEP coefficients (ms + 2 = 256 exactly
+#! fills the power-of-two layout; no zero padding).
 #! This lets us evaluate with the native 4-EF Horner instruction:
-#!   repeat.32 { mem_stream; horner_eval_ext }.
+#!   repeat.64 { mem_stream; horner_eval_ext }.
 #!
 #! Stack transition:
 #! Input:  [expected0, expected1, query_ptr, x, ...]
@@ -406,7 +407,7 @@ proc eval_deep_poly_at_x
     push.SIG_DEEP_POLY_PTR
     padw padw padw
 
-    repeat.32
+    repeat.64
         mem_stream
         horner_eval_ext
     end

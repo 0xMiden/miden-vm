@@ -168,7 +168,7 @@ impl SigTranscript {
     }
 }
 
-/// Compute INSTANCE_SEED for e2_110 from protocol parameters.
+/// Compute INSTANCE_SEED for udr from protocol parameters.
 ///
 /// INSTANCE_SEED = capacity after:
 ///   hperm(R1=[code_size, num_queries, grind_prox, grind_query],
@@ -178,7 +178,7 @@ impl SigTranscript {
 /// RELATION_DIGEST is derived in `miden-signature` from the fixed signature
 /// relation descriptor and the width-12 AIR dimensions.
 pub fn compute_instance_seed() -> [Felt; 4] {
-    let config = miden_signature::internal::signer::Config::e2_110bit::<
+    let config = miden_signature::internal::signer::Config::udr::<
         miden_signature::internal::air::Rpo12,
     >();
     let seed = miden_signature::internal::proof::instance_seed_for_config::<

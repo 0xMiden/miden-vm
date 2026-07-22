@@ -25,19 +25,19 @@ use miden::core::stark::random_coin
 
 # Circuit dimensions (from circuit_gen.rs).
 const ACE_NUM_VARS = 404
-const ACE_NUM_EVAL = 1164
+const ACE_NUM_EVAL = 1168
 const ACE_NUM_ADV_PIPE = 231
 const ACE_READ_WORDS = 32
 
 # Circuit commitment hash (with reversed wire IDs for chiplet convention).
-const ACE_CIRCUIT_HASH_0 = 1450665829201445797
-const ACE_CIRCUIT_HASH_1 = 10046822553360383469
-const ACE_CIRCUIT_HASH_2 = 15650706673428320359
-const ACE_CIRCUIT_HASH_3 = 5553949992686977874
+const ACE_CIRCUIT_HASH_0 = 7140815296386252846
+const ACE_CIRCUIT_HASH_1 = 16738131845697444928
+const ACE_CIRCUIT_HASH_2 = 7604427495292087967
+const ACE_CIRCUIT_HASH_3 = 1016946425411279441
 
 # ACE READ section base address (after sig query region + DEEP scratch).
 # 64 EF slots = 128 base felts = 32 words.
-const ACE_READ_PTR = 3240100532
+const ACE_READ_PTR = 3240101048
 
 # Domain constants.
 const TRACE_GEN = 18446744069397807105
@@ -153,17 +153,17 @@ proc setup_stark_vars
     padw exec.constants::sig_z_ptr mem_loadw_le
     # => [z0, z1, z8_0, z8_1]
 
-    # ── Slot 50: alpha ──
+    # ── Slot 58: alpha ──
     exec.constants::sig_lambda_ptr mem_load
     push.ACE_READ_PTR add.116 mem_store
     exec.constants::sig_lambda_ptr add.1 mem_load
     push.ACE_READ_PTR add.117 mem_store
 
-    # ── Slot 51: z^N = z^8 ──
+    # ── Slot 59: z^N = z^8 ──
     dup.2 push.ACE_READ_PTR add.118 mem_store    # z8_0
     dup.3 push.ACE_READ_PTR add.119 mem_store    # z8_1
 
-    # ── Slot 52: z_k = z ──
+    # ── Slot 60: z_k = z ──
     dup push.ACE_READ_PTR add.120 mem_store      # z0
     dup.1 push.ACE_READ_PTR add.121 mem_store    # z1
 
@@ -173,7 +173,7 @@ proc setup_stark_vars
     sub.1
     # => [van_0, van_1, z0, z1]   (van = z8 - 1)
 
-    # ── Slot 53: is_first = van * inv(z - 1) ──
+    # ── Slot 61: is_first = van * inv(z - 1) ──
     dup.3 dup.3
     # => [z0, z1, van_0, van_1, z0, z1]
     sub.1 ext2inv
@@ -205,7 +205,7 @@ proc setup_stark_vars
     ext2mul
     # => [is_last_0, is_last_1, is_trans_0, is_trans_1]
 
-    # Store slots 54-55 in one word:
+    # Store slots 62-63 in one word:
     # [is_last_0, is_last_1, is_trans_0, is_trans_1]
     push.ACE_READ_PTR add.124
     mem_storew_le
@@ -214,7 +214,7 @@ end
 
 #! Load circuit from advice map, verify its commitment, and store it in memory.
 #! 
-#! `adv_pipe` writes through the Poseidon2 state memory (R1_PTR, R2_PTR, C_PTR).
+#! `adv_pipe` writes through the hperm sponge state memory (R1_PTR, R2_PTR, C_PTR).
 #! We save and restore the random-coin state words around circuit loading so the
 #! transcript state remains unchanged.
 proc load_circuit
@@ -233,7 +233,7 @@ proc load_circuit
     # Circuit data destination
     push.ACE_READ_PTR add.128
 
-    # Fresh Poseidon2 state for circuit hashing (does NOT use the random coin)
+    # Fresh sponge state for circuit hashing (does NOT use the random coin)
     padw padw padw
 
     repeat.ACE_NUM_ADV_PIPE

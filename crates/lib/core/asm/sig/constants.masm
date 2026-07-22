@@ -1,19 +1,19 @@
 #! Memory layout and hardcoded parameters for the STARK-based signature verifier.
 #!
-#! # Variant: e2_110 (JSN, recursion-optimized)
+#! # Variant: udr (the paper's UDR instance, zero-fold)
 #!
 #! - Trace:     12 columns x 8 rows (RPO12 permutation: 7 rounds + input state)
 #! - Code domain: |D| = 2048, blowup = 256 (= 2048 / 8)
 #! - Extension: quadratic (e = 2), 128-bit challenge field
-#! - Queries:   q = 56
-#! - Mask degree: md = |H| + 2*(e+q) - 1 = 8 + 116 - 1 = 123
-#! - Message size: ms = md + 1 = 124  (number of masked witness coefficients)
-#! - Quotient:  7*md - 6 = 855 coefficients, segmented into 15 chunks of length 57
+#! - Queries:   q = 121
+#! - Mask degree: md = |H| + 2*(e+q) - 1 = 8 + 246 - 1 = 253
+#! - Message size: ms = md + 1 = 254  (number of masked witness coefficients)
+#! - Quotient:  7*md - 6 = 1765 coefficients, segmented into 15 chunks of length 118
 #! - Aux width: 15 chunks + 1 DEEP mask R = 16 committed EF columns
 #!
 #! # Sponge memory
 #!
-#! This verifier shares the Poseidon2 sponge memory region with `stark/constants.masm`
+#! This verifier shares the native hperm sponge memory region with `stark/constants.masm`
 #! (R1_PTR, R2_PTR, C_PTR, output_len, input_len). It cannot coexist with a VM proof
 #! verifier in the same execution context. Sig-specific storage lives in a separate
 #! memory region starting at SIG_MEM_BASE.
@@ -26,14 +26,14 @@ use miden::core::stark::constants
 
 const CODE_SIZE = 2048
 const LOG_CODE_SIZE = 11
-const NUM_QUERIES = 56
+const NUM_QUERIES = 121
 const TRACE_HEIGHT = 8
 const LOG_TRACE_HEIGHT = 3
 const WITNESS_WIDTH = 12
 const AUX_WIDTH = 16
 const NUM_QUOTIENT_CHUNKS = 15
-const SEGMENT_LEN = 57
-const MESSAGE_SIZE = 124
+const SEGMENT_LEN = 118
+const MESSAGE_SIZE = 254
 
 # OOD evaluation counts:
 #   witness_z(12 EF) + witness_gz(12 EF) + quotient_z(16 EF) + quotient_gz(16 EF) = 56 EF
@@ -70,41 +70,41 @@ const COSET_OFFSET_INV = 2635249152773512046
 #
 # INSTANCE_SEED = capacity after:
 # (num_constraints=24 for the width-12 RPO AIR)
-#   hperm(R1=[code_size=2048, num_queries=56, grind_prox=17, grind_query=19],
-#         R2=[log_trace_height=3, num_constraints=24, grind_ali=0, grind_ood=5],
+#   hperm(R1=[code_size=2048, num_queries=121, grind_prox=4, grind_query=16],
+#         R2=[log_trace_height=3, num_constraints=24, grind_ali=0, grind_ood=0],
 #         C=SIG_RELATION_DIGEST)
 #
 # SIG_RELATION_DIGEST is derived by miden-signature from the fixed signature
 # relation descriptor: protocol id/version, trace height, max constraint degree,
 # trace width, constraint count, OOD point count, and hasher id.
 #
-# Regenerated for the Plonky3 Poseidon2 instance (= VM hperm) and the e2_110
-# config via miden_signature::internal::proof::instance_seed_for_config::<Rpo12>.
+# Regenerated for the udr config (the paper's UDR instance) via
+# miden_signature::internal::proof::instance_seed_for_config::<Rpo12>.
 
 const SIG_RELATION_DIGEST_0 = 233486777786800190
 const SIG_RELATION_DIGEST_1 = 14977671287399219501
 const SIG_RELATION_DIGEST_2 = 9200360977739006828
 const SIG_RELATION_DIGEST_3 = 13964022728347191575
 
-const SIG_INSTANCE_SEED_0 = 14350876600472793560
-const SIG_INSTANCE_SEED_1 = 5398233744932340953
-const SIG_INSTANCE_SEED_2 = 13570276446505663048
-const SIG_INSTANCE_SEED_3 = 12740591338637192245
+const SIG_INSTANCE_SEED_0 = 11095227902427520873
+const SIG_INSTANCE_SEED_1 = 1380614432939724688
+const SIG_INSTANCE_SEED_2 = 17260572349238426593
+const SIG_INSTANCE_SEED_3 = 4061704215050277090
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Grinding bits per round
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# From the GrindingSchedule for e2_110 (JSN(m=2), target=112 bits):
-#   ALI  = 0   (constraint batching error already > 112 bits)
-#   OOD  = 5   (OOD baseline 107.9; grinding restores 112)
-#   PROX = 17  (JSN proximity gap baseline 95.8)
-#   QUERY = 19 (query agreement baseline 93.9; +2 over PROX to hold 110 at q=56)
+# From the GrindingSchedule for udr (UDR, target=116 bits):
+#   ALI  = 0   (constraint batching error 123.4, already above target)
+#   OOD  = 0   (OOD baseline 116.9, already above target)
+#   PROX = 4   (UDR correlated-agreement baseline 112.1)
+#   QUERY = 16 (query agreement baseline 100.3 at q=121)
 
 const GRIND_ALI_BITS = 0
-const GRIND_OOD_BITS = 5
-const GRIND_PROX_BITS = 17
-const GRIND_QUERY_BITS = 19
+const GRIND_OOD_BITS = 0
+const GRIND_PROX_BITS = 4
+const GRIND_QUERY_BITS = 16
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Memory layout (sig-specific region)
@@ -128,19 +128,19 @@ const GRIND_QUERY_BITS = 19
 #   3240099880  [112] ood_evals   -- OOD evaluations in point-major order:
 #                                   --   witness_z(24), quotient_z(32),
 #                                   --   witness_gz(24), quotient_gz(32)
-#   3240099992  [256] deep_poly   -- DEEP polynomial coefficients (padded to 128 EF)
-#   3240100248  [224] queries     -- 56 query indices (word-stride)
+#   3240099992  [512] deep_poly   -- DEEP polynomial coefficients (padded to 256 EF)
+#   3240100504  [484] queries     -- 121 query indices (word-stride)
 #
 #   --- per-query DEEP scratch (defined locally in deep_queries.masm) ---
-#   3240100472  [48]  opened_row  -- opened witness(16, zero-padded)+quotient(32) row
-#   3240100520  [4]   witness_leaf-- recomputed salted witness leaf digest
-#   3240100524  [4]   quotient_leaf- recomputed salted quotient leaf digest
-#   3240100528  [4]   leaf_salt   -- per-leaf salt loaded into Poseidon2 capacity
-#   3240100532  [..]  ace_read    -- ACE READ section + circuit (ood_check.masm)
-#   3240100472  [--]  (queries end; scratch starts exactly there)
+#   3240100988  [48]  opened_row  -- opened witness(16, zero-padded)+quotient(32) row
+#   3240101036  [4]   witness_leaf-- recomputed salted witness leaf digest
+#   3240101040  [4]   quotient_leaf- recomputed salted quotient leaf digest
+#   3240101044  [4]   leaf_salt   -- per-leaf salt loaded into the sponge capacity
+#   3240101048  [..]  ace_read    -- ACE READ section + circuit (ood_check.masm)
+#   3240100988  [--]  (queries end; scratch starts exactly there)
 #
 # NOTE: the scratch block (opened_row..leaf_salt) and ACE_READ_PTR are packed
-# with NO gap. If the opened-row width (currently 48 felts for e2_110, q=56: witness 16 zero-padded + quotient 32) or the
+# with NO gap. If the opened-row width (currently 48 felts for udr, q=121: witness 16 zero-padded + quotient 32) or the
 # query count changes, re-check that opened_row does not run into witness_leaf,
 # and that leaf_salt does not run into ACE_READ_PTR (ood_check.masm:const).
 
@@ -158,9 +158,9 @@ const SIG_HORNER_FIXED_PTR = 3240099872
 const SIG_NEG_Z_GZ_PTR = 3240099876
 const SIG_OOD_PTR = 3240099880
 const SIG_DEEP_POLY_PTR = 3240099992
-const SIG_QUERIES_PTR = 3240100248
-const SIG_QUERIES_END_PTR = 3240100472
-const SIG_OPENED_ROW_PTR = 3240100472
+const SIG_QUERIES_PTR = 3240100504
+const SIG_QUERIES_END_PTR = 3240100988
+const SIG_OPENED_ROW_PTR = 3240100988
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   Accessor procedures

@@ -37,7 +37,7 @@ use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, QuadFelt, TwoAdicField},
 };
-use miden_signature::e2_110 as sig_variant;
+use miden_signature::udr as sig_variant;
 
 use crate::sig::{
     instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig, test_message,
@@ -58,7 +58,7 @@ pub const IS_TRANS_SLOT: usize = 63;
 pub const NUM_INPUTS: usize = 64;
 
 const NUM_QUOTIENT_CHUNKS: usize = 15;
-const SEGMENT_LEN: usize = 57;
+const SEGMENT_LEN: usize = 118;
 const STATE_WIDTH: usize = 12;
 
 /// Gate operations.
@@ -655,10 +655,10 @@ mod tests {
         eprintln!("  circuit hash: {:?}", hash.map(|f| f.as_canonical_u64()));
 
         // Verify hash matches the MASM constants
-        assert_eq!(hash[0].as_canonical_u64(), 1450665829201445797u64);
-        assert_eq!(hash[1].as_canonical_u64(), 10046822553360383469u64);
-        assert_eq!(hash[2].as_canonical_u64(), 15650706673428320359u64);
-        assert_eq!(hash[3].as_canonical_u64(), 5553949992686977874u64);
+        assert_eq!(hash[0].as_canonical_u64(), 7140815296386252846u64);
+        assert_eq!(hash[1].as_canonical_u64(), 16738131845697444928u64);
+        assert_eq!(hash[2].as_canonical_u64(), 7604427495292087967u64);
+        assert_eq!(hash[3].as_canonical_u64(), 1016946425411279441u64);
     }
 
     #[test]
@@ -674,7 +674,7 @@ mod tests {
         let signature = sign_sig(&sk, message);
         assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_110bit::<Rpo12>();
+        let config = Config::udr::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
         let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
@@ -772,7 +772,7 @@ mod tests {
         let signature = sign_sig(&sk, message);
         assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_110bit::<Rpo12>();
+        let config = Config::udr::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
         let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
@@ -860,7 +860,7 @@ mod tests {
         let signature = sign_sig(&sk, message);
         assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_110bit::<air::Rpo12>();
+        let config = Config::udr::<air::Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
         let proof = serialize::deserialize_and_reconstruct_with::<air::Rpo12, QuadExt, RpoSuite>(
@@ -955,7 +955,7 @@ mod tests {
         let signature = sign_sig(&sk, message);
         assert!(verify_sig(&pk, message, &signature).is_ok());
 
-        let config = Config::e2_110bit::<Rpo12>();
+        let config = Config::udr::<Rpo12>();
         let stark = &config.stark;
         let pk_felts = *pk.elements();
         let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(

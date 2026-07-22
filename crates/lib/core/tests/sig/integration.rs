@@ -45,7 +45,7 @@ fn transcript_matches_prover() {
 fn masm_query_indices_match_transcript_replay() {
     use miden_processor::ContextId;
 
-    const SIG_QUERIES_PTR: u32 = 3240100248;
+    const SIG_QUERIES_PTR: u32 = 3240100504;
 
     let fixture = build_fixture(b"masm-query-indices-match-replay", 1003);
     let expected = miden_signature::internal::proof::replay_query_indices::<QuadExt, RpoSuite>(
@@ -164,7 +164,7 @@ fn masm_ood_grinding_guard_rejects_bad_nonce() {
             break;
         }
     }
-    let bad_nonce = bad_nonce.expect("expected nearby OOD nonce to fail 2-bit grinding");
+    let bad_nonce = bad_nonce.expect("expected nearby OOD nonce to fail the zero-bit check");
 
     let mut data = fixture.data.clone();
     data.advice_stack[OOD_NONCE_ADVICE_INDEX] = bad_nonce;
@@ -176,8 +176,10 @@ fn masm_ood_grinding_guard_rejects_bad_nonce() {
         end
     ";
 
+    // udr has zero OOD grinding bits: the round asserts a zero nonce rather
+    // than checking masked PoW bits.
     let test = build_sig_test(source, &data);
-    expect_assert_error_code_from_msg!(test, "grinding_pow_check_failed");
+    expect_assert_error_code_from_msg!(test, "grinding nonce must be zero when bits=0");
 }
 
 #[test]
@@ -373,8 +375,8 @@ fn masm_deep_poly_layout_padded_descending() {
     use miden_processor::ContextId;
 
     const SIG_DEEP_POLY_PTR: u32 = 3240099992;
-    const DEEP_EF_LOGICAL: usize = 124;
-    const DEEP_EF_PADDED: usize = 128;
+    const DEEP_EF_LOGICAL: usize = 254;
+    const DEEP_EF_PADDED: usize = 256;
     const DEEP_ZERO_PREFIX: usize = DEEP_EF_PADDED - DEEP_EF_LOGICAL;
 
     let fixture = build_fixture(b"masm-deep-layout", 1011);

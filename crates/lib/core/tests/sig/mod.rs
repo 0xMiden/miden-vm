@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use miden_core::{Felt, Word};
 use miden_signature::{
-    Goldilocks, QuadExt, VerifyError, e2_110,
+    Goldilocks, QuadExt, VerifyError, udr,
     internal::{
         air::Rpo12,
         signer::{Config, Signer},
@@ -77,17 +77,17 @@ pub fn instance_seed_goldilocks() -> [Goldilocks; 4] {
 
 // Signature helpers using 4-felt messages.
 
-pub fn sign_sig(sk: &e2_110::SecretKey, msg: [Felt; 4]) -> Vec<u8> {
-    Signer::<Rpo12, QuadExt, _, RpoSuite>::new(Config::e2_110bit::<Rpo12>())
+pub fn sign_sig(sk: &udr::SecretKey, msg: [Felt; 4]) -> Vec<u8> {
+    Signer::<Rpo12, QuadExt, _, RpoSuite>::new(Config::udr::<Rpo12>())
         .sign(sk, message_to_goldilocks(msg))
 }
 
 pub fn verify_sig(
-    pk: &e2_110::PublicKey,
+    pk: &udr::PublicKey,
     msg: [Felt; 4],
     signature: &[u8],
 ) -> Result<(), VerifyError> {
-    Signer::<Rpo12, QuadExt, _, RpoSuite>::new_verifier(Config::e2_110bit::<Rpo12>()).verify(
+    Signer::<Rpo12, QuadExt, _, RpoSuite>::new_verifier(Config::udr::<Rpo12>()).verify(
         pk,
         message_to_goldilocks(msg),
         signature,

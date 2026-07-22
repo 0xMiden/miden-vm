@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use miden_core::{Felt, Word, crypto::hash::Rpo256};
 use miden_signature::{
-    Goldilocks, QuadExt, e2_110 as sig_variant,
+    Goldilocks, QuadExt, udr as sig_variant,
     internal::{
         air::Rpo12,
         merkle::MerkleOpening,
@@ -45,7 +45,7 @@ pub(crate) fn build_fixture_with_message(seed: &[u8], message: [Felt; 4]) -> Sig
     let signature = sign_sig(&sk, message);
     assert!(verify_sig(&pk, message, &signature).is_ok());
 
-    let config = Config::e2_110bit::<Rpo12>();
+    let config = Config::udr::<Rpo12>();
     let proof = serialize::deserialize_and_reconstruct_with::<Rpo12, QuadExt, RpoSuite>(
         &signature,
         &config.stark,
