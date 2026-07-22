@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use miden_ace_codegen::{
     AceCircuit, AceConfig, AceDag, AceError, DagBuilder, InputKey, NodeId, NodeKind,
-    build_ace_dag_for_air,
+    build_ace_dags_for_airs,
 };
 use miden_core::{
     Felt,
@@ -29,9 +29,9 @@ use crate::session::ChipletAir;
 /// cross-chiplet LogUp boundary identity is checked separately by `ChipletMultiAir::eval_external`.
 ///
 /// Implementation strategy mirrors `miden_air::ace::build_multi_air_ace_circuit`:
-/// 1. Build each chiplet AIR's sub-DAG with its own single-AIR layout via
-///    [`build_ace_dag_for_air`]. These DAGs encode each AIR's alpha-folded constraints referencing
-///    layout-relative `InputKey::Preprocessed`/`Main`/`AuxCoord`/`AuxBusBoundary` slots.
+/// 1. Build the chiplet AIR sub-DAGs with single-AIR layouts via [`build_ace_dags_for_airs`]. These
+///    DAGs encode each AIR's constraints using layout-relative
+///    `InputKey::Preprocessed`/`Main`/`AuxCoord`/`AuxBusBoundary` slots.
 /// 2. Re-emit each sub-DAG's nodes into a fresh [`DagBuilder`] configured for the combined layout,
 ///    shifting preprocessed/main/aux/bus-boundary slot indices into that AIR's subregion and
 ///    tagging row selectors with the AIR's `ChipletAir::all()` instance index.
@@ -70,9 +70,9 @@ pub fn build_precompile_multi_air_ace_circuit(
     }
 
     let sub_config = AceConfig { num_airs: 1, ..config };
+    let artifacts = build_ace_dags_for_airs::<ChipletAir, Felt, QuadFelt>(&airs, sub_config)?;
     let mut parts: Vec<AirParts<QuadFelt>> = Vec::with_capacity(airs.len());
-    for air in &airs {
-        let artifacts = build_ace_dag_for_air::<ChipletAir, Felt, QuadFelt>(air, sub_config)?;
+    for (air, artifacts) in airs.iter().zip(artifacts) {
         let preprocessed_w = <ChipletAir as BaseAir<Felt>>::preprocessed_width(air);
         let main_w = <ChipletAir as BaseAir<Felt>>::width(air);
         let aux_w = <ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air);
