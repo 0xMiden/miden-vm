@@ -1,4 +1,5 @@
 pub mod aux_trace
+pub mod claim
 pub mod constraints_eval
 pub mod constraints_eval_inputs
 pub mod deep_queries

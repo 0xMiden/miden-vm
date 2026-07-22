@@ -49,3 +49,126 @@ proptest! {
         build_test!(&source, &test_values).prop_expect_stack(&expected_values)?;
     }
 }
+
+// EXECUTION CLAIM CROSS-TESTS
+// ================================================================================================
+
+/// The MASM `sys::vm::claim::claim_hash` brick must agree with the native
+/// `ExecutionClaim::commitment` on the same claim region (same encoding, same domain tag, same
+/// capacity layout).
+#[test]
+fn claim_hash_matches_native_execution_claim_commitment() {
+    use miden_core::{
+        Felt, Word,
+        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+    };
+
+    let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
+        [
+            Felt::new_unchecked(a),
+            Felt::new_unchecked(b),
+            Felt::new_unchecked(c),
+            Felt::new_unchecked(d),
+        ]
+        .into()
+    };
+
+    let kernel =
+        KernelDescriptor::from_hashes(vec![word(11, 12, 13, 14), word(21, 22, 23, 24)]).unwrap();
+    let program_info = ProgramInfo::new(word(1, 2, 3, 4), kernel);
+    let stack_inputs =
+        StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6), Felt::new_unchecked(7)])
+            .unwrap();
+    let stack_outputs =
+        StackOutputs::new(&[Felt::new_unchecked(8), Felt::new_unchecked(9)]).unwrap();
+    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+
+    // stage the canonical 40-felt encoding into a claim region at CLAIM_PTR
+    const CLAIM_PTR: u64 = 1000;
+    let elements = claim.to_elements();
+    let mut store_ops = String::new();
+    for (i, chunk) in elements.chunks(4).enumerate() {
+        // `push.e3.e2.e1.e0.addr mem_storew_le` stores [e0, e1, e2, e3] at addr..addr+4
+        store_ops.push_str(&format!(
+            "push.{}.{}.{}.{}.{} mem_storew_le dropw\n",
+            chunk[3].as_canonical_u64(),
+            chunk[2].as_canonical_u64(),
+            chunk[1].as_canonical_u64(),
+            chunk[0].as_canonical_u64(),
+            CLAIM_PTR + 4 * i as u64,
+        ));
+    }
+
+    let source = format!(
+        "
+        use miden::core::sys
+        use miden::core::sys::vm::claim
+
+        begin
+            {store_ops}
+            push.{CLAIM_PTR}
+            exec.claim::claim_hash
+            exec.sys::truncate_stack
+        end
+        "
+    );
+
+    let mut expected: Vec<u64> =
+        claim.commitment().as_elements().iter().map(Felt::as_canonical_u64).collect();
+    expected.resize(16, 0);
+    build_test!(source.as_str(), &[]).expect_stack(&expected);
+}
+
+/// The MASM `poseidon2::hash_elements_in_domain` must agree with the native implementation for
+/// rate-aligned, unaligned, and empty inputs. The kernel domain tag case binds the value baked
+/// into `public_inputs.masm` to `KernelDescriptor::commitment`.
+#[test]
+fn hash_elements_in_domain_matches_native() {
+    use miden_core::{Felt, chiplets::hasher};
+
+    for num_elements in [0usize, 5, 8, 11, 16, 40] {
+        let values: Vec<u64> = (1..=num_elements as u64).collect();
+        let felts: Vec<Felt> = values.iter().map(|&v| Felt::new_unchecked(v)).collect();
+        let domain = miden_core::program::KERNEL_DOMAIN_TAG;
+
+        const PTR: u64 = 1000;
+        let mut store_ops = String::new();
+        let mut padded = values.clone();
+        padded.resize(values.len().next_multiple_of(4).max(4), 0);
+        for (i, chunk) in padded.chunks(4).enumerate() {
+            store_ops.push_str(&format!(
+                "push.{}.{}.{}.{}.{} mem_storew_le dropw\n",
+                chunk[3],
+                chunk[2],
+                chunk[1],
+                chunk[0],
+                PTR + 4 * i as u64,
+            ));
+        }
+
+        let source = format!(
+            "
+            use miden::core::sys
+            use miden::core::crypto::hashes::poseidon2
+
+            begin
+                {store_ops}
+                push.{domain_int}
+                push.{num_elements}
+                push.{PTR}
+                exec.poseidon2::hash_elements_in_domain
+                exec.sys::truncate_stack
+            end
+            ",
+            domain_int = domain.as_canonical_u64(),
+        );
+
+        let mut expected: Vec<u64> = hasher::hash_elements_in_domain(&felts, domain)
+            .as_elements()
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect();
+        expected.resize(16, 0);
+        build_test!(source.as_str(), &[]).expect_stack(&expected);
+    }
+}
