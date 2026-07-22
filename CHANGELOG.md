@@ -28,9 +28,11 @@
 - [BREAKING] Fixed a soundness gap in the chiplets AIR where a chiplet section's first-row initialization was skipped when the preceding section was empty. A program that uses memory but performs no `u32and`/`u32xor` operations produces an empty bitwise section, which caused the memory chiplet to skip its "values not being written must be zero" reset; a malicious prover could exploit this to forge a read of never-written memory. Each section's first row is now identified from the chiplet selectors at the boundary rather than from the previous chiplet's last row, so the initialization holds no matter which preceding sections are empty. The ACE section-start reset was hardened the same way as a precaution ([#3387](https://github.com/0xMiden/miden-vm/pull/3387)).
 - [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
 - Added `Package::get_export_node()` and `Package::procedures_with_attribute()` APIs ([#3320](https://github.com/0xMiden/miden-vm/issues/3320)).
+- [BREAKING] Add dead-node elimination in ACE DAG ([#3408](https://github.com/0xMiden/miden-vm/pull/3408)).
 
 #### Fixes
 
+- [BREAKING] Bound MMR peak commitments to the leaf count by hashing `[num_leaves, 0, 0, 0] || padded_peaks`, and updated the core library `mmr::pack`/`mmr::unpack` procedures to use the same preimage ([#3388](https://github.com/0xMiden/miden-vm/pull/3388)).
 - Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
 - Fixed `hash_elements_in_domain(&[], d)` colliding with `hash_elements_in_domain(&[ZERO; RATE_WIDTH], d)` for nonzero `d`, by absorbing a `ONE` padding marker on the empty-input branch ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Fixed `hash_bytes(&[])` returning `Word::default()`; the empty-bytes input now absorbs a padding marker and permutes, producing a nonzero digest consistent with the 10\* sponge padding rule ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
