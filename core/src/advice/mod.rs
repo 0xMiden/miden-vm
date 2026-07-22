@@ -12,7 +12,7 @@ mod map;
 pub use map::AdviceMap;
 
 mod stack;
-pub use stack::AdviceStackBuilder;
+pub use stack::{AdviceStack, AdviceStackBuilder};
 
 // ADVICE INPUTS
 // ================================================================================================
@@ -61,6 +61,17 @@ impl AdviceInputs {
     {
         self.stack.extend(iter);
         self
+    }
+
+    /// Replaces the advice stack with the provided typed stack.
+    pub fn with_advice_stack(mut self, stack: AdviceStack) -> Self {
+        self.stack = stack.into_elements();
+        self
+    }
+
+    /// Returns the advice stack as a typed stack.
+    pub fn advice_stack(&self) -> AdviceStack {
+        self.stack.clone().into()
     }
 
     /// Extends the map of values with the given argument, replacing previously inserted items.
@@ -114,7 +125,7 @@ impl Deserializable for AdviceInputs {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::{AdviceInputs, AdviceStackBuilder};
+    use super::{AdviceInputs, AdviceStack, AdviceStackBuilder};
     use crate::{
         Felt, Word,
         serde::{Deserializable, Serializable},
@@ -140,6 +151,99 @@ mod tests {
         let advice2 = AdviceInputs::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(advice1, advice2);
+    }
+
+    #[test]
+    fn advice_inputs_accept_typed_advice_stack() {
+        let mut stack = AdviceStack::new();
+        stack.push_element(Felt::new_unchecked(1));
+        stack.push_word(
+            [
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4),
+                Felt::new_unchecked(5),
+            ]
+            .into(),
+        );
+
+        let advice = AdviceInputs::default().with_advice_stack(stack.clone());
+
+        assert_eq!(advice.stack, stack.into_elements());
+        assert_eq!(advice.advice_stack(), advice.stack.into());
+    }
+
+    #[test]
+    fn advice_stack_consumes_word_sized_groups_top_first() {
+        let word0: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let word1: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
+        let mut stack = AdviceStack::new();
+
+        stack.push_element(Felt::new_unchecked(0));
+        stack.push_word(word0);
+        stack.push_dword([word1, word0]);
+
+        assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(0)));
+        assert_eq!(stack.consume_word(), Some(word0));
+        assert_eq!(stack.consume_dword(), Some([word1, word0]));
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn advice_stack_rejects_partial_dword_without_consuming() {
+        let word: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let mut stack = AdviceStack::new();
+        stack.push_word(word);
+
+        assert_eq!(stack.consume_dword(), None);
+        assert_eq!(stack.consume_word(), Some(word));
+    }
+
+    #[test]
+    fn advice_stack_push_for_adv_push_matches_repeated_consumption() {
+        let values = [Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
+        let mut stack = AdviceStack::new();
+        stack.push_for_adv_push(&values);
+
+        assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(3)));
+        assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(2)));
+        assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(1)));
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn advice_stack_push_for_adv_pipe_requires_dword_alignment() {
+        let values: Vec<Felt> = (1..=16).map(Felt::new_unchecked).collect();
+        let mut stack = AdviceStack::new();
+        stack.push_for_adv_pipe(&values);
+
+        assert_eq!(stack.into_elements(), values);
+    }
+
+    #[test]
+    #[should_panic(expected = "push_for_adv_pipe requires slice length to be a multiple of 8")]
+    fn advice_stack_push_for_adv_pipe_panics_on_misalignment() {
+        let values: Vec<Felt> = (1..=7).map(Felt::new_unchecked).collect();
+        let mut stack = AdviceStack::new();
+        stack.push_for_adv_pipe(&values);
     }
 
     // ADVICE STACK BUILDER TESTS

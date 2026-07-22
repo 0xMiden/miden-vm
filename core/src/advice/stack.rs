@@ -3,6 +3,155 @@ use alloc::{collections::VecDeque, vec::Vec};
 use super::{AdviceInputs, AdviceMap};
 use crate::{Felt, Word, crypto::merkle::MerkleStore};
 
+// ADVICE STACK
+// ================================================================================================
+
+/// Advice stack values ordered from top to bottom.
+///
+/// The front of the stack is the next element consumed by `adv_push`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AdviceStack {
+    stack: VecDeque<Felt>,
+}
+
+impl AdviceStack {
+    /// Creates a new empty advice stack.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the number of elements on this advice stack.
+    pub fn len(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// Returns true if this advice stack has no elements.
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    /// Returns an iterator over elements from top to bottom.
+    pub fn iter(&self) -> impl Iterator<Item = &Felt> {
+        self.stack.iter()
+    }
+
+    /// Pushes a single element onto the advice stack.
+    ///
+    /// Elements are consumed in FIFO order: first pushed = first consumed by advice operations.
+    pub fn push_element(&mut self, value: Felt) -> &mut Self {
+        self.stack.push_back(value);
+        self
+    }
+
+    /// Extends the advice stack with raw elements ordered from top to bottom.
+    ///
+    /// Elements are consumed in FIFO order: first element in iter = first consumed.
+    pub fn push_elements<I>(&mut self, values: I) -> &mut Self
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        self.stack.extend(values);
+        self
+    }
+
+    /// Adds elements for consumption by multiple sequential `adv_push` instructions.
+    ///
+    /// After `repeat.n adv_push end`, the operand stack will have `slice[0]` on top.
+    pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
+        for elem in slice.iter().rev() {
+            self.stack.push_back(*elem);
+        }
+        self
+    }
+
+    /// Adds a word for consumption by `adv_loadw` or `adv_pushw`.
+    pub fn push_word(&mut self, word: Word) -> &mut Self {
+        self.stack.extend(word.iter().copied());
+        self
+    }
+
+    /// Adds two words for consumption by `adv_pipe`.
+    pub fn push_dword(&mut self, words: [Word; 2]) -> &mut Self {
+        for word in words {
+            self.push_word(word);
+        }
+        self
+    }
+
+    /// Adds elements for sequential consumption by `adv_pipe` operations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slice length is not a multiple of 8 (double-word aligned).
+    pub fn push_for_adv_pipe(&mut self, slice: &[Felt]) -> &mut Self {
+        assert!(
+            slice.len().is_multiple_of(8),
+            "push_for_adv_pipe requires slice length to be a multiple of 8, got {}",
+            slice.len()
+        );
+
+        self.stack.extend(slice.iter().copied());
+        self
+    }
+
+    /// Consumes a single element from the top of the advice stack.
+    pub fn consume_element(&mut self) -> Option<Felt> {
+        self.stack.pop_front()
+    }
+
+    /// Consumes a word from the top of the advice stack.
+    pub fn consume_word(&mut self) -> Option<Word> {
+        if self.stack.len() < 4 {
+            return None;
+        }
+
+        Some(Word::new([
+            self.consume_element().expect("checked len"),
+            self.consume_element().expect("checked len"),
+            self.consume_element().expect("checked len"),
+            self.consume_element().expect("checked len"),
+        ]))
+    }
+
+    /// Consumes two words from the top of the advice stack.
+    pub fn consume_dword(&mut self) -> Option<[Word; 2]> {
+        if self.stack.len() < 8 {
+            return None;
+        }
+
+        Some([self.consume_word()?, self.consume_word()?])
+    }
+
+    /// Consumes `self` and returns elements ordered from top to bottom.
+    pub fn into_elements(self) -> Vec<Felt> {
+        self.stack.into_iter().collect()
+    }
+}
+
+impl From<Vec<Felt>> for AdviceStack {
+    fn from(stack: Vec<Felt>) -> Self {
+        Self { stack: stack.into() }
+    }
+}
+
+impl From<VecDeque<Felt>> for AdviceStack {
+    fn from(stack: VecDeque<Felt>) -> Self {
+        Self { stack }
+    }
+}
+
+impl From<AdviceStack> for Vec<Felt> {
+    fn from(stack: AdviceStack) -> Self {
+        stack.into_elements()
+    }
+}
+
+impl FromIterator<Felt> for AdviceStack {
+    fn from_iter<T: IntoIterator<Item = Felt>>(iter: T) -> Self {
+        Self { stack: iter.into_iter().collect() }
+    }
+}
+
 // ADVICE STACK BUILDER
 // ================================================================================================
 
@@ -27,8 +176,7 @@ use crate::{Felt, Word, crypto::merkle::MerkleStore};
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct AdviceStackBuilder {
-    /// Conceptual stack where front (index 0) is "top" (consumed first).
-    stack: VecDeque<Felt>,
+    stack: AdviceStack,
 }
 
 impl AdviceStackBuilder {
@@ -44,7 +192,7 @@ impl AdviceStackBuilder {
     ///
     /// Elements are consumed in FIFO order: first pushed = first consumed by advice operations.
     pub fn push_element(&mut self, value: Felt) -> &mut Self {
-        self.stack.push_back(value);
+        self.stack.push_element(value);
         self
     }
 
@@ -55,7 +203,7 @@ impl AdviceStackBuilder {
     where
         I: IntoIterator<Item = Felt>,
     {
-        self.stack.extend(values);
+        self.stack.push_elements(values);
         self
     }
 
@@ -80,11 +228,7 @@ impl AdviceStackBuilder {
     /// // Result: operand stack = [a, b, c, ...] with a on top
     /// ```
     pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
-        // Reverse the slice: we want slice[0] to be popped last (ending up on top of operand stack)
-        // So we add elements in reverse order to the back of our stack
-        for elem in slice.iter().rev() {
-            self.stack.push_back(*elem);
-        }
+        self.stack.push_for_adv_push(slice);
         self
     }
 
@@ -102,9 +246,7 @@ impl AdviceStackBuilder {
     /// // Result: operand stack = [w0, w1, w2, w3, ...] with w0 on top
     /// ```
     pub fn push_word(&mut self, word: Word) -> &mut Self {
-        for elem in word.iter() {
-            self.stack.push_back(*elem);
-        }
+        self.stack.push_word(word);
         self
     }
 
@@ -130,10 +272,7 @@ impl AdviceStackBuilder {
             "push_for_adv_pipe requires slice length to be a multiple of 8, got {}",
             slice.len()
         );
-
-        for elem in slice.iter() {
-            self.stack.push_back(*elem);
-        }
+        self.stack.push_for_adv_pipe(slice);
         self
     }
 
@@ -149,7 +288,7 @@ impl AdviceStackBuilder {
     /// // Elements consumed in order: 1, 2, 3, 4, 5, 6, 7, 8
     /// ```
     pub fn push_u64_slice(&mut self, values: &[u64]) -> &mut Self {
-        self.stack.extend(values.iter().map(|&v| Felt::new_unchecked(v)));
+        self.stack.push_elements(values.iter().map(|&v| Felt::new_unchecked(v)));
         self
     }
 
@@ -162,7 +301,7 @@ impl AdviceStackBuilder {
     /// expected by `AdviceInputs`, which will be reversed when creating an `AdviceProvider`.
     pub fn build(self) -> AdviceInputs {
         AdviceInputs {
-            stack: self.stack.into(),
+            stack: self.stack.into_elements(),
             map: AdviceMap::default(),
             store: MerkleStore::default(),
         }
@@ -170,18 +309,22 @@ impl AdviceStackBuilder {
 
     /// Builds the `AdviceInputs` with additional map and store data.
     pub fn build_with(self, map: AdviceMap, store: MerkleStore) -> AdviceInputs {
-        AdviceInputs { stack: self.stack.into(), map, store }
+        AdviceInputs {
+            stack: self.stack.into_elements(),
+            map,
+            store,
+        }
     }
 
     /// Builds just the advice stack as `Vec<u64>` for use with `build_test!` macro.
     ///
     /// This is a convenience method that avoids needing to modify the test infrastructure.
     pub fn build_vec_u64(self) -> Vec<u64> {
-        self.stack.into_iter().map(|f| f.as_canonical_u64()).collect()
+        self.stack.into_elements().into_iter().map(|f| f.as_canonical_u64()).collect()
     }
 
     /// Consumes the builder and returns the accumulated elements as `Vec<Felt>`.
     pub fn into_elements(self) -> Vec<Felt> {
-        self.stack.into_iter().collect()
+        self.stack.into_elements()
     }
 }
