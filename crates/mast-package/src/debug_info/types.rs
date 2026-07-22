@@ -16,7 +16,7 @@
 //! variable inspection, stepping, and call stack visualization.
 
 use alloc::vec::Vec;
-use core::num::NonZeroU32;
+use core::{mem::MaybeUninit, num::NonZeroU32};
 
 use miden_core::{
     Word,
@@ -192,25 +192,113 @@ impl SourceNodeIdMarker for DebugSourceNodeId {}
 /// A custom `Option<T>` type that has a stable memory layout
 ///
 /// This type is meant to be converted to/from an `Option<T>` for actual use
-#[repr(u32)]
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum OptionC<T> {
-    None,
-    Some(T),
+#[repr(C)]
+pub struct OptionC<T> {
+    discriminant: u32,
+    payload: MaybeUninit<T>,
+}
+
+impl<T> Default for OptionC<T> {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::none()
+    }
 }
 
 impl<T> OptionC<T> {
-    #[inline(always)]
+    const fn none() -> Self {
+        Self {
+            discriminant: 0,
+            payload: MaybeUninit::zeroed(),
+        }
+    }
+
+    const fn some(value: T) -> Self {
+        Self {
+            discriminant: 1,
+            payload: MaybeUninit::new(value),
+        }
+    }
+
+    const fn invalid(discriminant: u32) -> Self {
+        Self {
+            discriminant,
+            payload: MaybeUninit::uninit(),
+        }
+    }
+
+    /// Get an [`Option<&T>`] from this value.
+    ///
+    /// NOTE: This function will panic if the discriminant tag is invalid, you must use
+    /// `try_into_option` to obtain a non-panicking equivalent.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self.discriminant {
+            0 => None,
+            1 => Some(unsafe { self.payload() }),
+            _ => panic!("attempted to unwrap invalid {}", core::any::type_name::<Self>()),
+        }
+    }
+
+    /// Convert this value into an [`Option<T>`].
+    ///
+    /// NOTE: This function will panic if the discriminant tag is invalid, use `try_into_option`
+    /// for a non-panicking equivalent.
     pub fn into_option(self) -> Option<T> {
-        self.into()
+        self.try_into().unwrap_or_else(|err| {
+            panic!("{err} (concrete type is {})", core::any::type_name::<Self>())
+        })
+    }
+
+    /// Convert this value into an [`Option<T>`] without panicking if the underlying discriminant
+    /// is out of range.
+    #[inline(always)]
+    pub fn try_into_option(self) -> Result<Option<T>, InvalidOptionCError> {
+        self.try_into()
+    }
+
+    /// Get a reference to the payload value of this option.
+    ///
+    /// This function will panic if:
+    ///
+    /// * The discriminant tag is invalid
+    /// * The discriminant is `None`
+    unsafe fn payload(&self) -> &T {
+        assert_eq!(self.discriminant, 1, "attempted to access payload of None/Invalid variant");
+        unsafe { MaybeUninit::assume_init_ref(&self.payload) }
+    }
+}
+
+impl<T: Copy> Copy for OptionC<T> {}
+
+impl<T: Clone> Clone for OptionC<T> {
+    fn clone(&self) -> Self {
+        match self.discriminant {
+            0 => Self::none(),
+            1 => Self::some(unsafe { self.payload() }.clone()),
+            invalid => Self::invalid(invalid),
+        }
+    }
+}
+
+impl<T: Eq> Eq for OptionC<T> {}
+
+impl<T: PartialEq> PartialEq for OptionC<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.discriminant, other.discriminant) {
+            (0, 0) => true,
+            (1, 0) | (0, 1) => false,
+            (1, 1) => unsafe { self.payload().eq(other.payload()) },
+            (..) => false,
+        }
     }
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for OptionC<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::None => write!(f, "None"),
-            Self::Some(arg0) => f.debug_tuple("Some").field(arg0).finish(),
+        match self.discriminant {
+            0 => write!(f, "None"),
+            1 => f.debug_tuple("Some").field(unsafe { self.payload() }).finish(),
+            invalid => write!(f, "Invalid(discriminant={invalid})"),
         }
     }
 }
@@ -218,17 +306,23 @@ impl<T: core::fmt::Debug> core::fmt::Debug for OptionC<T> {
 impl<T> From<Option<T>> for OptionC<T> {
     fn from(value: Option<T>) -> Self {
         match value {
-            Some(t) => Self::Some(t),
-            None => Self::None,
+            Some(t) => Self::some(t),
+            None => Self::none(),
         }
     }
 }
 
-impl<T> From<OptionC<T>> for Option<T> {
-    fn from(value: OptionC<T>) -> Self {
-        match value {
-            OptionC::Some(t) => Self::Some(t),
-            OptionC::None => Self::None,
+#[derive(Debug, thiserror::Error)]
+#[error("invalid optional value - discriminant tag of {0} is invalid (expected 0 or 1)")]
+pub struct InvalidOptionCError(u32);
+
+impl<T> TryFrom<OptionC<T>> for Option<T> {
+    type Error = InvalidOptionCError;
+    fn try_from(value: OptionC<T>) -> Result<Self, Self::Error> {
+        match value.discriminant {
+            0 => Ok(None),
+            1 => Ok(Some(unsafe { MaybeUninit::assume_init(value.payload) })),
+            invalid => Err(InvalidOptionCError(invalid)),
         }
     }
 }
@@ -699,24 +793,24 @@ impl<N: Idx> FunctionInfo<N> {
         Self {
             source_node: source_node.into(),
             name_idx,
-            linkage_name_idx: OptionC::None,
+            linkage_name_idx: OptionC::none(),
             file_idx,
             line: line.to_index(),
             column: column.to_index(),
-            type_idx: OptionC::None,
+            type_idx: OptionC::none(),
             mast_root,
         }
     }
 
     /// Sets the linkage name.
     pub fn with_linkage_name(mut self, linkage_name_idx: DebugStringIdx) -> Self {
-        self.linkage_name_idx = OptionC::Some(linkage_name_idx);
+        self.linkage_name_idx = OptionC::some(linkage_name_idx);
         self
     }
 
     /// Sets the type index.
     pub fn with_type(mut self, type_idx: DebugTypeIdx) -> Self {
-        self.type_idx = OptionC::Some(type_idx);
+        self.type_idx = OptionC::some(type_idx);
         self
     }
 }
