@@ -2195,6 +2195,40 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
     processor.execute_sync(&program, &mut host).unwrap();
 }
 
+/// Tests that restore_context returns an error when the stack overflow save stack is empty.
+#[test]
+fn test_restore_context_empty_stack_overflow_save_stack() {
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    // Manually clear the stack overflow save stack to simulate an empty state
+    processor.stack_overflow_save_stack.clear();
+
+    let result = StackInterface::restore_context(&mut processor);
+
+    assert!(result.is_err());
+    assert_matches!(
+        result.unwrap_err(),
+        OperationError::Internal(msg) if msg.contains("stack overflow save stack should never be empty")
+    );
+}
+
+/// Tests that restore_call_state returns an error when the system call state stack is empty.
+#[test]
+fn test_restore_call_state_empty_system_call_state_stack() {
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    // Manually clear the system call state stack to simulate an empty state
+    processor.system_call_state_stack.clear();
+
+    let result = SystemInterface::restore_call_state(&mut processor);
+
+    assert!(result.is_err());
+    assert_matches!(
+        result.unwrap_err(),
+        OperationError::Internal(msg) if msg.contains("system call state stack should never be empty")
+    );
+}
+
 // TEST HELPERS
 // -----------------------------------------------------------------------------------------------
 
