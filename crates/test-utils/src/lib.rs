@@ -38,7 +38,7 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
-    advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    advice::{AdviceInputs, AdviceProvider, AdviceStack, AdviceStackBuilder},
     trace::ExecutionTrace,
 };
 use miden_processor::{
@@ -71,9 +71,9 @@ pub mod rand;
 pub mod recursive_verifier;
 
 mod test_builders;
-
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
+pub use test_builders::{IntoAdviceStackInput, advice_stack_from};
 
 pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
