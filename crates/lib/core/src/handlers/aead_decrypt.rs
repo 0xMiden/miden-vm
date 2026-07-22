@@ -14,7 +14,7 @@ use miden_crypto::aead::{
 };
 use miden_processor::{
     ProcessorState,
-    advice::{AdviceMutation, MAX_ADVICE_STACK_SIZE},
+    advice::{AdviceMutation, AdviceStack, MAX_ADVICE_STACK_SIZE},
     event::EventError,
 };
 
@@ -34,7 +34,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 2. Reads authentication tag from memory at src_ptr + (num_blocks + 1) * 8
 /// 3. Constructs EncryptedData and decrypts using AEAD-Poseidon2
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
-/// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
+/// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack for `adv_pipe`
 ///
 /// Expected event payload order (excluding event id):
 /// `(key: Word, nonce: Word, src_ptr, dst_ptr, num_blocks)`.
@@ -113,10 +113,9 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     let mut plaintext_data = plaintext_with_padding;
     plaintext_data.truncate(data_blocks_count);
 
-    // Push plaintext data (WITHOUT padding) onto advice stack.
-    // Values are provided in structural order; `extend_stack` ensures the first element
-    // ends up at the top of the advice stack, matching `adv_pipe` expectations.
-    let advice_stack_mutation = AdviceMutation::extend_stack(plaintext_data);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_for_adv_pipe(&plaintext_data);
+    let advice_stack_mutation = AdviceMutation::extend_advice_stack(advice_stack);
 
     Ok(vec![advice_stack_mutation])
 }

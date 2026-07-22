@@ -5,10 +5,10 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::Felt;
+use miden_core::{Felt, Word};
 use miden_processor::{
     ProcessorState,
-    advice::AdviceMutation,
+    advice::{AdviceMutation, AdviceStack},
     event::{EventError, EventName},
 };
 
@@ -52,18 +52,14 @@ pub fn handle_u256_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let q_felts = u256_to_u32_felts(quotient);
     let r_felts = u256_to_u32_felts(remainder);
 
-    // Each `adv_loadw` pops 4 advice values and pushes them to the top of the operand stack.
-    // The MASM caller does four `adv_loadw`s; the LAST one ends up on top. To leave the operand
-    // stack in LE order [q0..q7, r0..r7, ...] (q0 on top, r7 at depth 15), we order advice so
-    // each subsequent `adv_loadw` brings the next-lower-significance word: r_hi, r_lo, q_hi,
-    // q_lo, with q_lo loaded last (and hence on top).
-    let mut advice = [Felt::from_u32(0); 16];
-    advice[0..4].copy_from_slice(&r_felts[4..8]);
-    advice[4..8].copy_from_slice(&r_felts[0..4]);
-    advice[8..12].copy_from_slice(&q_felts[4..8]);
-    advice[12..16].copy_from_slice(&q_felts[0..4]);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack
+        .push_word(Word::new([r_felts[4], r_felts[5], r_felts[6], r_felts[7]]))
+        .push_word(Word::new([r_felts[0], r_felts[1], r_felts[2], r_felts[3]]))
+        .push_word(Word::new([q_felts[4], q_felts[5], q_felts[6], q_felts[7]]))
+        .push_word(Word::new([q_felts[0], q_felts[1], q_felts[2], q_felts[3]]));
 
-    Ok(vec![AdviceMutation::extend_stack(advice)])
+    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }
 
 /// Reads a u256 value from 8 consecutive stack positions starting at `start`.

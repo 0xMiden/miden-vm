@@ -3,12 +3,16 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    Felt, ZERO,
+    Felt, Word, ZERO,
     deferred::{DeferredError, Node},
     events::EventName,
 };
 use miden_precompiles::{Limbs, UintDomain, UintPrecompile};
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_processor::{
+    ProcessorState,
+    advice::{AdviceMutation, AdviceStack},
+    event::EventError,
+};
 
 /// Event used by generated field uint wrappers to request an inverse witness from the host.
 pub const UINT_FIELD_INV_EVENT_NAME: EventName =
@@ -42,7 +46,14 @@ pub fn handle_uint_field_inv(
         .map_err(|_| UintFieldInvError::ExpectedUintValue)?;
     let inverse = domain.inv(value).ok_or(UintFieldInvError::ZeroValue)?;
 
-    Ok(vec![AdviceMutation::extend_stack(inverse.map(Felt::from_u32))])
+    let inverse = inverse.map(Felt::from_u32);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_dword([
+        Word::new([inverse[0], inverse[1], inverse[2], inverse[3]]),
+        Word::new([inverse[4], inverse[5], inverse[6], inverse[7]]),
+    ]);
+
+    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }
 
 fn limbs_from_value_node(node: &Node, domain: UintDomain) -> Result<Limbs, DeferredError> {

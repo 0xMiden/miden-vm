@@ -7,7 +7,7 @@ use alloc::{vec, vec::Vec};
 
 use miden_processor::{
     ProcessorState,
-    advice::AdviceMutation,
+    advice::{AdviceMutation, AdviceStack},
     event::{EventError, EventName},
 };
 
@@ -96,12 +96,9 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
     let (q_hi, q_lo) = u64_to_u32_elements(quotient);
     let (r_hi, r_lo) = u64_to_u32_elements(remainder);
 
-    // Create mutations to extend the advice stack with the result.
-    // extend_stack([a,b,c,d]) puts 'a' on top due to reverse iteration + push_front
-    // So [q_hi, q_lo, r_hi, r_lo] puts q_hi on top
-    // After `adv_push adv_push`: pops q_hi then q_lo → operand stack [q_lo, q_hi, ...] (LE)
-    // After `adv_push adv_push`: pops r_hi then r_lo → operand stack [r_lo, r_hi, ...] (LE)
-    let mutation = AdviceMutation::extend_stack([q_hi, q_lo, r_hi, r_lo]);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements([q_hi, q_lo, r_hi, r_lo]);
+    let mutation = AdviceMutation::extend_advice_stack(advice_stack);
     Ok(vec![mutation])
 }
 
