@@ -1,9 +1,13 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(any(feature = "std", feature = "testing"))]
+use alloc::vec::Vec;
+use alloc::{boxed::Box, sync::Arc};
 
+#[cfg(feature = "std")]
+use miden_assembly_syntax::Word;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
-    Parse, Path, Word,
+    Parse, Path,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
@@ -187,18 +191,6 @@ impl TestContext {
         let mut package = self.assembler().assemble_library(name, root, support)?;
         package.version = version;
         Ok(package)
-    }
-
-    /// Compile a module from `source`, with the fully-qualified name `path`, to MAST, returning
-    /// the MAST roots of all the exported procedures of that module.
-    #[track_caller]
-    pub fn assemble_module(
-        &self,
-        _path: impl AsRef<Path>,
-        _module: impl Parse,
-    ) -> Result<Vec<Word>, Report> {
-        // This API will change after we implement `Assembler::add_library()`
-        unimplemented!()
     }
 }
 
