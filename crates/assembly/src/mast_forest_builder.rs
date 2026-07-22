@@ -42,6 +42,8 @@ const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 const BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0001);
 /// Domain used when control-node interning keys must include child keys.
 const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
+/// Domain used when basic-block interning keys must preserve source-index layout.
+const BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
 
 // MAST FOREST BUILDER
 // ================================================================================================
@@ -50,8 +52,8 @@ const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 ///
 /// The purpose of the builder is to ensure that the underlying MAST forest contains as little
 /// information as possible needed to adequately describe the logical MAST forest. Specifically:
-/// - The builder ensures that only one copy of nodes that have the same MAST root is added to the
-///   MAST forest (i.e., two nodes that have the same MAST root will have the same [`MastNodeId`]).
+/// - The builder deduplicates nodes that have the same MAST root when their execution-visible data
+///   and source-index layouts are compatible.
 /// - The builder tries to merge adjacent basic blocks and eliminate the source block whenever this
 ///   does not have an impact on other nodes in the forest.
 #[derive(Clone, Debug, Default)]
@@ -354,18 +356,29 @@ impl MastForestBuilder {
     ) -> MastNodeKey {
         debug_assert!(!op_batches.is_empty());
         let error_code_data = serialize_basic_block_error_codes(op_batches);
-        if error_code_data.is_empty() {
-            return block_digest;
-        }
+        let error_code_key = if error_code_data.is_empty() {
+            block_digest
+        } else {
+            hash_basic_block_key_data(
+                BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN,
+                block_digest,
+                &error_code_data,
+            )
+        };
 
-        let data_len = error_code_data.len() as u64;
-        let mut elements = Vec::with_capacity(7 + error_code_data.len().div_ceil(4));
-        elements.push(BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN);
-        elements.extend_from_slice(block_digest.as_elements());
-        elements.push(Felt::from_u32(data_len as u32));
-        elements.push(Felt::from_u32((data_len >> 32) as u32));
-        elements.extend(bytes_to_packed_u32_elements(&error_code_data));
-        hasher::hash_elements(&elements)
+        // An explicit Noop has a zero opcode, so it can be indistinguishable from group padding in
+        // the MAST digest. Source indices, however, are recorded against raw operations and later
+        // adjusted with the retained block's padding layout. Preserve that complete layout in the
+        // pending identity whenever an explicit raw Noop makes digest-only reuse ambiguous.
+        let Some(source_layout_data) = serialize_basic_block_source_layout(op_batches) else {
+            return error_code_key;
+        };
+
+        hash_basic_block_key_data(
+            BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN,
+            error_code_key,
+            &source_layout_data,
+        )
     }
 
     #[inline]
@@ -558,6 +571,17 @@ fn batch_basic_block_operations(
     Ok((block.op_batches().to_vec(), block.digest()))
 }
 
+fn hash_basic_block_key_data(domain: Felt, base_key: Word, data: &[u8]) -> Word {
+    let data_len = data.len() as u64;
+    let mut elements = Vec::with_capacity(7 + data.len().div_ceil(4));
+    elements.push(domain);
+    elements.extend_from_slice(base_key.as_elements());
+    elements.push(Felt::from_u32(data_len as u32));
+    elements.push(Felt::from_u32((data_len >> 32) as u32));
+    elements.extend(bytes_to_packed_u32_elements(data));
+    hasher::hash_elements(&elements)
+}
+
 fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
     let mut data = Vec::new();
 
@@ -569,6 +593,42 @@ fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
     }
 
     data
+}
+
+/// Serializes the information needed to reconstruct a block's raw-to-padded operation map.
+///
+/// The raw operation count and every raw boundary followed by an assembler-inserted padding Noop
+/// fully determine the map. Blocks without explicit raw Noops return `None`: absent a hash
+/// collision, their nonzero opcodes already distinguish the executable layout in the MAST digest.
+fn serialize_basic_block_source_layout(op_batches: &[OpBatch]) -> Option<Vec<u8>> {
+    let (raw_op_count, has_explicit_noop) = op_batches.iter().flat_map(OpBatch::raw_ops).fold(
+        (0_u64, false),
+        |(count, has_explicit_noop), op| {
+            (count + 1, has_explicit_noop || matches!(op, Operation::Noop))
+        },
+    );
+    if !has_explicit_noop {
+        return None;
+    }
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&raw_op_count.to_le_bytes());
+
+    let mut raw_op_prefix = 0_u64;
+    for batch in op_batches {
+        for group_idx in 0..batch.num_groups() {
+            let group_op_count = batch.indptr()[group_idx + 1] - batch.indptr()[group_idx];
+            let has_padding = batch.padding()[group_idx];
+            debug_assert!(group_op_count >= usize::from(has_padding));
+            raw_op_prefix += (group_op_count - usize::from(has_padding)) as u64;
+            if has_padding {
+                data.extend_from_slice(&raw_op_prefix.to_le_bytes());
+            }
+        }
+    }
+    debug_assert_eq!(raw_op_prefix, raw_op_count);
+
+    Some(data)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1096,18 +1156,24 @@ mod tests {
     use alloc::{
         collections::BTreeSet,
         string::{String, ToString},
+        sync::Arc,
     };
 
     use miden_assembly_syntax::debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
     use miden_core::{
         mast::{MastNodeBuilder, MastNodeId},
         operations::{DebugVarInfo, DebugVarLocation, Operation},
+        serde::Serializable,
         utils::Idx,
     };
-    use miden_mast_package::debug_info::{
-        DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
-        DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
-        PackageDebugInfo, PackageDebugInfoBuilder,
+    use miden_mast_package::{
+        Package, PackageExport, PackageId, PathBuf, ProcedureExport, Section, SectionId,
+        TargetType, Version,
+        debug_info::{
+            DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
+            DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
+            PackageDebugInfo, PackageDebugInfoBuilder,
+        },
     };
     use proptest::prelude::*;
 
@@ -1673,6 +1739,177 @@ mod tests {
             block_a, block_b,
             "same op stream plus same DebugVarInfo payload should dedup to one node"
         );
+    }
+
+    #[test]
+    fn test_trailing_noop_blocks_keep_compatible_source_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let event = Felt::from_u32(7);
+        let emitted_event = vec![Operation::Push(event), Operation::Emit, Operation::Drop];
+
+        let block_ref =
+            builder.ensure_block_ref(emitted_event.clone(), Vec::new(), Vec::new()).unwrap();
+        let debug_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("result", DebugVarLocation::Stack(0)),
+        );
+        let trailing_noop_ops =
+            emitted_event.into_iter().chain([Operation::Noop]).collect::<Vec<_>>();
+        let trailing_noop_ref = builder
+            .ensure_block_ref(
+                trailing_noop_ops.clone(),
+                Vec::new(),
+                vec![with_debug_var_idx(debug_var, 3)],
+            )
+            .unwrap();
+
+        assert_ne!(
+            block_ref, trailing_noop_ref,
+            "same-digest blocks with incompatible raw operation layouts must not deduplicate",
+        );
+        assert_eq!(
+            builder.pending_node_mast_root(block_ref),
+            builder.pending_node_mast_root(trailing_noop_ref),
+            "an explicit trailing Noop must remain invisible to the MAST digest",
+        );
+
+        let call_ref = builder
+            .ensure_call_node_ref(block_ref, false, test_asm_op("test", "call"))
+            .unwrap();
+        let trailing_noop_call_ref = builder
+            .ensure_call_node_ref(trailing_noop_ref, false, test_asm_op("test", "call"))
+            .unwrap();
+        assert_ne!(
+            call_ref, trailing_noop_call_ref,
+            "incompatible child source layouts must propagate through control-node identity",
+        );
+        assert_eq!(
+            builder.pending_node_mast_root(call_ref),
+            builder.pending_node_mast_root(trailing_noop_call_ref),
+        );
+
+        let duplicate_trailing_noop_ref =
+            builder.ensure_block_ref(trailing_noop_ops, Vec::new(), Vec::new()).unwrap();
+        assert_eq!(
+            trailing_noop_ref, duplicate_trailing_noop_ref,
+            "identical raw-to-padded layouts should still deduplicate",
+        );
+
+        record_test_root(&mut builder, call_ref);
+        record_test_root(&mut builder, trailing_noop_call_ref);
+        let (forest, remapping, debug_info, _) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let final_block = remapping[&block_ref];
+        let final_trailing_noop = remapping[&trailing_noop_ref];
+
+        let MastNode::Block(block) = &forest[final_block] else {
+            panic!("expected a basic block")
+        };
+        let MastNode::Block(trailing_noop_block) = &forest[final_trailing_noop] else {
+            panic!("expected a basic block")
+        };
+        assert_eq!(block.raw_operations().count(), 3);
+        assert_eq!(trailing_noop_block.raw_operations().count(), 4);
+
+        let source_node = source_nodes_for_exec(&debug_info, final_block)
+            .into_iter()
+            .next()
+            .expect("base block source occurrence should survive finalization");
+        assert_eq!(source_node.op_start..source_node.op_end, 0..3);
+
+        let trailing_noop_source = source_nodes_for_exec(&debug_info, final_trailing_noop)
+            .into_iter()
+            .find(|source_node| !source_node.debug_vars.is_empty())
+            .expect("trailing-Noop source occurrence should survive finalization");
+        assert_eq!(trailing_noop_source.op_start..trailing_noop_source.op_end, 0..4);
+        assert_eq!(trailing_noop_source.debug_vars.len(), 1);
+        assert_eq!(trailing_noop_source.debug_vars[0].op_idx, 3);
+
+        let export_path = PathBuf::new("source_layout_test::entry").unwrap();
+        let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
+        let export_path = Arc::from(export_path.into_boxed_path());
+        let final_call = remapping[&call_ref];
+        let export = PackageExport::Procedure(ProcedureExport::new(
+            export_path,
+            Some(final_call),
+            forest[final_call].digest(),
+            None,
+        ));
+        let mut package = Package::create(
+            PackageId::from("source-layout-test"),
+            Version::new(0, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            [export],
+            [],
+        )
+        .unwrap();
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes()));
+        assert!(
+            package.debug_info().unwrap().is_some(),
+            "final source ranges and rows must pass package validation",
+        );
+    }
+
+    #[test]
+    fn test_noop_layout_key_includes_padding_boundaries() {
+        let event = Felt::from_u32(7);
+        let mut first_ops = vec![Operation::Push(event); 8];
+        first_ops.extend([Operation::Noop, Operation::Noop]);
+        let mut second_ops = vec![Operation::Push(event); 7];
+        second_ops.extend([Operation::Noop, Operation::Push(event), Operation::Noop]);
+
+        let (first_batches, first_digest) =
+            batch_basic_block_operations(first_ops.clone()).unwrap();
+        let (second_batches, second_digest) =
+            batch_basic_block_operations(second_ops.clone()).unwrap();
+        assert_eq!(first_digest, second_digest);
+        assert_eq!(
+            first_batches.iter().flat_map(OpBatch::raw_ops).count(),
+            second_batches.iter().flat_map(OpBatch::raw_ops).count(),
+        );
+
+        let raw_indices = (0..=first_ops.len()).collect::<Vec<_>>();
+        let first_mapping =
+            BasicBlockNode::adjust_asm_op_indices(raw_indices.clone(), &first_batches);
+        let second_mapping = BasicBlockNode::adjust_asm_op_indices(raw_indices, &second_batches);
+        assert_ne!(
+            first_mapping, second_mapping,
+            "the counterexample must have incompatible raw-to-padded source indices",
+        );
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let first_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("first", DebugVarLocation::Stack(0)),
+        );
+        let second_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("second", DebugVarLocation::Stack(0)),
+        );
+        let first_ref = builder
+            .ensure_block_ref(first_ops, Vec::new(), vec![with_debug_var_idx(first_var, 7)])
+            .unwrap();
+        let second_ref = builder
+            .ensure_block_ref(second_ops, Vec::new(), vec![with_debug_var_idx(second_var, 7)])
+            .unwrap();
+        assert_ne!(
+            first_ref, second_ref,
+            "equal raw counts are insufficient when padding boundaries differ",
+        );
+
+        record_test_root(&mut builder, first_ref);
+        record_test_root(&mut builder, second_ref);
+        let (_forest, remapping, debug_info, _) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let first_source = source_nodes_for_exec(&debug_info, remapping[&first_ref])[0];
+        let second_source = source_nodes_for_exec(&debug_info, remapping[&second_ref])[0];
+        assert_eq!(first_source.op_start..first_source.op_end, 0..11);
+        assert_eq!(second_source.op_start..second_source.op_end, 0..10);
+        assert_eq!(first_source.debug_vars[0].op_idx, 8);
+        assert_eq!(second_source.debug_vars[0].op_idx, 7);
     }
 
     #[test]
