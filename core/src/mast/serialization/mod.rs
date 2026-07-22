@@ -90,7 +90,7 @@
 #[cfg(test)]
 use alloc::string::ToString;
 use alloc::{boxed::Box, format, vec::Vec};
-use core::mem::size_of;
+use core::{mem::size_of, panic::Location};
 
 use miden_utils_sync::OnceLockCompat;
 
@@ -778,27 +778,32 @@ impl super::UntrustedMastForest {
     }
 }
 
-pub(super) fn read_untrusted_with_flags<R: ByteReader>(
+pub(super) fn read_untrusted_with_flags_and_caller<R: ByteReader>(
     source: &mut R,
+    caller: &'static Location<'static>,
 ) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
     let (flags, forest) = decode_from_reader(source, true)?;
-    log_untrusted_overspecification(flags);
+    log_untrusted_overspecification(flags, caller);
     Ok((forest, flags.bits()))
 }
 
-pub(super) fn read_untrusted_with_flags_and_allocation_budget<R: ByteReader>(
+pub(super) fn read_untrusted_with_flags_allocation_budget_and_caller<R: ByteReader>(
     source: &mut R,
     allocation_budget: usize,
+    caller: &'static Location<'static>,
 ) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
     let (flags, forest) = decode_from_reader_inner(source, true, Some(allocation_budget))?;
-    log_untrusted_overspecification(flags);
+    log_untrusted_overspecification(flags, caller);
     Ok((forest, flags.bits()))
 }
 
-fn log_untrusted_overspecification(flags: WireFlags) {
+fn log_untrusted_overspecification(flags: WireFlags, caller: &'static Location<'static>) {
     if !flags.is_hashless() {
-        log::error!(
-            "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes, and validation will recompute them and require them to match"
+        log::warn!(
+            "UntrustedMastForest expected HASHLESS input at {}:{}:{}; supplied artifact includes wire node hashes, and validation will recompute them and require them to match",
+            caller.file(),
+            caller.line(),
+            caller.column(),
         );
     }
 }
@@ -866,8 +871,9 @@ impl Deserializable for super::UntrustedMastForest {
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_untrusted_with_flags(source).map(|(forest, _flags)| forest)
+        super::UntrustedMastForest::read_from_reader(source)
     }
 
     /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
@@ -878,6 +884,7 @@ impl Deserializable for super::UntrustedMastForest {
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         super::UntrustedMastForest::read_from_bytes(bytes)
     }
