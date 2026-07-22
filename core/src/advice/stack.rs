@@ -54,6 +54,36 @@ impl AdviceStack {
         self
     }
 
+    /// Prepends raw elements ordered from top to bottom.
+    ///
+    /// The first element in `values` becomes the next element consumed by advice operations.
+    pub fn prepend_elements<I>(&mut self, values: I) -> &mut Self
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        let values: Vec<Felt> = values.into_iter().collect();
+        for value in values.into_iter().rev() {
+            self.stack.push_front(value);
+        }
+        self
+    }
+
+    /// Prepends a single element to the top of the advice stack.
+    pub fn prepend_element(&mut self, value: Felt) -> &mut Self {
+        self.stack.push_front(value);
+        self
+    }
+
+    /// Prepends a word to the top of the advice stack.
+    pub fn prepend_word(&mut self, word: Word) -> &mut Self {
+        self.prepend_elements(word.iter().copied())
+    }
+
+    /// Prepends another advice stack to the top of this stack.
+    pub fn prepend_stack(&mut self, stack: AdviceStack) -> &mut Self {
+        self.prepend_elements(stack.into_elements())
+    }
+
     /// Adds elements for consumption by multiple sequential `adv_push` instructions.
     ///
     /// After `repeat.n adv_push end`, the operand stack will have `slice[0]` on top.
