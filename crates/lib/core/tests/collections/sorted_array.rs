@@ -2,7 +2,11 @@ use miden_core_lib::{
     CoreLibrary,
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_processor::{
+    ProcessorState,
+    advice::{AdviceMutation, AdviceStack},
+    event::EventError,
+};
 
 use super::*;
 
@@ -973,7 +977,7 @@ fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
 fn malicious_lowerbound_oob_above(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
+    Ok(vec![advice_stack_mutation([Felt::new_unchecked(204), Felt::ZERO])])
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -981,7 +985,7 @@ fn malicious_lowerbound_oob_above(
 fn malicious_lowerbound_oob_below(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
+    Ok(vec![advice_stack_mutation([Felt::new_unchecked(40), Felt::ZERO])])
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -989,5 +993,11 @@ fn malicious_lowerbound_oob_below(
 fn malicious_lowerbound_start_ptr(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(100), Felt::ZERO])])
+    Ok(vec![advice_stack_mutation([Felt::new_unchecked(100), Felt::ZERO])])
+}
+
+fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements(values);
+    AdviceMutation::extend_advice_stack(advice_stack)
 }

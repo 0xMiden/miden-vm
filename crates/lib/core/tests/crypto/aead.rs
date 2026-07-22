@@ -8,7 +8,7 @@ use miden_crypto::aead::{
 };
 use miden_processor::{
     ProcessorState,
-    advice::AdviceMutation,
+    advice::{AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
 };
 use rand::SeedableRng;
@@ -184,7 +184,7 @@ fn test_decrypt_rejects_tampered_final_tag() {
     let valid_plaintext = plaintext;
     let malicious_handler: Arc<dyn EventHandler> =
         Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![AdviceMutation::extend_stack(valid_plaintext.clone())])
+            Ok(vec![advice_stack_mutation(valid_plaintext.clone())])
         });
 
     let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
@@ -443,7 +443,7 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
     let adversarial_plaintext = plaintext;
     let malicious_handler: Arc<dyn EventHandler> =
         Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![AdviceMutation::extend_stack(adversarial_plaintext.clone())])
+            Ok(vec![advice_stack_mutation(adversarial_plaintext.clone())])
         });
 
     let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
@@ -460,6 +460,12 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
     );
 
     expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
+}
+
+fn advice_stack_mutation(values: Vec<Felt>) -> AdviceMutation {
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements(values);
+    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 #[test]
