@@ -236,15 +236,10 @@ impl Assembler {
         self
     }
 
-    #[cfg(feature = "std")]
-    pub(crate) fn with_emit_debug_info(mut self, yes: bool) -> Self {
-        self.emit_debug_info = yes;
-        self
-    }
-
-    #[cfg(feature = "std")]
-    pub(crate) fn with_trim_paths(mut self, yes: bool) -> Self {
-        self.trim_paths = yes;
+    /// Configure this assembler based on configuration in `profile`
+    pub fn with_profile(mut self, profile: &miden_project::Profile) -> Self {
+        self.emit_debug_info = profile.should_emit_debug_info();
+        self.trim_paths = profile.should_trim_paths();
         self
     }
 }
@@ -1343,6 +1338,9 @@ impl Assembler {
             _ => panic!("expected item to be a procedure AST"),
         };
         let body_wrapper = if proc_ctx.is_program_entrypoint() {
+            // The primary check now lives at the AST mutation site (`Procedure::set_num_locals`).
+            // This backstop still catches entrypoints constructed with locals directly via
+            // `Procedure::new`, which bypasses that setter.
             assert!(num_locals == 0, "program entrypoint cannot have locals");
 
             Some(BodyWrapper {

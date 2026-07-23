@@ -8,6 +8,7 @@ name: Publish workspace to crates.io
 # rulesets may require deployment to the release environment and may make tags
 # immutable, so failures below print recovery commands instead of suggesting
 # force-pushing, deleting, or moving a tag.
+#
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +23,11 @@ on:
         type: string
       allow_existing:
         description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
+        required: false
+        default: false
+        type: boolean
+      skip_package_version_gate:
+        description: "Skip the package version gate. Use only for manual release recovery after maintainers verify the release plan."
         required: false
         default: false
         type: boolean
@@ -42,7 +48,7 @@ jobs:
       sha: ${{ steps.prepare.outputs.sha }}
     steps:
       - name: Checkout release tooling
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           # Check out the workflow/tooling revision so scripts/prepare-release.sh
@@ -62,10 +68,21 @@ jobs:
         run: |
           ./scripts/prepare-release.sh
 
+  package-version-gate:
+    name: check package versions
+    needs: prepare-release
+    if: ${{ github.repository_owner == '0xMiden' && (github.event_name != 'workflow_dispatch' || !inputs.skip_package_version_gate) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package-version-gate.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.sha }}
+      packages: ${{ github.event.inputs.packages || '' }}
+
   create-draft:
     name: create draft release
-    needs: prepare-release
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
+    needs: [prepare-release, package-version-gate]
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (needs.package-version-gate.result == 'success' || (inputs.skip_package_version_gate && needs.package-version-gate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -136,7 +153,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare-release.outputs.sha }}
@@ -158,15 +175,15 @@ jobs:
           mv target/${{ matrix.target }}/optimized/miden-format miden-format-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-registry miden-registry-${{ matrix.target }}
       - name: Attest miden-vm
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: miden-vm-${{ matrix.target }}
       - name: Attest miden-format
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: miden-format-${{ matrix.target }}
       - name: Attest miden-registry
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: miden-registry-${{ matrix.target }}
       - name: Upload
@@ -196,7 +213,7 @@ jobs:
           mv target/packages/miden-core.masp core.masp
       - name: Attest core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: core.masp
       - name: Upload core.masp
@@ -212,8 +229,8 @@ jobs:
 
   publish:
     name: publish workspace crates
-    needs: [prepare-release, upload-artifacts]
-    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
+    needs: [prepare-release, package-version-gate, upload-artifacts]
+    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (needs.package-version-gate.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_package_version_gate && needs.package-version-gate.result == 'skipped')) && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
     runs-on: warp-ubuntu-latest-x64-8x
     environment: release
     permissions:
@@ -222,14 +239,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare-release.outputs.sha }}
           persist-credentials: false
 
       - name: Authenticate with crates.io
-        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: auth
 
       - name: Publish workspace crates

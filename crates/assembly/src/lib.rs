@@ -47,7 +47,8 @@ pub use self::linker::LinkerError;
 #[cfg(feature = "std")]
 pub use self::project::{
     MasmSourceProvider, ProjectAssembler, ProjectSourceInputs, ProjectSourceProvenanceInputs,
-    ProjectSourceProvider, ProjectTargetSelector, SourceFileProvenance, TargetAssemblyContext,
+    ProjectSourceProvider, ProjectTargetSelector, ResolvedPackage, SourceFileProvenance,
+    SourceProviderRegistry, TargetAssemblyContext,
 };
 pub use self::{
     assembler::Assembler,

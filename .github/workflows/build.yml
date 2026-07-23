@@ -24,23 +24,11 @@ jobs:
       isRelease: ${{ steps.diffs.outputs.isRelease }}
       isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - id: diffs
         uses: ./.github/actions/diffs
-
-  workspace-versions:
-    name: Check workspace versions
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install --no-self-update
-      - name: Check workspace versions
-        run: make check-versions
 
   no-std:
     name: Build for no-std
@@ -52,7 +40,7 @@ jobs:
       matrix:
         toolchain: [stable, nightly]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -70,7 +58,7 @@ jobs:
     if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -87,7 +75,7 @@ jobs:
     if: ${{ needs.diffs.outputs.isFuzz == 'true' || needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Install Rust toolchain
