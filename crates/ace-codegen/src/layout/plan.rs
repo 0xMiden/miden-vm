@@ -20,6 +20,8 @@ impl InputRegion {
 /// Counts needed to build the ACE input layout.
 #[derive(Debug, Clone, Copy)]
 pub struct InputCounts {
+    /// Width of the preprocessed trace.
+    pub preprocessed_width: usize,
     /// Width of the main trace.
     pub width: usize,
     /// Width of the aux trace.
@@ -41,12 +43,16 @@ pub(crate) struct LayoutRegions {
     pub public_values: InputRegion,
     /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
+    /// Preprocessed trace OOD values at `zeta`.
+    pub preprocessed_curr: InputRegion,
     /// Main trace OOD values at `zeta`.
     pub main_curr: InputRegion,
     /// Aux trace OOD coordinates at `zeta`.
     pub aux_curr: InputRegion,
     /// Quotient chunk OOD coordinates at `zeta`.
     pub quotient_curr: InputRegion,
+    /// Preprocessed trace OOD values at `g * zeta`.
+    pub preprocessed_next: InputRegion,
     /// Main trace OOD values at `g * zeta`.
     pub main_next: InputRegion,
     /// Aux trace OOD coordinates at `g * zeta`.
@@ -130,9 +136,11 @@ impl InputLayout {
         for region in [
             self.regions.public_values,
             self.regions.randomness,
+            self.regions.preprocessed_curr,
             self.regions.main_curr,
             self.regions.aux_curr,
             self.regions.quotient_curr,
+            self.regions.preprocessed_next,
             self.regions.main_next,
             self.regions.aux_next,
             self.regions.quotient_next,
@@ -144,6 +152,14 @@ impl InputLayout {
 
         assert!(max_end <= self.total_inputs, "regions exceed total_inputs");
 
+        assert_eq!(
+            self.regions.preprocessed_curr.width, self.counts.preprocessed_width,
+            "preprocessed_curr width mismatch"
+        );
+        assert_eq!(
+            self.regions.preprocessed_next.width, self.counts.preprocessed_width,
+            "preprocessed_next width mismatch"
+        );
         assert_eq!(self.regions.main_curr.width, self.counts.width, "main_curr width mismatch");
         assert_eq!(self.regions.main_next.width, self.counts.width, "main_next width mismatch");
 
