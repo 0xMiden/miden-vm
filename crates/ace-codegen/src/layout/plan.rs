@@ -70,9 +70,9 @@ pub(crate) struct LayoutRegions {
 pub(crate) struct StarkVarIndices {
     /// Composition challenge `alpha`.
     pub alpha: usize,
-    /// `zeta^N`, where N is the trace length.
+    /// `zeta^N_max`, where `N_max` is the maximum trace length represented by the circuit.
     pub z_pow_n: usize,
-    /// `zeta^(N / max_cycle_len)` for periodic column evaluation.
+    /// Shared periodic-column basis `zeta^(N_max / shared_period)`.
     pub z_k: usize,
     /// First-row selector.
     pub is_first: usize,
