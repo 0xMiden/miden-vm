@@ -15,6 +15,7 @@ mod ec;
 mod ec_add;
 mod ec_dag;
 mod ec_msm;
+mod eval;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
