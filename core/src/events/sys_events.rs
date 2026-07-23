@@ -408,6 +408,27 @@ pub enum SystemEvent {
     ///   Advice stack:   unchanged
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegisterData,
+
+    // NON-MUTATING SYSTEM EVENTS
+    // --------------------------------------------------------------------------------------------
+    /// Signals an optional, read-only trace event to the host.
+    ///
+    /// When `emit` observes this system event ID at stack position 0, the VM forwards the user
+    /// trace event ID at stack position 1 to the host's trace handler. This is typically emitted
+    /// as `push.<user_trace_id> push.<sys::trace_event> emit`. Trace handlers can observe
+    /// the processor state, but cannot mutate VM state or the advice provider. If no handler is
+    /// registered for the user trace event ID, the event is a no-op.
+    ///
+    /// Hosts are expected to not raise an error if they encounter a `user_trace_id` for which no
+    /// trace handler is registered.
+    ///
+    /// Inputs:
+    ///   Operand stack: [sys::trace_event, user_trace_id, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice provider: unchanged
+    TraceEvent,
 }
 
 impl SystemEvent {
@@ -485,6 +506,7 @@ impl SystemEvent {
             Self::DeferredEvaluateTag,
             Self::DeferredEvaluatePayload,
             Self::DeferredRegisterData,
+            Self::TraceEvent,
         ]
     }
 }
@@ -526,7 +548,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 25;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -653,6 +675,11 @@ impl SystemEvent {
             event: SystemEvent::DeferredRegisterData,
             name: "sys::adv::register_deferred_data",
         },
+        SystemEventEntry {
+            id: EventId::from_u64(1768618069850226410),
+            event: SystemEvent::TraceEvent,
+            name: "sys::trace_event",
+        },
     ];
 }
 
@@ -765,7 +792,8 @@ mod test {
                 | SystemEvent::DeferredEvaluate
                 | SystemEvent::DeferredEvaluateTag
                 | SystemEvent::DeferredEvaluatePayload
-                | SystemEvent::DeferredRegisterData => {},
+                | SystemEvent::DeferredRegisterData
+                | SystemEvent::TraceEvent => {},
             }
         }
     }

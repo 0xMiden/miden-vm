@@ -42,7 +42,7 @@ use crate::{
 #[cfg(any(test, feature = "testing"))]
 mod test_utils;
 #[cfg(any(test, feature = "testing"))]
-pub use test_utils::{ProcessorStateSnapshot, TestHost};
+pub use test_utils::{ProcessorStateSnapshot, TestHost, TracingTestHost};
 
 #[cfg(test)]
 mod tests;
@@ -87,7 +87,8 @@ pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
 }
 

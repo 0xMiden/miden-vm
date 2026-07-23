@@ -176,6 +176,10 @@ pub enum HostError {
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
+    #[error("attempted to add trace handler for '{event}' (already registered)")]
+    DuplicateTraceHandler { event: EventName },
+    #[error("attempted to add trace handler for '{event}' (reserved system event)")]
+    ReservedTraceNamespace { event: EventName },
 }
 
 // IO ERROR
