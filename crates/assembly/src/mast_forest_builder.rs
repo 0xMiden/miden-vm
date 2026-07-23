@@ -152,9 +152,7 @@ impl MastForestBuilder {
     /// to be dynamically-linked, and are inserted as an external node. Dynamically-linked libraries
     /// must be provided separately to the processor at runtime.
     #[cfg(test)]
-    pub fn new<'a>(
-        static_libraries: impl IntoIterator<Item = &'a MastForest>,
-    ) -> Result<Self, Report> {
+    fn new<'a>(static_libraries: impl IntoIterator<Item = &'a MastForest>) -> Result<Self, Report> {
         Self::new_with_static_libraries(
             static_libraries.into_iter().map(|mast| StaticLibrary::new(mast, None)),
         )
