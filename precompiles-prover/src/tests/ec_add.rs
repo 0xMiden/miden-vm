@@ -853,6 +853,7 @@ fn cert_point_forged_as_trio_unbalances() {
     let traces = k1.stack.traces();
 
     let forged = tamper_ec_points(traces.ec_points_main(), r.addr() as usize - 1, COL_IS_CERT, 0);
+    crate::tests::check_local(EcPointStoreAir, &forged);
     let mut rng = StdRng::seed_from_u64(0xecad_dce3);
     let mut mains = traces.mains();
     mains[4] = &forged;
