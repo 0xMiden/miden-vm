@@ -202,9 +202,9 @@ pub proc verify_vm_proof
     exec.assert_acceptable_options
     # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
 
-    # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
+    # --- Stage the boundary-inputs block from the caller-supplied operands and advice ---
 
-    exec.public_inputs::stage_reduced_inputs
+    exec.public_inputs::stage_boundary_inputs
     # => [...]
 
     exec.load_air_context

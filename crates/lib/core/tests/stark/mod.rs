@@ -434,7 +434,7 @@ fn fib_stack_inputs() -> Vec<u64> {
 // 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
 // accepts.
 #[case(255)]
-fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usize) {
+fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usize) {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
@@ -451,11 +451,11 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     const KERNEL_PTR: u64 = 0;
     const CLAIM_PTR: u64 = 4096;
 
-    // 2) Initial operand stack: `stage_reduced_inputs` operands.
+    // 2) Initial operand stack: `stage_boundary_inputs` operands.
     let initial_stack = vec![CLAIM_PTR, KERNEL_PTR, num_kernel_proc_digests as u64];
 
     // 3) Build the advice stack: kernel digests (4N), then the claim-region fields (P, I, O) for
-    //    the marshalling, then the deferred root for `stage_reduced_inputs`, then the aux
+    //    the marshalling, then the deferred root for `stage_boundary_inputs`, then the aux
     //    randomness consumed by the test prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
@@ -465,7 +465,7 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
-    // 4) Marshal the caller regions, stage the reduced-inputs block, run process_public_inputs,
+    // 4) Marshal the caller regions, stage the boundary-inputs block, run process_public_inputs,
     //    then emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
     //    `generate_aux_randomness` samples it) and compute `c_total`.
     let source = "
@@ -501,7 +501,7 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
             push.32 push.4104
             exec.copy_advice_to_mem
 
-            exec.public_inputs::stage_reduced_inputs
+            exec.public_inputs::stage_boundary_inputs
 
             push.10 exec.constants::set_core_trace_length_log
             push.10 exec.constants::set_chiplets_trace_length_log
@@ -530,13 +530,13 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
             .as_canonical_u64()
     };
 
-    // Must match `REDUCED_INPUTS_ADDRESS_PTR` / `PUBLIC_INPUTS_ADDRESS_PTR` / `C_TOTAL_PTR`
+    // Must match `BOUNDARY_INPUTS_ADDRESS_PTR` / `PUBLIC_INPUTS_ADDRESS_PTR` / `C_TOTAL_PTR`
     // in `crates/lib/core/asm/stark/constants.masm`.
     let reduced_ptr = read_elem(3223322670) as u32;
     let pi_ptr = read_elem(3223322671) as u32;
     let c_total_ptr = 3223322704_u32;
 
-    // 4) kernel_H at reduced_inputs+0..4 must match the Rust mirror.
+    // 4) kernel_H at boundary_inputs+0..4 must match the Rust mirror.
     let digest_felts: Vec<Felt> =
         kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
     let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
@@ -548,17 +548,17 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
         );
     }
 
-    // 5) program_digest / deferred_root pass through to reduced_inputs+4..12; the trailing pad word
-    //    at +12..16 must be zero.
+    // 5) program_digest / deferred_root pass through to boundary_inputs+4..12; the trailing pad
+    //    word at +12..16 must be zero.
     for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
             read_elem(reduced_ptr + 4 + i as u32),
             v,
-            "reduced-inputs window felt {i} mismatch"
+            "boundary-inputs window felt {i} mismatch"
         );
     }
     for i in 12..16 {
-        assert_eq!(read_elem(reduced_ptr + i), 0, "reduced-inputs pad felt {i} must be zero");
+        assert_eq!(read_elem(reduced_ptr + i), 0, "boundary-inputs pad felt {i} must be zero");
     }
 
     // 6) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).
@@ -620,21 +620,21 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
 
 /// The recursive verifier must reject statements with more kernel-procedure digests than a
 /// `KernelDescriptor` can contain. 256 digests is one over the maximum, so
-/// `stage_reduced_inputs` must fail on the digest-count bound before reading caller memory or
+/// `stage_boundary_inputs` must fail on the digest-count bound before reading caller memory or
 /// advice.
 #[test]
 fn rejects_too_many_kernel_proc_digests() {
     let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
 
     // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3]. The bound on N is the first check in
-    // `stage_reduced_inputs`, so no caller memory or advice is needed.
+    // `stage_boundary_inputs`, so no caller memory or advice is needed.
     let initial_stack = vec![0_u64, num_kernel_proc_digests, 4096, 1, 2, 3, 4];
 
     let source = "
         use miden::core::sys::vm::public_inputs
 
         begin
-            exec.public_inputs::stage_reduced_inputs
+            exec.public_inputs::stage_boundary_inputs
         end
         ";
 

@@ -11,8 +11,8 @@ fn truncate_stack() {
 }
 
 #[test]
-fn reduce_kernel_digests_upper_bound() {
-    // `stage_reduced_inputs` takes the digest count `N` as an operand and asserts it fits
+fn stage_rejects_digest_count_over_bound() {
+    // `stage_boundary_inputs` takes the digest count `N` as an operand and asserts it fits
     // `Kernel::MAX_NUM_PROCEDURES` (`N < 256`). The bound is its first check, so no caller memory
     // or advice is required.
     //
@@ -20,7 +20,7 @@ fn reduce_kernel_digests_upper_bound() {
     let source = "
         use miden::core::sys::vm::public_inputs
         begin
-            exec.public_inputs::stage_reduced_inputs
+            exec.public_inputs::stage_boundary_inputs
         end
     ";
 

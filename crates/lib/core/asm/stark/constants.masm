@@ -95,21 +95,21 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
-### Address storing a pointer to the reduced-inputs block
+### Address storing a pointer to the boundary-inputs block
 ### [kernel_H | program_digest | deferred_root | zero_pad] (16 felts). The block lives at the
-### fixed standalone address REDUCED_INPUTS_PTR; this cell holds that pointer for the readers.
-const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
+### fixed standalone address BOUNDARY_INPUTS_PTR; this cell holds that pointer for the readers.
+const BOUNDARY_INPUTS_ADDRESS_PTR = 3223322670
 
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
 
 ### Caller-supplied base address of the kernel-procedure digests (N word-aligned digests). Persisted
-### by `stage_reduced_inputs` from its operand so the step-II boundary fold can re-read the same region the
+### by `stage_boundary_inputs` from its operand so the step-II boundary fold can re-read the same region the
 ### kernel commitment hashes.
 const KERNEL_DIGESTS_ADDRESS_PTR = 3223322706
 
 ### Caller-supplied base address of the claim region (40 base felts: P | K | I | O).
-### Persisted by `stage_reduced_inputs`; `load_public_inputs` EF-expands the I/O section (+8)
+### Persisted by `stage_boundary_inputs`; `load_public_inputs` EF-expands the I/O section (+8)
 ### and `claim_commitment` commits the whole region.
 const CLAIM_ADDRESS_PTR = 3223322707
 
@@ -183,11 +183,11 @@ const ORDER_TAG_PTR = 3223322764
 const RELATION_DIGEST_PTR = 3223322768
 const ACE_REGISTRY_ROOT_PTR = 3223322772
 
-### Fixed standalone reduced-inputs block (16 felts):
+### Fixed standalone boundary-inputs block (16 felts):
 ### [kernel_H (4) | program_digest (4) | deferred_root (4) | zero_pad (4)]. The verifier writes
 ### it and absorbs it into Fiat-Shamir; the ACE circuit never reads it, so it lives in the fixed
 ### verifier region rather than the OOD-derived ACE READ region.
-const REDUCED_INPUTS_PTR = 3223322836
+const BOUNDARY_INPUTS_PTR = 3223322836
 
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
@@ -212,16 +212,16 @@ const REDUCED_INPUTS_PTR = 3223322836
 ##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
 ##                                                          ... EVAL section follows ...
 ##
-## The reduced-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
+## The boundary-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
 ## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
-## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_vm_proof` and absorbed into
+## the fixed standalone `BOUNDARY_INPUTS_PTR` above, staged by `verify_vm_proof` and absorbed into
 ## Fiat-Shamir; it is not carved out of this region.
 ##
-## After `verify_vm_proof` returns, the 16 felts at `REDUCED_INPUTS_PTR` together with the FLPI
+## After `verify_vm_proof` returns, the 16 felts at `BOUNDARY_INPUTS_PTR` together with the FLPI
 ## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
 ## commitment the caller can bind against. The FLPI pointer is dynamic (stored at
-## PUBLIC_INPUTS_ADDRESS_PTR); the reduced-inputs pointer cell (REDUCED_INPUTS_ADDRESS_PTR) holds
-## the fixed `REDUCED_INPUTS_PTR`. All other pointers are fixed constants.
+## PUBLIC_INPUTS_ADDRESS_PTR); the boundary-inputs pointer cell (BOUNDARY_INPUTS_ADDRESS_PTR) holds
+## the fixed `BOUNDARY_INPUTS_PTR`. All other pointers are fixed constants.
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
@@ -530,8 +530,8 @@ pub proc get_trace_domain_generator
     push.TRACE_DOMAIN_GENERATOR_PTR mem_load
 end
 
-pub proc reduced_inputs_address_ptr
-    push.REDUCED_INPUTS_ADDRESS_PTR
+pub proc boundary_inputs_address_ptr
+    push.BOUNDARY_INPUTS_ADDRESS_PTR
 end
 
 pub proc public_inputs_address_ptr
@@ -610,8 +610,8 @@ pub proc c_total_ptr
     push.C_TOTAL_PTR
 end
 
-pub proc reduced_inputs_ptr
-    push.REDUCED_INPUTS_PTR
+pub proc boundary_inputs_ptr
+    push.BOUNDARY_INPUTS_PTR
 end
 
 pub proc kernel_digests_address_ptr
