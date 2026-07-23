@@ -21,7 +21,13 @@ use crate::{
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{
-        CARRY_HI_BEGIN, CARRY_LO_BEGIN, NUM_MAIN_COLS, UintStoreAir,
+        CARRY_HI_BEGIN, CARRY_LO_BEGIN, COL_PTR, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
+        UintStoreAir,
+        mul::trace::UintMulRequires,
+        store_mul::{
+            NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
+            trace::generate_trace as store_mul_trace,
+        },
         trace::{UintStoreRequires, generate_trace},
     },
 };
@@ -114,6 +120,38 @@ fn uint_store_constraints_hold() {
     assert!(carried, "random value block must carry (comp = bound − v borrowed)",);
 
     crate::tests::check_local(UintStoreAir, &main);
+}
+
+#[test]
+#[should_panic]
+fn uint_store_rejects_pointer_zero() {
+    let mut rng = StdRng::seed_from_u64(0x0bad_0000);
+    let store = sample_store(&mut rng);
+    let mut main = generate_trace(store, &mut BytePairLutRequires::new());
+
+    // Forge the first block from ptr 1 to ptr 0 while preserving its
+    // within-block constancy and its gap transition to ptr 2.
+    for row in 0..PERIOD {
+        main.values[row * NUM_MAIN_COLS + COL_PTR] = Felt::ZERO;
+    }
+    main.values[(PERIOD - 1) * NUM_MAIN_COLS + TERM_CELL_GAP] = Felt::ONE;
+
+    crate::tests::check_local(UintStoreAir, &main);
+}
+
+#[test]
+#[should_panic]
+fn production_uint_store_rejects_pointer_zero() {
+    let mut rng = StdRng::seed_from_u64(0x0bad_c0de);
+    let store = sample_store(&mut rng);
+    let mut main = store_mul_trace(store, UintMulRequires::new(), &mut BytePairLutRequires::new());
+
+    for row in 0..PERIOD {
+        main.values[row * STORE_MUL_NUM_MAIN_COLS + COL_PTR] = Felt::ZERO;
+    }
+    main.values[(PERIOD - 1) * STORE_MUL_NUM_MAIN_COLS + TERM_CELL_GAP] = Felt::ONE;
+
+    crate::tests::check_local(UintStoreMulAir, &main);
 }
 
 #[test]
@@ -210,13 +248,13 @@ fn uint_store_rejects_out_of_range_value() {
 fn uint_store_gaps_and_self_ref_padding() {
     let mut rng = StdRng::seed_from_u64(0x6a9);
     let bound = random_modulus(&mut rng);
-    // Modulus at ptr 5 (self-ref; the first block needs no anchor); a value
-    // at ptr 9 (gap 3); a self-referential zero uint at ptr 100 (gap 90) —
-    // it nets out on its own (provide −1 + consume +1, both `(100, 100, ·)`).
-    // Auto-padding appends a fourth zero block at ptr 101 (gap 0).
+    // Modulus at the required root ptr 1; a value at ptr 5 (gap 3); a
+    // self-referential zero uint at ptr 100 (gap 94) — it nets out on its own
+    // (provide −1 + consume +1, both `(100, 100, ·)`). Auto-padding appends a
+    // fourth zero block at ptr 101 (gap 0).
     let mut store = UintStoreRequires::new();
-    let fp = store.pin_modulus(5, bound);
-    store.intern_pinned(9, random_uint_below(&mut rng, bound), fp);
+    let fp = store.pin_modulus(1, bound);
+    store.intern_pinned(5, random_uint_below(&mut rng, bound), fp);
     store.pin_modulus(100, U256::ZERO);
 
     let mut bpl = BytePairLutRequires::new();

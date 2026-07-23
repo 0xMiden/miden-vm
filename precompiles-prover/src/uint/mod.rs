@@ -12,6 +12,9 @@
 //!
 //! See the design notes for the full design.
 //!
+//! The AIR roots store pointers at `1`; the positive `Range16`-checked gap chain excludes pointer
+//! `0`, reserving it as the unstored-zero sentinel.
+//!
 //! ## Range-membership via vertical Schwartz–Zippel
 //!
 //! Each uint occupies a **period-4 block** (16 cells/row); a one-hot
@@ -385,12 +388,10 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
         let bound_own: AB::ExprEF = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
         builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
 
-        // No first-row anchor: the gap chain alone forces injective ptrs
-        // (steps of gap + 1 ∈ [1, 2¹⁶] can't lap the field within any real
-        // trace), and every consume names its ptr explicitly, so absolute
-        // addresses need no pinning. Honest traces start at the smallest
-        // interned pin (ptr ≥ 1); a rogue block at address 0 is inert because ptr 0 is never
-        // provided as a real `UintVal` address.
+        // Root the bounded positive pointer-gap chain at 1. Even a maximum
+        // 2³²-row trace grows by < 2⁴⁶, so it cannot wrap through 0.
+        let ptr: AB::Expr = local[COL_PTR].into();
+        builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
 
         // Carry booleanity (the no-wrap bound needs binary carries):
         // γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.

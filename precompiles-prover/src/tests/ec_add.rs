@@ -100,6 +100,8 @@ impl EcStack {
     /// [`FP`].
     fn new(bound: U256) -> Self {
         let mut store = UintStoreRequires::new();
+        // Keep the ad-hoc modulus at `FP`, but root the store at pointer 1.
+        store.pin_modulus(1, U256::ZERO);
         let fp = store.pin_modulus(FP, bound);
         Self {
             store,
