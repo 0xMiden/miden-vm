@@ -16,6 +16,8 @@ pub enum InputKey {
     AuxRandBeta,
     /// Challenge used to fold per-AIR constraint roots in proof order.
     MultiAirFoldBeta,
+    /// Preprocessed trace value at (offset, index).
+    Preprocessed { offset: usize, index: usize },
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
@@ -76,6 +78,11 @@ impl InputKeyMapper<'_> {
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
+            InputKey::Preprocessed { offset, index } => match offset {
+                0 => layout.regions.preprocessed_curr.index(index),
+                1 => layout.regions.preprocessed_next.index(index),
+                _ => None,
+            },
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),

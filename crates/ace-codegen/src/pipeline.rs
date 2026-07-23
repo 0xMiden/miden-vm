@@ -95,7 +95,7 @@ where
     layout.validate();
 
     let air_layout = AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: counts.preprocessed_width,
         main_width: counts.width,
         num_public_values: counts.num_public,
         permutation_width: counts.aux_width,
@@ -133,12 +133,6 @@ where
             message: "num_quotient_chunks must be > 0".into(),
         });
     }
-    if air.preprocessed_trace().is_some() {
-        return Err(AceError::InvalidInputLayout {
-            message: "preprocessed trace inputs are not supported".into(),
-        });
-    }
-
     let num_randomness = air.num_randomness();
     if num_randomness != 2 {
         return Err(AceError::InvalidInputLayout {
@@ -149,6 +143,7 @@ where
     }
 
     Ok(InputCounts {
+        preprocessed_width: air.preprocessed_width(),
         width: air.width(),
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),

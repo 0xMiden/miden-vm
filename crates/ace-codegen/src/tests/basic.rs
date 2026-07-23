@@ -12,7 +12,7 @@ use miden_crypto::{
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
+    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit, dag::NodeKind,
     pipeline::build_ace_dag_for_air,
 };
 
@@ -33,6 +33,53 @@ impl BaseAir<F> for MockAir {
 
     fn periodic_columns(&self) -> Vec<Vec<F>> {
         vec![vec![Felt::ONE]]
+    }
+}
+
+struct MockPreprocessedAir;
+
+impl BaseAir<F> for MockPreprocessedAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
+        Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1))
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        1
+    }
+}
+
+impl LiftedAir<F, EF> for MockPreprocessedAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), Vec::new())
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let preprocessed = builder.preprocessed();
+        let curr = preprocessed.current_slice()[0];
+        let next = preprocessed.next_slice()[0];
+        builder.assert_zero(curr + next);
     }
 }
 
@@ -185,6 +232,51 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
 }
 
 #[test]
+fn test_preprocessed_entries_lower_to_input_keys() {
+    let air = MockPreprocessedAir;
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+        num_airs: 1,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+
+    assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
+    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
+    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).is_some());
+    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
+        node,
+        NodeKind::Input(InputKey::Preprocessed { offset: 0, index: 0 })
+    )));
+    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
+        node,
+        NodeKind::Input(InputKey::Preprocessed { offset: 1, index: 0 })
+    )));
+}
+
+#[test]
+fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
+    let air = MockPreprocessedAir;
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+        num_airs: 1,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
+    inputs[layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap()] = ef(17);
+
+    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+
+    assert_eq!(dag_value, ef(30));
+    assert_eq!(circuit_value, dag_value);
+}
+
+#[test]
 fn test_verifier_dag_matches_manual_eval() {
     let air = MockAir;
     let config = AceConfig {
@@ -200,7 +292,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let periodic_values = eval_periodic_values(&periodic_columns, z_k);
 
     let air_layout = AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: layout.counts.preprocessed_width,
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,

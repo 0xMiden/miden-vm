@@ -75,6 +75,7 @@ where
     // The final READ layout has one region for each input kind. Per-AIR main, aux, and boundary
     // values are concatenated at the offsets computed for the requested proof order.
     let combined_counts = InputCounts {
+        preprocessed_width: 0,
         width: combined_main_w,
         aux_width: combined_aux_w,
         num_aux_boundary: total_aux_values,
