@@ -440,7 +440,7 @@ impl Assembler {
         )?;
 
         // Derive the package name from the namespace of the root module
-        let name = root.path().as_str().replace("::", "-");
+        let name = root.path().to_relative().as_str().replace("::", "-");
 
         let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
