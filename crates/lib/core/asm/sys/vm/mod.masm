@@ -173,30 +173,34 @@ proc store_ace_registry_root
     dropw dropw
 end
 
-#! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
+#! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM and
+#! returns the deferred obligation the proof binds.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and
 #! stored in memory for use by the generic verifier.
 #!
-#! - Public inputs contain fixed-size input/output stacks, the program digest, and kernel procedure
-#!   digests.
-#! - The wrapper records the AIR context before calling the generic STARK verifier.
-#! - The constraints evaluator authenticates the ACE program selected by the derived proof order.
+#! The caller supplies the execution claim as a memory region holding the canonical encoding
+#! `P (+0) | K (+4, written by the verifier) | I (+8) | O (+24)` and the raw kernel-procedure
+#! digests as a witness region. The verifier computes K from the witness into the claim region,
+#! binds the transcript to the claim commitment, and evaluates the kernel-ROM boundary from the
+#! same witness. The final deferred root is loaded from advice, bound by the statement, and
+#! returned on the operand stack: the caller must settle it or expose it in its own statement.
 #!
-#! The kernel-procedure digests and the stack i/o are read from caller memory at the
-#! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
-#! final deferred root is loaded from the advice stack. `verify_proof` stages the reduced-inputs
-#! block (kernel_H | program_digest | deferred_root | pad) before the transcript starts.
+#! Inputs:  [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+#! Outputs: [D, ...]
 #!
-#! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
-#! Outputs: []
-pub proc verify_proof
+#! Where:
+#! - claim_ptr is the word-aligned address of the caller's claim region (40 felts).
+#! - kernel_ptr is the word-aligned address of the kernel digest witness.
+#! - num_kernel_digests is the number of digests in the witness.
+#! - D is the deferred root bound by the verified statement.
+pub proc verify_vm_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
-    # => [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
+    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
 
     # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
 
@@ -219,4 +223,9 @@ pub proc verify_proof
 
     exec.verifier::verify
     # => [...]
+
+    # --- Return the deferred obligation bound by the statement -----------------
+
+    exec.public_inputs::load_deferred_root
+    # => [D, ...]
 end

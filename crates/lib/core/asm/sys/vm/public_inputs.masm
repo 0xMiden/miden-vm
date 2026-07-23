@@ -2,6 +2,7 @@ use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::crypto::hashes::poseidon2
+use miden::core::sys::vm::claim
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -50,20 +51,21 @@ use miden::core::crypto::hashes::poseidon2
 #   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
 # where CLAIM_HASH is the canonical execution-claim commitment over
 # `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` (computed inline by
-# `compute_claim_hash`). With RELATION_DIGEST pre-loaded in the transcript capacity by
+# `compute_claim_commitment`). With RELATION_DIGEST pre-loaded in the transcript capacity by
 # `init_seed`, the state after this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
 # The raw stack i/o and kernel digests remain public values for the constraint checks and the
 # LogUp boundary without being separately absorbed.
 #
 # Data sources:
-#   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed for
-#     kernel_H and re-read for the step-II boundary fold.
-#   - program_digest: operand word.
-#   - deferred_root: advice (4 canonical felts), loaded by `verify_proof`.
-#   - stack i/o (FLPI): caller memory at `stack_io_ptr` (operand), 32 base felts.
+#   - claim region: caller memory at `claim_ptr` (operand), 40 base felts `P | K | I | O`;
+#     the caller fills P, I, O and `stage_reduced_inputs` writes K.
+#   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed
+#     into K and re-read for the step-II boundary fold.
+#   - deferred_root: advice (4 canonical felts), loaded by `stage_reduced_inputs`.
 #
-# `verify_proof` stages kernel_H, program_digest and deferred_root into the reduced-inputs
-# block before the transcript starts; `process_public_inputs` then only absorbs into FS.
+# `stage_reduced_inputs` completes the claim region and stages kernel_H, program_digest and
+# deferred_root into the reduced-inputs block before the transcript starts;
+# `process_public_inputs` then only absorbs into FS.
 #
 # CONSTANTS
 # =================================================================================================
@@ -71,12 +73,6 @@ use miden::core::crypto::hashes::poseidon2
 # Number of fixed length public inputs (in field elements): stack inputs (16) + stack
 # outputs (16). These are the only public values referenced by the ACE circuit; the program
 # digest and deferred root live in the caller-facing reduced-inputs block instead.
-# Domain tag for the kernel commitment: the registered selector
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (32 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match miden_core::program::KERNEL_DOMAIN_TAG
-# (enforced by cross-tests).
-const KERNEL_DOMAIN_TAG = 8193
-
 # Domain tag for the claim commitment: the registered selector
 # (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match
@@ -133,8 +129,10 @@ pub proc process_public_inputs
     exec.store_reduced_inputs_address
     # => [...]
 
-    # 2) Compute CLAIM_HASH and absorb the single statement block [CLAIM_HASH | D] into FS.
-    exec.compute_claim_hash
+    # 2) Compute CLAIM_HASH over the caller's claim region (completed by
+    #    `stage_reduced_inputs`) and absorb the statement block [CLAIM_HASH | D] into FS.
+    exec.constants::claim_address_ptr mem_load
+    exec.claim::claim_commitment
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
@@ -159,54 +157,61 @@ proc store_reduced_inputs_address
 end
 
 #! Stages the reduced-inputs block at the fixed standalone `REDUCED_INPUTS_PTR` before the
-#! transcript starts (called by `verify_proof`).
+#! transcript starts (called by `verify_vm_proof`).
 #!
 #! Writes, in order:
-#!   reduced_inputs+0  : kernel_H = hash_elements(kernel_ptr, 4·N), the kernel commitment over the
-#!                       caller-owned digest region.
-#!   reduced_inputs+4  : program_digest, taken from the operand word.
+#!   claim_ptr+4       : K = kernel_commitment(kernel_ptr, N), completing the caller's claim
+#!                       region (the caller filled P, I, O).
+#!   reduced_inputs+0  : K, for the step-II boundary fold and caller-facing readers.
+#!   reduced_inputs+4  : program_digest, copied from the claim region.
 #!   reduced_inputs+8  : deferred_root, loaded from advice.
 #!
-#! Also persists the caller pointers `kernel_ptr` and `stack_io_ptr` and the digest count `N` into
-#! their fixed cells so the step-I FLPI load and the step-II boundary fold can re-read the same
-#! caller-owned regions. The trailing pad word is zeroed when the window is absorbed in step I.
+#! Also persists `claim_ptr`, `kernel_ptr`, and the digest count `N` into their fixed cells so
+#! the step-I FLPI load and the step-II boundary fold can re-read the same caller-owned regions.
+#! The trailing pad word of the window is never written and reads as zero.
 #!
-#! Input:  [kernel_ptr, N, stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
+#! Input:  [claim_ptr, kernel_ptr, N, ...]
 #! Output: [...]
 pub proc stage_reduced_inputs
-    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and `kernel_ptr` for the step-II fold.
-    dup.1
+    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and the caller pointers.
+    dup.2
     u32assert.err="number of kernel procedure digests must fit in a u32"
     dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     exec.constants::num_kernel_digests_ptr mem_store
-    # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
-    dup exec.constants::kernel_digests_address_ptr mem_store
-    # => [kernel_ptr, N, stack_io_ptr, PROG..., ...]
+    # => [claim_ptr, kernel_ptr, N, ...]
+    dup.1 exec.constants::kernel_digests_address_ptr mem_store
+    dup exec.constants::claim_address_ptr mem_store
+    # => [claim_ptr, kernel_ptr, N, ...]
 
-    # kernel_H = hash_elements_in_domain(kernel_ptr, 4·N, KERNEL_DOMAIN_TAG) -> reduced_inputs+0.
-    # Mirrors KernelDescriptor::commitment on the Rust side (domain-tagged; length binding via
-    # the padding rule's capacity element).
-    swap mul.4 swap
-    # => [kernel_ptr, 4·N, stack_io_ptr, PROG..., ...]
-    push.KERNEL_DOMAIN_TAG movdn.2
-    # => [kernel_ptr, 4·N, KERNEL_DOMAIN_TAG, stack_io_ptr, PROG..., ...]
-    exec.poseidon2::hash_elements_in_domain
-    # => [kH0, kH1, kH2, kH3, stack_io_ptr, PROG..., ...]
-    exec.constants::reduced_inputs_ptr mem_storew_le dropw
-    # => [stack_io_ptr, PROG0, PROG1, PROG2, PROG3, ...]
+    # K = kernel_commitment(kernel_ptr, N) -> claim region (+4) and the window (+0).
+    movup.2 movup.2
+    # => [kernel_ptr, N, claim_ptr, ...]
+    exec.claim::kernel_commitment
+    # => [K, claim_ptr, ...]
+    dup.4 add.4 mem_storew_le
+    exec.constants::reduced_inputs_ptr mem_storew_le
+    # => [K, claim_ptr, ...]
 
-    # Persist `stack_io_ptr` for the step-I FLPI load.
-    exec.constants::stack_io_address_ptr mem_store
-    # => [PROG0, PROG1, PROG2, PROG3, ...]
+    # program_digest: claim region (+0) -> reduced_inputs + REDUCED_INPUTS_PROGRAM_OFFSET.
+    # The dead K word is the load target (mem_loadw_le overwrites the top word).
+    movup.4 mem_loadw_le
+    # => [P, ...]
+    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_PROGRAM_OFFSET mem_storew_le
+    # => [P, ...]
 
-    # program_digest (operand) -> reduced_inputs + REDUCED_INPUTS_PROGRAM_OFFSET.
-    exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_PROGRAM_OFFSET mem_storew_le dropw
-    # => [...]
-
-    # deferred_root from advice -> reduced_inputs + REDUCED_INPUTS_DEFERRED_OFFSET.
-    padw adv_loadw
+    # deferred_root from advice -> reduced_inputs + REDUCED_INPUTS_DEFERRED_OFFSET, loaded
+    # over the dead P word.
+    adv_loadw
     exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
+end
+
+#! Loads the final deferred root from the reduced-inputs window.
+#!
+#! Input:  [...]
+#! Output: [D, ...]
+pub proc load_deferred_root
+    padw exec.constants::reduced_inputs_ptr add.REDUCED_INPUTS_DEFERRED_OFFSET mem_loadw_le
 end
 
 # HELPER PROCEDURES
@@ -349,7 +354,7 @@ end
 #!
 #! Derives `γ = β^16`, then folds the request/response terms over the caller-owned kernel digests
 #! at `KERNEL_DIGESTS_ADDRESS_PTR` (count at `NUM_KERNEL_DIGESTS_PTR`) and the program digest /
-#! deferred root in the reduced-inputs block, all staged in `verify_proof`. Mirrors the module
+#! deferred root in the reduced-inputs block, all staged in `stage_reduced_inputs`. Mirrors the module
 #! banner's `c_total` definition and `MidenMultiAir::eval_external`.
 #!
 #! Input:  [...]
@@ -406,44 +411,6 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-#! Computes CLAIM_HASH, the canonical execution-claim commitment, without materializing a
-#! contiguous claim region: block 1 is assembled from the reduced-inputs window (`P` at
-#! +REDUCED_INPUTS_PROGRAM_OFFSET, `K` = kernel_H at +0) and blocks 2..5 stream the caller's
-#! stack i/o. Identical math to `claim::claim_hash` over the canonical region
-#! `P ‖ K ‖ I ‖ O` (domain tag in the second capacity element, `40 % 8 = 0` in the first);
-#! the caller-region form replaces this inline computation in the verifier API rework.
-#!
-#! Input:  [...]
-#! Output: [CLAIM_HASH, ...]
-proc compute_claim_hash
-    # capacity word = [40 % 8 = 0, CLAIM_DOMAIN_TAG, 0, 0]
-    push.0.0 push.CLAIM_DOMAIN_TAG push.0
-    # => [C, ...]
-
-    # block 1 rate = [P | K]: K = kernel_H at reduced_inputs+0, P at +PROGRAM_OFFSET
-    padw exec.constants::reduced_inputs_address_ptr mem_load mem_loadw_le
-    # => [K, C, ...]
-    padw exec.constants::reduced_inputs_address_ptr mem_load add.REDUCED_INPUTS_PROGRAM_OFFSET mem_loadw_le
-    # => [P, K, C, ...]
-    exec.poseidon2::permute
-    # => [R0', R1', C', ...]
-
-    # blocks 2..5: stream the 32 stack-i/o felts from caller memory
-    exec.constants::stack_io_address_ptr mem_load
-    movdn.12
-    # => [R0', R1', C', io_ptr, ...]
-    repeat.4
-        mem_stream
-        exec.poseidon2::permute
-    end
-    # => [R0, R1, C, io_ptr + 32, ...]
-
-    exec.poseidon2::squeeze_digest
-    # => [CLAIM_HASH, io_ptr + 32, ...]
-    movup.4 drop
-    # => [CLAIM_HASH, ...]
-end
-
 #! Absorbs the single statement block `[CLAIM_HASH | D]` into the FS transcript, mirroring
 #! `MidenMultiAir::observe`. With RELATION_DIGEST pre-loaded in the transcript capacity
 #! (`init_seed`), the resulting state realizes the factored statement binding
@@ -457,11 +424,9 @@ proc absorb_claim_and_deferred_into_fs
     # => [D, CLAIM_HASH, ...]
 
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    exec.random_coin::load_random_coin_state
-    # => [R1, R2, C, D, CLAIM_HASH, ...]
-
-    # duplex overwrite mode: replace the rate with [CLAIM_HASH | D]
-    dropw dropw
+    # Duplex overwrite mode: the stale rate words are never read, so load only the capacity
+    # and build the rate from [CLAIM_HASH | D] already on the stack.
+    exec.random_coin::get_capacity
     # => [C, D, CLAIM_HASH, ...]
     swapw.2
     # => [CLAIM_HASH, D, C, ...]
@@ -487,17 +452,17 @@ end
 proc load_public_inputs
     padw padw padw
     # => [SCRATCH(12), ...]
-    exec.constants::stack_io_address_ptr mem_load
+    exec.constants::claim_address_ptr mem_load add.8
     movdn.12
     exec.constants::public_inputs_address_ptr mem_load
     movdn.12
-    # => [SCRATCH(12), pi_ptr, stack_io_ptr, ...]
+    # => [SCRATCH(12), pi_ptr, claim_io_ptr, ...]
 
     # 4 iterations x 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
     repeat.4
         exec.public_inputs::load_base_store_extension_double_word_from_mem
     end
-    # => [SCRATCH'(12), pi_ptr + 64, stack_io_ptr + 32, ...]
+    # => [SCRATCH'(12), pi_ptr + 64, claim_io_ptr + 32, ...]
 
     dropw dropw dropw drop drop
     # => [...]

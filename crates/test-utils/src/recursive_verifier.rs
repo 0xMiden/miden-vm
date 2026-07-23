@@ -152,33 +152,27 @@ fn build_advice(
     }
 
     // Caller-owned memory regions consumed by the test marshalling in `run_recursive_verifier`:
-    // kernel digests at KERNEL_PTR, stack i/o at STACK_IO_PTR. These must match the constants in
-    // that MASM prologue.
+    // kernel digests at KERNEL_PTR, the claim region at CLAIM_PTR. These must match the
+    // constants in that MASM prologue.
     const KERNEL_PTR: u64 = 0;
-    const STACK_IO_PTR: u64 = 4096;
+    const CLAIM_PTR: u64 = 4096;
 
     let num_kernel_proc_digests = kernel_digests.len();
     let program_digest: Word = *pub_inputs.program_info().program_hash();
     let program_digest = program_digest.as_elements();
 
-    // `kernel_ptr` is on top. `StackInputs::try_from_ints` puts `vec[0]` on top.
-    let initial_stack = vec![
-        KERNEL_PTR,
-        num_kernel_proc_digests as u64,
-        STACK_IO_PTR,
-        program_digest[0].as_canonical_u64(),
-        program_digest[1].as_canonical_u64(),
-        program_digest[2].as_canonical_u64(),
-        program_digest[3].as_canonical_u64(),
-    ];
+    // `claim_ptr` is on top. `StackInputs::try_from_ints` puts `vec[0]` on top.
+    let initial_stack = vec![CLAIM_PTR, KERNEL_PTR, num_kernel_proc_digests as u64];
 
     let mut advice_stack = Vec::new();
 
-    // Kernel procedure digests are copied into the caller region at KERNEL_PTR.
+    // Kernel procedure digests are copied into the witness region at KERNEL_PTR.
     let kernel_advice = build_kernel_digest_advice(kernel_digests);
     advice_stack.extend_from_slice(&kernel_advice);
 
-    // Stack i/o is copied into the caller region at STACK_IO_PTR.
+    // The program digest and stack i/o are copied into the claim region at CLAIM_PTR
+    // (P at +0, I/O at +8); the verifier writes K at +4.
+    advice_stack.extend(program_digest.iter().map(Felt::as_canonical_u64));
     advice_stack.extend_from_slice(&build_stack_io_advice(&pub_inputs));
 
     // Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
