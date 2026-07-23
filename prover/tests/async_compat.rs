@@ -97,9 +97,9 @@ async fn prove_async_matches_prove() {
     .unwrap();
 
     assert_eq!(sync_outputs, async_outputs);
-    assert_eq!(sync_proof.hash_fn(), async_proof.hash_fn());
-    assert!(!sync_proof.stark_proof().is_empty());
-    assert!(!async_proof.stark_proof().is_empty());
+    assert_eq!(sync_proof.miden_proof().hash_fn(), async_proof.miden_proof().hash_fn());
+    assert!(!sync_proof.miden_proof().bytes().is_empty());
+    assert!(!async_proof.miden_proof().bytes().is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -124,5 +124,5 @@ async fn prove_async_supports_async_only_host_events() {
     .expect("async proving should succeed");
 
     assert_eq!(host.event_calls, 1);
-    assert!(!proof.stark_proof().is_empty());
+    assert!(!proof.miden_proof().bytes().is_empty());
 }

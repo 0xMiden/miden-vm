@@ -441,11 +441,16 @@ fn replace_felt_array_const(
     name: &str,
     values: &[Felt; 4],
 ) -> io::Result<()> {
-    let marker = format!("pub const {name}: [Felt; 4] = [");
+    let marker = format!("pub const {name}:");
     let start = content
         .find(&marker)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let block_start = start + marker.len();
+    let init_marker = " = [";
+    let init_start =
+        content[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
+        })?;
+    let block_start = init_start + init_marker.len();
     let block_end =
         content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))

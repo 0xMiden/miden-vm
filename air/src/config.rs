@@ -83,11 +83,14 @@ pub fn pcs_params() -> PcsParams {
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
 // ================================================================================================
 
+/// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
+pub type RelationDigest = [Felt; 4];
+
 /// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
-pub const RELATION_DIGEST: [Felt; 4] = [
+pub const RELATION_DIGEST: RelationDigest = [
     Felt::new_unchecked(837197885082815666),
     Felt::new_unchecked(17812429367884914),
     Felt::new_unchecked(12945170128166309606),
@@ -179,9 +182,9 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// Observes PCS protocol parameters into the challenger.
 ///
 /// Call on a challenger obtained from `config.challenger()` to complete the
-/// domain-separated transcript initialization. The config factories already bind
-/// RELATION_DIGEST into the prototype challenger; this function adds the remaining
-/// protocol parameters.
+/// domain-separated transcript initialization. The config factories bind the
+/// caller-supplied relation digest into the prototype challenger; this function
+/// adds the remaining protocol parameters.
 pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
     challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
@@ -219,43 +222,47 @@ type AlgLmcs<P> = LmcsConfig<
 /// Algebraic duplex challenger (for RPO, Poseidon2, RPX).
 type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
 
+/// Concrete STARK configuration type for RPO.
+pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>>;
+
 /// Concrete STARK configuration type for Poseidon2.
 pub type Poseidon2Config =
     MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
 
-/// Creates an RPO-based STARK configuration.
-pub fn rpo_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>> {
-    alg_config(params, RpoPermutation256)
+/// Concrete STARK configuration type for RPX.
+pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
+
+/// Creates an RPO-based STARK configuration bound to `relation_digest`.
+pub fn rpo_config(params: PcsParams, relation_digest: RelationDigest) -> RpoConfig {
+    alg_config(params, RpoPermutation256, relation_digest)
 }
 
-/// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>> {
-    alg_config(params, Poseidon2Permutation256)
+/// Creates a Poseidon2-based STARK configuration bound to `relation_digest`.
+pub fn poseidon2_config(params: PcsParams, relation_digest: RelationDigest) -> Poseidon2Config {
+    alg_config(params, Poseidon2Permutation256, relation_digest)
 }
 
-/// Creates an RPX-based STARK configuration.
-pub fn rpx_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>> {
-    alg_config(params, RpxPermutation256)
+/// Creates an RPX-based STARK configuration bound to `relation_digest`.
+pub fn rpx_config(params: PcsParams, relation_digest: RelationDigest) -> RpxConfig {
+    alg_config(params, RpxPermutation256, relation_digest)
 }
 
 /// Internal helper: builds an algebraic STARK configuration from a permutation.
 ///
-/// The prototype challenger has RELATION_DIGEST pre-loaded in the sponge capacity.
+/// The prototype challenger has the relation digest pre-loaded in the sponge capacity.
 /// When `observe_protocol_params` is called, the first duplexing permutes this
 /// capacity together with the PCS parameters written into the rate.
-fn alg_config<P>(params: PcsParams, perm: P) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
+fn alg_config<P>(
+    params: PcsParams,
+    perm: P,
+    relation_digest: RelationDigest,
+) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
 where
     P: CryptographicPermutation<[Felt; SPONGE_WIDTH]> + Copy,
 {
     let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
     let mut state = [Felt::ZERO; SPONGE_WIDTH];
-    state[CAPACITY_RANGE].copy_from_slice(&RELATION_DIGEST);
+    state[CAPACITY_RANGE].copy_from_slice(&relation_digest);
     let challenger = DuplexChallenger {
         sponge_state: state,
         input_buffer: vec![],
@@ -285,14 +292,17 @@ type BlakeLmcs = LmcsConfig<
 type BlakeChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Blake3Hasher, BLAKE_DIGEST_SIZE>>;
 
-/// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, BlakeChallenger> {
+/// Concrete STARK configuration type for Blake3.
+pub type Blake3Config = MidenStarkConfig<BlakeLmcs, BlakeChallenger>;
+
+/// Creates a Blake3_256-based STARK configuration bound to `relation_digest`.
+pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> Blake3Config {
     let lmcs = LmcsConfig::new(
         ChainingHasher::new(Blake3Hasher),
         CompressionFunctionFromHasher::new(Blake3Hasher),
     );
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
-    challenger.observe_slice(&RELATION_DIGEST);
+    challenger.observe_slice(&relation_digest);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
@@ -325,17 +335,20 @@ type KeccakLmcs = LmcsConfig<
 type KeccakChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, KECCAK_CHALLENGER_DIGEST_SIZE>>;
 
+/// Concrete STARK configuration type for Keccak.
+pub type KeccakConfig = MidenStarkConfig<KeccakLmcs, KeccakChallenger>;
+
 /// Creates a Keccak-based STARK configuration.
 ///
 /// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
 /// for SIMD parallelization.
-pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakChallenger> {
+pub fn keccak_config(params: PcsParams, relation_digest: RelationDigest) -> KeccakConfig {
     let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
     let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
     let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));
     let lmcs = LmcsConfig::new(sponge, compress);
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
-    challenger.observe_slice(&RELATION_DIGEST);
+    challenger.observe_slice(&relation_digest);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
