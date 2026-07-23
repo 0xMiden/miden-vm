@@ -901,6 +901,17 @@ fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
 }
 
 #[test]
+fn initial_package_resume_context_tracks_manifest_entrypoint_source_node() {
+    let fixture = same_digest_entrypoint_fixture(vec![Operation::Add], "add");
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let resume_context = processor
+        .get_initial_resume_context_for_package(fixture.package)
+        .expect("package resume context should initialize");
+
+    assert_eq!(resume_context.next_source_node_id(), Some(fixture.entrypoint_source_node_id),);
+}
+
+#[test]
 fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
@@ -1095,6 +1106,7 @@ fn external_then_fail_program_for_digest(
 }
 
 struct SameDigestEntrypointFixture {
+    package: Arc<Package>,
     program: Program,
     debug_info: PackageDebugInfo,
     entrypoint_source_node_id: DebugSourceNodeId,
@@ -1178,6 +1190,7 @@ fn same_digest_entrypoint_fixture(
     assert_eq!(entrypoint_source_node_id, source_alias_b);
 
     SameDigestEntrypointFixture {
+        package: Arc::new(executable.clone()),
         program: executable.unwrap_program(),
         debug_info: executable.debug_info().unwrap().unwrap(),
         entrypoint_source_node_id,

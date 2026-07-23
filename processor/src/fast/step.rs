@@ -40,6 +40,13 @@ impl ResumeContext {
         self.package_debug_info.clone()
     }
 
+    /// Returns the source/debug occurrence associated with the next continuation, if available.
+    pub fn next_source_node_id(&self) -> Option<DebugSourceNodeId> {
+        self.continuation_stack
+            .peek_continuation_with_source_node_id()
+            .and_then(|(_, source_node_id)| source_node_id)
+    }
+
     /// Returns a reference to the kernel being currently executed.
     pub fn kernel(&self) -> &KernelDescriptor {
         &self.kernel

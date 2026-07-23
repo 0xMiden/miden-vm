@@ -1644,6 +1644,41 @@ mod tests {
     }
 
     #[test]
+    fn test_source_graph_uses_full_merged_occurrence_as_control_flow_child() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
+        let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "mul"));
+        let first_block_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .unwrap();
+        let second_block_ref = builder
+            .ensure_block_ref(vec![Operation::Mul], vec![(0, second_asm_op)], vec![])
+            .unwrap();
+        let merged_ref =
+            builder.merge_basic_block_refs(&[first_block_ref, second_block_ref]).unwrap()[0];
+        let external_ref = builder
+            .ensure_external_link_with_source_ref(test_word(1), None, None, None)
+            .unwrap();
+        let root_ref = builder.join_node_refs(vec![merged_ref, external_ref], None).unwrap();
+        record_test_root(&mut builder, root_ref);
+
+        let (_, _, source_graph, _) = builder.build().unwrap().into_parts_with_source_graph();
+        let root = source_graph.roots()[0];
+        let merged_child = &source_graph.nodes()[source_graph.nodes()[root].children()[0]];
+
+        assert_eq!((merged_child.op_start(), merged_child.op_end()), (0, 2));
+        assert_eq!(
+            merged_child
+                .asm_ops()
+                .iter()
+                .map(|(_, asm_op)| asm_op.context_name())
+                .collect::<Vec<_>>(),
+            vec!["merge::first", "merge::second"],
+        );
+    }
+
+    #[test]
     fn test_source_graph_preserves_repeated_deduped_block_ranges_in_merge_window() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 

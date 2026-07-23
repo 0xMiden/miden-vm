@@ -302,10 +302,19 @@ impl FastProcessor {
         &mut self,
         package: Arc<Package>,
     ) -> Result<ResumeContext, ExecutionError> {
+        let entrypoint_source_node_id = package.entrypoint_source_node();
         let program = package.unwrap_program();
         let package_debug_info = package.debug_info()?.map(Arc::new);
         let current_forest = program.mast_forest().clone();
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        let continuation_stack = match package_debug_info.as_deref() {
+            Some(debug_info) => Self::source_aware_continuation_stack(
+                &program,
+                debug_info,
+                entrypoint_source_node_id,
+            )?,
+            None => ContinuationStack::new(&program),
+        };
 
         let entrypoint_source_node_id = package.entrypoint_source_node();
         let continuation_stack = if let Some(debug_info) = package_debug_info.as_deref() {
