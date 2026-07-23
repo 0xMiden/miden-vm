@@ -102,6 +102,96 @@ fn ace_simple_circuit_with_shared_terms() {
 }
 
 #[test]
+fn compact_removes_dead_nodes() {
+    // add(const_3, const_5) folds to const_8, leaving const_3 and const_5
+    // orphaned since nothing else references them.
+    let layout = minimal_layout(1);
+
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let three = builder.constant(QuadFelt::from(Felt::new_unchecked(3)));
+    let five = builder.constant(QuadFelt::from(Felt::new_unchecked(5)));
+    let eight = builder.add(three, five);
+    let root = builder.mul(a, eight);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    let after = dag.nodes().len();
+
+    assert!(
+        after < before,
+        "compact should remove dead nodes: before={before}, after={after}"
+    );
+    // Only Input(Public(0)), Constant(8), and the Mul remain reachable.
+    assert_eq!(after, 3);
+
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    // Without compaction the orphaned Constant(3) and Constant(5) would still be
+    // deduplicated into the emitted circuit's constant pool alongside Constant(8).
+    assert_eq!(
+        circuit.constants.len(),
+        1,
+        "orphaned constants must not reach the emitted circuit"
+    );
+
+    let a_val = QuadFelt::from(Felt::new_unchecked(2));
+    let inputs = build_inputs(&layout, &[(InputKey::Public(0), a_val)]);
+    let result = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(result, a_val * QuadFelt::from(Felt::new_unchecked(8)));
+}
+
+#[test]
+fn compact_removes_dead_operation_subtree() {
+    // A Mul built on top of `root` but never wired into anything else is a dead
+    // subtree: compaction must drop it, not just fold away dead constants.
+    let layout = minimal_layout(2);
+
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let b = builder.input(InputKey::Public(1));
+    let root = builder.add(a, b);
+    let _dead = builder.mul(root, b);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    let after = dag.nodes().len();
+
+    assert!(
+        after < before,
+        "compact should remove the dead Mul subtree: before={before}, after={after}"
+    );
+    // Only Input(Public(0)), Input(Public(1)), and the Add remain reachable.
+    assert_eq!(after, 3);
+
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    // Without compaction the dead Mul would still be emitted as a second operation.
+    assert_eq!(circuit.operations.len(), 1, "dead Mul must not reach the emitted circuit");
+
+    let a_val = QuadFelt::from(Felt::new_unchecked(4));
+    let b_val = QuadFelt::from(Felt::new_unchecked(9));
+    let inputs =
+        build_inputs(&layout, &[(InputKey::Public(0), a_val), (InputKey::Public(1), b_val)]);
+    let result = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(result, a_val + b_val);
+}
+
+#[test]
+fn compact_preserves_already_compact_dag() {
+    // A DAG with no dead nodes must be unchanged by compaction.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let b = builder.input(InputKey::Public(1));
+    let root = builder.add(a, b);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    assert_eq!(dag.nodes().len(), before);
+}
+
+#[test]
 fn ace_encoding_rejects_non_final_root() {
     let layout = minimal_layout(2);
 
