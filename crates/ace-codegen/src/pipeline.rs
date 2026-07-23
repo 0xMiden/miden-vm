@@ -8,7 +8,7 @@
 use miden_crypto::{
     field::{Algebra, ExtensionField, Field, TwoAdicField},
     stark::air::{
-        LiftedAir,
+        BaseAir, LiftedAir,
         symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
     },
 };
@@ -85,6 +85,60 @@ where
     }
 
     let periodic_columns = air.periodic_columns();
+    let shared_period = max_period(&periodic_columns);
+    build_ace_dag_for_air_with_periodic_columns(air, config, periodic_columns, shared_period)
+}
+
+/// Build verifier-equivalent DAGs and layouts for the provided AIRs.
+#[allow(dead_code)]
+pub(crate) fn build_ace_dags_for_airs<A, F, EF>(
+    airs: &[A],
+    config: AceConfig,
+) -> Result<Vec<AceArtifacts<EF>>, AceError>
+where
+    A: LiftedAir<F, EF>,
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+{
+    if config.num_airs == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "num_airs must be at least 1".into(),
+        });
+    }
+
+    let periodic_columns_by_air: Vec<_> = airs.iter().map(BaseAir::periodic_columns).collect();
+    let shared_period = periodic_columns_by_air
+        .iter()
+        .map(|columns| max_period(columns))
+        .max()
+        .unwrap_or(1);
+
+    airs.iter()
+        .zip(periodic_columns_by_air)
+        .map(|(air, periodic_columns)| {
+            build_ace_dag_for_air_with_periodic_columns(
+                air,
+                config,
+                periodic_columns,
+                shared_period,
+            )
+        })
+        .collect()
+}
+
+fn build_ace_dag_for_air_with_periodic_columns<A, F, EF>(
+    air: &A,
+    config: AceConfig,
+    periodic_columns: Vec<Vec<F>>,
+    shared_period: usize,
+) -> Result<AceArtifacts<EF>, AceError>
+where
+    A: LiftedAir<F, EF>,
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+{
     let counts = input_counts_for_air::<A, F, EF>(air, config)?;
     let layout = match (config.layout, config.num_airs >= 2) {
         (LayoutKind::Native, false) => InputLayout::new(counts),
@@ -110,16 +164,21 @@ where
     let ext_constraints = builder.extension_constraints();
 
     let periodic_data = (!periodic_columns.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns.to_vec()));
+        .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns));
     let dag = build_verifier_dag::<F, EF>(
         &base_constraints,
         &ext_constraints,
         &constraint_layout,
         &layout,
         periodic_data.as_ref(),
+        shared_period,
     );
 
     Ok(AceArtifacts { layout, dag })
+}
+
+fn max_period<F>(periodic_columns: &[Vec<F>]) -> usize {
+    periodic_columns.iter().map(Vec::len).max().unwrap_or(1)
 }
 
 fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>

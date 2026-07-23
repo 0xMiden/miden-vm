@@ -32,9 +32,10 @@ pub enum InputKey {
     Reserved,
     /// Composition challenge used to fold constraints.
     Alpha,
-    /// `zeta^N`, where `N` is the trace length.
+    /// `zeta^N_max`, where `N_max` is the maximum trace length represented by the circuit.
     ZPowN,
-    /// `zeta^(N / max_cycle_len)` for periodic columns.
+    /// Periodic-column evaluation basis `zeta^(N_max / shared_period)`.
+    /// A period-`p` column is evaluated at `ZK^(shared_period / p)`.
     ZK,
     /// Precomputed first-row selector: `(z^N - 1) / (z - 1)`.
     IsFirst,

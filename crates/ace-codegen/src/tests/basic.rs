@@ -12,8 +12,10 @@ use miden_crypto::{
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit, dag::NodeKind,
-    pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, InputLayout, LayoutKind,
+    circuit::emit_circuit,
+    dag::NodeKind,
+    pipeline::{build_ace_dag_for_air, build_ace_dags_for_airs},
 };
 
 // Base and extension field types for tests.
@@ -21,6 +23,51 @@ type F = Felt;
 type EF = QuadFelt;
 
 struct MockAir;
+
+struct PeriodicAir {
+    period: usize,
+}
+
+impl BaseAir<F> for PeriodicAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Vec<Vec<F>> {
+        let mut column = vec![Felt::ZERO; self.period];
+        column[1] = Felt::ONE;
+        vec![column]
+    }
+}
+
+impl LiftedAir<F, EF> for PeriodicAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        0
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        unimplemented!("periodic lowering test does not build traces")
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let periodic: AB::Expr = builder.periodic_values()[0].into();
+        builder.assert_zero(periodic);
+    }
+}
 
 impl BaseAir<F> for MockAir {
     fn width(&self) -> usize {
@@ -229,6 +276,45 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 1 }, ef(7));
 
     inputs
+}
+
+#[test]
+fn mixed_air_periods_use_one_derived_shared_period() {
+    let airs = [PeriodicAir { period: 4 }, PeriodicAir { period: 32 }];
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Native,
+        num_airs: 1,
+    };
+    let artifacts = build_ace_dags_for_airs::<_, F, EF>(&airs, config).unwrap();
+    let shared_period = airs
+        .iter()
+        .flat_map(BaseAir::periodic_columns)
+        .map(|column| column.len())
+        .max()
+        .unwrap();
+    assert_eq!(shared_period, 32);
+
+    let z_k = ef(3);
+    for (air, artifacts) in airs.iter().zip(&artifacts) {
+        let mut inputs = vec![EF::ZERO; artifacts.layout.total_inputs];
+        inputs[artifacts.layout.index(InputKey::ZK).unwrap()] = z_k;
+
+        let ratio = shared_period / air.period;
+        let mut column_point = z_k;
+        for _ in 0..ratio.ilog2() {
+            column_point *= column_point;
+        }
+        let expected = eval_periodic_values(&air.periodic_columns(), column_point)[0];
+        let actual =
+            eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &artifacts.layout);
+        assert_eq!(actual, expected, "period-{} AIR", air.period);
+
+        if air.period < shared_period {
+            let incorrectly_local = eval_periodic_values(&air.periodic_columns(), z_k)[0];
+            assert_ne!(actual, incorrectly_local, "regression must distinguish local lowering");
+        }
+    }
 }
 
 #[test]
