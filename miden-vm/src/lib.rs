@@ -9,7 +9,10 @@ pub use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics,
 };
-pub use miden_core::proof::{ExecutionProof, HashFunction};
+pub use miden_core::{
+    program::ExecutionClaim,
+    proof::{ExecutionProof, HashFunction},
+};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
@@ -21,7 +24,7 @@ pub use miden_processor::{
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::{prove_from_trace_sync, prove_sync};
-pub use miden_verifier::VerificationError;
+pub use miden_verifier::{Unsettled, VerificationError, settle, verify_unsettled};
 
 // (private) exports
 // ================================================================================================
@@ -29,33 +32,9 @@ pub use miden_verifier::VerificationError;
 #[cfg(feature = "internal")]
 pub mod internal;
 
-/// Verifies a Miden proof.
+/// Verifies a fully settled Miden proof of the given execution claim.
 ///
 /// See [miden_verifier::verify] for more details.
-pub fn verify(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
-}
-
-/// Verifies a Miden proof using an explicit deferred-state verifier budget.
-///
-/// See [miden_verifier::verify_with_max_deferred_elements] for more details.
-pub fn verify_with_max_deferred_elements(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    max_deferred_elements: usize,
-) -> Result<u32, VerificationError> {
-    miden_verifier::verify_with_max_deferred_elements(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        max_deferred_elements,
-    )
+pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
+    miden_verifier::verify(proof, claim)
 }

@@ -26,7 +26,7 @@ pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
+    program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
@@ -657,9 +657,11 @@ impl Test {
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
+            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            assert!(verify(proof, claim).is_err());
         } else {
-            let result = verify(program_info, stack_inputs, stack_outputs, proof);
+            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            let result = verify(proof, claim);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }

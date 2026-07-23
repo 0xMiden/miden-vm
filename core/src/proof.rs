@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::DeferredStateWire,
+    deferred::{DeferredRoot, DeferredStateWire},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -22,16 +22,19 @@ use crate::{
 
 /// A proof of correct execution of Miden VM.
 ///
-/// The proof contains the STARK proof, the hash function used during proof generation, and the
-/// deferred-state wire opening needed to rehydrate the deferred DAG under a verifier-supplied
-/// precompile registry. However, the proof does not contain public inputs needed to verify the
+/// The proof contains the STARK proof, the hash function used during proof generation, the
+/// deferred root the statement binds, and (optionally) the settlement evidence needed to
+/// discharge that root. The proof does not contain the public inputs needed to verify the
 /// STARK proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
-    pub deferred_state: DeferredStateWire,
+    /// The deferred root bound by the proof's statement.
+    pub deferred_root: DeferredRoot,
+    /// Native settlement evidence for the deferred root, if the package carries any.
+    pub settlement: Option<DeferredStateWire>,
 }
 
 impl ExecutionProof {
@@ -39,13 +42,19 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// and deferred-state wire opening.
+    /// deferred root, and optional settlement evidence.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
-        deferred_state: DeferredStateWire,
+        deferred_root: DeferredRoot,
+        settlement: Option<DeferredStateWire>,
     ) -> Self {
-        Self { proof, hash_fn, deferred_state }
+        Self {
+            proof,
+            hash_fn,
+            deferred_root,
+            settlement,
+        }
     }
 
     // PUBLIC ACCESSORS
@@ -61,9 +70,14 @@ impl ExecutionProof {
         self.hash_fn
     }
 
-    /// Returns the deferred-state wire opening carried by this proof.
-    pub const fn deferred_state(&self) -> &DeferredStateWire {
-        &self.deferred_state
+    /// Returns the deferred root bound by this proof's statement.
+    pub const fn deferred_root(&self) -> DeferredRoot {
+        self.deferred_root
+    }
+
+    /// Returns the settlement evidence carried by this proof, if any.
+    pub const fn settlement(&self) -> Option<&DeferredStateWire> {
+        self.settlement.as_ref()
     }
 
     /// Returns conjectured security level of this proof in bits.
@@ -97,9 +111,9 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the hash function, proof bytes, and deferred-state wire opening.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredStateWire) {
-        (self.hash_fn, self.proof, self.deferred_state)
+    /// Returns the hash function, proof bytes, deferred root, and settlement evidence.
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredRoot, Option<DeferredStateWire>) {
+        (self.hash_fn, self.proof, self.deferred_root, self.settlement)
     }
 }
 
@@ -209,7 +223,8 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.deferred_state.write_into(target);
+        self.deferred_root.write_into(target);
+        self.settlement.write_into(target);
     }
 }
 
@@ -217,9 +232,15 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let deferred_state = DeferredStateWire::read_from(source)?;
+        let deferred_root = DeferredRoot::read_from(source)?;
+        let settlement = Option::<DeferredStateWire>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, deferred_state })
+        Ok(ExecutionProof {
+            proof,
+            hash_fn,
+            deferred_root,
+            settlement,
+        })
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -252,7 +273,8 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Vec::new(),
             hash_fn: HashFunction::Blake3_256,
-            deferred_state: DeferredStateWire::default(),
+            deferred_root: DeferredRoot::default(),
+            settlement: Some(DeferredStateWire::default()),
         }
     }
 }
@@ -297,7 +319,8 @@ mod tests {
         let proof = ExecutionProof::new(
             alloc::vec![1, 2, 3],
             HashFunction::Blake3_256,
-            DeferredStateWire::default(),
+            DeferredRoot::default(),
+            Some(DeferredStateWire::default()),
         );
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
@@ -322,8 +345,12 @@ mod tests {
                 WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
             ],
         };
-        let proof =
-            ExecutionProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
+        let proof = ExecutionProof::new(
+            alloc::vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            DeferredRoot::default(),
+            Some(deferred_wire),
+        );
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
 
@@ -349,6 +376,8 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
         bytes.write_u8(HashFunction::Blake3_256 as u8);
+        DeferredRoot::default().write_into(&mut bytes);
+        bytes.write_u8(1); // Option::Some tag for the settlement evidence
         bytes.write_usize(2);
 
         let budget = bytes.len() + 1;
@@ -358,5 +387,17 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("requested 2 elements"));
+    }
+
+    #[test]
+    fn execution_proof_round_trips_with_and_without_settlement() {
+        let with_evidence = ExecutionProof::new_dummy();
+        let bytes = with_evidence.to_bytes();
+        assert_eq!(ExecutionProof::from_bytes(&bytes).unwrap(), with_evidence);
+
+        let mut pass_through = ExecutionProof::new_dummy();
+        pass_through.settlement = None;
+        let bytes = pass_through.to_bytes();
+        assert_eq!(ExecutionProof::from_bytes(&bytes).unwrap(), pass_through);
     }
 }

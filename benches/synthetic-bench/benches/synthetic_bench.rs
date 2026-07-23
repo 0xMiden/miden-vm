@@ -370,8 +370,15 @@ fn bench_one_scenario(
                 || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
                 |(program_info, stack_inputs, stack_outputs, proof)| {
                     black_box(
-                        miden_vm::verify(program_info, stack_inputs, stack_outputs, proof)
-                            .expect("verify"),
+                        miden_vm::verify(
+                            proof,
+                            miden_vm::ExecutionClaim::new(
+                                program_info,
+                                stack_inputs,
+                                stack_outputs,
+                            ),
+                        )
+                        .expect("verify"),
                     );
                 },
                 BatchSize::SmallInput,

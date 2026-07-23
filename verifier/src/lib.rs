@@ -16,15 +16,17 @@ use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = miden_core::deferred::DEFAULT_MAX_DEFERRED_ELEMENTS;
 
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
         Word,
-        deferred::{DeferredState, IntegrityError},
-        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+        deferred::{
+            DEFAULT_MAX_DEFERRED_ELEMENTS, DeferredRoot, DeferredState, DeferredStateWire,
+            IntegrityError,
+        },
+        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
     pub mod math {
@@ -36,84 +38,104 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs.
+/// An undischarged deferred obligation returned by [`verify_unsettled`].
 ///
-/// Specifically, verifies that if a program with the specified `program_hash` is executed against
-/// the provided `stack_inputs` and some secret inputs, the result is equal to the `stack_outputs`.
-///
-/// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
-/// Thus, their expected order on the stack will be the reverse of the order in which they are
-/// provided, and the last value in the `stack_inputs` slice is expected to be the value at the top
-/// of the stack.
-///
-/// Stack outputs are expected to be ordered as if they would be popped off the stack one by one.
-/// Thus, the value at the top of the stack is expected to be in the first position of the
-/// `stack_outputs` slice, and the order of the rest of the output elements will also match the
-/// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
-///
-/// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within the
-///   default deferred-state verifier budget.
-pub fn verify(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    verify_with_max_deferred_elements(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        DEFAULT_MAX_DEFERRED_ELEMENTS,
-    )
+/// Holds the deferred root the verified proof bound. There is no public constructor: the only
+/// way to obtain one is verifying a proof, and the intended ways to dispose of it are [`settle`]
+/// or explicitly re-exposing the root in the caller's own statement.
+#[must_use = "an unsettled deferred obligation must be settled or explicitly re-exposed"]
+#[derive(Debug)]
+pub struct Unsettled(DeferredRoot);
+
+impl Unsettled {
+    /// Returns the deferred root of this obligation.
+    pub const fn deferred_root(&self) -> DeferredRoot {
+        self.0
+    }
 }
 
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs, using an explicit deferred-state verifier budget.
+/// Verifies a fully settled proof of the given execution claim and returns its security level.
 ///
-/// Use this when verifying proofs produced with a non-default deferred-state execution budget.
+/// The proof package must carry settlement evidence; the STARK proof is verified against the
+/// claim and the package's deferred root, and the evidence is then verified to discharge that
+/// root under the built-in precompile registry and the default deferred-state budget.
 ///
 /// # Errors
 /// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof's deferred wire does not rehydrate under the built-in precompile registry within
-///   `max_deferred_elements`.
-pub fn verify_with_max_deferred_elements(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    max_deferred_elements: usize,
-) -> Result<u32, VerificationError> {
+/// - The package carries no settlement evidence (use [`verify_unsettled`] instead).
+/// - The proof does not prove a correct execution of the claim.
+/// - The settlement evidence does not discharge the proof's deferred root.
+pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
-    let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
+    let (hash_fn, proof_bytes, deferred_root, settlement) = proof.into_parts();
+    let wire = settlement.ok_or(VerificationError::MissingSettlementEvidence)?;
 
-    let state = DeferredState::from_wire(
-        Arc::new(miden_precompiles::registry()),
-        &deferred_wire,
-        max_deferred_elements,
-    )?;
-
-    verify_stark(program_info, stack_inputs, stack_outputs, state.root(), hash_fn, proof_bytes)?;
+    verify_stark(claim, deferred_root, hash_fn, proof_bytes)?;
+    settle_root(deferred_root, &wire, DEFAULT_MAX_DEFERRED_ELEMENTS)?;
 
     Ok(security_level)
+}
+
+/// Verifies only the VM STARK proof of the given execution claim, returning its security level
+/// and the deferred obligation the proof bound.
+///
+/// The obligation must then be discharged with [`settle`] or explicitly re-exposed in the
+/// caller's own statement; it must not be dropped.
+///
+/// # Errors
+/// Returns an error if the proof does not prove a correct execution of the claim.
+pub fn verify_unsettled(
+    proof: ExecutionProof,
+    claim: ExecutionClaim,
+) -> Result<(u32, Unsettled), VerificationError> {
+    let security_level = proof.security_level();
+    let (hash_fn, proof_bytes, deferred_root, _settlement) = proof.into_parts();
+
+    verify_stark(claim, deferred_root, hash_fn, proof_bytes)?;
+
+    Ok((security_level, Unsettled(deferred_root)))
+}
+
+/// Discharges a deferred obligation with native request-replay evidence, using an explicit
+/// deferred-state budget.
+///
+/// # Errors
+/// Returns an error if the evidence fails the deferred-DAG integrity checks or does not
+/// discharge the obligation's root.
+pub fn settle(
+    pending: Unsettled,
+    evidence: &DeferredStateWire,
+    max_deferred_elements: usize,
+) -> Result<(), VerificationError> {
+    settle_root(pending.0, evidence, max_deferred_elements)
 }
 
 // HELPER FUNCTIONS
 // ================================================================================================
 
+fn settle_root(
+    deferred_root: DeferredRoot,
+    evidence: &DeferredStateWire,
+    max_deferred_elements: usize,
+) -> Result<(), VerificationError> {
+    let state = DeferredState::from_wire(
+        Arc::new(miden_precompiles::registry()),
+        evidence,
+        max_deferred_elements,
+    )?;
+    if state.root() != deferred_root {
+        return Err(VerificationError::DeferredRootMismatch);
+    }
+    Ok(())
+}
+
 fn verify_stark(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
+    claim: ExecutionClaim,
     final_deferred_root: Word,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
+    let (program_info, stack_inputs, stack_outputs) = claim.into_parts();
     let program_hash = *program_info.program_hash();
 
     let pub_inputs =
@@ -158,6 +180,10 @@ pub enum VerificationError {
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("deferred-DAG integrity check failed: {0}")]
     DeferredIntegrity(#[from] IntegrityError),
+    #[error("proof carries no settlement evidence; use verify_unsettled")]
+    MissingSettlementEvidence,
+    #[error("settlement evidence does not discharge the proof's deferred root")]
+    DeferredRootMismatch,
 }
 
 // STARK PROOF VERIFICATION

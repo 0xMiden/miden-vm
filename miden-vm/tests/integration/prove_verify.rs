@@ -3,14 +3,14 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{deferred::DeferredState, proof::ExecutionProof};
+use miden_core::{deferred::DeferredState, program::ExecutionClaim, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
 use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
-use miden_verifier::verify;
+use miden_verifier::{VerificationError, settle, verify, verify_unsettled};
 use miden_vm::{DefaultHost, HashFunction};
 
 fn assert_prove_verify(
@@ -51,8 +51,8 @@ fn assert_prove_verify(
     }
 
     println!("Verifying proof...");
-    let security_level =
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+    let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+    let security_level = verify(proof, claim).expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
 }
@@ -67,7 +67,7 @@ fn assert_recursive_verify(
 
     let deferred_state = DeferredState::from_wire(
         Arc::new(miden_precompiles::registry()),
-        proof.deferred_state(),
+        proof.settlement().expect("prover packages carry settlement evidence"),
         usize::MAX,
     )
     .expect("deferred wire should rehydrate under official precompiles");
@@ -265,7 +265,10 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{ExecutionProof, HashFunction};
+    use miden_core::{
+        program::ExecutionClaim,
+        proof::{ExecutionProof, HashFunction},
+    };
     use miden_processor::{
         DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
         trace::build_trace,
@@ -351,16 +354,22 @@ mod fast_parallel {
         )
         .expect("Proving failed");
 
+        let deferred_root = trace.deferred_state().root();
         let deferred_wire = trace
             .deferred_state()
             .to_wire()
             .expect("deferred state should serialize to wire");
 
-        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_wire);
+        let proof = ExecutionProof::new(
+            proof_bytes,
+            HashFunction::Blake3_256,
+            deferred_root,
+            Some(deferred_wire),
+        );
 
         // Verify the proof
-        verify(program.into(), stack_inputs, fast_stack_outputs, proof)
-            .expect("Verification failed");
+        let claim = ExecutionClaim::new(program.into(), stack_inputs, fast_stack_outputs);
+        verify(proof, claim).expect("Verification failed");
     }
 
     #[test]
@@ -389,7 +398,8 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+        verify(proof, claim).expect("Verification failed");
     }
 
     #[test]
@@ -419,7 +429,63 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        assert_eq!(proof.deferred_state(), &expected_wire);
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        assert_eq!(proof.settlement(), Some(&expected_wire));
+        let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+        verify(proof, claim).expect("Verification failed");
     }
+}
+
+/// Proves a trivial program and returns the claim/proof pair for API-surface tests.
+fn prove_fixture() -> (ExecutionClaim, ExecutionProof) {
+    let program = Assembler::default()
+        .assemble_program("program", "begin push.1 push.2 add swap drop end")
+        .unwrap()
+        .unwrap_program();
+    let stack_inputs = stack_inputs_from_ints([0, 1]);
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+        ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
+    )
+    .expect("Proving failed");
+    (ExecutionClaim::new(program.into(), stack_inputs, stack_outputs), proof)
+}
+
+/// `verify` must refuse a package without settlement evidence; the same package verifies
+/// through `verify_unsettled` + `settle`.
+#[test]
+fn test_unsettled_obligation_flow() {
+    let (claim, proof) = prove_fixture();
+
+    // strip the settlement evidence: a pass-through package
+    let wire = proof.settlement().expect("prover packages carry evidence").clone();
+    let mut pass_through = proof.clone();
+    pass_through.settlement = None;
+
+    assert!(matches!(
+        verify(pass_through.clone(), claim.clone()),
+        Err(VerificationError::MissingSettlementEvidence)
+    ));
+
+    // the unsettled path returns the obligation, which settles against the evidence
+    let (_, pending) = verify_unsettled(pass_through, claim.clone()).expect("STARK should verify");
+    settle(pending, &wire, miden_verifier::DEFAULT_MAX_DEFERRED_ELEMENTS)
+        .expect("evidence should discharge the obligation");
+
+    // the settled path accepts the full package
+    verify(proof, claim).expect("settled verification should pass");
+}
+
+/// The deferred root is statement-bound: a tampered root must fail STARK verification.
+#[test]
+fn test_deferred_root_is_statement_bound() {
+    let (claim, mut proof) = prove_fixture();
+    proof.deferred_root =
+        miden_core::chiplets::hasher::hash_elements(&[miden_core::Felt::new_unchecked(42)]);
+    assert!(verify_unsettled(proof, claim).is_err());
 }

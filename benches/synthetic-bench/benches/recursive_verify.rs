@@ -466,7 +466,8 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 }
                 (stack_outputs, proof, "miss")
             };
-            let deferred_entries = proof.deferred_state().entries.len();
+            let deferred_entries =
+                proof.settlement().expect("prover packages carry evidence").entries.len();
             assert_eq!(
                 deferred_entries, 0,
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \

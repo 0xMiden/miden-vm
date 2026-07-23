@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
+    deferred::{DeferredRoot, DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
@@ -311,8 +311,12 @@ fn generate_fuzz_seeds() {
 
     // Execution proof seed (minimal)
     {
-        let proof =
-            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
+        let proof = ExecutionProof::new(
+            Vec::new(),
+            HashFunction::Rpo256,
+            DeferredRoot::default(),
+            Some(DeferredStateWire::default()),
+        );
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
 
@@ -344,7 +348,12 @@ fn generate_fuzz_seeds() {
                 })
                 .collect(),
         };
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
+        let proof = ExecutionProof::new(
+            vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            DeferredRoot::default(),
+            Some(deferred_wire),
+        );
         write_seed(
             "execution_proof_deserialize",
             "many_minimal_deferred_wire_entries.bin",

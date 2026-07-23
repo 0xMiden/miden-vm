@@ -310,7 +310,7 @@ pub fn generate_recursive_verifier_data(
     // proof-carried deferred wire instead of assuming TRUE.
     let deferred_state = DeferredState::from_wire(
         Arc::new(PrecompileRegistry::new()),
-        proof.deferred_state(),
+        proof.settlement().expect("prover packages carry settlement evidence"),
         usize::MAX,
     )
     .unwrap();

@@ -134,6 +134,7 @@ fn prove_execution_trace(
 
     let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
+    let deferred_root = trace.deferred_state().root();
     let deferred_wire = trace
         .deferred_state()
         .to_wire()
@@ -206,7 +207,7 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_root, Some(deferred_wire));
 
     Ok((stack_outputs, proof))
 }
