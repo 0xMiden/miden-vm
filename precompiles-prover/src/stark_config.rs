@@ -192,9 +192,10 @@ mod tests {
         let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
-            "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
+            "num_inputs: {}\nnum_eval_gates: {}\nstream_len: {}\nrelation_digest: {:?}",
             encoded.num_vars(),
             encoded.num_eval_rows(),
+            encoded.size_in_felt(),
             expected,
         );
         insta::assert_snapshot!(snapshot);
