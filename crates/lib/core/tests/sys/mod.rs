@@ -120,8 +120,7 @@ fn claim_hash_matches_native_execution_claim_commitment() {
 }
 
 /// The MASM `poseidon2::hash_elements_in_domain` must agree with the native implementation for
-/// rate-aligned, unaligned, and empty inputs. The kernel domain tag case binds the value baked
-/// into `public_inputs.masm` to `KernelDescriptor::commitment`.
+/// rate-aligned, unaligned, and empty inputs, exercising the kernel commitment's domain.
 #[test]
 fn hash_elements_in_domain_matches_native() {
     use miden_core::{Felt, chiplets::hasher};

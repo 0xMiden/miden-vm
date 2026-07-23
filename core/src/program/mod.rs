@@ -13,7 +13,7 @@ use crate::{
 };
 
 mod claim;
-pub use claim::{CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS};
+pub use claim::{CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS, claim_commitment};
 
 pub mod domain;
 

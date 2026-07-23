@@ -15,7 +15,7 @@
 //! offset 24..40   O  StackOutputs, 16 felts   (canonical zero-padded, native order)
 //! ```
 //!
-//! The code context comes first so that callsites which pin `(P, K)` can resume the claim hash
+//! The code context comes first so that callsites that pin `(P, K)` can resume the claim hash
 //! from a precomputed sponge state; 40 elements is exactly five Poseidon2 rate blocks, so no
 //! padding block is absorbed and both read points (the `(P, K)` prefix state and the claim
 //! commitment) fall on permutation boundaries.
@@ -26,12 +26,10 @@
 //! domain tag rides in the second capacity element while the first carries the Sponge2 padding
 //! rule of <https://eprint.iacr.org/2024/911> (here `40 % 8 = 0`).
 //!
-//! The commitment is deliberately verifier-independent: no relation or verifier identity enters
-//! its preimage, so a claim can be named — for proof requests, or for binding into a consumer's
-//! own statement — without fixing which verifier will check it. Binding a claim to a concrete
-//! relation is the transcript's job, performed at seeding time by hashing the verifier's
-//! relation identity together with this commitment (and the deferred root), so the same claim
-//! name seeds distinct transcripts under distinct verifiers.
+//! The commitment is verifier-independent: no relation identity enters its preimage, so a claim
+//! can be named — for proof requests, or for binding into a consumer's statement — before any
+//! verifier is chosen. The transcript binds it to a relation at seeding time, absorbing this
+//! commitment together with the relation digest and the deferred root.
 
 use super::{
     ProgramInfo, StackInputs, StackOutputs,
@@ -108,8 +106,16 @@ impl ExecutionClaim {
     /// This is the verifier-independent name of the claim: the value used to request proof
     /// packages and to bind verified claims into a consumer's own statement.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements_in_domain(&self.to_elements(), CLAIM_DOMAIN_TAG)
+        claim_commitment(&self.to_elements())
     }
+}
+
+/// Returns the canonical claim commitment over an already-encoded claim.
+///
+/// This is the single implementation of `CLAIM_HASH`; every native computation of the claim
+/// commitment (including the transcript observation in `miden-air`) must go through it.
+pub fn claim_commitment(elements: &[Felt; NUM_CLAIM_ELEMENTS]) -> Word {
+    hasher::hash_elements_in_domain(elements, CLAIM_DOMAIN_TAG)
 }
 
 // TESTS
@@ -117,7 +123,10 @@ impl ExecutionClaim {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        super::{KERNEL_DOMAIN_TAG, KernelDescriptor},
+        *,
+    };
 
     fn test_claim() -> ExecutionClaim {
         let word = |a: u64| -> Word {
@@ -129,15 +138,15 @@ mod tests {
             ]
             .into()
         };
-        let kernel = super::super::KernelDescriptor::from_hashes(vec![word(100)]).unwrap();
+        let kernel = KernelDescriptor::from_hashes(vec![word(100)]).unwrap();
         let program_info = ProgramInfo::new(word(1), kernel);
         let inputs = StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6)]).unwrap();
         let outputs = StackOutputs::new(&[Felt::new_unchecked(7)]).unwrap();
         ExecutionClaim::new(program_info, inputs, outputs)
     }
 
-    /// One consolidated negative matrix: the selector value, per-field binding, I/O order
-    /// binding, and domain separation.
+    /// The commitment must bind every field and the I/O order, be domain-separated, and use
+    /// the registered selector.
     #[test]
     fn commitment_binds_fields_order_and_domain() {
         let base = test_claim();
@@ -153,7 +162,7 @@ mod tests {
 
         // mutate K (different kernel)
         let mut mutated = base.clone();
-        let new_kernel = super::super::KernelDescriptor::from_hashes(vec![
+        let new_kernel = KernelDescriptor::from_hashes(vec![
             [Felt::new_unchecked(200), ZERO, ZERO, ZERO].into(),
         ])
         .unwrap();
@@ -187,7 +196,7 @@ mod tests {
         );
         assert_ne!(
             base_commitment,
-            hasher::hash_elements_in_domain(&elements, super::super::KERNEL_DOMAIN_TAG),
+            hasher::hash_elements_in_domain(&elements, KERNEL_DOMAIN_TAG),
             "claim commitment must differ from a kernel-tagged hash of the same data"
         );
 
