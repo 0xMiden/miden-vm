@@ -2,16 +2,30 @@
 
 use alloc::sync::Arc;
 
-use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{deferred::DeferredState, proof::ExecutionProof};
+use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
+use miden_core::{
+    Felt,
+    deferred::{DeferredState, TRUE_DIGEST},
+    proof::{DeferredProof, ExecutionProof},
+    utils::bytes_to_packed_u32_elements,
+};
 use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
 use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
-use miden_verifier::verify;
+use miden_verifier::Verifier;
 use miden_vm::{DefaultHost, HashFunction};
+
+fn masm_push_felts(felts: &[Felt]) -> String {
+    felts
+        .iter()
+        .rev()
+        .map(|felt| format!("push.{}", felt.as_canonical_u64()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 fn assert_prove_verify(
     source: &str,
@@ -46,13 +60,16 @@ fn assert_prove_verify(
         println!("Stack outputs: {stack_outputs:?}");
     }
 
-    if verify_recursively {
-        assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
-    }
+    let proof = if verify_recursively {
+        assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, proof)
+    } else {
+        proof
+    };
 
     println!("Verifying proof...");
-    let security_level =
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+    let security_level = Verifier::new()
+        .verify(program.into(), stack_inputs, stack_outputs, proof)
+        .expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
 }
@@ -61,19 +78,26 @@ fn assert_recursive_verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    proof: &ExecutionProof,
-) {
-    assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
+    proof: ExecutionProof,
+) -> ExecutionProof {
+    let stark_proof = proof.miden_proof();
+    let deferred_proof = proof.deferred_proof();
+    assert_eq!(stark_proof.hash_fn(), HashFunction::Poseidon2);
 
-    let deferred_state = DeferredState::from_wire(
-        Arc::new(miden_precompiles::registry()),
-        proof.deferred_state(),
-        usize::MAX,
-    )
-    .expect("deferred wire should rehydrate under official precompiles");
+    let final_deferred_root = match deferred_proof {
+        DeferredProof::Empty => TRUE_DIGEST,
+        DeferredProof::Wire(wire) => {
+            DeferredState::from_wire(Arc::new(miden_precompiles::registry()), wire, usize::MAX)
+                .expect("deferred wire should rehydrate under official precompiles")
+                .root()
+        },
+        DeferredProof::Stark { .. } => {
+            panic!("recursive verifier does not support deferred STARK proofs")
+        },
+    };
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
-    let verifier_inputs = generate_advice_inputs(proof.stark_proof(), pub_inputs)
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
+    let verifier_inputs = generate_advice_inputs(stark_proof.bytes(), pub_inputs)
         .expect("recursive verifier advice construction failed");
 
     let source = "
@@ -125,6 +149,51 @@ fn assert_recursive_verify(
     );
     test.libraries.push(CoreLibrary::default().package());
     test.execute().expect("recursive verifier execution failed");
+
+    proof
+}
+
+#[test]
+fn test_keccak_precompile_wrapper_prove_verify_final() {
+    let core_lib = CoreLibrary::default();
+    let input: Vec<u8> = (0u8..32).collect();
+    let input = masm_push_felts(&bytes_to_packed_u32_elements(&input));
+    let source = format!(
+        "
+        begin
+            {input}
+            exec.::miden::core::crypto::hashes::keccak256::hash
+            dropw dropw
+        end
+        "
+    );
+    let program = Assembler::default()
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library")
+        .assemble_program("keccak_precompile_wrapper_test", &source)
+        .expect("failed to assemble Keccak precompile wrapper test")
+        .unwrap_program();
+    let stack_inputs = StackInputs::default();
+    let advice_inputs = AdviceInputs::default();
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load CoreLibrary into the host");
+
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
+    )
+    .expect("Keccak precompile wrapper should prove");
+
+    assert!(proof.is_final());
+    assert!(matches!(proof.deferred_proof(), DeferredProof::Stark { .. }));
+    Verifier::new()
+        .verify(program.into(), stack_inputs, stack_outputs, proof)
+        .expect("Verification failed");
 }
 
 #[test]
@@ -265,15 +334,16 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{ExecutionProof, HashFunction};
+    use miden_core::proof::{DeferredProof, ExecutionProof, HashFunction};
     use miden_processor::{
         DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
     use miden_prover::{
-        ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync, prove_stark,
+        ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync,
+        prove_partial_from_trace_sync, prove_stark,
     };
-    use miden_verifier::verify;
+    use miden_verifier::{VerificationError, Verifier};
     use miden_vm::{Program, TraceBuildInputs};
 
     /// Default fragment size for parallel trace generation
@@ -340,7 +410,8 @@ mod fast_parallel {
         let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.to_air_matrices();
 
         // Generate proof using Blake3_256
-        let blake3_config = config::blake3_256_config(config::pcs_params());
+        let blake3_config =
+            config::blake3_256_config(config::pcs_params(), config::RELATION_DIGEST);
         let proof_bytes = prove_stark(
             &blake3_config,
             core_matrix,
@@ -351,15 +422,14 @@ mod fast_parallel {
         )
         .expect("Proving failed");
 
-        let deferred_wire = trace
-            .deferred_state()
-            .to_wire()
-            .expect("deferred state should serialize to wire");
+        assert_eq!(trace.deferred_state().root(), miden_core::deferred::TRUE_DIGEST);
 
-        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_wire);
+        let proof =
+            ExecutionProof::from_parts(proof_bytes, HashFunction::Blake3_256, DeferredProof::Empty);
 
         // Verify the proof
-        verify(program.into(), stack_inputs, fast_stack_outputs, proof)
+        Verifier::new()
+            .verify(program.into(), stack_inputs, fast_stack_outputs, proof)
             .expect("Verification failed");
     }
 
@@ -389,11 +459,15 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        assert!(proof.is_final());
+        assert_eq!(proof.deferred_proof(), &DeferredProof::Empty);
+        Verifier::new()
+            .verify(program.into(), stack_inputs, stack_outputs, proof)
+            .expect("Verification failed");
     }
 
     #[test]
-    fn test_prove_from_trace_sync_preserves_deferred_wire() {
+    fn test_prove_partial_from_trace_sync_preserves_deferred_wire() {
         let source = "begin log_deferred end";
         let program = Assembler::default()
             .assemble_program("program", source)
@@ -404,6 +478,7 @@ mod fast_parallel {
         let mut host = default_source_manager_host();
         let trace_inputs =
             execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
+        let expected_deferred_root = trace_inputs.deferred_state().root();
         let expected_wire = trace_inputs
             .deferred_state()
             .to_wire()
@@ -413,13 +488,31 @@ mod fast_parallel {
             "log_deferred should advance the deferred root"
         );
 
-        let (stack_outputs, proof) = prove_from_trace_sync(TraceProvingInputs::new(
+        let (stack_outputs, proof) = prove_partial_from_trace_sync(TraceProvingInputs::new(
             trace_inputs,
             ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
         ))
-        .expect("prove_from_trace_sync failed");
+        .expect("prove_partial_from_trace_sync failed");
 
-        assert_eq!(proof.deferred_state(), &expected_wire);
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        assert!(!proof.is_final());
+        assert_eq!(proof.deferred_proof(), &DeferredProof::Wire(expected_wire.clone()));
+
+        let err = Verifier::new()
+            .verify(program.to_info(), stack_inputs, stack_outputs, proof.clone())
+            .unwrap_err();
+        assert!(
+            matches!(err, VerificationError::UnsupportedDeferredProof),
+            "wire-backed partial proofs should be rejected by final verification, got {err:?}"
+        );
+
+        let (security_level, hydrated_state) = Verifier::new()
+            .verify_partial(program.to_info(), stack_inputs, stack_outputs, proof)
+            .expect("wire-backed partial proof should verify and hydrate deferred state");
+        assert_eq!(security_level, 96);
+        assert_eq!(hydrated_state.root(), expected_deferred_root);
+        assert_eq!(
+            hydrated_state.to_wire().expect("hydrated state should serialize to wire"),
+            expected_wire
+        );
     }
 }

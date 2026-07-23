@@ -171,7 +171,7 @@ fn assert_trace_constraints_reject(
         ProverStatement::new(statement, vec![core_matrix, chip_matrix, poseidon2_matrix])
             .expect("valid trace shapes");
 
-    let config = config::poseidon2_config(config::pcs_params());
+    let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
     let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
