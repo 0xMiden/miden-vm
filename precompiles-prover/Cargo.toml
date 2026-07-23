@@ -22,6 +22,7 @@ concurrent = [
     "miden-lifted-stark/concurrent",
 ]
 std = [
+    "dep:miden-ace-codegen",
     "miden-air/std",
     "miden-core/std",
     "miden-crypto/std",
@@ -31,6 +32,7 @@ std = [
 ]
 
 [dependencies]
+miden-ace-codegen = { workspace = true, optional = true }
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
@@ -48,5 +50,7 @@ wincode.workspace = true
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
 k256 = { workspace = true, features = ["arithmetic"] }
+insta.workspace = true
 miden-air = { workspace = true, features = ["std"] }
+miden-ace-codegen = { workspace = true, features = ["testing"] }
 rand = { workspace = true, features = ["std_rng"] }

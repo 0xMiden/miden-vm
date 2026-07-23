@@ -37,6 +37,19 @@ pub type PackedFelt = <Felt as Field>::Packing;
 /// Number of inputs to the Merkle compression function.
 const COMPRESSION_INPUTS: usize = 2;
 
+// DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
+// ================================================================================================
+
+/// PRECOMPILE_RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, CIRCUIT_COMMITMENT]).
+///
+/// Compile-time constant binding the Fiat-Shamir transcript to the precompile chiplet AIR set.
+/// Keep this in sync with [`crate::ace::build_precompile_multi_air_ace_circuit`].
+pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [
+    Felt::new_unchecked(13317182857012940240),
+    Felt::new_unchecked(3371465634074056705),
+    Felt::new_unchecked(9151144758086439755),
+    Felt::new_unchecked(11408832216958580677),
+];
 /// Default hash function for compatibility APIs such as
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
@@ -145,4 +158,53 @@ pub fn test_lmcs() -> Lmcs {
 /// Create the full legacy test STARK configuration.
 pub fn test_config() -> TestConfig {
     GenericStarkConfig::new(test_pcs_params(), test_lmcs(), Dft::default(), test_challenger())
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::{format, vec::Vec};
+
+    use miden_ace_codegen::{AceConfig, LayoutKind};
+    use miden_core::{Felt, crypto::hash::Poseidon2};
+
+    use crate::{ace, session::NUM_CHIPLETS};
+
+    const PROTOCOL_ID: u64 = 0;
+    const REGEN_HINT: &str = "update PRECOMPILE_RELATION_DIGEST in precompiles-prover/src/stark_config.rs and accept the insta snapshot";
+
+    /// Snapshot test: catches any precompile chiplet AIR change that alters the constraint circuit.
+    #[test]
+    fn precompile_relation_digest_matches_current_air() {
+        let config = AceConfig {
+            num_quotient_chunks: 8,
+            layout: LayoutKind::Masm,
+            num_airs: NUM_CHIPLETS,
+        };
+        let circuit = ace::build_precompile_multi_air_ace_circuit(config).unwrap();
+        let encoded = circuit.to_ace().unwrap();
+        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+
+        let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
+            .chain(circuit_commitment.iter().copied())
+            .collect();
+        let digest = Poseidon2::hash_elements(&input);
+        let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
+
+        let snapshot = format!(
+            "num_inputs: {}\nnum_eval_gates: {}\nstream_len: {}\nrelation_digest: {:?}",
+            encoded.num_vars(),
+            encoded.num_eval_rows(),
+            encoded.size_in_felt(),
+            expected,
+        );
+        insta::assert_snapshot!(snapshot);
+
+        let actual: Vec<u64> =
+            super::PRECOMPILE_RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
+        assert_eq!(
+            actual, expected,
+            "PRECOMPILE_RELATION_DIGEST in stark_config.rs is stale; {REGEN_HINT}"
+        );
+    }
 }

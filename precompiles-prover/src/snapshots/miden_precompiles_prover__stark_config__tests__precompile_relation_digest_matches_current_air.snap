@@ -1,0 +1,8 @@
+---
+source: precompiles-prover/src/stark_config.rs
+expression: snapshot
+---
+num_inputs: 3128
+num_eval_gates: 9656
+stream_len: 12672
+relation_digest: [13317182857012940240, 3371465634074056705, 9151144758086439755, 11408832216958580677]
