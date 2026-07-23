@@ -39,11 +39,8 @@ Package-owned debug information lives in optional debug custom sections, not in 
 - `Package::read_from` and `Package::read_from_bytes` are for untrusted artifacts. They validate
   the embedded MAST forest and discard package-owned debug sections before returning the package.
 - `Package::read_from_trusted` and `Package::read_from_bytes_trusted` are for trusted local files
-  or cache entries. They validate the embedded MAST forest and preserve package-owned debug
-  sections so `Package::debug_info` can decode them.
-- `Package::read_from_unchecked` and `Package::read_from_bytes_unchecked` are same-domain trusted
-  cache readers. They preserve package-owned debug sections, but skip MAST validation because the
-  bytes must already have been validated before persistence.
+  or cache entries. They skip embedded MAST and manifest cross-check validation and preserve
+  package-owned debug sections.
 
 Embedded kernel package bytes are carried in the opaque `kernel` custom section. An untrusted read
 may carry that section, but decoding the embedded kernel through the package API uses the

@@ -2,10 +2,10 @@ use std::{path::Path, process::Command, string::String, sync::Arc};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
     operations::{DebugVarInfo, DebugVarLocation, Operation},
     serde::{Deserializable, Serializable, SliceReader},
-    utils::hash_string_to_word,
+    utils::{Idx, hash_string_to_word},
 };
 use miden_mast_package::{
     PackageExport, PackageModule, ProcedureExport, Section, SectionId,
@@ -522,7 +522,7 @@ fn push_export_module_path(
 }
 
 #[test]
-fn static_linking_preserves_debug_rows_for_deduped_execution_nodes() {
+fn static_linking_drops_untrusted_dependency_debug_rows() {
     let tempdir = TempDir::new().unwrap();
 
     let depa = debug_bearing_static_package(
@@ -578,52 +578,14 @@ end
         .debug_info()
         .expect("package debug sections should decode")
         .expect("root package should contain debug info");
-    let source_for_context = |context_name: &str| {
-        debug_info
-            .source_map()
-            .expect("root package should contain source map")
+    let source_map = debug_info.source_map().expect("root package should contain source map");
+    assert!(
+        source_map
             .asm_ops()
             .iter()
-            .find(|row| row.context_name == context_name)
-            .map(|row| row.source_node)
-            .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
-    };
-    let depa_source = source_for_context("depa_ctx");
-    let depb_source = source_for_context("depb_ctx");
-    assert_ne!(depa_source, depb_source, "static package source occurrences must stay distinct",);
-
-    let depa_exec = debug_info.source_node(depa_source).unwrap().exec_node;
-    let depb_exec = debug_info.source_node(depb_source).unwrap().exec_node;
-    assert_eq!(
-        depa_exec, depb_exec,
-        "identical static dependency bodies should dedup to one execution node",
+            .all(|row| row.context_name != "depa_ctx" && row.context_name != "depb_ctx"),
+        "untrusted preassembled dependency debug rows should be dropped",
     );
-
-    let contexts_for_deduped_exec = [depa_source, depb_source]
-        .into_iter()
-        .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
-        .map(|source_node| {
-            debug_info
-                .first_asm_op_for_source_node(source_node)
-                .unwrap()
-                .context_name
-                .as_str()
-        })
-        .collect::<Vec<_>>();
-    assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
-    assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
-
-    let vars_at_source_start = |source_node_id| {
-        let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
-        debug_info
-            .debug_vars_for_operation(source_node_id, op_start)
-            .map(|row| row.var.name())
-            .collect::<Vec<_>>()
-    };
-    let depa_vars = vars_at_source_start(depa_source);
-    let depb_vars = vars_at_source_start(depb_source);
-    assert_eq!(depa_vars, vec!["depa_var"]);
-    assert_eq!(depb_vars, vec!["depb_var"]);
 
     let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
         .expect("root package should deserialize as trusted");
@@ -631,21 +593,15 @@ end
         .debug_info()
         .expect("round-tripped debug sections should decode")
         .expect("round-tripped package should contain debug info");
-    assert_eq!(
-        round_tripped_debug_info
-            .first_asm_op_for_source_node(depa_source)
-            .unwrap()
-            .context_name,
-        "depa_ctx",
-    );
-    assert_eq!(
-        {
-            let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
-            round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
-        }
-        .map(|row| row.var.name())
-        .collect::<Vec<_>>(),
-        vec!["depb_var"],
+    let round_tripped_source_map = round_tripped_debug_info
+        .source_map()
+        .expect("round-tripped package should contain source map");
+    assert!(
+        round_tripped_source_map
+            .asm_ops()
+            .iter()
+            .all(|row| row.context_name != "depa_ctx" && row.context_name != "depb_ctx"),
+        "round-tripped root debug should not regain dropped dependency debug rows",
     );
 }
 
@@ -2903,6 +2859,80 @@ end
 }
 
 #[test]
+fn preassembled_dependency_rejects_tampered_non_root_mast_node_after_graph_selection() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    let dep_manifest = dep_dir.join("miden-project.toml");
+    write_file(
+        &dep_manifest,
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "dep"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc leaf
+    dup.0
+    if.true
+        push.2
+    else
+        push.3
+    end
+    drop
+    push.1
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let dep_package = context
+        .assemble_library_package(&dep_manifest, Some("dev"))
+        .expect("dependency package should assemble");
+    let dep_package_path = tempdir.path().join("dep.masp");
+    dep_package.write_to_file(&dep_package_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep.masp", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::leaf
+end
+"#,
+    );
+
+    let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
+    fs::write(&dep_package_path, package_bytes_with_spoofed_non_root_node_digest(&dep_package))
+        .unwrap();
+
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect_err("tampered preassembled dependency MAST should fail validation");
+    let error = error.to_string();
+    assert!(error.contains("failed to decode package"));
+    assert!(error.contains("invalid untrusted MAST forest"));
+    assert!(error.contains("hash mismatch for node"));
+}
+
+#[test]
 fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
     let tempdir = TempDir::new().unwrap();
     let runtime_v1 = Arc::<MastPackage>::from(MastPackage::generate(
@@ -3276,4 +3306,94 @@ end
     );
 
     manifest_path
+}
+
+fn package_bytes_with_spoofed_non_root_node_digest(package: &MastPackage) -> Vec<u8> {
+    let forest = package.mast_forest();
+    let target_node = (0..forest.num_nodes())
+        .map(MastNodeId::new_unchecked)
+        .find(|node_id| !forest.procedure_roots().contains(node_id))
+        .expect("test package should contain a non-root node");
+
+    let mut output_bytes = Vec::new();
+    package.write_header_into(&mut output_bytes);
+    let forest_offset = output_bytes.len();
+    forest.write_into(&mut output_bytes);
+
+    let (node_hashes_start, internal_node_count) =
+        locate_first_node_hash(&output_bytes[forest_offset..]);
+    assert!(
+        target_node.to_usize() < internal_node_count,
+        "test package should not contain external nodes before the tampered node",
+    );
+
+    let spoofed_digest = hash_string_to_word("spoofed-preassembled-dependency-digest");
+    assert_ne!(
+        spoofed_digest,
+        forest[target_node].digest(),
+        "spoofed digest must differ from the original node digest",
+    );
+
+    let mut spoofed_digest_bytes = Vec::new();
+    spoofed_digest.write_into(&mut spoofed_digest_bytes);
+    assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
+
+    let digest_offset =
+        forest_offset + node_hashes_start + target_node.to_usize() * spoofed_digest_bytes.len();
+    output_bytes[digest_offset..digest_offset + spoofed_digest_bytes.len()]
+        .copy_from_slice(&spoofed_digest_bytes);
+
+    package.write_trailer_into(&mut output_bytes);
+
+    output_bytes
+}
+
+fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
+    // Header: magic[4] + flags[1] + version[3]
+    let mut offset = 0usize;
+    offset += 4;
+    offset += 1;
+    offset += 3;
+
+    let internal_node_count = read_usize_vint64(bytes, &mut offset);
+    let external_node_count = read_usize_vint64(bytes, &mut offset);
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .expect("node count overflow");
+
+    // Roots: len (usize) + elements (u32 LE)
+    let roots_len = read_usize_vint64(bytes, &mut offset);
+    offset += roots_len * 4;
+
+    // Basic block data: len (usize) + bytes
+    let bb_len = read_usize_vint64(bytes, &mut offset);
+    offset += bb_len;
+
+    offset += node_count * 8;
+    offset += external_node_count * 32;
+
+    (offset, internal_node_count)
+}
+
+fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
+    // This test patches raw bytes in place, so it needs byte offsets that
+    // ByteReader::read_usize does not expose.
+    let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    if length == 9 {
+        *offset += 1;
+        let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
+        let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
+        *offset = end;
+        let value = u64::from_le_bytes(chunk);
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    } else {
+        let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
+        let mut encoded = [0u8; 8];
+        encoded[..length].copy_from_slice(&bytes[*offset..end]);
+        *offset = end;
+        let value = u64::from_le_bytes(encoded) >> length;
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    }
 }

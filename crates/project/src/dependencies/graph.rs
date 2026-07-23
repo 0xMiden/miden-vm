@@ -15,7 +15,10 @@ use miden_assembly_syntax::{
     Report,
     debuginfo::{DefaultSourceManager, SourceManager, Uri},
 };
-use miden_core::utils::{DisplayHex, hash_string_to_word};
+use miden_core::{
+    serde::Deserializable,
+    utils::{DisplayHex, hash_string_to_word},
+};
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,
@@ -775,8 +778,8 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     ) -> Result<CollectedDependencyNode, Report> {
         let path = path.canonicalize().map_err(|error| Report::msg(error.to_string()))?;
         let bytes = std::fs::read(&path).map_err(|error| Report::msg(error.to_string()))?;
-        let package = MastPackage::read_from_bytes_trusted(&bytes)
-            .map_err(|error| Report::msg(error.to_string()))?;
+        let package =
+            MastPackage::read_from_bytes(&bytes).map_err(|error| Report::msg(error.to_string()))?;
         self.ensure_dependency_name(expected_name, &package.name, Some(&path))?;
         let semver = package.version.clone();
         let selected = Version::new(semver, package.digest());

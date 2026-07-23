@@ -356,10 +356,9 @@ impl Package {
 
     /// Decodes trusted package-owned debug sections, if any are present.
     ///
-    /// Package debug sections are trusted only for packages constructed in-process or read via the
-    /// trusted same-domain readers such as [`Self::read_from_trusted`],
-    /// [`Self::read_from_bytes_trusted`], [`Self::read_from_unchecked`], and
-    /// [`Self::read_from_bytes_unchecked`]. Normal untrusted readers discard debug sections before
+    /// Package debug sections are trusted only for packages constructed in-process or read via
+    /// trusted same-domain readers such as [`Self::read_from_trusted`] and
+    /// [`Self::read_from_bytes_trusted`]. Normal untrusted readers discard debug sections before
     /// returning the package.
     ///
     /// This does not read legacy debug metadata from the embedded [`MastForest`].
@@ -1335,9 +1334,10 @@ impl Package {
     #[cfg(feature = "std")]
     /// Reads a trusted local package file.
     ///
-    /// This preserves package-owned debug sections and should be used only for files/cache entries
-    /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
-    /// bytes received across a trust boundary.
+    /// This skips embedded MAST and manifest cross-check validation, preserves package-owned debug
+    /// sections, and should be used only for files/cache entries controlled by the same trusted
+    /// build or execution system. Use [`Self::read_from_bytes`] for bytes received across a trust
+    /// boundary.
     pub fn deserialize_from_file_trusted(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, DeserializationError> {

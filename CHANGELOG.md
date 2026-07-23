@@ -29,6 +29,7 @@
 - [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
 - Added `Package::get_export_node()` and `Package::procedures_with_attribute()` APIs ([#3320](https://github.com/0xMiden/miden-vm/issues/3320)).
 - [BREAKING] Add dead-node elimination in ACE DAG ([#3408](https://github.com/0xMiden/miden-vm/pull/3408)).
+- [BREAKING] Changed `Package::read_from_trusted` and `Package::read_from_bytes_trusted` to skip embedded MAST and manifest cross-check validation, removed the package unchecked readers, and kept untrusted package reads on `Package::read_from` and `Package::read_from_bytes`, which validate MAST and drop debug sections ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
 
 #### Fixes
 
