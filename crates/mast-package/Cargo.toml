@@ -22,6 +22,7 @@ default = ["std"]
 arbitrary = ["std", "dep:proptest", "dep:proptest-derive", "miden-assembly-syntax/arbitrary", "miden-core/arbitrary"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std", "thiserror/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies

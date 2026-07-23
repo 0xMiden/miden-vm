@@ -30,6 +30,7 @@ std = [
 ]
 arbitrary = ["std", "dep:proptest"]
 serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
