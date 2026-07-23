@@ -1365,9 +1365,10 @@ impl Package {
     #[cfg(feature = "std")]
     /// Reads a trusted local package file.
     ///
-    /// This preserves package-owned debug sections and should be used only for files/cache entries
-    /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
-    /// bytes received across a trust boundary.
+    /// This skips embedded MAST and manifest cross-check validation, preserves package-owned debug
+    /// sections, and should be used only for files/cache entries controlled by the same trusted
+    /// build or execution system. Use [`Self::read_from_bytes`] for bytes received across a trust
+    /// boundary.
     pub fn deserialize_from_file_trusted(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, DeserializationError> {

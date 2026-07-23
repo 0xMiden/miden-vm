@@ -141,6 +141,7 @@
 - [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 - Enable simd128 Plonky3 backend for WASM builds and added related CI job ([#3433](https://github.com/0xMiden/miden-vm/pull/3433)).
 - [BREAKING] Bumped Plonky3 related dependencies to integrate SVE2 and WASM-SIMD128 speed-ups and include a NEON bugfix. ([#3441](https://github.com/0xMiden/miden-vm/pull/3441)).
+- [BREAKING] Changed `Package::read_from_trusted` and `Package::read_from_bytes_trusted` to skip embedded MAST and manifest cross-check validation, removed the package unchecked readers, and kept untrusted package reads on `Package::read_from` and `Package::read_from_bytes`, which validate MAST and drop debug sections ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
 
 #### Fixes
 
