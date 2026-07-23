@@ -1817,3 +1817,71 @@ fn split_u128(value: u128) -> (u64, u64, u64, u64) {
         value as u32 as u64,
     )
 }
+
+/// Test that shr with n >= 64 produces an assertion error.
+#[test]
+fn shr_out_of_range_errors() {
+    let a: u64 = 0x12345678_9abcdef0u64;
+    let (a1, a0) = split_u64(a);
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::shr
+        end
+    ";
+    let test = build_test!(source, &[64u64, a0, a1]);
+    expect_assert_error_message!(test);
+    let test = build_test!(source, &[100u64, a0, a1]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that shl with n >= 64 produces an assertion error.
+#[test]
+fn shl_out_of_range_errors() {
+    let a: u64 = 0x12345678_9abcdef0u64;
+    let (a1, a0) = split_u64(a);
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::shl
+        end
+    ";
+    let test = build_test!(source, &[64u64, a0, a1]);
+    expect_assert_error_message!(test);
+    let test = build_test!(source, &[100u64, a0, a1]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that rotl with n >= 64 produces an assertion error.
+#[test]
+fn rotl_out_of_range_errors() {
+    let a: u64 = 0x12345678_9abcdef0u64;
+    let (a1, a0) = split_u64(a);
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotl
+        end
+    ";
+    let test = build_test!(source, &[64u64, a0, a1]);
+    expect_assert_error_message!(test);
+    let test = build_test!(source, &[100u64, a0, a1]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that rotr with n >= 64 produces an assertion error.
+#[test]
+fn rotr_out_of_range_errors() {
+    let a: u64 = 0x12345678_9abcdef0u64;
+    let (a1, a0) = split_u64(a);
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotr
+        end
+    ";
+    let test = build_test!(source, &[64u64, a0, a1]);
+    expect_assert_error_message!(test);
+    let test = build_test!(source, &[100u64, a0, a1]);
+    expect_assert_error_message!(test);
+}
