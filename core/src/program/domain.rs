@@ -23,6 +23,7 @@
 //! |-----------|---------|-------------------------------------------|
 //! | 32        | 1       | kernel commitment ([`KERNEL_DOMAIN_TAG`](super::KERNEL_DOMAIN_TAG)) |
 //! | 33        | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
+//! | 34        | 1       | proof request key ([`REQUEST_DOMAIN_TAG`](super::REQUEST_DOMAIN_TAG)) |
 //!
 //! Selectors share one namespace with the `merge_in_domain` values used for MAST control-block
 //! hashing. Those are opcode-sized (`< 256`) while every registered selector is `>= 257`
@@ -37,6 +38,9 @@ pub const KERNEL_COMMITMENT_DOMAIN_ID: u32 = 32;
 
 /// Registered domain id for the execution-claim commitment.
 pub const EXECUTION_CLAIM_DOMAIN_ID: u32 = 33;
+
+/// Registered domain id for the proof-request key.
+pub const PROOF_REQUEST_DOMAIN_ID: u32 = 34;
 
 /// Packs a registered domain id and per-domain version into a domain selector.
 ///
@@ -57,11 +61,12 @@ mod tests {
 
     #[test]
     fn registry_entries_are_valid_and_distinct_selectors() {
-        use crate::program::{CLAIM_DOMAIN_TAG, KERNEL_DOMAIN_TAG};
+        use crate::program::{CLAIM_DOMAIN_TAG, KERNEL_DOMAIN_TAG, REQUEST_DOMAIN_TAG};
 
         let entries = [
             (KERNEL_COMMITMENT_DOMAIN_ID, KERNEL_DOMAIN_TAG),
             (EXECUTION_CLAIM_DOMAIN_ID, CLAIM_DOMAIN_TAG),
+            (PROOF_REQUEST_DOMAIN_ID, REQUEST_DOMAIN_TAG),
         ];
         for (i, (id, tag)) in entries.iter().enumerate() {
             assert!(*id >= 1 && *id < (1 << 24), "domain id out of the registered range");

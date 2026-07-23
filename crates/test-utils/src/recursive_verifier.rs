@@ -26,7 +26,7 @@ use miden_air::{
     MIDEN_AIR_COUNT, MidenMultiAir, ProofOrder, PublicInputs, Statement,
     ace::build_recursive_verifier_ace_circuit, config,
 };
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt, program::request_key};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
@@ -54,6 +54,24 @@ pub struct VerifierData {
     pub advice_stack: Vec<u64>,
     pub store: MerkleStore,
     pub advice_map: Vec<(Word, Vec<Felt>)>,
+}
+
+/// Registers a proof package's advice-stack stream in the advice map under its request key, so a
+/// consumer that knows the claim only by `(verifier_root, claim_commitment)` can fetch it with
+/// `adv.push_mapval` (by content) instead of relying on a pre-concatenated advice stack.
+///
+/// Returns the request key and the stream as field elements; insert that pair into the advice
+/// map and have the consumer compute the same key and `adv.push_mapval` it. The Merkle store and
+/// query advice map are root-addressed and merged separately (no positional ordering); this
+/// helper covers only the ordered stack stream.
+pub fn register_proof_package(
+    verifier_root: Word,
+    claim_commitment: Word,
+    stream: &[u64],
+) -> (Word, Vec<Felt>) {
+    let key = request_key(verifier_root, claim_commitment);
+    let values = stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
+    (key, values)
 }
 
 #[derive(Debug, thiserror::Error)]
