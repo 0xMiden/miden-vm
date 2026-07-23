@@ -2504,7 +2504,9 @@ dependencies = [
 name = "miden-precompiles-prover"
 version = "0.28.0"
 dependencies = [
+ "insta",
  "k256",
+ "miden-ace-codegen",
  "miden-air",
  "miden-core",
  "miden-crypto",
