@@ -104,13 +104,14 @@ const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
 
 ### Caller-supplied base address of the kernel-procedure digests (N word-aligned digests). Persisted
-### by `verify_proof` from its operand so the step-II boundary fold can re-read the same region the
+### by `stage_reduced_inputs` from its operand so the step-II boundary fold can re-read the same region the
 ### kernel commitment hashes.
 const KERNEL_DIGESTS_ADDRESS_PTR = 3223322706
 
-### Caller-supplied base address of the fixed-length public inputs (stack i/o, 32 base felts).
-### Persisted by `verify_proof` from its operand so `load_public_inputs` can EF-expand them.
-const STACK_IO_ADDRESS_PTR = 3223322707
+### Caller-supplied base address of the claim region (40 base felts: P | K | I | O).
+### Persisted by `stage_reduced_inputs`; `load_public_inputs` EF-expands the I/O section (+8)
+### and `claim_commitment` commits the whole region.
+const CLAIM_ADDRESS_PTR = 3223322707
 
 ### Scratch word used by the FRI verifier to persist loop state between queries.
 ### Stores [query_ptr, layer_ptr, rem_ptr, g].
@@ -139,7 +140,7 @@ const BUS_GAMMA_PTR = 3223322700
 const C_TOTAL_PTR = 3223322704
 
 ### Address of the cell holding the number of kernel-procedure digests `N`, persisted by
-### `verify_proof` for the outer-LogUp boundary fold computed in step II.
+### `verify_vm_proof` for the outer-LogUp boundary fold computed in step II.
 const NUM_KERNEL_DIGESTS_PTR = 3223322712
 
 ### Address of the composition challenges [alpha0, alpha1, beta0, beta1].
@@ -213,10 +214,10 @@ const REDUCED_INPUTS_PTR = 3223322836
 ##
 ## The reduced-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
 ## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
-## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_proof` and absorbed into
+## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_vm_proof` and absorbed into
 ## Fiat-Shamir; it is not carved out of this region.
 ##
-## After `verify_proof` returns, the 16 felts at `REDUCED_INPUTS_PTR` together with the FLPI
+## After `verify_vm_proof` returns, the 16 felts at `REDUCED_INPUTS_PTR` together with the FLPI
 ## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
 ## commitment the caller can bind against. The FLPI pointer is dynamic (stored at
 ## PUBLIC_INPUTS_ADDRESS_PTR); the reduced-inputs pointer cell (REDUCED_INPUTS_ADDRESS_PTR) holds
@@ -617,8 +618,8 @@ pub proc kernel_digests_address_ptr
     push.KERNEL_DIGESTS_ADDRESS_PTR
 end
 
-pub proc stack_io_address_ptr
-    push.STACK_IO_ADDRESS_PTR
+pub proc claim_address_ptr
+    push.CLAIM_ADDRESS_PTR
 end
 
 pub proc fri_verify_state_ptr

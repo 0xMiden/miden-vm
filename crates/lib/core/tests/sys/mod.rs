@@ -16,7 +16,7 @@ fn reduce_kernel_digests_upper_bound() {
     // `Kernel::MAX_NUM_PROCEDURES` (`N < 256`). The bound is its first check, so no caller memory
     // or advice is required.
     //
-    // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3].
+    // Operands: [claim_ptr, kernel_ptr, N].
     let source = "
         use miden::core::sys::vm::public_inputs
         begin
@@ -25,7 +25,7 @@ fn reduce_kernel_digests_upper_bound() {
     ";
 
     let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
-    let initial_stack = vec![0_u64, num_kernel_proc_digests, 4096, 1, 2, 3, 4];
+    let initial_stack = vec![4096_u64, 0, num_kernel_proc_digests];
 
     let test = build_test!(source, &initial_stack);
     expect_assert_error_message!(test);
@@ -53,11 +53,11 @@ proptest! {
 // EXECUTION CLAIM CROSS-TESTS
 // ================================================================================================
 
-/// The MASM `sys::vm::claim::claim_hash` brick must agree with the native
+/// The MASM `sys::vm::claim::claim_commitment` procedure must agree with the native
 /// `ExecutionClaim::commitment` on the same claim region (same encoding, same domain tag, same
 /// capacity layout).
 #[test]
-fn claim_hash_matches_native_execution_claim_commitment() {
+fn masm_claim_commitment_matches_native() {
     use miden_core::{
         Felt, Word,
         program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
@@ -107,7 +107,7 @@ fn claim_hash_matches_native_execution_claim_commitment() {
         begin
             {store_ops}
             push.{CLAIM_PTR}
-            exec.claim::claim_hash
+            exec.claim::claim_commitment
             exec.sys::truncate_stack
         end
         "

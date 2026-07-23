@@ -323,6 +323,7 @@ pub fn generate_recursive_verifier_data(
 /// Run the recursive verifier MASM program with the given VerifierData.
 fn run_recursive_verifier(data: &VerifierData) {
     let source = "
+        use miden::core::sys
         use miden::core::sys::vm
 
         # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
@@ -346,19 +347,26 @@ fn run_recursive_verifier(data: &VerifierData) {
         end
 
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
+            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
 
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
-            # (kernel_ptr = 0). Build [dst=0, count=4N].
-            dup.1 mul.4 push.0
+            # Copy kernel digests (4·num_kernel_digests felts) from advice into the witness
+            # region (kernel_ptr = 0). Build [dst=0, count=4N].
+            dup.2 mul.4 push.0
             exec.copy_advice_to_mem
 
-            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
-            # Build [dst=4096, count=32].
-            push.32 push.4096
+            # Copy the program digest from advice into the claim region (claim_ptr = 4096).
+            push.4 push.4096
             exec.copy_advice_to_mem
 
-            exec.vm::verify_proof
+            # Copy stack i/o (32 felts) from advice into the claim region's I/O section (+8).
+            push.32 push.4104
+            exec.copy_advice_to_mem
+
+            exec.vm::verify_vm_proof
+            # => [D] — keep the obligation as the program's output and truncate the
+            # marshalling residue; the statement binding is cross-checked via the ACE
+            # READ section.
+            exec.sys::truncate_stack
         end
         ";
     let test = build_test!(
@@ -439,19 +447,19 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
     // Caller-owned memory regions (must match the MASM constants below): kernel digests at 0,
-    // stack i/o at 4096.
+    // the claim region at 4096.
     const KERNEL_PTR: u64 = 0;
-    const STACK_IO_PTR: u64 = 4096;
+    const CLAIM_PTR: u64 = 4096;
 
     // 2) Initial operand stack: `stage_reduced_inputs` operands.
-    let mut initial_stack = vec![KERNEL_PTR, num_kernel_proc_digests as u64, STACK_IO_PTR];
-    initial_stack.extend_from_slice(&program_digest);
+    let initial_stack = vec![CLAIM_PTR, KERNEL_PTR, num_kernel_proc_digests as u64];
 
-    // 3) Build the advice stack: kernel digests (4N) and stack i/o (32) for the marshalling, then
-    //    deferred root for `stage_reduced_inputs`, then the aux randomness consumed by the test
-    //    prologue that drives `compute_outer_logup_correction`.
+    // 3) Build the advice stack: kernel digests (4N), then the claim-region fields (P, I, O) for
+    //    the marshalling, then the deferred root for `stage_reduced_inputs`, then the aux
+    //    randomness consumed by the test prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
+    advice_stack.extend_from_slice(&program_digest);
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
     advice_stack.extend_from_slice(&deferred_root);
@@ -478,9 +486,19 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
         end
 
         begin
-            dup.1 mul.4 push.0
+            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
+
+            # Copy kernel digests (4·num_kernel_digests felts) from advice into the witness
+            # region (kernel_ptr = 0). Build [dst=0, count=4N].
+            dup.2 mul.4 push.0
             exec.copy_advice_to_mem
-            push.32 push.4096
+
+            # Copy the program digest from advice into the claim region (claim_ptr = 4096).
+            push.4 push.4096
+            exec.copy_advice_to_mem
+
+            # Copy stack i/o (32 felts) from advice into the claim region's I/O section (+8).
+            push.32 push.4104
             exec.copy_advice_to_mem
 
             exec.public_inputs::stage_reduced_inputs

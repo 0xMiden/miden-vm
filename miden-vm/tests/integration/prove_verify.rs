@@ -77,6 +77,7 @@ fn assert_recursive_verify(
         .expect("recursive verifier advice construction failed");
 
     let source = "
+        use miden::core::sys
         use miden::core::sys::vm
 
         # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
@@ -100,19 +101,23 @@ fn assert_recursive_verify(
         end
 
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
+            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
 
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
-            # (kernel_ptr = 0). Build [dst=0, count=4N].
-            dup.1 mul.4 push.0
+            # Copy kernel digests (4·num_kernel_digests felts) from advice into the witness
+            # region (kernel_ptr = 0).
+            dup.2 mul.4 push.0
             exec.copy_advice_to_mem
 
-            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
-            # Build [dst=4096, count=32].
-            push.32 push.4096
+            # Copy the program digest into the claim region (claim_ptr = 4096), then the
+            # stack i/o (32 felts) into its I/O section (+8).
+            push.4 push.4096
+            exec.copy_advice_to_mem
+            push.32 push.4104
             exec.copy_advice_to_mem
 
-            exec.vm::verify_proof
+            exec.vm::verify_vm_proof
+            # => [D] — keep the obligation as the program's output; truncate the residue.
+            exec.sys::truncate_stack
         end
     ";
 

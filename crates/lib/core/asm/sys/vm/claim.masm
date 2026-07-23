@@ -24,6 +24,12 @@ use miden::core::crypto::hashes::poseidon2
 # Must match miden_core::program::CLAIM_DOMAIN_TAG (enforced by cross-tests).
 const CLAIM_DOMAIN_TAG = 8449
 
+# Domain tag for the kernel commitment: the registered selector
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (32 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+const KERNEL_DOMAIN_TAG = 8193
+
 # Number of field elements in the canonical claim encoding.
 const NUM_CLAIM_ELEMENTS = 40
 
@@ -39,9 +45,31 @@ const NUM_CLAIM_ELEMENTS = 40
 #! Where:
 #! - claim_ptr is the word-aligned address of the claim region.
 #! - CLAIM_HASH is the domain-tagged Poseidon2 hash of the 40-element encoding.
-pub proc claim_hash
+pub proc claim_commitment
     push.CLAIM_DOMAIN_TAG push.NUM_CLAIM_ELEMENTS movup.2
     # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
     exec.poseidon2::hash_elements_in_domain
     # => [CLAIM_HASH, ...]
+end
+
+#! Computes the canonical kernel commitment over a raw kernel-procedure digest list.
+#!
+#! Mirrors miden_core::program::KernelDescriptor::commitment: the domain-tagged sequential hash
+#! of the flattened digests, length-bound by the sponge's padding rule, in the descriptor's
+#! canonical order.
+#!
+#! Inputs:  [kernel_ptr, num_kernel_digests, ...]
+#! Outputs: [K, ...]
+#!
+#! Where:
+#! - kernel_ptr is the word-aligned address of the digest list.
+#! - num_kernel_digests is the number of digests (words) in the list.
+#! - K is the kernel commitment.
+pub proc kernel_commitment
+    swap mul.4 swap
+    # => [kernel_ptr, num_elements, ...]
+    push.KERNEL_DOMAIN_TAG movdn.2
+    # => [kernel_ptr, num_elements, KERNEL_DOMAIN_TAG, ...]
+    exec.poseidon2::hash_elements_in_domain
+    # => [K, ...]
 end
