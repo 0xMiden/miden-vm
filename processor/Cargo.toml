@@ -19,6 +19,7 @@ bench = false
 doctest = false
 
 [features]
+arbitrary = ["dep:proptest", "miden-core/arbitrary"]
 concurrent = ["std", "miden-air/concurrent"]
 default = ["std"]
 std = [
@@ -27,7 +28,7 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["arbitrary", "miden-air/testing"]
 # Pulls in the LogUp debug surface from miden-air (under `#[cfg(feature = "std")]`).
 # NOTE: the real-trace bus debugger is not yet wired into the prover/processor paths,
 # so today this feature only compiles in the LookupAir shape-validation walker.
@@ -46,12 +47,14 @@ miden-utils-indexing.workspace = true
 # External dependencies
 itertools.workspace = true
 paste.workspace = true
+proptest = { workspace = true, optional = true }
 rayon.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }

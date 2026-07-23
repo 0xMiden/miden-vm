@@ -4,6 +4,13 @@ use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, STATE_WIDTH},
 };
+use miden_core::{
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
+    utils::{SerializableVecDeque, read_vec_deque},
+};
 
 use crate::{
     ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
@@ -38,7 +45,11 @@ use crate::{
 /// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
 ///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
 ///    [`miden_core::mast::DynNode`]).
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
@@ -54,7 +65,11 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -68,6 +83,10 @@ pub struct CoreTraceState {
 ///
 /// This struct captures the complete state of the system at a specific clock cycle, allowing for
 /// reconstruction of the system trace during concurrent execution.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemState {
     /// Current clock cycle (row index in the trace)
@@ -104,7 +123,11 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -153,7 +176,11 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -279,7 +306,11 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -294,7 +325,11 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -321,7 +356,11 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -426,7 +465,11 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -440,7 +483,11 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -459,7 +506,11 @@ pub struct ExecutionContextSystemInfo {
 /// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
 /// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -478,6 +529,10 @@ impl MastForestResolutionReplay {
             .pop_front()
             .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
     }
+
+    pub(crate) fn iter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.mast_forest_resolutions.iter().map(|(_node_id, forest_id)| *forest_id)
+    }
 }
 
 // MEMORY REPLAY
@@ -494,7 +549,11 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -559,7 +618,11 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -645,7 +708,11 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -736,14 +803,22 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
 }
 
 /// Replay data for bitwise operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BitwiseReplay {
     u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
 }
@@ -777,7 +852,11 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -806,7 +885,11 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -838,7 +921,11 @@ impl IntoIterator for AceReplay {
 /// Replay data for range checking operations.
 ///
 /// This currently only records
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeCheckerReplay {
     range_checks_u32_ops: VecDeque<[u16; 4]>,
 }
@@ -866,7 +953,11 @@ impl IntoIterator for RangeCheckerReplay {
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -896,7 +987,11 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
@@ -1003,7 +1098,11 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
@@ -1019,7 +1118,11 @@ pub enum HasherOp {
 ///
 /// The hasher requests are recorded during fast processor execution and then replayed during hasher
 /// chiplet trace generation.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
 }
@@ -1069,6 +1172,15 @@ impl HasherRequestReplay {
         self.hasher_ops
             .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
+
+    pub(crate) fn iter_hash_basic_block_forest_ids(
+        &self,
+    ) -> impl Iterator<Item = MastForestId> + '_ {
+        self.hasher_ops.iter().filter_map(|op| match op {
+            HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
+            _ => None,
+        })
+    }
 }
 
 impl IntoIterator for HasherRequestReplay {
@@ -1095,7 +1207,11 @@ impl IntoIterator for HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
@@ -1181,3 +1297,610 @@ impl StackOverflowReplay {
             .ok_or(OperationError::Internal("no overflow address operations recorded"))
     }
 }
+
+// SERIALIZATION
+// ================================================================================================
+
+fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
+    u32::from(row).write_into(target);
+}
+
+fn read_row_index<R: ByteReader>(source: &mut R) -> Result<RowIndex, DeserializationError> {
+    Ok(RowIndex::from(u32::read_from(source)?))
+}
+
+fn write_memory_element_queue<W: ByteWriter>(
+    queue: &VecDeque<(Felt, Felt, ContextId, RowIndex)>,
+    target: &mut W,
+) {
+    target.write_usize(queue.len());
+    for &(element, addr, ctx, clk) in queue {
+        element.write_into(target);
+        addr.write_into(target);
+        ctx.write_into(target);
+        write_row_index(clk, target);
+    }
+}
+
+fn read_memory_element_queue<R: ByteReader>(
+    source: &mut R,
+) -> Result<VecDeque<(Felt, Felt, ContextId, RowIndex)>, DeserializationError> {
+    let len = source.read_usize()?;
+    let element_size =
+        Felt::min_serialized_size() * 2 + u32::min_serialized_size() + u32::min_serialized_size();
+    let max_len = source.max_alloc(element_size);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "memory element replay length {len} exceeds reader allocation bound {max_len}"
+        )));
+    }
+
+    let mut values = VecDeque::with_capacity(len);
+    for _ in 0..len {
+        values.push_back((
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+            ContextId::read_from(source)?,
+            read_row_index(source)?,
+        ));
+    }
+    Ok(values)
+}
+
+fn write_memory_word_queue<W: ByteWriter>(
+    queue: &VecDeque<(Word, Felt, ContextId, RowIndex)>,
+    target: &mut W,
+) {
+    target.write_usize(queue.len());
+    for &(word, addr, ctx, clk) in queue {
+        word.write_into(target);
+        addr.write_into(target);
+        ctx.write_into(target);
+        write_row_index(clk, target);
+    }
+}
+
+fn read_memory_word_queue<R: ByteReader>(
+    source: &mut R,
+) -> Result<VecDeque<(Word, Felt, ContextId, RowIndex)>, DeserializationError> {
+    let len = source.read_usize()?;
+    let element_size =
+        Word::min_serialized_size() + Felt::min_serialized_size() + u32::min_serialized_size() * 2;
+    let max_len = source.max_alloc(element_size);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "memory word replay length {len} exceeds reader allocation bound {max_len}"
+        )));
+    }
+
+    let mut values = VecDeque::with_capacity(len);
+    for _ in 0..len {
+        values.push_back((
+            Word::read_from(source)?,
+            Felt::read_from(source)?,
+            ContextId::read_from(source)?,
+            read_row_index(source)?,
+        ));
+    }
+    Ok(values)
+}
+
+impl Serializable for SystemState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        write_row_index(self.clk, target);
+        self.ctx.write_into(target);
+        self.fn_hash.write_into(target);
+        self.deferred_root.write_into(target);
+    }
+}
+
+impl Deserializable for SystemState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            clk: read_row_index(source)?,
+            ctx: ContextId::read_from(source)?,
+            fn_hash: Word::read_from(source)?,
+            deferred_root: Word::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for DecoderState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.current_addr.write_into(target);
+        self.parent_addr.write_into(target);
+    }
+}
+
+impl Deserializable for DecoderState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            current_addr: Felt::read_from(source)?,
+            parent_addr: Felt::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for StackState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.stack_top.write_into(target);
+        self.stack_depth.write_into(target);
+        self.last_overflow_addr.write_into(target);
+    }
+}
+
+impl Deserializable for StackState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let stack_top = <[Felt; MIN_STACK_DEPTH]>::read_from(source)?;
+        let stack_depth = usize::read_from(source)?;
+        if stack_depth < MIN_STACK_DEPTH {
+            return Err(DeserializationError::InvalidValue(format!(
+                "stack depth {stack_depth} is below minimum {MIN_STACK_DEPTH}"
+            )));
+        }
+        Ok(Self {
+            stack_top,
+            stack_depth,
+            last_overflow_addr: Felt::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for CoreTraceState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.system.write_into(target);
+        self.decoder.write_into(target);
+        self.stack.write_into(target);
+    }
+}
+
+impl Deserializable for CoreTraceState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            system: SystemState::read_from(source)?,
+            decoder: DecoderState::read_from(source)?,
+            stack: StackState::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for CoreTraceFragmentContext {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.state.write_into(target);
+        self.replay.write_into(target);
+        self.continuation.write_into(target);
+        self.initial_mast_forest_id.write_into(target);
+    }
+}
+
+impl Deserializable for CoreTraceFragmentContext {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            state: CoreTraceState::read_from(source)?,
+            replay: ExecutionReplay::read_from(source)?,
+            continuation: ContinuationStack::<MastForestId>::read_from(source)?,
+            initial_mast_forest_id: MastForestId::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for NodeEndData {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ended_node_addr.write_into(target);
+        self.prev_addr.write_into(target);
+        self.prev_parent_addr.write_into(target);
+    }
+}
+
+impl Deserializable for NodeEndData {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            ended_node_addr: Felt::read_from(source)?,
+            prev_addr: Felt::read_from(source)?,
+            prev_parent_addr: Felt::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for ExecutionContextSystemInfo {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.parent_ctx.write_into(target);
+        self.parent_fn_hash.write_into(target);
+    }
+}
+
+impl Deserializable for ExecutionContextSystemInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            parent_ctx: ContextId::read_from(source)?,
+            parent_fn_hash: Word::read_from(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        ContextId::min_serialized_size() + Word::min_serialized_size()
+    }
+}
+
+impl Serializable for ExecutionContextReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.execution_contexts).write_into(target);
+    }
+}
+
+impl Deserializable for ExecutionContextReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            execution_contexts: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for BlockStackReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.node_start_parent_addr).write_into(target);
+        SerializableVecDeque(&self.node_end).write_into(target);
+    }
+}
+
+impl Deserializable for BlockStackReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            node_start_parent_addr: read_vec_deque(source)?,
+            node_end: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for MastForestResolutionReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.mast_forest_resolutions).write_into(target);
+    }
+}
+
+impl Deserializable for MastForestResolutionReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            mast_forest_resolutions: read_mast_forest_resolution_queue(source)?,
+        })
+    }
+}
+
+fn read_mast_forest_resolution_queue<R: ByteReader>(
+    source: &mut R,
+) -> Result<VecDeque<(MastNodeId, MastForestId)>, DeserializationError> {
+    let len = read_bounded_len(
+        source,
+        "MastForestResolutionReplay",
+        u32::min_serialized_size() + MastForestId::min_serialized_size(),
+    )?;
+    let mut values = VecDeque::with_capacity(len);
+    for _ in 0..len {
+        values.push_back((
+            MastNodeId::from(u32::read_from(source)?),
+            MastForestId::read_from(source)?,
+        ));
+    }
+    Ok(values)
+}
+
+impl Serializable for MemoryReadsReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        write_memory_element_queue(&self.elements_read, target);
+        write_memory_word_queue(&self.words_read, target);
+    }
+}
+
+impl Deserializable for MemoryReadsReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            elements_read: read_memory_element_queue(source)?,
+            words_read: read_memory_word_queue(source)?,
+        })
+    }
+}
+
+impl Serializable for MemoryWritesReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        write_memory_element_queue(&self.elements_written, target);
+        write_memory_word_queue(&self.words_written, target);
+    }
+}
+
+impl Deserializable for MemoryWritesReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            elements_written: read_memory_element_queue(source)?,
+            words_written: read_memory_word_queue(source)?,
+        })
+    }
+}
+
+impl Serializable for AdviceReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.stack_pops).write_into(target);
+        SerializableVecDeque(&self.stack_word_pops).write_into(target);
+        SerializableVecDeque(&self.stack_dword_pops).write_into(target);
+    }
+}
+
+impl Deserializable for AdviceReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            stack_pops: read_vec_deque(source)?,
+            stack_word_pops: read_vec_deque(source)?,
+            stack_dword_pops: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for BitwiseOp {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::U32And => 0u8,
+            Self::U32Xor => 1u8,
+        }
+        .write_into(target);
+    }
+}
+
+impl Deserializable for BitwiseOp {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match u8::read_from(source)? {
+            0 => Ok(Self::U32And),
+            1 => Ok(Self::U32Xor),
+            tag => Err(DeserializationError::InvalidValue(format!(
+                "invalid bitwise replay op tag {tag}"
+            ))),
+        }
+    }
+}
+
+impl Serializable for BitwiseReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.u32op_with_operands).write_into(target);
+    }
+}
+
+impl Deserializable for BitwiseReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            u32op_with_operands: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for KernelReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.kernel_proc_accesses).write_into(target);
+    }
+}
+
+impl Deserializable for KernelReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            kernel_proc_accesses: read_vec_deque(source)?,
+        })
+    }
+}
+
+fn write_ace_queue<W: ByteWriter>(queue: &VecDeque<(RowIndex, CircuitEvaluation)>, target: &mut W) {
+    target.write_usize(queue.len());
+    for &(row, ref evaluation) in queue {
+        write_row_index(row, target);
+        evaluation.write_into(target);
+    }
+}
+
+fn read_ace_queue<R: ByteReader>(
+    source: &mut R,
+) -> Result<VecDeque<(RowIndex, CircuitEvaluation)>, DeserializationError> {
+    let len = source.read_usize()?;
+    let max_len =
+        source.max_alloc(u32::min_serialized_size() + CircuitEvaluation::min_serialized_size());
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "ACE replay length {len} exceeds reader allocation bound {max_len}"
+        )));
+    }
+
+    let mut values = VecDeque::with_capacity(len);
+    for _ in 0..len {
+        values.push_back((read_row_index(source)?, CircuitEvaluation::read_from(source)?));
+    }
+    Ok(values)
+}
+
+impl Serializable for AceReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        write_ace_queue(&self.circuit_evaluations, target);
+    }
+}
+
+impl Deserializable for AceReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            circuit_evaluations: read_ace_queue(source)?,
+        })
+    }
+}
+
+impl Serializable for RangeCheckerReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.range_checks_u32_ops).write_into(target);
+    }
+}
+
+impl Deserializable for RangeCheckerReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            range_checks_u32_ops: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for BlockAddressReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.block_addresses).write_into(target);
+    }
+}
+
+impl Deserializable for BlockAddressReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self { block_addresses: read_vec_deque(source)? })
+    }
+}
+
+impl Serializable for HasherResponseReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.permutation_operations).write_into(target);
+        SerializableVecDeque(&self.build_merkle_root_operations).write_into(target);
+        SerializableVecDeque(&self.mrupdate_operations).write_into(target);
+    }
+}
+
+impl Deserializable for HasherResponseReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            permutation_operations: read_vec_deque(source)?,
+            build_merkle_root_operations: read_vec_deque(source)?,
+            mrupdate_operations: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for HasherOp {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::Permute(state) => {
+                0u8.write_into(target);
+                state.write_into(target);
+            },
+            Self::HashControlBlock((h1, h2, domain, expected_hash)) => {
+                1u8.write_into(target);
+                h1.write_into(target);
+                h2.write_into(target);
+                domain.write_into(target);
+                expected_hash.write_into(target);
+            },
+            Self::HashBasicBlock((forest_id, node_id, expected_hash)) => {
+                2u8.write_into(target);
+                forest_id.write_into(target);
+                node_id.write_into(target);
+                expected_hash.write_into(target);
+            },
+            Self::BuildMerkleRoot((leaf, path, index)) => {
+                3u8.write_into(target);
+                leaf.write_into(target);
+                path.write_into(target);
+                index.write_into(target);
+            },
+            Self::UpdateMerkleRoot((old_value, new_value, path, index)) => {
+                4u8.write_into(target);
+                old_value.write_into(target);
+                new_value.write_into(target);
+                path.write_into(target);
+                index.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for HasherOp {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match u8::read_from(source)? {
+            0 => Ok(Self::Permute(<[Felt; STATE_WIDTH]>::read_from(source)?)),
+            1 => Ok(Self::HashControlBlock((
+                Word::read_from(source)?,
+                Word::read_from(source)?,
+                Felt::read_from(source)?,
+                Word::read_from(source)?,
+            ))),
+            2 => Ok(Self::HashBasicBlock((
+                MastForestId::read_from(source)?,
+                MastNodeId::from(u32::read_from(source)?),
+                Word::read_from(source)?,
+            ))),
+            3 => Ok(Self::BuildMerkleRoot((
+                Word::read_from(source)?,
+                MerklePath::read_from(source)?,
+                Felt::read_from(source)?,
+            ))),
+            4 => Ok(Self::UpdateMerkleRoot((
+                Word::read_from(source)?,
+                Word::read_from(source)?,
+                MerklePath::read_from(source)?,
+                Felt::read_from(source)?,
+            ))),
+            tag => Err(DeserializationError::InvalidValue(format!(
+                "invalid hasher replay op tag {tag}"
+            ))),
+        }
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size()
+            + (MastForestId::min_serialized_size()
+                + u32::min_serialized_size()
+                + Word::min_serialized_size())
+    }
+}
+
+impl Serializable for HasherRequestReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.hasher_ops).write_into(target);
+    }
+}
+
+impl Deserializable for HasherRequestReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self { hasher_ops: read_vec_deque(source)? })
+    }
+}
+
+impl Serializable for StackOverflowReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        SerializableVecDeque(&self.overflow_values).write_into(target);
+        SerializableVecDeque(&self.restore_context_info).write_into(target);
+    }
+}
+
+impl Deserializable for StackOverflowReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            overflow_values: read_vec_deque(source)?,
+            restore_context_info: read_vec_deque(source)?,
+        })
+    }
+}
+
+impl Serializable for ExecutionReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.block_stack.write_into(target);
+        self.execution_context.write_into(target);
+        self.stack_overflow.write_into(target);
+        self.memory_reads.write_into(target);
+        self.advice.write_into(target);
+        self.hasher.write_into(target);
+        self.block_address.write_into(target);
+        self.mast_forest_resolution.write_into(target);
+    }
+}
+
+impl Deserializable for ExecutionReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            block_stack: BlockStackReplay::read_from(source)?,
+            execution_context: ExecutionContextReplay::read_from(source)?,
+            stack_overflow: StackOverflowReplay::read_from(source)?,
+            memory_reads: MemoryReadsReplay::read_from(source)?,
+            advice: AdviceReplay::read_from(source)?,
+            hasher: HasherResponseReplay::read_from(source)?,
+            block_address: BlockAddressReplay::read_from(source)?,
+            mast_forest_resolution: MastForestResolutionReplay::read_from(source)?,
+        })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary;

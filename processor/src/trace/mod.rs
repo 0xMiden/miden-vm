@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{format, sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -6,7 +6,10 @@ use miden_air::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::deferred::DeferredState;
+use miden_core::{
+    deferred::{DEFAULT_MAX_DEFERRED_ELEMENTS, DeferredState, DeferredStateWire},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -37,6 +40,10 @@ pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
+///
+/// Its binary form is trusted replay data. Sparse MAST node and digest maps inside the trace
+/// generation context are not checked against a source `MastForest` commitment; see
+/// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
     trace_output: TraceBuildOutput,
@@ -45,7 +52,7 @@ pub struct TraceBuildInputs {
 }
 
 #[derive(Debug)]
-pub(crate) struct TraceBuildOutput {
+struct TraceBuildOutput {
     stack_outputs: StackOutputs,
     deferred_state: DeferredState,
 }
@@ -60,6 +67,34 @@ impl TraceBuildOutput {
         } = execution_output;
 
         Self { stack_outputs: stack, deferred_state }
+    }
+}
+
+impl Serializable for TraceBuildOutput {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.stack_outputs.write_into(target);
+        let deferred_wire = self
+            .deferred_state
+            .to_wire()
+            .expect("deferred state must serialize to canonical wire");
+        deferred_wire.write_into(target);
+    }
+}
+
+impl Deserializable for TraceBuildOutput {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let stack_outputs = StackOutputs::read_from(source)?;
+        let deferred_wire = DeferredStateWire::read_from(source)?;
+        let deferred_state = DeferredState::from_wire(
+            Arc::new(miden_precompiles::registry()),
+            &deferred_wire,
+            DEFAULT_MAX_DEFERRED_ELEMENTS,
+        )
+        .map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid deferred state: {err}"))
+        })?;
+
+        Ok(Self { stack_outputs, deferred_state })
     }
 }
 
@@ -93,6 +128,13 @@ impl TraceBuildInputs {
         &self.program_info
     }
 
+    // Kept for mismatch and edge-case tests that mutate replay inputs directly.
+    #[cfg(any(test, feature = "testing"))]
+    #[expect(dead_code, reason = "used only by replay-mutation tests")]
+    fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
+        (self.trace_output, self.trace_generation_context, self.program_info)
+    }
+
     #[cfg(any(test, feature = "testing"))]
     /// Returns the trace replay context captured during execution.
     pub fn trace_generation_context(&self) -> &TraceGenerationContext {
@@ -104,6 +146,38 @@ impl TraceBuildInputs {
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
         &mut self.trace_generation_context
+    }
+
+    #[cfg(test)]
+    #[expect(dead_code, reason = "used only by replay-mutation tests")]
+    fn from_parts(
+        trace_output: TraceBuildOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        Self {
+            trace_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+}
+
+impl Serializable for TraceBuildInputs {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.trace_output.write_into(target);
+        self.trace_generation_context.write_into(target);
+        self.program_info.write_into(target);
+    }
+}
+
+impl Deserializable for TraceBuildInputs {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            trace_output: TraceBuildOutput::read_from(source)?,
+            trace_generation_context: TraceGenerationContext::read_from(source)?,
+            program_info: ProgramInfo::read_from(source)?,
+        })
     }
 }
 
@@ -130,7 +204,7 @@ impl ExecutionTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    pub(crate) fn new_from_parts(
+    fn new_from_parts(
         program_info: ProgramInfo,
         trace_output: TraceBuildOutput,
         main_trace: MainTrace,

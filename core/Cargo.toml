@@ -44,7 +44,13 @@ serde = [
     "miden-debug-types/serde",
     "miden-utils-indexing/serde",
 ]
-arbitrary = ["dep:proptest"]
+arbitrary = [
+    "dep:proptest",
+    # TODO: switch to miden-crypto/arbitrary once it exists. For now, the crypto-owned
+    # Arbitrary impls for Felt and Word are exposed by testing:
+    # https://github.com/0xMiden/crypto/issues/1071
+    "miden-crypto/testing",
+]
 testing = ["arbitrary"]
 fuzzing = []
 

@@ -109,6 +109,7 @@
 - Reduced optimized benchmark build time by relaxing forced inlining in processor execution helpers ([#3292](https://github.com/0xMiden/miden-vm/pull/3292)).
 - Added no-op handlers for readonly debugger events to `CoreLibrary::handlers`, so hosts that load the core library can execute programs emitting those events without registering no-op handlers manually ([#3305](https://github.com/0xMiden/miden-vm/pull/3305)).
 - Added trusted sparse MAST forest serialization for trace replay payloads ([#3313](https://github.com/0xMiden/miden-vm/pull/3313)).
+- Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 
 ## miden-vm v0.24.0 (2026-06-24)
 

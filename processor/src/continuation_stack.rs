@@ -1,10 +1,25 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{mast::MastNodeId, program::Program};
+use miden_core::{
+    mast::{MastForestId, MastNodeId},
+    program::Program,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
+
+const TAG_START_NODE: u8 = 0;
+const TAG_FINISH_JOIN: u8 = 1;
+const TAG_FINISH_SPLIT: u8 = 2;
+const TAG_FINISH_LOOP: u8 = 3;
+const TAG_FINISH_CALL: u8 = 4;
+const TAG_FINISH_DYN: u8 = 5;
+const TAG_RESUME_BASIC_BLOCK: u8 = 6;
+const TAG_RESPAN: u8 = 7;
+const TAG_FINISH_BASIC_BLOCK: u8 = 8;
+const TAG_ENTER_FOREST: u8 = 9;
 
 // CONTINUATION
 // ================================================================================================
@@ -18,7 +33,15 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 /// [`Continuation::EnterForest`] variant. For live execution this is `Arc<MastForest>`; for the
 /// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
 /// `mast_forest_store` of the trace generation context.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(
+        binary_serde(true),
+        serde_test(false),
+        types(MastForestId)
+    )
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
@@ -115,7 +138,15 @@ impl<F> Continuation<F> {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(
+        binary_serde(true),
+        serde_test(false),
+        types(MastForestId)
+    )
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
     source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
@@ -341,6 +372,191 @@ impl<F> ContinuationStack<F> {
     }
 }
 
+impl ContinuationStack<MastForestId> {
+    pub(crate) fn iter_enter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.stack.iter().filter_map(|continuation| match continuation {
+            Continuation::EnterForest { forest, .. } => Some(*forest),
+            _ => None,
+        })
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for Continuation<MastForestId> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::StartNode(node_id) => {
+                TAG_START_NODE.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishJoin(node_id) => {
+                TAG_FINISH_JOIN.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishSplit(node_id) => {
+                TAG_FINISH_SPLIT.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishLoop(node_id) => {
+                TAG_FINISH_LOOP.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishCall(node_id) => {
+                TAG_FINISH_CALL.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::FinishDyn(node_id) => {
+                TAG_FINISH_DYN.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                TAG_RESUME_BASIC_BLOCK.write_into(target);
+                node_id.write_into(target);
+                batch_index.write_into(target);
+                op_idx_in_batch.write_into(target);
+            },
+            Self::Respan { node_id, batch_index } => {
+                TAG_RESPAN.write_into(target);
+                node_id.write_into(target);
+                batch_index.write_into(target);
+            },
+            Self::FinishBasicBlock(node_id) => {
+                TAG_FINISH_BASIC_BLOCK.write_into(target);
+                node_id.write_into(target);
+            },
+            Self::EnterForest { forest, package_debug_info: _ } => {
+                TAG_ENTER_FOREST.write_into(target);
+                forest.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for Continuation<MastForestId> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match u8::read_from(source)? {
+            TAG_START_NODE => Ok(Self::StartNode(read_mast_node_id(source)?)),
+            TAG_FINISH_JOIN => Ok(Self::FinishJoin(read_mast_node_id(source)?)),
+            TAG_FINISH_SPLIT => Ok(Self::FinishSplit(read_mast_node_id(source)?)),
+            TAG_FINISH_LOOP => Ok(Self::FinishLoop(read_mast_node_id(source)?)),
+            TAG_FINISH_CALL => Ok(Self::FinishCall(read_mast_node_id(source)?)),
+            TAG_FINISH_DYN => Ok(Self::FinishDyn(read_mast_node_id(source)?)),
+            TAG_RESUME_BASIC_BLOCK => Ok(Self::ResumeBasicBlock {
+                node_id: read_mast_node_id(source)?,
+                batch_index: usize::read_from(source)?,
+                op_idx_in_batch: usize::read_from(source)?,
+            }),
+            TAG_RESPAN => Ok(Self::Respan {
+                node_id: read_mast_node_id(source)?,
+                batch_index: usize::read_from(source)?,
+            }),
+            TAG_FINISH_BASIC_BLOCK => Ok(Self::FinishBasicBlock(read_mast_node_id(source)?)),
+            TAG_ENTER_FOREST => Ok(Self::EnterForest {
+                forest: MastForestId::read_from(source)?,
+                package_debug_info: None,
+            }),
+            tag => {
+                Err(DeserializationError::InvalidValue(format!("invalid continuation tag {tag}")))
+            },
+        }
+    }
+}
+
+fn read_mast_node_id<R: ByteReader>(source: &mut R) -> Result<MastNodeId, DeserializationError> {
+    Ok(MastNodeId::from(u32::read_from(source)?))
+}
+
+impl Serializable for ContinuationStack<MastForestId> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.stack.write_into(target);
+        self.source_node_ids.write_into(target);
+    }
+}
+
+impl Deserializable for ContinuationStack<MastForestId> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let stack = Vec::<Continuation<MastForestId>>::read_from(source)?;
+        let source_node_ids = Option::<Vec<Option<DebugSourceNodeId>>>::read_from(source)?;
+        if let Some(source_node_ids) = &source_node_ids
+            && source_node_ids.len() != stack.len()
+        {
+            return Err(DeserializationError::InvalidValue(format!(
+                "continuation source_node_ids length {} does not match stack length {}",
+                source_node_ids.len(),
+                stack.len()
+            )));
+        }
+        Ok(Self { stack, source_node_ids })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::{collection, prelude::*};
+
+    use super::*;
+    use crate::mast::MastForestId;
+
+    const MAX_CONTINUATIONS: usize = 16;
+
+    fn arb_source_node_id() -> impl Strategy<Value = DebugSourceNodeId> {
+        any::<u32>().prop_map(DebugSourceNodeId::from)
+    }
+
+    impl Arbitrary for Continuation<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                any::<MastNodeId>().prop_map(Self::StartNode),
+                any::<MastNodeId>().prop_map(Self::FinishJoin),
+                any::<MastNodeId>().prop_map(Self::FinishSplit),
+                any::<MastNodeId>().prop_map(Self::FinishLoop),
+                any::<MastNodeId>().prop_map(Self::FinishCall),
+                any::<MastNodeId>().prop_map(Self::FinishDyn),
+                (any::<MastNodeId>(), 0usize..=8, 0usize..=8).prop_map(
+                    |(node_id, batch_index, op_idx_in_batch)| Self::ResumeBasicBlock {
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    },
+                ),
+                (any::<MastNodeId>(), 0usize..=8)
+                    .prop_map(|(node_id, batch_index)| Self::Respan { node_id, batch_index }),
+                any::<MastNodeId>().prop_map(Self::FinishBasicBlock),
+                any::<MastForestId>()
+                    .prop_map(|forest| Self::EnterForest { forest, package_debug_info: None }),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ContinuationStack<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            collection::vec(any::<Continuation<MastForestId>>(), 0..=MAX_CONTINUATIONS)
+                .prop_flat_map(|stack| {
+                    let len = stack.len();
+                    (
+                        Just(stack),
+                        prop_oneof![
+                            Just(None),
+                            collection::vec(proptest::option::of(arb_source_node_id()), len..=len,)
+                                .prop_map(Some),
+                        ],
+                    )
+                })
+                .prop_map(|(stack, source_node_ids)| Self { stack, source_node_ids })
+                .boxed()
+        }
+    }
+}
+
 // TESTS
 // ================================================================================================
 
@@ -408,5 +624,50 @@ mod tests {
         assert!(matches!(result[0], Continuation::EnterForest { .. }));
         assert!(matches!(result[1], Continuation::EnterForest { .. }));
         assert!(matches!(result[2], Continuation::StartNode(_)));
+    }
+
+    #[test]
+    fn continuation_stack_mast_forest_id_round_trip_omits_package_debug_info() {
+        let mut stack: ContinuationStack<MastForestId> = ContinuationStack::default();
+        stack.push_continuation(Continuation::StartNode(MastNodeId::from(1)));
+        stack.push_continuation(Continuation::EnterForest {
+            forest: MastForestId::from(2),
+            package_debug_info: None,
+        });
+        stack.push_continuation(Continuation::ResumeBasicBlock {
+            node_id: MastNodeId::from(3),
+            batch_index: 4,
+            op_idx_in_batch: 5,
+        });
+        stack.source_node_ids =
+            Some(vec![Some(DebugSourceNodeId::from(10)), None, Some(DebugSourceNodeId::from(11))]);
+
+        let bytes = stack.to_bytes();
+        let restored = ContinuationStack::<MastForestId>::read_from_bytes(&bytes).unwrap();
+
+        assert_eq!(restored.stack.len(), 3);
+        assert!(matches!(
+            restored.stack[0],
+            Continuation::StartNode(node_id) if node_id == MastNodeId::from(1)
+        ));
+        assert!(matches!(
+            restored.stack[1],
+            Continuation::EnterForest {
+                forest,
+                package_debug_info: None,
+            } if forest == MastForestId::from(2)
+        ));
+        assert!(matches!(
+            restored.stack[2],
+            Continuation::ResumeBasicBlock {
+                node_id,
+                batch_index: 4,
+                op_idx_in_batch: 5,
+            } if node_id == MastNodeId::from(3)
+        ));
+        assert_eq!(
+            restored.source_node_ids,
+            Some(vec![Some(DebugSourceNodeId::from(10)), None, Some(DebugSourceNodeId::from(11)),])
+        );
     }
 }
