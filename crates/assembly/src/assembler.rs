@@ -663,6 +663,7 @@ impl Assembler {
                         let node = self.ensure_valid_procedure_mast_root(
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
+                            Some(&self.linker[gid.module].path().join(&item.name)),
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
@@ -1589,9 +1590,14 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                let path = match target {
+                    InvocationTarget::Path(path) => Some(path.inner().as_ref()),
+                    InvocationTarget::MastRoot(_) | InvocationTarget::Symbol(_) => None,
+                };
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
+                    path,
                     mast_root.into_inner(),
                     None,
                     None,
@@ -1613,6 +1619,7 @@ impl Assembler {
                             let node = self.ensure_valid_procedure_mast_root(
                                 kind,
                                 target.span(),
+                                Some(&self.linker[gid.module].path().join(&p.name)),
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
@@ -1644,6 +1651,7 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         span: SourceSpan,
+        path: Option<&Path>,
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
@@ -1658,9 +1666,13 @@ impl Assembler {
             // procedures at this point, so if the digest is not present in the kernel,
             // it is a definite error.
             if !self.linker.kernel().contains_proc(mast_root) {
-                let callee = mast_forest_builder
-                    .find_procedure_by_mast_root(&mast_root)
-                    .map(|proc| proc.path().clone())
+                let callee = path
+                    .map(|p| p.to_path_buf().into_boxed_path().into())
+                    .or_else(|| {
+                        mast_forest_builder
+                            .find_procedure_by_mast_root(&mast_root)
+                            .map(|proc| proc.path().clone())
+                    })
                     .unwrap_or_else(|| {
                         let digest_path = format!("{mast_root}");
                         Arc::<Path>::from(Path::new(&digest_path))
@@ -1675,19 +1687,20 @@ impl Assembler {
 
         if let (Some(source_library_commitment), Some(source_root_id)) =
             (source_library_commitment, source_root_id)
-            && let Some(conflicting_root) = self.linker.conflicting_dynamic_procedure_export_root(
-                source_library_commitment,
-                mast_root,
-                source_root_id,
-            )
+            && let Some((_conflicting_root, conflicting_path)) =
+                self.linker.conflicting_dynamic_procedure_export_root(
+                    source_library_commitment,
+                    mast_root,
+                    source_root_id,
+                )
         {
             return Err(Report::new(LinkerError::AmbiguousDynamicProcedureRoot {
                 span,
                 source_file: current_source_file,
+                path: path.map(|p| p.to_path_buf().into_boxed_path().into()),
                 mast_root,
                 source_library_commitment,
-                selected_root: source_root_id,
-                conflicting_root,
+                conflicting_path,
             }));
         }
 

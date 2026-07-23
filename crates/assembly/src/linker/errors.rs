@@ -9,7 +9,6 @@ use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
-use miden_core::mast::MastNodeId;
 
 // LINKER ERROR
 // ================================================================================================
@@ -218,7 +217,7 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         callee: Arc<Path>,
     },
-    #[error("ambiguous dynamic procedure link for MAST root {mast_root}")]
+    #[error("ambiguous dynamic link for procedure {}: conflicts with '{conflicting_path}' which has the same MAST root", path.as_deref().map(|p| format!("'{p}' (MAST root {mast_root})")).unwrap_or_else(|| format!("MAST root {mast_root}")))]
     #[diagnostic(help(
         "link the library statically, or avoid exporting multiple procedures with this same execution digest"
     ))]
@@ -227,10 +226,10 @@ pub enum LinkerError {
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        path: Option<Arc<Path>>,
+        conflicting_path: Arc<Path>,
         mast_root: Word,
         source_library_commitment: Word,
-        selected_root: MastNodeId,
-        conflicting_root: MastNodeId,
     },
     #[error("kernel procedure '{callee}' can only be invoked via syscall")]
     #[diagnostic()]

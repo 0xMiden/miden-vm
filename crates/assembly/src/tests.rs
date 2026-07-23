@@ -2013,7 +2013,7 @@ fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
         .assemble_program("program", source)
         .expect_err("expected ambiguous dynamic link diagnostic");
 
-    assert_diagnostic!(&err, "ambiguous dynamic procedure link for MAST root");
+    assert_diagnostic!(&err, "ambiguous dynamic link for procedure '::lib::a::f2'");
     assert_diagnostic!(
         &err,
         "dynamic reference cannot select one of the same-digest exported roots"
