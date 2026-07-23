@@ -12,8 +12,6 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-/// Domain tag for the kernel commitment.
-///
 /// Domain tag for the kernel commitment: the registered selector
 /// `(KERNEL_COMMITMENT_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
 pub const KERNEL_DOMAIN_TAG: crate::Felt =

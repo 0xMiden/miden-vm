@@ -24,11 +24,11 @@
 //! | 32        | 1       | kernel commitment ([`KERNEL_DOMAIN_TAG`](super::KERNEL_DOMAIN_TAG)) |
 //! | 33        | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
 //!
-//! Selectors share one domain namespace with the small `merge_in_domain` values used for MAST
-//! control-block hashing (opcode-sized, `< 256`): every registered selector is `>= 257` by
-//! construction (`domain_id >= 1`), so the two ranges cannot collide, and the sequential and
-//! two-to-one constructions use the same capacity layout deliberately — a registered id must
-//! not be reused as a merge domain.
+//! Selectors share one namespace with the `merge_in_domain` values used for MAST control-block
+//! hashing. Those are opcode-sized (`< 256`) while every registered selector is `>= 257`
+//! (`domain_id >= 1`), so the ranges cannot collide. The sequential and two-to-one
+//! constructions share the capacity layout deliberately: a registered id must not be reused as
+//! a merge domain.
 
 use crate::Felt;
 

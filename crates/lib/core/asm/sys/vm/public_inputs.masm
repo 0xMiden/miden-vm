@@ -46,13 +46,14 @@ use miden::core::crypto::hashes::poseidon2
 # Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
 # is accumulated as `requests − response`.
 #
-# Fiat-Shamir absorption order (`MidenMultiAir::observe`):
-#   1. kernel_H + program_digest                      (4 + 4 = 8 felts)
-#   2. deferred_root + zero pad                       (4 + 4 = 8 felts)
-#   3. stack_inputs[0..8]                             (8 felts)
-#   4. stack_inputs[8..16]                            (8 felts)
-#   5. stack_outputs[0..8]                            (8 felts)
-#   6. stack_outputs[8..16]                           (8 felts)
+# Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
+#   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
+# where CLAIM_HASH is the canonical execution-claim commitment over
+# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` (computed inline by
+# `compute_claim_hash`). With RELATION_DIGEST pre-loaded in the transcript capacity by
+# `init_seed`, the state after this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+# The raw stack i/o and kernel digests remain public values for the constraint checks and the
+# LogUp boundary without being separately absorbed.
 #
 # Data sources:
 #   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed for
@@ -75,6 +76,13 @@ use miden::core::crypto::hashes::poseidon2
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match miden_core::program::KERNEL_DOMAIN_TAG
 # (enforced by cross-tests).
 const KERNEL_DOMAIN_TAG = 8193
+
+# Domain tag for the claim commitment: the registered selector
+# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match
+# miden_core::program::CLAIM_DOMAIN_TAG and the const in claim.masm (enforced by the
+# e2e recursion tests).
+const CLAIM_DOMAIN_TAG = 8449
 
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
@@ -125,11 +133,14 @@ pub proc process_public_inputs
     exec.store_reduced_inputs_address
     # => [...]
 
-    # 2) Observe the 16-felt reduced-inputs window into FS as two rate-aligned chunks.
-    exec.absorb_reduced_inputs_window_into_fs
+    # 2) Compute CLAIM_HASH and absorb the single statement block [CLAIM_HASH | D] into FS.
+    exec.compute_claim_hash
+    # => [CLAIM_HASH, ...]
+    exec.absorb_claim_and_deferred_into_fs
     # => [...]
 
-    # 3) Load FLPI (stack i/o) from caller memory into the FLPI region and absorb into FS.
+    # 3) Load FLPI (stack i/o) from caller memory into the FLPI region (public values for the
+    #    constraint checks; not separately absorbed — the transcript sees them via CLAIM_HASH).
     exec.load_public_inputs
     # => [...]
 
@@ -395,68 +406,101 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc absorb_reduced_inputs_window_into_fs
-    # Explicitly zero the trailing pad word at reduced_inputs+12 before absorbing the window.
-    padw exec.constants::reduced_inputs_address_ptr mem_load add.12 mem_storew_le dropw
+#! Computes CLAIM_HASH, the canonical execution-claim commitment, without materializing a
+#! contiguous claim region: block 1 is assembled from the reduced-inputs window (`P` at
+#! +REDUCED_INPUTS_PROGRAM_OFFSET, `K` = kernel_H at +0) and blocks 2..5 stream the caller's
+#! stack i/o. Identical math to `claim::claim_hash` over the canonical region
+#! `P ‖ K ‖ I ‖ O` (domain tag in the second capacity element, `40 % 8 = 0` in the first);
+#! the caller-region form replaces this inline computation in the verifier API rework.
+#!
+#! Input:  [...]
+#! Output: [CLAIM_HASH, ...]
+proc compute_claim_hash
+    # capacity word = [40 % 8 = 0, CLAIM_DOMAIN_TAG, 0, 0]
+    push.0.0 push.CLAIM_DOMAIN_TAG push.0
+    # => [C, ...]
+
+    # block 1 rate = [P | K]: K = kernel_H at reduced_inputs+0, P at +PROGRAM_OFFSET
+    padw exec.constants::reduced_inputs_address_ptr mem_load mem_loadw_le
+    # => [K, C, ...]
+    padw exec.constants::reduced_inputs_address_ptr mem_load add.REDUCED_INPUTS_PROGRAM_OFFSET mem_loadw_le
+    # => [P, K, C, ...]
+    exec.poseidon2::permute
+    # => [R0', R1', C', ...]
+
+    # blocks 2..5: stream the 32 stack-i/o felts from caller memory
+    exec.constants::stack_io_address_ptr mem_load
+    movdn.12
+    # => [R0', R1', C', io_ptr, ...]
+    repeat.4
+        mem_stream
+        exec.poseidon2::permute
+    end
+    # => [R0, R1, C, io_ptr + 32, ...]
+
+    exec.poseidon2::squeeze_digest
+    # => [CLAIM_HASH, io_ptr + 32, ...]
+    movup.4 drop
+    # => [CLAIM_HASH, ...]
+end
+
+#! Absorbs the single statement block `[CLAIM_HASH | D]` into the FS transcript, mirroring
+#! `MidenMultiAir::observe`. With RELATION_DIGEST pre-loaded in the transcript capacity
+#! (`init_seed`), the resulting state realizes the factored statement binding
+#! `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+#!
+#! Input:  [CLAIM_HASH, ...]
+#! Output: [...]
+proc absorb_claim_and_deferred_into_fs
+    # D from the reduced-inputs window
+    padw exec.constants::reduced_inputs_address_ptr mem_load add.REDUCED_INPUTS_DEFERRED_OFFSET mem_loadw_le
+    # => [D, CLAIM_HASH, ...]
 
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     exec.random_coin::load_random_coin_state
-    # => [R1, R2, C, ...]
+    # => [R1, R2, C, D, CLAIM_HASH, ...]
 
-    # `mem_stream` consumes its pointer from stack[12].
-    exec.constants::reduced_inputs_address_ptr mem_load
-    movdn.12
-    # => [R1, R2, C, base, ...]
+    # duplex overwrite mode: replace the rate with [CLAIM_HASH | D]
+    dropw dropw
+    # => [C, D, CLAIM_HASH, ...]
+    swapw.2
+    # => [CLAIM_HASH, D, C, ...]
 
-    repeat.2
-        mem_stream
-        # Bind the absorbed length (8) into the capacity before each absorb permutation.
-        movup.8 add.8 movdn.8
-        exec.poseidon2::permute
-    end
-    # => [R1', R2', C', base+16, ...]
+    # Bind the absorbed length (8) into the capacity before the absorb permutation.
+    movup.8 add.8 movdn.8
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
 
     exec.random_coin::store_random_coin_state
     push.8 exec.constants::random_coin_output_len_ptr mem_store
-    # => [base+16, ...]
-
-    drop
+    # => [...]
 end
 
-#! Loads stack i/o from caller memory at `STACK_IO_ADDRESS_PTR`, stores it at `pi_ptr` as extension
-#! field elements (each base felt at offset `2*i`, zero in the high coordinate), and absorbs it
-#! into the FS transcript. Each `load_base_store_extension_double_word_from_mem + permute`
-#! iteration absorbs 8 base felts via direct sponge permutation.
+#! Loads stack i/o from caller memory at `STACK_IO_ADDRESS_PTR` and stores it at `pi_ptr` as
+#! extension field elements (each base felt at offset `2*i`, zero in the high coordinate).
 #!
-#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
+#! The values are public inputs for the constraint checks only; they are NOT absorbed into the
+#! FS transcript (the transcript binds them via CLAIM_HASH).
 #!
 #! Input:  [...]
 #! Output: [...]
 proc load_public_inputs
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    exec.random_coin::load_random_coin_state
-    # => [R1, R2, C, ...]
-
+    padw padw padw
+    # => [SCRATCH(12), ...]
     exec.constants::stack_io_address_ptr mem_load
     movdn.12
     exec.constants::public_inputs_address_ptr mem_load
     movdn.12
-    # => [R1, R2, C, pi_ptr, stack_io_ptr, ...]
+    # => [SCRATCH(12), pi_ptr, stack_io_ptr, ...]
 
-    # 4 iterations × 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
+    # 4 iterations x 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
     repeat.4
         exec.public_inputs::load_base_store_extension_double_word_from_mem
-        # Bind the absorbed length (8) into the capacity before each absorb permutation.
-        movup.8 add.8 movdn.8
-        exec.poseidon2::permute
     end
-    # => [R1', R2', C', pi_ptr + 64, stack_io_ptr + 32, ...]
+    # => [SCRATCH'(12), pi_ptr + 64, stack_io_ptr + 32, ...]
 
-    exec.random_coin::store_random_coin_state
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-    # => [pi_ptr + 64, stack_io_ptr + 32, ...]
-
-    drop drop
+    dropw dropw dropw drop drop
+    # => [...]
 end
 
 #! Observe the Miden AIR shape into the Fiat-Shamir transcript.

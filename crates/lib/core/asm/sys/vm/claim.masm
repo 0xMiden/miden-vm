@@ -15,13 +15,13 @@ use miden::core::crypto::hashes::poseidon2
 #
 # The claim commitment is the domain-tagged sequential hash of the region. 40 felts is exactly
 # five rate blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
-# resumable by callsites that pin the code context. Mirrors
+# resumable by callsites that pin those fields. Mirrors
 # miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
 
 # Domain tag for the claim commitment: the registered selector
 # (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match miden_core::program::CLAIM_DOMAIN_TAG
-# (enforced by cross-tests).
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::CLAIM_DOMAIN_TAG (enforced by cross-tests).
 const CLAIM_DOMAIN_TAG = 8449
 
 # Number of field elements in the canonical claim encoding.
@@ -29,9 +29,9 @@ const NUM_CLAIM_ELEMENTS = 40
 
 #! Computes the canonical claim commitment (CLAIM_HASH) over a claim region.
 #!
-#! The region must hold the fully populated 40-felt claim encoding P ‖ K ‖ I ‖ O. This procedure
-#! is pure: it does not verify anything, it only names the claim. It is the value used to form
-#! proof-request keys and to bind verified claims into a consumer's own statement.
+#! The region must hold the fully populated 40-felt claim encoding P ‖ K ‖ I ‖ O. The commitment
+#! names the claim: it forms proof-request keys and binds verified claims into a consumer's own
+#! statement. The procedure verifies nothing.
 #!
 #! Inputs:  [claim_ptr, ...]
 #! Outputs: [CLAIM_HASH, ...]
