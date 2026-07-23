@@ -1,4 +1,9 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, Path, PathBuf,
@@ -1450,4 +1455,102 @@ fn test_assert_message_without_debug_info_reports_error_code() {
         !diagnostic.contains("assertion failed with error message: Value is not zero"),
         "non-debug execution should not recover package debug assertion messages:\n{diagnostic}"
     );
+}
+
+/// Verifies assembly instruction cycle fixtures referenced by user docs.
+#[test]
+fn user_doc_assembly_cycle_fixtures_match_documentation() {
+    for case in load_assembly_cycle_fixtures() {
+        let measured = measure_program_cycles(&case.program);
+        let baseline = measure_program_cycles(&case.baseline_program);
+        let delta = measured.saturating_sub(baseline);
+        assert_eq!(
+            delta, case.expected_cycles,
+            "fixture {}: program should measure {} cycles (measured {measured}, baseline {baseline})",
+            case.id, case.expected_cycles,
+        );
+    }
+}
+
+struct AssemblyCycleFixture {
+    id: String,
+    program: String,
+    baseline_program: String,
+    expected_cycles: u32,
+}
+
+fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
+    // Packaged with the crate so `cargo test -p miden-processor` works outside the workspace.
+    const FIXTURES: &str = include_str!("assembly-cycle-fixtures.toml");
+
+    let table: toml::Table =
+        FIXTURES.parse().expect("assembly cycle fixtures should be valid TOML");
+    let cases = table
+        .get("case")
+        .and_then(toml::Value::as_array)
+        .expect("assembly-cycle-fixtures.toml should contain a [[case]] array");
+
+    cases
+        .iter()
+        .map(|case| {
+            let case = case.as_table().expect("each [[case]] entry should be a table");
+            let expected = case
+                .get("expected")
+                .and_then(toml::Value::as_str)
+                .expect("fixture should declare expected cycle text");
+            let expected_cycles = expected
+                .split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| panic!("could not parse cycle count from {expected:?}"));
+
+            AssemblyCycleFixture {
+                id: case.get("id").and_then(toml::Value::as_str).expect("id").to_string(),
+                program: case
+                    .get("program")
+                    .and_then(toml::Value::as_str)
+                    .expect("program")
+                    .to_string(),
+                baseline_program: case
+                    .get("baseline_program")
+                    .and_then(toml::Value::as_str)
+                    .expect("baseline_program")
+                    .to_string(),
+                expected_cycles,
+            }
+        })
+        .collect()
+}
+
+fn measure_program_cycles(program: &str) -> u32 {
+    use miden_utils_testing::Test;
+
+    const TRUNCATE_STACK: &str = r"@locals(4)
+proc truncate_stack
+    loc_storew_be.0 dropw movupw.3
+    sdepth neq.16
+    while.true
+        dropw movupw.3
+        sdepth neq.16
+    end
+    loc_loadw_be.0
+end
+";
+
+    let body = program.trim();
+    let source = format!(
+        "{TRUNCATE_STACK}begin
+{body}
+exec.truncate_stack
+end"
+    );
+
+    let test = Test::new("program", &source, false);
+    let outputs = test.get_last_stack_state();
+    let measured = outputs
+        .iter()
+        .next()
+        .expect("program should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    u32::try_from(measured).expect("measured cycle count should fit in u32")
 }

@@ -64,7 +64,7 @@ The padding block is automatically added and encrypted. The tag is stored right 
 - Blocks must be stored contiguously in memory
 - `src_ptr` and `dst_ptr` **must be different** (in-place encryption not supported)
 
-**Cycles:** ~77 + 2 * n, where n = number of field elements encrypted (includes the final padding block)
+**Cycles:** ~77 + 2 * n, where n = number of field elements encrypted (includes the final padding block). For num_blocks data blocks: n = 8 * (num_blocks + 1).
 
 ### decrypt
 
@@ -112,4 +112,4 @@ Length: `num_blocks * 8` elements. The padding block is authenticated but **not*
 - Execution halts with assertion failure if tag verification fails
 - If execution completes successfully, the plaintext at `dst_ptr` is authenticated
 
-**Cycles:** ~177 + 3.5 * n, where n = number of field elements in the plaintext (excludes padding block)
+**Cycles:** ~209 + 5 * n, where n = number of field elements in the plaintext (excludes the padding block). For `num_blocks` data blocks: n = 8 * num_blocks.

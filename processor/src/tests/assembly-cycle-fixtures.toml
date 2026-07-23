@@ -1,0 +1,19 @@
+# Assembly instruction cycle fixtures measured with clk.
+# Source of truth for assembly cycle fixtures (shared by processor tests and scripts/check_user_doc_cycles.py).
+# See processor::tests::user_doc_assembly_cycle_fixtures_match_documentation and issue #3111.
+
+[[case]]
+id = "u32popcnt"
+doc = "docs/src/user_docs/assembly/u32_operations.md"
+marker = "u32popcnt"
+program = "clk push.7 u32popcnt drop clk swap sub"
+baseline_program = "clk push.7 drop clk swap sub"
+expected = "38 cycles"
+
+[[case]]
+id = "u32popcnt-instruction-reference"
+doc = "docs/src/user_docs/assembly/instruction_reference.md"
+marker = "u32popcnt"
+program = "clk push.7 u32popcnt drop clk swap sub"
+baseline_program = "clk push.7 drop clk swap sub"
+expected = "38"
