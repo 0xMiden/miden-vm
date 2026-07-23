@@ -54,6 +54,11 @@ pub const CLAIM_DOMAIN_TAG: Felt = domain_selector(EXECUTION_CLAIM_DOMAIN_ID, 1)
 /// identify the executed code and its syscall authorization set; the stack inputs and outputs
 /// are the execution's public I/O.
 ///
+/// Stack inputs are ordered as if pushed onto the stack one by one, so the last value in the
+/// slice ends up on top of the stack; stack outputs are ordered as if popped off one by one, so
+/// the top of the stack is the first value. The claim stores both in their canonical
+/// zero-padded 16-element form.
+///
 /// The deferred root is deliberately absent: verification returns it as an obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionClaim {
@@ -89,6 +94,11 @@ impl ExecutionClaim {
     /// Returns the stack outputs of this claim.
     pub const fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Splits this claim into its program info and stack I/O.
+    pub fn into_parts(self) -> (ProgramInfo, StackInputs, StackOutputs) {
+        (self.program_info, self.stack_inputs, self.stack_outputs)
     }
 
     /// Returns the canonical 40-element encoding `P ‖ K ‖ I ‖ O` of this claim.

@@ -3,6 +3,7 @@
 ## v0.28.0 (unreleased)
 
 #### Changes
+- [BREAKING] Reworked native verification around execution claims and linear obligations: `Verifier::verify(proof, claim)` verifies final proofs, and `Verifier::verify_partial(proof, claim)` verifies wire-backed partial proofs, returning the deferred obligation as a `#[must_use]` `Unsettled` token; the old `verify(program_info, inputs, outputs, proof)` signature is removed.
 - [BREAKING] Collapsed the statement observation of the Fiat-Shamir transcript into one block `[CLAIM_HASH | deferred_root]`: with `RELATION_DIGEST` pre-loaded in the transcript capacity, the transcript realizes the factored statement binding `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`. The raw stack I/O and kernel digests remain public values for constraint evaluation but are no longer separately absorbed.
 - [BREAKING] Added the canonical execution-claim schema: `ExecutionClaim` with a domain-tagged commitment (`CLAIM_HASH`), mirrored in MASM by `sys::vm::claim::claim_hash`. Domain tags are registered numeric selectors (`miden_core::program::domain`), and kernel commitments are now domain-tagged, which changes their values. Adds `hash_elements_in_domain` to the Poseidon2 MASM module.
 - `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).

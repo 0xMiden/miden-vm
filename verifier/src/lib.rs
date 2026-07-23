@@ -27,7 +27,7 @@ mod exports {
     pub use miden_core::{
         Word,
         deferred::{DeferredState, IntegrityError},
-        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+        program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof},
     };
     pub mod math {
@@ -70,49 +70,30 @@ impl Verifier {
         self
     }
 
-    /// Returns the security level of the final proof if the specified program was executed
-    /// correctly against the specified inputs and outputs.
+    /// Returns the security level of the final proof if it proves a correct execution of the
+    /// given claim.
     ///
     /// If the proof contains STARK-backed precompile VM proof material, both the precompile VM
     /// proof and the Miden VM proof are verified, and the returned security level is the minimum
     /// of the verified proof security levels. If no precompile claims were produced, only the
     /// Miden VM proof is verified.
     ///
-    /// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by
-    /// one. Thus, their expected order on the stack will be the reverse of the order in which
-    /// they are provided, and the last value in the `stack_inputs` slice is expected to be the
-    /// value at the top of the stack.
-    ///
-    /// Stack outputs are expected to be ordered as if they would be popped off the stack one by
-    /// one. Thus, the value at the top of the stack is expected to be in the first position of
-    /// the `stack_outputs` slice, and the order of the rest of the output elements will also
-    /// match the order on the stack. This is the reverse of the order of the `stack_inputs`
-    /// slice.
-    ///
     /// # Errors
     /// Returns an error if:
-    /// - The provided proof does not prove a correct execution of the program.
+    /// - The provided proof does not prove a correct execution of the claim.
     /// - The proof carries wire-backed deferred proof material, which is a partial/delegable form.
     /// - The proof's STARK-backed precompile VM proof, if present, does not verify against its
     ///   public root.
     pub fn verify(
         &self,
-        program_info: ProgramInfo,
-        stack_inputs: StackInputs,
-        stack_outputs: StackOutputs,
         proof: ExecutionProof,
+        claim: ExecutionClaim,
     ) -> Result<u32, VerificationError> {
         let miden_security_level = proof.security_level();
         let (final_deferred_root, precompile_security_level) =
             resolve_final_deferred_root(proof.deferred_proof())?;
 
-        verify_stark(
-            program_info,
-            stack_inputs,
-            stack_outputs,
-            final_deferred_root,
-            proof.miden_proof(),
-        )?;
+        verify_stark(claim, final_deferred_root, proof.miden_proof())?;
 
         Ok(precompile_security_level
             .map(|level| miden_security_level.min(level))
@@ -137,58 +118,53 @@ impl Verifier {
     ///   deferred root.
     pub fn verify_partial(
         &self,
-        program_info: ProgramInfo,
-        stack_inputs: StackInputs,
-        stack_outputs: StackOutputs,
         proof: ExecutionProof,
-    ) -> Result<(u32, DeferredState), VerificationError> {
+        claim: ExecutionClaim,
+    ) -> Result<(u32, Unsettled), VerificationError> {
         let security_level = proof.security_level();
         let deferred_state =
             hydrate_deferred_state(proof.deferred_proof(), self.max_deferred_elements)?;
 
-        verify_stark(
-            program_info,
-            stack_inputs,
-            stack_outputs,
-            deferred_state.root(),
-            proof.miden_proof(),
-        )?;
+        verify_stark(claim, deferred_state.root(), proof.miden_proof())?;
 
-        Ok((security_level, deferred_state))
+        Ok((security_level, Unsettled(deferred_state)))
     }
 }
 
-/// Returns the security level of the final proof if the specified program was executed correctly
-/// against the specified inputs and outputs.
+/// The obligation a partially verified proof hands back: the hydrated deferred state whose root
+/// the verified statement bound.
 ///
-/// This is a compatibility shim for `Verifier::default().verify(...)`.
+/// It must be settled into a final proof form or re-exposed in the caller's own statement; it
+/// must not be dropped.
+#[must_use = "the deferred obligation must be settled or re-exposed, not dropped"]
+#[derive(Debug)]
+pub struct Unsettled(DeferredState);
+
+impl Unsettled {
+    /// Returns the deferred root bound by the verified statement.
+    pub fn root(&self) -> Word {
+        self.0.root()
+    }
+
+    /// Consumes the obligation into its hydrated deferred state, for settlement or re-exposure.
+    pub fn into_state(self) -> DeferredState {
+        self.0
+    }
+}
+
+/// Returns the security level of the final proof if it proves a correct execution of the given
+/// claim, under the default verifier configuration.
 ///
-/// Specifically, verifies that if a program with the specified `program_hash` is executed against
-/// the provided `stack_inputs` and some secret inputs, the result is equal to the `stack_outputs`.
-///
-/// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
-/// Thus, their expected order on the stack will be the reverse of the order in which they are
-/// provided, and the last value in the `stack_inputs` slice is expected to be the value at the top
-/// of the stack.
-///
-/// Stack outputs are expected to be ordered as if they would be popped off the stack one by one.
-/// Thus, the value at the top of the stack is expected to be in the first position of the
-/// `stack_outputs` slice, and the order of the rest of the output elements will also match the
-/// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
+/// Wire-backed deferred proofs are partial/delegable proof material and are rejected here; use
+/// [`Verifier::verify_partial`] to verify and hydrate wire-backed partial proofs.
 ///
 /// # Errors
 /// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
+/// - The provided proof does not prove a correct execution of the claim.
 /// - The proof carries wire-backed deferred proof material, which is a partial/delegable form.
 /// - The proof's STARK-backed deferred proof, if present, does not verify against its public root.
-#[deprecated(since = "0.25.0", note = "use Verifier::new().verify(...) instead")]
-pub fn verify(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    Verifier::default().verify(program_info, stack_inputs, stack_outputs, proof)
+pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
+    Verifier::default().verify(proof, claim)
 }
 
 // HELPER FUNCTIONS
@@ -229,16 +205,18 @@ fn stark_security_level(_proof: &StarkProof) -> u32 {
 }
 
 fn verify_stark(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
+    claim: ExecutionClaim,
     final_deferred_root: Word,
     stark_proof: &StarkProof,
 ) -> Result<(), VerificationError> {
-    let program_hash = *program_info.program_hash();
+    let program_hash = *claim.program_info().program_hash();
 
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
+    let pub_inputs = PublicInputs::new(
+        claim.program_info().clone(),
+        *claim.stack_inputs(),
+        *claim.stack_outputs(),
+        final_deferred_root,
+    );
     let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
 
     let hash_fn = stark_proof.hash_fn();

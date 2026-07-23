@@ -26,7 +26,7 @@ pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
+    program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
@@ -48,7 +48,7 @@ use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::Verifier;
+pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -657,13 +657,11 @@ impl Test {
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            assert!(
-                Verifier::new()
-                    .verify(program_info, stack_inputs, stack_outputs, proof)
-                    .is_err()
-            );
+            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            assert!(verify(proof, claim).is_err());
         } else {
-            let result = Verifier::new().verify(program_info, stack_inputs, stack_outputs, proof);
+            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            let result = verify(proof, claim);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
