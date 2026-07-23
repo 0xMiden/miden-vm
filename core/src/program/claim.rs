@@ -33,7 +33,7 @@
 
 use super::{
     ProgramInfo, StackInputs, StackOutputs,
-    domain::{EXECUTION_CLAIM_DOMAIN_ID, domain_selector},
+    domain::{EXECUTION_CLAIM_DOMAIN_ID, PROOF_REQUEST_DOMAIN_ID, domain_selector},
 };
 use crate::{Felt, Word, ZERO, chiplets::hasher};
 
@@ -46,6 +46,10 @@ pub const NUM_CLAIM_ELEMENTS: usize = 40;
 /// Domain tag for the claim commitment: the registered selector
 /// `(EXECUTION_CLAIM_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
 pub const CLAIM_DOMAIN_TAG: Felt = domain_selector(EXECUTION_CLAIM_DOMAIN_ID, 1);
+
+/// Domain tag for the proof-request key: the registered selector
+/// `(PROOF_REQUEST_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
+pub const REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1);
 
 // EXECUTION CLAIM
 // ================================================================================================
@@ -126,6 +130,23 @@ impl ExecutionClaim {
 /// commitment (including the transcript observation in `miden-air`) must go through it.
 pub fn claim_commitment(elements: &[Felt; NUM_CLAIM_ELEMENTS]) -> Word {
     hasher::hash_elements_in_domain(elements, CLAIM_DOMAIN_TAG)
+}
+
+/// Returns the advice-map key addressing a proof package for `claim_commitment` under the
+/// verifier identified by `verifier_root`.
+///
+/// The key is `H_tag(claim_commitment ‖ verifier_root)` (one rate block, domain-separated). It
+/// is a lookup address, not a trust anchor: the verifier re-checks the retrieved package against
+/// the claim, so a wrong package fails verification. Both inputs are values the requester owns
+/// (the verifier's MAST root; the claim commitment it computed or holds from its own inputs) —
+/// neither is taken from advice.
+pub fn request_key(verifier_root: Word, claim_commitment: Word) -> Word {
+    // Absorb claim_commitment first so the MASM mirror needs a single word-swap to place the
+    // rate; the order is otherwise arbitrary (a domain-separated hash of the two words).
+    let mut preimage = [ZERO; 2 * 4];
+    preimage[0..4].copy_from_slice(claim_commitment.as_elements());
+    preimage[4..8].copy_from_slice(verifier_root.as_elements());
+    hasher::hash_elements_in_domain(&preimage, REQUEST_DOMAIN_TAG)
 }
 
 // TESTS

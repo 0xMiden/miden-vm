@@ -73,3 +73,33 @@ pub proc kernel_commitment
     exec.poseidon2::hash_elements_in_domain
     # => [K, ...]
 end
+
+# Domain tag for the proof-request key: the registered selector
+# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (34 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::REQUEST_DOMAIN_TAG (enforced by cross-tests).
+const REQUEST_DOMAIN_TAG = 8705
+
+#! Computes the advice-map key addressing a proof package for a claim under a verifier.
+#!
+#! The key is the domain-tagged hash of `verifier_root ‖ claim_commitment` (exactly one rate
+#! block, so a single permutation with no memory). It is a lookup address, not a trust anchor:
+#! the verifier re-checks the retrieved package, so a wrong package fails verification. Both
+#! inputs are program-owned (the verifier's MAST root via `procref`; the claim commitment via
+#! `claim_commitment` or the program's own inputs) — neither comes from advice. Mirrors
+#! miden_core::program::request_key.
+#!
+#! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
+#! Outputs: [REQUEST_KEY, ...]
+pub proc request_key
+    # Capacity word [0, REQUEST_DOMAIN_TAG, 0, 0]: first element 8 % 8 = 0, domain in the
+    # second. Pushed on top, then swapped to the capacity position (state word 2) so the two
+    # input words become the rate; absorbing claim ‖ verifier keeps this to a single swap.
+    push.0.0.REQUEST_DOMAIN_TAG.0
+    # => [CAP, VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
+    swapw.2
+    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, CAP, ...]  = [R0, R1, C]; rate = claim ‖ verifier
+    hperm
+    exec.poseidon2::squeeze_digest
+    # => [REQUEST_KEY, ...]
+end

@@ -171,3 +171,128 @@ fn hash_elements_in_domain_matches_native() {
         build_test!(source.as_str(), &[]).expect_stack(&expected);
     }
 }
+
+/// The MASM `sys::vm::claim::request_key` must agree with the native `request_key` on the same
+/// (verifier_root, claim_commitment) pair.
+#[test]
+fn masm_request_key_matches_native() {
+    use miden_core::{Felt, Word, program::request_key};
+
+    let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
+        [
+            Felt::new_unchecked(a),
+            Felt::new_unchecked(b),
+            Felt::new_unchecked(c),
+            Felt::new_unchecked(d),
+        ]
+        .into()
+    };
+    let verifier_root = word(101, 102, 103, 104);
+    let claim_commitment = word(201, 202, 203, 204);
+
+    // Push CLAIM_COMMITMENT then VERIFIER_ROOT so VERIFIER_ROOT ends on top (word 0).
+    let push = |w: Word| -> String {
+        let e = w.as_elements();
+        format!(
+            "push.{}.{}.{}.{}",
+            e[3].as_canonical_u64(),
+            e[2].as_canonical_u64(),
+            e[1].as_canonical_u64(),
+            e[0].as_canonical_u64()
+        )
+    };
+    let source = format!(
+        "
+        use miden::core::sys
+        use miden::core::sys::vm::claim
+
+        begin
+            {}
+            {}
+            exec.claim::request_key
+            exec.sys::truncate_stack
+        end
+        ",
+        push(claim_commitment),
+        push(verifier_root),
+    );
+
+    let mut expected: Vec<u64> = request_key(verifier_root, claim_commitment)
+        .as_elements()
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .collect();
+    expected.resize(16, 0);
+    build_test!(source.as_str(), &[]).expect_stack(&expected);
+}
+
+/// End-to-end request round-trip: the host registers a package stream under
+/// `request_key(verifier_root, claim_commitment)`, and a consumer that holds only those two
+/// words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
+/// host helper and the MASM `request_key` address the same advice-map entry.
+#[test]
+fn request_round_trip_retrieves_registered_package() {
+    use miden_core::{Felt, Word};
+    use miden_utils_testing::recursive_verifier::register_proof_package;
+
+    let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
+        [
+            Felt::new_unchecked(a),
+            Felt::new_unchecked(b),
+            Felt::new_unchecked(c),
+            Felt::new_unchecked(d),
+        ]
+        .into()
+    };
+    let verifier_root = word(11, 12, 13, 14);
+    let claim_commitment = word(21, 22, 23, 24);
+    let stream: [u64; 4] = [100, 200, 300, 400];
+
+    let (key, values) = register_proof_package(verifier_root, claim_commitment, &stream);
+
+    let push = |w: Word| -> String {
+        let e = w.as_elements();
+        format!(
+            "push.{}.{}.{}.{}",
+            e[3].as_canonical_u64(),
+            e[2].as_canonical_u64(),
+            e[1].as_canonical_u64(),
+            e[0].as_canonical_u64()
+        )
+    };
+    // Consumer holds (claim_commitment, verifier_root) from its own inputs; pushes them in the
+    // request_key contract order (verifier on top), derives the key, fetches the stream, and
+    // reads the four values back onto the operand stack.
+    let source = format!(
+        "
+        use miden::core::sys
+        use miden::core::sys::vm::claim
+
+        begin
+            {}
+            {}
+            exec.claim::request_key
+            adv.push_mapval
+            drop drop drop drop
+            adv_push adv_push adv_push adv_push
+            exec.sys::truncate_stack
+        end
+        ",
+        push(claim_commitment),
+        push(verifier_root),
+    );
+
+    // Map value the host registered under the request key.
+    let advice_map = vec![(key, values)];
+    let mut expected: Vec<u64> = stream.to_vec();
+    expected.reverse(); // four adv_push results, top-first
+    expected.resize(16, 0);
+    build_test!(
+        source.as_str(),
+        &[],
+        Vec::<u64>::new(),
+        miden_utils_testing::crypto::MerkleStore::new(),
+        advice_map
+    )
+    .expect_stack(&expected);
+}
