@@ -57,6 +57,7 @@
 - Restored compact SMT serialization budgets so an empty-subtree-only `NodeValue` can be read under a tight budget ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Built the crypto SVE archive from target cfg (`CARGO_CFG_TARGET_ARCH` / `CARGO_CFG_TARGET_FEATURE`) instead of `#[cfg(target_feature = "sve")]`, which does not fire in build scripts ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Qualified the word-wrapper derive macro's emitted `String` as `alloc::string::String` and wrapped the impl in `const _: () = { extern crate alloc; ... }` for `no_std` and `#![no_implicit_prelude]` consumers ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Fixed `miden-format` producing lines longer than the configured maximum for item imports; imports now wrap one item per line. Added `overflow_delimited_expr` to opt into keeping long `word(...)`/`event(...)` call heads on the assignment line when they fit ([#3380](https://github.com/0xMiden/miden-vm/pull/3380)).
 
 ## miden-vm v0.25.5 (2026-07-16)
 
