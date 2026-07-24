@@ -124,9 +124,9 @@ impl Package {
     /// digests. Use it only for bytes that were already validated before being persisted by the
     /// same trusted system.
     ///
-    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
-    /// other package that crosses a trust boundary. Use [`Package::read_from`] for those
-    /// inputs.
+    /// Do not use this for user-controlled packages, network input, or any other package that
+    /// crosses a trust boundary. Use [`Package::read_from`] for those inputs.
+    #[track_caller]
     pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, false)?;
@@ -141,15 +141,36 @@ impl Package {
     /// digests. Use it only for bytes that were already validated before being persisted by the
     /// same trusted system.
     ///
-    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
-    /// other package that crosses a trust boundary. Use [`Package::read_from_bytes`] for those
-    /// inputs.
+    /// Do not use this for user-controlled packages, network input, or any other package that
+    /// crosses a trust boundary. Use [`Package::read_from_bytes`] for those inputs.
+    #[track_caller]
     pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
         Self::read_from_trusted(&mut reader)
     }
 
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn read_from_validated_with_trusted_debug<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true, true)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn read_from_bytes_validated_with_trusted_debug(
+        bytes: &[u8],
+    ) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from_validated_with_trusted_debug(&mut reader)
+    }
+
+    #[track_caller]
     fn read_mast_forest<R: ByteReader>(
         source: &mut R,
         validate_mast_forest: bool,
@@ -270,6 +291,7 @@ impl Package {
 }
 
 impl Deserializable for Package {
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
 
@@ -279,6 +301,7 @@ impl Deserializable for Package {
         Self::read_from_with_header_and_mast(source, header, mast, true, false)
     }
 
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);

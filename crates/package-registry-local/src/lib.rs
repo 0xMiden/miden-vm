@@ -339,12 +339,13 @@ impl LocalPackageRegistry {
         };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
-            LocalRegistryError::PackageDecode {
-                path: path.clone(),
-                error: error.to_string(),
-            }
-        })?;
+        let loaded =
+            MastPackage::read_from_bytes_validated_with_trusted_debug(&bytes).map_err(|error| {
+                LocalRegistryError::PackageDecode {
+                    path: path.clone(),
+                    error: error.to_string(),
+                }
+            })?;
 
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
         if loaded.name != *package || actual_version != *version {
@@ -1051,12 +1052,34 @@ mod tests {
         package
             .sections
             .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        let expected_sections = package.sections.clone();
 
         let package = Arc::from(package);
         let version = registry.cache_package(Arc::clone(&package)).unwrap();
         let recached = registry.cache_package(package).unwrap();
 
         assert_eq!(recached, version);
+        let loaded = registry.load_package(&PackageId::from("pkg"), &version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
+    }
+
+    #[test]
+    fn publish_preserves_debug_enabled_package_artifact_on_load() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let mut package = build_package("pkg", "1.0.0", []);
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        let expected_sections = package.sections.clone();
+
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
     }
 
     #[test]
