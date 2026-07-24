@@ -1,11 +1,8 @@
-use alloc::{
-    collections::{BTreeSet, VecDeque},
-    vec::Vec,
-};
+use alloc::{collections::BTreeSet, vec::Vec};
 
 use miden_core::{
     Felt, WORD_SIZE, Word,
-    advice::{AdviceInputs, AdviceMap},
+    advice::{AdviceInputs, AdviceMap, AdviceStack},
     crypto::{
         hash::Poseidon2,
         merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
@@ -95,7 +92,7 @@ impl MerkleStoreBudget for MerkleStore {
 ///    the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdviceProvider {
-    stack: VecDeque<Felt>,
+    stack: AdviceStack,
     map: AdviceMap,
     map_element_count: usize,
     max_map_value_size: usize,
@@ -116,9 +113,9 @@ impl AdviceProvider {
     ///
     /// The advice map limits in `options` are enforced while loading the initial advice inputs.
     pub fn new(inputs: AdviceInputs, options: &ExecutionOptions) -> Result<Self, AdviceError> {
-        let AdviceInputs { stack, map, store } = inputs;
+        let (stack, map, store) = inputs.into_parts();
         let mut provider = Self::empty(options);
-        provider.extend_stack(stack)?;
+        provider.extend_advice_stack(stack)?;
         provider.extend_merkle_store(store.inner_nodes())?;
         provider.extend_map(&map)?;
         Ok(provider)
@@ -128,7 +125,7 @@ impl AdviceProvider {
         let store = MerkleStore::default();
         let merkle_store_node_count = store.num_internal_nodes();
         Self {
-            stack: VecDeque::new(),
+            stack: AdviceStack::new(),
             map: AdviceMap::default(),
             map_element_count: 0,
             max_map_value_size: options.max_adv_map_value_size(),
@@ -185,8 +182,8 @@ impl AdviceProvider {
 
     fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
         match mutation {
-            AdviceMutation::ExtendStack { values } => {
-                self.extend_stack(values)?;
+            AdviceMutation::ExtendStack { stack } => {
+                self.extend_advice_stack(stack)?;
             },
             AdviceMutation::ExtendMap { other } => {
                 self.extend_map(&other)?;
@@ -235,7 +232,7 @@ impl AdviceProvider {
     /// # Errors
     /// Returns an error if the advice stack is empty.
     fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
-        self.stack.pop_front().ok_or(AdviceError::StackReadFailed)
+        self.stack.consume_element().ok_or(AdviceError::StackReadFailed)
     }
 
     /// Pops a word (4 elements) from the advice stack and returns it.
@@ -246,16 +243,7 @@ impl AdviceProvider {
     /// # Errors
     /// Returns an error if the advice stack does not contain a full word.
     fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
-        if self.stack.len() < 4 {
-            return Err(AdviceError::StackReadFailed);
-        }
-
-        let w0 = self.stack.pop_front().expect("checked len");
-        let w1 = self.stack.pop_front().expect("checked len");
-        let w2 = self.stack.pop_front().expect("checked len");
-        let w3 = self.stack.pop_front().expect("checked len");
-
-        Ok(Word::new([w0, w1, w2, w3]))
+        self.stack.consume_word().ok_or(AdviceError::StackReadFailed)
     }
 
     /// Pops a double word (8 elements) from the advice stack and returns them.
@@ -267,10 +255,7 @@ impl AdviceProvider {
     /// # Errors
     /// Returns an error if the advice stack does not contain two words.
     fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
-        let word0 = self.pop_stack_word()?;
-        let word1 = self.pop_stack_word()?;
-
-        Ok([word0, word1])
+        self.stack.consume_dword().ok_or(AdviceError::StackReadFailed)
     }
 
     /// Checks that pushing `count` elements would not exceed the advice stack size limit.
@@ -292,16 +277,14 @@ impl AdviceProvider {
     /// Pushes a single value onto the advice stack.
     pub fn push_stack(&mut self, value: Felt) -> Result<(), AdviceError> {
         self.check_stack_capacity(1)?;
-        self.stack.push_front(value);
+        self.stack.prepend_element(value);
         Ok(())
     }
 
     /// Pushes a word (4 elements) onto the stack.
     pub fn push_stack_word(&mut self, word: &Word) -> Result<(), AdviceError> {
         self.check_stack_capacity(4)?;
-        for &value in word.iter().rev() {
-            self.stack.push_front(value);
-        }
+        self.stack.prepend_word(*word);
         Ok(())
     }
 
@@ -355,21 +338,18 @@ impl AdviceProvider {
             })?;
         self.check_stack_capacity(total_push)?;
 
+        let mut stack = AdviceStack::new();
+        if include_len {
+            stack.push_element(Felt::new_unchecked(values.len() as u64));
+        }
+        stack.push_elements(values.iter().copied());
+
         // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
         // final (padded) elements list length will be the next multiple of pad_to
         for _ in 0..num_pad_elements {
-            self.stack.push_front(Felt::default());
+            stack.push_element(Felt::default());
         }
-
-        // Treat map values as already canonical sequences of FELTs.
-        // The advice stack is LIFO; extend in reverse so that the first element of `values`
-        // becomes the first element returned by a subsequent `adv_push`.
-        for &value in values.iter().rev() {
-            self.stack.push_front(value);
-        }
-        if include_len {
-            self.stack.push_front(Felt::new_unchecked(values.len() as u64));
-        }
+        self.stack.prepend_stack(stack);
         Ok(())
     }
 
@@ -378,16 +358,10 @@ impl AdviceProvider {
         self.stack.iter().copied().collect()
     }
 
-    /// Extends the stack with the given elements.
-    pub fn extend_stack<I>(&mut self, iter: I) -> Result<(), AdviceError>
-    where
-        I: IntoIterator<Item = Felt>,
-    {
-        let values: Vec<Felt> = iter.into_iter().collect();
-        self.check_stack_capacity(values.len())?;
-        for value in values.into_iter().rev() {
-            self.stack.push_front(value);
-        }
+    /// Extends the stack with typed advice stack values.
+    pub fn extend_advice_stack(&mut self, stack: AdviceStack) -> Result<(), AdviceError> {
+        self.check_stack_capacity(stack.len())?;
+        self.stack.prepend_stack(stack);
         Ok(())
     }
 
@@ -701,7 +675,7 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.extend_stack(inputs.stack.iter().cloned())?;
+        self.extend_advice_stack(inputs.advice_stack())?;
         self.extend_merkle_store(inputs.store.inner_nodes())?;
         self.extend_map(&inputs.map)
     }
@@ -710,7 +684,7 @@ impl AdviceProvider {
     ///
     /// The returned stack vector is ordered from top (index 0) to bottom.
     pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
-        (self.stack.into_iter().collect(), self.map, self.store)
+        (self.stack.into_elements(), self.map, self.store)
     }
 }
 
@@ -764,7 +738,7 @@ mod tests {
     use super::AdviceProvider;
     use crate::{
         AdviceInputs, ExecutionOptions, Felt, Word,
-        advice::{AdviceError, AdviceMap},
+        advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
         crypto::merkle::{MerkleStore, MerkleTree},
     };
 
@@ -808,6 +782,33 @@ mod tests {
 
         assert_eq!(provider_a, provider_b);
         assert_eq!(provider_a.fingerprint(), provider_b.fingerprint());
+    }
+
+    #[test]
+    fn typed_advice_stack_mutation_prepends_values() {
+        let mut initial_stack = AdviceStack::new();
+        initial_stack.push_elements([Felt::new_unchecked(3), Felt::new_unchecked(4)]);
+        let mut mutation_stack = AdviceStack::new();
+        mutation_stack.push_elements([Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+        let mut provider = AdviceProvider::new(
+            AdviceInputs::default().with_advice_stack(initial_stack),
+            &Default::default(),
+        )
+        .unwrap();
+
+        provider
+            .apply_mutations([AdviceMutation::extend_advice_stack(mutation_stack)])
+            .unwrap();
+
+        assert_eq!(
+            provider.stack(),
+            vec![
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4)
+            ]
+        );
     }
 
     #[test]

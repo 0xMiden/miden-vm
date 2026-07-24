@@ -11,7 +11,11 @@ use miden_core::{
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     events::EventName,
 };
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_processor::{
+    ProcessorState,
+    advice::{AdviceMutation, AdviceStack},
+    event::EventError,
+};
 
 /// Event name for the smt_peek operation.
 pub const SMT_PEEK_EVENT_NAME: EventName =
@@ -66,7 +70,7 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     if node == *empty_leaf {
         // if the node is a root of an empty subtree, then there is no value associated with
         // the specified key
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
+        let mutation = advice_stack_word_mutation(Smt::EMPTY_VALUE);
         Ok(vec![mutation])
     } else {
         let leaf_preimage = get_smt_leaf_preimage(process, node)?;
@@ -74,14 +78,14 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
         for (key_in_leaf, value_in_leaf) in leaf_preimage {
             if key == key_in_leaf {
                 // Found key - push value associated with key, and return
-                let mutation = AdviceMutation::extend_stack(value_in_leaf);
+                let mutation = advice_stack_word_mutation(value_in_leaf);
                 return Ok(vec![mutation]);
             }
         }
 
         // if we can't find any key in the leaf that matches `key`, it means no value is
         // associated with `key`
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
+        let mutation = advice_stack_word_mutation(Smt::EMPTY_VALUE);
         Ok(vec![mutation])
     }
 }
@@ -112,6 +116,13 @@ fn get_smt_leaf_preimage(
             (key.into(), value.into())
         })
         .collect())
+}
+
+fn advice_stack_word_mutation(word: Word) -> AdviceMutation {
+    let mut advice_stack = AdviceStack::new();
+    // MASM callers consume the returned value with `adv_loadw` or `adv_pushw`.
+    advice_stack.push_word(word);
+    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 // ERROR TYPES

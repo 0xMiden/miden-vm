@@ -9,7 +9,11 @@ use miden_core::{
     utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_processor::{
+    ProcessorState,
+    advice::{AdviceMutation, AdviceStack},
+    event::EventError,
+};
 
 use crate::handlers::read_memory_region;
 
@@ -47,7 +51,10 @@ pub fn handle_keccak256_digest(
         .into());
     }
 
-    Ok(vec![AdviceMutation::extend_stack(digest_felts)])
+    let mut advice_stack = AdviceStack::new();
+    // MASM consumes the digest with two `adv_pushw` calls, low word first and high word second.
+    advice_stack.push_for_adv_pipe(&digest_felts);
+    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }
 
 fn read_memory_packed_u32(

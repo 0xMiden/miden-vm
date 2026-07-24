@@ -1,6 +1,6 @@
 use miden_core::{
     Felt, Word,
-    advice::{AdviceInputs, AdviceStackBuilder},
+    advice::{AdviceInputs, AdviceStack},
 };
 use miden_core_lib::dsa::ecdsa_k256_keccak;
 use miden_crypto::dsa::ecdsa_k256_keccak::SigningKey;
@@ -25,7 +25,7 @@ impl Default for PrecompileWorkload {
 }
 
 pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInputs {
-    let mut builder = AdviceStackBuilder::new();
+    let mut advice_stack = AdviceStack::new();
     let mut rng = ChaCha20Rng::from_seed([0xd3; 32]);
 
     for i in 0..workload.ecdsas {
@@ -38,14 +38,13 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
             "generated ECDSA fixture must verify before passing it to MASM",
         );
 
-        builder.push_word(message);
-        builder.push_word(ecdsa_k256_keccak::public_key_commitment(&pk));
-        builder.push_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
+        advice_stack.push_word(message);
+        advice_stack.push_word(ecdsa_k256_keccak::public_key_commitment(&pk));
+        advice_stack.push_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
     }
 
-    let advice = builder.into_elements();
-    assert_eq!(advice.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");
-    AdviceInputs::default().with_stack(advice)
+    assert_eq!(advice_stack.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");
+    AdviceInputs::default().with_advice_stack(advice_stack)
 }
 
 fn ecdsa_message(index: u64) -> Word {

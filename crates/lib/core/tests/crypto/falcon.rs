@@ -12,7 +12,7 @@ use miden_core::{
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
-    advice::{AdviceInputs, AdviceMutation},
+    advice::{AdviceInputs, AdviceMutation, AdviceStack},
     crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
@@ -20,7 +20,7 @@ use miden_processor::{
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::proptest;
 use miden_utils_testing::{
-    AdviceStackBuilder, Word,
+    Word,
     crypto::{
         MerkleStore, Poseidon2,
         falcon512_poseidon2::{Polynomial, SecretKey},
@@ -91,7 +91,7 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let signature_result = falcon512_poseidon2::sign(&sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
-    Ok(vec![AdviceMutation::extend_stack(signature_result)])
+    Ok(vec![advice_stack_mutation(signature_result)])
 }
 
 // EVENT ERROR
@@ -211,8 +211,7 @@ fn test_falcon512_probabilistic_product_deterministic() {
 
     let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
     let s2: Polynomial<Felt> = Polynomial::new(s2_coeffs);
-    let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
-        generate_data_probabilistic_product_test(h, s2, false);
+    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, false);
 
     let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
     let expected_stack = &[];
@@ -226,8 +225,7 @@ fn test_falcon512_probabilistic_product() {
     let mut rng = ChaCha20Rng::from_seed([0; 32]);
     let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
     let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
-        generate_data_probabilistic_product_test(h, s2, false);
+    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, false);
 
     let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
     let expected_stack = &[];
@@ -241,8 +239,7 @@ fn test_falcon512_probabilistic_product_failure() {
     let mut rng = rng();
     let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
     let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
-        generate_data_probabilistic_product_test(h, s2, true);
+    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, true);
 
     let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
 
@@ -371,8 +368,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
         let q_hi = Felt::new_unchecked(q >> 32);
         let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([ZERO]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([ZERO]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -424,8 +421,8 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([Felt::new_unchecked(FORGED_R)]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([Felt::new_unchecked(FORGED_R)]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -472,8 +469,8 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
         let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
-        let remainder = AdviceMutation::extend_stack([forged_remainder]);
-        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        let remainder = advice_stack_mutation([forged_remainder]);
+        let quotient = advice_stack_mutation([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
 
@@ -559,6 +556,12 @@ fn generate_test(
     (source, op_stack, adv_stack, store, advice_map)
 }
 
+fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements(values);
+    AdviceMutation::extend_advice_stack(advice_stack)
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 
@@ -598,7 +601,7 @@ fn generate_data_probabilistic_product_test(
     h: Polynomial<Felt>,
     s2: Polynomial<Felt>,
     test_failure: bool,
-) -> (Vec<u64>, Vec<u64>) {
+) -> (Vec<u64>, AdviceStack) {
     let mut rng = rng();
     let pi = mul_modulo_p(h.clone(), s2.clone());
     // lay the polynomials in order h then s2 then pi = h * s2
@@ -616,10 +619,9 @@ fn generate_data_probabilistic_product_test(
     let digest_polynomials = Poseidon2::hash_elements(&polynomials[..]);
     let tau0 = digest_polynomials[0];
     let tau1 = digest_polynomials[1];
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_push(&[tau0, tau1]);
-    builder.push_elements(polynomials.iter().copied());
-    let advice_stack = builder.build_vec_u64();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_for_adv_push(&[tau0, tau1]);
+    advice_stack.push_elements(polynomials.iter().copied());
 
     // compute hash of h and place it on the stack.
     let h_hash = Poseidon2::hash_elements(&to_elements(h));
