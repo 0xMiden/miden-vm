@@ -38,7 +38,7 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
-    advice::{AdviceInputs, AdviceProvider, AdviceStack, AdviceStackBuilder},
+    advice::{AdviceInputs, AdviceProvider, AdviceStack},
     trace::ExecutionTrace,
 };
 use miden_processor::{

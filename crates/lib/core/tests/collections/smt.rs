@@ -1173,12 +1173,12 @@ fn build_leaf_advice_value(entries: &[(Word, Word)]) -> Vec<Felt> {
         return Vec::new();
     }
 
-    let mut builder = AdviceStackBuilder::new();
+    let mut stack = AdviceStack::new();
     for (key, value) in entries {
-        builder.push_word(*key);
-        builder.push_word(*value);
+        stack.push_word(*key);
+        stack.push_word(*value);
     }
-    builder.into_elements()
+    stack.into_elements()
 }
 
 fn smt_insert(smt: &mut Smt, key: Word, value: Word) -> Word {

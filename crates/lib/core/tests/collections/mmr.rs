@@ -1,6 +1,6 @@
 use miden_core::WORD_SIZE;
 use miden_crypto::merkle::mmr::PartialMmr;
-use miden_processor::advice::AdviceStackBuilder;
+use miden_processor::advice::AdviceStack;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
     crypto::{
@@ -70,9 +70,8 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_word(merkle_root);
-    let advice_stack = builder.build_vec_u64();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_word(merkle_root);
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -131,10 +130,9 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree1.inner_nodes());
     merkle_store.extend(merkle_tree2.inner_nodes());
 
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_word(merkle_root1);
-    builder.push_word(merkle_root2);
-    let advice_stack = builder.build_vec_u64();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_word(merkle_root1);
+    advice_stack.push_word(merkle_root2);
 
     let examples = [
         // absolute_pos, leaf
@@ -196,9 +194,8 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     let stack = word_to_ints(&merkle_root3);
 
     // Test case for single element MMR
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_word(merkle_root3);
-    let advice_stack = builder.build_vec_u64();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_word(merkle_root3);
     let source = format!(
         "
         use miden::core::collections::mmr
@@ -218,11 +215,10 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     test.expect_stack(&stack);
 
     // Test case for the single element tree in a MMR with multiple trees
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_word(merkle_root1);
-    builder.push_word(merkle_root2);
-    builder.push_word(merkle_root3);
-    let advice_stack = builder.build_vec_u64();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_word(merkle_root1);
+    advice_stack.push_word(merkle_root2);
+    advice_stack.push_word(merkle_root3);
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
         "
