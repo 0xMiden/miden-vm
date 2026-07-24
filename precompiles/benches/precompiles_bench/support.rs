@@ -107,7 +107,9 @@ pub fn verify_once(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) {
+    let claim =
+        miden_vm::ExecutionClaim::new(fixture.program.to_info(), fixture.stack_inputs, stack_outputs);
     Verifier::new()
-        .verify(fixture.program.to_info(), fixture.stack_inputs, stack_outputs, proof)
+        .verify(proof, claim)
         .expect("failed to verify precompile benchmark proof");
 }

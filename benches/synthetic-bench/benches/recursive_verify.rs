@@ -44,8 +44,8 @@ use miden_assembly::Linkage;
 use miden_core::{
     Felt,
     crypto::hash::Blake3_256,
-    deferred::TRUE_DIGEST,
     field::QuotientMap,
+    program::ExecutionClaim,
     serde::{Deserializable, Serializable},
     utils::to_hex,
 };
@@ -53,7 +53,7 @@ use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs, trace::TraceLenSummary,
 };
-use miden_prover::{PublicInputs, prove_sync};
+use miden_prover::prove_sync;
 use miden_utils_testing::recursive_verifier::generate_advice_inputs;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackInputs,
@@ -469,8 +469,6 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 }
                 (stack_outputs, proof, "miss")
             };
-            let deferred_entries =
-                proof.deferred_proof().as_wire().map_or(0, |wire| wire.entries.len());
             assert!(
                 proof.deferred_proof().is_empty(),
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
@@ -488,11 +486,11 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
             let proof_digest_hex = to_hex(proof_digest);
             println!(
                 "    proof={proof_index} stack={stack_values:?} proof_bytes={proof_bytes_len} \
-                 deferred_entries={deferred_entries}",
+                 deferred_entries=0",
             );
             println!(
                 "BENCH_TX_PROOF index={proof_index} stack={stack_values:?} \
-                 proof_bytes={proof_bytes_len} deferred_entries={deferred_entries} \
+                 proof_bytes={proof_bytes_len} deferred_entries=0 \
                  proof_cache={proof_cache_status} proof_digest={proof_digest_hex} \
                  proof_prefix={proof_prefix}",
             );
@@ -600,20 +598,20 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
 /// Build the advice provider consumed by one recursive verifier call.
 ///
 /// `generate_advice_inputs` parses the inner STARK proof and returns the exact advice stack,
-/// Merkle store, and advice-map entries expected by `exec.vm::verify_proof`.
+/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
 /// The stack is ordered so its first element is the next value consumed by the VM.
 fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
-    let pub_inputs = PublicInputs::new(
+    let claim = ExecutionClaim::new(
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,
-        TRUE_DIGEST,
     );
-    let verifier_inputs = generate_advice_inputs(fixture.proof.miden_proof().bytes(), pub_inputs)
-        .expect("recursive advice");
+    let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
 
     let advice_inputs = AdviceInputs::default()
-        .with_stack_values(verifier_inputs.advice_stack)
+        .with_stack_values(
+            verifier_inputs.advice_stack(),
+        )
         .expect("recursive advice stack values must be canonical")
         .with_merkle_store(verifier_inputs.store)
         .with_map(verifier_inputs.advice_map);

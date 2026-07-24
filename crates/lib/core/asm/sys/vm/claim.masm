@@ -82,7 +82,7 @@ const REQUEST_DOMAIN_TAG = 8705
 
 #! Computes the advice-map key addressing a proof package for a claim under a verifier.
 #!
-#! The key is the domain-tagged hash of `verifier_root ‖ claim_commitment` (exactly one rate
+#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one rate
 #! block, so a single permutation with no memory). It is a lookup address, not a trust anchor:
 #! the verifier re-checks the retrieved package, so a wrong package fails verification. Both
 #! inputs are program-owned (the verifier's MAST root via `procref`; the claim commitment via

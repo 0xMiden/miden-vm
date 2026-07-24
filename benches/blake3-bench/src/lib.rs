@@ -159,8 +159,10 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
     let stack_inputs = fixture.stack_inputs;
     let trace_inputs = execute_trace_inputs(fixture);
     let (stack_outputs, proof) = prove_trace_outputs(trace_inputs);
+    let claim =
+        miden_vm::ExecutionClaim::new(fixture.program.to_info(), stack_inputs, stack_outputs);
     Verifier::new()
-        .verify(fixture.program.to_info(), stack_inputs, stack_outputs, proof)
+        .verify(proof, claim)
         .expect("failed to verify Blake3 benchmark proof");
 }
 

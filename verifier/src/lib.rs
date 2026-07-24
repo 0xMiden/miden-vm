@@ -36,6 +36,8 @@ mod exports {
 }
 pub use exports::*;
 
+pub mod recursive;
+
 // VERIFIER
 // ================================================================================================
 
@@ -44,7 +46,7 @@ pub use exports::*;
 /// [`Verifier::verify`] performs final verification and rejects wire-backed partial proofs.
 /// [`Verifier::verify_partial`] accepts wire-backed partial proofs, rehydrates their deferred
 /// state using the standard precompile registry, verifies the Miden VM proof against the hydrated
-/// root, and returns the Miden VM security level with the hydrated state.
+/// root, and returns the Miden VM security level with the deferred obligation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Verifier {
     max_deferred_elements: usize,

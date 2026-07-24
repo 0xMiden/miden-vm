@@ -32,8 +32,8 @@ use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
 use miden_vm::{
-    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackOutputs,
-    Verifier, prove_sync,
+    Assembler, ExecutionClaim, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions,
+    StackOutputs, Verifier, prove_sync,
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
@@ -369,11 +369,8 @@ fn bench_one_scenario(
             b.iter_batched(
                 || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
                 |(program_info, stack_inputs, stack_outputs, proof)| {
-                    black_box(
-                        Verifier::new()
-                            .verify(program_info, stack_inputs, stack_outputs, proof)
-                            .expect("verify"),
-                    );
+                    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+                    black_box(Verifier::new().verify(proof, claim).expect("verify"));
                 },
                 BatchSize::SmallInput,
             );
