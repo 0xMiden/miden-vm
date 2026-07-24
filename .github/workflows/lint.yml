@@ -43,6 +43,8 @@ jobs:
         run: cargo install cargo-deny --version 0.19.1 --locked
       - name: Check dependencies with cargo-deny
         run: cargo deny check
+      - name: Check masm-lint tool dependencies with cargo-deny
+        run: make masm-lint-deny
 
   cargo-shear:
     name: cargo-shear on ubuntu-latest
@@ -78,6 +80,24 @@ jobs:
         run: cargo binstall --no-confirm cargo-workspace-inheritance-check@1.2.0
       - name: Check workspace inheritance
         run: cargo workspace-inheritance-check --promotion-threshold 2 --promotion-failure
+
+  masm-lint:
+    name: masm-lint on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install rust
+        run: |
+          rustup update --no-self-update
+          rustup component add clippy
+      - name: Clippy masm-lint tool workspace
+        run: make masm-lint-clippy
+      - name: Lint MASM core library
+        run: make masm-lint-core
 
   clippy:
     name: clippy stable on ubuntu-latest
