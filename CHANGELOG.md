@@ -43,6 +43,7 @@
 - [BREAKING] Replaced the free `verify_with_max_deferred_elements` functions in `miden-verifier` and `miden-vm` with the configurable `Verifier` API. Use `Verifier::with_max_deferred_elements(...)` followed by `verify(...)` or `verify_partial(...)`.
 - Added `Package::get_export_node()` and `Package::procedures_with_attribute()` APIs ([#3320](https://github.com/0xMiden/miden-vm/issues/3320)).
 - [BREAKING] Add dead-node elimination in ACE DAG ([#3408](https://github.com/0xMiden/miden-vm/pull/3408)).
+- [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 
 #### Fixes
 
