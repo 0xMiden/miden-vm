@@ -1,8 +1,6 @@
 // HELPERS
 // ================================================================================================
 
-use miden_core::field::QuotientMap;
-
 /// Converts macro advice stack inputs into the typed advice stack representation.
 pub trait IntoAdviceStackInput {
     fn into_advice_stack_input(self)
@@ -63,15 +61,7 @@ fn advice_stack_from_ints<I>(iter: I) -> Result<crate::AdviceStack, miden_core::
 where
     I: IntoIterator<Item = u64>,
 {
-    let stack = iter
-        .into_iter()
-        .map(|value| {
-            crate::Felt::from_canonical_checked(value)
-                .ok_or(miden_core::program::InputError::InvalidStackElement(value))
-        })
-        .collect::<Result<::alloc::vec::Vec<_>, _>>()?;
-
-    Ok(stack.into())
+    crate::AdviceStack::try_from_values(iter)
 }
 
 // MACROS TO BUILD TESTS

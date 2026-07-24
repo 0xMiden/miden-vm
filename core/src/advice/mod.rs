@@ -3,8 +3,6 @@ use alloc::vec::Vec;
 use crate::{
     Felt, Word,
     crypto::merkle::MerkleStore,
-    field::QuotientMap,
-    program::InputError,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -12,7 +10,7 @@ mod map;
 pub use map::AdviceMap;
 
 mod stack;
-pub use stack::{AdviceStack, AdviceStackBuilder};
+pub use stack::AdviceStack;
 
 // ADVICE INPUTS
 // ================================================================================================
@@ -30,11 +28,7 @@ pub use stack::{AdviceStack, AdviceStackBuilder};
 ///    with Merkle trees.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdviceInputs {
-    /// Advice stack values ordered from top to bottom.
-    ///
-    /// This field remains public for compatibility. Prefer [`AdviceInputs::with_advice_stack`]
-    /// and [`AdviceInputs::advice_stack`] for typed access.
-    pub stack: Vec<Felt>,
+    advice_stack: AdviceStack,
     pub map: AdviceMap,
     pub store: MerkleStore,
 }
@@ -43,39 +37,15 @@ impl AdviceInputs {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    /// Attempts to extend the stack values with the given sequence of integers, returning an error
-    /// if any of the numbers fails while converting to an element `[Felt]`.
-    pub fn with_stack_values<I>(mut self, iter: I) -> Result<Self, InputError>
-    where
-        I: IntoIterator<Item = u64>,
-    {
-        let stack = iter
-            .into_iter()
-            .map(|v| Felt::from_canonical_checked(v).ok_or(InputError::InvalidStackElement(v)))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        self.stack.extend(stack.iter());
-        Ok(self)
-    }
-
-    /// Extends the stack with the given elements.
-    pub fn with_stack<I>(mut self, iter: I) -> Self
-    where
-        I: IntoIterator<Item = Felt>,
-    {
-        self.stack.extend(iter);
-        self
-    }
-
     /// Replaces the advice stack with the provided typed stack.
     pub fn with_advice_stack(mut self, stack: AdviceStack) -> Self {
-        self.stack = stack.into_elements();
+        self.advice_stack = stack;
         self
     }
 
     /// Returns the advice stack as a typed stack.
     pub fn advice_stack(&self) -> AdviceStack {
-        self.stack.clone().into()
+        self.advice_stack.clone()
     }
 
     /// Extends the map of values with the given argument, replacing previously inserted items.
@@ -98,15 +68,21 @@ impl AdviceInputs {
 
     /// Extends the contents of this instance with the contents of the other instance.
     pub fn extend(&mut self, other: Self) {
-        self.stack.extend(other.stack);
+        self.advice_stack.push_elements(other.advice_stack.into_elements());
         self.map.extend(other.map);
         self.store.extend(other.store.inner_nodes());
+    }
+
+    /// Consumes this instance and returns its parts.
+    pub fn into_parts(self) -> (AdviceStack, AdviceMap, MerkleStore) {
+        (self.advice_stack, self.map, self.store)
     }
 }
 
 impl Serializable for AdviceInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let Self { stack, map, store } = self;
+        let Self { advice_stack, map, store } = self;
+        let stack: Vec<Felt> = advice_stack.iter().copied().collect();
         stack.write_into(target);
         map.write_into(target);
         store.write_into(target);
@@ -118,7 +94,7 @@ impl Deserializable for AdviceInputs {
         let stack = Vec::<Felt>::read_from(source)?;
         let map = AdviceMap::read_from(source)?;
         let store = MerkleStore::read_from(source)?;
-        Ok(Self { stack, map, store })
+        Ok(Self { advice_stack: stack.into(), map, store })
     }
 }
 
@@ -129,7 +105,7 @@ impl Deserializable for AdviceInputs {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::{AdviceInputs, AdviceStack, AdviceStackBuilder};
+    use super::{AdviceInputs, AdviceStack};
     use crate::{
         Felt, Word,
         serde::{Deserializable, Serializable},
@@ -142,15 +118,18 @@ mod tests {
 
         assert_eq!(advice1, advice2);
 
-        let advice1 = AdviceInputs::default().with_stack_values([1, 2, 3].iter().copied()).unwrap();
-        let advice2 = AdviceInputs::default().with_stack_values([1, 2, 3].iter().copied()).unwrap();
+        let advice1 = AdviceInputs::default()
+            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
+        let advice2 = AdviceInputs::default()
+            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
 
         assert_eq!(advice1, advice2);
     }
 
     #[test]
     fn test_advice_inputs_serialization() {
-        let advice1 = AdviceInputs::default().with_stack_values([1, 2, 3].iter().copied()).unwrap();
+        let advice1 = AdviceInputs::default()
+            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
         let bytes = advice1.to_bytes();
         let advice2 = AdviceInputs::read_from_bytes(&bytes).unwrap();
 
@@ -173,8 +152,7 @@ mod tests {
 
         let advice = AdviceInputs::default().with_advice_stack(stack.clone());
 
-        assert_eq!(advice.stack, stack.into_elements());
-        assert_eq!(advice.advice_stack(), advice.stack.into());
+        assert_eq!(advice.advice_stack(), stack);
     }
 
     #[test]
@@ -269,150 +247,20 @@ mod tests {
         );
     }
 
-    // ADVICE STACK BUILDER TESTS
+    // INTEGER INPUT TESTS
     // --------------------------------------------------------------------------------------------
 
     #[test]
-    fn test_builder_push_for_adv_push() {
-        // push_for_adv_push reverses the slice
-        // Input: [a, b, c] -> Builder stack: [c, b, a] (c on top)
-        let a = Felt::new_unchecked(1);
-        let b = Felt::new_unchecked(2);
-        let c = Felt::new_unchecked(3);
+    fn advice_stack_try_from_values_keeps_top_first_order() {
+        let stack = AdviceStack::try_from_values([1, 2, 3, 4]).unwrap();
 
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_push(&[a, b, c]);
-        let advice = builder.build();
-
-        // Builder stack is [c, b, a] with c on top (index 0)
-        // This becomes AdviceInputs.stack = [c, b, a]
-        assert_eq!(advice.stack, vec![c, b, a]);
-    }
-
-    #[test]
-    fn test_builder_push_word() {
-        let word: Word = [
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-            Felt::new_unchecked(4),
-        ]
-        .into();
-
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_word(word);
-        let advice = builder.build();
-
-        // Builder stack is [w0, w1, w2, w3] with w0 on top
         assert_eq!(
-            advice.stack,
+            stack.into_elements(),
             vec![
                 Felt::new_unchecked(1),
                 Felt::new_unchecked(2),
                 Felt::new_unchecked(3),
                 Felt::new_unchecked(4)
-            ]
-        );
-    }
-
-    #[test]
-    fn test_builder_push_for_adv_pipe() {
-        let slice: Vec<Felt> = (1..=8).map(Felt::new_unchecked).collect();
-
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_pipe(&slice);
-        let advice = builder.build();
-
-        assert_eq!(advice.stack, slice);
-    }
-
-    #[test]
-    #[should_panic(expected = "push_for_adv_pipe requires slice length to be a multiple of 8")]
-    fn test_builder_push_for_adv_pipe_panics_on_misalignment() {
-        let slice: Vec<Felt> = (1..=7).map(Felt::new_unchecked).collect();
-
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_pipe(&slice);
-        builder.build();
-    }
-
-    #[test]
-    fn test_builder_push_u64_slice() {
-        // push_u64_slice converts u64 to Felt without reversal
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_u64_slice(&[1, 2, 3, 4]);
-        let advice = builder.build();
-
-        assert_eq!(
-            advice.stack,
-            vec![
-                Felt::new_unchecked(1),
-                Felt::new_unchecked(2),
-                Felt::new_unchecked(3),
-                Felt::new_unchecked(4)
-            ]
-        );
-    }
-
-    #[test]
-    fn test_builder_chaining_top_first() {
-        // First call adds elements consumed first (on top)
-        // Second call adds elements consumed second (below)
-        let a = Felt::new_unchecked(1);
-        let b = Felt::new_unchecked(2);
-        let c = Felt::new_unchecked(3);
-        let word: Word = [
-            Felt::new_unchecked(10),
-            Felt::new_unchecked(20),
-            Felt::new_unchecked(30),
-            Felt::new_unchecked(40),
-        ]
-        .into();
-
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_push(&[a, b, c]); // Consumed first
-        builder.push_word(word); // Consumed second
-        let advice = builder.build();
-
-        // Builder stack: [c, b, a, w0, w1, w2, w3]
-        // (c on top from reversed [a,b,c], then word below)
-        assert_eq!(
-            advice.stack,
-            vec![
-                c,
-                b,
-                a,
-                Felt::new_unchecked(10),
-                Felt::new_unchecked(20),
-                Felt::new_unchecked(30),
-                Felt::new_unchecked(40)
-            ]
-        );
-    }
-
-    #[test]
-    fn test_builder_multiple_push_for_adv_push() {
-        // Multiple calls should maintain top-first ordering
-        let first = [Felt::new_unchecked(1), Felt::new_unchecked(2)];
-        let second = [Felt::new_unchecked(3), Felt::new_unchecked(4)];
-
-        let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_push(&first); // Consumed first
-        builder.push_for_adv_push(&second); // Consumed second
-        let advice = builder.build();
-
-        // First call: [2, 1] (reversed)
-        // Second call prepends: [4, 3, 2, 1] -> but wait, second is consumed AFTER first
-        // So second should go BELOW first in the stack
-        // Builder stack after first: [2, 1]
-        // Builder stack after second: [2, 1, 4, 3]
-        assert_eq!(
-            advice.stack,
-            vec![
-                Felt::new_unchecked(2),
-                Felt::new_unchecked(1),
-                Felt::new_unchecked(4),
-                Felt::new_unchecked(3)
             ]
         );
     }

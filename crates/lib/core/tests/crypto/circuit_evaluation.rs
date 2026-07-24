@@ -2,7 +2,7 @@ use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
 use miden_air::MIDEN_AIR_COUNT;
 use miden_core::{
     Felt, ONE, ZERO,
-    advice::AdviceStackBuilder,
+    advice::AdviceStack,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_utils_testing::rand::rand_quad_felt;
@@ -119,9 +119,8 @@ fn multi_air_eval_circuit_masm() {
     memory_felts.resize(padded_len, ZERO);
     let num_adv_pipe = padded_len / 8;
 
-    let mut advice_builder = AdviceStackBuilder::new();
-    advice_builder.push_for_adv_pipe(&memory_felts);
-    let adv_stack = advice_builder.build_vec_u64();
+    let mut adv_stack = AdviceStack::new();
+    adv_stack.push_for_adv_pipe(&memory_felts);
 
     let pointer = 1 << 16;
     let num_vars = encoded.num_vars();

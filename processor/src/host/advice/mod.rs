@@ -113,9 +113,9 @@ impl AdviceProvider {
     ///
     /// The advice map limits in `options` are enforced while loading the initial advice inputs.
     pub fn new(inputs: AdviceInputs, options: &ExecutionOptions) -> Result<Self, AdviceError> {
-        let AdviceInputs { stack, map, store } = inputs;
+        let (stack, map, store) = inputs.into_parts();
         let mut provider = Self::empty(options);
-        provider.extend_advice_stack(stack.into())?;
+        provider.extend_advice_stack(stack)?;
         provider.extend_merkle_store(store.inner_nodes())?;
         provider.extend_map(&map)?;
         Ok(provider)
@@ -356,16 +356,6 @@ impl AdviceProvider {
     /// Returns the current stack as a vector ordered from top (index 0) to bottom.
     pub fn stack(&self) -> Vec<Felt> {
         self.stack.iter().copied().collect()
-    }
-
-    /// Extends the stack with the given elements.
-    pub fn extend_stack<I>(&mut self, iter: I) -> Result<(), AdviceError>
-    where
-        I: IntoIterator<Item = Felt>,
-    {
-        let mut stack = AdviceStack::new();
-        stack.push_elements(iter);
-        self.extend_advice_stack(stack)
     }
 
     /// Extends the stack with typed advice stack values.

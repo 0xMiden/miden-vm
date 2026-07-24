@@ -14,7 +14,7 @@ use miden_crypto::{
 use miden_precompiles::K1Scalar;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
-    advice::AdviceInputs,
+    advice::{AdviceInputs, AdviceStack},
 };
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
@@ -343,9 +343,11 @@ fn run_core_program_with_advice(
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.push_elements(advice.iter().copied());
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
-        AdviceInputs::default().with_stack(advice.iter().copied()),
+        AdviceInputs::default().with_advice_stack(advice_stack),
         ExecutionOptions::default(),
     )
     .expect("processor construction");

@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    Felt, Word,
+    Word,
     advice::{AdviceMap, AdviceStack},
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
@@ -35,12 +35,6 @@ pub enum AdviceMutation {
 }
 
 impl AdviceMutation {
-    pub fn extend_stack(iter: impl IntoIterator<Item = Felt>) -> Self {
-        let mut stack = AdviceStack::new();
-        stack.push_elements(iter);
-        Self::extend_advice_stack(stack)
-    }
-
     pub fn extend_advice_stack(stack: AdviceStack) -> Self {
         Self::ExtendStack { stack }
     }

@@ -75,7 +75,7 @@ pub use miden_core::{
 pub use trace::{TraceBuildInputs, TraceGenerationContext};
 
 pub mod advice {
-    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack, AdviceStackBuilder};
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
 
     pub use super::host::{
         AdviceMutation,
