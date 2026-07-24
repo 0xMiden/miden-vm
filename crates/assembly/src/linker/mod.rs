@@ -763,7 +763,7 @@ impl Linker {
         source_library_commitment: Word,
         mast_root: Word,
         selected_root_id: MastNodeId,
-    ) -> Option<MastNodeId> {
+    ) -> Option<(MastNodeId, Arc<Path>)> {
         let library = self.libraries.get(&source_library_commitment)?;
         if !matches!(library.linkage, Linkage::Dynamic) {
             return None;
@@ -777,11 +777,17 @@ impl Linker {
                 module
                     .procedures()
                     .filter_map(|(_, proc)| {
-                        (proc.digest == mast_root).then(|| proc.source_root_id()).flatten()
+                        (proc.digest == mast_root)
+                            .then(|| {
+                                proc.source_root_id().map(|sid| {
+                                    (sid, module.path().join(&proc.name).into_boxed_path().into())
+                                })
+                            })
+                            .flatten()
                     })
                     .collect::<Vec<_>>()
             })
-            .find(|&root_id| root_id != selected_root_id)
+            .find(|(root_id, _)| *root_id != selected_root_id)
     }
 
     /// Resolves `target` from the perspective of `caller`.

@@ -20,19 +20,22 @@ doctest = false
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "dep:proptest-derive", "miden-assembly-syntax/arbitrary", "miden-core/arbitrary"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std", "thiserror/std"]
-serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "miden-utils-indexing/std", "rustc-hash/std", "serde?/std", "thiserror/std"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-utils-indexing/serde"]
 
 [dependencies]
 # Miden dependencies
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+miden-utils-indexing.workspace = true
 
 # External dependencies
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+hashbrown = "0.17"
+rustc-hash = { version = "2.1", default-features = false }
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 

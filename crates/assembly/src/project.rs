@@ -393,7 +393,7 @@ where
             .extend_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
 
-        let mut package = product.into_artifact()?;
+        let mut package = product.into_artifact(profile.should_emit_debug_info())?;
         package.name = project.target_package_name(target);
         package.version = project.version().into_inner().clone();
         package.description = project.description().map(|description| description.to_string());

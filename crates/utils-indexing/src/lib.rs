@@ -12,6 +12,8 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
 pub use csr::{CsrMatrix, CsrValidationError};
+#[doc(hidden)]
+pub use miden_serde_utils;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
@@ -48,14 +50,23 @@ pub trait Idx: Copy + Eq + Ord + Debug + From<u32> + Into<u32> {
 /// Macro to create a newtyped ID that implements Idx.
 #[macro_export]
 macro_rules! newtype_id {
-    ($name:ident) => {
+    (
+        $(#[$a:meta])*
+        $vis:vis struct $name:ident;
+    ) => {
+        $(#[$a])*
         #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
         #[repr(transparent)]
-        pub struct $name(u32);
+        $vis struct $name(u32);
 
         impl core::fmt::Debug for $name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
+        impl core::fmt::Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Display::fmt(&self.0, f)
             }
         }
         impl From<u32> for $name {
@@ -69,6 +80,26 @@ macro_rules! newtype_id {
             }
         }
         impl $crate::Idx for $name {}
+
+        impl $crate::miden_serde_utils::Serializable for $name {
+            fn write_into<W: $crate::miden_serde_utils::ByteWriter>(&self, target: &mut W) {
+                target.write_u32(self.0);
+            }
+        }
+
+        impl $crate::miden_serde_utils::Deserializable for $name {
+            fn read_from<R: $crate::miden_serde_utils::ByteReader>(source: &mut R) -> Result<Self, $crate::miden_serde_utils::DeserializationError> {
+                Ok(Self(source.read_u32()?))
+            }
+
+            fn min_serialized_size() -> usize {
+                4
+            }
+        }
+    };
+
+    ($name:ident) => {
+        $crate::newtype_id!(pub struct $name;);
     };
 }
 
@@ -206,6 +237,11 @@ impl<I: Idx, T> IndexVec<I, T> {
     /// Remove an element at the specified index and return it.
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.raw.swap_remove(index)
+    }
+
+    /// Shortens the vector, keeping the first `new_len` elements and dropping the rest
+    pub fn truncate(&mut self, new_len: usize) {
+        self.raw.truncate(new_len);
     }
 
     /// Check if this IndexVec contains a specific element.
@@ -382,7 +418,7 @@ impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
 // SERIALIZATION
 // ================================================================================================
 
-use miden_crypto::utils::{
+use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
@@ -407,6 +443,98 @@ where
             DeserializationError::InvalidValue("IndexVec length exceeds u32::MAX".into())
         })
     }
+}
+
+impl<I, T> IndexVec<I, T>
+where
+    I: Idx,
+    T: Deserializable,
+{
+    /// Reads and validates a serialized length before it is used for allocation.
+    pub fn read_from_bounded<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+    ) -> Result<Self, DeserializationError> {
+        let len = read_bounded_len(source, label, <T as Deserializable>::min_serialized_size())?;
+        if len > u32::MAX as usize {
+            return Err(DeserializationError::InvalidValue(
+                "IndexVec length exceeds u32::MAX".into(),
+            ));
+        }
+
+        let mut vec = Vec::<T>::with_capacity(len);
+        for element in source.read_many_iter(len)? {
+            vec.push(element?);
+        }
+
+        Ok(Self { raw: vec, _m: PhantomData })
+    }
+}
+
+impl<I, T> IndexVec<I, T>
+where
+    I: Idx,
+{
+    /// Reads and validates a serialized length before it is used for allocation, using the provided
+    /// function to deserializing each element
+    pub fn read_from_bounded_with<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+        min_element_size: usize,
+        deserializer: impl Fn(&mut R) -> Result<T, DeserializationError>,
+    ) -> Result<Self, DeserializationError> {
+        let len = read_bounded_len(source, label, min_element_size)?;
+        if len > u32::MAX as usize {
+            return Err(DeserializationError::InvalidValue(
+                "IndexVec length exceeds u32::MAX".into(),
+            ));
+        }
+
+        let mut vec = Vec::<T>::with_capacity(len);
+        for _ in 0..len {
+            vec.push(deserializer(source)?);
+        }
+
+        Ok(Self { raw: vec, _m: PhantomData })
+    }
+}
+
+/// Reads and validates a serialized length before it is used for allocation.
+fn read_bounded_len<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+    min_element_size: usize,
+) -> Result<usize, DeserializationError> {
+    let len = source.read_usize()?;
+    validate_bounded_len(source, label, len, min_element_size)?;
+    Ok(len)
+}
+
+/// Validates that a serialized length fits both the reader budget and remaining input.
+fn validate_bounded_len<R: ByteReader>(
+    source: &R,
+    label: &str,
+    len: usize,
+    min_element_size: usize,
+) -> Result<(), DeserializationError> {
+    let max_len = source.max_alloc(min_element_size);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(alloc::format!(
+            "{label} count {len} exceeds budget {max_len}"
+        )));
+    }
+
+    let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
+        DeserializationError::InvalidValue(alloc::format!(
+            "{label} count {len} overflows minimum serialized size {min_element_size}"
+        ))
+    })?;
+    source.check_eor(min_bytes).map_err(|err| match err {
+        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(alloc::format!(
+            "{label} count {len} exceeds remaining input"
+        )),
+        err => err,
+    })
 }
 
 #[cfg(test)]

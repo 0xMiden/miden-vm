@@ -97,6 +97,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as Item);
 
     let name = match &input {
+        Item::Type(item) => &item.ident,
         Item::Struct(item) => &item.ident,
         Item::Enum(item) => &item.ident,
         _ => panic!("This macro only works on structs and enums"),

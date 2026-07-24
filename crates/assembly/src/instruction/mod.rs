@@ -51,7 +51,7 @@ impl Assembler {
         let pending_node_asm_op = if can_create_node {
             // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
             // since the instruction creates exactly one node (call/syscall/dyn).
-            block_builder.set_instruction_cycle_count()?.map(|mut asm_op| {
+            block_builder.set_instruction_cycle_count().map(|mut asm_op| {
                 asm_op.set_num_cycles(1);
                 asm_op
             })
@@ -69,7 +69,7 @@ impl Assembler {
 
         // If we didn't create a node, set the cycle count after compilation.
         if !can_create_node {
-            let _ = block_builder.set_instruction_cycle_count()?;
+            let _ = block_builder.set_instruction_cycle_count();
         }
 
         Ok(opt_new_node_id)
@@ -588,7 +588,7 @@ impl Assembler {
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             Instruction::DebugVar(debug_var_info) => {
-                block_builder.push_debug_var(debug_var_info.clone())?;
+                block_builder.push_debug_var(debug_var_info.clone());
             },
 
             // ----- emit instruction -------------------------------------------------------------

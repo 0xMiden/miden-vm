@@ -25,19 +25,8 @@ use serde::{Deserialize, Serialize};
 pub struct SectionId(Cow<'static, str>);
 
 impl SectionId {
-    /// The section containing debug type definitions (primitives, structs, arrays, pointers,
-    /// function types)
-    pub const DEBUG_TYPES: Self = Self(Cow::Borrowed("debug_types"));
-    /// The section containing debug source file paths and checksums
-    pub const DEBUG_SOURCES: Self = Self(Cow::Borrowed("debug_sources"));
-    /// The section containing debug function metadata
-    pub const DEBUG_FUNCTIONS: Self = Self(Cow::Borrowed("debug_functions"));
-    /// The section containing source/debug MAST occurrence graph topology
-    pub const DEBUG_SOURCE_GRAPH: Self = Self(Cow::Borrowed("debug_source_graph"));
-    /// The section containing source-keyed assembly operation and debug variable rows
-    pub const DEBUG_SOURCE_MAP: Self = Self(Cow::Borrowed("debug_source_map"));
-    /// The section containing assertion error messages keyed by runtime error code
-    pub const DEBUG_ERROR_MESSAGES: Self = Self(Cow::Borrowed("debug_error_messages"));
+    /// The section containing a serialized [`crate::debug_info::PackageDebugInfo`] struct
+    pub const DEBUG_INFO: Self = Self(Cow::Borrowed("debug_info"));
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
@@ -73,15 +62,7 @@ impl SectionId {
 
     /// Returns true if this section contains package debug metadata.
     pub fn is_debug(&self) -> bool {
-        matches!(
-            self.as_str(),
-            "debug_types"
-                | "debug_sources"
-                | "debug_functions"
-                | "debug_source_graph"
-                | "debug_source_map"
-                | "debug_error_messages"
-        )
+        self == &Self::DEBUG_INFO
     }
 }
 
@@ -101,12 +82,7 @@ impl FromStr for SectionId {
     type Err = InvalidSectionIdError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "debug_types" => Ok(Self::DEBUG_TYPES),
-            "debug_sources" => Ok(Self::DEBUG_SOURCES),
-            "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
-            "debug_source_graph" => Ok(Self::DEBUG_SOURCE_GRAPH),
-            "debug_source_map" => Ok(Self::DEBUG_SOURCE_MAP),
-            "debug_error_messages" => Ok(Self::DEBUG_ERROR_MESSAGES),
+            "debug_info" => Ok(Self::DEBUG_INFO),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             "project_source_provenance" => Ok(Self::PROJECT_SOURCE_PROVENANCE),
             "kernel" => Ok(Self::KERNEL),
@@ -194,12 +170,7 @@ impl Arbitrary for SectionId {
         use alloc::string::String;
 
         let builtins = proptest::sample::select(vec![
-            Self::DEBUG_TYPES,
-            Self::DEBUG_SOURCES,
-            Self::DEBUG_FUNCTIONS,
-            Self::DEBUG_SOURCE_GRAPH,
-            Self::DEBUG_SOURCE_MAP,
-            Self::DEBUG_ERROR_MESSAGES,
+            Self::DEBUG_INFO,
             Self::ACCOUNT_COMPONENT_METADATA,
             Self::PROJECT_SOURCE_PROVENANCE,
             Self::KERNEL,

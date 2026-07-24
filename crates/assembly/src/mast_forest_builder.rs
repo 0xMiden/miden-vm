@@ -1,5 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
+use miden_assembly_syntax::debuginfo::SourceManager;
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -8,11 +9,13 @@ use miden_core::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, JoinNode, LoopNode, MastForest,
         MastForestRootMap, MastNode, MastNodeExt, OpBatch, SplitNode, error_code_from_msg,
     },
-    operations::{AssemblyOp, DebugVarInfo, Operation},
+    operations::{AssemblyOp, Operation},
     serde::Serializable,
-    utils::{Idx, IndexVec, bytes_to_packed_u32_elements},
+    utils::{IndexVec, bytes_to_packed_u32_elements},
 };
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_mast_package::debug_info::{
+    DebugInfoBuilder, DebugSourceAsmOp, DebugSourceVar, FunctionInfo, PackageDebugInfo,
+};
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
@@ -25,12 +28,8 @@ use finalizer::{BuiltMastForest, MastForestFinalizer};
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
-pub(crate) use pending_record::{AsmOpRef, DebugVarRef, MastNodeRef, SourceNodeRef};
-use pending_record::{
-    MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind, PendingSourceNode,
-};
-mod source_debug_graph;
-pub(crate) use source_debug_graph::{SourceDebugGraph, SourceNode, SourceNodeId};
+use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind};
+pub(crate) use pending_record::{MastNodeRef, SourceNodeRef};
 mod static_import;
 
 // CONSTANTS
@@ -43,6 +42,8 @@ const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 const BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0001);
 /// Domain used when control-node interning keys must include child keys.
 const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
+/// Domain used when basic-block interning keys must preserve source-index layout.
+const BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
 
 // MAST FOREST BUILDER
 // ================================================================================================
@@ -51,14 +52,16 @@ const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 ///
 /// The purpose of the builder is to ensure that the underlying MAST forest contains as little
 /// information as possible needed to adequately describe the logical MAST forest. Specifically:
-/// - The builder ensures that only one copy of nodes that have the same MAST root is added to the
-///   MAST forest (i.e., two nodes that have the same MAST root will have the same [`MastNodeId`]).
+/// - The builder deduplicates nodes that have the same MAST root when their execution-visible data
+///   and source-index layouts are compatible.
 /// - The builder tries to merge adjacent basic blocks and eliminate the source block whenever this
 ///   does not have an impact on other nodes in the forest.
 #[derive(Clone, Debug, Default)]
 pub struct MastForestBuilder {
     /// Advice map entries registered while building this forest.
     advice_map: AdviceMap,
+    /// Package debug info produced while building the forest
+    debug_info: DebugInfoBuilder<MastNodeRef, SourceNodeRef>,
     /// A map of all procedures added to the MAST forest indexed by their global procedure ID.
     /// This includes all local, exported, and re-exported procedures. In case multiple procedures
     /// with the same digest are added to the MAST forest builder, only the first procedure is
@@ -70,26 +73,16 @@ pub struct MastForestBuilder {
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
-    /// Procedure roots recorded by builder-local source/debug occurrence ref until finalization.
-    procedure_source_root_refs: Vec<SourceNodeRef>,
     /// Number of source/debug occurrences already selected as procedure roots per execution ref.
     procedure_source_root_count_by_node_ref: BTreeMap<MastNodeRef, usize>,
     /// A map of MAST node interning keys to their corresponding builder-local node refs.
     node_ref_by_key: BTreeMap<MastNodeKey, MastNodeRef>,
     /// Builder-owned dense storage for node refs.
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
-    /// Builder-owned dense storage for source/debug occurrences.
-    source_nodes: IndexVec<SourceNodeRef, PendingSourceNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
     /// Source occurrences recorded for each execution node ref, in creation order.
     source_refs_by_node_ref: BTreeMap<MastNodeRef, Vec<SourceNodeRef>>,
-    /// Builder-owned dense storage for assembly op refs.
-    asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
-    /// Builder-owned dense storage for debug variable refs.
-    debug_vars: IndexVec<DebugVarRef, DebugVarInfo>,
-    /// Assertion error messages keyed by runtime error code.
-    error_messages: BTreeMap<u64, Arc<str>>,
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
@@ -170,15 +163,16 @@ impl MastForestBuilder {
             .iter()
             .map(|library| Arc::new(library.mast.clone()))
             .collect::<Vec<_>>();
-        let mut error_messages = BTreeMap::new();
+        let mut debug_info_builder = DebugInfoBuilder::default();
         let statically_linked_package_debug_info = static_libraries
             .iter()
             .map(|library| {
-                if let Some(debug_info) = library.debug_info.as_ref()
-                    && let Some(section) = debug_info.error_messages()
-                {
-                    for row in section.messages() {
-                        error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
+                if let Some(debug_info) = library.debug_info.as_ref() {
+                    for row in debug_info.error_messages() {
+                        debug_info_builder.add_error_message(
+                            row.err_code,
+                            debug_info.get_string(row.message).unwrap(),
+                        );
                     }
                 }
                 library.debug_info.clone()
@@ -208,12 +202,12 @@ impl MastForestBuilder {
         // the library(s) that are actually linked into the output.
         Ok(MastForestBuilder {
             advice_map: statically_linked_mast.advice_map().clone(),
+            debug_info: debug_info_builder,
             statically_linked_mast: Arc::new(statically_linked_mast),
             statically_linked_source_forests,
             statically_linked_package_debug_info,
             statically_linked_forest_indices_by_commitment,
             statically_linked_root_map,
-            error_messages,
             ..Self::default()
         })
     }
@@ -268,23 +262,6 @@ impl MastForestBuilder {
 
         self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
         Ok(node_ref)
-    }
-
-    fn insert_pending_node_with_allocated_metadata_refs(
-        &mut self,
-        dedup_key: MastNodeKey,
-        draft: PendingMastNodeDraft,
-        asm_op_checkpoint: usize,
-        debug_var_checkpoint: usize,
-    ) -> Result<MastNodeRef, Report> {
-        match self.insert_or_replace_pending_node_record_ref(dedup_key, draft) {
-            Ok(node_ref) => Ok(node_ref),
-            Err(err) => {
-                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
-                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
-                Err(err)
-            },
-        }
     }
 
     fn find_node_ref_by_key(&self, key: &MastNodeKey) -> Option<MastNodeRef> {
@@ -379,54 +356,34 @@ impl MastForestBuilder {
     ) -> MastNodeKey {
         debug_assert!(!op_batches.is_empty());
         let error_code_data = serialize_basic_block_error_codes(op_batches);
-        if error_code_data.is_empty() {
-            return block_digest;
-        }
+        let error_code_key = if error_code_data.is_empty() {
+            block_digest
+        } else {
+            hash_basic_block_key_data(
+                BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN,
+                block_digest,
+                &error_code_data,
+            )
+        };
 
-        let data_len = error_code_data.len() as u64;
-        let mut elements = Vec::with_capacity(7 + error_code_data.len().div_ceil(4));
-        elements.push(BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN);
-        elements.extend_from_slice(block_digest.as_elements());
-        elements.push(Felt::from_u32(data_len as u32));
-        elements.push(Felt::from_u32((data_len >> 32) as u32));
-        elements.extend(bytes_to_packed_u32_elements(&error_code_data));
-        hasher::hash_elements(&elements)
+        // An explicit Noop has a zero opcode, so it can be indistinguishable from group padding in
+        // the MAST digest. Source indices, however, are recorded against raw operations and later
+        // adjusted with the retained block's padding layout. Preserve that complete layout in the
+        // pending identity whenever an explicit raw Noop makes digest-only reuse ambiguous.
+        let Some(source_layout_data) = serialize_basic_block_source_layout(op_batches) else {
+            return error_code_key;
+        };
+
+        hash_basic_block_key_data(
+            BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN,
+            error_code_key,
+            &source_layout_data,
+        )
     }
 
-    pub(crate) fn add_asm_op_ref(&mut self, asm_op: AssemblyOp) -> Result<AsmOpRef, Report> {
-        self.asm_op_by_ref
-            .push(asm_op)
-            .into_diagnostic()
-            .wrap_err("assembler created too many assembly op refs")
-    }
-
-    fn push_debug_var_ref(&mut self, debug_var: DebugVarInfo) -> Result<DebugVarRef, Report> {
-        self.debug_vars
-            .push(debug_var)
-            .into_diagnostic()
-            .wrap_err("assembler created too many debug variables")
-    }
-
-    fn indexed_asm_op_refs(
-        &mut self,
-        asm_ops: Vec<(usize, AssemblyOp)>,
-    ) -> Result<Vec<(usize, AsmOpRef)>, Report> {
-        asm_ops
-            .into_iter()
-            .map(|(op_idx, asm_op)| self.add_asm_op_ref(asm_op).map(|asm_ref| (op_idx, asm_ref)))
-            .collect()
-    }
-
-    fn indexed_debug_var_refs(
-        &mut self,
-        debug_vars: Vec<(usize, DebugVarInfo)>,
-    ) -> Result<Vec<(usize, DebugVarRef)>, Report> {
-        debug_vars
-            .into_iter()
-            .map(|(op_idx, debug_var)| {
-                self.add_debug_var_ref(debug_var).map(|debug_var_ref| (op_idx, debug_var_ref))
-            })
-            .collect()
+    #[inline]
+    pub(crate) fn debug_info_mut(&mut self) -> &mut DebugInfoBuilder<MastNodeRef, SourceNodeRef> {
+        &mut self.debug_info
     }
 
     fn intern_pending_node_with_asm_op(
@@ -437,26 +394,24 @@ impl MastForestBuilder {
         let dedup_key = self.dedup_key_for_pending_data(&draft);
         let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
 
-        let asm_op_checkpoint = self.asm_op_by_ref.len();
-        let debug_var_checkpoint = self.debug_vars.len();
-        draft.asm_ops = self.indexed_asm_op_refs(vec![(0, asm_op)])?;
+        let location_idx = asm_op.location().map(|loc| self.debug_info.add_location(loc.clone()));
+        let context_name_idx = self.debug_info.add_string(asm_op.context_name().clone());
+        let op_name_idx = self.debug_info.add_string(asm_op.op().clone());
+        draft.asm_ops = vec![DebugSourceAsmOp::new(
+            0,
+            location_idx,
+            context_name_idx,
+            op_name_idx,
+            asm_op.num_cycles(),
+        )];
         let node_ref =
             if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
                 node_ref
             } else {
-                self.insert_pending_node_with_allocated_metadata_refs(
-                    dedup_key,
-                    draft.clone(),
-                    asm_op_checkpoint,
-                    debug_var_checkpoint,
-                )?
+                self.insert_or_replace_pending_node_record_ref(dedup_key, draft.clone())?
             };
 
-        if let Err(err) = self.record_source_occurrence(node_ref, source_child_refs, &draft) {
-            truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
-            truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
-            return Err(err);
-        }
+        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
 
         Ok(node_ref)
     }
@@ -520,8 +475,8 @@ impl MastForestBuilder {
             draft
                 .asm_ops
                 .iter()
-                .map(|(op_idx, _)| op_idx + 1)
-                .chain(draft.debug_vars.iter().map(|(op_idx, _)| op_idx + 1))
+                .map(|asm_op| asm_op.op_idx as usize + 1)
+                .chain(draft.debug_vars.iter().map(|debug_var| debug_var.op_idx as usize + 1))
                 .max()
                 .unwrap_or(0)
         };
@@ -535,19 +490,20 @@ impl MastForestBuilder {
         child_refs: Vec<SourceNodeRef>,
         op_start: usize,
         op_end: usize,
-        asm_ops: Vec<(usize, AsmOpRef)>,
-        debug_vars: Vec<(usize, DebugVarRef)>,
+        asm_ops: Vec<DebugSourceAsmOp>,
+        debug_vars: Vec<DebugSourceVar>,
         update_latest: bool,
     ) -> Result<SourceNodeRef, Report> {
         let source_ref = self
-            .source_nodes
-            .push(PendingSourceNode {
-                exec_ref,
-                child_refs,
-                op_start,
-                op_end,
+            .debug_info
+            .add_node(miden_mast_package::debug_info::SourceNode {
+                exec_node: exec_ref,
+                children: child_refs,
+                op_start: op_start.try_into().expect("invalid op start"),
+                op_end: op_end.try_into().expect("invalid op end"),
                 asm_ops,
                 debug_vars,
+                inline_calls: vec![],
             })
             .into_diagnostic()
             .wrap_err("assembler created too many source MAST node refs")?;
@@ -575,25 +531,13 @@ impl MastForestBuilder {
     /// used in reference to this builder should be resolved using this map.
     pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
         let procedure_root_refs = core::mem::take(&mut self.procedure_root_refs);
-        let procedure_source_root_refs = core::mem::take(&mut self.procedure_source_root_refs);
 
         let layout = FinalForestLayout::plan(procedure_root_refs, &self.nodes);
 
         let mut finalizer = MastForestFinalizer::new();
         finalizer.materialize_live_nodes(&layout.live_node_refs, &self.nodes)?;
 
-        let error_messages = core::mem::take(&mut self.error_messages);
-
-        finalizer
-            .into_built_forest(
-                &layout.procedure_root_refs,
-                &procedure_source_root_refs,
-                &self.source_nodes,
-                &self.asm_op_by_ref,
-                &self.debug_vars,
-                self.advice_map,
-            )
-            .map(|built| built.with_error_messages(error_messages))
+        finalizer.into_built_forest(&layout.procedure_root_refs, self.advice_map, self.debug_info)
     }
 }
 
@@ -601,17 +545,17 @@ impl MastForestBuilder {
 ///
 /// For basic block nodes, adjusts indices to account for padding NOOPs in OpBatches.
 /// For control flow nodes, computes the operation count from the maximum index.
-fn compute_operations_and_adjust_mappings<T: Copy>(
+fn compute_operations_and_adjust_mappings(
     node: &MastNode,
-    mappings: Vec<(usize, T)>,
-) -> (usize, Vec<(usize, T)>) {
+    mappings: Vec<usize>,
+) -> (usize, Vec<usize>) {
     match node {
         MastNode::Block(block) => (
             block.num_operations() as usize,
             BasicBlockNode::adjust_asm_op_indices(mappings, block.op_batches()),
         ),
         _ => {
-            let num_ops = mappings.iter().map(|(idx, _)| idx + 1).max().unwrap_or(0);
+            let num_ops = mappings.iter().map(|idx| idx + 1).max().unwrap_or(0);
             (num_ops, mappings)
         },
     }
@@ -627,6 +571,17 @@ fn batch_basic_block_operations(
     Ok((block.op_batches().to_vec(), block.digest()))
 }
 
+fn hash_basic_block_key_data(domain: Felt, base_key: Word, data: &[u8]) -> Word {
+    let data_len = data.len() as u64;
+    let mut elements = Vec::with_capacity(7 + data.len().div_ceil(4));
+    elements.push(domain);
+    elements.extend_from_slice(base_key.as_elements());
+    elements.push(Felt::from_u32(data_len as u32));
+    elements.push(Felt::from_u32((data_len >> 32) as u32));
+    elements.extend(bytes_to_packed_u32_elements(data));
+    hasher::hash_elements(&elements)
+}
+
 fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
     let mut data = Vec::new();
 
@@ -640,10 +595,40 @@ fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
     data
 }
 
-fn truncate_index_vec<I: Idx, T>(items: &mut IndexVec<I, T>, len: usize) {
-    while items.len() > len {
-        items.swap_remove(items.len() - 1);
+/// Serializes the information needed to reconstruct a block's raw-to-padded operation map.
+///
+/// The raw operation count and every raw boundary followed by an assembler-inserted padding Noop
+/// fully determine the map. Blocks without explicit raw Noops return `None`: absent a hash
+/// collision, their nonzero opcodes already distinguish the executable layout in the MAST digest.
+fn serialize_basic_block_source_layout(op_batches: &[OpBatch]) -> Option<Vec<u8>> {
+    let (raw_op_count, has_explicit_noop) = op_batches.iter().flat_map(OpBatch::raw_ops).fold(
+        (0_u64, false),
+        |(count, has_explicit_noop), op| {
+            (count + 1, has_explicit_noop || matches!(op, Operation::Noop))
+        },
+    );
+    if !has_explicit_noop {
+        return None;
     }
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&raw_op_count.to_le_bytes());
+
+    let mut raw_op_prefix = 0_u64;
+    for batch in op_batches {
+        for group_idx in 0..batch.num_groups() {
+            let group_op_count = batch.indptr()[group_idx + 1] - batch.indptr()[group_idx];
+            let has_padding = batch.padding()[group_idx];
+            debug_assert!(group_op_count >= usize::from(has_padding));
+            raw_op_prefix += (group_op_count - usize::from(has_padding)) as u64;
+            if has_padding {
+                data.extend_from_slice(&raw_op_prefix.to_le_bytes());
+            }
+        }
+    }
+    debug_assert_eq!(raw_op_prefix, raw_op_count);
+
+    Some(data)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -700,6 +685,7 @@ impl MastForestBuilder {
         &mut self,
         gid: GlobalItemIndex,
         procedure: Procedure,
+        source_manager: &dyn SourceManager,
     ) -> Result<(), Report> {
         // Check if an entry is already in this cache slot.
         //
@@ -748,8 +734,49 @@ impl MastForestBuilder {
         }
 
         self.record_procedure_root_ref(procedure.body_node_ref());
+        self.record_procedure_debug_info(&procedure, source_manager)?;
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
+
         self.procedures.insert(gid, procedure);
+
+        Ok(())
+    }
+
+    fn record_procedure_debug_info(
+        &mut self,
+        procedure: &Procedure,
+        source_manager: &dyn SourceManager,
+    ) -> Result<(), Report> {
+        use miden_assembly_syntax::ast::types::Type;
+
+        if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
+            let source_ref = self.latest_source_ref_for_node_ref(procedure.body_node_ref());
+            let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
+            let name_idx = self.debug_info.add_string(procedure.path().as_str());
+            let type_idx = if let Some(signature) = procedure.signature() {
+                Some(self.debug_info.register_debug_type(
+                    Some(name_idx),
+                    None,
+                    &Type::Function(signature),
+                )?)
+            } else {
+                None
+            };
+            let func_info = FunctionInfo::new(
+                source_ref,
+                name_idx,
+                file_idx,
+                file_line_col.line,
+                file_line_col.column,
+                procedure.mast_root(),
+            );
+            let func_info = if let Some(type_idx) = type_idx {
+                func_info.with_type(type_idx)
+            } else {
+                func_info
+            };
+            self.debug_info.add_function(func_info);
+        }
 
         Ok(())
     }
@@ -763,9 +790,9 @@ impl MastForestBuilder {
                 .get(*self.procedure_source_root_count_by_node_ref.entry(root_ref).or_default())
                 .copied()
                 .or_else(|| history.last().copied())
-            && !self.procedure_source_root_refs.contains(&source_ref)
+            && !self.debug_info.roots().contains(&source_ref)
         {
-            self.procedure_source_root_refs.push(source_ref);
+            self.debug_info.add_root(source_ref);
             *self.procedure_source_root_count_by_node_ref.entry(root_ref).or_default() += 1;
         }
     }
@@ -930,28 +957,35 @@ impl MastForestBuilder {
         merged_source_occurrences: &[(SourceNodeRef, usize)],
     ) -> Result<(), Report> {
         for &(source_ref, new_start) in merged_source_occurrences {
-            let source_node = self.source_nodes[source_ref].clone();
+            let new_start = u32::try_from(new_start).expect("operation start index too large");
+            let source_node = self.debug_info[source_ref].clone();
             let old_start = source_node.op_start;
             let op_len = source_node.op_end.saturating_sub(old_start);
-            let remap_op_idx = |op_idx: usize| {
+            let remap_op_idx = |op_idx: u32| {
                 debug_assert!(op_idx >= old_start);
                 op_idx - old_start + new_start
             };
 
             self.push_source_occurrence(
                 merged_ref,
-                source_node.child_refs,
-                new_start,
-                new_start + op_len,
+                source_node.children,
+                new_start as usize,
+                (new_start + op_len) as usize,
                 source_node
                     .asm_ops
                     .into_iter()
-                    .map(|(op_idx, asm_op_ref)| (remap_op_idx(op_idx), asm_op_ref))
+                    .map(|mut asm_op| {
+                        asm_op.op_idx = remap_op_idx(asm_op.op_idx);
+                        asm_op
+                    })
                     .collect(),
                 source_node
                     .debug_vars
                     .into_iter()
-                    .map(|(op_idx, debug_var_ref)| (remap_op_idx(op_idx), debug_var_ref))
+                    .map(|mut debug_var| {
+                        debug_var.op_idx = remap_op_idx(debug_var.op_idx);
+                        debug_var
+                    })
                     .collect(),
                 false,
             )?;
@@ -973,8 +1007,8 @@ impl MastForestBuilder {
 
         let mut operations: Vec<Operation> = Vec::new();
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
-        let mut merged_asm_ops: Vec<(usize, AsmOpRef)> = Vec::new();
-        let mut merged_debug_vars: Vec<(usize, DebugVarRef)> = Vec::new();
+        let mut merged_asm_ops: Vec<DebugSourceAsmOp> = Vec::new();
+        let mut merged_debug_vars: Vec<DebugSourceVar> = Vec::new();
         let mut merged_source_occurrences: Vec<(SourceNodeRef, usize)> = Vec::new();
 
         let mut merged_basic_block_refs: Vec<MastNodeRef> = Vec::new();
@@ -1003,18 +1037,16 @@ impl MastForestBuilder {
                 merged_source_occurrences.push((source_ref, ops_offset));
 
                 let pending_node = &self.nodes[basic_block_ref];
-                merged_asm_ops.extend(
-                    pending_node
-                        .asm_ops
-                        .iter()
-                        .map(|(op_idx, asm_op_id)| (op_idx + ops_offset, *asm_op_id)),
-                );
-                merged_debug_vars.extend(
-                    pending_node
-                        .debug_vars
-                        .iter()
-                        .map(|(op_idx, var_id)| (op_idx + ops_offset, *var_id)),
-                );
+                merged_asm_ops.extend(pending_node.asm_ops.iter().map(|asm_op| {
+                    let mut asm_op = *asm_op;
+                    asm_op.op_idx += u32::try_from(ops_offset).unwrap();
+                    asm_op
+                }));
+                merged_debug_vars.extend(pending_node.debug_vars.iter().map(|debug_var| {
+                    let mut debug_var = debug_var.clone();
+                    debug_var.op_idx += u32::try_from(ops_offset).unwrap();
+                    debug_var
+                }));
 
                 operations.extend(block_ops);
             } else {
@@ -1052,8 +1084,8 @@ impl MastForestBuilder {
     pub(crate) fn ensure_block_ref(
         &mut self,
         operations: Vec<Operation>,
-        asm_op_refs: Vec<(usize, AsmOpRef)>,
-        debug_vars: Vec<(usize, DebugVarRef)>,
+        asm_ops: Vec<DebugSourceAsmOp>,
+        debug_vars: Vec<DebugSourceVar>,
     ) -> Result<MastNodeRef, Report> {
         let (op_batches, digest) = batch_basic_block_operations(operations)?;
         let kind = PendingMastNodeKind::BasicBlock { op_batches };
@@ -1061,33 +1093,20 @@ impl MastForestBuilder {
             kind,
             digest,
             child_refs: Vec::new(),
-            asm_ops: asm_op_refs,
+            asm_ops,
             debug_vars,
         })
     }
 }
 
 // ------------------------------------------------------------------------------------------------
-/// Node inserters
-impl MastForestBuilder {
-    /// Adds a debug variable to the builder, and returns its builder-local [`DebugVarRef`].
-    ///
-    /// Debug variables are not deduplicated since each occurrence represents a specific point in
-    /// program execution where the variable's location is being tracked.
-    pub(crate) fn add_debug_var_ref(
-        &mut self,
-        debug_var: DebugVarInfo,
-    ) -> Result<DebugVarRef, Report> {
-        self.push_debug_var_ref(debug_var)
-    }
-}
 
 impl MastForestBuilder {
     /// Registers an error message in the MAST Forest and returns the
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         let err_code = error_code_from_msg(&msg);
-        self.error_messages.entry(err_code.as_canonical_u64()).or_insert(msg);
+        self.debug_info.add_error_message(err_code.as_canonical_u64(), msg);
         err_code
     }
 }
@@ -1137,15 +1156,27 @@ mod tests {
     use alloc::{
         collections::BTreeSet,
         string::{String, ToString},
+        sync::Arc,
     };
 
+    use miden_assembly_syntax::{
+        ast::{DebugVarInfo, DebugVarLocation},
+        debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+    };
     use miden_core::{
         mast::{MastNodeBuilder, MastNodeId},
-        operations::{DebugVarLocation, Operation},
+        operations::Operation,
+        serde::Serializable,
+        utils::Idx,
     };
-    use miden_mast_package::debug_info::{
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
-        DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    use miden_mast_package::{
+        Package, PackageExport, PackageId, PathBuf, ProcedureExport, Section, SectionId,
+        TargetType, Version,
+        debug_info::{
+            DebugFieldInfo, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceInlineCall,
+            DebugSourceNode, DebugSourceVar, DebugTypeIdx, DebugTypeInfo, FunctionInfo,
+            PackageDebugInfo, PackageDebugInfoBuilder,
+        },
     };
     use proptest::prelude::*;
 
@@ -1156,12 +1187,47 @@ mod tests {
         node_ref
     }
 
-    fn add_test_asm_op(builder: &mut MastForestBuilder, asm_op: AssemblyOp) -> AsmOpRef {
-        builder.add_asm_op_ref(asm_op).unwrap()
+    fn add_test_asm_op(builder: &mut MastForestBuilder, asm_op: AssemblyOp) -> DebugSourceAsmOp {
+        let location_idx = asm_op
+            .location()
+            .map(|location| builder.debug_info_mut().add_location(location.clone()));
+        let context_name_idx = builder.debug_info_mut().add_string(asm_op.context_name().clone());
+        let op_name_idx = builder.debug_info_mut().add_string(asm_op.op().clone());
+        DebugSourceAsmOp::new(0, location_idx, context_name_idx, op_name_idx, asm_op.num_cycles())
+    }
+
+    fn add_test_debug_var(
+        builder: &mut MastForestBuilder,
+        debug_var: DebugVarInfo,
+    ) -> DebugSourceVar {
+        let name_idx = builder.debug_info_mut().add_string(debug_var.name().clone());
+        let location_idx = debug_var
+            .location()
+            .map(|location| builder.debug_info_mut().add_location(location.clone()));
+        DebugSourceVar {
+            op_idx: 0,
+            name_idx,
+            type_id: None,
+            arg_idx: debug_var.arg_index(),
+            location_idx,
+            value_location: debug_var.value_location().clone(),
+        }
+    }
+
+    fn with_asm_op_idx(mut asm_op: DebugSourceAsmOp, op_idx: u32) -> DebugSourceAsmOp {
+        asm_op.op_idx = op_idx;
+        asm_op
+    }
+
+    fn with_debug_var_idx(mut debug_var: DebugSourceVar, op_idx: u32) -> DebugSourceVar {
+        debug_var.op_idx = op_idx;
+        debug_var
     }
 
     fn test_asm_op(context: impl Into<String>, op: impl Into<String>) -> AssemblyOp {
-        AssemblyOp::new(None, context.into(), 1, op.into())
+        let context = context.into();
+        let op = op.into();
+        AssemblyOp::new(None, context, 1, op)
     }
 
     fn test_word(value: u64) -> Word {
@@ -1169,93 +1235,40 @@ mod tests {
     }
 
     fn source_nodes_for_exec(
-        source_graph: &SourceDebugGraph,
+        debug_info: &PackageDebugInfo,
         exec_node: MastNodeId,
-    ) -> Vec<&SourceNode> {
-        source_graph
+    ) -> Vec<&DebugSourceNode> {
+        debug_info
             .nodes()
-            .as_slice()
             .iter()
-            .filter(|source_node| source_node.exec_node() == exec_node)
+            .filter(|source_node| source_node.exec_node == exec_node)
             .collect()
     }
 
-    fn source_debug_var_names(
-        source_graph: &SourceDebugGraph,
-        exec_node: MastNodeId,
-    ) -> Vec<String> {
-        source_nodes_for_exec(source_graph, exec_node)
+    fn source_debug_var_names(debug_info: &PackageDebugInfo, exec_node: MastNodeId) -> Vec<String> {
+        source_nodes_for_exec(debug_info, exec_node)
             .into_iter()
             .flat_map(|source_node| {
                 source_node
-                    .debug_vars()
+                    .debug_vars
                     .iter()
-                    .map(|(_, debug_var)| debug_var.name().to_string())
+                    .map(|debug_var| debug_info[debug_var.name_idx].to_string())
                     .collect::<Vec<_>>()
             })
             .collect()
     }
 
-    fn source_asm_contexts(source_graph: &SourceDebugGraph, exec_node: MastNodeId) -> Vec<String> {
-        source_nodes_for_exec(source_graph, exec_node)
+    fn source_asm_contexts(debug_info: &PackageDebugInfo, exec_node: MastNodeId) -> Vec<String> {
+        source_nodes_for_exec(debug_info, exec_node)
             .into_iter()
             .flat_map(|source_node| {
                 source_node
-                    .asm_ops()
+                    .asm_ops
                     .iter()
-                    .map(|(_, asm_op)| asm_op.context_name().to_string())
+                    .map(|asm_op| debug_info[asm_op.context_name_idx].to_string())
                     .collect::<Vec<_>>()
             })
             .collect()
-    }
-
-    fn package_debug_info_from_source_graph(source_graph: &SourceDebugGraph) -> PackageDebugInfo {
-        let source_nodes = source_graph
-            .nodes()
-            .as_slice()
-            .iter()
-            .map(|source_node| {
-                DebugSourceNode::new(
-                    source_node.exec_node(),
-                    source_node
-                        .children()
-                        .iter()
-                        .map(|child| DebugSourceNodeId::from(u32::from(*child)))
-                        .collect(),
-                    source_node.op_start() as u32,
-                    source_node.op_end() as u32,
-                )
-            })
-            .collect();
-        let roots = source_graph
-            .roots()
-            .iter()
-            .map(|root| DebugSourceNodeId::from(u32::from(*root)))
-            .collect();
-
-        let mut asm_ops = Vec::new();
-        let mut debug_vars = Vec::new();
-        for (source_idx, source_node) in source_graph.nodes().as_slice().iter().enumerate() {
-            let source_node_id = DebugSourceNodeId::from(source_idx as u32);
-            asm_ops.extend(source_node.asm_ops().iter().map(|(op_idx, asm_op)| {
-                DebugSourceAsmOp::new(
-                    source_node_id,
-                    *op_idx as u32,
-                    asm_op.location().cloned(),
-                    asm_op.context_name().to_string(),
-                    asm_op.op().to_string(),
-                    asm_op.num_cycles(),
-                )
-            }));
-            debug_vars.extend(source_node.debug_vars().iter().map(|(op_idx, debug_var)| {
-                DebugSourceVar::new(source_node_id, *op_idx as u32, debug_var.clone())
-            }));
-        }
-
-        PackageDebugInfo::with_source_debug(
-            DebugSourceGraphSection::from_parts(source_nodes, roots),
-            DebugSourceMapSection::from_parts(asm_ops, debug_vars),
-        )
     }
 
     #[derive(Debug, Clone)]
@@ -1318,18 +1331,16 @@ mod tests {
         ) {
             let mut builder = MastForestBuilder::new(&[]).unwrap();
             let shared_asm_op = add_test_asm_op(&mut builder, test_asm_op("generated::shared", "add"));
-            let shared_debug_var = builder
-                .add_debug_var_ref(DebugVarInfo::new(
-                    "shared",
-                    DebugVarLocation::Stack(0),
-                ))
-                .unwrap();
+            let shared_debug_var = add_test_debug_var(
+                &mut builder,
+                DebugVarInfo::new("shared", DebugVarLocation::Stack(0)),
+            );
 
             let seed_ref = builder
                 .ensure_block_ref(
                     vec![Operation::Add, Operation::Mul],
-                    vec![(0, shared_asm_op), (1, shared_asm_op)],
-                    vec![(0, shared_debug_var)],
+                    vec![shared_asm_op, with_asm_op_idx(shared_asm_op, 1)],
+                    vec![shared_debug_var],
                 )
                 .unwrap();
             record_test_root(&mut builder, seed_ref);
@@ -1348,7 +1359,7 @@ mod tests {
                         builder
                             .ensure_block_ref(
                                 vec![Operation::Add],
-                                vec![(0, asm_op)],
+                                vec![asm_op],
                                 vec![],
                             )
                             .unwrap()
@@ -1473,10 +1484,10 @@ mod tests {
         let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
         let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "mul"));
         let first_block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![first_asm_op], vec![])
             .unwrap();
         let second_block_ref = builder
-            .ensure_block_ref(vec![Operation::Mul], vec![(0, second_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Mul], vec![second_asm_op], vec![])
             .unwrap();
 
         let merged_blocks =
@@ -1484,8 +1495,7 @@ mod tests {
         assert_eq!(merged_blocks.len(), 1);
         let merged_ref = record_test_root(&mut builder, merged_blocks[0]);
 
-        let (_, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+        let (_, remapping, source_graph, _) = builder.build().unwrap().into_parts_with_debug_info();
         let final_merged_id = remapping[&merged_ref];
         let source_nodes = source_nodes_for_exec(&source_graph, final_merged_id);
 
@@ -1496,23 +1506,21 @@ mod tests {
         );
         assert!(
             source_nodes.iter().any(|source_node| {
-                source_node.op_start() == 0
-                    && source_node.op_end() == 1
-                    && source_node
-                        .asm_ops()
-                        .iter()
-                        .any(|(_, asm_op)| asm_op.context_name() == "merge::first")
+                source_node.op_start == 0
+                    && source_node.op_end == 1
+                    && source_node.asm_ops.iter().any(|asm_op| {
+                        source_graph[asm_op.context_name_idx].as_ref() == "merge::first"
+                    })
             }),
             "first pre-merge source block should survive as range 0..1",
         );
         assert!(
             source_nodes.iter().any(|source_node| {
-                source_node.op_start() == 1
-                    && source_node.op_end() == 2
-                    && source_node
-                        .asm_ops()
-                        .iter()
-                        .any(|(_, asm_op)| asm_op.context_name() == "merge::second")
+                source_node.op_start == 1
+                    && source_node.op_end == 2
+                    && source_node.asm_ops.iter().any(|asm_op| {
+                        source_graph[asm_op.context_name_idx].as_ref() == "merge::second"
+                    })
             }),
             "second pre-merge source block should survive as range 1..2",
         );
@@ -1525,10 +1533,10 @@ mod tests {
         let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
         let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "add"));
         let first_block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![first_asm_op], vec![])
             .unwrap();
         let second_block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, second_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![second_asm_op], vec![])
             .unwrap();
 
         assert_eq!(
@@ -1541,30 +1549,27 @@ mod tests {
         assert_eq!(merged_blocks.len(), 1);
         let merged_ref = record_test_root(&mut builder, merged_blocks[0]);
 
-        let (_, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+        let (_, remapping, source_graph, _) = builder.build().unwrap().into_parts_with_debug_info();
         let final_merged_id = remapping[&merged_ref];
         let source_nodes = source_nodes_for_exec(&source_graph, final_merged_id);
 
         assert!(
             source_nodes.iter().any(|source_node| {
-                source_node.op_start() == 0
-                    && source_node.op_end() == 1
-                    && source_node
-                        .asm_ops()
-                        .iter()
-                        .any(|(_, asm_op)| asm_op.context_name() == "merge::first")
+                source_node.op_start == 0
+                    && source_node.op_end == 1
+                    && source_node.asm_ops.iter().any(|asm_op| {
+                        source_graph[asm_op.context_name_idx].as_ref() == "merge::first"
+                    })
             }),
             "first deduped source block should survive as range 0..1",
         );
         assert!(
             source_nodes.iter().any(|source_node| {
-                source_node.op_start() == 1
-                    && source_node.op_end() == 2
-                    && source_node
-                        .asm_ops()
-                        .iter()
-                        .any(|(_, asm_op)| asm_op.context_name() == "merge::second")
+                source_node.op_start == 1
+                    && source_node.op_end == 2
+                    && source_node.asm_ops.iter().any(|asm_op| {
+                        source_graph[asm_op.context_name_idx].as_ref() == "merge::second"
+                    })
             }),
             "second deduped source block should survive as range 1..2",
         );
@@ -1645,30 +1650,26 @@ mod tests {
     /// Same-ops blocks with different debug vars use the same execution node identity.
     #[test]
     fn test_ensure_node_preserving_debug_vars_prevents_aliasing() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let var_x_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let var_y_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
-            .unwrap();
+        let var_x_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("x", DebugVarLocation::Stack(0)));
+        let var_y_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("y", DebugVarLocation::Stack(1)));
 
         // Same ops, different debug vars dedup to the same execution node.
         let block_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_x_ref)])
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_x_ref])
             .unwrap();
         let block_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_y_ref)])
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_y_ref])
             .unwrap();
 
         assert_eq!(block_a_ref, block_b_ref);
 
         record_test_root(&mut builder, block_a_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block_a = remapping[&block_a_ref];
         let final_block_b = remapping[&block_b_ref];
         let var_names = source_debug_var_names(&source_graph, final_block_a);
@@ -1679,37 +1680,33 @@ mod tests {
 
     #[test]
     fn test_source_graph_distinguishes_same_exec_debug_var_occurrences() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let var_x_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let var_y_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
-            .unwrap();
+        let var_x_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("x", DebugVarLocation::Stack(0)));
+        let var_y_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("y", DebugVarLocation::Stack(1)));
 
         let block_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_x_ref)])
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_x_ref])
             .unwrap();
         let block_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_y_ref)])
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_y_ref])
             .unwrap();
 
         assert_eq!(block_a_ref, block_b_ref);
 
         record_test_root(&mut builder, block_a_ref);
         let (forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block = remapping[&block_a_ref];
         let debug_var_names = source_nodes_for_exec(&source_graph, final_block)
             .into_iter()
             .flat_map(|source_node| {
                 source_node
-                    .debug_vars()
+                    .debug_vars
                     .iter()
-                    .map(|(_, debug_var)| debug_var.name().to_string())
+                    .map(|debug_var| source_graph[debug_var.name_idx].to_string())
             })
             .collect::<BTreeSet<_>>();
 
@@ -1723,28 +1720,193 @@ mod tests {
     /// were allocated different builder refs.
     #[test]
     fn test_ensure_block_dedups_identical_debug_var_payloads() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let var_a = builder
-            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let var_b = builder
-            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
+        let var_a =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("x", DebugVarLocation::Stack(0)));
+        let var_b =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("x", DebugVarLocation::Stack(0)));
 
-        let block_a = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_a)])
-            .unwrap();
-        let block_b = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_b)])
-            .unwrap();
+        let block_a =
+            builder.ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_a]).unwrap();
+        let block_b =
+            builder.ensure_block_ref(vec![Operation::Add], Vec::new(), vec![var_b]).unwrap();
 
         assert_eq!(
             block_a, block_b,
             "same op stream plus same DebugVarInfo payload should dedup to one node"
         );
+    }
+
+    #[test]
+    fn test_trailing_noop_blocks_keep_compatible_source_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let event = Felt::from_u32(7);
+        let emitted_event = vec![Operation::Push(event), Operation::Emit, Operation::Drop];
+
+        let block_ref =
+            builder.ensure_block_ref(emitted_event.clone(), Vec::new(), Vec::new()).unwrap();
+        let debug_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("result", DebugVarLocation::Stack(0)),
+        );
+        let trailing_noop_ops =
+            emitted_event.into_iter().chain([Operation::Noop]).collect::<Vec<_>>();
+        let trailing_noop_ref = builder
+            .ensure_block_ref(
+                trailing_noop_ops.clone(),
+                Vec::new(),
+                vec![with_debug_var_idx(debug_var, 3)],
+            )
+            .unwrap();
+
+        assert_ne!(
+            block_ref, trailing_noop_ref,
+            "same-digest blocks with incompatible raw operation layouts must not deduplicate",
+        );
+        assert_eq!(
+            builder.pending_node_mast_root(block_ref),
+            builder.pending_node_mast_root(trailing_noop_ref),
+            "an explicit trailing Noop must remain invisible to the MAST digest",
+        );
+
+        let call_ref = builder
+            .ensure_call_node_ref(block_ref, false, test_asm_op("test", "call"))
+            .unwrap();
+        let trailing_noop_call_ref = builder
+            .ensure_call_node_ref(trailing_noop_ref, false, test_asm_op("test", "call"))
+            .unwrap();
+        assert_ne!(
+            call_ref, trailing_noop_call_ref,
+            "incompatible child source layouts must propagate through control-node identity",
+        );
+        assert_eq!(
+            builder.pending_node_mast_root(call_ref),
+            builder.pending_node_mast_root(trailing_noop_call_ref),
+        );
+
+        let duplicate_trailing_noop_ref =
+            builder.ensure_block_ref(trailing_noop_ops, Vec::new(), Vec::new()).unwrap();
+        assert_eq!(
+            trailing_noop_ref, duplicate_trailing_noop_ref,
+            "identical raw-to-padded layouts should still deduplicate",
+        );
+
+        record_test_root(&mut builder, call_ref);
+        record_test_root(&mut builder, trailing_noop_call_ref);
+        let (forest, remapping, debug_info, _) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let final_block = remapping[&block_ref];
+        let final_trailing_noop = remapping[&trailing_noop_ref];
+
+        let MastNode::Block(block) = &forest[final_block] else {
+            panic!("expected a basic block")
+        };
+        let MastNode::Block(trailing_noop_block) = &forest[final_trailing_noop] else {
+            panic!("expected a basic block")
+        };
+        assert_eq!(block.raw_operations().count(), 3);
+        assert_eq!(trailing_noop_block.raw_operations().count(), 4);
+
+        let source_node = source_nodes_for_exec(&debug_info, final_block)
+            .into_iter()
+            .next()
+            .expect("base block source occurrence should survive finalization");
+        assert_eq!(source_node.op_start..source_node.op_end, 0..3);
+
+        let trailing_noop_source = source_nodes_for_exec(&debug_info, final_trailing_noop)
+            .into_iter()
+            .find(|source_node| !source_node.debug_vars.is_empty())
+            .expect("trailing-Noop source occurrence should survive finalization");
+        assert_eq!(trailing_noop_source.op_start..trailing_noop_source.op_end, 0..4);
+        assert_eq!(trailing_noop_source.debug_vars.len(), 1);
+        assert_eq!(trailing_noop_source.debug_vars[0].op_idx, 3);
+
+        let export_path = PathBuf::new("source_layout_test::entry").unwrap();
+        let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
+        let export_path = Arc::from(export_path.into_boxed_path());
+        let final_call = remapping[&call_ref];
+        let export = PackageExport::Procedure(ProcedureExport::new(
+            export_path,
+            Some(final_call),
+            forest[final_call].digest(),
+            None,
+        ));
+        let mut package = Package::create(
+            PackageId::from("source-layout-test"),
+            Version::new(0, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            [export],
+            [],
+        )
+        .unwrap();
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes()));
+        assert!(
+            package.debug_info().unwrap().is_some(),
+            "final source ranges and rows must pass package validation",
+        );
+    }
+
+    #[test]
+    fn test_noop_layout_key_includes_padding_boundaries() {
+        let event = Felt::from_u32(7);
+        let mut first_ops = vec![Operation::Push(event); 8];
+        first_ops.extend([Operation::Noop, Operation::Noop]);
+        let mut second_ops = vec![Operation::Push(event); 7];
+        second_ops.extend([Operation::Noop, Operation::Push(event), Operation::Noop]);
+
+        let (first_batches, first_digest) =
+            batch_basic_block_operations(first_ops.clone()).unwrap();
+        let (second_batches, second_digest) =
+            batch_basic_block_operations(second_ops.clone()).unwrap();
+        assert_eq!(first_digest, second_digest);
+        assert_eq!(
+            first_batches.iter().flat_map(OpBatch::raw_ops).count(),
+            second_batches.iter().flat_map(OpBatch::raw_ops).count(),
+        );
+
+        let raw_indices = (0..=first_ops.len()).collect::<Vec<_>>();
+        let first_mapping =
+            BasicBlockNode::adjust_asm_op_indices(raw_indices.clone(), &first_batches);
+        let second_mapping = BasicBlockNode::adjust_asm_op_indices(raw_indices, &second_batches);
+        assert_ne!(
+            first_mapping, second_mapping,
+            "the counterexample must have incompatible raw-to-padded source indices",
+        );
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let first_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("first", DebugVarLocation::Stack(0)),
+        );
+        let second_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("second", DebugVarLocation::Stack(0)),
+        );
+        let first_ref = builder
+            .ensure_block_ref(first_ops, Vec::new(), vec![with_debug_var_idx(first_var, 7)])
+            .unwrap();
+        let second_ref = builder
+            .ensure_block_ref(second_ops, Vec::new(), vec![with_debug_var_idx(second_var, 7)])
+            .unwrap();
+        assert_ne!(
+            first_ref, second_ref,
+            "equal raw counts are insufficient when padding boundaries differ",
+        );
+
+        record_test_root(&mut builder, first_ref);
+        record_test_root(&mut builder, second_ref);
+        let (_forest, remapping, debug_info, _) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let first_source = source_nodes_for_exec(&debug_info, remapping[&first_ref])[0];
+        let second_source = source_nodes_for_exec(&debug_info, remapping[&second_ref])[0];
+        assert_eq!(first_source.op_start..first_source.op_end, 0..11);
+        assert_eq!(second_source.op_start..second_source.op_end, 0..10);
+        assert_eq!(first_source.debug_vars[0].op_idx, 8);
+        assert_eq!(second_source.debug_vars[0].op_idx, 7);
     }
 
     #[test]
@@ -1838,27 +2000,148 @@ mod tests {
 
     #[test]
     fn test_build_assigns_final_debug_var_ids_to_used_refs() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let _unused_var = builder
-            .add_debug_var_ref(DebugVarInfo::new("unused", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let used_var = builder
-            .add_debug_var_ref(DebugVarInfo::new("used", DebugVarLocation::Stack(1)))
-            .unwrap();
+        let _unused_var = add_test_debug_var(
+            &mut builder,
+            DebugVarInfo::new("unused", DebugVarLocation::Stack(0)),
+        );
+        let used_var =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("used", DebugVarLocation::Stack(1)));
         let block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, used_var)])
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![used_var])
             .unwrap();
 
         record_test_root(&mut builder, block_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block_id = remapping[&block_ref];
         let var_names = source_debug_var_names(&source_graph, final_block_id);
 
         assert_eq!(var_names, vec!["used"]);
+    }
+
+    #[test]
+    fn test_build_preserves_function_debug_info_and_references() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let block_ref = builder.ensure_block_ref(vec![Operation::Add], vec![], vec![]).unwrap();
+        record_test_root(&mut builder, block_ref);
+        let source_ref = builder.latest_source_ref_for_node_ref(block_ref).unwrap();
+        let mast_root = builder.mast_root_for_ref(block_ref).unwrap();
+        let dead_block_ref =
+            builder.ensure_block_ref(vec![Operation::Mul], vec![], vec![]).unwrap();
+        let dead_source_ref = builder.latest_source_ref_for_node_ref(dead_block_ref).unwrap();
+        let dead_mast_root = builder.mast_root_for_ref(dead_block_ref).unwrap();
+
+        let location = Location::new(
+            Uri::from("file:///src/debug-test.masm"),
+            ByteIndex::from(4u32),
+            ByteIndex::from(9u32),
+        );
+        let debug_info = builder.debug_info_mut();
+        let location_idx = debug_info.add_location(location.clone());
+        let file_idx = debug_info.debug_info().locations()[location_idx].file_idx;
+        let function_name_idx = debug_info.add_string("debug_test::entry");
+        let linkage_name_idx = debug_info.add_string("entry");
+        let dead_function_name_idx = debug_info.add_string("debug_test::dead");
+        let struct_name_idx = debug_info.add_string("Wrapper");
+        let field_name_idx = debug_info.add_string("inner");
+        let expected_primitive_type_idx = DebugTypeIdx::from(1);
+        let pointer_type_idx = debug_info.add_type(DebugTypeInfo::Pointer {
+            pointee_type_idx: expected_primitive_type_idx,
+        });
+        let primitive_type_idx =
+            debug_info.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        assert_eq!(primitive_type_idx, expected_primitive_type_idx);
+        let struct_type_idx = debug_info.add_type(DebugTypeInfo::Struct {
+            name_idx: struct_name_idx,
+            size: 4,
+            fields: vec![DebugFieldInfo {
+                name_idx: field_name_idx,
+                type_idx: pointer_type_idx,
+                offset: 0,
+            }],
+        });
+        let function_type_idx = debug_info.add_type(DebugTypeInfo::Function {
+            return_type_idx: Some(struct_type_idx),
+            param_type_indices: vec![struct_type_idx],
+        });
+        let function_idx = debug_info.add_function(
+            FunctionInfo::new(
+                Some(source_ref),
+                function_name_idx,
+                file_idx,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                mast_root,
+            )
+            .with_linkage_name(linkage_name_idx)
+            .with_type(function_type_idx),
+        );
+        debug_info.add_function(
+            FunctionInfo::new(
+                Some(dead_source_ref),
+                dead_function_name_idx,
+                file_idx,
+                LineNumber::new(2).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                dead_mast_root,
+            )
+            .with_type(function_type_idx),
+        );
+        debug_info[source_ref].inline_calls.push(DebugSourceInlineCall {
+            op_idx: 0,
+            callee_idx: function_idx,
+            loc_idx: location_idx,
+        });
+        assert!(debug_info.add_error_message(7, "debug failure".into()));
+
+        let (_forest, node_ids, debug_info, source_ids) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let source_id = source_ids[&source_ref];
+        let function = &debug_info.functions()[0];
+
+        assert_eq!(function.source_node.into_option(), Some(source_id));
+        assert_eq!(function.mast_root, mast_root);
+        assert_eq!(debug_info[source_id].exec_node, node_ids[&block_ref]);
+        assert_eq!(debug_info[function.name_idx].as_ref(), "debug_test::entry");
+        assert_eq!(debug_info[function.linkage_name_idx.into_option().unwrap()].as_ref(), "entry");
+        let function_file = debug_info.get_file(function.file_idx).unwrap();
+        assert_eq!(
+            function.file_idx,
+            debug_info.locations()[location_idx].file_idx,
+            "function file reference should match its remapped source location",
+        );
+        assert!(!debug_info[function_file.path_idx].is_empty());
+        assert_eq!(debug_info.get_location(location_idx), Some(location.clone()));
+        assert_eq!(debug_info.error_message(7).as_deref(), Some("debug failure"));
+
+        let dead_function = &debug_info.functions()[1];
+        assert_eq!(dead_function.source_node.into_option(), None);
+        assert_eq!(dead_function.mast_root, dead_mast_root);
+
+        let DebugTypeInfo::Function {
+            return_type_idx: Some(return_type_idx),
+            param_type_indices,
+        } = &debug_info[function.type_idx.into_option().unwrap()]
+        else {
+            panic!("expected remapped function type");
+        };
+        assert_eq!(param_type_indices, &[*return_type_idx]);
+        let DebugTypeInfo::Struct { name_idx, fields, .. } = &debug_info[*return_type_idx] else {
+            panic!("expected remapped struct type");
+        };
+        assert_eq!(debug_info[*name_idx].as_ref(), "Wrapper");
+        assert_eq!(debug_info[fields[0].name_idx].as_ref(), "inner");
+        let DebugTypeInfo::Pointer { pointee_type_idx } = debug_info[fields[0].type_idx] else {
+            panic!("expected remapped pointer type");
+        };
+        assert_eq!(debug_info[pointee_type_idx], DebugTypeInfo::Primitive(DebugPrimitiveType::U32),);
+
+        let inline_call = &debug_info[source_id].inline_calls[0];
+        assert_eq!(inline_call.op_idx, 0);
+        assert_eq!(debug_info.get_function(inline_call.callee_idx), Some(function));
+        assert_eq!(debug_info.get_location(inline_call.loc_idx), Some(location));
     }
 
     /// Same-ops blocks with different AssemblyOps use the same execution node identity.
@@ -1866,16 +2149,14 @@ mod tests {
     fn test_ensure_block_keeps_different_asm_ops_distinct() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let asm_op_a =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()));
-        let asm_op_b =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()));
+        let asm_op_a = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a", 1, "add"));
+        let asm_op_b = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b", 1, "add"));
 
         let block_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_a)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_a], Vec::new())
             .unwrap();
         let block_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_b)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_b], Vec::new())
             .unwrap();
 
         assert_eq!(
@@ -1885,7 +2166,7 @@ mod tests {
 
         record_test_root(&mut builder, block_a_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block_a = remapping[&block_a_ref];
         assert!(source_asm_contexts(&source_graph, final_block_a).contains(&"ctx_a".to_string()));
         assert_eq!(final_block_a, remapping[&block_b_ref]);
@@ -1895,31 +2176,29 @@ mod tests {
     fn test_source_graph_distinguishes_same_exec_asm_op_occurrences() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let asm_op_a =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()));
-        let asm_op_b =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()));
+        let asm_op_a = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a", 1, "add"));
+        let asm_op_b = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b", 1, "add"));
 
         let block_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_a)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_a], Vec::new())
             .unwrap();
         let block_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_b)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_b], Vec::new())
             .unwrap();
 
         assert_eq!(block_a_ref, block_b_ref);
 
         record_test_root(&mut builder, block_a_ref);
         let (forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block = remapping[&block_a_ref];
         let asm_contexts = source_nodes_for_exec(&source_graph, final_block)
             .into_iter()
             .flat_map(|source_node| {
                 source_node
-                    .asm_ops()
+                    .asm_ops
                     .iter()
-                    .map(|(_, asm_op)| asm_op.context_name().to_string())
+                    .map(|asm_op| source_graph[asm_op.context_name_idx].to_string())
             })
             .collect::<BTreeSet<_>>();
 
@@ -1933,35 +2212,33 @@ mod tests {
     fn test_source_graph_preserves_repeated_same_exec_child_occurrences() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let asm_op_a =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()));
-        let asm_op_b =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()));
+        let asm_op_a = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a", 1, "add"));
+        let asm_op_b = add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b", 1, "add"));
         let block_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_a)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_a], Vec::new())
             .unwrap();
         let block_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_b)], Vec::new())
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_b], Vec::new())
             .unwrap();
         assert_eq!(block_a_ref, block_b_ref);
 
         let split_ref = builder
             .ensure_split_node_ref(
                 [block_a_ref, block_b_ref],
-                AssemblyOp::new(None, "split".into(), 1, "if.true".into()),
+                AssemblyOp::new(None, "split", 1, "if.true"),
             )
             .unwrap();
         record_test_root(&mut builder, split_ref);
 
         let (_forest, _remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let root = source_graph.roots()[0];
         let child_contexts = source_graph.nodes()[root]
-            .children()
+            .children
             .iter()
             .map(|child| {
                 let child_node = &source_graph.nodes()[*child];
-                child_node.asm_ops()[0].1.context_name().to_string()
+                source_graph[child_node.asm_ops[0].context_name_idx].to_string()
             })
             .collect::<Vec<_>>();
 
@@ -1977,15 +2254,15 @@ mod tests {
         let split_ref = builder
             .ensure_split_node_ref(
                 [block_ref, block_ref],
-                AssemblyOp::new(None, "split".into(), 1, "if.true".into()),
+                AssemblyOp::new(None, "split", 1, "if.true"),
             )
             .unwrap();
         record_test_root(&mut builder, split_ref);
 
         let (_forest, _remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let root = source_graph.roots()[0];
-        let children = source_graph.nodes()[root].children();
+        let children = &source_graph.nodes()[root].children;
 
         assert_eq!(children.len(), 2);
         assert_eq!(children[0], children[1]);
@@ -1998,18 +2275,10 @@ mod tests {
 
         let callee_ref = builder.ensure_block_ref(vec![Operation::Add], vec![], vec![]).unwrap();
         let call_a_ref = builder
-            .ensure_call_node_ref(
-                callee_ref,
-                false,
-                AssemblyOp::new(None, "ctx_a".into(), 1, "call.foo".into()),
-            )
+            .ensure_call_node_ref(callee_ref, false, AssemblyOp::new(None, "ctx_a", 1, "call.foo"))
             .unwrap();
         let call_b_ref = builder
-            .ensure_call_node_ref(
-                callee_ref,
-                false,
-                AssemblyOp::new(None, "ctx_b".into(), 1, "call.foo".into()),
-            )
+            .ensure_call_node_ref(callee_ref, false, AssemblyOp::new(None, "ctx_b", 1, "call.foo"))
             .unwrap();
 
         assert_eq!(
@@ -2019,7 +2288,7 @@ mod tests {
 
         record_test_root(&mut builder, call_a_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_call_a = remapping[&call_a_ref];
         assert!(source_asm_contexts(&source_graph, final_call_a).contains(&"ctx_a".to_string()));
         assert_eq!(final_call_a, remapping[&call_b_ref]);
@@ -2028,8 +2297,6 @@ mod tests {
     /// Statically linked nodes dedup with local nodes that have the same execution shape.
     #[test]
     fn test_statically_linked_nodes_preserve_metadata_in_dedup() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let static_block_id = MastNodeId::new_unchecked(0);
 
         let mut nodes = IndexVec::new();
@@ -2054,19 +2321,12 @@ mod tests {
             )
             .unwrap();
 
-        let local_var_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
-            .unwrap();
-        let local_asm_op_ref = add_test_asm_op(
-            &mut builder,
-            AssemblyOp::new(None, "local_ctx".into(), 1, "add".into()),
-        );
+        let local_var_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("y", DebugVarLocation::Stack(1)));
+        let local_asm_op_ref =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "local_ctx", 1, "add"));
         let local_block_ref = builder
-            .ensure_block_ref(
-                vec![Operation::Add],
-                vec![(0, local_asm_op_ref)],
-                vec![(0, local_var_ref)],
-            )
+            .ensure_block_ref(vec![Operation::Add], vec![local_asm_op_ref], vec![local_var_ref])
             .unwrap();
 
         assert_eq!(
@@ -2076,7 +2336,7 @@ mod tests {
 
         record_test_root(&mut builder, copied_block_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_copied_block_id = remapping[&copied_block_ref];
         assert_eq!(final_copied_block_id, remapping[&local_block_ref]);
         assert!(
@@ -2090,8 +2350,6 @@ mod tests {
 
     #[test]
     fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
         let ops = vec![
             Operation::Push(Felt::from_u32(1)),
@@ -2104,30 +2362,30 @@ mod tests {
             Operation::Push(Felt::from_u32(2)),
             Operation::Push(Felt::from_u32(3)),
         ];
-        let asm_op = AssemblyOp::new(None, "padded_ctx".into(), 1, "push.3".into());
+        let asm_op = AssemblyOp::new(None, "padded_ctx", 1, "push.3");
         let debug_var = DebugVarInfo::new("padded_var", DebugVarLocation::Stack(0));
 
         let static_asm_op_ref = add_test_asm_op(&mut source_builder, asm_op.clone());
-        let static_debug_var_ref = source_builder.add_debug_var_ref(debug_var).unwrap();
+        let static_debug_var_ref = add_test_debug_var(&mut source_builder, debug_var);
         let static_block_ref = source_builder
             .ensure_block_ref(
                 ops.clone(),
-                vec![(8, static_asm_op_ref)],
-                vec![(8, static_debug_var_ref)],
+                vec![with_asm_op_idx(static_asm_op_ref, 8)],
+                vec![with_debug_var_idx(static_debug_var_ref, 8)],
             )
             .unwrap();
         record_test_root(&mut source_builder, static_block_ref);
 
         let (static_forest, source_remapping, static_source_graph, _) =
-            source_builder.build().unwrap().into_parts_with_source_graph();
+            source_builder.build().unwrap().into_parts_with_debug_info();
         let final_static_block = source_remapping[&static_block_ref];
         let static_source_root = static_source_graph.roots()[0];
-        let expected_padded_idx = static_source_graph.nodes()[static_source_root].asm_ops()[0].0;
+        let expected_padded_idx = static_source_graph.nodes()[static_source_root].asm_ops[0].op_idx;
         assert_eq!(
-            static_source_graph.nodes()[static_source_root].debug_vars()[0].0,
+            static_source_graph.nodes()[static_source_root].debug_vars[0].op_idx,
             expected_padded_idx
         );
-        let package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
+        let package_debug_info = *static_source_graph;
 
         let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
             &static_forest,
@@ -2139,12 +2397,13 @@ mod tests {
                 static_forest[final_static_block].digest(),
                 Some(static_forest.commitment()),
                 Some(final_static_block),
-                Some(DebugSourceNodeId::from(u32::from(static_source_root))),
+                Some(static_source_root),
             )
             .unwrap();
         let local_asm_op_ref = add_test_asm_op(&mut builder, asm_op);
-        let local_block_ref =
-            builder.ensure_block_ref(ops, vec![(8, local_asm_op_ref)], vec![]).unwrap();
+        let local_block_ref = builder
+            .ensure_block_ref(ops, vec![with_asm_op_idx(local_asm_op_ref, 8)], vec![])
+            .unwrap();
 
         assert_eq!(
             copied_block_ref, local_block_ref,
@@ -2153,17 +2412,19 @@ mod tests {
 
         record_test_root(&mut builder, copied_block_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block_id = remapping[&copied_block_ref];
         let source_nodes = source_nodes_for_exec(&source_graph, final_block_id);
         assert!(source_nodes.iter().any(|source_node| {
-            source_node.asm_ops().iter().any(|(op_idx, asm_op)| {
-                *op_idx == expected_padded_idx && asm_op.context_name() == "padded_ctx"
+            source_node.asm_ops.iter().any(|asm_op| {
+                asm_op.op_idx == expected_padded_idx
+                    && source_graph[asm_op.context_name_idx].as_ref() == "padded_ctx"
             })
         }));
         assert!(source_nodes.iter().any(|source_node| {
-            source_node.debug_vars().iter().any(|(op_idx, debug_var)| {
-                *op_idx == expected_padded_idx && debug_var.name() == "padded_var"
+            source_node.debug_vars.iter().any(|debug_var| {
+                debug_var.op_idx == expected_padded_idx
+                    && source_graph[debug_var.name_idx].as_ref() == "padded_var"
             })
         }));
     }
@@ -2178,31 +2439,24 @@ mod tests {
             Operation::Drop,
             Operation::Push(Felt::from_u32(2)),
         ];
-        let asm_op = AssemblyOp::new(None, "partial_ctx".into(), 1, "push.2".into());
+        let asm_op = AssemblyOp::new(None, "partial_ctx", 1, "push.2");
         let static_asm_op_ref = add_test_asm_op(&mut source_builder, asm_op);
         let static_block_ref = source_builder
-            .ensure_block_ref(ops, vec![(4, static_asm_op_ref)], vec![])
+            .ensure_block_ref(ops, vec![with_asm_op_idx(static_asm_op_ref, 4)], vec![])
             .unwrap();
         record_test_root(&mut source_builder, static_block_ref);
 
         let (static_forest, source_remapping, static_source_graph, _) =
-            source_builder.build().unwrap().into_parts_with_source_graph();
+            source_builder.build().unwrap().into_parts_with_debug_info();
         let final_static_block = source_remapping[&static_block_ref];
         let static_source_root = static_source_graph.roots()[0];
-        let expected_partial_start = static_source_graph.nodes()[static_source_root].asm_ops()[0].0;
-        let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
-        let package_source_root = DebugSourceNodeId::from(u32::from(static_source_root));
-        let package_source_graph =
-            package_debug_info.source_graph().expect("source graph should be present");
-        let mut package_source_nodes = package_source_graph.nodes().to_vec();
-        package_source_nodes[u32::from(package_source_root) as usize].op_start =
-            expected_partial_start as u32;
-        package_source_nodes[u32::from(package_source_root) as usize].op_end =
-            expected_partial_start as u32 + 1;
-        let package_source_roots = package_source_graph.roots().to_vec();
-        package_debug_info = package_debug_info.with_source_graph(
-            DebugSourceGraphSection::from_parts(package_source_nodes, package_source_roots),
-        );
+        let expected_partial_start =
+            static_source_graph.nodes()[static_source_root].asm_ops[0].op_idx;
+        let package_source_root = static_source_root;
+        let mut package_debug_info = PackageDebugInfoBuilder::from(static_source_graph);
+        package_debug_info[package_source_root].op_start = expected_partial_start;
+        package_debug_info[package_source_root].op_end = expected_partial_start + 1;
+        let package_debug_info = *package_debug_info.build();
 
         let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
             &static_forest,
@@ -2220,20 +2474,20 @@ mod tests {
 
         record_test_root(&mut builder, copied_block_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_block_id = remapping[&copied_block_ref];
         let linked_source_node = source_nodes_for_exec(&source_graph, final_block_id)
             .into_iter()
             .find(|source_node| {
                 source_node
-                    .asm_ops()
+                    .asm_ops
                     .iter()
-                    .any(|(_, asm_op)| asm_op.context_name() == "partial_ctx")
+                    .any(|asm_op| source_graph[asm_op.context_name_idx].as_ref() == "partial_ctx")
             })
             .expect("linked source node should preserve package metadata");
 
-        assert_eq!(linked_source_node.op_start(), expected_partial_start);
-        assert_eq!(linked_source_node.op_end(), expected_partial_start + 1);
+        assert_eq!(linked_source_node.op_start, expected_partial_start);
+        assert_eq!(linked_source_node.op_end, expected_partial_start + 1);
     }
 
     #[test]
@@ -2246,27 +2500,18 @@ mod tests {
         let split_ref = source_builder
             .ensure_split_node_ref(
                 [left_ref, right_ref],
-                AssemblyOp::new(None, "split_ctx".into(), 1, "if.true".into()),
+                AssemblyOp::new(None, "split_ctx", 1, "if.true"),
             )
             .unwrap();
         record_test_root(&mut source_builder, split_ref);
 
         let (static_forest, source_remapping, static_source_graph, _) =
-            source_builder.build().unwrap().into_parts_with_source_graph();
+            source_builder.build().unwrap().into_parts_with_debug_info();
         let final_split = source_remapping[&split_ref];
-        let package_source_root =
-            DebugSourceNodeId::from(u32::from(static_source_graph.roots()[0]));
-        let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
-        let package_source_graph =
-            package_debug_info.source_graph().expect("source graph should be present");
-        let mut package_source_nodes = package_source_graph.nodes().to_vec();
-        package_source_nodes[u32::from(package_source_root) as usize]
-            .children
-            .swap(0, 1);
-        let package_source_roots = package_source_graph.roots().to_vec();
-        package_debug_info = package_debug_info.with_source_graph(
-            DebugSourceGraphSection::from_parts(package_source_nodes, package_source_roots),
-        );
+        let package_source_root = static_source_graph.roots()[0];
+        let mut package_debug_info = PackageDebugInfoBuilder::from(static_source_graph);
+        package_debug_info[package_source_root].children.swap(0, 1);
+        let package_debug_info = *package_debug_info.build();
 
         let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
             &static_forest,
@@ -2289,20 +2534,18 @@ mod tests {
     /// debug vars and asm ops, since the root node survives removal.
     #[test]
     fn test_merged_root_block_keeps_metadata() {
-        use miden_core::operations::{AssemblyOp, DebugVarInfo, DebugVarLocation};
+        use miden_core::operations::AssemblyOp;
 
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
-        let var_ref = builder
-            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let asm_op_ref =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "test".into(), 1, "add".into()));
+        let var_ref =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("x", DebugVarLocation::Stack(0)));
+        let asm_op_ref = add_test_asm_op(&mut builder, AssemblyOp::new(None, "test", 1, "add"));
 
         // Small block that will be a procedure root -- should_merge returns true for
         // small roots, so it will be folded into the merged block.
         let root_block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_ref)], vec![(0, var_ref)])
+            .ensure_block_ref(vec![Operation::Add], vec![asm_op_ref], vec![var_ref])
             .unwrap();
         builder.record_procedure_root_ref(root_block_ref);
 
@@ -2317,7 +2560,7 @@ mod tests {
         assert_ne!(merged_ref, root_block_ref);
 
         let (forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
 
         // The root block survives removal (it's a procedure root).
         let final_root_id = remapping[&root_block_ref];
@@ -2339,19 +2582,15 @@ mod tests {
     fn test_static_link_exact_node_preserves_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
-        let alias_a_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_a".into(), 1, "add".into()),
-        );
-        let alias_b_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_b".into(), 1, "add".into()),
-        );
+        let alias_a_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_a", 1, "add"));
+        let alias_b_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_b", 1, "add"));
         let alias_a_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_a_asm_op], vec![])
             .unwrap();
         let alias_b_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
@@ -2361,7 +2600,8 @@ mod tests {
         let final_alias_b = source_remapping[&alias_b_ref];
         assert_eq!(static_forest[final_alias_a].digest(), static_forest[final_alias_b].digest());
 
-        // Exact-path linking still uses execution identity, so the first retained metadata wins.
+        // This path links only the execution forest, without package debug info, so no source
+        // metadata is imported.
         let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
         let exact_alias_b_ref = {
             let source_forest = Arc::clone(&exact_builder.statically_linked_mast);
@@ -2375,7 +2615,7 @@ mod tests {
         };
         record_test_root(&mut exact_builder, exact_alias_b_ref);
         let (_exact_forest, exact_remapping, exact_source_graph, _) =
-            exact_builder.build().unwrap().into_parts_with_source_graph();
+            exact_builder.build().unwrap().into_parts_with_debug_info();
         let final_exact_alias_b = exact_remapping[&exact_alias_b_ref];
         assert!(source_asm_contexts(&exact_source_graph, final_exact_alias_b).is_empty());
     }
@@ -2385,27 +2625,27 @@ mod tests {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let alias_a_asm_op =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()));
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_a", 1, "add"));
         let alias_b_asm_op =
-            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()));
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_b", 1, "add"));
         let alias_a_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_a_asm_op], vec![])
             .unwrap();
         let alias_b_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut builder, alias_a_ref);
         record_test_root(&mut builder, alias_b_ref);
 
         let (forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_alias_a = remapping[&alias_a_ref];
         let final_alias_b = remapping[&alias_b_ref];
         let root_contexts = source_graph
             .roots()
             .iter()
-            .flat_map(|source_root| source_graph.nodes()[*source_root].asm_ops())
-            .map(|(_, asm_op)| asm_op.context_name().to_string())
+            .flat_map(|source_root| source_graph.nodes()[*source_root].asm_ops.iter())
+            .map(|asm_op| source_graph[asm_op.context_name_idx].to_string())
             .collect::<BTreeSet<_>>();
 
         assert_eq!(final_alias_a, final_alias_b);
@@ -2420,19 +2660,15 @@ mod tests {
     fn test_static_link_by_digest_imports_only_selected_alias() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
-        let alias_a_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_a".into(), 1, "add".into()),
-        );
-        let alias_b_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_b".into(), 1, "add".into()),
-        );
+        let alias_a_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_a", 1, "add"));
+        let alias_b_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_b", 1, "add"));
         let alias_a_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_a_asm_op], vec![])
             .unwrap();
         let alias_b_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
@@ -2461,24 +2697,20 @@ mod tests {
     #[test]
     fn test_static_link_ambiguous_same_commitment_source_root_drops_source_metadata() {
         let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
-        let source_a_asm_op = add_test_asm_op(
-            &mut source_a_builder,
-            AssemblyOp::new(None, "source_a".into(), 1, "add".into()),
-        );
+        let source_a_asm_op =
+            add_test_asm_op(&mut source_a_builder, AssemblyOp::new(None, "source_a", 1, "add"));
         let source_a_ref = source_a_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, source_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![source_a_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_a_builder, source_a_ref);
         let (source_a_forest, source_a_remapping) = source_a_builder.build().unwrap().into_parts();
         let source_a_root = source_a_remapping[&source_a_ref];
 
         let mut source_b_builder = MastForestBuilder::new(&[]).unwrap();
-        let source_b_asm_op = add_test_asm_op(
-            &mut source_b_builder,
-            AssemblyOp::new(None, "source_b".into(), 1, "add".into()),
-        );
+        let source_b_asm_op =
+            add_test_asm_op(&mut source_b_builder, AssemblyOp::new(None, "source_b", 1, "add"));
         let source_b_ref = source_b_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, source_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![source_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_b_builder, source_b_ref);
         let (source_b_forest, source_b_remapping) = source_b_builder.build().unwrap().into_parts();
@@ -2506,7 +2738,7 @@ mod tests {
         );
         record_test_root(&mut builder, linked_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_linked = remapping[&linked_ref];
 
         assert!(
@@ -2518,29 +2750,25 @@ mod tests {
     #[test]
     fn test_static_link_direct_forest_identity_uses_full_commitment() {
         let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
-        let source_a_asm_op = add_test_asm_op(
-            &mut source_a_builder,
-            AssemblyOp::new(None, "source_a".into(), 1, "add".into()),
-        );
+        let source_a_asm_op =
+            add_test_asm_op(&mut source_a_builder, AssemblyOp::new(None, "source_a", 1, "add"));
         let source_a_ref = source_a_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, source_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![source_a_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_a_builder, source_a_ref);
         let (source_a_forest, source_a_remapping, source_a_graph, _) =
-            source_a_builder.build().unwrap().into_parts_with_source_graph();
+            source_a_builder.build().unwrap().into_parts_with_debug_info();
         let source_a_root = source_a_remapping[&source_a_ref];
 
         let mut source_b_builder = MastForestBuilder::new(&[]).unwrap();
-        let source_b_asm_op = add_test_asm_op(
-            &mut source_b_builder,
-            AssemblyOp::new(None, "source_b".into(), 1, "add".into()),
-        );
+        let source_b_asm_op =
+            add_test_asm_op(&mut source_b_builder, AssemblyOp::new(None, "source_b", 1, "add"));
         let source_b_ref = source_b_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, source_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![source_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_b_builder, source_b_ref);
         let (source_b_forest, source_b_remapping, source_b_graph, _) =
-            source_b_builder.build().unwrap().into_parts_with_source_graph();
+            source_b_builder.build().unwrap().into_parts_with_debug_info();
         let source_b_root = source_b_remapping[&source_b_ref];
         let source_b_forest = source_b_forest.with_advice_map(AdviceMap::from_iter([(
             Word::from([Felt::new_unchecked(9), Felt::ZERO, Felt::ZERO, Felt::ZERO]),
@@ -2556,14 +2784,8 @@ mod tests {
 
         let source_b_debug_root = source_b_graph.roots()[0];
         let mut builder = MastForestBuilder::new_with_static_libraries([
-            StaticLibrary::new(
-                &source_a_forest,
-                Some(package_debug_info_from_source_graph(&source_a_graph)),
-            ),
-            StaticLibrary::new(
-                &source_b_forest,
-                Some(package_debug_info_from_source_graph(&source_b_graph)),
-            ),
+            StaticLibrary::new(&source_a_forest, Some(*source_a_graph)),
+            StaticLibrary::new(&source_b_forest, Some(*source_b_graph)),
         ])
         .unwrap();
         let linked_ref = builder
@@ -2571,12 +2793,12 @@ mod tests {
                 source_b_forest[source_b_root].digest(),
                 Some(source_b_forest.commitment()),
                 Some(source_b_root),
-                Some(DebugSourceNodeId::from(u32::from(source_b_debug_root))),
+                Some(source_b_debug_root),
             )
             .unwrap();
         record_test_root(&mut builder, linked_ref);
         let (_forest, remapping, source_graph, _) =
-            builder.build().unwrap().into_parts_with_source_graph();
+            builder.build().unwrap().into_parts_with_debug_info();
         let final_linked = remapping[&linked_ref];
 
         assert_eq!(source_asm_contexts(&source_graph, final_linked), vec!["source_b"]);
@@ -2587,30 +2809,26 @@ mod tests {
     fn test_static_link_with_source_root_preserves_selected_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
-        let alias_a_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_a".into(), 1, "add".into()),
-        );
-        let alias_b_asm_op = add_test_asm_op(
-            &mut source_builder,
-            AssemblyOp::new(None, "alias_b".into(), 1, "add".into()),
-        );
+        let alias_a_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_a", 1, "add"));
+        let alias_b_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "alias_b", 1, "add"));
         let alias_a_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_a_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_a_asm_op], vec![])
             .unwrap();
         let alias_b_ref = source_builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_b_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![alias_b_asm_op], vec![])
             .unwrap();
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
 
         let (static_forest, source_remapping, static_source_graph, _) =
-            source_builder.build().unwrap().into_parts_with_source_graph();
+            source_builder.build().unwrap().into_parts_with_debug_info();
         let final_alias_a = source_remapping[&alias_a_ref];
         let final_alias_b = source_remapping[&alias_b_ref];
         assert_eq!(static_forest[final_alias_a].digest(), static_forest[final_alias_b].digest());
         let alias_b_source_root = static_source_graph.roots()[1];
-        let package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
+        let package_debug_info = *static_source_graph;
 
         let mut provenance_builder =
             MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
@@ -2623,19 +2841,20 @@ mod tests {
                 static_forest[final_alias_b].digest(),
                 Some(static_forest.commitment()),
                 Some(final_alias_b),
-                Some(DebugSourceNodeId::from(u32::from(alias_b_source_root))),
+                Some(alias_b_source_root),
             )
             .unwrap();
         record_test_root(&mut provenance_builder, linked_alias_b_ref);
         let (_linked_forest, linked_remapping, linked_source_graph, _) =
-            provenance_builder.build().unwrap().into_parts_with_source_graph();
+            provenance_builder.build().unwrap().into_parts_with_debug_info();
         let final_linked_alias_b = linked_remapping[&linked_alias_b_ref];
         let linked_source_root = linked_source_graph.roots()[0];
         let linked_source_node = &linked_source_graph.nodes()[linked_source_root];
 
-        assert_eq!(linked_source_node.exec_node(), final_linked_alias_b);
+        assert_eq!(linked_source_node.exec_node, final_linked_alias_b);
+        let linked_asm_op = linked_source_node.asm_ops.first().unwrap();
         assert_eq!(
-            linked_source_node.asm_ops().first().unwrap().1.context_name(),
+            linked_source_graph[linked_asm_op.context_name_idx].as_ref(),
             "alias_b",
             "exact static provenance should select the hinted package source occurrence",
         );

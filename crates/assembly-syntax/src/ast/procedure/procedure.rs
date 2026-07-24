@@ -288,7 +288,7 @@ impl crate::prettier::PrettyPrint for Procedure {
             if self.visibility.is_public() {
                 doc += display(self.visibility) + const_text(" ");
             }
-            doc += const_text("proc") + const_text(" ") + display(&self.name);
+            doc += const_text("proc") + const_text(" ") + display(self.name.as_ident());
             if let Some(sig) = self.signature() {
                 doc += sig.render();
             }

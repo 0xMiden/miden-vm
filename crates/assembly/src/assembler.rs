@@ -1,3 +1,4 @@
+#[cfg(feature = "std")]
 pub(super) mod debuginfo;
 pub(crate) mod error;
 mod product;
@@ -10,7 +11,6 @@ use alloc::{
     vec::Vec,
 };
 
-use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
     ExportedTypeUse, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
@@ -31,7 +31,7 @@ use miden_core::{
 use miden_mast_package::{
     ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
     PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
-    debug_info::DebugSourceNodeId,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 use miden_project::{Linkage, TargetType};
 
@@ -45,10 +45,7 @@ use crate::{
         Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
         SymbolResolver,
     },
-    mast_forest_builder::{
-        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
-        StaticLibrary,
-    },
+    mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceNodeRef, StaticLibrary},
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -86,7 +83,7 @@ impl PendingPackageExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, DebugSourceNodeId>,
     ) -> Result<PackageExport, Report> {
         match self {
             Self::Procedure(export) => export.into_package_export(node_id_by_ref, source_id_by_ref),
@@ -100,7 +97,7 @@ impl PendingProcedureExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, DebugSourceNodeId>,
     ) -> Result<PackageExport, Report> {
         let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
             Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
@@ -174,8 +171,6 @@ pub struct Assembler {
     source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
     linker: Box<Linker>,
-    /// The debug information gathered during assembly
-    pub(super) debug_info: DebugInfoSections,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
     /// Whether to preserve debug information in the assembled artifact.
@@ -191,7 +186,6 @@ impl Default for Assembler {
         Self {
             source_manager,
             linker,
-            debug_info: Default::default(),
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
@@ -208,7 +202,6 @@ impl Assembler {
         Self {
             source_manager,
             linker,
-            debug_info: Default::default(),
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
@@ -419,8 +412,9 @@ impl Assembler {
             .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a library [`Package`] from the set of modules reachable from `root`.
@@ -446,10 +440,11 @@ impl Assembler {
         )?;
 
         // Derive the package name from the namespace of the root module
-        let name = root.path().as_str().replace("::", "-");
+        let name = root.path().to_relative().as_str().replace("::", "-");
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assembles the provided module into a kernel package.
@@ -463,8 +458,9 @@ impl Assembler {
         root: Box<ast::Module>,
         support: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<Box<Package>, Report> {
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -496,8 +492,9 @@ impl Assembler {
             self.warnings_as_errors,
         )?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -582,8 +579,8 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref, source_graph, source_id_by_ref) =
-            mast_forest_builder.build()?.into_parts_with_source_graph();
+        let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
+            mast_forest_builder.build()?.into_parts_with_debug_info();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
@@ -594,7 +591,7 @@ impl Assembler {
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         let modules = self.package_modules(module_indices);
-        self.finish_library_product(name, mast_forest, source_graph, exports, modules, kind)
+        self.finish_library_product(name, mast_forest, debug_info, exports, modules, kind)
     }
 
     fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
@@ -666,6 +663,7 @@ impl Assembler {
                         let node = self.ensure_valid_procedure_mast_root(
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
+                            Some(&self.linker[gid.module].path().join(&item.name)),
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
@@ -690,7 +688,7 @@ impl Assembler {
 
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
-                mast_forest_builder.insert_procedure(gid, procedure)?;
+                mast_forest_builder.insert_procedure(gid, procedure, &self.source_manager)?;
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
@@ -793,7 +791,9 @@ impl Assembler {
             ));
         }
 
-        self.assemble_executable_modules(name.into(), program, [])?.into_artifact()
+        let emit_debug_info = self.emit_debug_info;
+        self.assemble_executable_modules(name.into(), program, [])?
+            .into_artifact(emit_debug_info)
     }
 
     pub(crate) fn assemble_library_modules(
@@ -1059,28 +1059,33 @@ impl Assembler {
             .get_procedure(entrypoint)
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
+        let entry_source_ref = mast_forest_builder.latest_source_ref_for_node_ref(entry_node_ref);
 
-        let (mast_forest, node_id_by_ref, source_graph, _) =
-            mast_forest_builder.build()?.into_parts_with_source_graph();
+        let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
+            mast_forest_builder.build()?.into_parts_with_debug_info();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
+        let entry_source_id =
+            entry_source_ref.and_then(|source_ref| source_id_by_ref.get(&source_ref).copied());
 
+        let kernel_package = self.linker.kernel_package();
         self.finish_program_product(
             name,
             namespace,
             mast_forest,
-            source_graph,
+            debug_info,
             entry_node_id,
-            self.linker.kernel_package(),
+            entry_source_id,
+            kernel_package,
         )
     }
 
     fn finish_library_product(
-        &self,
+        self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
-        source_graph: SourceDebugGraph,
+        #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
         kind: TargetType,
@@ -1098,20 +1103,15 @@ impl Assembler {
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
-            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
-            let mut debug_info = self.debug_info.clone();
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                debug_info.trim_paths(&trimmer);
-            }
-            debug_info
-        });
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+        #[cfg(feature = "std")]
+        if self.emit_debug_info
+            && let Some(trimmer) = self.source_path_trimmer()
+        {
+            debuginfo::trim_paths(&mut debug_info, &trimmer);
+        }
 
-        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
+        Ok(AssemblyProduct::new(package, None, debug_info))
     }
 
     fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
@@ -1138,20 +1138,18 @@ impl Assembler {
     }
 
     fn finish_program_product(
-        &self,
+        self,
         name: PackageId,
         namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
-        source_graph: SourceDebugGraph,
+        #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         entrypoint: MastNodeId,
+        entrypoint_source_id: Option<DebugSourceNodeId>,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
-        let entry_source_node = source_graph
-            .unique_root_for_exec_node(entrypoint)
-            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(
                 name,
@@ -1160,40 +1158,19 @@ impl Assembler {
                 mast,
                 vec![PackageExport::Procedure(
                     ProcedureExport::new(entry, Some(entrypoint), entry_digest, None)
-                        .with_source_node(entry_source_node),
+                        .with_source_node(entrypoint_source_id),
                 )],
                 None,
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
-            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
-            let mut debug_info = self.debug_info.clone();
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                debug_info.trim_paths(&trimmer);
-            }
-            debug_info
-        });
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
-
-        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
-    }
-
-    fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
-        if self.trim_paths {
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                return source_graph.with_rewritten_source_locations(
-                    |location| trimmer.trim_location(location),
-                    |location| trimmer.trim_file_line_col(location),
-                );
-            }
+        #[cfg(feature = "std")]
+        if let Some(trimmer) = self.source_path_trimmer() {
+            debuginfo::trim_paths(&mut debug_info, &trimmer);
         }
 
-        source_graph
+        Ok(AssemblyProduct::new(package, kernel, debug_info))
     }
 
     #[cfg(feature = "std")]
@@ -1285,14 +1262,14 @@ impl Assembler {
                     // procedure body node itself, all nodes that make up the procedure body would
                     // be added to the forest.
 
-                    // Record the debug info for this procedure
-                    self.debug_info
-                        .register_procedure_debug_info(&procedure, self.source_manager.as_ref())?;
-
                     // Cache the compiled procedure
                     drop(proc);
                     self.linker.register_procedure_root(procedure_gid, procedure.mast_root());
-                    mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
+                    mast_forest_builder.insert_procedure(
+                        procedure_gid,
+                        procedure,
+                        self.source_manager.as_ref(),
+                    )?;
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
@@ -1613,9 +1590,14 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                let path = match target {
+                    InvocationTarget::Path(path) => Some(path.inner().as_ref()),
+                    InvocationTarget::MastRoot(_) | InvocationTarget::Symbol(_) => None,
+                };
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
+                    path,
                     mast_root.into_inner(),
                     None,
                     None,
@@ -1637,6 +1619,7 @@ impl Assembler {
                             let node = self.ensure_valid_procedure_mast_root(
                                 kind,
                                 target.span(),
+                                Some(&self.linker[gid.module].path().join(&p.name)),
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
@@ -1668,6 +1651,7 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         span: SourceSpan,
+        path: Option<&Path>,
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
@@ -1682,9 +1666,13 @@ impl Assembler {
             // procedures at this point, so if the digest is not present in the kernel,
             // it is a definite error.
             if !self.linker.kernel().contains_proc(mast_root) {
-                let callee = mast_forest_builder
-                    .find_procedure_by_mast_root(&mast_root)
-                    .map(|proc| proc.path().clone())
+                let callee = path
+                    .map(|p| p.to_path_buf().into_boxed_path().into())
+                    .or_else(|| {
+                        mast_forest_builder
+                            .find_procedure_by_mast_root(&mast_root)
+                            .map(|proc| proc.path().clone())
+                    })
                     .unwrap_or_else(|| {
                         let digest_path = format!("{mast_root}");
                         Arc::<Path>::from(Path::new(&digest_path))
@@ -1697,21 +1685,25 @@ impl Assembler {
             }
         }
 
+        // NOTE(pauls): This is temporarily commented out while we decide how to proceed with
+        // this check going forward
+        #[cfg(false)]
         if let (Some(source_library_commitment), Some(source_root_id)) =
             (source_library_commitment, source_root_id)
-            && let Some(conflicting_root) = self.linker.conflicting_dynamic_procedure_export_root(
-                source_library_commitment,
-                mast_root,
-                source_root_id,
-            )
+            && let Some((_conflicting_root, conflicting_path)) =
+                self.linker.conflicting_dynamic_procedure_export_root(
+                    source_library_commitment,
+                    mast_root,
+                    source_root_id,
+                )
         {
             return Err(Report::new(LinkerError::AmbiguousDynamicProcedureRoot {
                 span,
                 source_file: current_source_file,
+                path: path.map(|p| p.to_path_buf().into_boxed_path().into()),
                 mast_root,
                 source_library_commitment,
-                selected_root: source_root_id,
-                conflicting_root,
+                conflicting_path,
             }));
         }
 

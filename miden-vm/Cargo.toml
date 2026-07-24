@@ -44,6 +44,10 @@ harness = false
 name = "deserialize_core_lib"
 harness = false
 
+[[bench]]
+name = "deserialize_core_lib_debug_info"
+harness = false
+
 [[test]]
 name = "miden-cli"
 path = "tests/integration/main.rs"

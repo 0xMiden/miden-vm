@@ -295,9 +295,16 @@ impl FastProcessor {
         let current_forest = program.mast_forest().clone();
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
+        let entrypoint_source_node_id = package.entrypoint_source_node();
+        let continuation_stack = if let Some(debug_info) = package_debug_info.as_deref() {
+            Self::source_aware_continuation_stack(&program, debug_info, entrypoint_source_node_id)?
+        } else {
+            ContinuationStack::new(&program)
+        };
+
         Ok(ResumeContext {
             current_forest,
-            continuation_stack: ContinuationStack::new(&program),
+            continuation_stack,
             kernel: program.kernel().clone(),
             package_debug_info,
         })

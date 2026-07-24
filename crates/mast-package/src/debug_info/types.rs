@@ -15,29 +15,35 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
+use core::{mem::MaybeUninit, num::NonZeroU32};
 
-use miden_core::{
-    Word,
-    mast::{MastForestRootMap, MastNodeId},
-    operations::DebugVarInfo,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use miden_assembly_syntax::ast::{DebugVarInfo, DebugVarLocation, TypeExpr, types::Type};
+use miden_core::{Word, mast::MastNodeId, operations::AssemblyOp};
+use miden_debug_types::{
+    ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceSpan, Span,
 };
-use miden_debug_types::{ColumnNumber, LineNumber, Location};
+use miden_utils_indexing::{Idx, newtype_id};
+
+use super::{DebugInfo, FxHashMap, FxHashSet, PackageDebugInfo, SourceNodeIdMarker};
 
 // DEBUG SOURCE GRAPH LOOKUP ERROR
 // ================================================================================================
 
 /// Error returned when a caller needs a unique source/debug occurrence but the graph cannot supply
 /// one.
+pub type DebugSourceGraphLookupError = SourceGraphLookupError<MastNodeId, DebugSourceNodeId>;
+
+/// Error returned when a caller needs a unique source/debug occurrence but the graph cannot supply
+/// one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum DebugSourceGraphLookupError {
+pub enum SourceGraphLookupError<Exec: Idx, Src: Idx> {
     /// The requested parent source/debug occurrence is not present.
     #[error("source/debug occurrence {source_node:?} is not present")]
-    MissingSourceNode { source_node: DebugSourceNodeId },
+    MissingSourceNode { source_node: Src },
     /// Multiple source/debug roots point at the same executable MAST node.
     #[error("multiple source/debug roots point at executable MAST node {exec_node:?}")]
-    AmbiguousRoot { exec_node: MastNodeId },
+    AmbiguousRoot { exec_node: Exec },
 }
 
 // PACKAGE DEBUG INFO MERGE ERROR
@@ -45,8 +51,12 @@ pub enum DebugSourceGraphLookupError {
 
 /// Error returned when package-owned source/debug metadata cannot be remapped after a
 /// [`miden_core::mast::MastForest`] merge.
+pub type PackageDebugInfoMergeError = DebugInfoMergeError<MastNodeId, DebugSourceNodeId>;
+
+/// Error returned when package-owned source/debug metadata cannot be remapped after a
+/// [`miden_core::mast::MastForest`] merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum PackageDebugInfoMergeError {
+pub enum DebugInfoMergeError<Exec: Idx, Src: Idx> {
     /// The package has source-keyed metadata rows without a source graph to define source IDs.
     #[error("debug info for forest {forest_index} has source-map rows but no source graph")]
     SourceMapWithoutGraph { forest_index: usize },
@@ -54,24 +64,21 @@ pub enum PackageDebugInfoMergeError {
     #[error(
         "debug info for forest {forest_index} references execution node {exec_node:?}, which is not present in the merge map"
     )]
-    MissingExecNodeMapping {
-        forest_index: usize,
-        exec_node: MastNodeId,
-    },
+    MissingExecNodeMapping { forest_index: usize, exec_node: Exec },
     /// A source-keyed metadata row refers to a source/debug occurrence that was not present in the
     /// corresponding source graph.
     #[error(
         "debug info for forest {forest_index} references source/debug occurrence {source_node:?}, which is not present in the source graph"
     )]
-    MissingSourceNodeMapping {
-        forest_index: usize,
-        source_node: DebugSourceNodeId,
-    },
+    MissingSourceNodeMapping { forest_index: usize, source_node: Src },
     /// A debug type row refers to a string index that is not present in its type string table.
     #[error(
         "debug info for forest {forest_index} references type string index {string_idx}, which is not present in the type string table"
     )]
-    MissingTypeStringMapping { forest_index: usize, string_idx: u32 },
+    MissingTypeStringMapping {
+        forest_index: usize,
+        string_idx: DebugStringIdx,
+    },
     /// A debug type or function row refers to a type index that is not present in its type table.
     #[error(
         "debug info for forest {forest_index} references type index {type_idx:?}, which is not present in the type table"
@@ -85,280 +92,237 @@ pub enum PackageDebugInfoMergeError {
     #[error(
         "debug info for forest {forest_index} references source string index {string_idx}, which is not present in the source string table"
     )]
-    MissingSourceStringMapping { forest_index: usize, string_idx: u32 },
+    MissingSourceStringMapping {
+        forest_index: usize,
+        string_idx: DebugStringIdx,
+    },
+
     /// A debug function or inline-call row refers to a source-file index that is not present in its
     /// source-file table.
     #[error(
         "debug info for forest {forest_index} references source file index {file_idx}, which is not present in the source file table"
     )]
-    MissingSourceFileMapping { forest_index: usize, file_idx: u32 },
+    MissingSourceFileMapping {
+        forest_index: usize,
+        file_idx: DebugFileIdx,
+    },
+    #[error(
+        "debug info for forest {forest_index} references source location index {location_idx}, which is not present in the location table"
+    )]
+    MissingSourceLocationMapping {
+        forest_index: usize,
+        location_idx: DebugLocIdx,
+    },
     /// A debug function row refers to a string index that is not present in its function string
     /// table.
     #[error(
         "debug info for forest {forest_index} references function string index {string_idx}, which is not present in the function string table"
     )]
-    MissingFunctionStringMapping { forest_index: usize, string_idx: u32 },
+    MissingFunctionStringMapping {
+        forest_index: usize,
+        string_idx: DebugStringIdx,
+    },
     /// A debug inline-call row refers to a function index that is not present in its function
     /// table.
     #[error(
         "debug info for forest {forest_index} references function index {function_idx}, which is not present in the function table"
     )]
-    MissingFunctionMapping { forest_index: usize, function_idx: u32 },
+    MissingFunctionMapping {
+        forest_index: usize,
+        function_idx: DebugFunctionIdx,
+    },
 }
 
-// DEBUG TYPE INDEX
+newtype_id!(
+    /// A strongly-typed index into the strings table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    pub struct DebugStringIdx;
+);
+
+newtype_id!(
+    /// A strongly-typed index into the type table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    pub struct DebugTypeIdx;
+);
+
+newtype_id!(
+    /// A strongly-typed index into the sources table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    pub struct DebugFileIdx;
+);
+
+newtype_id!(
+    /// A strongly-typed index into the functions table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    pub struct DebugFunctionIdx;
+);
+
+newtype_id!(
+    /// A strongly-typed index into the locations table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    pub struct DebugLocIdx;
+);
+
+newtype_id!(
+    /// A strongly-typed index into the assembly source nodes table of [`PackageDebugInfo`].
+    ///
+    /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+    /// where a type index is expected).
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(transparent))]
+    pub struct DebugSourceNodeId;
+);
+
+impl SourceNodeIdMarker for DebugSourceNodeId {}
+
+// STABLE OPTION TYPE
 // ================================================================================================
 
-/// A strongly-typed index into the type table of a [`DebugTypesSection`].
+/// A custom `Option<T>` type that has a stable memory layout
 ///
-/// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
-/// where a type index is expected).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
-pub struct DebugTypeIdx(u32);
+/// This type is meant to be converted to/from an `Option<T>` for actual use
+#[repr(C)]
+pub struct OptionC<T> {
+    discriminant: u32,
+    payload: MaybeUninit<T>,
+}
 
-impl DebugTypeIdx {
-    /// Returns the inner value as a `u32`.
-    pub fn as_u32(self) -> u32 {
-        self.0
+impl<T> Default for OptionC<T> {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::none()
     }
 }
 
-impl From<u32> for DebugTypeIdx {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<DebugTypeIdx> for u32 {
-    fn from(value: DebugTypeIdx) -> Self {
-        value.0
-    }
-}
-
-impl Serializable for DebugTypeIdx {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.0);
-    }
-
-    fn get_size_hint(&self) -> usize {
-        4
-    }
-}
-
-impl Deserializable for DebugTypeIdx {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self(source.read_u32()?))
-    }
-
-    fn min_serialized_size() -> usize {
-        4
-    }
-}
-
-// DEBUG TYPES SECTION
-// ================================================================================================
-
-/// The version of the debug_types section format.
-pub const DEBUG_TYPES_VERSION: u8 = 1;
-
-/// Debug types section containing type definitions for a MASP package.
-///
-/// This section stores type information (primitives, structs, enums, arrays, pointers,
-/// function types) that enables debuggers to properly display values.
-///
-/// String indices in sub-types (e.g., `name_idx` in `DebugFieldInfo`) are relative
-/// to this section's own string table.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugTypesSection {
-    /// Version of the debug types format
-    pub version: u8,
-    /// String table containing type names, field names
-    pub strings: Vec<Arc<str>>,
-    /// Type table containing all type definitions
-    pub types: Vec<DebugTypeInfo>,
-}
-
-impl DebugTypesSection {
-    /// Creates a new empty debug types section.
-    pub fn new() -> Self {
+impl<T> OptionC<T> {
+    const fn none() -> Self {
         Self {
-            version: DEBUG_TYPES_VERSION,
-            strings: Vec::new(),
-            types: Vec::new(),
+            discriminant: 0,
+            payload: MaybeUninit::zeroed(),
         }
     }
 
-    /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
-        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
-            return idx as u32;
-        }
-        let idx = self.strings.len() as u32;
-        self.strings.push(s);
-        idx
-    }
-
-    /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
-        self.strings.get(idx as usize).cloned()
-    }
-
-    /// Adds a type to the type table and returns its index.
-    pub fn add_type(&mut self, ty: DebugTypeInfo) -> DebugTypeIdx {
-        let idx = DebugTypeIdx(self.types.len() as u32);
-        self.types.push(ty);
-        idx
-    }
-
-    /// Gets a type by index.
-    pub fn get_type(&self, idx: DebugTypeIdx) -> Option<&DebugTypeInfo> {
-        self.types.get(idx.0 as usize)
-    }
-
-    /// Returns true if the section is empty (no types).
-    pub fn is_empty(&self) -> bool {
-        self.types.is_empty()
-    }
-}
-
-// DEBUG SOURCES SECTION
-// ================================================================================================
-
-/// The version of the debug_sources section format.
-pub const DEBUG_SOURCES_VERSION: u8 = 1;
-
-/// Debug sources section containing source file paths and checksums.
-///
-/// This section stores deduplicated source file information that is referenced
-/// by the debug functions section.
-///
-/// String indices in sub-types (e.g., `path_idx` in `DebugFileInfo`) are relative
-/// to this section's own string table.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugSourcesSection {
-    /// Version of the debug sources format
-    pub version: u8,
-    /// String table containing file paths
-    pub strings: Vec<Arc<str>>,
-    /// Source file table
-    pub files: Vec<DebugFileInfo>,
-}
-
-impl DebugSourcesSection {
-    /// Creates a new empty debug sources section.
-    pub fn new() -> Self {
+    const fn some(value: T) -> Self {
         Self {
-            version: DEBUG_SOURCES_VERSION,
-            strings: Vec::new(),
-            files: Vec::new(),
+            discriminant: 1,
+            payload: MaybeUninit::new(value),
         }
     }
 
-    /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
-        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
-            return idx as u32;
-        }
-        let idx = self.strings.len() as u32;
-        self.strings.push(s);
-        idx
-    }
-
-    /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
-        self.strings.get(idx as usize).cloned()
-    }
-
-    /// Adds a file to the file table and returns its index.
-    pub fn add_file(&mut self, file: DebugFileInfo) -> u32 {
-        if let Some(idx) = self.files.iter().position(|existing| existing.path_idx == file.path_idx)
-        {
-            return idx as u32;
-        }
-        let idx = self.files.len() as u32;
-        self.files.push(file);
-        idx
-    }
-
-    /// Gets a file by index.
-    pub fn get_file(&self, idx: u32) -> Option<&DebugFileInfo> {
-        self.files.get(idx as usize)
-    }
-
-    /// Returns true if the section is empty (no files).
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
-    }
-}
-
-// DEBUG FUNCTIONS SECTION
-// ================================================================================================
-
-/// The version of the debug_functions section format.
-///
-/// Version 2 removes the version 1 local-variable and inline-call payloads.
-pub const DEBUG_FUNCTIONS_VERSION: u8 = 2;
-/// The version of the debug_source_graph section format.
-pub const DEBUG_SOURCE_GRAPH_VERSION: u8 = 1;
-/// The version of the debug_source_map section format.
-pub const DEBUG_SOURCE_MAP_VERSION: u8 = 1;
-/// The version of the debug_error_messages section format.
-pub const DEBUG_ERROR_MESSAGES_VERSION: u8 = 1;
-
-/// Debug functions section containing function metadata.
-///
-/// This section stores function debug information.
-///
-/// String indices in sub-types (e.g., `name_idx` in `DebugFunctionInfo`) are relative
-/// to this section's own string table.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugFunctionsSection {
-    /// Version of the debug functions format
-    pub version: u8,
-    /// String table containing function names and linkage names
-    pub strings: Vec<Arc<str>>,
-    /// Function debug information
-    pub functions: Vec<DebugFunctionInfo>,
-}
-
-impl DebugFunctionsSection {
-    /// Creates a new empty debug functions section.
-    pub fn new() -> Self {
+    const fn invalid(discriminant: u32) -> Self {
         Self {
-            version: DEBUG_FUNCTIONS_VERSION,
-            strings: Vec::new(),
-            functions: Vec::new(),
+            discriminant,
+            payload: MaybeUninit::uninit(),
         }
     }
 
-    /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
-        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
-            return idx as u32;
+    /// Get an [`Option<&T>`] from this value.
+    ///
+    /// NOTE: This function will panic if the discriminant tag is invalid, you must use
+    /// `try_into_option` to obtain a non-panicking equivalent.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self.discriminant {
+            0 => None,
+            1 => Some(unsafe { self.payload() }),
+            _ => panic!("attempted to unwrap invalid {}", core::any::type_name::<Self>()),
         }
-        let idx = self.strings.len() as u32;
-        self.strings.push(s);
-        idx
     }
 
-    /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
-        self.strings.get(idx as usize).cloned()
+    /// Convert this value into an [`Option<T>`].
+    ///
+    /// NOTE: This function will panic if the discriminant tag is invalid, use `try_into_option`
+    /// for a non-panicking equivalent.
+    pub fn into_option(self) -> Option<T> {
+        self.try_into().unwrap_or_else(|err| {
+            panic!("{err} (concrete type is {})", core::any::type_name::<Self>())
+        })
     }
 
-    /// Adds a function to the function table.
-    pub fn add_function(&mut self, func: DebugFunctionInfo) {
-        self.functions.push(func);
+    /// Convert this value into an [`Option<T>`] without panicking if the underlying discriminant
+    /// is out of range.
+    #[inline(always)]
+    pub fn try_into_option(self) -> Result<Option<T>, InvalidOptionCError> {
+        self.try_into()
     }
 
-    /// Returns true if the section is empty (no functions).
-    pub fn is_empty(&self) -> bool {
-        self.functions.is_empty()
+    /// Get a reference to the payload value of this option.
+    ///
+    /// This function will panic if:
+    ///
+    /// * The discriminant tag is invalid
+    /// * The discriminant is `None`
+    unsafe fn payload(&self) -> &T {
+        assert_eq!(self.discriminant, 1, "attempted to access payload of None/Invalid variant");
+        unsafe { MaybeUninit::assume_init_ref(&self.payload) }
+    }
+}
+
+impl<T: Copy> Copy for OptionC<T> {}
+
+impl<T: Clone> Clone for OptionC<T> {
+    fn clone(&self) -> Self {
+        match self.discriminant {
+            0 => Self::none(),
+            1 => Self::some(unsafe { self.payload() }.clone()),
+            invalid => Self::invalid(invalid),
+        }
+    }
+}
+
+impl<T: Eq> Eq for OptionC<T> {}
+
+impl<T: PartialEq> PartialEq for OptionC<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.discriminant, other.discriminant) {
+            (0, 0) => true,
+            (1, 0) | (0, 1) => false,
+            (1, 1) => unsafe { self.payload().eq(other.payload()) },
+            (..) => false,
+        }
+    }
+}
+
+impl<T: core::fmt::Debug> core::fmt::Debug for OptionC<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.discriminant {
+            0 => write!(f, "None"),
+            1 => f.debug_tuple("Some").field(unsafe { self.payload() }).finish(),
+            invalid => write!(f, "Invalid(discriminant={invalid})"),
+        }
+    }
+}
+
+impl<T> From<Option<T>> for OptionC<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(t) => Self::some(t),
+            None => Self::none(),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid optional value - discriminant tag of {0} is invalid (expected 0 or 1)")]
+pub struct InvalidOptionCError(u32);
+
+impl<T> TryFrom<OptionC<T>> for Option<T> {
+    type Error = InvalidOptionCError;
+    fn try_from(value: OptionC<T>) -> Result<Self, Self::Error> {
+        match value.discriminant {
+            0 => Ok(None),
+            1 => Ok(Some(unsafe { MaybeUninit::assume_init(value.payload) })),
+            invalid => Err(InvalidOptionCError(invalid)),
+        }
     }
 }
 
@@ -366,690 +330,24 @@ impl DebugFunctionsSection {
 // ================================================================================================
 
 /// Trusted package-owned debug information decoded from well-known debug sections.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PackageDebugInfo {
-    /// Type definitions for source-level debug consumers.
-    pub(crate) types: Option<DebugTypesSection>,
-    /// Source file table.
-    pub(crate) sources: Option<DebugSourcesSection>,
-    /// Function metadata.
-    pub(crate) functions: Option<DebugFunctionsSection>,
-    /// Source/debug MAST occurrence graph.
-    pub(crate) source_graph: Option<DebugSourceGraphSection>,
-    /// Source-keyed assembly operation and debug variable rows.
-    pub(crate) source_map: Option<DebugSourceMapSection>,
-    /// Assertion error messages keyed by runtime error code.
-    pub(crate) error_messages: Option<DebugErrorMessagesSection>,
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
+pub struct DebugLoc {
+    pub file_idx: DebugFileIdx,
+    pub start: ByteIndex,
+    pub end: ByteIndex,
 }
 
-impl PackageDebugInfo {
-    /// Creates debug info with source/debug graph and map sections.
-    pub fn with_source_debug(
-        source_graph: DebugSourceGraphSection,
-        source_map: DebugSourceMapSection,
-    ) -> Self {
-        Self {
-            source_graph: Some(source_graph),
-            source_map: Some(source_map),
-            ..Self::default()
-        }
-    }
-
-    /// Sets the source/debug graph section.
-    pub fn with_source_graph(mut self, source_graph: DebugSourceGraphSection) -> Self {
-        self.source_graph = Some(source_graph);
-        self
-    }
-
-    /// Sets the source/debug map section.
-    pub fn with_source_map(mut self, source_map: DebugSourceMapSection) -> Self {
-        self.source_map = Some(source_map);
-        self
-    }
-
-    /// Sets the assertion error messages section.
-    pub fn with_error_messages(mut self, error_messages: DebugErrorMessagesSection) -> Self {
-        self.error_messages = Some(error_messages);
-        self
-    }
-
-    /// Returns the type definitions section, if present.
-    pub fn types(&self) -> Option<&DebugTypesSection> {
-        self.types.as_ref()
-    }
-
-    /// Returns the source file table section, if present.
-    pub fn sources(&self) -> Option<&DebugSourcesSection> {
-        self.sources.as_ref()
-    }
-
-    /// Returns the function metadata section, if present.
-    pub fn functions(&self) -> Option<&DebugFunctionsSection> {
-        self.functions.as_ref()
-    }
-
-    /// Returns the source/debug graph section, if present.
-    pub fn source_graph(&self) -> Option<&DebugSourceGraphSection> {
-        self.source_graph.as_ref()
-    }
-
-    /// Returns the source/debug map section, if present.
-    pub fn source_map(&self) -> Option<&DebugSourceMapSection> {
-        self.source_map.as_ref()
-    }
-
-    /// Returns the assertion error messages section, if present.
-    pub fn error_messages(&self) -> Option<&DebugErrorMessagesSection> {
-        self.error_messages.as_ref()
-    }
-
-    /// Returns true if no package debug sections were decoded.
-    pub fn is_empty(&self) -> bool {
-        self.types.is_none()
-            && self.sources.is_none()
-            && self.functions.is_none()
-            && self.source_graph.is_none()
-            && self.source_map.is_none()
-            && self.error_messages.is_none()
-    }
-
-    /// Merges package-owned source/debug metadata after a [`miden_core::mast::MastForest`] merge.
-    ///
-    /// [`miden_core::mast::MastForest::merge`] remains execution-only. This helper applies the
-    /// returned node mappings to package source/debug sections so callers can merge
-    /// `(MastForest, PackageDebugInfo)` pairs without reattaching debug metadata to the forest.
-    ///
-    /// This also merges the type, source-file, and function tables referenced by source-map
-    /// inline-call rows.
-    pub fn merge_source_debug<'a>(
-        inputs: impl IntoIterator<Item = (usize, &'a PackageDebugInfo)>,
-        root_map: &MastForestRootMap,
-    ) -> Result<Self, PackageDebugInfoMergeError> {
-        let mut types = DebugTypesSection::new();
-        let mut sources = DebugSourcesSection::new();
-        let mut functions = DebugFunctionsSection::new();
-        let mut nodes = Vec::new();
-        let mut roots = Vec::new();
-        let mut asm_ops = Vec::new();
-        let mut debug_vars = Vec::new();
-        let mut inline_calls = Vec::new();
-        let mut error_messages = BTreeMap::new();
-        let mut saw_types = false;
-        let mut saw_sources = false;
-        let mut saw_functions = false;
-        let mut saw_source_graph = false;
-        let mut saw_source_map = false;
-        let mut saw_error_messages = false;
-
-        for (forest_index, debug_info) in inputs {
-            let type_map = merge_debug_types(forest_index, debug_info.types.as_ref(), &mut types)?;
-            saw_types |= debug_info.types.is_some();
-            let source_file_map =
-                merge_debug_sources(forest_index, debug_info.sources.as_ref(), &mut sources)?;
-            saw_sources |= debug_info.sources.is_some();
-            let function_map = merge_debug_functions(
-                forest_index,
-                debug_info.functions.as_ref(),
-                &mut functions,
-                &source_file_map,
-                &type_map,
-            )?;
-            saw_functions |= debug_info.functions.is_some();
-
-            let source_graph = debug_info.source_graph.as_ref();
-            let source_map = debug_info.source_map.as_ref();
-            if source_graph.is_none() && source_map.is_some_and(|source_map| !source_map.is_empty())
-            {
-                return Err(PackageDebugInfoMergeError::SourceMapWithoutGraph { forest_index });
-            }
-
-            if let Some(section) = debug_info.error_messages.as_ref() {
-                saw_error_messages = true;
-                for row in section.messages() {
-                    error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
-                }
-            }
-
-            let Some(source_graph) = source_graph else {
-                continue;
-            };
-            saw_source_graph = true;
-
-            let mut source_id_map = BTreeMap::new();
-            for old_source_idx in 0..source_graph.nodes().len() {
-                source_id_map.insert(
-                    DebugSourceNodeId::from(old_source_idx as u32),
-                    DebugSourceNodeId::from(nodes.len() as u32 + old_source_idx as u32),
-                );
-            }
-
-            for (old_source_idx, source_node) in source_graph.nodes().iter().enumerate() {
-                let exec_node = root_map.map_node(forest_index, &source_node.exec_node).ok_or(
-                    PackageDebugInfoMergeError::MissingExecNodeMapping {
-                        forest_index,
-                        exec_node: source_node.exec_node,
-                    },
-                )?;
-                let children = source_node
-                    .children
-                    .iter()
-                    .map(|child| {
-                        source_id_map.get(child).copied().ok_or(
-                            PackageDebugInfoMergeError::MissingSourceNodeMapping {
-                                forest_index,
-                                source_node: *child,
-                            },
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                nodes.push(DebugSourceNode::new(
-                    exec_node,
-                    children,
-                    source_node.op_start,
-                    source_node.op_end,
-                ));
-                debug_assert_eq!(
-                    source_id_map[&DebugSourceNodeId::from(old_source_idx as u32)].as_u32()
-                        as usize,
-                    nodes.len() - 1,
-                );
-            }
-
-            for root in source_graph.roots().iter().copied() {
-                roots.push(source_id_map.get(&root).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: root,
-                    },
-                )?);
-            }
-
-            let Some(source_map) = source_map else {
-                continue;
-            };
-            saw_source_map = true;
-            for row in source_map.asm_ops() {
-                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: row.source_node,
-                    },
-                )?;
-                asm_ops.push(DebugSourceAsmOp {
-                    source_node,
-                    op_idx: row.op_idx,
-                    location: row.location.clone(),
-                    context_name: row.context_name.clone(),
-                    op: row.op.clone(),
-                    num_cycles: row.num_cycles,
-                });
-            }
-            for row in source_map.debug_vars() {
-                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: row.source_node,
-                    },
-                )?;
-                debug_vars.push(DebugSourceVar::new(source_node, row.op_idx, row.var.clone()));
-            }
-            for row in source_map.inline_calls() {
-                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: row.source_node,
-                    },
-                )?;
-                let callee_idx = function_map.get(&row.callee_idx).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingFunctionMapping {
-                        forest_index,
-                        function_idx: row.callee_idx,
-                    },
-                )?;
-                let file_idx = source_file_map.get(&row.file_idx).copied().ok_or(
-                    PackageDebugInfoMergeError::MissingSourceFileMapping {
-                        forest_index,
-                        file_idx: row.file_idx,
-                    },
-                )?;
-                inline_calls.push(DebugSourceInlineCall::new(
-                    source_node,
-                    row.op_idx,
-                    callee_idx,
-                    file_idx,
-                    row.line,
-                    row.column,
-                ));
-            }
-        }
-
-        Ok(Self {
-            types: saw_types.then_some(types),
-            sources: saw_sources.then_some(sources),
-            functions: saw_functions.then_some(functions),
-            source_graph: saw_source_graph
-                .then_some(DebugSourceGraphSection::from_parts(nodes, roots)),
-            source_map: saw_source_map.then_some(
-                DebugSourceMapSection::from_parts_with_inline_calls(
-                    asm_ops,
-                    debug_vars,
-                    inline_calls,
-                ),
-            ),
-            error_messages: saw_error_messages.then_some(DebugErrorMessagesSection::from_parts(
-                error_messages
-                    .into_iter()
-                    .map(|(err_code, message)| DebugErrorMessage::new(err_code, message))
-                    .collect(),
-            )),
-        })
-    }
-
-    /// Returns a source/debug occurrence by ID.
-    pub fn source_node(&self, source_node: DebugSourceNodeId) -> Option<&DebugSourceNode> {
-        self.source_graph.as_ref()?.source_node(source_node)
-    }
-
-    /// Returns the unique source/debug root that points at `exec_node`.
-    ///
-    /// Returns `Ok(None)` if no source graph is present, or if no root points at `exec_node`.
-    pub fn unique_source_root_for_exec_node(
-        &self,
-        exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceNodeId>, DebugSourceGraphLookupError> {
-        self.source_graph
-            .as_ref()
-            .map(|source_graph| source_graph.unique_source_root_for_exec_node(exec_node))
-            .unwrap_or(Ok(None))
-    }
-
-    /// Returns `parent`'s source/debug child at `child_index`, if present.
-    ///
-    /// Returns `Ok(None)` if no source graph is present, or if `child_index` is out of range.
-    pub fn child_source_node(
-        &self,
-        parent: DebugSourceNodeId,
-        child_index: usize,
-    ) -> Result<Option<(DebugSourceNodeId, &DebugSourceNode)>, DebugSourceGraphLookupError> {
-        self.source_graph
-            .as_ref()
-            .map(|source_graph| source_graph.child_source_node(parent, child_index))
-            .unwrap_or(Ok(None))
-    }
-
-    /// Returns assembly operation rows for a source/debug occurrence.
-    pub fn asm_ops_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceAsmOp> {
-        self.source_map
-            .iter()
-            .flat_map(move |source_map| source_map.asm_ops_for_source_node(source_node))
-    }
-
-    /// Returns the first assembly operation row for `source_node`, if present.
-    pub fn first_asm_op_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> Option<&DebugSourceAsmOp> {
-        self.source_map.as_ref()?.first_asm_op_for_source_node(source_node)
-    }
-
-    /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
-    pub fn asm_op_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> Option<&DebugSourceAsmOp> {
-        self.source_map.as_ref()?.asm_op_for_operation(source_node, op_idx)
-    }
-
-    /// Returns debug variable rows for a source/debug occurrence.
-    pub fn debug_vars_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceVar> {
-        self.source_map
-            .iter()
-            .flat_map(move |source_map| source_map.debug_vars_for_source_node(source_node))
-    }
-
-    /// Returns debug variable rows for `source_node` at `op_idx`.
-    pub fn debug_vars_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> impl Iterator<Item = &DebugSourceVar> {
-        self.source_map
-            .iter()
-            .flat_map(move |source_map| source_map.debug_vars_for_operation(source_node, op_idx))
-    }
-
-    /// Returns inline-call rows for a source/debug occurrence.
-    pub fn inline_calls_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
-        self.source_map
-            .iter()
-            .flat_map(move |source_map| source_map.inline_calls_for_source_node(source_node))
-    }
-
-    /// Returns inline-call rows for `source_node` at `op_idx`.
-    pub fn inline_calls_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
-        self.source_map
-            .iter()
-            .flat_map(move |source_map| source_map.inline_calls_for_operation(source_node, op_idx))
-    }
-
-    /// Returns the assertion error message for `err_code`, if present.
-    pub fn error_message(&self, err_code: u64) -> Option<Arc<str>> {
-        self.error_messages.as_ref()?.message(err_code)
-    }
-}
-
-fn merge_debug_types(
-    forest_index: usize,
-    section: Option<&DebugTypesSection>,
-    output: &mut DebugTypesSection,
-) -> Result<BTreeMap<u32, DebugTypeIdx>, PackageDebugInfoMergeError> {
-    let Some(section) = section else {
-        return Ok(BTreeMap::new());
-    };
-
-    let mut string_map = BTreeMap::new();
-    for (old_idx, string) in section.strings.iter().enumerate() {
-        string_map.insert(old_idx as u32, output.add_string(string.clone()));
-    }
-
-    let base_idx = output.types.len() as u32;
-    let type_map = (0..section.types.len())
-        .map(|old_idx| (old_idx as u32, DebugTypeIdx::from(base_idx + old_idx as u32)))
-        .collect::<BTreeMap<_, _>>();
-
-    for ty in &section.types {
-        output.add_type(remap_debug_type_info(forest_index, ty, &string_map, &type_map)?);
-    }
-
-    Ok(type_map)
-}
-
-fn merge_debug_sources(
-    forest_index: usize,
-    section: Option<&DebugSourcesSection>,
-    output: &mut DebugSourcesSection,
-) -> Result<BTreeMap<u32, u32>, PackageDebugInfoMergeError> {
-    let Some(section) = section else {
-        return Ok(BTreeMap::new());
-    };
-
-    let mut string_map = BTreeMap::new();
-    for (old_idx, string) in section.strings.iter().enumerate() {
-        string_map.insert(old_idx as u32, output.add_string(string.clone()));
-    }
-
-    let mut file_map = BTreeMap::new();
-    for (old_idx, file) in section.files.iter().enumerate() {
-        let path_idx = string_map.get(&file.path_idx).copied().ok_or(
-            PackageDebugInfoMergeError::MissingSourceStringMapping {
-                forest_index,
-                string_idx: file.path_idx,
-            },
-        )?;
-        let file = DebugFileInfo {
-            path_idx,
-            checksum: file.checksum.clone(),
-        };
-        let new_idx =
-            output.files.iter().position(|existing| *existing == file).unwrap_or_else(|| {
-                let new_idx = output.files.len();
-                output.files.push(file);
-                new_idx
-            }) as u32;
-        file_map.insert(old_idx as u32, new_idx);
-    }
-
-    Ok(file_map)
-}
-
-fn merge_debug_functions(
-    forest_index: usize,
-    section: Option<&DebugFunctionsSection>,
-    output: &mut DebugFunctionsSection,
-    source_file_map: &BTreeMap<u32, u32>,
-    type_map: &BTreeMap<u32, DebugTypeIdx>,
-) -> Result<BTreeMap<u32, u32>, PackageDebugInfoMergeError> {
-    let Some(section) = section else {
-        return Ok(BTreeMap::new());
-    };
-
-    let mut string_map = BTreeMap::new();
-    for (old_idx, string) in section.strings.iter().enumerate() {
-        string_map.insert(old_idx as u32, output.add_string(string.clone()));
-    }
-
-    let mut function_map = BTreeMap::new();
-    for (old_idx, function) in section.functions.iter().enumerate() {
-        let name_idx = remap_string_index(
-            forest_index,
-            function.name_idx,
-            &string_map,
-            |forest_index, string_idx| PackageDebugInfoMergeError::MissingFunctionStringMapping {
-                forest_index,
-                string_idx,
-            },
-        )?;
-        let linkage_name_idx = function
-            .linkage_name_idx
-            .map(|idx| {
-                remap_string_index(forest_index, idx, &string_map, |forest_index, string_idx| {
-                    PackageDebugInfoMergeError::MissingFunctionStringMapping {
-                        forest_index,
-                        string_idx,
-                    }
-                })
-            })
-            .transpose()?;
-        let file_idx = source_file_map.get(&function.file_idx).copied().ok_or(
-            PackageDebugInfoMergeError::MissingSourceFileMapping {
-                forest_index,
-                file_idx: function.file_idx,
-            },
-        )?;
-        let type_idx = function
-            .type_idx
-            .map(|idx| remap_type_idx(forest_index, idx, type_map))
-            .transpose()?;
-        let new_idx = output.functions.len() as u32;
-        output.add_function(DebugFunctionInfo {
-            name_idx,
-            linkage_name_idx,
-            file_idx,
-            line: function.line,
-            column: function.column,
-            type_idx,
-            mast_root: function.mast_root,
-        });
-        function_map.insert(old_idx as u32, new_idx);
-    }
-
-    Ok(function_map)
-}
-
-fn remap_debug_type_info(
-    forest_index: usize,
-    ty: &DebugTypeInfo,
-    string_map: &BTreeMap<u32, u32>,
-    type_map: &BTreeMap<u32, DebugTypeIdx>,
-) -> Result<DebugTypeInfo, PackageDebugInfoMergeError> {
-    Ok(match ty {
-        DebugTypeInfo::Primitive(primitive) => DebugTypeInfo::Primitive(*primitive),
-        DebugTypeInfo::Pointer { pointee_type_idx } => DebugTypeInfo::Pointer {
-            pointee_type_idx: remap_type_idx(forest_index, *pointee_type_idx, type_map)?,
-        },
-        DebugTypeInfo::Array { element_type_idx, count } => DebugTypeInfo::Array {
-            element_type_idx: remap_type_idx(forest_index, *element_type_idx, type_map)?,
-            count: *count,
-        },
-        DebugTypeInfo::Struct { name_idx, size, fields } => DebugTypeInfo::Struct {
-            name_idx: remap_string_index(
-                forest_index,
-                *name_idx,
-                string_map,
-                |forest_index, string_idx| PackageDebugInfoMergeError::MissingTypeStringMapping {
-                    forest_index,
-                    string_idx,
-                },
-            )?,
-            size: *size,
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Ok(DebugFieldInfo {
-                        name_idx: remap_string_index(
-                            forest_index,
-                            field.name_idx,
-                            string_map,
-                            |forest_index, string_idx| {
-                                PackageDebugInfoMergeError::MissingTypeStringMapping {
-                                    forest_index,
-                                    string_idx,
-                                }
-                            },
-                        )?,
-                        type_idx: remap_type_idx(forest_index, field.type_idx, type_map)?,
-                        offset: field.offset,
-                    })
-                })
-                .collect::<Result<_, PackageDebugInfoMergeError>>()?,
-        },
-        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
-            DebugTypeInfo::Function {
-                return_type_idx: return_type_idx
-                    .map(|idx| remap_type_idx(forest_index, idx, type_map))
-                    .transpose()?,
-                param_type_indices: param_type_indices
-                    .iter()
-                    .map(|idx| remap_type_idx(forest_index, *idx, type_map))
-                    .collect::<Result<_, _>>()?,
-            }
-        },
-        DebugTypeInfo::Enum {
-            name_idx,
-            size,
-            discriminant_type_idx,
-            variants,
-        } => DebugTypeInfo::Enum {
-            name_idx: remap_string_index(
-                forest_index,
-                *name_idx,
-                string_map,
-                |forest_index, string_idx| PackageDebugInfoMergeError::MissingTypeStringMapping {
-                    forest_index,
-                    string_idx,
-                },
-            )?,
-            size: *size,
-            discriminant_type_idx: remap_type_idx(forest_index, *discriminant_type_idx, type_map)?,
-            variants: variants
-                .iter()
-                .map(|variant| {
-                    Ok(DebugVariantInfo {
-                        name_idx: remap_string_index(
-                            forest_index,
-                            variant.name_idx,
-                            string_map,
-                            |forest_index, string_idx| {
-                                PackageDebugInfoMergeError::MissingTypeStringMapping {
-                                    forest_index,
-                                    string_idx,
-                                }
-                            },
-                        )?,
-                        type_idx: variant
-                            .type_idx
-                            .map(|idx| remap_type_idx(forest_index, idx, type_map))
-                            .transpose()?,
-                        payload_offset: variant.payload_offset,
-                        discriminant: variant.discriminant,
-                    })
-                })
-                .collect::<Result<_, PackageDebugInfoMergeError>>()?,
-        },
-        DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
-    })
-}
-
-fn remap_string_index(
-    forest_index: usize,
-    string_idx: u32,
-    string_map: &BTreeMap<u32, u32>,
-    error: impl FnOnce(usize, u32) -> PackageDebugInfoMergeError,
-) -> Result<u32, PackageDebugInfoMergeError> {
-    string_map
-        .get(&string_idx)
-        .copied()
-        .ok_or_else(|| error(forest_index, string_idx))
-}
-
-fn remap_type_idx(
-    forest_index: usize,
-    type_idx: DebugTypeIdx,
-    type_map: &BTreeMap<u32, DebugTypeIdx>,
-) -> Result<DebugTypeIdx, PackageDebugInfoMergeError> {
-    type_map
-        .get(&type_idx.as_u32())
-        .copied()
-        .ok_or(PackageDebugInfoMergeError::MissingTypeMapping { forest_index, type_idx })
-}
+// Ensure that DebugLoc records adhere to size/alignment requirements we assume elsewhere
+const _DEBUG_LOC_SIZE_CHECK: () = const {
+    assert!(
+        size_of::<DebugLoc>().is_multiple_of(align_of::<DebugLoc>()),
+        "expected the size of DebugLoc to be a multiple of its alignment"
+    );
+};
 
 // DEBUG SOURCE GRAPH SECTION
 // ================================================================================================
-
-/// A strongly-typed index into the source/debug MAST occurrence graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct DebugSourceNodeId(u32);
-
-impl DebugSourceNodeId {
-    /// Returns the inner value as a `u32`.
-    pub fn as_u32(self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for DebugSourceNodeId {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<DebugSourceNodeId> for u32 {
-    fn from(value: DebugSourceNodeId) -> Self {
-        value.0
-    }
-}
-
-impl Serializable for DebugSourceNodeId {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.0);
-    }
-}
-
-impl Deserializable for DebugSourceNodeId {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self(source.read_u32()?))
-    }
-
-    fn min_serialized_size() -> usize {
-        4
-    }
-}
 
 /// A source/debug occurrence for code that produced an executable MAST node.
 ///
@@ -1060,472 +358,185 @@ impl Deserializable for DebugSourceNodeId {
 /// treat the [`DebugSourceNodeId`] as the identity of the source occurrence and use `exec_node`
 /// only to find the executable node it describes.
 ///
-/// Source-map rows in [`DebugSourceMapSection`] attach assembly operations and debug variables to
-/// these source occurrences.
+/// Assembly-operation, variable, and inline-call rows are stored directly on each source
+/// occurrence.
+pub type DebugSourceNode = SourceNode<MastNodeId, DebugSourceNodeId>;
+
+/// A source/debug occurrence for code that produced an executable MAST node.
+///
+/// Indexed by a given execution node index, with children indexed by the given source node index
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DebugSourceNode {
+pub struct SourceNode<Exec: Idx, Src: Idx> {
     /// The executable MAST node represented by this source occurrence.
-    pub exec_node: MastNodeId,
+    pub exec_node: Exec,
     /// Child source occurrences, in the same order as the executable node's children.
-    pub children: Vec<DebugSourceNodeId>,
+    pub children: Vec<Src>,
     /// Inclusive start operation index in the executable node.
     pub op_start: u32,
     /// Exclusive end operation index in the executable node.
     pub op_end: u32,
+    /// Operation metadata for operations attached to this node
+    pub asm_ops: Vec<DebugSourceAsmOp>,
+    /// Debug variable metadata for operations attached to this node
+    pub debug_vars: Vec<DebugSourceVar>,
+    /// Inline-call metadata for operations attached to this node
+    pub inline_calls: Vec<DebugSourceInlineCall>,
 }
 
-impl DebugSourceNode {
-    /// Creates a source/debug occurrence record.
-    pub fn new(
-        exec_node: MastNodeId,
-        children: Vec<DebugSourceNodeId>,
-        op_start: u32,
-        op_end: u32,
-    ) -> Self {
-        Self { exec_node, children, op_start, op_end }
-    }
-}
-
-/// Package-owned source/debug MAST occurrence graph.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugSourceGraphSection {
-    /// Version of the debug source graph format.
-    version: u8,
-    /// Source/debug occurrence nodes.
-    nodes: Vec<DebugSourceNode>,
-    /// Source/debug occurrence roots.
-    roots: Vec<DebugSourceNodeId>,
-}
-
-impl DebugSourceGraphSection {
-    /// Creates an empty source/debug occurrence graph section.
-    pub fn new() -> Self {
-        Self {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: Vec::new(),
-            roots: Vec::new(),
-        }
+impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
+    pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&DebugSourceAsmOp> {
+        self.asm_ops
+            .iter()
+            .filter(|row| row.op_idx <= op_idx)
+            .max_by_key(|row| row.op_idx)
     }
 
-    /// Creates a source/debug occurrence graph section from validated parts.
-    pub fn from_parts(nodes: Vec<DebugSourceNode>, roots: Vec<DebugSourceNodeId>) -> Self {
-        Self {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes,
-            roots,
-        }
-    }
-
-    /// Returns the source graph section format version.
-    pub fn version(&self) -> u8 {
-        self.version
-    }
-
-    /// Returns source/debug occurrence nodes.
-    pub fn nodes(&self) -> &[DebugSourceNode] {
-        &self.nodes
-    }
-
-    /// Returns source/debug occurrence roots.
-    pub fn roots(&self) -> &[DebugSourceNodeId] {
-        &self.roots
-    }
-
-    /// Returns true if the section contains no source occurrences.
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty() && self.roots.is_empty()
-    }
-
-    /// Returns a source/debug occurrence by ID.
-    fn source_node(&self, source_node: DebugSourceNodeId) -> Option<&DebugSourceNode> {
-        self.nodes.get(source_node.as_u32() as usize)
-    }
-
-    /// Returns all source/debug roots that point at `exec_node`.
-    fn source_roots_for_exec_node(
+    pub fn debug_vars_for_operation(
         &self,
-        exec_node: MastNodeId,
-    ) -> impl Iterator<Item = (DebugSourceNodeId, &DebugSourceNode)> {
-        self.roots.iter().copied().filter_map(move |source_node_id| {
-            self.source_node(source_node_id)
-                .filter(|source_node| source_node.exec_node == exec_node)
-                .map(|source_node| (source_node_id, source_node))
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceVar> + '_ {
+        self.debug_vars.iter().filter(move |row| row.op_idx == op_idx)
+    }
+
+    pub fn debug_infos_for_operation(
+        &self,
+        op_idx: u32,
+        debug_info: &DebugInfo<Exec, Src>,
+    ) -> impl Iterator<Item = DebugVarInfo> {
+        let mut type_cache = FxHashMap::<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>::default();
+        self.debug_vars_for_operation(op_idx).map(move |source_var| {
+            let name = debug_info[source_var.name_idx].clone();
+            let mut info = DebugVarInfo::new(name, source_var.value_location.clone());
+            if let Some(arg_idx) = source_var.arg_idx {
+                info.set_arg_index(arg_idx.get())
+            }
+            if let Some(loc) = source_var.location_idx {
+                info.set_location(debug_info.get_location(loc).unwrap())
+            }
+            if let Some(tid) = source_var.type_id {
+                if let Some((ty, declared_ty)) = type_cache.get(&tid) {
+                    info.set_ty(ty.clone(), declared_ty.clone());
+                } else if let Some(type_info) = debug_info.get_type(tid)
+                    && let Some((ty, declared_type)) =
+                        type_info.recover_registered_type(debug_info, &mut type_cache)
+                {
+                    type_cache.insert(tid, (ty.clone(), declared_type.clone()));
+                    info.set_ty(ty, declared_type);
+                }
+            }
+            info
         })
-    }
-
-    /// Returns the unique source/debug root that points at `exec_node`.
-    fn unique_source_root_for_exec_node(
-        &self,
-        exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceNodeId>, DebugSourceGraphLookupError> {
-        let mut roots = self
-            .source_roots_for_exec_node(exec_node)
-            .map(|(source_node_id, _)| source_node_id);
-        let first = roots.next();
-        if roots.next().is_some() {
-            return Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node });
-        }
-        Ok(first)
-    }
-
-    /// Returns `parent`'s source/debug child at `child_index`, if present.
-    fn child_source_node(
-        &self,
-        parent: DebugSourceNodeId,
-        child_index: usize,
-    ) -> Result<Option<(DebugSourceNodeId, &DebugSourceNode)>, DebugSourceGraphLookupError> {
-        let parent_node = self
-            .source_node(parent)
-            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: parent })?;
-        let Some(child) = parent_node.children.get(child_index).copied() else {
-            return Ok(None);
-        };
-        let child_node = self
-            .source_node(child)
-            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: child })?;
-
-        Ok(Some((child, child_node)))
     }
 }
 
 /// Assembly operation metadata keyed by a source/debug MAST occurrence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct DebugSourceAsmOp {
-    /// Source/debug occurrence that owns this operation row.
-    pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
-    /// Optional source location for the assembly operation.
-    pub location: Option<Location>,
-    /// Assembly context name.
-    pub context_name: String,
-    /// Assembly operation text.
-    pub op: String,
+    /// Source location index in the locations table
+    pub location_idx: OptionC<DebugLocIdx>,
+    /// Assembly context name index in the strings table
+    pub context_name_idx: DebugStringIdx,
+    /// Assembly operation text index in the strings table
+    pub op_name_idx: DebugStringIdx,
     /// Number of VM cycles taken by the operation.
     pub num_cycles: u8,
+    _padding: [u8; 3],
 }
 
 impl DebugSourceAsmOp {
-    /// Creates a source-keyed assembly operation metadata row.
+    // Ensure that DebugSourceAsmOp records adhere to size/alignment requirements we assume
+    // elsewhere
+    const _ASM_OP_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugSourceAsmOp>().is_multiple_of(align_of::<DebugSourceAsmOp>()),
+            "expected the size of DebugSourceAsmOp to be a multiple of its alignment"
+        );
+    };
+
     pub fn new(
-        source_node: DebugSourceNodeId,
         op_idx: u32,
-        location: Option<Location>,
-        context_name: String,
-        op: String,
+        location_idx: Option<DebugLocIdx>,
+        context_name_idx: DebugStringIdx,
+        op_name_idx: DebugStringIdx,
         num_cycles: u8,
     ) -> Self {
         Self {
-            source_node,
             op_idx,
-            location,
-            context_name,
-            op,
+            location_idx: location_idx.into(),
+            context_name_idx,
+            op_name_idx,
             num_cycles,
+            _padding: [0; _],
         }
+    }
+
+    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> AssemblyOp {
+        let location = self.location_idx.into_option().and_then(|loc| debug_info.get_location(loc));
+        let context_name = debug_info[self.context_name_idx].clone();
+        let op = debug_info[self.op_name_idx].clone();
+        AssemblyOp::new(location, context_name, self.num_cycles, op)
     }
 }
 
 /// Debug variable metadata keyed by a source/debug MAST occurrence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugSourceVar {
-    /// Source/debug occurrence that owns this variable row.
-    pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
-    /// Debug variable metadata.
-    pub var: DebugVarInfo,
-}
-
-impl DebugSourceVar {
-    /// Creates a source-keyed debug variable metadata row.
-    pub fn new(source_node: DebugSourceNodeId, op_idx: u32, var: DebugVarInfo) -> Self {
-        Self { source_node, op_idx, var }
-    }
+    /// Variable name as it appears in source code.
+    pub name_idx: DebugStringIdx,
+    /// Low-level structural type information
+    pub type_id: Option<DebugTypeIdx>,
+    /// If this is a function parameter, its 1-based index.
+    pub arg_idx: Option<NonZeroU32>,
+    /// Source file location (file:line:column).
+    /// This should only be set when the location differs from the AssemblyOp location associated
+    /// with the same instruction, to avoid package bloat.
+    pub location_idx: Option<DebugLocIdx>,
+    /// Where to find the variable's value at this point
+    pub value_location: DebugVarLocation,
 }
 
 /// Inline-call metadata keyed by a source/debug MAST occurrence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct DebugSourceInlineCall {
-    /// Source/debug occurrence that owns this inline-call row.
-    pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Inlined callee function index in the debug functions table.
-    pub callee_idx: u32,
-    /// Call-site source file index in the debug sources table.
-    pub file_idx: u32,
-    /// Call-site line number.
-    pub line: LineNumber,
-    /// Call-site column number.
-    pub column: ColumnNumber,
+    pub callee_idx: DebugFunctionIdx,
+    /// Call-site source location index in the debug locations table.
+    pub loc_idx: DebugLocIdx,
 }
 
-impl DebugSourceInlineCall {
-    /// Creates a source-keyed inline-call metadata row.
-    pub fn new(
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-        callee_idx: u32,
-        file_idx: u32,
-        line: LineNumber,
-        column: ColumnNumber,
-    ) -> Self {
-        Self {
-            source_node,
-            op_idx,
-            callee_idx,
-            file_idx,
-            line,
-            column,
-        }
-    }
-}
-
-/// Package-owned source-keyed debug metadata rows.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugSourceMapSection {
-    /// Version of the debug source map format.
-    version: u8,
-    /// Deduplicated source locations referenced by assembly operation rows.
-    locations: Vec<Location>,
-    /// Deduplicated strings referenced by assembly operation rows.
-    strings: Vec<String>,
-    /// Source-keyed assembly operation rows.
-    asm_ops: Vec<DebugSourceAsmOp>,
-    /// Source-keyed debug variable rows.
-    debug_vars: Vec<DebugSourceVar>,
-    /// Source-keyed inline-call rows.
-    inline_calls: Vec<DebugSourceInlineCall>,
-}
-
-impl DebugSourceMapSection {
-    /// Creates an empty source-keyed debug metadata section.
-    pub fn new() -> Self {
-        Self {
-            version: DEBUG_SOURCE_MAP_VERSION,
-            locations: Vec::new(),
-            strings: Vec::new(),
-            asm_ops: Vec::new(),
-            debug_vars: Vec::new(),
-            inline_calls: Vec::new(),
-        }
-    }
-
-    /// Creates a source-keyed debug metadata section from rows.
-    pub fn from_parts(asm_ops: Vec<DebugSourceAsmOp>, debug_vars: Vec<DebugSourceVar>) -> Self {
-        Self::from_parts_with_inline_calls(asm_ops, debug_vars, Vec::new())
-    }
-
-    /// Creates a source-keyed debug metadata section from rows, including inline calls.
-    pub fn from_parts_with_inline_calls(
-        asm_ops: Vec<DebugSourceAsmOp>,
-        debug_vars: Vec<DebugSourceVar>,
-        inline_calls: Vec<DebugSourceInlineCall>,
-    ) -> Self {
-        let locations = intern_locations(&asm_ops);
-        let strings = intern_source_map_strings(&asm_ops);
-        Self {
-            version: DEBUG_SOURCE_MAP_VERSION,
-            locations,
-            strings,
-            asm_ops,
-            debug_vars,
-            inline_calls,
-        }
-    }
-
-    /// Returns the source map section format version.
-    pub fn version(&self) -> u8 {
-        self.version
-    }
-
-    /// Returns source-keyed assembly operation rows.
-    pub fn asm_ops(&self) -> &[DebugSourceAsmOp] {
-        &self.asm_ops
-    }
-
-    /// Returns the deduplicated source locations referenced by assembly operation rows.
-    pub fn locations(&self) -> &[Location] {
-        &self.locations
-    }
-
-    /// Returns the deduplicated strings referenced by assembly operation rows.
-    pub fn strings(&self) -> &[String] {
-        &self.strings
-    }
-
-    /// Returns source-keyed debug variable rows.
-    pub fn debug_vars(&self) -> &[DebugSourceVar] {
-        &self.debug_vars
-    }
-
-    /// Returns source-keyed inline-call rows.
-    pub fn inline_calls(&self) -> &[DebugSourceInlineCall] {
-        &self.inline_calls
-    }
-
-    /// Returns true if the section contains no metadata rows.
-    pub fn is_empty(&self) -> bool {
-        self.asm_ops.is_empty() && self.debug_vars.is_empty() && self.inline_calls.is_empty()
-    }
-
-    /// Returns assembly operation rows for a source/debug occurrence.
-    fn asm_ops_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceAsmOp> {
-        self.asm_ops.iter().filter(move |row| row.source_node == source_node)
-    }
-
-    /// Returns the first assembly operation row for `source_node`, if present.
-    fn first_asm_op_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
-    }
-
-    /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
-    fn asm_op_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node)
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
-    }
-
-    /// Returns debug variable rows for a source/debug occurrence.
-    fn debug_vars_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceVar> {
-        self.debug_vars.iter().filter(move |row| row.source_node == source_node)
-    }
-
-    /// Returns debug variable rows for `source_node` at `op_idx`.
-    fn debug_vars_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> impl Iterator<Item = &DebugSourceVar> {
-        self.debug_vars_for_source_node(source_node)
-            .filter(move |row| row.op_idx == op_idx)
-    }
-
-    /// Returns inline-call rows for a source/debug occurrence.
-    fn inline_calls_for_source_node(
-        &self,
-        source_node: DebugSourceNodeId,
-    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
-        self.inline_calls.iter().filter(move |row| row.source_node == source_node)
-    }
-
-    /// Returns inline-call rows for `source_node` at `op_idx`.
-    fn inline_calls_for_operation(
-        &self,
-        source_node: DebugSourceNodeId,
-        op_idx: u32,
-    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
-        self.inline_calls_for_source_node(source_node)
-            .filter(move |row| row.op_idx == op_idx)
-    }
-}
-
-fn intern_locations(asm_ops: &[DebugSourceAsmOp]) -> Vec<Location> {
-    let mut locations = Vec::new();
-    let mut by_location = BTreeMap::new();
-    for location in asm_ops.iter().filter_map(|row| row.location.as_ref()) {
-        by_location.entry(location.clone()).or_insert_with(|| {
-            let idx = locations.len();
-            locations.push(location.clone());
-            idx
-        });
-    }
-    locations
-}
-
-fn intern_source_map_strings(asm_ops: &[DebugSourceAsmOp]) -> Vec<String> {
-    let mut strings = Vec::new();
-    let mut by_string = BTreeMap::new();
-    for value in asm_ops.iter().flat_map(|row| [&row.context_name, &row.op]) {
-        by_string.entry(value.clone()).or_insert_with(|| {
-            let idx = strings.len();
-            strings.push(value.clone());
-            idx
-        });
-    }
-    strings
-}
-
-// DEBUG ERROR MESSAGES SECTION
+// DEBUG ERROR MESSAGES
 // ================================================================================================
 
 /// Assertion error message keyed by its runtime error code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct DebugErrorMessage {
     /// Runtime error code emitted by the assembled assertion operation.
     pub err_code: u64,
-    /// Human-readable assertion error message from source.
-    pub message: Arc<str>,
+    /// String table index of the error message content
+    pub message: DebugStringIdx,
 }
 
 impl DebugErrorMessage {
-    /// Creates an assertion error message metadata row.
-    pub fn new(err_code: u64, message: Arc<str>) -> Self {
+    // Ensure that DebugErrorMessage records adhere to size/alignment requirements we assume
+    // elsewhere
+    const _DEBUG_ERROR_MESSAGE_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugErrorMessage>().is_multiple_of(align_of::<DebugErrorMessage>()),
+            "expected the size of DebugErrorMessage to be a multiple of its alignment"
+        );
+    };
+
+    pub fn new(err_code: u64, message: DebugStringIdx) -> Self {
         Self { err_code, message }
-    }
-}
-
-/// Package-owned assertion error messages.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DebugErrorMessagesSection {
-    /// Version of the debug error messages format.
-    version: u8,
-    /// Error messages keyed by runtime error code.
-    messages: Vec<DebugErrorMessage>,
-}
-
-impl DebugErrorMessagesSection {
-    /// Creates an empty assertion error message section.
-    pub fn new() -> Self {
-        Self {
-            version: DEBUG_ERROR_MESSAGES_VERSION,
-            messages: Vec::new(),
-        }
-    }
-
-    /// Creates an assertion error message section from rows.
-    pub fn from_parts(messages: Vec<DebugErrorMessage>) -> Self {
-        Self {
-            version: DEBUG_ERROR_MESSAGES_VERSION,
-            messages,
-        }
-    }
-
-    /// Returns the error message section format version.
-    pub fn version(&self) -> u8 {
-        self.version
-    }
-
-    /// Returns error message rows.
-    pub fn messages(&self) -> &[DebugErrorMessage] {
-        &self.messages
-    }
-
-    /// Returns true if the section contains no metadata rows.
-    pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
-    }
-
-    /// Returns the assertion error message for `err_code`, if present.
-    pub fn message(&self, err_code: u64) -> Option<Arc<str>> {
-        self.messages
-            .iter()
-            .find(|row| row.err_code == err_code)
-            .map(|row| row.message.clone())
     }
 }
 
@@ -1536,7 +547,7 @@ impl DebugErrorMessagesSection {
 ///
 /// This encodes the type of a variable or expression, enabling debuggers to properly
 /// display values on the stack or in memory.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DebugTypeInfo {
     /// A primitive type (e.g., i32, i64, felt, etc.)
     Primitive(DebugPrimitiveType),
@@ -1555,7 +566,7 @@ pub enum DebugTypeInfo {
     /// A struct type
     Struct {
         /// Name of the struct (index into string table)
-        name_idx: u32,
+        name_idx: DebugStringIdx,
         /// Size in bytes
         size: u32,
         /// Fields of the struct
@@ -1571,7 +582,7 @@ pub enum DebugTypeInfo {
     /// An enum type.
     Enum {
         /// Name of the enum (index into string table).
-        name_idx: u32,
+        name_idx: DebugStringIdx,
         /// Size in bytes.
         size: u32,
         /// Type of the enum discriminant.
@@ -1587,10 +598,14 @@ pub enum DebugTypeInfo {
 ///
 /// New variants must be added at the end to maintain backwards compatibility
 /// with previously serialized debug info.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum DebugPrimitiveType {
     /// Void type (0 bytes)
+    #[warn(
+        deprecated_in_future,
+        reason = "void is deprecated in favor of function types with no results"
+    )]
     Void = 0,
     /// Boolean (1 byte)
     Bool,
@@ -1626,6 +641,32 @@ pub enum DebugPrimitiveType {
     U256,
 }
 
+impl TryFrom<DebugPrimitiveType> for Type {
+    type Error = DebugPrimitiveType;
+
+    fn try_from(value: DebugPrimitiveType) -> Result<Self, Self::Error> {
+        Ok(match value {
+            value @ (DebugPrimitiveType::Void
+            | DebugPrimitiveType::Word
+            | DebugPrimitiveType::F32) => return Err(value),
+            DebugPrimitiveType::Bool => Type::I1,
+            DebugPrimitiveType::I8 => Type::I8,
+            DebugPrimitiveType::U8 => Type::U8,
+            DebugPrimitiveType::I16 => Type::I16,
+            DebugPrimitiveType::U16 => Type::U16,
+            DebugPrimitiveType::I32 => Type::I32,
+            DebugPrimitiveType::U32 => Type::U32,
+            DebugPrimitiveType::I64 => Type::I64,
+            DebugPrimitiveType::U64 => Type::U64,
+            DebugPrimitiveType::I128 => Type::I128,
+            DebugPrimitiveType::U128 => Type::U128,
+            DebugPrimitiveType::F64 => Type::F64,
+            DebugPrimitiveType::Felt => Type::Felt,
+            DebugPrimitiveType::U256 => Type::U256,
+        })
+    }
+}
+
 impl DebugPrimitiveType {
     /// Converts a discriminant byte to a primitive type.
     pub fn from_discriminant(discriminant: u8) -> Option<Self> {
@@ -1653,10 +694,10 @@ impl DebugPrimitiveType {
 }
 
 /// Field information within a struct type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DebugFieldInfo {
     /// Name of the field (index into string table)
-    pub name_idx: u32,
+    pub name_idx: DebugStringIdx,
     /// Type of the field (index into type table)
     pub type_idx: DebugTypeIdx,
     /// Byte offset within the struct
@@ -1664,16 +705,327 @@ pub struct DebugFieldInfo {
 }
 
 /// Variant information within an enum type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DebugVariantInfo {
     /// Name of the variant (index into string table).
-    pub name_idx: u32,
+    pub name_idx: DebugStringIdx,
     /// Payload type of this variant (index into type table), if present.
     pub type_idx: Option<DebugTypeIdx>,
     /// Byte offset of the payload from the base of the enum value, if present.
     pub payload_offset: Option<u32>,
     /// Discriminant value for this variant.
     pub discriminant: u128,
+}
+
+impl DebugTypeInfo {
+    /// Recovers the structural and source-level types represented by this debug type.
+    ///
+    /// Returns `None` when the debug type contains an invalid reference, cannot be represented by
+    /// the assembly type system, or participates in a reference cycle.
+    pub fn recover_registered_type<Exec: Idx, Src: Idx>(
+        &self,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        let mut resolving = FxHashSet::default();
+        self.recover_registered_type_inner(debug_info, cached_types, &mut resolving)
+    }
+
+    fn recover_registered_type_inner<Exec: Idx, Src: Idx>(
+        &self,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+        resolving: &mut FxHashSet<DebugTypeIdx>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        use miden_assembly_syntax::ast;
+
+        match self {
+            Self::Primitive(ty) => {
+                let ty = Type::try_from(*ty).ok()?;
+                let declared_ty = Some(Arc::new(TypeExpr::Primitive(Span::unknown(ty.clone()))));
+                Some((ty, declared_ty))
+            },
+            Self::Pointer { pointee_type_idx } => {
+                let (pointee, declared_pointee) = Self::recover_type_index(
+                    *pointee_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                let declared_ty = declared_pointee
+                    .as_deref()
+                    .map(|t| Arc::new(TypeExpr::Ptr(ast::PointerType::new(t.clone()))));
+                let ty = Type::Ptr(Arc::new(ast::types::PointerType::new(pointee)));
+                Some((ty, declared_ty))
+            },
+            Self::Array { element_type_idx, count } => {
+                let (element, declared_element) = Self::recover_type_index(
+                    *element_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                match count {
+                    Some(count) => {
+                        let count = usize::try_from(*count).ok()?;
+                        let declared_ty = declared_element.as_deref().map(|element| {
+                            Arc::new(TypeExpr::Array(ast::ArrayType::new(element.clone(), count)))
+                        });
+                        let ty = Type::Array(Arc::new(ast::types::ArrayType::new(element, count)));
+                        Some((ty, declared_ty))
+                    },
+                    None => Some((Type::List(Arc::new(element)), None)),
+                }
+            },
+            Self::Struct { name_idx, size, fields } => {
+                if fields.len() > usize::from(u8::MAX) + 1 {
+                    return None;
+                }
+
+                let name = debug_info.get_string(*name_idx)?;
+                let mut structural_fields = Vec::with_capacity(fields.len());
+                let mut declared_fields = Vec::with_capacity(fields.len());
+                let mut has_declared_type = true;
+                for field in fields {
+                    let field_name = debug_info.get_string(field.name_idx)?;
+                    let (field_ty, declared_field_ty) = Self::recover_type_index(
+                        field.type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    structural_fields.push((field_name.clone(), field_ty));
+
+                    match (ast::Ident::new(field_name.as_ref()), declared_field_ty) {
+                        (Ok(name), Some(ty)) if has_declared_type => {
+                            declared_fields.push(ast::StructField {
+                                span: SourceSpan::UNKNOWN,
+                                name,
+                                ty: Arc::unwrap_or_clone(ty),
+                            });
+                        },
+                        _ => has_declared_type = false,
+                    }
+                }
+
+                let structural_types =
+                    structural_fields.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+                let (field_offsets, recovered_size) =
+                    checked_default_struct_layout(&structural_types)?;
+                if recovered_size != *size
+                    || field_offsets
+                        .iter()
+                        .zip(fields)
+                        .any(|(actual, field)| *actual != field.offset)
+                {
+                    return None;
+                }
+
+                let is_anonymous = name.as_ref() == "<anon>";
+                let structural_ty = if is_anonymous {
+                    ast::types::StructType::new(structural_fields)
+                } else {
+                    ast::types::StructType::named(name.clone(), structural_fields)
+                };
+                let ty = Type::Struct(Arc::new(structural_ty));
+
+                let declared_name = if is_anonymous {
+                    Some(None)
+                } else {
+                    ast::Ident::new(name.as_ref()).ok().map(Some)
+                };
+                let declared_ty = declared_name.filter(|_| has_declared_type).map(|name| {
+                    Arc::new(TypeExpr::Struct(ast::StructType::new(name, declared_fields)))
+                });
+
+                Some((ty, declared_ty))
+            },
+            Self::Function { return_type_idx, param_type_indices } => {
+                let mut params = Vec::with_capacity(param_type_indices.len());
+                for param_type_idx in param_type_indices {
+                    let (param, _) = Self::recover_type_index(
+                        *param_type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    params.push(param);
+                }
+
+                let mut results = Vec::with_capacity(1);
+                if let Some(return_type_idx) = return_type_idx
+                    && !matches!(
+                        debug_info.get_type(*return_type_idx),
+                        Some(Self::Primitive(DebugPrimitiveType::Void))
+                    )
+                {
+                    let (result, _) = Self::recover_type_index(
+                        *return_type_idx,
+                        debug_info,
+                        cached_types,
+                        resolving,
+                    )?;
+                    results.push(result);
+                }
+
+                let ty = Type::Function(Arc::new(ast::types::FunctionType::new(
+                    ast::types::CallConv::Fast,
+                    params,
+                    results,
+                )));
+                Some((ty, None))
+            },
+            Self::Enum {
+                name_idx,
+                size,
+                discriminant_type_idx,
+                variants,
+            } => {
+                let name = debug_info.get_string(*name_idx)?;
+                let (discriminant, _) = Self::recover_type_index(
+                    *discriminant_type_idx,
+                    debug_info,
+                    cached_types,
+                    resolving,
+                )?;
+                let mut recovered_variants = Vec::with_capacity(variants.len());
+                for variant in variants {
+                    let variant_name = debug_info.get_string(variant.name_idx)?;
+                    let recovered_variant = match variant.type_idx {
+                        Some(type_idx) => {
+                            let (payload, _) = Self::recover_type_index(
+                                type_idx,
+                                debug_info,
+                                cached_types,
+                                resolving,
+                            )?;
+                            let (payload_offsets, _) = checked_default_struct_layout(&[
+                                discriminant.clone(),
+                                payload.clone(),
+                            ])?;
+                            let expected_offset = payload_offsets[1];
+                            if variant.payload_offset != Some(expected_offset) {
+                                return None;
+                            }
+                            ast::types::Variant::new(
+                                variant_name,
+                                payload,
+                                Some(variant.discriminant),
+                            )
+                        },
+                        None => {
+                            if variant.payload_offset.is_some() {
+                                return None;
+                            }
+                            ast::types::Variant::c_like(variant_name, Some(variant.discriminant))
+                        },
+                    };
+                    recovered_variants.push(recovered_variant);
+                }
+
+                let enum_ty =
+                    ast::types::EnumType::new(name, discriminant, recovered_variants).ok()?;
+                if enum_ty.size_in_bytes() != *size as usize {
+                    return None;
+                }
+                Some((Type::Enum(Arc::new(enum_ty)), None))
+            },
+            Self::Unknown => Some((Type::Unknown, None)),
+        }
+    }
+
+    fn recover_type_index<Exec: Idx, Src: Idx>(
+        type_idx: DebugTypeIdx,
+        debug_info: &DebugInfo<Exec, Src>,
+        cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+        resolving: &mut FxHashSet<DebugTypeIdx>,
+    ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+        if let Some(recovered) = cached_types.get(&type_idx) {
+            return Some(recovered.clone());
+        }
+        if !resolving.insert(type_idx) {
+            return None;
+        }
+
+        let recovered = debug_info.get_type(type_idx).and_then(|type_info| {
+            type_info.recover_registered_type_inner(debug_info, cached_types, resolving)
+        });
+        resolving.remove(&type_idx);
+
+        if let Some(recovered) = recovered.as_ref() {
+            cached_types.insert(type_idx, recovered.clone());
+        }
+        recovered
+    }
+}
+
+fn checked_default_struct_layout(types: &[Type]) -> Option<(Vec<u32>, u32)> {
+    let mut field_sizes = Vec::with_capacity(types.len());
+    let mut field_alignments = Vec::with_capacity(types.len());
+    for ty in types {
+        field_sizes.push(u32::try_from(checked_type_size_in_bytes(ty)?).ok()?);
+        field_alignments.push(u16::try_from(ty.min_alignment()).ok()?);
+    }
+
+    let struct_alignment = field_alignments.iter().copied().max().unwrap_or(1);
+    let mut offset = 0u32;
+    let mut offsets = Vec::with_capacity(types.len());
+    for (size, alignment) in field_sizes.into_iter().zip(field_alignments) {
+        offset = checked_align_up(offset, u32::from(alignment))?;
+        offsets.push(offset);
+        offset = offset.checked_add(size)?;
+    }
+    let size = checked_align_up(offset, u32::from(struct_alignment))?;
+    Some((offsets, size))
+}
+
+fn checked_align_up(value: u32, alignment: u32) -> Option<u32> {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(alignment - remainder)
+    }
+}
+
+fn checked_type_size_in_bytes(ty: &Type) -> Option<usize> {
+    let bits = checked_type_size_in_bits(ty)?;
+    (bits / 8).checked_add(usize::from(!bits.is_multiple_of(8)))
+}
+
+fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Unknown | Type::Never => Some(0),
+        Type::I1 => Some(1),
+        Type::I8 | Type::U8 => Some(8),
+        Type::I16 | Type::U16 => Some(16),
+        Type::I32 | Type::U32 | Type::Felt | Type::Ptr(_) | Type::Function(_) => Some(32),
+        Type::I64 | Type::U64 | Type::F64 => Some(64),
+        Type::I128 | Type::U128 => Some(128),
+        Type::U256 => Some(256),
+        Type::Struct(ty) => ty.size().checked_mul(8),
+        Type::Enum(ty) => ty.size_in_bytes().checked_mul(8),
+        Type::Array(ty) => match ty.len() {
+            0 => Some(0),
+            1 => checked_type_size_in_bits(ty.element_type()),
+            count => {
+                let element_size = checked_type_size_in_bits(ty.element_type())?;
+                let element_alignment = ty.element_type().min_alignment().checked_mul(8)?;
+                let padded_element_size = checked_align_up_usize(element_size, element_alignment)?;
+                padded_element_size.checked_mul(count - 1)?.checked_add(element_size)
+            },
+        },
+        Type::List(_) => None,
+    }
+}
+
+fn checked_align_up_usize(value: usize, alignment: usize) -> Option<usize> {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(alignment - remainder)
+    }
 }
 
 // DEBUG FILE INFO
@@ -1687,29 +1039,48 @@ pub struct DebugVariantInfo {
 /// When `directory_idx` is set, `path_idx` would be a relative path; otherwise `path_idx`
 /// is expected to be absolute. This would allow sharing common directory prefixes across
 /// multiple files.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct DebugFileInfo {
     /// Full path to the source file (index into string table).
-    pub path_idx: u32,
+    pub path_idx: DebugStringIdx,
     /// Optional checksum of the file content for verification.
     ///
     /// When present, debuggers can use this to verify that the source file on disk
     /// matches the version used during compilation.
     ///
     /// Boxed to reduce the size of `DebugFileInfo` when checksums are not used.
-    pub checksum: Option<Box<[u8; 32]>>,
+    pub(super) checksum: [u8; 32],
 }
 
 impl DebugFileInfo {
+    // Ensure that DebugFileInfo records adhere to size/alignment requirements we assume elsewhere
+    const _DEBUG_FILE_INFO_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<DebugFileInfo>().is_multiple_of(align_of::<DebugFileInfo>()),
+            "expected the size of DebugFileInfo to be a multiple of its alignment"
+        );
+    };
+
+    pub(crate) const EMPTY_CHECKSUM: [u8; 32] = [0u8; 32];
+
     /// Creates a new file info with a path.
-    pub fn new(path_idx: u32) -> Self {
-        Self { path_idx, checksum: None }
+    pub fn new(path_idx: DebugStringIdx) -> Self {
+        Self { path_idx, checksum: Self::EMPTY_CHECKSUM }
     }
 
     /// Sets the checksum.
     pub fn with_checksum(mut self, checksum: [u8; 32]) -> Self {
-        self.checksum = Some(Box::new(checksum));
+        self.checksum = checksum;
         self
+    }
+
+    pub fn checksum(&self) -> Option<&[u8; 32]> {
+        if self.checksum == Self::EMPTY_CHECKSUM {
+            None
+        } else {
+            Some(&self.checksum)
+        }
     }
 }
 
@@ -1719,143 +1090,395 @@ impl DebugFileInfo {
 /// Debug information for a function.
 ///
 /// Links source-level function information to the compiled MAST representation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DebugFunctionInfo {
-    /// Name of the function (index into string table)
-    pub name_idx: u32,
+pub type DebugFunctionInfo = FunctionInfo<DebugSourceNodeId>;
+
+// The ordering of fields in this struct is carefully chosen to ensure there are no padding bytes
+// between fields - you must ensure that adding new fields or removing them is done such that this
+// property is perserved.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub struct FunctionInfo<N: Idx> {
+    /// MAST root digest of this function.
+    ///
+    /// This links the debug info to the compiled code if `source_node` is unknown
+    pub mast_root: Word,
+    /// The source occurrance this function is linked to, if known
+    pub source_node: OptionC<N>,
+    /// Type signature of this function (index into type table, optional)
+    pub type_idx: OptionC<DebugTypeIdx>,
     /// Linkage name / mangled name (index into string table, optional)
-    pub linkage_name_idx: Option<u32>,
+    pub linkage_name_idx: OptionC<DebugStringIdx>,
+    /// Name of the function (index into string table)
+    pub name_idx: DebugStringIdx,
     /// File containing this function (index into file table)
-    pub file_idx: u32,
-    /// Line number where the function starts (1-indexed)
-    pub line: LineNumber,
-    /// Column number where the function starts (1-indexed)
-    pub column: ColumnNumber,
-    /// Type of this function (index into type table, optional)
-    pub type_idx: Option<DebugTypeIdx>,
-    /// MAST root digest of this function (if known).
-    /// This links the debug info to the compiled code.
-    pub mast_root: Option<Word>,
+    pub file_idx: DebugFileIdx,
+    /// Line index where the function starts (0-indexed)
+    pub line: LineIndex,
+    /// Column index where the function starts (0-indexed)
+    pub column: ColumnIndex,
 }
 
-impl DebugFunctionInfo {
+impl<N: Idx> FunctionInfo<N> {
+    // Ensure that FunctionInfo records adhere to size/alignment requirements we assume elsewhere
+    const _FUNCTION_INFO_SIZE_CHECK: () = const {
+        assert!(
+            size_of::<FunctionInfo<N>>().is_multiple_of(align_of::<FunctionInfo<N>>()),
+            "expected the size of FunctionInfo to be a multiple of its alignment"
+        );
+    };
+
     /// Creates a new function info.
-    pub fn new(name_idx: u32, file_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
+    pub fn new(
+        source_node: Option<N>,
+        name_idx: DebugStringIdx,
+        file_idx: DebugFileIdx,
+        line: LineNumber,
+        column: ColumnNumber,
+        mast_root: Word,
+    ) -> Self {
         Self {
+            source_node: source_node.into(),
             name_idx,
-            linkage_name_idx: None,
+            linkage_name_idx: OptionC::none(),
             file_idx,
-            line,
-            column,
-            type_idx: None,
-            mast_root: None,
+            line: line.to_index(),
+            column: column.to_index(),
+            type_idx: OptionC::none(),
+            mast_root,
         }
     }
 
     /// Sets the linkage name.
-    pub fn with_linkage_name(mut self, linkage_name_idx: u32) -> Self {
-        self.linkage_name_idx = Some(linkage_name_idx);
+    pub fn with_linkage_name(mut self, linkage_name_idx: DebugStringIdx) -> Self {
+        self.linkage_name_idx = OptionC::some(linkage_name_idx);
         self
     }
 
     /// Sets the type index.
     pub fn with_type(mut self, type_idx: DebugTypeIdx) -> Self {
-        self.type_idx = Some(type_idx);
-        self
-    }
-
-    /// Sets the MAST root digest.
-    pub fn with_mast_root(mut self, mast_root: Word) -> Self {
-        self.mast_root = Some(mast_root);
+        self.type_idx = OptionC::some(type_idx);
         self
     }
 }
 
 #[cfg(test)]
+impl PackageDebugInfo {
+    /// Corrupts a decoded file-table reference so package validation tests can exercise invalid
+    /// serialized input that the public builder intentionally refuses to construct.
+    pub(crate) fn set_file_path_index_for_test(
+        &mut self,
+        file_idx: DebugFileIdx,
+        path_idx: DebugStringIdx,
+    ) {
+        self.files[file_idx].path_idx = path_idx;
+    }
+
+    /// Corrupts a decoded location-table reference for package validation tests.
+    pub(crate) fn set_location_file_index_for_test(
+        &mut self,
+        location_idx: DebugLocIdx,
+        file_idx: DebugFileIdx,
+    ) {
+        self.locations[location_idx].file_idx = file_idx;
+    }
+
+    /// Corrupts an error-message string reference for package validation tests.
+    pub(crate) fn set_error_message_index_for_test(
+        &mut self,
+        message_idx: usize,
+        string_idx: DebugStringIdx,
+    ) {
+        self.error_messages[message_idx].message = string_idx;
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
+
+    use miden_debug_types::{ByteIndex, Location, Uri};
+
     use super::*;
+    use crate::debug_info::PackageDebugInfoBuilder;
 
-    #[test]
-    fn test_debug_types_section_string_dedup() {
-        let mut section = DebugTypesSection::new();
-
-        let idx1 = section.add_string(Arc::from("test.rs"));
-        let idx2 = section.add_string(Arc::from("main.rs"));
-        let idx3 = section.add_string(Arc::from("test.rs")); // Duplicate
-
-        assert_eq!(idx1, 0);
-        assert_eq!(idx2, 1);
-        assert_eq!(idx3, 0); // Should return same index
-        assert_eq!(section.strings.len(), 2);
+    fn source_node(
+        exec_node: MastNodeId,
+        children: Vec<DebugSourceNodeId>,
+        op_start: u32,
+        op_end: u32,
+    ) -> DebugSourceNode {
+        DebugSourceNode {
+            exec_node,
+            children,
+            op_start,
+            op_end,
+            asm_ops: Vec::new(),
+            debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+        }
     }
 
     #[test]
-    fn test_debug_sources_section_string_dedup() {
-        let mut section = DebugSourcesSection::new();
+    fn recover_registered_pointer_caches_its_pointee() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let pointee_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let pointer_idx =
+            builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: pointee_idx });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
 
-        let idx1 = section.add_string(Arc::from("test.rs"));
-        let idx2 = section.add_string(Arc::from("main.rs"));
-        let idx3 = section.add_string(Arc::from("test.rs")); // Duplicate
+        let (recovered, declared) = debug_info[pointer_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("pointer should be recoverable");
 
-        assert_eq!(idx1, 0);
-        assert_eq!(idx2, 1);
-        assert_eq!(idx3, 0); // Should return same index
-        assert_eq!(section.strings.len(), 2);
+        let Type::Ptr(pointer) = recovered else {
+            panic!("expected a recovered pointer");
+        };
+        assert_eq!(pointer.pointee(), &Type::U32);
+        assert!(matches!(declared.as_deref(), Some(TypeExpr::Ptr(_))));
+        assert_eq!(cache.get(&pointee_idx).map(|(ty, _)| ty), Some(&Type::U32));
     }
 
     #[test]
-    fn test_debug_functions_section_string_dedup() {
-        let mut section = DebugFunctionsSection::new();
+    fn recover_registered_fixed_and_dynamic_arrays() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let element_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U16));
+        let fixed_idx = builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: Some(3),
+        });
+        let dynamic_idx = builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: None,
+        });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
 
-        let idx1 = section.add_string(Arc::from("foo"));
-        let idx2 = section.add_string(Arc::from("bar"));
-        let idx3 = section.add_string(Arc::from("foo")); // Duplicate
+        let (fixed, fixed_declared) = debug_info[fixed_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("fixed array should be recoverable");
+        let Type::Array(fixed) = fixed else {
+            panic!("expected a recovered fixed array");
+        };
+        assert_eq!(fixed.element_type(), &Type::U16);
+        assert_eq!(fixed.len(), 3);
+        assert!(matches!(fixed_declared.as_deref(), Some(TypeExpr::Array(_))));
 
-        assert_eq!(idx1, 0);
-        assert_eq!(idx2, 1);
-        assert_eq!(idx3, 0); // Should return same index
-        assert_eq!(section.strings.len(), 2);
+        let (dynamic, dynamic_declared) = debug_info[dynamic_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("dynamic array should be recoverable as a list");
+        let Type::List(element) = dynamic else {
+            panic!("expected a recovered list");
+        };
+        assert_eq!(element.as_ref(), &Type::U16);
+        assert!(dynamic_declared.is_none());
+    }
+
+    #[test]
+    fn recover_registered_struct_and_enum_round_trip() {
+        use miden_assembly_syntax::ast::types::{ArrayType, EnumType, StructType, Variant};
+
+        let array = Type::Array(Arc::new(ArrayType::new(Type::U8, 2)));
+        let struct_ty = Type::Struct(Arc::new(StructType::named(
+            Arc::from("pair"),
+            [(Arc::from("left"), Type::U32), (Arc::from("right"), array)],
+        )));
+        let enum_ty = Type::Enum(Arc::new(
+            EnumType::new(
+                Arc::from("option_u32"),
+                Type::U8,
+                [
+                    Variant::c_like(Arc::from("none"), Some(0)),
+                    Variant::new(Arc::from("some"), Type::U32, Some(1)),
+                ],
+            )
+            .unwrap(),
+        ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_idx = builder.register_debug_type(None, None, &struct_ty).unwrap();
+        let enum_idx = builder.register_debug_type(None, None, &enum_ty).unwrap();
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered_struct, declared_struct) = debug_info[struct_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("struct should be recoverable");
+        assert_eq!(recovered_struct, struct_ty);
+        assert!(matches!(declared_struct.as_deref(), Some(TypeExpr::Struct(_))));
+
+        let (recovered_enum, declared_enum) = debug_info[enum_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("enum should be recoverable");
+        assert_eq!(recovered_enum, enum_ty);
+        assert!(declared_enum.is_none());
+    }
+
+    #[test]
+    fn recover_registered_functions_use_fast_calling_convention() {
+        use miden_assembly_syntax::ast::types::CallConv;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let u32_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let void_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void));
+        let no_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: None,
+            param_type_indices: vec![u32_idx],
+        });
+        let void_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: Some(void_idx),
+            param_type_indices: vec![u32_idx],
+        });
+        let value_return_idx = builder.add_type(DebugTypeInfo::Function {
+            return_type_idx: Some(u32_idx),
+            param_type_indices: vec![u32_idx],
+        });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        for function_idx in [no_return_idx, void_return_idx] {
+            let (function, declared) = debug_info[function_idx]
+                .recover_registered_type(debug_info.as_ref(), &mut cache)
+                .expect("function should be recoverable");
+            let Type::Function(function) = function else {
+                panic!("expected a recovered function");
+            };
+            assert_eq!(function.calling_convention(), CallConv::Fast);
+            assert_eq!(function.params(), &[Type::U32]);
+            assert!(function.results().is_empty());
+            assert!(declared.is_none());
+        }
+
+        let (function, _) = debug_info[value_return_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("function should be recoverable");
+        let Type::Function(function) = function else {
+            panic!("expected a recovered function");
+        };
+        assert_eq!(function.calling_convention(), CallConv::Fast);
+        assert_eq!(function.results(), &[Type::U32]);
+    }
+
+    #[test]
+    fn recover_registered_type_rejects_cycles_and_unsized_aggregates() {
+        let mut cyclic_builder = PackageDebugInfoBuilder::default();
+        let first = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(1) });
+        let second = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(0) });
+        assert_eq!(first, DebugTypeIdx::from(0));
+        assert_eq!(second, DebugTypeIdx::from(1));
+        let cyclic = cyclic_builder.build();
+        assert!(
+            cyclic[first]
+                .recover_registered_type(cyclic.as_ref(), &mut FxHashMap::default())
+                .is_none()
+        );
+
+        let mut aggregate_builder = PackageDebugInfoBuilder::default();
+        let name_idx = aggregate_builder.add_string("unsized");
+        let field_name_idx = aggregate_builder.add_string("items");
+        let element_idx =
+            aggregate_builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let list_idx = aggregate_builder.add_type(DebugTypeInfo::Array {
+            element_type_idx: element_idx,
+            count: None,
+        });
+        let struct_idx = aggregate_builder.add_type(DebugTypeInfo::Struct {
+            name_idx,
+            size: 0,
+            fields: vec![DebugFieldInfo {
+                name_idx: field_name_idx,
+                type_idx: list_idx,
+                offset: 0,
+            }],
+        });
+        let aggregate = aggregate_builder.build();
+        assert!(
+            aggregate[struct_idx]
+                .recover_registered_type(aggregate.as_ref(), &mut FxHashMap::default())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn file_uri_lookup_uses_the_stored_representation() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let uri = Uri::new("file:///src/main.masm");
+        let file_idx = builder.add_file(uri.clone(), None);
+
+        assert_eq!(builder.get_file_index_by_uri(&uri), Some(file_idx));
+
+        let debug_info = builder.build();
+        assert_eq!(debug_info.get_file_index_by_uri(&uri), Some(file_idx));
+    }
+
+    #[test]
+    fn trimming_file_paths_does_not_mutate_shared_strings() {
+        let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+        let trimmed_path: Arc<str> = Arc::from("src/main.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_a = builder.add_file(Uri::from(absolute_path.clone()), None);
+        let file_b = builder.add_file(Uri::from(absolute_path.clone()), Some([1; 32]));
+        let trimmed_path_idx = builder.add_string(trimmed_path.clone());
+        assert!(builder.add_error_message(7, absolute_path.clone()));
+        let mut debug_info = *builder.build();
+        let mut trim_calls = 0;
+
+        debug_info.trim_file_paths(|path| {
+            trim_calls += 1;
+            assert_eq!(path, absolute_path.as_ref());
+            Some(trimmed_path.clone())
+        });
+
+        assert_eq!(trim_calls, 1, "a shared file path should only be trimmed once");
+        assert_eq!(debug_info[file_a].path_idx, trimmed_path_idx);
+        assert_eq!(debug_info[file_b].path_idx, trimmed_path_idx);
+        assert_eq!(debug_info.error_message(7).as_deref(), Some(absolute_path.as_ref()));
+        assert_eq!(debug_info.strings().len(), 2, "the existing trimmed string should be reused");
     }
 
     #[test]
     fn test_debug_source_map_inline_calls_are_keyed_by_source_operation() {
-        let source_a = DebugSourceNodeId::from(0);
-        let source_b = DebugSourceNodeId::from(1);
-        let inline_a = DebugSourceInlineCall::new(
-            source_a,
-            3,
-            0,
-            0,
-            LineNumber::new(10).unwrap(),
-            ColumnNumber::new(4).unwrap(),
-        );
-        let inline_b = DebugSourceInlineCall::new(
-            source_b,
-            3,
-            1,
-            0,
-            LineNumber::new(20).unwrap(),
-            ColumnNumber::new(8).unwrap(),
-        );
-        let source_map = DebugSourceMapSection::from_parts_with_inline_calls(
-            alloc::vec![],
-            alloc::vec![],
-            alloc::vec![inline_a.clone(), inline_b.clone()],
-        );
+        let inline_a = DebugSourceInlineCall {
+            op_idx: 3,
+            callee_idx: DebugFunctionIdx::from(0),
+            loc_idx: DebugLocIdx::from(0),
+        };
+        let inline_b = DebugSourceInlineCall {
+            op_idx: 3,
+            callee_idx: DebugFunctionIdx::from(1),
+            loc_idx: DebugLocIdx::from(0),
+        };
+        let mut builder = PackageDebugInfoBuilder::default();
+        let mut node_a = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 4);
+        node_a.inline_calls.push(inline_a);
+        let source_a = builder.add_node(node_a).unwrap();
+        let mut node_b = source_node(MastNodeId::new_unchecked(1), Vec::new(), 0, 4);
+        node_b.inline_calls.push(inline_b);
+        let source_b = builder.add_node(node_b).unwrap();
+        let debug_info = builder.build();
 
-        assert_eq!(source_map.inline_calls(), &[inline_a.clone(), inline_b]);
         assert_eq!(
-            source_map.inline_calls_for_operation(source_a, 3).collect::<Vec<_>>(),
-            alloc::vec![&inline_a],
+            debug_info.inline_calls_for_source_node(source_a).collect::<Vec<_>>(),
+            vec![&inline_a]
         );
-        assert!(source_map.inline_calls_for_operation(source_a, 4).next().is_none());
+        assert_eq!(
+            debug_info.inline_calls_for_source_node(source_b).collect::<Vec<_>>(),
+            vec![&inline_b]
+        );
+        assert_eq!(
+            debug_info.inline_calls_for_operation(source_a, 3).collect::<Vec<_>>(),
+            vec![&inline_a],
+        );
+        assert!(debug_info.inline_calls_for_operation(source_a, 4).next().is_none());
     }
 
     #[test]
     fn test_package_source_debug_merge_remaps_execution_nodes_without_collapsing_sources() {
+        use miden_assembly_syntax::ast::DebugVarLocation;
         use miden_core::{
             mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest},
-            operations::{DebugVarInfo, DebugVarLocation, Operation},
+            operations::Operation,
         };
 
         fn forest_with_add_block() -> (MastForest, MastNodeId) {
@@ -1874,51 +1497,43 @@ mod tests {
             context: &str,
             var_name: &str,
         ) -> PackageDebugInfo {
+            let mut builder = PackageDebugInfoBuilder::default();
             let source_node = DebugSourceNodeId::from(0);
-            let mut sources = DebugSourcesSection::new();
-            let path_idx = sources.add_string(Arc::from(alloc::format!("{context}.masm")));
-            let file_idx = sources.add_file(DebugFileInfo::new(path_idx));
-            let mut functions = DebugFunctionsSection::new();
-            let name_idx = functions.add_string(Arc::from(alloc::format!("{context}_callee")));
-            functions.add_function(DebugFunctionInfo::new(
+            let uri = Uri::new(alloc::format!("{context}.masm"));
+            let file_idx = builder.add_file(uri.clone(), None);
+            let loc_idx =
+                builder.add_location(Location::new(uri, ByteIndex::new(8), ByteIndex::new(9)));
+            let name_idx = builder.add_string(Arc::from(alloc::format!("{context}_callee")));
+            let callee_idx = builder.add_function(DebugFunctionInfo::new(
+                Some(source_node),
                 name_idx,
                 file_idx,
                 LineNumber::new(7).unwrap(),
                 ColumnNumber::new(3).unwrap(),
+                Word::default(),
             ));
-            PackageDebugInfo {
-                sources: Some(sources),
-                functions: Some(functions),
-                source_graph: Some(DebugSourceGraphSection {
-                    version: DEBUG_SOURCE_GRAPH_VERSION,
-                    nodes: alloc::vec![DebugSourceNode::new(block, alloc::vec![], 0, 1,)],
-                    roots: alloc::vec![source_node],
-                }),
-                source_map: Some(DebugSourceMapSection::from_parts_with_inline_calls(
-                    alloc::vec![DebugSourceAsmOp::new(
-                        source_node,
-                        0,
-                        None,
-                        context.into(),
-                        "add".into(),
-                        1,
-                    )],
-                    alloc::vec![DebugSourceVar::new(
-                        source_node,
-                        0,
-                        DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
-                    )],
-                    alloc::vec![DebugSourceInlineCall::new(
-                        source_node,
-                        0,
-                        0,
-                        file_idx,
-                        LineNumber::new(9).unwrap(),
-                        ColumnNumber::new(5).unwrap(),
-                    )],
-                )),
-                ..PackageDebugInfo::default()
-            }
+            let context_name_idx = builder.add_string(context);
+            let op_name_idx = builder.add_string("add");
+            let var_name_idx = builder.add_string(var_name);
+            let node = DebugSourceNode {
+                exec_node: block,
+                children: Vec::new(),
+                op_start: 0,
+                op_end: 1,
+                asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
+                debug_vars: vec![DebugSourceVar {
+                    op_idx: 0,
+                    name_idx: var_name_idx,
+                    type_id: None,
+                    arg_idx: None,
+                    location_idx: None,
+                    value_location: DebugVarLocation::Stack(0),
+                }],
+                inline_calls: vec![DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx }],
+            };
+            assert_eq!(builder.add_node(node).unwrap(), source_node);
+            builder.add_root(source_node);
+            *builder.build()
         }
 
         let (forest_a, block_a) = forest_with_add_block();
@@ -1934,58 +1549,137 @@ mod tests {
         let merged_debug =
             PackageDebugInfo::merge_source_debug([(0, &debug_a), (1, &debug_b)], &root_map)
                 .unwrap();
-        let source_graph = merged_debug.source_graph.as_ref().unwrap();
-        assert_eq!(source_graph.nodes.len(), 2);
-        assert_eq!(source_graph.roots.len(), 2);
-        assert!(source_graph.nodes.iter().all(|node| node.exec_node == merged_a));
+        assert_eq!(merged_debug.nodes().len(), 2);
+        assert_eq!(merged_debug.roots().len(), 2);
+        assert!(merged_debug.nodes().iter().all(|node| node.exec_node == merged_a));
 
-        let source_a = source_graph.roots[0];
-        let source_b = source_graph.roots[1];
+        let source_a = merged_debug.roots()[0];
+        let source_b = merged_debug.roots()[1];
         assert_ne!(source_a, source_b);
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(source_a).unwrap().context_name,
+            merged_debug
+                [merged_debug.first_asm_op_for_source_node(source_a).unwrap().context_name_idx]
+                .as_ref(),
             "alias_a",
         );
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            merged_debug
+                [merged_debug.first_asm_op_for_source_node(source_b).unwrap().context_name_idx]
+                .as_ref(),
             "alias_b",
         );
         assert_eq!(
             merged_debug
                 .debug_vars_for_operation(source_a, 0)
-                .map(|row| row.var.name())
+                .map(|row| merged_debug[row.name_idx].as_ref())
                 .collect::<Vec<_>>(),
             alloc::vec!["x"],
         );
         assert_eq!(
             merged_debug
                 .debug_vars_for_operation(source_b, 0)
-                .map(|row| row.var.name())
+                .map(|row| merged_debug[row.name_idx].as_ref())
                 .collect::<Vec<_>>(),
             alloc::vec!["y"],
         );
-        let sources = merged_debug.sources.as_ref().unwrap();
-        let functions = merged_debug.functions.as_ref().unwrap();
         let inline_a = merged_debug.inline_calls_for_operation(source_a, 0).collect::<Vec<_>>();
         let inline_b = merged_debug.inline_calls_for_operation(source_b, 0).collect::<Vec<_>>();
         assert_eq!(inline_a.len(), 1);
         assert_eq!(inline_b.len(), 1);
 
-        let file_a = sources.get_file(inline_a[0].file_idx).unwrap();
-        let path_a = sources.get_string(file_a.path_idx).unwrap();
-        let function_a = &functions.functions[inline_a[0].callee_idx as usize];
-        let function_name_a = functions.get_string(function_a.name_idx).unwrap();
+        let call_loc_a = merged_debug.locations()[inline_a[0].loc_idx];
+        let function_a = merged_debug.get_function(inline_a[0].callee_idx).unwrap();
+        let file_a = merged_debug.get_file(function_a.file_idx).unwrap();
+        let path_a = merged_debug.get_string(file_a.path_idx).unwrap();
+        let function_name_a = merged_debug.get_string(function_a.name_idx).unwrap();
         assert_eq!(path_a.as_ref(), "alias_a.masm");
         assert_eq!(function_name_a.as_ref(), "alias_a_callee");
-        assert_eq!(function_a.file_idx, inline_a[0].file_idx);
+        assert_eq!(function_a.file_idx, call_loc_a.file_idx);
 
-        let file_b = sources.get_file(inline_b[0].file_idx).unwrap();
-        let path_b = sources.get_string(file_b.path_idx).unwrap();
-        let function_b = &functions.functions[inline_b[0].callee_idx as usize];
-        let function_name_b = functions.get_string(function_b.name_idx).unwrap();
+        let call_loc_b = merged_debug.locations()[inline_b[0].loc_idx];
+        let function_b = merged_debug.get_function(inline_b[0].callee_idx).unwrap();
+        let file_b = merged_debug.get_file(function_b.file_idx).unwrap();
+        let path_b = merged_debug.get_string(file_b.path_idx).unwrap();
+        let function_name_b = merged_debug.get_string(function_b.name_idx).unwrap();
         assert_eq!(path_b.as_ref(), "alias_b.masm");
         assert_eq!(function_name_b.as_ref(), "alias_b_callee");
-        assert_eq!(function_b.file_idx, inline_b[0].file_idx);
+        assert_eq!(function_b.file_idx, call_loc_b.file_idx);
+    }
+
+    #[test]
+    fn test_package_source_debug_merge_remaps_first_input_execution_nodes() {
+        use miden_core::{
+            mast::{
+                BasicBlockNodeBuilder, DenseMastForestBuilder, ExternalNodeBuilder, MastForest,
+            },
+            operations::Operation,
+        };
+
+        let mut source_builder = DenseMastForestBuilder::new();
+        let block = source_builder
+            .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
+            .unwrap();
+        source_builder.mark_root(block);
+        let (source_forest, source_remapping) = source_builder.finish_with_id_map().unwrap();
+        let block = source_remapping.get(block).unwrap();
+
+        // External nodes are finalized before basic blocks, forcing the first forest's block ID to
+        // move in the merged forest.
+        let mut other_builder = DenseMastForestBuilder::new();
+        let external = other_builder.push_node(ExternalNodeBuilder::new(Word::default())).unwrap();
+        other_builder.mark_root(external);
+        let (other_forest, _) = other_builder.finish_with_id_map().unwrap();
+
+        let (_merged_forest, root_map) =
+            MastForest::merge([&source_forest, &other_forest]).unwrap();
+        let merged_block = root_map.map_node(0, &block).unwrap();
+        assert_ne!(merged_block, block, "test setup must renumber the first forest's block");
+
+        let mut debug_builder = PackageDebugInfoBuilder::default();
+        let source_root = debug_builder.add_node(source_node(block, Vec::new(), 0, 1)).unwrap();
+        debug_builder.add_root(source_root);
+        let debug_info = debug_builder.build();
+
+        let merged_debug =
+            PackageDebugInfo::merge_source_debug([(0, debug_info.as_ref())], &root_map).unwrap();
+
+        assert_eq!(merged_debug[source_root].exec_node, merged_block);
+    }
+
+    #[test]
+    fn test_package_source_debug_merge_supports_forward_and_cyclic_type_references() {
+        use miden_core::mast::MastForestRootMap;
+
+        let mut base_builder = PackageDebugInfoBuilder::default();
+        let base_type = base_builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        assert_eq!(base_type, DebugTypeIdx::from(0));
+        let base = base_builder.build();
+
+        let mut cyclic_builder = PackageDebugInfoBuilder::default();
+        let first = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(1) });
+        let second = cyclic_builder
+            .add_type(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(0) });
+        assert_eq!(first, DebugTypeIdx::from(0));
+        assert_eq!(second, DebugTypeIdx::from(1));
+        let cyclic = cyclic_builder.build();
+
+        let merged = PackageDebugInfo::merge_source_debug(
+            [(0, base.as_ref()), (1, cyclic.as_ref())],
+            &MastForestRootMap::default(),
+        )
+        .unwrap();
+
+        let merged_first = DebugTypeIdx::from(1);
+        let merged_second = DebugTypeIdx::from(2);
+        assert_eq!(
+            merged[merged_first],
+            DebugTypeInfo::Pointer { pointee_type_idx: merged_second }
+        );
+        assert_eq!(
+            merged[merged_second],
+            DebugTypeInfo::Pointer { pointee_type_idx: merged_first }
+        );
     }
 
     #[test]
@@ -2005,92 +1699,91 @@ mod tests {
         let callee = remapping.get(callee).unwrap();
         let call = remapping.get(call).unwrap();
 
-        let root_source = DebugSourceNodeId::from(0);
-        let child_source = DebugSourceNodeId::from(1);
-        let debug_info = PackageDebugInfo {
-            source_graph: Some(DebugSourceGraphSection {
-                version: DEBUG_SOURCE_GRAPH_VERSION,
-                nodes: alloc::vec![
-                    DebugSourceNode::new(call, alloc::vec![child_source], 0, 1),
-                    DebugSourceNode::new(callee, alloc::vec![], 0, 1),
-                ],
-                roots: alloc::vec![root_source],
-            }),
-            source_map: Some(DebugSourceMapSection::from_parts(
-                alloc::vec![DebugSourceAsmOp::new(
-                    child_source,
-                    0,
-                    None,
-                    "callee".into(),
-                    "add".into(),
-                    1,
-                )],
-                alloc::vec![],
-            )),
-            ..PackageDebugInfo::default()
-        };
+        let mut debug_builder = PackageDebugInfoBuilder::default();
+        let context_name_idx = debug_builder.add_string("callee");
+        let op_name_idx = debug_builder.add_string("add");
+        let mut child = source_node(callee, Vec::new(), 0, 1);
+        child
+            .asm_ops
+            .push(DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1));
+        let child_source = debug_builder.add_node(child).unwrap();
+        let root_source =
+            debug_builder.add_node(source_node(call, vec![child_source], 0, 1)).unwrap();
+        debug_builder.add_root(root_source);
+        let debug_info = debug_builder.build();
 
         let (_merged_forest, root_map) = MastForest::merge([&forest]).unwrap();
         let merged_callee = root_map.map_node(0, &callee).unwrap();
 
         let merged_debug =
-            PackageDebugInfo::merge_source_debug([(0, &debug_info)], &root_map).unwrap();
-        let source_graph = merged_debug.source_graph.as_ref().unwrap();
-        let merged_child = source_graph.nodes[source_graph.roots[0].as_u32() as usize].children[0];
-        assert_eq!(source_graph.nodes[merged_child.as_u32() as usize].exec_node, merged_callee,);
+            PackageDebugInfo::merge_source_debug([(0, debug_info.as_ref())], &root_map).unwrap();
+        let merged_child =
+            merged_debug.child_source_node(merged_debug.roots()[0], 0).unwrap().unwrap().0;
+        assert_eq!(merged_debug[merged_child].exec_node, merged_callee);
         assert_eq!(
-            merged_debug.first_asm_op_for_source_node(merged_child).unwrap().context_name,
+            merged_debug[merged_debug
+                .first_asm_op_for_source_node(merged_child)
+                .unwrap()
+                .context_name_idx]
+                .as_ref(),
             "callee",
         );
     }
 
     #[test]
     fn test_source_debug_lookup_uses_source_node_identity() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
         let exec_node = MastNodeId::new_unchecked(7);
-        let source_a = DebugSourceNodeId::from(0);
-        let source_b = DebugSourceNodeId::from(1);
-        let graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: alloc::vec![
-                DebugSourceNode::new(exec_node, alloc::vec![], 0, 1),
-                DebugSourceNode::new(exec_node, alloc::vec![], 0, 1),
-            ],
-            roots: alloc::vec![source_a, source_b],
-        };
-        assert_eq!(graph.nodes().iter().filter(|node| node.exec_node == exec_node).count(), 2);
-        assert_eq!(graph.source_node(source_a).unwrap().exec_node, exec_node);
+        let mut builder = PackageDebugInfoBuilder::default();
+        let add_idx = builder.add_string("add");
+        let mul_idx = builder.add_string("mul");
+        let alias_a_idx = builder.add_string("alias_a");
+        let alias_b_idx = builder.add_string("alias_b");
+        let alias_b_later_idx = builder.add_string("alias_b_later");
+        let x_idx = builder.add_string("x");
+        let y_idx = builder.add_string("y");
+        let mut node_a = source_node(exec_node, Vec::new(), 0, 1);
+        node_a.asm_ops.push(DebugSourceAsmOp::new(0, None, alias_a_idx, add_idx, 1));
+        node_a.debug_vars.push(DebugSourceVar {
+            op_idx: 0,
+            name_idx: x_idx,
+            type_id: None,
+            arg_idx: None,
+            location_idx: None,
+            value_location: DebugVarLocation::Stack(0),
+        });
+        let source_a = builder.add_node(node_a).unwrap();
+        let mut node_b = source_node(exec_node, Vec::new(), 0, 3);
+        node_b.asm_ops.extend([
+            DebugSourceAsmOp::new(0, None, alias_b_idx, add_idx, 1),
+            DebugSourceAsmOp::new(2, None, alias_b_later_idx, mul_idx, 1),
+        ]);
+        node_b.debug_vars.push(DebugSourceVar {
+            op_idx: 0,
+            name_idx: y_idx,
+            type_id: None,
+            arg_idx: None,
+            location_idx: None,
+            value_location: DebugVarLocation::Stack(1),
+        });
+        let source_b = builder.add_node(node_b).unwrap();
+        builder.add_root(source_a);
+        builder.add_root(source_b);
+        let debug_info = builder.build();
 
-        let source_map = DebugSourceMapSection::from_parts(
-            alloc::vec![
-                DebugSourceAsmOp::new(source_a, 0, None, "alias_a".into(), "add".into(), 1),
-                DebugSourceAsmOp::new(source_b, 0, None, "alias_b".into(), "add".into(), 1),
-                DebugSourceAsmOp::new(source_b, 2, None, "alias_b_later".into(), "mul".into(), 1),
-            ],
-            alloc::vec![
-                DebugSourceVar::new(
-                    source_a,
-                    0,
-                    DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
-                ),
-                DebugSourceVar::new(
-                    source_b,
-                    0,
-                    DebugVarInfo::new("y", DebugVarLocation::Stack(1)),
-                ),
-            ],
-        );
-
-        assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name, "alias_a",);
-        assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name, "alias_b",);
+        assert_eq!(debug_info.nodes().iter().filter(|node| node.exec_node == exec_node).count(), 2);
+        assert_eq!(debug_info.source_node(source_a).unwrap().exec_node, exec_node);
+        let asm_a = debug_info.asm_op_for_operation(source_a, 0).unwrap();
+        let asm_b = debug_info.asm_op_for_operation(source_b, 0).unwrap();
+        assert_eq!(debug_info[asm_a.context_name_idx].as_ref(), "alias_a");
+        assert_eq!(debug_info[asm_b.context_name_idx].as_ref(), "alias_b");
         assert_eq!(
-            source_map.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            debug_info[debug_info.first_asm_op_for_source_node(source_b).unwrap().context_name_idx]
+                .as_ref(),
             "alias_b",
         );
-        let vars_b = source_map.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();
+        let vars_b = debug_info.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();
         assert_eq!(vars_b.len(), 1);
-        assert_eq!(vars_b[0].var.name(), "y");
+        assert_eq!(debug_info[vars_b[0].name_idx].as_ref(), "y");
     }
 
     #[test]
@@ -2098,46 +1791,33 @@ mod tests {
         let root_exec = MastNodeId::new_unchecked(7);
         let child_exec = MastNodeId::new_unchecked(8);
         let other_exec = MastNodeId::new_unchecked(9);
-        let root = DebugSourceNodeId::from(0);
-        let child_a = DebugSourceNodeId::from(1);
-        let child_b = DebugSourceNodeId::from(2);
-        let other_root = DebugSourceNodeId::from(3);
-        let graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: alloc::vec![
-                DebugSourceNode::new(root_exec, alloc::vec![child_a, child_b], 0, 1),
-                DebugSourceNode::new(child_exec, alloc::vec![], 0, 1),
-                DebugSourceNode::new(child_exec, alloc::vec![], 0, 1),
-                DebugSourceNode::new(root_exec, alloc::vec![], 0, 1),
-            ],
-            roots: alloc::vec![root],
-        };
+        let mut builder = PackageDebugInfoBuilder::default();
+        let child_a = builder.add_node(source_node(child_exec, Vec::new(), 0, 1)).unwrap();
+        let child_b = builder.add_node(source_node(child_exec, Vec::new(), 0, 1)).unwrap();
+        let root = builder.add_node(source_node(root_exec, vec![child_a, child_b], 0, 1)).unwrap();
+        let other_root = builder.add_node(source_node(root_exec, Vec::new(), 0, 1)).unwrap();
+        builder.add_root(root);
 
-        assert_eq!(graph.unique_source_root_for_exec_node(root_exec).unwrap(), Some(root));
-        assert_eq!(graph.unique_source_root_for_exec_node(other_exec).unwrap(), None);
-        assert_eq!(graph.child_source_node(root, 0).unwrap().unwrap().0, child_a);
-        assert_eq!(graph.child_source_node(root, 1).unwrap().unwrap().0, child_b);
-        assert!(graph.child_source_node(root, 2).unwrap().is_none());
         assert_eq!(
-            graph.child_source_node(DebugSourceNodeId::from(99), 0),
+            builder.debug_info().unique_source_root_for_exec_node(root_exec).unwrap(),
+            Some(root)
+        );
+        assert_eq!(
+            builder.debug_info().unique_source_root_for_exec_node(other_exec).unwrap(),
+            None
+        );
+        assert_eq!(builder.debug_info().child_source_node(root, 0).unwrap().unwrap().0, child_a);
+        assert_eq!(builder.debug_info().child_source_node(root, 1).unwrap().unwrap().0, child_b);
+        assert!(builder.debug_info().child_source_node(root, 2).unwrap().is_none());
+        assert_eq!(
+            builder.debug_info().child_source_node(DebugSourceNodeId::from(99), 0),
             Err(DebugSourceGraphLookupError::MissingSourceNode {
                 source_node: DebugSourceNodeId::from(99),
             }),
         );
 
-        let ambiguous_roots = DebugSourceGraphSection {
-            roots: alloc::vec![root, other_root],
-            ..graph
-        };
-        assert_eq!(
-            ambiguous_roots.unique_source_root_for_exec_node(root_exec),
-            Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
-        );
-
-        let package_debug = PackageDebugInfo {
-            source_graph: Some(ambiguous_roots),
-            ..PackageDebugInfo::default()
-        };
+        builder.add_root(other_root);
+        let package_debug = builder.build();
         assert_eq!(
             package_debug.unique_source_root_for_exec_node(root_exec),
             Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),

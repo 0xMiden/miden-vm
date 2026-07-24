@@ -6,20 +6,21 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{DebugVarInfo, Instruction},
     debuginfo::{Location, Span},
     diagnostics::Report,
 };
 use miden_core::{
     Felt,
     events::SystemEvent,
-    operations::{AssemblyOp, DebugVarInfo, Operation},
+    operations::{AssemblyOp, Operation},
 };
+use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceVar};
 
 use crate::{
     ProcedureContext,
     assembler::BodyWrapper,
-    mast_forest_builder::{AsmOpRef, DebugVarRef, MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
 };
 
 // PENDING ASM OP
@@ -59,11 +60,10 @@ pub struct BasicBlockBuilder<'a> {
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
-    /// Finalized AssemblyOps with their operation indices (op_idx, asm_op_ref).
-    asm_ops: Vec<(usize, AsmOpRef)>,
+    /// Assembly op metadata attached to operations in this block.
+    asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variables attached to operations in this block.
-    /// Each entry is (op_index, debug_var_ref).
-    debug_vars: Vec<(usize, DebugVarRef)>,
+    debug_vars: Vec<DebugSourceVar>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -172,21 +172,36 @@ impl BasicBlockBuilder<'_> {
     /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a control
     /// node. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
     /// registration with the node's debug info.
-    pub fn set_instruction_cycle_count(&mut self) -> Result<Option<AssemblyOp>, Report> {
+    pub fn set_instruction_cycle_count(&mut self) -> Option<AssemblyOp> {
         let pending = self.pending_asm_op.take().expect("no pending asm op to finalize");
 
         // Compute the cycle count for the instruction
         let cycle_count = self.ops.len() - pending.op_start;
-
-        let asm_op =
-            AssemblyOp::new(pending.location, pending.context_name, cycle_count as u8, pending.op);
-
         match cycle_count {
-            0 => Ok(Some(asm_op)),
+            0 => {
+                let asm_op = AssemblyOp::new(
+                    pending.location,
+                    pending.context_name,
+                    cycle_count as u8,
+                    pending.op,
+                );
+
+                Some(asm_op)
+            },
             _ => {
-                let asm_op_ref = self.mast_forest_builder.add_asm_op_ref(asm_op)?;
-                self.asm_ops.push((pending.op_start, asm_op_ref));
-                Ok(None)
+                let debug_info = self.mast_forest_builder.debug_info_mut();
+                let location_idx = pending.location.map(|loc| debug_info.add_location(loc));
+                let context_name_idx = debug_info.add_string(pending.context_name);
+                let op_name_idx = debug_info.add_string(pending.op);
+                let asm_op = DebugSourceAsmOp::new(
+                    pending.op_start as u32,
+                    location_idx,
+                    context_name_idx,
+                    op_name_idx,
+                    cycle_count as u8,
+                );
+                self.asm_ops.push(asm_op);
+                None
             },
         }
     }
@@ -196,10 +211,29 @@ impl BasicBlockBuilder<'_> {
     /// Debug variables are stored in dedicated CSR storage (not as decorators) and are
     /// only accessed by the debugger. They track source-level variable locations at
     /// specific points in program execution.
-    pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) -> Result<(), Report> {
-        let debug_var_ref = self.mast_forest_builder.add_debug_var_ref(debug_var)?;
-        self.debug_vars.push((self.ops.len(), debug_var_ref));
-        Ok(())
+    pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) {
+        let debug_info = self.mast_forest_builder.debug_info_mut();
+        let name_idx = debug_info.add_string(debug_var.name().clone());
+        let location_idx = debug_var.location().cloned().map(|loc| debug_info.add_location(loc));
+        let type_id = if let Some(ty) = debug_var.ty() {
+            let declared_ty = debug_var.declared_type();
+            Some(
+                debug_info
+                    .register_debug_type(None, declared_ty.as_deref(), ty)
+                    .expect("invalid debug var info"),
+            )
+        } else {
+            None
+        };
+        let debug_var = DebugSourceVar {
+            op_idx: self.ops.len() as u32,
+            name_idx,
+            type_id,
+            arg_idx: debug_var.arg_index(),
+            location_idx,
+            value_location: debug_var.value_location().clone(),
+        };
+        self.debug_vars.push(debug_var);
     }
 }
 

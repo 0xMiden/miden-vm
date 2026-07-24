@@ -43,6 +43,23 @@ impl Location {
     }
 }
 
+impl Serializable for Location {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.uri.write_into(target);
+        self.start.to_u32().write_into(target);
+        self.end.to_u32().write_into(target);
+    }
+}
+
+impl Deserializable for Location {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let uri = Uri::read_from(source)?;
+        let start = ByteIndex::from(source.read_u32()?);
+        let end = ByteIndex::from(source.read_u32()?);
+        Ok(Self::new(uri, start, end))
+    }
+}
+
 /// A [FileLineCol] represents traditional file/line/column information for use in rendering.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]

@@ -89,8 +89,7 @@ impl<F> Continuation<F> {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn exec_node(&self) -> Option<MastNodeId> {
+    pub fn exec_node(&self) -> Option<MastNodeId> {
         match self {
             Self::StartNode(node_id)
             | Self::FinishJoin(node_id)
@@ -266,7 +265,6 @@ impl<F> ContinuationStack<F> {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn start_tracking_source_nodes(
         &mut self,
         next_source_node_id: Option<DebugSourceNodeId>,
@@ -337,6 +335,24 @@ impl<F> ContinuationStack<F> {
                 // This continuation does not increment the clock, continue.
                 true
             }
+        })
+    }
+
+    /// Same as [`Self::iter_continuations_for_next_clock`], but provides the set of source node
+    /// ids for each continuation.
+    pub fn iter_continuations_for_next_clock_with_source_node_ids(
+        &self,
+    ) -> impl Iterator<Item = (&Continuation<F>, Option<DebugSourceNodeId>)> {
+        let mut stack_index = self.stack.len().saturating_sub(1);
+
+        self.iter_continuations_for_next_clock().map(move |cont| {
+            let source_node_id = self
+                .source_node_ids
+                .as_deref()
+                .and_then(|ids| ids.get(stack_index).copied())
+                .flatten();
+            stack_index = stack_index.saturating_sub(1);
+            (cont, source_node_id)
         })
     }
 }
