@@ -3,11 +3,11 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{deferred::DeferredState, program::ExecutionClaim, proof::ExecutionProof};
+use miden_core::{program::ExecutionClaim, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
-    AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
+    AdviceInputs, ProgramInfo, ProvingOptions, StackInputs, StackOutputs, prove_sync,
 };
 use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
 use miden_verifier::{VerificationError, settle, verify, verify_unsettled};
@@ -63,17 +63,8 @@ fn assert_recursive_verify(
     stack_outputs: StackOutputs,
     proof: &ExecutionProof,
 ) {
-    assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
-
-    let deferred_state = DeferredState::from_wire(
-        Arc::new(miden_precompiles::registry()),
-        proof.settlement().expect("prover packages carry settlement evidence"),
-        usize::MAX,
-    )
-    .expect("deferred wire should rehydrate under official precompiles");
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
-    let verifier_inputs = generate_advice_inputs(proof.stark_proof(), pub_inputs)
+    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+    let verifier_inputs = generate_advice_inputs(proof, &claim)
         .expect("recursive verifier advice construction failed");
 
     let source = "
@@ -124,7 +115,7 @@ fn assert_recursive_verify(
     let mut test = crate::build_test!(
         source,
         &verifier_inputs.initial_stack,
-        &verifier_inputs.advice_stack,
+        &verifier_inputs.advice_stack(),
         verifier_inputs.store,
         verifier_inputs.advice_map
     );

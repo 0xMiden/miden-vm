@@ -173,8 +173,63 @@ proc store_ace_registry_root
     dropw dropw
 end
 
+#! Verifies a proof of the caller-staged execution claim, fetched from the advice map by
+#! content.
+#!
+#! The caller populates the claim region with its own trusted P, I, O (K's slot may be left
+#! unset) and supplies the kernel digest witness. This procedure materializes K from the
+#! witness, derives the claim commitment from the completed region, fetches the registered
+#! proof from the advice map under `request_key(verifier_root, claim_commitment)` (the verifier
+#! root via `procref` of `verify_vm_proof` itself), and verifies it. The derived commitment is
+#! both the fetch address and what verification binds, so consistency needs no check: a wrong
+#! or substituted package fails verification against the caller's claim.
+#!
+#! Inputs:  [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+#! Outputs: [D, ...]
+#!
+#! Where:
+#! - claim_ptr is the word-aligned address of the caller's claim region (40 felts), with P at +0,
+#!   I at +8, and O at +24 already populated from the caller's own inputs; K (+4) is written
+#!   here (and rederived by the verifier from the same witness).
+#! - kernel_ptr / num_kernel_digests locate the kernel digest witness.
+#! - D is the deferred root bound by the verified statement.
+pub proc verify_vm_proof_from_claim
+    # --- Materialize K from the kernel witness into the claim region ---
+
+    dup.2 dup.2
+    # => [kernel_ptr, num_kernel_digests, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    exec.claim::kernel_commitment
+    # => [K, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    dup.4 add.4 mem_storew_le dropw
+    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    # --- Derive the claim commitment: the fetch address ---
+
+    dup exec.claim::claim_commitment
+    # => [CLAIM_COMMITMENT, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    procref.verify_vm_proof
+    # => [VERIFIER_ROOT, CLAIM_COMMITMENT, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    exec.claim::request_key
+    # => [REQUEST_KEY, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    # --- Fetch the proof onto the advice stack and verify it ---
+
+    adv.push_mapval dropw
+    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+
+    exec.verify_vm_proof
+    # => [D, ...]
+end
+
 #! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM and
 #! returns the deferred obligation the proof binds.
+#!
+#! The proof is consumed from the advice stack; request keys name this procedure's MAST root
+#! (see `verify_vm_proof_from_claim` for fetching a proof from the advice map by content).
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and

@@ -233,7 +233,7 @@ fn masm_request_key_matches_native() {
 #[test]
 fn request_round_trip_retrieves_registered_package() {
     use miden_core::{Felt, Word};
-    use miden_utils_testing::recursive_verifier::register_proof_package;
+    use miden_utils_testing::recursive_verifier::request_key;
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [
@@ -246,9 +246,15 @@ fn request_round_trip_retrieves_registered_package() {
     };
     let verifier_root = word(11, 12, 13, 14);
     let claim_commitment = word(21, 22, 23, 24);
-    let stream: [u64; 4] = [100, 200, 300, 400];
+    let stream: [Felt; 4] = [
+        Felt::new_unchecked(100),
+        Felt::new_unchecked(200),
+        Felt::new_unchecked(300),
+        Felt::new_unchecked(400),
+    ];
 
-    let (key, values) = register_proof_package(verifier_root, claim_commitment, &stream);
+    let key = request_key(verifier_root, claim_commitment);
+    let values: Vec<Felt> = stream.to_vec();
 
     let push = |w: Word| -> String {
         let e = w.as_elements();
@@ -284,7 +290,7 @@ fn request_round_trip_retrieves_registered_package() {
 
     // Map value the host registered under the request key.
     let advice_map = vec![(key, values)];
-    let mut expected: Vec<u64> = stream.to_vec();
+    let mut expected: Vec<u64> = stream.iter().map(Felt::as_canonical_u64).collect();
     expected.reverse(); // four adv_push results, top-first
     expected.resize(16, 0);
     build_test!(
