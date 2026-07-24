@@ -1338,6 +1338,9 @@ impl Assembler {
             _ => panic!("expected item to be a procedure AST"),
         };
         let body_wrapper = if proc_ctx.is_program_entrypoint() {
+            // The primary check now lives at the AST mutation site (`Procedure::set_num_locals`).
+            // This backstop still catches entrypoints constructed with locals directly via
+            // `Procedure::new`, which bypasses that setter.
             assert!(num_locals == 0, "program entrypoint cannot have locals");
 
             Some(BodyWrapper {

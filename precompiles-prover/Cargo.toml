@@ -1,0 +1,52 @@
+[package]
+name = "miden-precompiles-prover"
+version.workspace = true
+description = "Prover-side precompile implementations for the Miden VM deferred framework"
+documentation = "https://docs.rs/miden-precompiles-prover"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "deferred", "zkp"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+concurrent = [
+    "std",
+    "miden-air/concurrent",
+    "miden-crypto/concurrent",
+    "miden-lifted-stark/concurrent",
+]
+std = [
+    "miden-air/std",
+    "miden-core/std",
+    "miden-crypto/std",
+    "miden-precompiles/std",
+    "ruint/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-air.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-lifted-air.workspace = true
+miden-lifted-stark.workspace = true
+miden-precompiles.workspace = true
+ruint.workspace = true
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wincode.workspace = true
+
+[dev-dependencies]
+# Known-good secp256k1 ("k1") reference — the oracle for EC circuit
+# cross-validation tests (RustCrypto, pure Rust, no C deps).
+k256 = { workspace = true, features = ["arithmetic"] }
+miden-air = { workspace = true, features = ["std"] }
+rand = { workspace = true, features = ["std_rng"] }

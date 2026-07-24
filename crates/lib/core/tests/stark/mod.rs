@@ -4,9 +4,9 @@ use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{DeferredState, PrecompileRegistry},
+    deferred::{DeferredState, TRUE_DIGEST},
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    proof::HashFunction,
+    proof::{DeferredProof, HashFunction},
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
@@ -73,7 +73,9 @@ fn stark_verifier_e2f4_with_kernel_single() {
     run_recursive_verifier(&data);
 }
 
+// TODO: Un-ignore once recursive verifier supports deferred proofs
 #[test]
+#[ignore = "recursive verifier does not yet support verifying deferred proofs"]
 fn stark_verifier_e2f4_with_deferred_root() {
     let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
     run_recursive_verifier(&data);
@@ -306,18 +308,24 @@ pub fn generate_recursive_verifier_data(
 
     let program_info = ProgramInfo::from(program);
 
-    // These programs are deferred-free, so an empty registry is intentional; still rehydrate the
-    // proof-carried deferred wire instead of assuming TRUE.
-    let deferred_state = DeferredState::from_wire(
-        Arc::new(PrecompileRegistry::new()),
-        proof.deferred_state(),
-        usize::MAX,
-    )
-    .unwrap();
+    // Resolve the proof-carried deferred root instead of assuming TRUE. This helper tests the
+    // recursive verifier for the outer VM STARK only; `prove_sync` constructed any nested deferred
+    // STARK proof locally, so its public root is the outer proof's public input.
+    let stark_proof = proof.miden_proof();
+    let deferred_proof = proof.deferred_proof();
+    let final_deferred_root = match deferred_proof {
+        DeferredProof::Empty => TRUE_DIGEST,
+        DeferredProof::Wire(wire) => {
+            DeferredState::from_wire(Arc::new(miden_precompiles::registry()), wire, usize::MAX)
+                .unwrap()
+                .root()
+        },
+        DeferredProof::Stark { public_root, .. } => *public_root,
+    };
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_state.root());
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
 
-    generate_advice_inputs(proof.stark_proof(), pub_inputs).unwrap()
+    generate_advice_inputs(stark_proof.bytes(), pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

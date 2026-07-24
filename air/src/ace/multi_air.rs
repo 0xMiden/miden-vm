@@ -151,7 +151,8 @@ pub fn build_multi_air_ace_circuit_for_order(
 
     let combined_constraint = builder.sub(combined_acc, shared_quotient_binding);
 
-    let combined_dag = builder.build(combined_constraint);
+    let mut combined_dag = builder.build(combined_constraint);
+    combined_dag.compact();
     miden_ace_codegen::emit_circuit(&combined_dag, combined_layout)
 }
 

@@ -187,5 +187,7 @@ where
     let q_times_v = builder.mul(quotient, vanishing);
     let root = builder.sub(acc, q_times_v);
 
-    builder.build(root)
+    let mut dag = builder.build(root);
+    dag.compact();
+    dag
 }

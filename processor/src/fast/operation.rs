@@ -179,10 +179,9 @@ impl SystemInterface for FastProcessor {
 
     #[inline(always)]
     fn restore_call_state(&mut self) -> Result<(), OperationError> {
-        let saved = self
-            .system_call_state_stack
-            .pop()
-            .expect("system call state stack should never be empty when restoring context");
+        let saved = self.system_call_state_stack.pop().ok_or(OperationError::Internal(
+            "system call state stack should never be empty when restoring context",
+        ))?;
         self.ctx = saved.ctx;
         self.caller_hash = saved.caller_hash;
         Ok(())
@@ -317,10 +316,10 @@ impl StackInterface for FastProcessor {
             return Err(OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() });
         }
 
-        let overflow_stack = self
-            .stack_overflow_save_stack
-            .pop()
-            .expect("stack overflow save stack should never be empty when restoring context");
+        let overflow_stack =
+            self.stack_overflow_save_stack.pop().ok_or(OperationError::Internal(
+                "stack overflow save stack should never be empty when restoring context",
+            ))?;
 
         let target_overflow_len = overflow_stack.len();
         debug_assert!(
