@@ -25,16 +25,16 @@ pub const U256_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u2
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Advice stack: [r0..r7, q0..q7, ...]
+///   Advice stack: [r4..r7, r0..r3, q4..q7, q0..q3, ...]
 ///
 /// Where (b0..b7) and (a0..a7) are the 32-bit limbs of the divisor and dividend respectively,
 /// with b0/a0 being the least significant limb.
 ///
 /// After four `padw adv_loadw` in MASM:
-///   First:  loads [r0, r1, r2, r3] onto operand stack
-///   Second: loads [r4, r5, r6, r7]
-///   Third:  loads [q0, q1, q2, q3]
-///   Fourth: loads [q4, q5, q6, q7]
+///   First:  loads [r4, r5, r6, r7] onto operand stack
+///   Second: loads [r0, r1, r2, r3] onto operand stack
+///   Third:  loads [q4, q5, q6, q7] onto operand stack
+///   Fourth: loads [q0, q1, q2, q3] onto operand stack
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO or any limb is not a valid u32.
@@ -53,6 +53,8 @@ pub fn handle_u256_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let r_felts = u256_to_u32_felts(remainder);
 
     let mut advice_stack = AdviceStack::new();
+    // MASM uses four `padw adv_loadw` instructions. Each load places the next lower word on top,
+    // so q0..q3 must be consumed last to finish above q4..q7, r0..r3, and r4..r7.
     advice_stack
         .push_word(Word::new([r_felts[4], r_felts[5], r_felts[6], r_felts[7]]))
         .push_word(Word::new([r_felts[0], r_felts[1], r_felts[2], r_felts[3]]))

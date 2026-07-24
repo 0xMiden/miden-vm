@@ -70,10 +70,12 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
     assert_eq!(r_hi, ZERO);
 
     let mut remainder_stack = AdviceStack::new();
+    // MASM consumes the remainder after the quotient, with one `adv_push`.
     remainder_stack.push_element(r_lo);
     let remainder = AdviceMutation::extend_advice_stack(remainder_stack);
 
     let mut quotient_stack = AdviceStack::new();
+    // MASM reads q_hi then q_lo with `adv_push adv_push`, so q_lo lands on top.
     quotient_stack.push_elements([q_hi, q_lo]);
     let quotient = AdviceMutation::extend_advice_stack(quotient_stack);
     Ok(vec![remainder, quotient])
