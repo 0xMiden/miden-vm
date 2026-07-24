@@ -52,6 +52,7 @@ pub fn handle_keccak256_digest(
     }
 
     let mut advice_stack = AdviceStack::new();
+    // MASM consumes the digest with two `adv_pushw` calls, low word first and high word second.
     advice_stack.push_for_adv_pipe(&digest_felts);
     Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }

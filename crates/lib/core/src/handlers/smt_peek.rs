@@ -120,6 +120,7 @@ fn get_smt_leaf_preimage(
 
 fn advice_stack_word_mutation(word: Word) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
+    // MASM callers consume the returned value with `adv_loadw` or `adv_pushw`.
     advice_stack.push_word(word);
     AdviceMutation::extend_advice_stack(advice_stack)
 }

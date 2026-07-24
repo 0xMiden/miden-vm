@@ -48,6 +48,7 @@ pub fn handle_uint_field_inv(
 
     let inverse = inverse.map(Felt::from_u32);
     let mut advice_stack = AdviceStack::new();
+    // Generated MASM consumes the inverse with two `adv_pushw` calls: low limbs, then high limbs.
     advice_stack.push_dword([
         Word::new([inverse[0], inverse[1], inverse[2], inverse[3]]),
         Word::new([inverse[4], inverse[5], inverse[6], inverse[7]]),
