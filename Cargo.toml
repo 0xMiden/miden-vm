@@ -3,6 +3,7 @@ members = [
     "air",
     "benches/blake3-bench",
     "benches/miden-bench",
+    "benches/precompiles-bench",
     "benches/smt-codspeed",
     "benches/synthetic-bench",
     "core",
@@ -35,6 +36,7 @@ members = [
     "miden-vm",
     "precompiles",
     "crates/lib/core/codegen",
+    "precompiles-prover",
     "processor",
     "prover",
     "tests/wycheproof",
@@ -93,6 +95,7 @@ miden-lifted-stark      = { path = "./crates/lifted-stark", version = "0.28", de
 miden-mast-package      = { path = "./crates/mast-package", version = "0.28", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "0.28", default-features = false }
 miden-precompiles       = { path = "./precompiles", version = "0.28", default-features = false }
+miden-precompiles-prover = { path = "./precompiles-prover", version = "0.28", default-features = false }
 miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.28", default-features = false }
 miden-processor         = { path = "./processor", version = "0.28", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
@@ -120,7 +123,7 @@ wincode       = { version = "0.5.5", default-features = false, features = ["allo
 # Third-party crates
 clap            = { version = "4.5", features = ["derive"] }
 codspeed-criterion-compat = { version = "5.0.1" }
-criterion       = { version = "0.7" }
+criterion       = { version = "0.8" }
 assert_matches  = { version = "1.5", default-features = false }
 blake3          = { version = "1.8", default-features = false }
 cc              = "1.2"
@@ -198,6 +201,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 rand_chacha = { version = "0.10", default-features = false }
 rstest = "0.26"
+ruint = { version = "1.18", default-features = false }
 toml = { version = "1.0", default-features = false }
 tracing-forest = "0.3.1"
 walkdir = "2.5"

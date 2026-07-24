@@ -140,7 +140,7 @@ assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 
 ### Verifying program execution
 
-To verify program execution, you can use the `verify()` function. The function takes the following parameters:
+To verify program execution, use `Verifier::new().verify(...)`. The verifier takes the following parameters:
 
 - `program_info: ProgramInfo` - a structure containing the hash of the program to be verified (represented as a 32-byte digest), and the hashes of the Kernel procedures used to execute the program.
 - `stack_inputs: StackInputs` - a list of the values with which the stack was initialized prior to the program's execution..
@@ -151,7 +151,7 @@ Stack inputs are expected to be ordered as if they would be pushed onto the stac
 
 Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the `stack_outputs`, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the `stack_inputs`.
 
-The function returns `Result<u32, VerificationError>` which will be `Ok(security_level)` if verification passes, or `Err(VerificationError)` if verification fails, with `VerificationError` describing the reason for the failure.
+The verifier returns `Result<u32, VerificationError>` which will be `Ok(security_level)` if verification passes, or `Err(VerificationError)` if verification fails, with `VerificationError` describing the reason for the failure.
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
@@ -162,14 +162,14 @@ Notice how the verifier needs to know only the hash of the program - not what th
 Here is a simple example of verifying execution of the program from the previous example:
 
 ```rust,ignore
-use miden_vm::{field::Felt, ProgramInfo, StackInputs, StackOutputs};
+use miden_vm::{field::Felt, ProgramInfo, StackInputs, StackOutputs, Verifier};
 
 let program =   /* value from previous example */;
 let proof =     /* value from previous example */;
 let expected_outputs = StackOutputs::new(&[Felt::new(8).unwrap()]).unwrap();
 
 // let's verify program execution
-match miden_vm::verify(ProgramInfo::from(program), StackInputs::default(), expected_outputs, proof) {
+match Verifier::new().verify(ProgramInfo::from(program), StackInputs::default(), expected_outputs, proof) {
     Ok(_) => println!("Execution verified!"),
     Err(msg) => println!("Something went terribly wrong: {}", msg),
 }

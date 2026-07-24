@@ -10,98 +10,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::DeferredStateWire,
+    deferred::{DeferredRoot, DeferredStateWire},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
     },
 };
-
-// EXECUTION PROOF
-// ================================================================================================
-
-/// A proof of correct execution of Miden VM.
-///
-/// The proof contains the STARK proof, the hash function used during proof generation, and the
-/// deferred-state wire opening needed to rehydrate the deferred DAG under a verifier-supplied
-/// precompile registry. However, the proof does not contain public inputs needed to verify the
-/// STARK proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ExecutionProof {
-    pub proof: Vec<u8>,
-    pub hash_fn: HashFunction,
-    pub deferred_state: DeferredStateWire,
-}
-
-impl ExecutionProof {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// and deferred-state wire opening.
-    pub const fn new(
-        proof: Vec<u8>,
-        hash_fn: HashFunction,
-        deferred_state: DeferredStateWire,
-    ) -> Self {
-        Self { proof, hash_fn, deferred_state }
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the underlying STARK proof.
-    pub fn stark_proof(&self) -> &[u8] {
-        &self.proof
-    }
-
-    /// Returns the hash function used during proof generation process.
-    pub const fn hash_fn(&self) -> HashFunction {
-        self.hash_fn
-    }
-
-    /// Returns the deferred-state wire opening carried by this proof.
-    pub const fn deferred_state(&self) -> &DeferredStateWire {
-        &self.deferred_state
-    }
-
-    /// Returns conjectured security level of this proof in bits.
-    ///
-    /// Currently returns a hardcoded 96 bits. Once the security estimator is implemented
-    /// in Plonky3, this should calculate the actual conjectured security level based on:
-    /// - Proof parameters (FRI folding factor, number of queries, etc.)
-    /// - Hash function collision resistance
-    /// - Field size and extension degree
-    pub fn security_level(&self) -> u32 {
-        96
-    }
-
-    // SERIALIZATION / DESERIALIZATION
-    // --------------------------------------------------------------------------------------------
-
-    /// Serializes this proof into a vector of bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        self.write_into(&mut bytes);
-        bytes
-    }
-
-    /// Reads the source bytes, parsing a new proof instance.
-    ///
-    /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
-    pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        <Self as Deserializable>::read_from_bytes(source)
-    }
-
-    // DESTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the hash function, proof bytes, and deferred-state wire opening.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredStateWire) {
-        (self.hash_fn, self.proof, self.deferred_state)
-    }
-}
 
 // HASH FUNCTION
 // ================================================================================================
@@ -138,6 +52,15 @@ impl HashFunction {
             HashFunction::Keccak => 128,
         }
     }
+}
+
+/// Error type for invalid hash function strings.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
+)]
+pub struct InvalidHashFunctionError {
+    pub hash_function: String,
 }
 
 impl TryFrom<u8> for HashFunction {
@@ -190,9 +113,6 @@ impl Arbitrary for HashFunction {
     }
 }
 
-// SERIALIZATION
-// ================================================================================================
-
 impl Serializable for HashFunction {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(*self as u8);
@@ -205,21 +125,106 @@ impl Deserializable for HashFunction {
     }
 }
 
+// EXECUTION PROOF
+// ================================================================================================
+
+/// A proof of correct execution of Miden VM.
+///
+/// The proof contains the Miden VM STARK proof and deferred proof material for the execution's
+/// precompile claims. Verifying the deferred proof returns the root used to check the VM STARK
+/// public inputs.
+///
+/// `Empty` and STARK-backed deferred proofs are final form; wire-backed proofs are partial form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExecutionProof {
+    miden: StarkProof,
+    deferred: DeferredProof,
+}
+
+impl ExecutionProof {
+    // CONSTRUCTOR
+    // --------------------------------------------------------------------------------------------
+
+    /// Creates a new instance of [ExecutionProof] from a Miden VM STARK proof envelope and deferred
+    /// proof material.
+    pub const fn new(miden: StarkProof, deferred: DeferredProof) -> Self {
+        Self { miden, deferred }
+    }
+
+    /// Creates a new instance of [ExecutionProof] from serialized Miden VM STARK proof bytes, hash
+    /// function, and deferred proof material.
+    pub fn from_parts(
+        miden_proof_bytes: Vec<u8>,
+        hash_fn: HashFunction,
+        deferred: impl Into<DeferredProof>,
+    ) -> Self {
+        Self::new(StarkProof::new(miden_proof_bytes, hash_fn), deferred.into())
+    }
+
+    // PUBLIC ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the Miden VM STARK proof envelope.
+    pub const fn miden_proof(&self) -> &StarkProof {
+        &self.miden
+    }
+
+    /// Returns the deferred proof material associated with the Miden VM proof.
+    pub const fn deferred_proof(&self) -> &DeferredProof {
+        &self.deferred
+    }
+
+    /// Returns `true` if this proof is in final form.
+    ///
+    /// This is a shape check only: it means the deferred proof is empty or STARK-backed, not that
+    /// either the VM STARK proof or the deferred proof has been verified.
+    pub const fn is_final(&self) -> bool {
+        self.deferred.is_final()
+    }
+
+    /// Returns conjectured security level of this proof in bits.
+    ///
+    /// Currently returns a hardcoded 96 bits. Once the security estimator is implemented
+    /// in Plonky3, this should calculate the actual conjectured security level based on:
+    /// - Proof parameters (FRI folding factor, number of queries, etc.)
+    /// - Hash function collision resistance
+    /// - Field size and extension degree
+    pub fn security_level(&self) -> u32 {
+        96
+    }
+
+    // SERIALIZATION / DESERIALIZATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Serializes this proof into a vector of bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        self.write_into(&mut bytes);
+        bytes
+    }
+
+    /// Reads the source bytes, parsing a new proof instance.
+    ///
+    /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
+    pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
+        <Self as Deserializable>::read_from_bytes(source)
+    }
+}
+
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.proof.write_into(target);
-        self.hash_fn.write_into(target);
-        self.deferred_state.write_into(target);
+        self.miden.write_into(target);
+        self.deferred.write_into(target);
     }
 }
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let proof = Vec::<u8>::read_from(source)?;
-        let hash_fn = HashFunction::read_from(source)?;
-        let deferred_state = DeferredStateWire::read_from(source)?;
+        let miden = StarkProof::read_from(source)?;
+        let deferred = DeferredProof::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, deferred_state })
+        Ok(ExecutionProof::new(miden, deferred))
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -228,32 +233,196 @@ impl Deserializable for ExecutionProof {
     }
 }
 
-// HASH FUNCTION ERROR
-// ================================================================================================
-
-/// Error type for invalid hash function strings.
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
-)]
-pub struct InvalidHashFunctionError {
-    pub hash_function: String,
-}
-
-// TESTING UTILS
-// ================================================================================================
-
 #[cfg(any(test, feature = "testing"))]
 impl ExecutionProof {
     /// Creates a dummy `ExecutionProof` for testing purposes only.
     ///
     /// A proof created in this way will not be verifiable against any verifier.
     pub fn new_dummy() -> Self {
-        ExecutionProof {
-            proof: Vec::new(),
-            hash_fn: HashFunction::Blake3_256,
-            deferred_state: DeferredStateWire::default(),
+        ExecutionProof::new(
+            StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            DeferredProof::Empty,
+        )
+    }
+}
+
+// DEFERRED PROOF
+// ================================================================================================
+
+/// Proof material for the precompile claims associated with an execution proof.
+///
+/// Verification returns the deferred root used to check the VM STARK proof. `Wire` is the partial
+/// form; `Empty` and `Stark` are final forms.
+///
+/// Variants are public so callers can construct and inspect deferred proof material directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DeferredProof {
+    /// No precompile claims were produced. Verifiers resolve this to
+    /// [`crate::deferred::TRUE_DIGEST`].
+    Empty,
+    /// Canonical deferred-state wire for a partial proof.
+    Wire(DeferredStateWire),
+    /// A precompile VM STARK proof for this execution's exact deferred root.
+    ///
+    /// After `proof` verifies against `public_root`, that root is used to verify the VM STARK
+    /// proof.
+    Stark {
+        proof: StarkProof,
+        public_root: DeferredRoot,
+    },
+}
+
+impl DeferredProof {
+    const EMPTY_TAG: u8 = 0;
+    pub(crate) const WIRE_TAG: u8 = 1;
+    const STARK_TAG: u8 = 2;
+
+    /// Creates an empty deferred proof.
+    pub const fn empty() -> Self {
+        Self::Empty
+    }
+
+    /// Creates a deferred proof backed by a wire opening.
+    pub const fn wire(wire: DeferredStateWire) -> Self {
+        Self::Wire(wire)
+    }
+
+    /// Creates a deferred proof backed by a precompile VM STARK proof.
+    pub const fn stark(proof: StarkProof, public_root: DeferredRoot) -> Self {
+        Self::Stark { proof, public_root }
+    }
+
+    /// Returns `true` if this deferred proof is [`DeferredProof::Empty`].
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    /// Returns `true` if this deferred proof is in final form.
+    ///
+    /// This is a shape check only: it accepts empty and STARK-backed proofs and rejects wire-backed
+    /// partial proofs. It does not verify the contained proof material.
+    pub const fn is_final(&self) -> bool {
+        matches!(self, Self::Empty | Self::Stark { .. })
+    }
+
+    /// Returns the wire opening if this deferred proof is [`DeferredProof::Wire`].
+    pub const fn as_wire(&self) -> Option<&DeferredStateWire> {
+        match self {
+            Self::Wire(wire) => Some(wire),
+            _ => None,
         }
+    }
+
+    /// Returns the nested proof and public root if this proof is [`DeferredProof::Stark`].
+    pub const fn as_stark(&self) -> Option<(&StarkProof, DeferredRoot)> {
+        match self {
+            Self::Stark { proof, public_root } => Some((proof, *public_root)),
+            _ => None,
+        }
+    }
+}
+
+impl From<DeferredStateWire> for DeferredProof {
+    fn from(wire: DeferredStateWire) -> Self {
+        Self::wire(wire)
+    }
+}
+
+impl Serializable for DeferredProof {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::Empty => target.write_u8(Self::EMPTY_TAG),
+            Self::Wire(wire) => {
+                target.write_u8(Self::WIRE_TAG);
+                wire.write_into(target);
+            },
+            Self::Stark { proof, public_root } => {
+                target.write_u8(Self::STARK_TAG);
+                proof.write_into(target);
+                public_root.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for DeferredProof {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let tag = source.read_u8()?;
+        match tag {
+            Self::EMPTY_TAG => Ok(Self::Empty),
+            Self::WIRE_TAG => Ok(Self::Wire(DeferredStateWire::read_from(source)?)),
+            Self::STARK_TAG => {
+                let proof = StarkProof::read_from(source)?;
+                let public_root = <DeferredRoot as Deserializable>::read_from(source)?;
+                Ok(Self::Stark { proof, public_root })
+            },
+            other => Err(DeserializationError::InvalidValue(format!(
+                "invalid deferred proof discriminant: {other}"
+            ))),
+        }
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        Self::read_from(&mut reader)
+    }
+
+    fn min_serialized_size() -> usize {
+        1
+    }
+}
+
+// STARK PROOF
+// ================================================================================================
+
+/// A serialized STARK proof and the hash function used during proof generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct StarkProof {
+    bytes: Vec<u8>,
+    hash_fn: HashFunction,
+}
+
+impl StarkProof {
+    /// Creates a new instance of [StarkProof] from proof bytes and hash function.
+    pub const fn new(bytes: Vec<u8>, hash_fn: HashFunction) -> Self {
+        Self { bytes, hash_fn }
+    }
+
+    /// Returns the serialized STARK proof bytes.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Returns the hash function used during proof generation process.
+    pub const fn hash_fn(&self) -> HashFunction {
+        self.hash_fn
+    }
+
+    /// Returns the serialized STARK proof bytes and hash function.
+    pub fn into_parts(self) -> (Vec<u8>, HashFunction) {
+        (self.bytes, self.hash_fn)
+    }
+}
+
+impl Serializable for StarkProof {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.bytes.write_into(target);
+        self.hash_fn.write_into(target);
+    }
+}
+
+impl Deserializable for StarkProof {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let bytes = Vec::<u8>::read_from(source)?;
+        let hash_fn = HashFunction::read_from(source)?;
+        Ok(Self::new(bytes, hash_fn))
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        Self::read_from(&mut reader)
     }
 }
 
@@ -262,7 +431,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{TRUE_INDEX, Tag, WireEntry},
+        deferred::{DeferredRoot, TRUE_INDEX, Tag, WireEntry},
         serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
     };
 
@@ -293,16 +462,34 @@ mod tests {
     }
 
     #[test]
-    fn execution_proof_round_trips_empty_deferred_wire() {
+    fn execution_proof_round_trips_empty_deferred_proof() {
         let proof = ExecutionProof::new(
-            alloc::vec![1, 2, 3],
-            HashFunction::Blake3_256,
-            DeferredStateWire::default(),
+            StarkProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256),
+            DeferredProof::empty(),
         );
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
 
         assert_eq!(decoded, proof);
+        assert_eq!(decoded.miden_proof().bytes(), &[1, 2, 3]);
+        assert_eq!(decoded.miden_proof().hash_fn(), HashFunction::Blake3_256);
+        assert!(decoded.deferred_proof().is_empty());
+        assert!(decoded.is_final());
+    }
+
+    #[test]
+    fn execution_proof_round_trips_empty_deferred_wire() {
+        let proof = ExecutionProof::from_parts(
+            alloc::vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            DeferredProof::wire(DeferredStateWire::default()),
+        );
+
+        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+
+        assert_eq!(decoded, proof);
+        assert_eq!(decoded.deferred_proof().as_wire(), Some(&DeferredStateWire::default()));
+        assert!(!decoded.is_final());
     }
 
     #[test]
@@ -322,12 +509,53 @@ mod tests {
                 WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
             ],
         };
-        let proof =
-            ExecutionProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
+        let proof = ExecutionProof::from_parts(
+            alloc::vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            deferred_wire,
+        );
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
 
         assert_eq!(decoded, proof);
+        assert!(!decoded.is_final());
+    }
+
+    #[test]
+    fn execution_proof_round_trips_stark_deferred_proof() {
+        let public_root: DeferredRoot = [
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+        ]
+        .into();
+        let deferred_stark_proof = StarkProof::new(alloc::vec![4, 5, 6], HashFunction::Poseidon2);
+        let deferred = DeferredProof::stark(deferred_stark_proof.clone(), public_root);
+        let proof = ExecutionProof::new(
+            StarkProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256),
+            deferred,
+        );
+
+        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+
+        assert_eq!(decoded, proof);
+        assert_eq!(decoded.deferred_proof().as_stark(), Some((&deferred_stark_proof, public_root)));
+        assert!(decoded.is_final());
+    }
+
+    #[test]
+    fn execution_proof_rejects_invalid_deferred_variant() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_u8(HashFunction::Blake3_256 as u8);
+        bytes.write_u8(255);
+
+        let err = ExecutionProof::from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid deferred proof discriminant: 255"));
     }
 
     #[test]
@@ -349,6 +577,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
         bytes.write_u8(HashFunction::Blake3_256 as u8);
+        bytes.write_u8(DeferredProof::WIRE_TAG);
         bytes.write_usize(2);
 
         let budget = bytes.len() + 1;
