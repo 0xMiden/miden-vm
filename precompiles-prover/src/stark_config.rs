@@ -45,10 +45,10 @@ const COMPRESSION_INPUTS: usize = 2;
 /// Compile-time constant binding the Fiat-Shamir transcript to the precompile chiplet AIR set.
 /// Keep this in sync with [`crate::ace::build_precompile_multi_air_ace_circuit`].
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(13317182857012940240),
-    Felt::new_unchecked(3371465634074056705),
-    Felt::new_unchecked(9151144758086439755),
-    Felt::new_unchecked(11408832216958580677),
+    Felt::new_unchecked(15901056294547705196),
+    Felt::new_unchecked(13548154566962352054),
+    Felt::new_unchecked(13148050606838836712),
+    Felt::new_unchecked(2433548564999773594),
 ];
 /// Default hash function for compatibility APIs such as
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
