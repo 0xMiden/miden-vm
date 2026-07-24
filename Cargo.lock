@@ -2055,6 +2055,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "miden-ace-codegen"
 version = "0.28.0"
 dependencies = [
+ "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "thiserror",
@@ -2066,6 +2067,7 @@ version = "0.28.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "miden-test-serde-macros",
@@ -2161,6 +2163,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-constraint-compiler"
+version = "0.28.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+]
+
+[[package]]
 name = "miden-core"
 version = "0.28.0"
 dependencies = [
@@ -2195,6 +2206,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-assembly-syntax",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",

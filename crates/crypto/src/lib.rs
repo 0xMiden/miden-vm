@@ -24,7 +24,7 @@ pub mod field {
 
     pub use miden_field::{
         Algebra, BasedVectorSpace, Binomial, BinomialExtensionField, BinomiallyExtendable,
-        BoundedPowers, ExtensionAlgebra, ExtensionField, Field, HasTwoAdicBinomialExtension,
+        BoundedPowers, Dup, ExtensionAlgebra, ExtensionField, Field, HasTwoAdicBinomialExtension,
         InjectiveMonomial, Packable, PermutationMonomial, Powers, PrimeCharacteristicRing,
         PrimeField, PrimeField64, QuotientMap, RawDataSerializable, TwoAdicField,
         batch_multiplicative_inverse,

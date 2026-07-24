@@ -1,11 +1,11 @@
 [package]
-name = "miden-ace-codegen"
+name = "miden-constraint-compiler"
 version = "0.28.0"
-description = "ACE circuit codegen for Plonky3-based Miden AIRs."
-documentation = "https://docs.rs/miden-ace-codegen"
+description = "Constraint compiler for Plonky3-based Miden AIRs."
+documentation = "https://docs.rs/miden-constraint-compiler"
 readme = "README.md"
-categories = ["cryptography", "no-std"]
-keywords = ["air", "arithmetization", "crypto", "miden"]
+categories = ["cryptography"]
+keywords = ["air", "arithmetization", "compiler", "miden"]
 license.workspace = true
 authors.workspace = true
 homepage.workspace = true
@@ -13,14 +13,10 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
-[features]
-testing = []
-
 [dependencies]
-miden-constraint-compiler = { workspace = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
+miden-air = { workspace = true }
 miden-core = { workspace = true, features = ["std"] }
