@@ -414,6 +414,7 @@ pub trait Deserializable: Sized {
     /// Returns an error if:
     /// * The `source` does not contain enough bytes to deserialize `Self`.
     /// * Bytes read from the `source` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError>;
 
     /// Returns the minimum serialized size for one instance of this type.
@@ -448,6 +449,7 @@ pub trait Deserializable: Sized {
     /// # Security
     /// This method is for trusted input. It does not bound allocations or reject trailing bytes.
     /// Use [`Deserializable::read_from_bytes_with_budget`] for attacker-controlled bytes.
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from(&mut SliceReader::new(bytes))
     }
@@ -463,6 +465,7 @@ pub trait Deserializable: Sized {
     /// * The budget is exhausted before deserialization completes.
     /// * The `bytes` do not contain enough information to deserialize `Self`.
     /// * The `bytes` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,

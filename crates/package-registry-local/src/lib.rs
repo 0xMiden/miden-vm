@@ -12,7 +12,10 @@ use std::{
 };
 
 use miden_assembly_syntax::Report;
-use miden_core::{serde::Serializable, utils::DisplayHex};
+use miden_core::{
+    serde::{Deserializable, Serializable},
+    utils::DisplayHex,
+};
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
@@ -224,7 +227,7 @@ impl LocalPackageRegistry {
     ) -> Result<PublishedPackage, LocalRegistryError> {
         let package_path = package_path.as_ref();
         let bytes = fs::read(package_path).map_err(LocalRegistryError::IndexRead)?;
-        let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
+        let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: package_path.to_path_buf(),
                 error: error.to_string(),
@@ -293,7 +296,7 @@ impl LocalPackageRegistry {
         let Ok(bytes) = fs::read(path) else {
             return false;
         };
-        let Ok(loaded) = MastPackage::read_from_bytes_trusted(&bytes) else {
+        let Ok(loaded) = MastPackage::read_from_bytes(&bytes) else {
             return false;
         };
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
@@ -336,12 +339,13 @@ impl LocalPackageRegistry {
         };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let loaded = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
-            LocalRegistryError::PackageDecode {
-                path: path.clone(),
-                error: error.to_string(),
-            }
-        })?;
+        let loaded =
+            MastPackage::read_from_bytes_validated_with_trusted_debug(&bytes).map_err(|error| {
+                LocalRegistryError::PackageDecode {
+                    path: path.clone(),
+                    error: error.to_string(),
+                }
+            })?;
 
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
         if loaded.name != *package || actual_version != *version {
@@ -430,12 +434,12 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(legacy_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
                 Ok(existing_package) => {
                     let existing_version =
                         Version::new(existing_package.version.clone(), existing_package.digest());
                     if existing_package.name == package.name && existing_version == *version {
-                        if &existing_package == package {
+                        if Self::matches_after_untrusted_package_read(&existing_package, package) {
                             write_file_atomically(artifact_path, &existing_bytes)
                                 .map_err(LocalRegistryError::IndexWrite)
                         } else {
@@ -466,8 +470,12 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(artifact_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
-                Ok(existing_package) if &existing_package == package => Ok(()),
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                Ok(existing_package)
+                    if Self::matches_after_untrusted_package_read(&existing_package, package) =>
+                {
+                    Ok(())
+                },
                 Ok(_) => Err(LocalRegistryError::DuplicateSemanticVersion {
                     package: package.name.clone(),
                     version: package.version.clone(),
@@ -488,6 +496,11 @@ impl LocalPackageRegistry {
                 bytes,
             ),
         }
+    }
+
+    fn matches_after_untrusted_package_read(existing: &MastPackage, package: &MastPackage) -> bool {
+        MastPackage::read_from_bytes(&package.to_bytes())
+            .is_ok_and(|expected| existing == &expected)
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -1028,6 +1041,45 @@ mod tests {
             .expect("cached package should be indexed");
         assert_eq!(shown.dependencies.len(), 1);
         assert!(reloaded.load_package(&PackageId::from("pkg"), &version).is_ok());
+    }
+
+    #[test]
+    fn cache_accepts_existing_debug_enabled_package_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let mut package = build_package("pkg", "1.0.0", []);
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        let expected_sections = package.sections.clone();
+
+        let package = Arc::from(package);
+        let version = registry.cache_package(Arc::clone(&package)).unwrap();
+        let recached = registry.cache_package(package).unwrap();
+
+        assert_eq!(recached, version);
+        let loaded = registry.load_package(&PackageId::from("pkg"), &version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
+    }
+
+    #[test]
+    fn publish_preserves_debug_enabled_package_artifact_on_load() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let mut package = build_package("pkg", "1.0.0", []);
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        let expected_sections = package.sections.clone();
+
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
     }
 
     #[test]

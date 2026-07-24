@@ -31,13 +31,8 @@
 //! package. Use them for bytes received across a trust boundary.
 //!
 //! [`Package::read_from_trusted`] and [`Package::read_from_bytes_trusted`] are for local
-//! files/cache entries controlled by the same trusted build or execution system. They validate the
-//! embedded MAST forest, but preserve package-owned debug sections so [`Package::debug_info`] can
-//! decode them.
-//!
-//! [`Package::read_from_unchecked`] and [`Package::read_from_bytes_unchecked`] are also trusted
-//! same-domain readers, but skip MAST validation. Use them only for bytes that were already
-//! validated before being persisted by the same trusted system.
+//! files/cache entries controlled by the same trusted build or execution system. They preserve
+//! package-owned debug sections and skip embedded MAST and manifest cross-check validation.
 //!
 //! Embedded kernel package bytes are stored in the opaque `kernel` custom section. Untrusted
 //! package reads may carry those bytes, but decoding the embedded kernel through the package API
@@ -125,57 +120,57 @@ impl Package {
     ///
     /// # Trust boundary
     ///
-    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
-    /// bytes that were already validated before being persisted by the same trusted system.
+    /// This skips embedded MAST and manifest cross-check validation and trusts serialized node
+    /// digests. Use it only for bytes that were already validated before being persisted by the
+    /// same trusted system.
     ///
-    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
-    /// other package that crosses a trust boundary. Use [`Package::read_from`] for those
-    /// inputs.
-    pub fn read_from_unchecked<R: ByteReader>(
-        source: &mut R,
-    ) -> Result<Self, DeserializationError> {
+    /// Do not use this for user-controlled packages, network input, or any other package that
+    /// crosses a trust boundary. Use [`Package::read_from`] for those inputs.
+    #[track_caller]
+    pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, false)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
+        Self::read_from_with_header_and_mast(source, header, mast_forest, false, true)
     }
 
     /// Reads trusted package bytes without validating the embedded MAST forest.
     ///
     /// # Trust boundary
     ///
-    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
-    /// bytes that were already validated before being persisted by the same trusted system.
+    /// This skips embedded MAST and manifest cross-check validation and trusts serialized node
+    /// digests. Use it only for bytes that were already validated before being persisted by the
+    /// same trusted system.
     ///
-    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
-    /// other package that crosses a trust boundary. Use [`Package::read_from_bytes`] for those
-    /// inputs.
-    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        let mut source = SliceReader::new(bytes);
-        Self::read_from_unchecked(&mut source)
-    }
-
-    /// Reads a trusted local package while validating the embedded MAST forest.
-    ///
-    /// This keeps the same structural validation as [`Package::read_from`], but allows
-    /// package-owned debug sections to be decoded as trusted metadata. Use this only for local
-    /// files or cache artifacts controlled by this process or build system. Do not use this for
-    /// inbound artifacts from an untrusted channel; use [`Package::read_from`] instead so debug
-    /// sections are discarded before the package is exposed to callers.
-    pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let header = Self::read_header_from(source)?;
-        let mast_forest = Self::read_mast_forest(source, true)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
-    }
-
-    /// Reads trusted local package bytes while validating the embedded MAST forest.
-    ///
-    /// See [`Package::read_from_trusted`].
+    /// Do not use this for user-controlled packages, network input, or any other package that
+    /// crosses a trust boundary. Use [`Package::read_from_bytes`] for those inputs.
+    #[track_caller]
     pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
         Self::read_from_trusted(&mut reader)
     }
 
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn read_from_validated_with_trusted_debug<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true, true)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn read_from_bytes_validated_with_trusted_debug(
+        bytes: &[u8],
+    ) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from_validated_with_trusted_debug(&mut reader)
+    }
+
+    #[track_caller]
     fn read_mast_forest<R: ByteReader>(
         source: &mut R,
         validate_mast_forest: bool,
@@ -253,19 +248,22 @@ impl Package {
         source: &mut R,
         header: PackageHeader,
         mast: Arc<MastForest>,
+        validate_manifest: bool,
         debug_sections_trusted: bool,
     ) -> Result<Self, DeserializationError> {
         let PackageHeader { name, version, description, kind } = header;
 
         // Read manifest
-        let manifest = PackageManifest::read_from_safe(source, &mast)?;
+        let manifest = if validate_manifest {
+            PackageManifest::read_from_safe(source, &mast)?
+        } else {
+            PackageManifest::read_from_trusted(source, &mast)?
+        };
 
         // Read custom sections
         let mut sections = Vec::<Section>::read_from(source)?;
         if !debug_sections_trusted && sections.iter().any(|section| section.id.is_debug()) {
-            log::warn!(
-                "Package read ignored debug sections from an untrusted artifact; use Package::read_from_trusted for local cache/debug reads"
-            );
+            log::warn!("Package read ignored debug sections from an untrusted artifact");
             sections.retain(|section| !section.id.is_debug());
         }
 
@@ -281,9 +279,11 @@ impl Package {
             debug_sections_trusted,
         };
 
-        package
-            .compute_interface_digest()
-            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+        if validate_manifest {
+            package
+                .compute_interface_digest()
+                .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+        }
         package.recompute_mast_commitment();
 
         Ok(package)
@@ -291,15 +291,17 @@ impl Package {
 }
 
 impl Deserializable for Package {
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
 
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast, false)
+        Self::read_from_with_header_and_mast(source, header, mast, true, false)
     }
 
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
@@ -513,6 +515,56 @@ impl Serializable for PackageManifest {
 }
 
 impl PackageManifest {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        // Read exports
+        let exports_len = source.read_usize()?;
+        let max_exports = source.max_alloc(PackageExport::min_serialized_size());
+        if exports_len > max_exports {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {exports_len} elements but reader can provide at most {max_exports}"
+            )));
+        }
+        let mut exports = Vec::with_capacity(exports_len);
+        for _ in 0..exports_len {
+            exports.push(PackageExport::read_from_trusted(source, mast)?);
+        }
+
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let max_modules = source.max_alloc(PackageModule::min_serialized_size());
+        if modules_len > max_modules {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {modules_len} elements but reader can provide at most {max_modules}"
+            )));
+        }
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
+        // Read dependencies
+        let dependencies = Vec::<Dependency>::read_from(source)?;
+
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
+        PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
+            .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
@@ -647,6 +699,20 @@ impl Serializable for PackageExport {
 }
 
 impl PackageExport {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            1 => ProcedureExport::read_from_trusted(source, mast).map(Self::Procedure),
+            2 => ConstantExport::read_from(source).map(Self::Constant),
+            3 => TypeExport::read_from(source).map(Self::Type),
+            invalid => Err(DeserializationError::InvalidValue(format!(
+                "unexpected PackageExport tag: '{invalid}'"
+            ))),
+        }
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
@@ -705,6 +771,39 @@ impl Serializable for ProcedureExport {
 }
 
 impl ProcedureExport {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        use miden_assembly_syntax::ast::types::FunctionType;
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let node = if source.read_bool()? {
+            Some(MastNodeId::from_u32_safe(source.read_u32()?, mast)?)
+        } else {
+            None
+        };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceNodeId::read_from(source)?)
+        } else {
+            None
+        };
+        let digest = Word::read_from(source)?;
+        let signature = if source.read_bool()? {
+            Some(FunctionType::read_from(source)?)
+        } else {
+            None
+        };
+        let attributes = AttributeSet::read_from(source)?;
+        Ok(Self {
+            path,
+            node,
+            source_node,
+            digest,
+            signature,
+            attributes,
+        })
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
@@ -1058,22 +1157,6 @@ mod tests {
         let bytes = package.to_bytes();
 
         let deserialized = Package::read_from_bytes_trusted(&bytes).unwrap();
-
-        assert!(
-            deserialized
-                .sections
-                .iter()
-                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        );
-        assert!(deserialized.debug_info().unwrap().is_some());
-    }
-
-    #[test]
-    fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
-        let package = build_package_with_debug_info();
-        let bytes = package.to_bytes();
-
-        let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
 
         assert!(
             deserialized
@@ -1551,7 +1634,7 @@ mod tests {
     }
 
     #[test]
-    fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
+    fn trusted_package_deserialisation_accepts_spoofed_mast_hashes() {
         // Build mast for:
         //
         // pub proc p
@@ -1581,14 +1664,21 @@ mod tests {
             debug_sections_trusted: true,
         };
 
-        let (bytes, _spoofed_digest) =
+        let (bytes, spoofed_digest) =
             build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-library-digest");
-        let err = Package::read_from_bytes_unchecked(&bytes)
-            .expect_err("expected package deserialization to reject inconsistent node digests");
+        let trusted = Package::read_from_bytes_trusted(&bytes)
+            .expect("trusted package deserialization should not recompute MAST hashes");
+        assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
+
+        let err = Package::read_from_bytes(&bytes)
+            .expect_err("untrusted package deserialization should reject spoofed MAST hashes");
         assert!(
-            err.to_string()
-                .contains("declared node id and digest do not correspond to a procedure root"),
-            "expected package manifest validation failure, got: {err}"
+            err.to_string().contains("invalid untrusted MAST forest"),
+            "expected untrusted-MAST validation failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("hash mismatch for node"),
+            "expected digest mismatch failure, got: {err}"
         );
     }
 
@@ -1694,7 +1784,7 @@ mod tests {
     }
 
     #[test]
-    fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() {
+    fn trusted_kernel_package_deserialisation_accepts_spoofed_mast_hashes() {
         // Build mast for:
         //
         // pub proc k1
@@ -1724,16 +1814,11 @@ mod tests {
             debug_sections_trusted: true,
         };
 
-        let (bytes, _spoofed_digest) =
+        let (bytes, spoofed_digest) =
             build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
-        let err = Package::read_from_bytes_unchecked(&bytes).expect_err(
-            "expected unchecked kernel deserialization to reject inconsistent node digests",
-        );
-        assert!(
-            err.to_string()
-                .contains("declared node id and digest do not correspond to a procedure root"),
-            "expected package manifest validation failure, got: {err}"
-        );
+        let trusted = Package::read_from_bytes_trusted(&bytes)
+            .expect("trusted kernel deserialization should not recompute MAST hashes");
+        assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
     }
 
     fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {

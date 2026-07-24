@@ -775,7 +775,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     ) -> Result<CollectedDependencyNode, Report> {
         let path = path.canonicalize().map_err(|error| Report::msg(error.to_string()))?;
         let bytes = std::fs::read(&path).map_err(|error| Report::msg(error.to_string()))?;
-        let package = MastPackage::read_from_bytes_trusted(&bytes)
+        let package = MastPackage::read_from_bytes_validated_with_trusted_debug(&bytes)
             .map_err(|error| Report::msg(error.to_string()))?;
         self.ensure_dependency_name(expected_name, &package.name, Some(&path))?;
         let semver = package.version.clone();
