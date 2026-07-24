@@ -1134,10 +1134,7 @@ fn test_mmr_hash_peaks() {
     // minimum length is 16
     let mut expected_peaks = [first_peak, second_peak, third_peak].to_vec();
     expected_peaks.resize(16, Word::default());
-    assert_eq!(
-        peaks.hash_peaks(),
-        Poseidon2::hash_elements(&digests_to_elements(&expected_peaks))
-    );
+    assert_eq!(peaks.hash_peaks(), mmr_commitment(peaks.num_leaves() as u64, &expected_peaks));
 }
 
 #[test]
@@ -1155,7 +1152,7 @@ fn test_mmr_peaks_hash_less_than_16() {
         expected_peaks.resize(16, Word::default());
         assert_eq!(
             accumulator.hash_peaks(),
-            Poseidon2::hash_elements(&digests_to_elements(&expected_peaks))
+            mmr_commitment(accumulator.num_leaves() as u64, &expected_peaks)
         );
     }
 }
@@ -1172,8 +1169,38 @@ fn test_mmr_peaks_hash_odd() {
     expected_peaks.resize(18, Word::default());
     assert_eq!(
         accumulator.hash_peaks(),
-        Poseidon2::hash_elements(&digests_to_elements(&expected_peaks))
+        mmr_commitment(accumulator.num_leaves() as u64, &expected_peaks)
     );
+}
+
+#[test]
+fn test_mmr_peaks_hash_binds_num_leaves() {
+    let peak = int_to_node(0);
+
+    let one_leaf_peaks = MmrPeaks::new(Forest::new(1).unwrap(), vec![peak]).unwrap();
+    let two_leaf_peaks = MmrPeaks::new(Forest::new(2).unwrap(), vec![peak]).unwrap();
+
+    assert_eq!(one_leaf_peaks.flatten_and_pad_peaks(), two_leaf_peaks.flatten_and_pad_peaks());
+    assert_ne!(one_leaf_peaks.hash_peaks(), two_leaf_peaks.hash_peaks());
+}
+
+#[test]
+fn test_empty_mmr_peaks_hash_includes_num_leaves() {
+    let peaks = MmrPeaks::default();
+
+    let expected_peaks = vec![Word::default(); 16];
+    assert_eq!(peaks.hash_peaks(), mmr_commitment(0, &expected_peaks));
+}
+
+#[test]
+fn test_mmr_peaks_hash_binds_multi_peak_forest_shape() {
+    let peaks = vec![int_to_node(0), int_to_node(1)];
+
+    let five_leaf_peaks = MmrPeaks::new(Forest::new(0b0101).unwrap(), peaks.clone()).unwrap();
+    let six_leaf_peaks = MmrPeaks::new(Forest::new(0b0110).unwrap(), peaks).unwrap();
+
+    assert_eq!(five_leaf_peaks.flatten_and_pad_peaks(), six_leaf_peaks.flatten_and_pad_peaks());
+    assert_ne!(five_leaf_peaks.hash_peaks(), six_leaf_peaks.hash_peaks());
 }
 
 #[test]
@@ -1504,8 +1531,18 @@ mod property_tests {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn digests_to_elements(digests: &[Word]) -> Vec<Felt> {
-    Word::words_as_elements(digests).to_vec()
+fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
+    let padded_peak_elements = Word::words_as_elements(padded_peaks);
+    let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peak_elements.len());
+    elements.extend_from_slice(&[
+        Felt::new_unchecked(num_leaves),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ]);
+    elements.extend_from_slice(padded_peak_elements);
+
+    Poseidon2::hash_elements(&elements)
 }
 
 // short hand for the Poseidon2 hash, used to make test code more concise and easy to read

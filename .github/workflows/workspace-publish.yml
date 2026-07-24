@@ -8,6 +8,7 @@ name: Publish workspace to crates.io
 # rulesets may require deployment to the release environment and may make tags
 # immutable, so failures below print recovery commands instead of suggesting
 # force-pushing, deleting, or moving a tag.
+#
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +23,11 @@ on:
         type: string
       allow_existing:
         description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
+        required: false
+        default: false
+        type: boolean
+      skip_package_version_gate:
+        description: "Skip the package version gate. Use only for manual release recovery after maintainers verify the release plan."
         required: false
         default: false
         type: boolean
@@ -62,10 +68,21 @@ jobs:
         run: |
           ./scripts/prepare-release.sh
 
+  package-version-gate:
+    name: check package versions
+    needs: prepare-release
+    if: ${{ github.repository_owner == '0xMiden' && (github.event_name != 'workflow_dispatch' || !inputs.skip_package_version_gate) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package-version-gate.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.sha }}
+      packages: ${{ github.event.inputs.packages || '' }}
+
   create-draft:
     name: create draft release
-    needs: prepare-release
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
+    needs: [prepare-release, package-version-gate]
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (needs.package-version-gate.result == 'success' || (inputs.skip_package_version_gate && needs.package-version-gate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -212,8 +229,8 @@ jobs:
 
   publish:
     name: publish workspace crates
-    needs: [prepare-release, upload-artifacts]
-    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
+    needs: [prepare-release, package-version-gate, upload-artifacts]
+    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (needs.package-version-gate.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_package_version_gate && needs.package-version-gate.result == 'skipped')) && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
     runs-on: warp-ubuntu-latest-x64-8x
     environment: release
     permissions:

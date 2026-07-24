@@ -1,4 +1,5 @@
 use miden_core::WORD_SIZE;
+use miden_crypto::merkle::mmr::PartialMmr;
 use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
@@ -272,7 +273,7 @@ fn test_mmr_unpack() {
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
     ];
-    let peaks_hash = hash_elements(&peaks.concat());
+    let peaks_hash = mmr_commitment_from_elements(number_of_leaves, &peaks.concat());
 
     let mmr_ptr = 1000_u32;
     let mut stack = felt_slice_to_ints(&*peaks_hash);
@@ -335,7 +336,8 @@ fn test_mmr_unpack_invalid_hash() {
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
     ];
-    let hash = hash_elements(&hash_data.concat());
+    let number_of_leaves = 0b10101;
+    let hash = mmr_commitment_from_elements(number_of_leaves, &hash_data.concat());
 
     // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mmr_ptr = 1000;
@@ -351,7 +353,7 @@ fn test_mmr_unpack_invalid_hash() {
     hash_data[0][0] += ONE;
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
-    map_data.extend_from_slice(&[Felt::new_unchecked(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
+    map_data.extend_from_slice(&[Felt::new_unchecked(number_of_leaves), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
     map_data.extend_from_slice(&hash_data.as_slice().concat());
 
     let hash_key = hash;
@@ -367,6 +369,84 @@ fn test_mmr_unpack_invalid_hash() {
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
 
     assert!(test.execute().is_err());
+}
+
+#[test]
+fn test_mmr_unpack_rejects_forged_num_leaves() -> Result<(), MerkleError> {
+    let mmr_ptr = 1000_u32;
+    let leaves = init_merkle_leaves(&[1, 2]);
+    let merkle_tree = MerkleTree::new(leaves.clone())?;
+    let two_leaf_peak = merkle_tree.root();
+
+    let mut honest_peaks = vec![two_leaf_peak];
+    honest_peaks.resize(16, Word::default());
+    let peak_hash = mmr_commitment(2, &honest_peaks);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            exec.mmr::unpack
+            push.{mmr_ptr} push.0 exec.mmr::get
+
+            swapw dropw
+        end
+        "
+    );
+
+    let mut initial_stack = felt_slice_to_ints(&*peak_hash);
+    initial_stack.push(mmr_ptr as u64);
+
+    let peak_elements = Word::words_as_elements(&honest_peaks);
+
+    let mut honest_map_data = vec![Felt::new_unchecked(2), ZERO, ZERO, ZERO];
+    honest_map_data.extend_from_slice(peak_elements.as_ref());
+    let honest_advice_map = [(peak_hash, honest_map_data)];
+
+    build_test!(
+        source.as_str(),
+        &initial_stack,
+        &[],
+        MerkleStore::from(&merkle_tree),
+        honest_advice_map.iter().cloned()
+    )
+    .expect_stack(&word_to_ints(&leaves[0]));
+
+    let mut forged_map_data = vec![Felt::new_unchecked(1), ZERO, ZERO, ZERO];
+    forged_map_data.extend_from_slice(peak_elements.as_ref());
+    let forged_advice_map = [(peak_hash, forged_map_data)];
+
+    assert_ne!(two_leaf_peak, leaves[0]);
+    let forged_test = build_test!(
+        source.as_str(),
+        &initial_stack,
+        &[],
+        MerkleStore::new(),
+        forged_advice_map.iter().cloned()
+    );
+    assert!(forged_test.execute().is_err());
+
+    Ok(())
+}
+
+#[test]
+fn test_partial_mmr_peaks_hash_binds_num_leaves() {
+    let mut mmr = Mmr::new();
+    for i in 1u64..=7 {
+        mmr.add(init_merkle_leaf(i)).unwrap();
+    }
+
+    let accumulator = mmr.peaks();
+    let partial = PartialMmr::from_peaks(accumulator.clone());
+
+    let mut padded_peaks = accumulator.peaks().to_vec();
+    padded_peaks.resize(16, Word::default());
+
+    assert_eq!(
+        partial.peaks().hash_peaks(),
+        mmr_commitment(accumulator.num_leaves() as u64, &padded_peaks)
+    );
 }
 
 /// Tests the case of an MMR with more than 16 peaks
@@ -397,7 +477,7 @@ fn test_mmr_unpack_large_mmr() {
         [ZERO, ZERO, ZERO, Felt::new_unchecked(17)],
         EMPTY_WORD.into(),
     ];
-    let peaks_hash = hash_elements(&peaks.concat());
+    let peaks_hash = mmr_commitment_from_elements(number_of_leaves, &peaks.concat());
 
     // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mmr_ptr = 1000_u32;
@@ -456,7 +536,10 @@ fn test_mmr_pack_roundtrip() {
     mmr.add(init_merkle_leaf(3)).unwrap();
 
     let accumulator = mmr.peaks();
+    let mut hash_data = accumulator.peaks().to_vec();
+    hash_data.resize(16, Word::default());
     let hash = accumulator.hash_peaks();
+    assert_eq!(hash, mmr_commitment(accumulator.num_leaves() as u64, &hash_data));
     let mmr_ptr = 1000;
     let mut stack = felt_slice_to_ints(&*hash);
     stack.push(mmr_ptr);
@@ -467,8 +550,6 @@ fn test_mmr_pack_roundtrip() {
     let advice_stack = &[];
     let store = MerkleStore::new();
 
-    let mut hash_data = accumulator.peaks().to_vec();
-    hash_data.resize(16, Word::default());
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
     map_data.extend_from_slice(&[
         Felt::new_unchecked(accumulator.num_leaves() as u64),
@@ -534,7 +615,7 @@ fn test_mmr_pack() {
     ]);
     hash_data.resize(16 * 4, ZERO); // padding data
 
-    let hash = hash_elements(&hash_data);
+    let hash = mmr_commitment_from_elements(3, &hash_data);
     // Under the canonical layout, adv.insert_mem uses the digest word in
     // stack order as the advice map key. So here we use the digest as-is.
     let hash_key = hash;
@@ -711,7 +792,9 @@ fn test_add_mmr_large() {
     let mut expected_memory = vec![num_leaves, 0, 0, 0];
     expected_memory.extend(digests_to_ints(accumulator.peaks()));
 
-    let expect_stack = word_to_ints(&accumulator.hash_peaks());
+    let mut hash_data = accumulator.peaks().to_vec();
+    hash_data.resize(16, Word::default());
+    let expect_stack = word_to_ints(&mmr_commitment(num_leaves, &hash_data));
     build_test!(&source).expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);
 }
 
@@ -785,7 +868,9 @@ fn test_mmr_large_add_roundtrip() {
     }
 
     let old_accumulator = mmr.peaks();
-    let hash = old_accumulator.hash_peaks();
+    let mut hash_data = old_accumulator.peaks().to_vec();
+    hash_data.resize(16, Word::default());
+    let hash = mmr_commitment(old_accumulator.num_leaves() as u64, &hash_data);
 
     // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mut stack = felt_slice_to_ints(&*hash);
@@ -795,9 +880,6 @@ fn test_mmr_large_add_roundtrip() {
     // the map and pushed to the advice stack by the MASM code)
     let advice_stack = &[];
     let store = MerkleStore::new();
-
-    let mut hash_data = old_accumulator.peaks().to_vec();
-    hash_data.resize(16, Word::default());
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
     let num_leaves = old_accumulator.num_leaves() as u64;
@@ -833,7 +915,7 @@ fn test_mmr_large_add_roundtrip() {
     expected_memory.extend(digests_to_ints(&new_peaks));
 
     // Expected stack after pack+swapw+dropw: [h0, h1, h2, h3]
-    let expect_stack = word_to_ints(&new_accumulator.hash_peaks());
+    let expect_stack = word_to_ints(&mmr_commitment(num_leaves, &new_peaks));
 
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
     test.expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);
@@ -853,4 +935,15 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
     arr.iter().map(Felt::as_canonical_u64).collect()
+}
+
+fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
+    mmr_commitment_from_elements(num_leaves, Word::words_as_elements(padded_peaks))
+}
+
+fn mmr_commitment_from_elements(num_leaves: u64, padded_peak_elements: &[Felt]) -> Word {
+    let mut elements = Vec::with_capacity(WORD_SIZE + padded_peak_elements.len());
+    elements.extend_from_slice(&[Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO]);
+    elements.extend_from_slice(padded_peak_elements);
+    hash_elements(&elements)
 }

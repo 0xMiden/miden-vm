@@ -1,0 +1,57 @@
+name: Package version gate
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+      - next
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref or SHA to check. Empty checks the caller ref."
+        required: false
+        default: ""
+        type: string
+      packages:
+        description: "Comma, space, or newline separated packages to check. Empty checks all publishable workspace packages."
+        required: false
+        default: ""
+        type: string
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Comma, space, or newline separated packages to check. Empty checks all publishable workspace packages."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event_name }} @ ${{ inputs.ref || github.ref }} @ ${{ inputs.packages || '' }}"
+  cancel-in-progress: true
+
+jobs:
+  package-versions:
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: warp-ubuntu-latest-x64-8x
+    env:
+      RUSTC_BOOTSTRAP: "1"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --version 0.49.0 --locked
+
+      - name: Check package versions
+        run: scripts/check-package-release-plan.sh "$PACKAGE_VERSION_GATE_PACKAGES"
+        env:
+          PACKAGE_VERSION_GATE_PACKAGES: ${{ inputs.packages || '' }}
