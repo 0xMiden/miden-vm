@@ -163,6 +163,8 @@
 ## v0.29.0 (2026-08-04)
 
 #### Changes
+- `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
+- Added `dup u32lt.64 assert.err` boundary checks to `u64::shl`, `u64::shr`, `u64::rotl`, and `u64::rotr` and updated cycle counts ([#3368](https://github.com/0xMiden/miden-vm/pull/3368), fixes [#3360](https://github.com/0xMiden/miden-vm/issues/3360)).
 
 - [BREAKING] Recursive MASM verification now accepts a claim commitment and authenticates the advice-supplied claim and kernel witness. Rust callers construct request-addressed inputs with `RecursiveVerifierInputs::for_request` ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
 
