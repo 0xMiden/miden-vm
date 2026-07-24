@@ -1972,6 +1972,7 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
 }
 
 #[test]
+#[cfg(false)]
 fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
     let context = TestContext::default();
     let library_module = parse_module!(

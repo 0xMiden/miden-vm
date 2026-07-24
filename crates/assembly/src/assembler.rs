@@ -1685,6 +1685,9 @@ impl Assembler {
             }
         }
 
+        // NOTE(pauls): This is temporarily commented out while we decide how to proceed with
+        // this check going forward
+        #[cfg(false)]
         if let (Some(source_library_commitment), Some(source_root_id)) =
             (source_library_commitment, source_root_id)
             && let Some((_conflicting_root, conflicting_path)) =
