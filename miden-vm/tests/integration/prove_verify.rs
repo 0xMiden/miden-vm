@@ -264,12 +264,10 @@ fn test_rpx_prove_verify() {
 mod fast_parallel {
     use alloc::sync::Arc;
 
-    use miden_core::proof::DeferredProof;
-
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::{
         program::ExecutionClaim,
-        proof::{ExecutionProof, HashFunction},
+        proof::{DeferredProof, ExecutionProof, HashFunction},
     };
     use miden_processor::{
         DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,

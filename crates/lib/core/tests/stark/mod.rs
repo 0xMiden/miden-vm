@@ -600,8 +600,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     let initial_stack = vec![CLAIM_PTR, KERNEL_PTR, num_kernel_proc_digests as u64];
 
     // 3) Build the advice stack: kernel digests (4N), then the claim-region fields (P, I, O) for
-    //    the staging, then the deferred root for `stage_boundary_inputs`, then the aux
-    //    randomness consumed by the test prologue that drives `compute_outer_logup_correction`.
+    //    the staging, then the deferred root for `stage_boundary_inputs`, then the aux randomness
+    //    consumed by the test prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&program_digest);
@@ -610,8 +610,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
-    // 4) Stage the caller regions, stage the boundary-inputs block, run process_public_inputs,
-    //    then emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
+    // 4) Stage the caller regions, stage the boundary-inputs block, run process_public_inputs, then
+    //    emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
     //    `generate_aux_randomness` samples it) and compute `c_total`.
     let source = format!(
         "

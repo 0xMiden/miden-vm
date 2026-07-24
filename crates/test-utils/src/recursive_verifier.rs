@@ -8,8 +8,8 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, Word, program::ExecutionClaim, proof::ExecutionProof};
 pub use miden_core::program::request_key;
+use miden_core::{Felt, Word, program::ExecutionClaim, proof::ExecutionProof};
 pub use miden_verifier::recursive::RecursiveAdviceError;
 
 use crate::crypto::MerkleStore;
@@ -66,7 +66,12 @@ pub fn generate_advice_inputs(
         claim_advice.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
     }
     claim_advice.extend(
-        claim.program_info().program_hash().as_elements().iter().map(Felt::as_canonical_u64),
+        claim
+            .program_info()
+            .program_hash()
+            .as_elements()
+            .iter()
+            .map(Felt::as_canonical_u64),
     );
     claim_advice.extend(claim.stack_inputs().as_ref().iter().map(Felt::as_canonical_u64));
     claim_advice.extend(claim.stack_outputs().as_ref().iter().map(Felt::as_canonical_u64));

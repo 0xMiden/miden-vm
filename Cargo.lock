@@ -2649,10 +2649,7 @@ dependencies = [
  "miden-verifier",
  "pretty_assertions",
  "proptest",
- "serde-wincode",
  "test-case",
- "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -2723,7 +2720,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-mast-package",
- "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-serde-macros",

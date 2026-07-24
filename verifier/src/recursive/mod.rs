@@ -20,16 +20,15 @@
 
 use alloc::{
     string::{String, ToString},
+    sync::Arc,
     vec,
     vec::Vec,
 };
 
-use alloc::sync::Arc;
 use miden_air::{
     MIDEN_AIR_COUNT, MidenMultiAir, ProofOrder, PublicInputs, Statement,
     ace::build_recursive_verifier_ace_circuit, config,
 };
-
 use miden_core::{
     Felt, Word,
     crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
