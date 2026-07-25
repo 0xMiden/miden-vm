@@ -304,7 +304,7 @@ pub fn generate_recursive_verifier_data(
     .unwrap();
 
     let program_info = ProgramInfo::from(program);
-    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
     generate_advice_inputs(&proof, &claim).unwrap()
 }

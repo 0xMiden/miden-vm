@@ -55,7 +55,7 @@ pub fn generate_advice_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<VerifierData, RecursiveAdviceError> {
-    let kernel_digests = claim.program_info().kernel_procedures();
+    let kernel_digests = claim.kernel().proc_hashes();
     let num_kernel_digests = kernel_digests.len() as u64;
     let inputs = miden_verifier::recursive::advice_inputs(proof, claim)?;
 
@@ -65,14 +65,7 @@ pub fn generate_advice_inputs(
     for digest in kernel_digests {
         claim_advice.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
     }
-    claim_advice.extend(
-        claim
-            .program_info()
-            .program_hash()
-            .as_elements()
-            .iter()
-            .map(Felt::as_canonical_u64),
-    );
+    claim_advice.extend(claim.program_root().as_elements().iter().map(Felt::as_canonical_u64));
     claim_advice.extend(claim.stack_inputs().as_ref().iter().map(Felt::as_canonical_u64));
     claim_advice.extend(claim.stack_outputs().as_ref().iter().map(Felt::as_canonical_u64));
 

@@ -657,10 +657,12 @@ impl Test {
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            let claim =
+                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
             assert!(verify(proof, claim).is_err());
         } else {
-            let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+            let claim =
+                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
             let result = verify(proof, claim);
             assert!(result.is_ok(), "error: {result:?}");
         }

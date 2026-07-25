@@ -140,7 +140,7 @@ pub fn advice_inputs(
         return Err(RecursiveAdviceError::UnsupportedHashFunction(stark.hash_fn()));
     }
     let pub_inputs = PublicInputs::new(
-        claim.program_info().clone(),
+        claim.to_program_info(),
         *claim.stack_inputs(),
         *claim.stack_outputs(),
         resolve_deferred_root(proof.deferred_proof())?,
@@ -447,7 +447,7 @@ mod tests {
             HashFunction::Blake3_256,
             DeferredProof::empty(),
         );
-        let claim = ExecutionClaim::new(
+        let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(Word::default(), KernelDescriptor::default()),
             StackInputs::default(),
             StackOutputs::default(),

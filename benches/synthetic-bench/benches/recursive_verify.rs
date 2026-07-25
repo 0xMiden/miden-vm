@@ -601,7 +601,7 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
 /// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
 /// The stack is ordered so its first element is the next value consumed by the VM.
 fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
-    let claim = ExecutionClaim::new(
+    let claim = ExecutionClaim::from_program_info(
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,

@@ -211,10 +211,10 @@ fn verify_stark(
     final_deferred_root: Word,
     stark_proof: &StarkProof,
 ) -> Result<(), VerificationError> {
-    let program_hash = *claim.program_info().program_hash();
+    let program_hash = claim.program_root();
 
     let pub_inputs = PublicInputs::new(
-        claim.program_info().clone(),
+        claim.to_program_info(),
         *claim.stack_inputs(),
         *claim.stack_outputs(),
         final_deferred_root,

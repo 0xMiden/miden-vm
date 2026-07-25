@@ -257,6 +257,11 @@ impl ProgramInfo {
     pub fn kernel_commitment(&self) -> Word {
         self.kernel.commitment()
     }
+
+    /// Splits this program info into its program hash and kernel descriptor.
+    pub fn into_parts(self) -> (Word, KernelDescriptor) {
+        (self.program_hash, self.kernel)
+    }
 }
 
 impl From<Program> for ProgramInfo {

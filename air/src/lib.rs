@@ -1146,7 +1146,7 @@ mod tests {
         let stack_outputs = StackOutputs::new(&[Felt::new_unchecked(7)]).unwrap();
         let deferred_root = word(90);
 
-        let claim = ExecutionClaim::new(
+        let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(program_hash, kernel.clone()),
             stack_inputs,
             stack_outputs,

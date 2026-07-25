@@ -32,7 +32,7 @@
 //! commitment together with the relation digest and the deferred root.
 
 use super::{
-    ProgramInfo, StackInputs, StackOutputs,
+    KernelDescriptor, ProgramInfo, StackInputs, StackOutputs,
     domain::{EXECUTION_CLAIM_DOMAIN_ID, PROOF_REQUEST_DOMAIN_ID, domain_selector},
 };
 use crate::{Felt, Word, ZERO, chiplets::hasher};
@@ -54,9 +54,9 @@ pub const REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1)
 // EXECUTION CLAIM
 // ================================================================================================
 
-/// The external statement a Miden VM proof attests: the program digest and kernel commitment
-/// identify the executed code and its syscall authorization set; the stack inputs and outputs
-/// are the execution's public I/O.
+/// The external statement a Miden VM proof attests: the program root and kernel identify the
+/// executed code and its syscall authorization set; the stack inputs and outputs are the
+/// execution's public I/O.
 ///
 /// Stack inputs are ordered as if pushed onto the stack one by one, so the last value in the
 /// slice ends up on top of the stack; stack outputs are ordered as if popped off one by one, so
@@ -66,28 +66,53 @@ pub const REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1)
 /// The deferred root is deliberately absent: verification returns it as an obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionClaim {
-    program_info: ProgramInfo,
+    program_root: Word,
+    kernel: KernelDescriptor,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
 }
 
 impl ExecutionClaim {
-    /// Creates a new execution claim from the program info and the stack I/O.
+    /// Creates a new execution claim from the program root, kernel, and stack I/O.
     pub const fn new(
-        program_info: ProgramInfo,
+        program_root: Word,
+        kernel: KernelDescriptor,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
     ) -> Self {
         Self {
-            program_info,
+            program_root,
+            kernel,
             stack_inputs,
             stack_outputs,
         }
     }
 
-    /// Returns the program info (program digest + kernel) of this claim.
-    pub const fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
+    /// Creates a new execution claim from the program info and the stack I/O.
+    pub fn from_program_info(
+        program_info: ProgramInfo,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+    ) -> Self {
+        let (program_root, kernel) = program_info.into_parts();
+        Self::new(program_root, kernel, stack_inputs, stack_outputs)
+    }
+
+    /// Returns the MAST root of the executed program.
+    pub const fn program_root(&self) -> Word {
+        self.program_root
+    }
+
+    /// Returns the kernel descriptor of this claim.
+    pub const fn kernel(&self) -> &KernelDescriptor {
+        &self.kernel
+    }
+
+    /// Returns the program info (program root + kernel) of this claim.
+    ///
+    /// This constructs a new [`ProgramInfo`], cloning the kernel descriptor.
+    pub fn to_program_info(&self) -> ProgramInfo {
+        ProgramInfo::new(self.program_root, self.kernel.clone())
     }
 
     /// Returns the stack inputs of this claim.
@@ -100,16 +125,16 @@ impl ExecutionClaim {
         &self.stack_outputs
     }
 
-    /// Splits this claim into its program info and stack I/O.
-    pub fn into_parts(self) -> (ProgramInfo, StackInputs, StackOutputs) {
-        (self.program_info, self.stack_inputs, self.stack_outputs)
+    /// Splits this claim into its program root, kernel, and stack I/O.
+    pub fn into_parts(self) -> (Word, KernelDescriptor, StackInputs, StackOutputs) {
+        (self.program_root, self.kernel, self.stack_inputs, self.stack_outputs)
     }
 
     /// Returns the canonical 40-element encoding `P ‖ K ‖ I ‖ O` of this claim.
     pub fn to_elements(&self) -> [Felt; NUM_CLAIM_ELEMENTS] {
         let mut elements = [ZERO; NUM_CLAIM_ELEMENTS];
-        elements[0..4].copy_from_slice(self.program_info.program_hash().as_elements());
-        elements[4..8].copy_from_slice(self.program_info.kernel_commitment().as_elements());
+        elements[0..4].copy_from_slice(self.program_root.as_elements());
+        elements[4..8].copy_from_slice(self.kernel.commitment().as_elements());
         elements[8..24].copy_from_slice(&self.stack_inputs[..]);
         elements[24..40].copy_from_slice(&self.stack_outputs[..]);
         elements
@@ -173,7 +198,7 @@ mod tests {
         let program_info = ProgramInfo::new(word(1), kernel);
         let inputs = StackInputs::new(&[Felt::new_unchecked(5), Felt::new_unchecked(6)]).unwrap();
         let outputs = StackOutputs::new(&[Felt::new_unchecked(7)]).unwrap();
-        ExecutionClaim::new(program_info, inputs, outputs)
+        ExecutionClaim::from_program_info(program_info, inputs, outputs)
     }
 
     /// The commitment must bind every field and the I/O order, be domain-separated, and use
@@ -186,18 +211,15 @@ mod tests {
 
         // mutate P
         let mut mutated = base.clone();
-        let other_kernel = mutated.program_info.kernel().clone();
-        mutated.program_info =
-            ProgramInfo::new([Felt::new_unchecked(999), ZERO, ZERO, ZERO].into(), other_kernel);
+        mutated.program_root = [Felt::new_unchecked(999), ZERO, ZERO, ZERO].into();
         assert_ne!(mutated.commitment(), base_commitment, "P not bound");
 
         // mutate K (different kernel)
         let mut mutated = base.clone();
-        let new_kernel = KernelDescriptor::from_hashes(vec![
+        mutated.kernel = KernelDescriptor::from_hashes(vec![
             [Felt::new_unchecked(200), ZERO, ZERO, ZERO].into(),
         ])
         .unwrap();
-        mutated.program_info = ProgramInfo::new(*base.program_info.program_hash(), new_kernel);
         assert_ne!(mutated.commitment(), base_commitment, "K not bound");
 
         // mutate one element of I

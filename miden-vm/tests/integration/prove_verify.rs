@@ -55,7 +55,7 @@ fn assert_prove_verify(
     }
 
     println!("Verifying proof...");
-    let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
     let security_level = verify(proof, claim).expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
@@ -67,7 +67,7 @@ fn assert_recursive_verify(
     stack_outputs: StackOutputs,
     proof: &ExecutionProof,
 ) {
-    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
     let verifier_inputs = generate_advice_inputs(proof, &claim)
         .expect("recursive verifier advice construction failed");
 
@@ -365,7 +365,8 @@ mod fast_parallel {
         );
 
         // Verify the proof
-        let claim = ExecutionClaim::new(program.into(), stack_inputs, fast_stack_outputs);
+        let claim =
+            ExecutionClaim::from_program_info(program.into(), stack_inputs, fast_stack_outputs);
         verify(proof, claim).expect("Verification failed");
     }
 
@@ -395,7 +396,7 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+        let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
         verify(proof, claim).expect("Verification failed");
     }
 
@@ -427,7 +428,7 @@ mod fast_parallel {
         .expect("prove_partial_from_trace_sync failed");
 
         assert_eq!(proof.deferred_proof().as_wire(), Some(&expected_wire));
-        let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+        let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
         let (_, pending) = miden_verifier::Verifier::new()
             .verify_partial(proof, claim)
             .expect("partial verification failed");
@@ -454,7 +455,10 @@ fn prove_fixture() -> (ExecutionClaim, ExecutionProof) {
         ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
     )
     .expect("Proving failed");
-    (ExecutionClaim::new(program.into(), stack_inputs, stack_outputs), proof)
+    (
+        ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs),
+        proof,
+    )
 }
 
 /// Like [`prove_fixture`], but produces a wire-backed partial proof via `prove_partial_sync`.
@@ -475,7 +479,10 @@ fn prove_partial_fixture() -> (ExecutionClaim, ExecutionProof) {
         ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
     )
     .expect("Proving failed");
-    (ExecutionClaim::new(program.into(), stack_inputs, stack_outputs), proof)
+    (
+        ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs),
+        proof,
+    )
 }
 
 /// `verify` accepts the prover's final packages and refuses wire-backed partial material; a
@@ -529,7 +536,7 @@ fn test_deferred_root_is_statement_bound() {
         ProvingOptions::with_96_bit_security(HashFunction::Poseidon2),
     )
     .expect("Proving failed");
-    let claim = ExecutionClaim::new(program.into(), stack_inputs, stack_outputs);
+    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
 
     // swap in empty deferred material: it resolves to TRUE, which the statement did not bind
     let stark = proof.miden_proof();

@@ -369,7 +369,11 @@ fn bench_one_scenario(
             b.iter_batched(
                 || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
                 |(program_info, stack_inputs, stack_outputs, proof)| {
-                    let claim = ExecutionClaim::new(program_info, stack_inputs, stack_outputs);
+                    let claim = ExecutionClaim::from_program_info(
+                        program_info,
+                        stack_inputs,
+                        stack_outputs,
+                    );
                     black_box(Verifier::new().verify(proof, claim).expect("verify"));
                 },
                 BatchSize::SmallInput,
