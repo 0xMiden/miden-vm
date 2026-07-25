@@ -591,6 +591,12 @@ impl Assembler {
             Instruction::DebugVar(debug_var_info) => {
                 block_builder.push_debug_var(debug_var_info.clone())?;
             },
+            Instruction::DebugInlineCall(inline_call) => {
+                block_builder.push_debug_inline_call(inline_call, proc_ctx.source_manager());
+            },
+            Instruction::DebugInlineCallClear => {
+                block_builder.clear_debug_inline_calls();
+            },
 
             // ----- emit instruction -------------------------------------------------------------
             // emit: reads event ID from top of stack and execute the corresponding handler.

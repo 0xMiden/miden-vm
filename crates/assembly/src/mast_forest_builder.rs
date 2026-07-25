@@ -1650,10 +1650,10 @@ mod tests {
         let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
         let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "mul"));
         let first_block_ref = builder
-            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![first_asm_op], vec![], vec![], vec![])
             .unwrap();
         let second_block_ref = builder
-            .ensure_block_ref(vec![Operation::Mul], vec![(0, second_asm_op)], vec![])
+            .ensure_block_ref(vec![Operation::Mul], vec![second_asm_op], vec![], vec![], vec![])
             .unwrap();
         let merged_ref =
             builder.merge_basic_block_refs(&[first_block_ref, second_block_ref]).unwrap()[0];
@@ -1663,16 +1663,16 @@ mod tests {
         let root_ref = builder.join_node_refs(vec![merged_ref, external_ref], None).unwrap();
         record_test_root(&mut builder, root_ref);
 
-        let (_, _, source_graph, _) = builder.build().unwrap().into_parts_with_source_graph();
+        let (_, _, source_graph, _) = builder.build().unwrap().into_parts_with_debug_info();
         let root = source_graph.roots()[0];
-        let merged_child = &source_graph.nodes()[source_graph.nodes()[root].children()[0]];
+        let merged_child = &source_graph[source_graph[root].children[0]];
 
-        assert_eq!((merged_child.op_start(), merged_child.op_end()), (0, 2));
+        assert_eq!((merged_child.op_start, merged_child.op_end), (0, 2));
         assert_eq!(
             merged_child
-                .asm_ops()
+                .asm_ops
                 .iter()
-                .map(|(_, asm_op)| asm_op.context_name())
+                .map(|asm_op| source_graph[asm_op.context_name_idx].as_ref())
                 .collect::<Vec<_>>(),
             vec!["merge::first", "merge::second"],
         );

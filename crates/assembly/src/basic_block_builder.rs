@@ -11,11 +11,14 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::{
-    Felt,
+    Felt, Word,
     events::SystemEvent,
-    operations::{AssemblyOp, Operation},
+    operations::{AssemblyOp, DebugInlineCallInfo, Operation},
 };
-use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceVar};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+    FunctionInfo,
+};
 
 use crate::{
     ProcedureContext,
@@ -43,6 +46,12 @@ struct PendingAsmOp {
     op: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ActiveInlineCall {
+    callee_idx: DebugFunctionIdx,
+    loc_idx: DebugLocIdx,
+}
+
 // BASIC BLOCK BUILDER
 // ================================================================================================
 
@@ -64,6 +73,10 @@ pub struct BasicBlockBuilder<'a> {
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variables attached to operations in this block.
     debug_vars: Vec<DebugSourceVar>,
+    /// Inline call chains attached to operations in this block.
+    inline_calls: Vec<DebugSourceInlineCall>,
+    /// The source-level inline call chain active for subsequently generated operations.
+    active_inline_calls: Vec<ActiveInlineCall>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -85,6 +98,8 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Vec::new(),
+                inline_calls: Vec::new(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
             None => Self {
@@ -93,6 +108,8 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Default::default(),
+                inline_calls: Default::default(),
+                active_inline_calls: Default::default(),
                 mast_forest_builder,
             },
         }
@@ -116,6 +133,7 @@ impl BasicBlockBuilder<'_> {
 impl BasicBlockBuilder<'_> {
     /// Adds the specified operation to the list of basic block operations.
     pub fn push_op(&mut self, op: Operation) {
+        self.record_active_inline_calls(self.ops.len() as u32);
         self.ops.push(op);
     }
 
@@ -125,13 +143,16 @@ impl BasicBlockBuilder<'_> {
         I: IntoIterator<Item = O>,
         O: Borrow<Operation>,
     {
-        self.ops.extend(ops.into_iter().map(|o| *o.borrow()));
+        for op in ops {
+            self.push_op(*op.borrow());
+        }
     }
 
     /// Adds the specified operation n times to the list of basic block operations.
     pub fn push_op_many(&mut self, op: Operation, n: usize) {
-        let new_len = self.ops.len() + n;
-        self.ops.resize(new_len, op);
+        for _ in 0..n {
+            self.push_op(op);
+        }
     }
 
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
@@ -232,6 +253,62 @@ impl BasicBlockBuilder<'_> {
         self.debug_vars.push(debug_var);
         Ok(())
     }
+
+    /// Appends one frame to the inline call chain active for subsequently generated operations.
+    pub fn push_debug_inline_call(
+        &mut self,
+        inline_call: &DebugInlineCallInfo,
+        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
+    ) {
+        let Some(call_site_span) =
+            source_manager.file_line_col_to_span(inline_call.call_site().clone())
+        else {
+            return;
+        };
+        let Ok(call_site) = source_manager.location(call_site_span) else {
+            return;
+        };
+
+        let debug_info = self.mast_forest_builder.debug_info_mut();
+        let declaration = inline_call.declaration();
+        let file_idx = debug_info.add_file(declaration.uri.clone(), None);
+        let name_idx = debug_info.add_string(inline_call.name());
+        let mut function = FunctionInfo::new(
+            None,
+            name_idx,
+            file_idx,
+            declaration.line,
+            declaration.column,
+            Word::default(),
+        );
+        if let Some(linkage_name) = inline_call.linkage_name() {
+            function = function.with_linkage_name(debug_info.add_string(linkage_name));
+        }
+        let callee_idx = debug_info
+            .debug_info()
+            .functions()
+            .iter()
+            .position(|existing| existing == &function)
+            .map(|index| DebugFunctionIdx::from(index as u32))
+            .unwrap_or_else(|| debug_info.add_function(function));
+        let loc_idx = debug_info.add_location(call_site);
+        self.active_inline_calls.push(ActiveInlineCall { callee_idx, loc_idx });
+    }
+
+    /// Clears the inline call chain active for subsequently generated operations.
+    pub fn clear_debug_inline_calls(&mut self) {
+        self.active_inline_calls.clear();
+    }
+
+    fn record_active_inline_calls(&mut self, op_idx: u32) {
+        self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
+            DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            }
+        }));
+    }
 }
 
 /// Basic Block Constructors
@@ -247,12 +324,13 @@ impl BasicBlockBuilder<'_> {
             let ops = core::mem::take(&mut self.ops);
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars = core::mem::take(&mut self.debug_vars);
+            let inline_calls = core::mem::take(&mut self.inline_calls);
 
             let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
                 ops,
                 asm_ops,
                 debug_vars,
-                vec![],
+                inline_calls,
                 vec![],
             )?;
 

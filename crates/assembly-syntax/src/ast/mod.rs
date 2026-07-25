@@ -23,6 +23,8 @@ pub mod types;
 mod visibility;
 pub mod visit;
 
+pub use miden_core::operations::DebugInlineCallInfo;
+
 pub use self::{
     advice_map_entry::AdviceMapEntry,
     attribute::{

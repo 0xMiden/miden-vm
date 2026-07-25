@@ -283,6 +283,8 @@ pub enum Instruction {
 
     // ----- debug decorators --------------------------------------------------------------------
     DebugVar(DebugVarInfo),
+    DebugInlineCall(miden_core::operations::DebugInlineCallInfo),
+    DebugInlineCallClear,
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
@@ -299,7 +301,7 @@ impl Instruction {
     /// Some instructions (like [`DebugVar`](Self::DebugVar)) are compiler-internal and have
     /// no surface syntax. They should be skipped during pretty-printing.
     pub const fn has_textual_representation(&self) -> bool {
-        !matches!(self, Self::DebugVar(_))
+        !matches!(self, Self::DebugVar(_) | Self::DebugInlineCall(_) | Self::DebugInlineCallClear)
     }
 }
 
