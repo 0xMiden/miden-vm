@@ -45,10 +45,10 @@ fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
 ))]
 #[inline(always)]
 pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDTH]) {
-    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "sve2"))]
     sve2_kernel::permute_packed(state);
 
-    #[cfg(not(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2")))]
+    #[cfg(not(all(target_arch = "aarch64", target_feature = "sve2")))]
     P3_POSEIDON2.permute_mut(miden_field::PackedFelt::as_goldilocks_array_mut(state));
 }
 
@@ -57,7 +57,7 @@ pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDT
 /// same pattern as the RPO SVE kernels). Layout contract: `[PackedFelt; 12]`
 /// is 12 elements × 2 lanes contiguous. Round constants are the module's own
 /// `ARK_*` tables (asserted equal to Plonky3's in `constants` tests).
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_feature = "sve2"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "sve2"))]
 mod sve2_kernel {
     use super::*;
 

@@ -1,6 +1,5 @@
 fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_features = std::env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
     let has_sve = target_features.split(',').any(|feature| feature == "sve");
     let has_sve2 = target_features.split(',').any(|feature| feature == "sve2");
@@ -9,9 +8,9 @@ fn main() {
         compile_arch_arm64_sve();
     }
     // Gated identically to the Rust dispatch in the Poseidon2 module
-    // (cfg(all(aarch64, linux, target_feature = "sve2"))), so the compiled
-    // object and the `extern "C"` call site are always both present or both absent.
-    if target_arch == "aarch64" && target_os == "linux" && has_sve2 {
+    // (cfg(all(aarch64, target_feature = "sve2"))), so the compiled object and
+    // the `extern "C"` call site are always both present or both absent.
+    if target_arch == "aarch64" && has_sve2 {
         compile_arch_arm64_sve2_poseidon2();
     }
 }
