@@ -331,7 +331,7 @@ fn write_quad_felt<W: ByteWriter>(value: QuadFelt, target: &mut W) {
 fn read_quad_felt<R: ByteReader>(source: &mut R) -> Result<QuadFelt, DeserializationError> {
     let c0 = Felt::read_from(source)?;
     let c1 = Felt::read_from(source)?;
-    Ok(QuadFelt::from_basis_coefficients_fn(|i| [c0, c1][i]))
+    Ok(QuadFelt::new([c0, c1]))
 }
 
 fn quad_felt_min_serialized_size() -> usize {
