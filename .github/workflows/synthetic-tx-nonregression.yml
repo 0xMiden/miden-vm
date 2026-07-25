@@ -71,12 +71,12 @@ jobs:
       contents: read
     outputs:
       summary: ${{ steps.summary.outputs.summary }}
-      regression: ${{ steps.compare.outputs.regression }}
-      status: ${{ steps.compare.outputs.status }}
+      regression: ${{ steps.verdict.outputs.regression }}
+      status: ${{ steps.verdict.outputs.status }}
       baseline_sha: ${{ steps.compare.outputs.baseline_sha }}
       current_sha: ${{ steps.compare.outputs.current_sha }}
-      max_delta_metric: ${{ steps.compare.outputs.max_delta_metric }}
-      max_delta_pct: ${{ steps.compare.outputs.max_delta_pct }}
+      max_delta_metric: ${{ steps.verdict.outputs.max_delta_metric }}
+      max_delta_pct: ${{ steps.verdict.outputs.max_delta_pct }}
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -372,6 +372,124 @@ jobs:
             --min-regression-ms "${MIN_DELTA_MS}" \
             --github-output "${GITHUB_OUTPUT}"
 
+      - name: Confirm possible regression in reverse order
+        if: steps.compare.outputs.regression == 'true'
+        env:
+          GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+          WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          RAYON_THREADS: ${{ steps.refs.outputs.rayon_threads }}
+          SAMPLE_SIZE: ${{ steps.refs.outputs.sample_size }}
+          MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.measurement_time_secs }}
+          WARM_UP_TIME_SECS: ${{ steps.refs.outputs.warm_up_time_secs }}
+          BENCH_AXES: ${{ steps.refs.outputs.bench_axes }}
+          SCENARIO_FILTER: ${{ steps.refs.outputs.scenario_filter }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline_sha }}
+          CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/synthetic_tx_nonregression.py" run \
+            --repo-root "${WORKTREE_DIR}/current" \
+            --output-dir "${ARTIFACT_DIR}/confirmation/current" \
+            --rayon-num-threads "${RAYON_THREADS}" \
+            --sample-size "${SAMPLE_SIZE}" \
+            --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
+            --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --bench-axes "${BENCH_AXES}" \
+            --scenario-filter "${SCENARIO_FILTER}" \
+            --git-ref "${CURRENT_SHA}"
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/synthetic_tx_nonregression.py" run \
+            --repo-root "${WORKTREE_DIR}/baseline" \
+            --output-dir "${ARTIFACT_DIR}/confirmation/baseline" \
+            --rayon-num-threads "${RAYON_THREADS}" \
+            --sample-size "${SAMPLE_SIZE}" \
+            --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
+            --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --bench-axes "${BENCH_AXES}" \
+            --scenario-filter "${SCENARIO_FILTER}" \
+            --git-ref "${BASELINE_SHA}"
+
+      - name: Compare confirmation results
+        if: steps.compare.outputs.regression == 'true'
+        id: confirmation
+        env:
+          GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          THRESHOLD_PCT: ${{ steps.refs.outputs.threshold_pct }}
+          MIN_DELTA_MS: ${{ steps.refs.outputs.min_delta_ms }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/synthetic_tx_nonregression.py" compare \
+            --baseline "${ARTIFACT_DIR}/confirmation/baseline/result.json" \
+            --current "${ARTIFACT_DIR}/confirmation/current/result.json" \
+            --summary-out "${ARTIFACT_DIR}/confirmation/summary.md" \
+            --json-out "${ARTIFACT_DIR}/confirmation/comparison.json" \
+            --threshold-pct "${THRESHOLD_PCT}" \
+            --min-regression-ms "${MIN_DELTA_MS}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Determine regression verdict
+        if: always() && steps.compare.outcome == 'success'
+        id: verdict
+        env:
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          INITIAL_REGRESSION: ${{ steps.compare.outputs.regression }}
+          INITIAL_MAX_DELTA_METRIC: ${{ steps.compare.outputs.max_delta_metric }}
+          INITIAL_MAX_DELTA_PCT: ${{ steps.compare.outputs.max_delta_pct }}
+          CONFIRMATION_REGRESSION: ${{ steps.confirmation.outputs.regression }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${INITIAL_REGRESSION}" == "true" && "${CONFIRMATION_REGRESSION}" == "true" ]]; then
+            confirmed_metric="$(
+              jq -r --slurp '
+                (.[0].regression_rows | map(.name)) as $initial_names
+                | .[1].regression_rows
+                | map(select(.name as $name | $initial_names | index($name)))
+                | sort_by(.delta_pct)
+                | last
+                | .name // empty
+              ' \
+                "${ARTIFACT_DIR}/comparison.json" \
+                "${ARTIFACT_DIR}/confirmation/comparison.json"
+            )"
+          else
+            confirmed_metric=""
+          fi
+
+          if [[ -n "${confirmed_metric}" ]]; then
+            initial_delta_pct="$(
+              jq -r --arg name "${confirmed_metric}" \
+                '.regression_rows[] | select(.name == $name) | .delta_pct' \
+                "${ARTIFACT_DIR}/comparison.json"
+            )"
+            confirmation_delta_pct="$(
+              jq -r --arg name "${confirmed_metric}" \
+                '.regression_rows[] | select(.name == $name) | .delta_pct' \
+                "${ARTIFACT_DIR}/confirmation/comparison.json"
+            )"
+            {
+              echo "regression=true"
+              echo "status=regression"
+              echo "max_delta_metric=${confirmed_metric}"
+              echo "max_delta_pct=${confirmation_delta_pct}"
+              echo "initial_delta_pct=${initial_delta_pct}"
+              echo "confirmation_delta_pct=${confirmation_delta_pct}"
+            } >> "${GITHUB_OUTPUT}"
+          else
+            {
+              echo "regression=false"
+              echo "status=ok"
+              echo "max_delta_metric=${INITIAL_MAX_DELTA_METRIC}"
+              echo "max_delta_pct=${INITIAL_MAX_DELTA_PCT}"
+            } >> "${GITHUB_OUTPUT}"
+            if [[ "${INITIAL_REGRESSION}" == "true" ]]; then
+              echo "::warning title=Unconfirmed synthetic benchmark result::The initial comparison crossed the configured regression threshold, but no metric crossed it in both the initial and reverse-order runs. The workflow will not fail for an unconfirmed result."
+            fi
+          fi
+
       - name: Publish job summary
         if: always()
         env:
@@ -381,6 +499,16 @@ jobs:
           set -euo pipefail
           if [[ -f "${ARTIFACT_DIR}/summary.md" ]]; then
             cat "${ARTIFACT_DIR}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [[ -f "${ARTIFACT_DIR}/confirmation/summary.md" ]]; then
+            {
+              echo
+              echo "---"
+              echo
+              echo "## Reverse-order confirmation"
+              echo
+              cat "${ARTIFACT_DIR}/confirmation/summary.md"
+            } >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: Expose summary for downstream jobs
@@ -397,6 +525,14 @@ jobs:
           {
             echo "summary<<EOF"
             cat "${ARTIFACT_DIR}/summary.md"
+            if [[ -f "${ARTIFACT_DIR}/confirmation/summary.md" ]]; then
+              echo
+              echo "---"
+              echo
+              echo "## Reverse-order confirmation"
+              echo
+              cat "${ARTIFACT_DIR}/confirmation/summary.md"
+            fi
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
@@ -420,15 +556,16 @@ jobs:
           git worktree remove --force "${WORKTREE_DIR}/current" || true
           rm -rf "${RUN_ROOT}"
 
-      - name: Fail on regression
-        if: steps.compare.outputs.regression == 'true'
+      - name: Fail on confirmed regression
+        if: steps.verdict.outputs.regression == 'true'
         env:
-          MAX_DELTA_METRIC: ${{ steps.compare.outputs.max_delta_metric }}
-          MAX_DELTA_PCT: ${{ steps.compare.outputs.max_delta_pct }}
+          CONFIRMED_METRIC: ${{ steps.verdict.outputs.max_delta_metric }}
+          INITIAL_DELTA_PCT: ${{ steps.verdict.outputs.initial_delta_pct }}
+          CONFIRMATION_DELTA_PCT: ${{ steps.verdict.outputs.confirmation_delta_pct }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "synthetic transaction kernel benchmark ${MAX_DELTA_METRIC} regressed by ${MAX_DELTA_PCT}%"
+          echo "::error title=Confirmed synthetic transaction regression::${CONFIRMED_METRIC} exceeded the configured threshold in both comparisons: ${INITIAL_DELTA_PCT}% initially and ${CONFIRMATION_DELTA_PCT}% in the reverse-order confirmation. Review both reports and artifacts before accepting the change."
           exit 1
 
   comment:
