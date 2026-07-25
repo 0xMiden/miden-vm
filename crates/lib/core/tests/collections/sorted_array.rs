@@ -998,6 +998,6 @@ fn malicious_lowerbound_start_ptr(
 
 fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_elements(values);
+    advice_stack.append_elements(values);
     AdviceMutation::extend_advice_stack(advice_stack)
 }

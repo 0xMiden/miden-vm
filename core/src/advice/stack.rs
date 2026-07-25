@@ -51,18 +51,18 @@ impl AdviceStack {
         self.stack.iter()
     }
 
-    /// Pushes a single element onto the advice stack.
+    /// Appends a single element to the bottom of the advice stack.
     ///
-    /// Elements are consumed in FIFO order: first pushed = first consumed by advice operations.
-    pub fn push_element(&mut self, value: Felt) -> &mut Self {
+    /// The appended element is consumed after all existing advice stack elements.
+    pub fn append_element(&mut self, value: Felt) -> &mut Self {
         self.stack.push_back(value);
         self
     }
 
-    /// Extends the advice stack with raw elements ordered from top to bottom.
+    /// Appends raw elements to the bottom of the advice stack.
     ///
-    /// Elements are consumed in FIFO order: first element in iter = first consumed.
-    pub fn push_elements<I>(&mut self, values: I) -> &mut Self
+    /// Values are ordered from top to bottom within the appended block.
+    pub fn append_elements<I>(&mut self, values: I) -> &mut Self
     where
         I: IntoIterator<Item = Felt>,
     {
@@ -84,8 +84,8 @@ impl AdviceStack {
         self
     }
 
-    /// Prepends a single element to the top of the advice stack.
-    pub fn prepend_element(&mut self, value: Felt) -> &mut Self {
+    /// Pushes a single element onto the top of the advice stack.
+    pub fn push_element(&mut self, value: Felt) -> &mut Self {
         self.stack.push_front(value);
         self
     }
@@ -100,39 +100,39 @@ impl AdviceStack {
         self.prepend_elements(stack.into_elements())
     }
 
-    /// Adds elements for consumption by multiple sequential `adv_push` instructions.
+    /// Appends elements for consumption by multiple sequential `adv_push` instructions.
     ///
     /// After `repeat.n adv_push end`, the operand stack will have `slice[0]` on top.
-    pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
+    pub fn append_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
         for elem in slice.iter().rev() {
             self.stack.push_back(*elem);
         }
         self
     }
 
-    /// Adds a word for consumption by `adv_loadw` or `adv_pushw`.
-    pub fn push_word(&mut self, word: Word) -> &mut Self {
+    /// Appends a word for consumption by `adv_loadw` or `adv_pushw`.
+    pub fn append_word(&mut self, word: Word) -> &mut Self {
         self.stack.extend(word.iter().copied());
         self
     }
 
-    /// Adds two words for consumption by `adv_pipe`.
-    pub fn push_dword(&mut self, words: [Word; 2]) -> &mut Self {
+    /// Appends two words for consumption by `adv_pipe`.
+    pub fn append_dword(&mut self, words: [Word; 2]) -> &mut Self {
         for word in words {
-            self.push_word(word);
+            self.append_word(word);
         }
         self
     }
 
-    /// Adds elements for sequential consumption by `adv_pipe` operations.
+    /// Appends elements for sequential consumption by `adv_pipe` operations.
     ///
     /// # Panics
     ///
     /// Panics if the slice length is not a multiple of 8 (double-word aligned).
-    pub fn push_for_adv_pipe(&mut self, slice: &[Felt]) -> &mut Self {
+    pub fn append_for_adv_pipe(&mut self, slice: &[Felt]) -> &mut Self {
         assert!(
             slice.len().is_multiple_of(8),
-            "push_for_adv_pipe requires slice length to be a multiple of 8, got {}",
+            "append_for_adv_pipe requires slice length to be a multiple of 8, got {}",
             slice.len()
         );
 

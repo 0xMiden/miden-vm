@@ -558,7 +558,7 @@ fn generate_test(
 
 fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_elements(values);
+    advice_stack.append_elements(values);
     AdviceMutation::extend_advice_stack(advice_stack)
 }
 
@@ -620,8 +620,8 @@ fn generate_data_probabilistic_product_test(
     let tau0 = digest_polynomials[0];
     let tau1 = digest_polynomials[1];
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_for_adv_push(&[tau0, tau1]);
-    advice_stack.push_elements(polynomials.iter().copied());
+    advice_stack.append_for_adv_push(&[tau0, tau1]);
+    advice_stack.append_elements(polynomials.iter().copied());
 
     // compute hash of h and place it on the stack.
     let h_hash = Poseidon2::hash_elements(&to_elements(h));

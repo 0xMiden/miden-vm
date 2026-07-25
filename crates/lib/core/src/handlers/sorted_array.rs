@@ -120,7 +120,7 @@ fn push_lowerbound_result(
     if addr_range.is_empty() {
         let mut advice_stack = AdviceStack::new();
         // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
-        advice_stack.push_elements([Felt::from_u32(addr_range.end), Felt::from_bool(false)]);
+        advice_stack.append_elements([Felt::from_u32(addr_range.end), Felt::from_bool(false)]);
         return Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)]);
     }
 
@@ -163,7 +163,7 @@ fn push_lowerbound_result(
 
     let mut advice_stack = AdviceStack::new();
     // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
-    advice_stack.push_elements([
+    advice_stack.append_elements([
         Felt::from_u32(result.unwrap_or(addr_range.end)),
         Felt::from_bool(was_key_found),
     ]);

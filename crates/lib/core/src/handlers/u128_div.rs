@@ -54,8 +54,8 @@ pub fn handle_u128_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let mut advice_stack = AdviceStack::new();
     // MASM consumes remainder with the first `adv_pushw` and quotient with the second one.
     advice_stack
-        .push_word(Word::new([r0, r1, r2, r3]))
-        .push_word(Word::new([q0, q1, q2, q3]));
+        .append_word(Word::new([r0, r1, r2, r3]))
+        .append_word(Word::new([q0, q1, q2, q3]));
     let mutation = AdviceMutation::extend_advice_stack(advice_stack);
     Ok(vec![mutation])
 }

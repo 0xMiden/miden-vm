@@ -68,7 +68,7 @@ impl AdviceInputs {
 
     /// Extends the contents of this instance with the contents of the other instance.
     pub fn extend(&mut self, other: Self) {
-        self.advice_stack.push_elements(other.advice_stack.into_elements());
+        self.advice_stack.append_elements(other.advice_stack.into_elements());
         self.map.extend(other.map);
         self.store.extend(other.store.inner_nodes());
     }
@@ -139,8 +139,8 @@ mod tests {
     #[test]
     fn advice_inputs_accept_typed_advice_stack() {
         let mut stack = AdviceStack::new();
-        stack.push_element(Felt::new_unchecked(1));
-        stack.push_word(
+        stack.append_element(Felt::new_unchecked(1));
+        stack.append_word(
             [
                 Felt::new_unchecked(2),
                 Felt::new_unchecked(3),
@@ -173,9 +173,9 @@ mod tests {
         .into();
         let mut stack = AdviceStack::new();
 
-        stack.push_element(Felt::new_unchecked(0));
-        stack.push_word(word0);
-        stack.push_dword([word1, word0]);
+        stack.append_element(Felt::new_unchecked(0));
+        stack.append_word(word0);
+        stack.append_dword([word1, word0]);
 
         assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(0)));
         assert_eq!(stack.consume_word(), Some(word0));
@@ -193,17 +193,17 @@ mod tests {
         ]
         .into();
         let mut stack = AdviceStack::new();
-        stack.push_word(word);
+        stack.append_word(word);
 
         assert_eq!(stack.consume_dword(), None);
         assert_eq!(stack.consume_word(), Some(word));
     }
 
     #[test]
-    fn advice_stack_push_for_adv_push_matches_repeated_consumption() {
+    fn advice_stack_append_for_adv_push_matches_repeated_consumption() {
         let values = [Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
         let mut stack = AdviceStack::new();
-        stack.push_for_adv_push(&values);
+        stack.append_for_adv_push(&values);
 
         assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(3)));
         assert_eq!(stack.consume_element(), Some(Felt::new_unchecked(2)));
@@ -212,27 +212,27 @@ mod tests {
     }
 
     #[test]
-    fn advice_stack_push_for_adv_pipe_requires_dword_alignment() {
+    fn advice_stack_append_for_adv_pipe_requires_dword_alignment() {
         let values: Vec<Felt> = (1..=16).map(Felt::new_unchecked).collect();
         let mut stack = AdviceStack::new();
-        stack.push_for_adv_pipe(&values);
+        stack.append_for_adv_pipe(&values);
 
         assert_eq!(stack.into_elements(), values);
     }
 
     #[test]
-    #[should_panic(expected = "push_for_adv_pipe requires slice length to be a multiple of 8")]
-    fn advice_stack_push_for_adv_pipe_panics_on_misalignment() {
+    #[should_panic(expected = "append_for_adv_pipe requires slice length to be a multiple of 8")]
+    fn advice_stack_append_for_adv_pipe_panics_on_misalignment() {
         let values: Vec<Felt> = (1..=7).map(Felt::new_unchecked).collect();
         let mut stack = AdviceStack::new();
-        stack.push_for_adv_pipe(&values);
+        stack.append_for_adv_pipe(&values);
     }
 
     #[test]
     fn advice_stack_prepends_new_top_elements() {
         let mut stack = AdviceStack::from(vec![Felt::new_unchecked(3), Felt::new_unchecked(4)]);
 
-        stack.prepend_element(Felt::new_unchecked(2));
+        stack.push_element(Felt::new_unchecked(2));
         stack.prepend_elements([Felt::new_unchecked(0), Felt::new_unchecked(1)]);
 
         assert_eq!(

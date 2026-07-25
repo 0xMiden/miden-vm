@@ -277,7 +277,7 @@ impl AdviceProvider {
     /// Pushes a single value onto the advice stack.
     pub fn push_stack(&mut self, value: Felt) -> Result<(), AdviceError> {
         self.check_stack_capacity(1)?;
-        self.stack.prepend_element(value);
+        self.stack.push_element(value);
         Ok(())
     }
 
@@ -340,14 +340,14 @@ impl AdviceProvider {
 
         let mut stack = AdviceStack::new();
         if include_len {
-            stack.push_element(Felt::new_unchecked(values.len() as u64));
+            stack.append_element(Felt::new_unchecked(values.len() as u64));
         }
-        stack.push_elements(values.iter().copied());
+        stack.append_elements(values.iter().copied());
 
         // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
         // final (padded) elements list length will be the next multiple of pad_to
         for _ in 0..num_pad_elements {
-            stack.push_element(Felt::default());
+            stack.append_element(Felt::default());
         }
         self.stack.prepend_stack(stack);
         Ok(())
@@ -787,9 +787,9 @@ mod tests {
     #[test]
     fn typed_advice_stack_mutation_prepends_values() {
         let mut initial_stack = AdviceStack::new();
-        initial_stack.push_elements([Felt::new_unchecked(3), Felt::new_unchecked(4)]);
+        initial_stack.append_elements([Felt::new_unchecked(3), Felt::new_unchecked(4)]);
         let mut mutation_stack = AdviceStack::new();
-        mutation_stack.push_elements([Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+        mutation_stack.append_elements([Felt::new_unchecked(1), Felt::new_unchecked(2)]);
         let mut provider = AdviceProvider::new(
             AdviceInputs::default().with_advice_stack(initial_stack),
             &Default::default(),

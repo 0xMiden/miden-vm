@@ -344,7 +344,7 @@ fn run_core_program_with_advice(
         .expect("failed to load CoreLibrary into the host");
 
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_elements(advice.iter().copied());
+    advice_stack.append_elements(advice.iter().copied());
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default().with_advice_stack(advice_stack),

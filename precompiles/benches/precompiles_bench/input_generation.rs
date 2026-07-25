@@ -38,9 +38,9 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
             "generated ECDSA fixture must verify before passing it to MASM",
         );
 
-        advice_stack.push_word(message);
-        advice_stack.push_word(ecdsa_k256_keccak::public_key_commitment(&pk));
-        advice_stack.push_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
+        advice_stack.append_word(message);
+        advice_stack.append_word(ecdsa_k256_keccak::public_key_commitment(&pk));
+        advice_stack.append_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
     }
 
     assert_eq!(advice_stack.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");

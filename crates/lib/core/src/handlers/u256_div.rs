@@ -56,10 +56,10 @@ pub fn handle_u256_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     // MASM uses four `padw adv_loadw` instructions. Each load places the next lower word on top,
     // so q0..q3 must be consumed last to finish above q4..q7, r0..r3, and r4..r7.
     advice_stack
-        .push_word(Word::new([r_felts[4], r_felts[5], r_felts[6], r_felts[7]]))
-        .push_word(Word::new([r_felts[0], r_felts[1], r_felts[2], r_felts[3]]))
-        .push_word(Word::new([q_felts[4], q_felts[5], q_felts[6], q_felts[7]]))
-        .push_word(Word::new([q_felts[0], q_felts[1], q_felts[2], q_felts[3]]));
+        .append_word(Word::new([r_felts[4], r_felts[5], r_felts[6], r_felts[7]]))
+        .append_word(Word::new([r_felts[0], r_felts[1], r_felts[2], r_felts[3]]))
+        .append_word(Word::new([q_felts[4], q_felts[5], q_felts[6], q_felts[7]]))
+        .append_word(Word::new([q_felts[0], q_felts[1], q_felts[2], q_felts[3]]));
 
     Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }

@@ -23,7 +23,7 @@ use crate::{
 fn test_op_advpop() {
     // popping from the advice stack should push the value onto the operand stack
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_element(Felt::new_unchecked(3));
+    advice_stack.append_element(Felt::new_unchecked(3));
     let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)
@@ -48,7 +48,7 @@ fn test_op_advpopw() {
     // pop_stack_word() consumes Word([3, 4, 5, 6])
     // word[0]=3 goes to stack position 0 (top), so result is [3, 4, 5, 6, 1].
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(
+    advice_stack.append_word(
         [
             Felt::new_unchecked(3),
             Felt::new_unchecked(4),
@@ -415,7 +415,7 @@ fn test_op_pipe() {
     ]
     .into();
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_dword([advice_word1, advice_word2]);
+    advice_stack.append_dword([advice_word1, advice_word2]);
     let advice_inputs = AdviceInputs::default().with_advice_stack(advice_stack);
     let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(advice_inputs)

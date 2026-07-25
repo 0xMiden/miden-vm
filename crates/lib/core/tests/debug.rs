@@ -406,7 +406,7 @@ fn print_mem_rejects_full_range() {
 #[test]
 fn print_adv_stack_all_outputs_advice_stack() {
     let mut stack = AdviceStack::new();
-    stack.push_elements([Felt::new_unchecked(7), Felt::new_unchecked(8), Felt::new_unchecked(9)]);
+    stack.append_elements([Felt::new_unchecked(7), Felt::new_unchecked(8), Felt::new_unchecked(9)]);
     let advice = AdviceInputs::default().with_advice_stack(stack);
     let source = "
     use miden::core::debug
@@ -425,7 +425,7 @@ fn print_adv_stack_all_outputs_advice_stack() {
 #[test]
 fn print_adv_stack_outputs_range() {
     let mut stack = AdviceStack::new();
-    stack.push_elements([
+    stack.append_elements([
         Felt::new_unchecked(7),
         Felt::new_unchecked(8),
         Felt::new_unchecked(9),
@@ -570,7 +570,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
     end
     ";
     let mut stack = AdviceStack::new();
-    stack.push_element(Felt::new_unchecked(7));
+    stack.append_element(Felt::new_unchecked(7));
     let advice = AdviceInputs::default().with_advice_stack(stack);
 
     let core_lib = CoreLibrary::default();

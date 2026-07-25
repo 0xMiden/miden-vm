@@ -424,7 +424,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
 
 fn advice_stack_from_hash_and_data(hash: Word, data: &[u64]) -> AdviceStack {
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(hash);
-    advice_stack.push_elements(data.iter().map(|&value| Felt::new_unchecked(value)));
+    advice_stack.append_word(hash);
+    advice_stack.append_elements(data.iter().map(|&value| Felt::new_unchecked(value)));
     advice_stack
 }

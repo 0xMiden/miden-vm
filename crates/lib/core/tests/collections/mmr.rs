@@ -71,7 +71,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(merkle_root);
+    advice_stack.append_word(merkle_root);
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -131,8 +131,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(merkle_root1);
-    advice_stack.push_word(merkle_root2);
+    advice_stack.append_word(merkle_root1);
+    advice_stack.append_word(merkle_root2);
 
     let examples = [
         // absolute_pos, leaf
@@ -195,7 +195,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for single element MMR
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(merkle_root3);
+    advice_stack.append_word(merkle_root3);
     let source = format!(
         "
         use miden::core::collections::mmr
@@ -216,9 +216,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for the single element tree in a MMR with multiple trees
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_word(merkle_root1);
-    advice_stack.push_word(merkle_root2);
-    advice_stack.push_word(merkle_root3);
+    advice_stack.append_word(merkle_root1);
+    advice_stack.append_word(merkle_root2);
+    advice_stack.append_word(merkle_root3);
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
         "

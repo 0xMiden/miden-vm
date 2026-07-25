@@ -115,7 +115,7 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
 
     let mut advice_stack = AdviceStack::new();
     // MASM streams plaintext blocks to memory with one `adv_pipe` per block.
-    advice_stack.push_for_adv_pipe(&plaintext_data);
+    advice_stack.append_for_adv_pipe(&plaintext_data);
     let advice_stack_mutation = AdviceMutation::extend_advice_stack(advice_stack);
 
     Ok(vec![advice_stack_mutation])

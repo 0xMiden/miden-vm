@@ -120,7 +120,7 @@ fn multi_air_eval_circuit_masm() {
     let num_adv_pipe = padded_len / 8;
 
     let mut adv_stack = AdviceStack::new();
-    adv_stack.push_for_adv_pipe(&memory_felts);
+    adv_stack.append_for_adv_pipe(&memory_felts);
 
     let pointer = 1 << 16;
     let num_vars = encoded.num_vars();

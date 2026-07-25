@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn advice_stack_from_accepts_typed_advice_stack() {
         let mut stack = AdviceStack::new();
-        stack.push_element(Felt::new_unchecked(7));
+        stack.append_element(Felt::new_unchecked(7));
 
         let converted = advice_stack_from(stack).unwrap();
 

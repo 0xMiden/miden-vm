@@ -19,7 +19,7 @@ fn adv_push() {
 #[test]
 fn adv_push_repeat() {
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_for_adv_push(&[
+    advice_stack.append_for_adv_push(&[
         Felt::new_unchecked(1),
         Felt::new_unchecked(2),
         Felt::new_unchecked(3),

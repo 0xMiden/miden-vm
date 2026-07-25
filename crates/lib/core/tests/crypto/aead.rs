@@ -464,7 +464,7 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
 
 fn advice_stack_mutation(values: Vec<Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
-    advice_stack.push_elements(values);
+    advice_stack.append_elements(values);
     AdviceMutation::extend_advice_stack(advice_stack)
 }
 
