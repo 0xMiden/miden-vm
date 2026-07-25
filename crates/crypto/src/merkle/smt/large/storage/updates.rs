@@ -144,6 +144,16 @@ impl StorageUpdates {
         self.leaf_updates.is_empty() && self.subtree_updates.is_empty()
     }
 
+    /// Returns the number of leaf updates in this batch.
+    pub fn leaf_update_count(&self) -> usize {
+        self.leaf_updates.len()
+    }
+
+    /// Returns the number of subtree updates in this batch.
+    pub fn subtree_update_count(&self) -> usize {
+        self.subtree_updates.len()
+    }
+
     /// Returns a reference to the leaf updates map.
     pub fn leaf_updates(&self) -> &Map<u64, Option<SmtLeaf>> {
         &self.leaf_updates
@@ -162,6 +172,36 @@ impl StorageUpdates {
     /// Returns the entry count delta.
     pub fn entry_count_delta(&self) -> isize {
         self.entry_count_delta
+    }
+
+    /// Sets the leaf count delta.
+    pub fn set_leaf_count_delta(&mut self, delta: isize) {
+        self.leaf_count_delta = delta;
+    }
+
+    /// Sets the entry count delta.
+    pub fn set_entry_count_delta(&mut self, delta: isize) {
+        self.entry_count_delta = delta;
+    }
+
+    /// Adjusts the leaf count delta by the specified amount.
+    pub fn adjust_leaf_count_delta(&mut self, adjustment: isize) {
+        self.leaf_count_delta += adjustment;
+    }
+
+    /// Adjusts the entry count delta by the specified amount.
+    pub fn adjust_entry_count_delta(&mut self, adjustment: isize) {
+        self.entry_count_delta += adjustment;
+    }
+
+    /// Consumes this StorageUpdates and returns the leaf updates map.
+    pub fn into_leaf_updates(self) -> Map<u64, Option<SmtLeaf>> {
+        self.leaf_updates
+    }
+
+    /// Consumes this StorageUpdates and returns the subtree updates vector.
+    pub fn into_subtree_updates(self) -> Vec<SubtreeUpdate> {
+        self.subtree_updates
     }
 
     /// Consumes this `StorageUpdates` and returns its owned parts as a [`StorageUpdateParts`].
