@@ -56,7 +56,12 @@ pub fn run(mode: Mode) -> Result<(), String> {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), GENERATED_EVAL_PATH);
     match mode {
         Mode::Write => {
-            fs::write(&path, &content).map_err(|e| format!("failed to write {path}: {e}"))?;
+            // Write to a sibling temp file and rename, so an interrupted run
+            // cannot leave a truncated `generated.rs` behind.
+            let tmp = format!("{path}.tmp");
+            fs::write(&tmp, &content).map_err(|e| format!("failed to write {tmp}: {e}"))?;
+            fs::rename(&tmp, &path)
+                .map_err(|e| format!("failed to rename {tmp} to {path}: {e}"))?;
             println!("wrote air/src/constraints/generated.rs ({} lines)", content.lines().count());
             Ok(())
         },

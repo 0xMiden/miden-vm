@@ -257,7 +257,9 @@ impl<EF: Clone> AceDag<EF> {
     ///
     /// After compaction, `nodes` contains only nodes reachable from `root`, in the same
     /// relative order. All `NodeId` references, including `root`, are remapped to the new
-    /// contiguous indices.
+    /// contiguous indices. When any node is removed, the DAG also takes a fresh `dag_id`,
+    /// so `NodeId`s issued before compaction fail provenance checks instead of silently
+    /// resolving to whichever node now occupies their old index.
     pub fn compact(&mut self) {
         let n = self.nodes.len();
         if n == 0 {
@@ -296,7 +298,7 @@ impl<EF: Clone> AceDag<EF> {
             return;
         }
 
-        let dag_id = self.dag_id;
+        let dag_id = DagId::fresh();
         let remap_id = |id: NodeId| NodeId::in_dag(remap[id.index()], dag_id);
 
         let mut new_nodes = Vec::with_capacity(new_len);
@@ -317,6 +319,7 @@ impl<EF: Clone> AceDag<EF> {
 
         self.nodes = new_nodes;
         self.root = remap_id(self.root);
+        self.dag_id = dag_id;
     }
 }
 
