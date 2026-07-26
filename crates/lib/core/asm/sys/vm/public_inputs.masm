@@ -8,11 +8,10 @@ use miden::core::sys::vm::claim
 # =================================================================================================
 #
 # This module handles the Miden VM-specific public input processing for the recursive verifier.
-# It (a) computes `kernel_H`, the Poseidon2 hash (`hash_elements`) of all kernel-procedure
-# digests, (b) materializes the kernel digests and populates the caller-facing boundary-inputs
-# block and the FLPI section of the ACE READ region, and (c) absorbs every public input into the
-# Fiat-Shamir transcript in a rate-aligned schedule mirroring `MidenMultiAir::observe` on the Rust
-# side. The outer-LogUp boundary correction `c_total` is computed later, in step II
+# It (a) populates the caller-facing boundary-inputs block (kernel commitment, program digest,
+# deferred root) and the FLPI section of the ACE READ region, and (b) absorbs every public input
+# into the Fiat-Shamir transcript in a rate-aligned schedule mirroring `MidenMultiAir::observe`
+# on the Rust side. The outer-LogUp boundary correction `c_total` is computed later, in step II
 # (`observe_aux_trace`), once the aux randomness has been sampled from the transcript.
 #
 # Memory layout populated (low -> high addresses):
@@ -57,15 +56,17 @@ use miden::core::sys::vm::claim
 # LogUp boundary without being separately absorbed.
 #
 # Data sources:
-#   - claim region: caller memory at `claim_ptr` (operand), 40 base felts `P | K | I | O`;
-#     the caller fills P, I, O and `stage_boundary_inputs` writes K.
-#   - kernel digests: caller memory at `kernel_ptr` (operand), N word-aligned digests; hashed
-#     into K and re-read for the step-II boundary fold.
+#   - claim region: caller memory at `claim_ptr` (operand), 40 base felts `P | K | I | O`,
+#     fully populated by the caller from its own trusted data.
+#   - kernel digests: verifier memory at `kernel_ptr` (operand), N word-aligned digests.
+#     `verify_vm_proof_from_claim` fetches them from the advice map and asserts they hash to
+#     the claim's K before calling into this module; the step-II boundary fold reads them
+#     from the same region.
 #   - deferred_root: advice (4 canonical felts), loaded by `stage_boundary_inputs`.
 #
-# `stage_boundary_inputs` completes the claim region and stages kernel_H, program_digest and
-# deferred_root into the boundary-inputs block before the transcript starts;
-# `process_public_inputs` then only absorbs into FS.
+# `stage_boundary_inputs` stages the kernel commitment, program_digest and deferred_root into
+# the boundary-inputs block before the transcript starts; `process_public_inputs` then only
+# absorbs into FS.
 #
 # CONSTANTS
 # =================================================================================================
@@ -157,23 +158,25 @@ proc store_boundary_inputs_address
 end
 
 #! Stages the boundary-inputs block at the fixed standalone `BOUNDARY_INPUTS_PTR` before the
-#! transcript starts (called by `verify_vm_proof`).
+#! transcript starts (called by `verify_vm_proof_from_claim`).
+#!
+#! Precondition: the claim region is fully populated, and the digest witness at `kernel_ptr`
+#! hashes to its K field (`verify_vm_proof_from_claim` asserts this before calling).
 #!
 #! Writes, in order:
-#!   claim_ptr+4       : K = kernel_commitment(kernel_ptr, N), completing the caller's claim
-#!                       region (the caller filled P, I, O).
-#!   boundary_inputs+0  : K, for the step-II boundary fold and caller-facing readers.
+#!   boundary_inputs+0  : K, copied from the claim region (+4), for the step-II boundary fold
+#!                        and caller-facing readers.
 #!   boundary_inputs+4  : program_digest, copied from the claim region.
 #!   boundary_inputs+8  : deferred_root, loaded from advice.
 #!
-#! Also persists `claim_ptr`, `kernel_ptr`, and the digest count `N` into their fixed cells so
-#! the step-I FLPI load and the step-II boundary fold can re-read the same caller-owned regions.
+#! Also persists `claim_ptr`, `kernel_ptr`, and the digest count `N` into their fixed cells
+#! for the step-I FLPI load and the step-II boundary fold.
 #! The trailing pad word of the window is never written and reads as zero.
 #!
 #! Input:  [claim_ptr, kernel_ptr, N, ...]
 #! Output: [...]
 pub proc stage_boundary_inputs
-    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and the caller pointers.
+    # Persist N (bounded by KernelDescriptor::MAX_NUM_PROCEDURES) and the region pointers.
     dup.2
     u32assert.err="number of kernel procedure digests must fit in a u32"
     dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
@@ -182,13 +185,12 @@ pub proc stage_boundary_inputs
     dup.1 exec.constants::kernel_digests_address_ptr mem_store
     dup exec.constants::claim_address_ptr mem_store
     # => [claim_ptr, kernel_ptr, N, ...]
+    movdn.2 drop drop
+    # => [claim_ptr, ...]
 
-    # K = kernel_commitment(kernel_ptr, N) -> claim region (+4) and the window (+0).
-    movup.2 movup.2
-    # => [kernel_ptr, N, claim_ptr, ...]
-    exec.claim::kernel_commitment
+    # K: claim region (+4) -> the window (+0).
+    padw dup.4 add.4 mem_loadw_le
     # => [K, claim_ptr, ...]
-    dup.4 add.4 mem_storew_le
     exec.constants::boundary_inputs_ptr mem_storew_le
     # => [K, claim_ptr, ...]
 

@@ -1,10 +1,10 @@
 //! Building the advice a MASM recursive verifier consumes to verify a Miden VM proof.
 //!
-//! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed order. This
-//! module is the producer side of that ABI: it destructures an [`ExecutionProof`] against its
-//! [`ExecutionClaim`] into the advice-stack stream, the Merkle store, and the query advice-map
-//! entries the verifier consumes. The consumption order is exercised end to end by the recursive
-//! verification tests, which drive the real MASM verifier over this output.
+//! `exec.vm::verify_vm_proof_from_claim` reads a STARK proof from the advice provider in a fixed
+//! order. This module is the producer side of that ABI: it destructures an [`ExecutionProof`]
+//! against its [`ExecutionClaim`] into the advice-stack stream, the Merkle store, and the query
+//! advice-map entries the verifier consumes. The consumption order is exercised end to end by the
+//! recursive verification tests, which drive the real MASM verifier over this output.
 //!
 //! The stream carries only the proof — the claim is the consumer's and never travels in it:
 //!
@@ -13,10 +13,12 @@
 //!   aux finals -> quotient commit -> deep alpha -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
-//! The consumer fills the kernel witness, program digest, and stack i/o into VM memory from its
-//! own claim; `verify_vm_proof` verifies this stream against that claim, so a substituted stream
-//! fails rather than redefining the claim. The Merkle store and query advice-map are
-//! content-addressed and merge across proofs without collision.
+//! The consumer stages the 40-felt claim encoding into VM memory from its own claim;
+//! `verify_vm_proof_from_claim` verifies this stream against that claim, so a substituted stream
+//! fails rather than redefining the claim. Everything else is content-addressed in the advice
+//! map and merges across proofs without collision: the kernel digest witness under the kernel
+//! commitment K (`[count, digests..]`), the claim encoding under its commitment (fetched by the
+//! commitment-first `verify_vm_proof`), and the query rows, Merkle store, and ACE circuit.
 
 use alloc::{
     string::{String, ToString},
@@ -62,18 +64,19 @@ const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 /// The advice a MASM recursive verifier consumes to verify one Miden VM proof.
 ///
-/// The `advice_stack` stream feeds `exec.vm::verify_vm_proof` directly;
+/// The `advice_stack` stream feeds `exec.vm::verify_vm_proof_from_claim` directly;
 /// [`Self::into_request_package`] instead registers it in the advice map under
 /// `request_key(verifier_root, claim_commitment)` for consumers that fetch proofs by content
-/// (`exec.vm::verify_vm_proof_from_claim`).
+/// (`exec.vm::verify_vm_proof`).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
-    /// The advice-stack stream, in the order `verify_vm_proof` (with the standard staging
-    /// prologue) consumes it.
+    /// The advice-stack stream, in the order `verify_vm_proof_from_claim` (with the standard
+    /// staging prologue) consumes it.
     pub advice_stack: Vec<Felt>,
     /// Merkle store backing the query openings (`mtree_get` authentication paths).
     pub store: MerkleStore,
-    /// Query advice-map entries (`leaf_hash -> leaf_data`) and the ACE circuit.
+    /// Content-addressed advice-map entries: query rows (`leaf_hash -> leaf_data`), the ACE
+    /// circuit, the kernel digest witness under K, and the claim encoding under its commitment.
     pub advice_map: Vec<(Word, Vec<Felt>)>,
     /// Commitment to the execution claim: the content address (paired with a verifier root) the
     /// proof stream is registered under.
@@ -84,11 +87,11 @@ impl RecursiveVerifierInputs {
     /// Moves the proof stream into the advice map under
     /// `request_key(verifier_root, claim_commitment)`, leaving the advice stack empty.
     ///
-    /// The result is order-free — all of it (Merkle nodes, query rows, proof stream) is
-    /// content-addressed, so packages for any number of proofs merge into one advice provider in
-    /// any order. A consumer holding the claim fetches and verifies the proof with
-    /// `exec.vm::verify_vm_proof_from_claim`; the key is addressing, not trust — a package that
-    /// does not match the consumer's claim fails verification.
+    /// All of it (Merkle nodes, query rows, proof stream) is content-addressed, so packages
+    /// for any number of proofs merge into one advice provider in any order. A consumer holding the
+    /// claim commitment fetches and verifies the proof with `exec.vm::verify_vm_proof`; the key
+    /// is addressing, not trust — a package that does not match the consumer's claim fails
+    /// verification.
     pub fn into_request_package(mut self, verifier_root: Word) -> Self {
         let key = request_key(verifier_root, self.claim_commitment);
         let proof_stream = core::mem::take(&mut self.advice_stack);
@@ -146,7 +149,20 @@ pub fn advice_inputs(
         resolve_deferred_root(proof.deferred_proof())?,
     );
 
-    build_from_proof_bytes(stark.bytes(), &pub_inputs, claim.commitment())
+    let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim.commitment())?;
+
+    // Content-addressed claim advice: the kernel digest witness under K and the claim encoding
+    // under its commitment. The verifier checks each fetched value against its key, so proofs
+    // sharing a kernel or a claim produce identical entries that merge.
+    let kernel = claim.kernel();
+    let mut kernel_witness = vec![Felt::new_unchecked(kernel.proc_hashes().len() as u64)];
+    for digest in kernel.proc_hashes() {
+        kernel_witness.extend_from_slice(digest.as_elements());
+    }
+    inputs.advice_map.push((kernel.commitment(), kernel_witness));
+    inputs.advice_map.push((claim.commitment(), claim.to_elements().to_vec()));
+
+    Ok(inputs)
 }
 
 /// Resolves the deferred root the outer VM statement binds, from the proof's deferred material:

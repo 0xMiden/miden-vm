@@ -6,6 +6,8 @@ pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 
+use miden::core::crypto::hashes::poseidon2
+use miden::core::mem
 use miden::core::stark::verifier
 use miden::core::stark::constants
 
@@ -16,6 +18,13 @@ const ACCEPTABLE_NUM_QUERIES = 27
 const ACCEPTABLE_QUERY_POW_BITS = 16
 const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
+
+# Domain tag for the claim commitment: the registered selector
+# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match
+# miden_core::program::CLAIM_DOMAIN_TAG and the const in claim.masm (enforced by the
+# e2e recursion tests).
+const CLAIM_DOMAIN_TAG = 8449
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
 const RELATION_DIGEST_0 = 837197885082815666
@@ -173,92 +182,133 @@ proc store_ace_registry_root
     dropw dropw
 end
 
-#! Verifies a proof of the caller-staged execution claim, fetched from the advice map by
-#! content.
+#! Verifies a proof of the execution claim named by the given commitment and returns the
+#! deferred obligation the proof binds.
 #!
-#! The caller populates the claim region with its own trusted P, I, O (K's slot may be left
-#! unset) and supplies the kernel digest witness. This procedure materializes K from the
-#! witness, derives the claim commitment from the completed region, fetches the registered
-#! proof from the advice map under `request_key(verifier_root, claim_commitment)` (the verifier
-#! root via `procref` of `verify_vm_proof` itself), and verifies it. The derived commitment is
-#! both the fetch address and what verification binds, so consistency needs no check: a wrong
-#! or substituted package fails verification against the caller's claim.
+#! Only the claim's name crosses the caller boundary: the 40-felt claim encoding is fetched from
+#! the advice map under CLAIM_COMMITMENT into this procedure's frame and checked by rehashing —
+#! the binding of the fetched fields to the caller's name, so a package for a different claim
+#! cannot pass. The proof is then fetched under `request_key(verifier_root, claim_commitment)`
+#! (the verifier root via `procref` of `verify_vm_proof_from_claim`, the underlying verifier)
+#! and verified; the proof needs no separate binding check — a wrong or substituted stream
+#! fails Fiat-Shamir against the claim.
 #!
-#! Inputs:  [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+#! A caller that owns the claim fields instead of the name stages them itself, derives the name
+#! with `claim::claim_commitment`, and calls this procedure.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, ...]
 #! Outputs: [D, ...]
 #!
 #! Where:
-#! - claim_ptr is the word-aligned address of the caller's claim region (40 felts), with P at +0,
-#!   I at +8, and O at +24 already populated from the caller's own inputs; K (+4) is written
-#!   here (and rederived by the verifier from the same witness).
-#! - kernel_ptr / num_kernel_digests locate the kernel digest witness.
+#! - CLAIM_COMMITMENT is the canonical commitment to the claim (`CLAIM_HASH`), a value the
+#!   caller owns: derived from its own data or carried in its own statement, never fetched.
 #! - D is the deferred root bound by the verified statement.
-pub proc verify_vm_proof_from_claim
-    # --- Materialize K from the kernel witness into the claim region ---
+@locals(40)
+pub proc verify_vm_proof
+    # --- Fetch the claim fields by name and unhash them into the local claim region ---
 
-    dup.2 dup.2
-    # => [kernel_ptr, num_kernel_digests, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    adv.push_mapval
+    # => [CLAIM_COMMITMENT, ...]           advice: [P | K | I | O] (40 felts)
 
-    exec.claim::kernel_commitment
-    # => [K, claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    locaddr.0
+    push.0.0.CLAIM_DOMAIN_TAG.0
+    # => [C = [0, tag, 0, 0], write_ptr, CLAIM_COMMITMENT, ...]   (capacity: 40 % 8 = 0)
+    padw padw
+    # => [R0, R1, C, write_ptr, CLAIM_COMMITMENT, ...]
+    repeat.5
+        adv_pipe
+        exec.poseidon2::permute
+    end
+    exec.poseidon2::squeeze_digest
+    movup.4 drop
+    # => [CLAIM_HASH', CLAIM_COMMITMENT, ...]
+    dupw.1 assert_eqw.err="fetched claim does not hash to the requested commitment"
+    # => [CLAIM_COMMITMENT, ...]
 
-    dup.4 add.4 mem_storew_le dropw
-    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    # --- Fetch the proof onto the advice stack and verify the staged claim ---
 
-    # --- Derive the claim commitment: the fetch address ---
-
-    dup exec.claim::claim_commitment
-    # => [CLAIM_COMMITMENT, claim_ptr, kernel_ptr, num_kernel_digests, ...]
-
-    procref.verify_vm_proof
-    # => [VERIFIER_ROOT, CLAIM_COMMITMENT, claim_ptr, kernel_ptr, num_kernel_digests, ...]
-
+    procref.verify_vm_proof_from_claim
+    # => [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
     exec.claim::request_key
-    # => [REQUEST_KEY, claim_ptr, kernel_ptr, num_kernel_digests, ...]
-
-    # --- Fetch the proof onto the advice stack and verify it ---
-
+    # => [REQUEST_KEY, ...]
     adv.push_mapval dropw
-    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    # => [...]
 
-    exec.verify_vm_proof
+    locaddr.0
+    exec.verify_vm_proof_from_claim
     # => [D, ...]
 end
 
-#! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM and
-#! returns the deferred obligation the proof binds.
+#! Verifies a STARK proof of the caller-staged execution claim and returns the deferred
+#! obligation the proof binds. This is the underlying stream-level verifier: `verify_vm_proof`
+#! (the canonical commitment-first entrypoint) wraps it, and callers that own the claim fields
+#! and deliver the proof positionally call it directly.
 #!
 #! The proof is consumed from the advice stack; request keys name this procedure's MAST root
-#! (see `verify_vm_proof_from_claim` for fetching a proof from the advice map by content).
+#! (`CoreLibrary::recursive_verifier_root` on the operator side).
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and
 #! stored in memory for use by the generic verifier.
 #!
-#! The caller supplies the execution claim as a memory region holding the canonical encoding
-#! `P (+0) | K (+4, written by the verifier) | I (+8) | O (+24)` and the raw kernel-procedure
-#! digests as a witness region. The verifier computes K from the witness into the claim region,
-#! binds the transcript to the claim commitment, and evaluates the kernel-ROM boundary from the
-#! same witness. The final deferred root is loaded from advice, bound by the statement, and
-#! returned on the operand stack: the caller must settle it or expose it in its own statement.
+#! The caller supplies the execution claim as a memory region holding the fully populated
+#! canonical encoding `P (+0) | K (+4) | I (+8) | O (+24)`; every field is the caller's own
+#! trusted data. The kernel digest witness is not caller-supplied: this procedure fetches it
+#! from the advice map under K (`[num_digests, digest_0, ..]`), stages it into the
+#! verifier-owned witness region (`constants::kernel_witness_ptr`), and asserts it hashes to
+#! the claim's K. The verifier binds the transcript to the claim commitment and evaluates the
+#! kernel-ROM boundary from the fetched witness. The final deferred root is loaded from advice,
+#! bound by the statement, and returned on the operand stack: the caller must settle it or
+#! expose it in its own statement.
 #!
-#! Inputs:  [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+#! Inputs:  [claim_ptr, ...]
 #! Outputs: [D, ...]
 #!
 #! Where:
 #! - claim_ptr is the word-aligned address of the caller's claim region (40 felts).
-#! - kernel_ptr is the word-aligned address of the kernel digest witness.
-#! - num_kernel_digests is the number of digests in the witness.
 #! - D is the deferred root bound by the verified statement.
-pub proc verify_vm_proof
+pub proc verify_vm_proof_from_claim
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
+    # => [claim_ptr, ...]
+
+    # --- Materialize the kernel digest witness from the advice map, keyed by the claim's K ---
+
+    padw dup.4 add.4 mem_loadw_le
+    # => [K, claim_ptr, ...]
+    adv.push_mapval
+    adv_push
+    # => [num_kernel_digests, K, claim_ptr, ...]   advice: [digest_0, .., digest_{n-1}]
+
+    # The count must be bounded before the copy: it comes from advice and is only bound to K
+    # by the hash check, which runs after the writes.
+    u32assert.err="number of kernel procedure digests must fit in a u32"
+    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+
+    dup exec.constants::kernel_witness_ptr swap
+    # => [num_words = num_kernel_digests, write_ptr, num_kernel_digests, K, claim_ptr, ...]
+    exec.mem::pipe_words_to_memory
+    # The pipe's untagged hash state is unused: the binding check is the domain-tagged kernel
+    # commitment below.
+    # => [R0, R1, C, write_ptr', num_kernel_digests, K, claim_ptr, ...]
+    dropw dropw dropw drop
+    # => [num_kernel_digests, K, claim_ptr, ...]
+
+    dup exec.constants::kernel_witness_ptr
+    # => [kernel_ptr, num_kernel_digests, num_kernel_digests, K, claim_ptr, ...]
+    exec.claim::kernel_commitment
+    # => [K', num_kernel_digests, K, claim_ptr, ...]
+    movup.4 movdn.8
+    # => [K', K, num_kernel_digests, claim_ptr, ...]
+    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    # => [num_kernel_digests, claim_ptr, ...]
+
+    # --- Stage the boundary-inputs block from the claim region and advice ---
+
+    exec.constants::kernel_witness_ptr movup.2
     # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
-
-    # --- Stage the boundary-inputs block from the caller-supplied operands and advice ---
-
     exec.public_inputs::stage_boundary_inputs
     # => [...]
 

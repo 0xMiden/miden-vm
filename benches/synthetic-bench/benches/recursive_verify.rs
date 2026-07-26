@@ -2,7 +2,7 @@
 //!
 //! This benchmark separates the transaction proof from the recursive verifier cost:
 //! transaction proofs are generated before timing, then the timed program verifies
-//! the configured number of proofs via `exec.vm::verify_vm_proof`.
+//! the configured number of proofs via `exec.vm::verify_vm_proof_from_claim`.
 //!
 //! For each requested proof count, the setup builds one recursive-verifier program and one advice
 //! provider. The program contains one verifier call per inner proof. The advice stack segments for
@@ -61,7 +61,6 @@ use miden_vm::{
 };
 
 const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
-const KERNEL_DIGEST_PTR: u64 = 0;
 const CLAIM_PTR: u64 = 4096;
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v1";
 
@@ -505,34 +504,27 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
         .collect()
 }
 
-/// MASM for one `exec.vm::verify_vm_proof` call.
+/// MASM for one `exec.vm::verify_vm_proof_from_claim` call.
 ///
 /// The generated program appends one block like this per inner transaction proof.
 fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
     let mut source = String::new();
-    // `initial_stack[0]` must be on top when `verify_vm_proof` starts.
+    // `initial_stack[0]` must be on top when `verify_vm_proof_from_claim` starts.
     for value in initial_stack.iter().rev() {
         writeln!(source, "push.{value}").expect("write recursive verifier call source");
     }
     writeln!(
         source,
         "
-        # Copy 4 * num_kernel_digests felts from advice into the kernel witness region.
-        dup.2 mul.4 push.{KERNEL_DIGEST_PTR}
+        # Copy the claim encoding P | K | I | O (40 felts) into the claim region; the kernel
+        # digest witness travels in the advice map.
+        push.40 push.{CLAIM_PTR}
         exec.copy_advice_to_mem
 
-        # Copy the program digest into the claim region, then the stack i/o into its I/O
-        # section (+8).
-        push.4 push.{CLAIM_PTR}
-        exec.copy_advice_to_mem
-        push.32 push.{claim_io_ptr}
-        exec.copy_advice_to_mem
-
-        exec.vm::verify_vm_proof
+        exec.vm::verify_vm_proof_from_claim
         # => [D] — discarded: the bench measures verification; obligations are not consumed.
         dropw
         ",
-        claim_io_ptr = CLAIM_PTR + 8,
     )
     .expect("write recursive verifier call source");
     source
@@ -540,7 +532,8 @@ fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
 
 /// Full MASM program used by the benchmark.
 ///
-/// `verify_calls` is a sequence of `exec.vm::verify_vm_proof` calls, one per inner proof.
+/// `verify_calls` is a sequence of `exec.vm::verify_vm_proof_from_claim` calls, one per inner
+/// proof.
 fn recursive_verifier_program_masm(verify_calls: &str) -> String {
     format!(
         "
@@ -598,7 +591,7 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
 /// Build the advice provider consumed by one recursive verifier call.
 ///
 /// `generate_advice_inputs` parses the inner STARK proof and returns the exact advice stack,
-/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
+/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof_from_claim`.
 /// The stack is ordered so its first element is the next value consumed by the VM.
 fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
     let claim = ExecutionClaim::from_program_info(

@@ -96,21 +96,14 @@ fn assert_recursive_verify(
         end
 
         begin
-            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
+            # Initial stack: [claim_ptr].
 
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the witness
-            # region (kernel_ptr = 0).
-            dup.2 mul.4 push.0
+            # Copy the claim encoding P | K | I | O (40 felts) into the claim region
+            # (claim_ptr = 4096); the kernel digest witness travels in the advice map.
+            push.40 push.4096
             exec.copy_advice_to_mem
 
-            # Copy the program digest into the claim region (claim_ptr = 4096), then the
-            # stack i/o (32 felts) into its I/O section (+8).
-            push.4 push.4096
-            exec.copy_advice_to_mem
-            push.32 push.4104
-            exec.copy_advice_to_mem
-
-            exec.vm::verify_vm_proof
+            exec.vm::verify_vm_proof_from_claim
             # => [D] — keep the obligation as the program's output; truncate the residue.
             exec.sys::truncate_stack
         end

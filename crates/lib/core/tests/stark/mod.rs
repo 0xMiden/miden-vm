@@ -309,10 +309,10 @@ pub fn generate_recursive_verifier_data(
     generate_advice_inputs(&proof, &claim).unwrap()
 }
 
-/// The MAST root of `sys::vm::verify_vm_proof` — the verifier identity request keys name. The
-/// operator side is `CoreLibrary::recursive_verifier_root`; a consumer computes the identical
-/// value in-VM with `procref` (a procedure's root is intrinsic to its own MAST, independent of
-/// the enclosing program), so the two sides agree without any shared constant.
+/// The MAST root of `sys::vm::verify_vm_proof_from_claim` — the verifier identity request keys
+/// name. The operator side is `CoreLibrary::recursive_verifier_root`; a consumer computes the
+/// identical value in-VM with `procref` (a procedure's root is intrinsic to its own MAST,
+/// independent of the enclosing program), so the two sides agree without any shared constant.
 fn verify_vm_proof_root() -> Word {
     miden_core_lib::CoreLibrary::default().recursive_verifier_root()
 }
@@ -335,33 +335,30 @@ pub(crate) const COPY_ADVICE_TO_MEM: &str = "
         end
 ";
 
-/// Builds the consumer program: fill the claim into memory from the consumer's own
-/// inputs (the advice tape), then fetch and verify its proof by content via
-/// `verify_vm_proof_from_claim`.
+/// Builds the consumer program: fill the claim into memory from the consumer's own inputs (the
+/// advice tape), derive its commitment, and call `verify_vm_proof` — the fields-owning
+/// caller's flow.
 fn request_consumer_source() -> String {
     format!(
         "
         use miden::core::sys
         use miden::core::sys::vm
+        use miden::core::sys::vm::claim
 
         {COPY_ADVICE_TO_MEM}
 
         begin
-            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
+            # Initial stack: [claim_ptr].
 
-            # 1) Fill the claim into VM memory from the consumer's OWN inputs (the advice tape)
-            #    BEFORE fetching the proof: kernel witness at kernel_ptr, then program digest and
-            #    stack i/o into the claim region.
-            dup.2 mul.4 push.0
-            exec.copy_advice_to_mem
-            push.4 push.4096
-            exec.copy_advice_to_mem
-            push.32 push.4104
+            # 1) Fill the claim (the canonical 40-felt encoding) into VM memory from the
+            #    consumer's own inputs (the advice tape).
+            push.40 push.4096
             exec.copy_advice_to_mem
 
-            # 2) Derive the claim commitment from the staged claim, fetch its proof by content,
-            #    and verify -- a wrong or substituted package fails verification.
-            exec.vm::verify_vm_proof_from_claim
+            # 2) Derive the claim commitment and verify by name; a wrong or substituted
+            #    package fails verification.
+            exec.claim::claim_commitment
+            exec.vm::verify_vm_proof
             exec.sys::truncate_stack
         end
         "
@@ -399,9 +396,12 @@ fn request_flow_binds_proof_to_claim() {
     ace_read_check::cross_check_ace_circuit(&output);
 
     // Substitution: a different claim's proof under the same key fails against the consumer's
-    // claim — the advice provider cannot pass off another proof.
+    // claim — the advice provider cannot pass off another proof. The intended claim's own
+    // content-addressed entries stay available so the claim fetch succeeds and rejection
+    // happens in verification, not as a missing key.
     let (k, v) = entry(&other.proof_stream);
     let mut advice_map = other.advice_map.clone();
+    advice_map.extend(intended.advice_map.iter().cloned());
     advice_map.push((k, v));
     let bad = build_test!(
         source.as_str(),
@@ -416,13 +416,13 @@ fn request_flow_binds_proof_to_claim() {
     );
 }
 
-/// Multi-proof consumption through `verify_vm_proof_from_claim`: two independently proven
+/// Multi-proof consumption through `verify_vm_proof`: two independently proven
 /// executions of one program
 /// (distinct stack i/o) are verified inside a single consumer program — each proof is registered
 /// under `request_key(verifier_root, claim_commitment)` and fetched by content, independent of
-/// its position in the advice. The consumer stages each claim from its own inputs and the
-/// entrypoint derives the commitment that addresses the proof, so passing requires the in-VM
-/// kernel-commitment, claim-commitment, and request-key derivations to match their native
+/// its position in the advice. The consumer stages each claim from its own inputs and derives
+/// the commitment that addresses the claim and proof entries, so passing requires the in-VM
+/// claim-commitment, kernel-commitment, and request-key derivations to match their native
 /// mirrors (a mismatch is a missing advice-map key).
 #[test]
 fn stark_verifier_e2f4_request_multi_proof() {
@@ -432,11 +432,10 @@ fn stark_verifier_e2f4_request_multi_proof() {
     let tx0 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs.clone(), None);
     inputs[13] = 7; // distinct claim: same program, different stack inputs
     let tx1 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
-    assert_eq!(tx0.initial_stack[2], 0, "expected an empty kernel (num_kernel_digests = 0)");
 
     // One advice provider for both proofs: the tape carries only the consumer's claims; the
     // proof streams are content-addressed in the advice map, merged with the (also
-    // content-addressed) query maps and Merkle stores.
+    // content-addressed) query maps, claim/kernel entries, and Merkle stores.
     let verifier_root = verify_vm_proof_root();
     let mut tape = Vec::new();
     let mut store = MerkleStore::new();
@@ -453,16 +452,16 @@ fn stark_verifier_e2f4_request_multi_proof() {
         "
         use miden::core::sys
         use miden::core::sys::vm
+        use miden::core::sys::vm::claim
 
         {COPY_ADVICE_TO_MEM}
 
         proc verify_one_claim
-            # Stage the claim fields from the consumer's own inputs; the entrypoint derives the
-            # commitment and fetches the proof it addresses.
-            push.4 push.4096 exec.copy_advice_to_mem     # program digest P -> claim region
-            push.32 push.4104 exec.copy_advice_to_mem    # stack I/O -> claim region + 8
-            push.0 push.0 push.4096                      # [claim_ptr, kernel_ptr=0, num=0]
-            exec.vm::verify_vm_proof_from_claim          # => [D]
+            # Stage the claim fields from the consumer's own inputs, derive the commitment that
+            # names the claim, and fetch and verify the proof it addresses.
+            push.40 push.4096 exec.copy_advice_to_mem    # claim encoding -> claim region
+            push.4096 exec.claim::claim_commitment       # => [CLAIM_COMMITMENT]
+            exec.vm::verify_vm_proof                     # => [D]
         end
 
         begin
@@ -475,13 +474,13 @@ fn stark_verifier_e2f4_request_multi_proof() {
 
     let test = build_test!(source.as_str(), &[0_u64], &tape, store, advice_map);
     test.execute_for_output()
-        .expect("both proofs must verify through the field-owning entrypoint");
+        .expect("both proofs must verify through the commitment-first entrypoint");
 }
 
 /// Runs the recursive verifier MASM program with the proof pre-loaded on the advice stack.
 /// These runs are the differential guardrail that pins the proof-stream order against the MASM
-/// consumption sequence, so they deliberately feed `verify_vm_proof` directly rather than
-/// fetching the proof through a request.
+/// consumption sequence, so they deliberately feed `verify_vm_proof_from_claim` directly rather
+/// than fetching the proof through a request.
 fn run_recursive_verifier(data: &VerifierData) {
     let source = format!(
         "
@@ -491,22 +490,14 @@ fn run_recursive_verifier(data: &VerifierData) {
         {COPY_ADVICE_TO_MEM}
 
         begin
-            # Initial stack: [claim_ptr, kernel_ptr, num_kernel_digests].
+            # Initial stack: [claim_ptr].
 
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the witness
-            # region (kernel_ptr = 0). Build [dst=0, count=4N].
-            dup.2 mul.4 push.0
+            # Copy the claim encoding P | K | I | O (40 felts) from advice into the claim
+            # region (claim_ptr = 4096); the kernel digest witness travels in the advice map.
+            push.40 push.4096
             exec.copy_advice_to_mem
 
-            # Copy the program digest from advice into the claim region (claim_ptr = 4096).
-            push.4 push.4096
-            exec.copy_advice_to_mem
-
-            # Copy stack i/o (32 felts) from advice into the claim region's I/O section (+8).
-            push.32 push.4104
-            exec.copy_advice_to_mem
-
-            exec.vm::verify_vm_proof
+            exec.vm::verify_vm_proof_from_claim
             # => [D] — keep the obligation as the program's output and truncate the
             # staging residue; the statement binding is cross-checked via the ACE
             # READ section.
@@ -599,12 +590,18 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     // 2) Initial operand stack: `stage_boundary_inputs` operands.
     let initial_stack = vec![CLAIM_PTR, KERNEL_PTR, num_kernel_proc_digests as u64];
 
-    // 3) Build the advice stack: kernel digests (4N), then the claim-region fields (P, I, O) for
-    //    the staging, then the deferred root for `stage_boundary_inputs`, then the aux randomness
-    //    consumed by the test prologue that drives `compute_outer_logup_correction`.
+    // 3) Build the advice stack: kernel digests (4N) for the caller witness region, then the full
+    //    claim encoding (P, K, I, O) for the staging — the claim region arrives at
+    //    `stage_boundary_inputs` fully populated, K included — then the deferred root for
+    //    `stage_boundary_inputs`, then the aux randomness consumed by the test prologue that drives
+    //    `compute_outer_logup_correction`.
+    let digest_felts: Vec<Felt> =
+        kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
+    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&program_digest);
+    advice_stack.extend(expected_kernel_h.iter().map(|f| f.as_canonical_u64()));
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
     advice_stack.extend_from_slice(&deferred_root);
@@ -629,12 +626,9 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
             dup.2 mul.4 push.0
             exec.copy_advice_to_mem
 
-            # Copy the program digest from advice into the claim region (claim_ptr = 4096).
-            push.4 push.4096
-            exec.copy_advice_to_mem
-
-            # Copy stack i/o (32 felts) from advice into the claim region's I/O section (+8).
-            push.32 push.4104
+            # Copy the full claim encoding P | K | I | O (40 felts) from advice into the claim
+            # region (claim_ptr = 4096).
+            push.40 push.4096
             exec.copy_advice_to_mem
 
             exec.public_inputs::stage_boundary_inputs
@@ -673,10 +667,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     let pi_ptr = read_elem(3223322671) as u32;
     let c_total_ptr = 3223322704_u32;
 
-    // 4) kernel_H at boundary_inputs+0..4 must match the Rust mirror.
-    let digest_felts: Vec<Felt> =
-        kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
+    // 4) kernel_H at boundary_inputs+0..4 must match the Rust mirror (staged from the claim
+    //    region's K slot).
     for (i, expected) in expected_kernel_h.iter().enumerate() {
         assert_eq!(
             read_elem(reduced_ptr + i as u32),
