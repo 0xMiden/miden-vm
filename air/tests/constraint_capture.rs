@@ -2,7 +2,11 @@
 //!
 //! Capture goes through [`HandwrittenMidenAir`]: `MidenAir::eval` routes to the
 //! generated evaluators, and these tests exercise the capture frontend on the
-//! hand-written definitions (crate invariant 1).
+//! hand-written definitions (`miden-constraint-compiler` crate invariant 1).
+//!
+//! Lives here rather than in the compiler crate so `miden-constraint-compiler`
+//! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
+//! `miden-constraint-compiler` → `miden-ace-codegen` → `miden-air`.
 
 use miden_air::{HandwrittenMidenAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
@@ -113,7 +117,7 @@ fn roots_and_indices_are_parallel_and_nonempty() {
 }
 
 /// CSE can only remove work: unique ops never exceed as-written ops, and on the
-/// real AIRs must remove a meaningful amount.
+/// real AIRs must remove some.
 #[test]
 fn cse_only_removes_work() {
     for air in AIRS {

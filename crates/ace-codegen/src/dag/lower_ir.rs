@@ -159,7 +159,13 @@ pub fn build_verifier_dag_from_ir(
     let q_times_v = builder.mul(quotient, vanishing);
     let root = builder.sub(acc, q_times_v);
 
-    builder.build(root)
+    // Compact like the symbolic-tree lowering does: interned-but-dead nodes
+    // (e.g. the folded accumulator seed) would otherwise shift every node id
+    // in the DAG's node table, breaking node-for-node parity with the tree
+    // lowering. The encoded circuit and its digest are unaffected either way.
+    let mut dag = builder.build(root);
+    dag.compact();
+    dag
 }
 
 /// Lower one constraint expression by recursive DFS from `id`, left child
@@ -175,7 +181,9 @@ fn lower_ir_expr(
         Node::Leaf(leaf) => match leaf {
             Leaf::Main { offset, index } => builder.input(InputKey::Main { offset, index }),
             Leaf::Public(index) => builder.input(InputKey::Public(index)),
-            Leaf::Periodic(index) => periodic_nodes[index],
+            Leaf::Periodic(index) => *periodic_nodes
+                .get(index)
+                .unwrap_or_else(|| panic!("periodic column index {index} is out of range")),
             Leaf::IsFirst => builder.input(InputKey::IsFirst),
             Leaf::IsLast => builder.input(InputKey::IsLast),
             Leaf::IsTransition => builder.input(InputKey::IsTransition),

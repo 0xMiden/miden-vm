@@ -6,13 +6,13 @@
 //! - **Structural equality (modulo commutative operand order)**: both evaluators captured into one
 //!   shared, hash-consing builder produce identical canonical per-constraint roots — the constraint
 //!   expressions are the same, deterministically, not just equal at sampled points. Commutative
-//!   operand order is the one legitimate difference: the emitter flips mixed-class `Add`/`Mul`
-//!   operands so the extension side drives the efficient impl, which is value- and circuit-neutral
-//!   (`DagBuilder` canonicalizes commutative operands). This also pins the constraint order
+//!   operand order is quotiented away (any `Add`/`Mul` swap — value-neutral in a field); the
+//!   emitter's mixed-class flip, which lets the extension side drive the efficient impl, is the one
+//!   difference that exercises the quotient. This also pins the constraint order
 //!   (`ConstraintLayout`, and hence alpha assignment and all proof artifacts).
 //! - **Polynomial identity testing**: independently captured graphs evaluate to identical
 //!   per-constraint values on pseudorandom leaf assignments (4 seeds). Unlike the structural check,
-//!   this does not rely on hash-consing canonicalization being faithful.
+//!   this does not rely on shared-builder id canonicalization or the commutative-sort pass.
 //!
 //! If these fail after an intentional constraint change, the artifact is stale:
 //! `cargo run -p miden-core-lib --features constraints-tools --bin
@@ -46,6 +46,30 @@ fn generated_evaluators_match_handwritten_structurally() {
         assert_eq!(handwritten.base_global_indices, generated.base_global_indices);
         assert_eq!(handwritten.ext_global_indices, generated.ext_global_indices);
     }
+}
+
+/// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
+/// hand-written definitions. The emitter flips mixed-class commutative
+/// operands, so honest routing yields raw (pre-canonicalization) root ids that
+/// differ from the handwritten capture's somewhere. If `HandwrittenMidenAir`
+/// and `MidenAir` ever route to the same evaluator, both drift oracles silently
+/// compare the generated path against itself — and this test fails instead.
+#[test]
+fn handwritten_and_generated_are_distinct_captures() {
+    let mut any_difference = false;
+    for air in AIRS {
+        let mut builder = Graph::builder();
+        let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
+        let generated = capture_into(&air, &mut builder);
+        let _ = builder.freeze();
+        any_difference |= handwritten.base_roots != generated.base_roots
+            || handwritten.ext_roots != generated.ext_roots;
+    }
+    assert!(
+        any_difference,
+        "handwritten and generated evaluators captured identically: the drift \
+         oracles would be comparing the generated evaluators against themselves"
+    );
 }
 
 /// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children

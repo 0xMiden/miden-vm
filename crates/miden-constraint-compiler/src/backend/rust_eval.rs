@@ -3,7 +3,7 @@
 //!
 //! Per AIR, one `eval_{name}<AB: LiftedAirBuilder<F = Felt>>` function. Every
 //! unique graph node gets one `let` (global CSE), emitted at its first use —
-//! leaf reads named `h{n}` in first-use order, ops named `b{id}` (base) /
+//! leaves named `h{n}` in first-use order, ops named `b{id}` (base) /
 //! `e{id}` (ext) — and each constraint assert is placed directly after its
 //! root, replayed in the exact global order of the captured eval, so
 //! `ConstraintLayout` (and hence alpha assignment and all proof artifacts) is
@@ -12,8 +12,8 @@
 //! Interleaving the asserts with the node `let`s bounds value live ranges:
 //! each constraint root dies at its assert. The alternative — all `let`s
 //! first, all asserts last — keeps every root live to the end of the
-//! function, and the resulting register spills measurably regress the prover
-//! on register-starved or cache-contended targets.
+//! function, and the resulting register spills regressed the prover in
+//! benchmarking on register-starved and cache-contended targets.
 //!
 //! Emission is deterministic: the same graph always produces byte-identical
 //! output (crate invariant 3).

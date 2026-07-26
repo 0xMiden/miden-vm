@@ -4,8 +4,10 @@
 //! [`super::lower_ir`] (which documents the verifier expression both build). It
 //! is compiled only for tests, where the node-for-node differential in
 //! `miden-air` (`tests/ace_codegen.rs`) checks that the IR path replicates this
-//! path's `DagBuilder` interning order exactly. Scheduled for deletion once the
-//! migration has soaked; do not extend it.
+//! path's `DagBuilder` interning order exactly. Delete after the checked-in
+//! circuit digests survive a release cycle on the IR path; the node-for-node
+//! differential retires with it (semantic coverage then rests on
+//! `all_airs_dag_matches_manual_eval`). Do not extend it.
 
 use miden_crypto::{
     field::{ExtensionField, Field},
