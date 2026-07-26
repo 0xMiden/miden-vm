@@ -65,6 +65,9 @@ fn state_to_key(state: &HasherState) -> StateKey {
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
+    // Both maps are keyed by program-chosen values under a fast, non-HashDoS-hardened
+    // hasher (foldhash); a crafted program can degrade lookups, but trace growth is
+    // bounded by `max_trace_len`, which caps the damage.
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: HashMap<DigestKey, (usize, usize)>,
     /// Maps input state -> Poseidon2 cycle id.

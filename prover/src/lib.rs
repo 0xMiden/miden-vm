@@ -126,33 +126,37 @@ pub fn prove_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    // Snapshot the overlap flag before `execution_options` moves into the processor. The
+    // binding is std-gated only because the branch consuming it is: on no_std the streaming
+    // builder's thread does not exist and the flag is documented as ignored.
     #[cfg(feature = "std")]
     let overlapped_trace_build = execution_options.overlapped_trace_build();
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    // Overlapped path (std only): the hasher chiplet builds concurrently with
-    // execution, hiding the dominant serial part of trace building.
+    // Overlapped path: the hasher chiplet builds concurrently with execution,
+    // hiding the dominant serial part of trace building.
     #[cfg(feature = "std")]
-    {
-        if overlapped_trace_build {
-            let trace = {
-                let _span = tracing::info_span!("execute_miden_vm").entered();
-                processor.execute_and_build_trace_sync(program, host)?
-            };
-            return prove_final_execution_trace(trace, proving_options);
-        }
-    }
-    {
-        let trace_inputs = {
+    if overlapped_trace_build {
+        let trace = {
             let _span = tracing::info_span!("execute_miden_vm").entered();
-            processor.execute_trace_inputs_sync(program, host)?
+            processor.execute_and_build_trace_sync(program, host)?
         };
-        prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
+        return prove_final_execution_trace(trace, proving_options);
     }
+
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_trace_inputs_sync(program, host)?
+    };
+    prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
-/// Synchronous wrapper for [`prove_partial()`].
+/// Synchronous variant of [`prove_partial()`].
+///
+/// Like [`prove_sync`], the sync path can overlap hasher-chiplet trace building with program
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
+/// default); the produced trace and proof are identical either way.
 #[instrument("prove_program_partial_sync", skip_all)]
 pub fn prove_partial_sync(
     program: &Program,
@@ -162,8 +166,23 @@ pub fn prove_partial_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    // Snapshot the overlap flag before `execution_options` moves into the processor. The
+    // binding is std-gated only because the branch consuming it is: on no_std the streaming
+    // builder's thread does not exist and the flag is documented as ignored.
+    #[cfg(feature = "std")]
+    let overlapped_trace_build = execution_options.overlapped_trace_build();
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
+
+    // Overlapped path, mirroring `prove_sync`.
+    #[cfg(feature = "std")]
+    if overlapped_trace_build {
+        let trace = {
+            let _span = tracing::info_span!("execute_miden_vm").entered();
+            processor.execute_and_build_trace_sync(program, host)?
+        };
+        return prove_partial_execution_trace(trace, proving_options);
+    }
 
     let trace_inputs = {
         let _span = tracing::info_span!("execute_miden_vm").entered();

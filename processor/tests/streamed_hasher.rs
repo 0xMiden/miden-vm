@@ -3,9 +3,10 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
     trace::build_trace,
 };
+use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
 /// A program mixing basic blocks (including repeats, which exercise the
 /// hasher's memoized-trace path), control blocks, and an `hperm` (a streamed
@@ -31,10 +32,11 @@ begin
 end
 ";
 
-fn processor() -> FastProcessor {
+fn processor(stack: &[u64], advice: AdviceInputs) -> FastProcessor {
+    let stack: Vec<Felt> = stack.iter().map(|&v| Felt::new(v).unwrap()).collect();
     FastProcessor::new_with_options(
-        StackInputs::new(&[miden_processor::Felt::new_unchecked(1)]).unwrap(),
-        AdviceInputs::default(),
+        StackInputs::new(&stack).unwrap(),
+        advice,
         ExecutionOptions::default()
             .with_core_trace_fragment_size(64)
             .expect("valid fragment size"),
@@ -42,19 +44,27 @@ fn processor() -> FastProcessor {
     .unwrap()
 }
 
-#[test]
-fn overlapped_build_matches_buffered() {
-    let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
+/// Runs `program_src` through both trace-build paths and asserts byte-for-byte
+/// equality of every trace segment.
+fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: &AdviceInputs) {
+    let program = Assembler::default()
+        .assemble_program("test", program_src)
+        .unwrap()
+        .unwrap_program();
 
     let buffered = {
         let mut host = DefaultHost::default();
-        let inputs = processor().execute_trace_inputs_sync(&program, &mut host).unwrap();
+        let inputs = processor(stack, advice.clone())
+            .execute_trace_inputs_sync(&program, &mut host)
+            .unwrap();
         build_trace(inputs).unwrap()
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
-        processor().execute_and_build_trace_sync(&program, &mut host).unwrap()
+        processor(stack, advice.clone())
+            .execute_and_build_trace_sync(&program, &mut host)
+            .unwrap()
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());
@@ -63,6 +73,50 @@ fn overlapped_build_matches_buffered() {
     assert_eq!(b_core, s_core, "core segment diverged");
     assert_eq!(b_chiplets, s_chiplets, "chiplets segment diverged");
     assert_eq!(b_p2, s_p2, "poseidon2 segment diverged");
+}
+
+#[test]
+fn overlapped_build_matches_buffered() {
+    assert_overlapped_matches_buffered(PROGRAM, &[1], &AdviceInputs::default());
+}
+
+/// Covers the two Merkle op kinds in the streamed replay (`BuildMerkleRoot`
+/// from `mtree_get`, `UpdateMerkleRoot` from `mtree_set`), which the main
+/// program cannot exercise without a Merkle store in the advice inputs.
+#[test]
+fn overlapped_build_matches_buffered_merkle() {
+    let index = 3usize;
+    let (leaves, store) = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    let tree = MerkleTree::new(leaves).unwrap();
+    let root = tree.root();
+    let advice = AdviceInputs::default().with_merkle_store(store);
+
+    // mtree_get consumes [d, i, R, ...] with depth on top.
+    let get_stack = [
+        tree.depth() as u64,
+        index as u64,
+        root[0].as_canonical_u64(),
+        root[1].as_canonical_u64(),
+        root[2].as_canonical_u64(),
+        root[3].as_canonical_u64(),
+    ];
+    assert_overlapped_matches_buffered("begin mtree_get dropw end", &get_stack, &advice);
+
+    // mtree_set consumes [d, i, R, V_new] with depth on top.
+    let new_node = init_merkle_leaf(9);
+    let set_stack = [
+        tree.depth() as u64,
+        index as u64,
+        root[0].as_canonical_u64(),
+        root[1].as_canonical_u64(),
+        root[2].as_canonical_u64(),
+        root[3].as_canonical_u64(),
+        new_node[0].as_canonical_u64(),
+        new_node[1].as_canonical_u64(),
+        new_node[2].as_canonical_u64(),
+        new_node[3].as_canonical_u64(),
+    ];
+    assert_overlapped_matches_buffered("begin mtree_set end", &set_stack, &advice);
 }
 
 /// The overlap path spawns the hasher builder on its own thread; span context is
@@ -114,7 +168,9 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
-        processor().execute_and_build_trace_sync(&program, &mut host).unwrap();
+        processor(&[1], AdviceInputs::default())
+            .execute_and_build_trace_sync(&program, &mut host)
+            .unwrap();
     });
 
     assert_eq!(

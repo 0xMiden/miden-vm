@@ -7,7 +7,7 @@
 
 - Opened the `LargeSmtForest` backend API for external implementations: made `LineageMutation::new` and `AppliedLineageMutation::new` public and added `LineageId::as_bytes` and `MutationSet::from_parts`.
 - [BREAKING] Added `AdviceStack` as the public advice stack type. `AdviceInputs` and `AdviceProvider` now use it, and the old raw stack field and `extend_stack` helpers were removed ([#3423](https://github.com/0xMiden/miden-vm/pull/3423)).
-- Sped up trace building: chiplet traces now build in parallel and can overlap with execution ([#3407](https://github.com/0xMiden/miden-vm/pull/3407)).
+- Sped up trace building: chiplets build in parallel, and on the sync proving paths the hasher chiplet builds during execution (on by default, `ExecutionOptions::with_overlapped_trace_build`) ([#3407](https://github.com/0xMiden/miden-vm/pull/3407)).
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
