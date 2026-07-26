@@ -36,7 +36,7 @@ pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
-// references these directly within `parallel`.
+// uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
 #[cfg(feature = "std")]
 pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 #[cfg(feature = "std")]

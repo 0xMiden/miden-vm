@@ -490,10 +490,10 @@ fn initialize_range_checker(
 /// execution; this pass only needs the trace-recording side effects.
 ///
 /// The five chiplets are populated from disjoint replays, so they build in parallel. Each
-/// builder caps its own trace length at `max_trace_len` (keeping allocations bounded, which is
-/// the purpose of the incremental check the sequential version ran after every operation), and
-/// the combined length check runs once at the end. The abort point on overflow is coarser than
-/// the sequential version's; the returned error is identical.
+/// builder caps its own trace length at `max_trace_len`, and the combined length check runs
+/// once at the end, returning the same error an incremental check would. The bound before the
+/// error fires is per-chiplet rather than on the sum, so transient allocations can reach a few
+/// times `max_trace_len` on adversarial inputs before the combined check aborts.
 fn initialize_chiplets(
     kernel: KernelDescriptor,
     core_trace_contexts: &[CoreTraceFragmentContext],
@@ -564,8 +564,8 @@ pub(crate) fn build_hasher_chiplet(
             ResolvedHasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
-            ResolvedHasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                let _ = hasher.hash_basic_block(&op_batches, expected_hash);
+            ResolvedHasherOp::HashBasicBlock((batch_groups, expected_hash)) => {
+                let _ = hasher.hash_basic_block(&batch_groups, expected_hash);
             },
             ResolvedHasherOp::BuildMerkleRoot((value, path, index)) => {
                 let _ = hasher.build_merkle_root(value, &path, index);

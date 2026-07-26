@@ -2,9 +2,9 @@ use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HasherState, STATE_WIDTH},
+    chiplets::hasher::{HasherState, RATE_LEN, STATE_WIDTH},
 };
-use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
+use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt};
 
 use crate::{
     ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
@@ -1041,7 +1041,7 @@ impl HasherOp {
 pub enum ResolvedHasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<OpBatch>, Word)),
+    HashBasicBlock((Vec<[Felt; RATE_LEN]>, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -1079,7 +1079,7 @@ impl HasherRequestReplay {
     /// Send failures are ignored: they mean the consumer stopped early, and its error surfaces
     /// when the caller joins it.
     #[cfg(feature = "std")]
-    pub fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp>) -> Self {
+    pub(crate) fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp>) -> Self {
         Self { sink: HasherOpSink::Streamed(sender) }
     }
 
@@ -1141,7 +1141,8 @@ impl HasherRequestReplay {
     /// Records a `Hasher::hash_basic_block()` request.
     ///
     /// `basic_block_node` must be the node identified by `(forest_id, node_id)`; streamed
-    /// replays clone its op batches so the concurrent builder needs no forest access.
+    /// replays copy its per-batch group hashes so the concurrent builder needs no forest
+    /// access.
     pub fn record_hash_basic_block(
         &mut self,
         forest_id: MastForestId,
@@ -1151,7 +1152,7 @@ impl HasherRequestReplay {
         let expected_hash = basic_block_node.digest();
         self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
             ResolvedHasherOp::HashBasicBlock((
-                basic_block_node.op_batches().to_vec(),
+                basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
                 expected_hash,
             ))
         });
@@ -1176,18 +1177,25 @@ impl HasherRequestReplay {
     /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
     /// forest store.
     ///
-    /// Streamed replays yield nothing here: their ops were already delivered to the concurrent
-    /// builder.
+    /// A streamed replay must not reach this path — its ops were already delivered to the
+    /// concurrent builder (and the overlap path swaps in an empty buffered replay via
+    /// `take_hasher_replay`) — so it yields an error rather than silently producing an empty
+    /// hasher chiplet.
     pub fn into_resolved_ops<'a>(
         self,
         mast_forest_store: &'a [Arc<SparseMastForest>],
     ) -> impl Iterator<Item = Result<ResolvedHasherOp, ExecutionError>> + 'a {
-        let ops = match self.sink {
-            HasherOpSink::Buffered(ops) => ops,
+        let (streamed_err, ops) = match self.sink {
+            HasherOpSink::Buffered(ops) => (None, ops),
             #[cfg(feature = "std")]
-            HasherOpSink::Streamed(_) => VecDeque::new(),
+            HasherOpSink::Streamed(_) => (
+                Some(ExecutionError::Internal(
+                    "streamed hasher replay reached the buffered trace-build path",
+                )),
+                VecDeque::new(),
+            ),
         };
-        ops.into_iter().map(move |op| match op {
+        streamed_err.into_iter().map(Err).chain(ops.into_iter().map(move |op| match op {
             HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
                 let forest =
                     mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
@@ -1202,12 +1210,12 @@ impl HasherRequestReplay {
                     ));
                 };
                 Ok(ResolvedHasherOp::HashBasicBlock((
-                    basic_block_node.op_batches().to_vec(),
+                    basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
                     expected_hash,
                 )))
             },
             op => Ok(op.resolve_forest_free().expect("all other variants are forest-free")),
-        })
+        }))
     }
 }
 
@@ -1310,5 +1318,21 @@ impl StackOverflowReplay {
         self.restore_context_info
             .pop_front()
             .ok_or(OperationError::Internal("no overflow address operations recorded"))
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+
+    /// A streamed replay reaching the buffered trace-build path is a logic error
+    /// and must surface immediately, not as a silently empty hasher chiplet.
+    #[test]
+    fn streamed_replay_in_buffered_path_errors() {
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        let replay = HasherRequestReplay::streamed(sender);
+        let mut ops = replay.into_resolved_ops(&[]);
+        assert!(matches!(ops.next(), Some(Err(ExecutionError::Internal(_)))));
+        assert!(ops.next().is_none());
     }
 }

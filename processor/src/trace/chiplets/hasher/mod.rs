@@ -8,8 +8,8 @@ use miden_air::trace::chiplets::hasher::{
 use miden_core::chiplets::hasher::apply_permutation;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
-    Word as Digest, ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, Word as Digest,
+    ZERO,
 };
 
 mod trace;
@@ -182,12 +182,13 @@ impl Hasher {
         (addr, result)
     }
 
-    /// Computes a sequential hash of all operation batches and returns the result.
+    /// Computes a sequential hash of a basic block's operation batches, given as one group-hash
+    /// array per batch (the only part of a batch the hasher absorbs), and returns the result.
     ///
     /// Returns (addr, digest).
     pub fn hash_basic_block(
         &mut self,
-        op_batches: &[OpBatch],
+        batch_groups: &[[Felt; RATE_LEN]],
         expected_hash: Digest,
     ) -> (Felt, Digest) {
         if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
@@ -196,9 +197,9 @@ impl Hasher {
 
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
-        let init_state = init_state(op_batches[0].groups(), ZERO);
+        let init_state = init_state(&batch_groups[0], ZERO);
 
-        let num_batches = op_batches.len();
+        let num_batches = batch_groups.len();
 
         if num_batches == 1 {
             // One-batch hashes have both boundary flags set.
@@ -232,8 +233,8 @@ impl Hasher {
         );
 
         // Middle batches: no boundary flags.
-        for batch in op_batches.iter().take(num_batches - 1).skip(1) {
-            absorb_into_state(&mut state, batch.groups());
+        for groups in batch_groups.iter().take(num_batches - 1).skip(1) {
+            absorb_into_state(&mut state, groups);
             state = self.append_controller_permutation(
                 LINEAR_HASH,
                 RETURN_STATE,
@@ -248,7 +249,7 @@ impl Hasher {
         }
 
         // Last batch: boundary output only.
-        absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
+        absorb_into_state(&mut state, &batch_groups[num_batches - 1]);
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,

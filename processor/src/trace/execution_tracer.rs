@@ -165,7 +165,7 @@ impl ExecutionTracer {
     /// recorded, instead of buffering for post-execution replay. Everything else records as in
     /// [`Self::new`].
     #[cfg(feature = "std")]
-    pub fn new_with_streamed_hasher(
+    pub(crate) fn new_with_streamed_hasher(
         fragment_size: usize,
         max_stack_depth: usize,
         hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp>,

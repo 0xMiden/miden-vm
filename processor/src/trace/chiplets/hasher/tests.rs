@@ -370,8 +370,8 @@ fn hash_memoization_basic_blocks_single_batch() {
     let batches = make_single_batch();
     let expected_hash = compute_basic_block_hash(&batches);
 
-    let (addr1, digest1) = hasher.hash_basic_block(&batches, expected_hash);
-    let (addr2, digest2) = hasher.hash_basic_block(&batches, expected_hash);
+    let (addr1, digest1) = hasher.hash_basic_block(&batch_groups(&batches), expected_hash);
+    let (addr2, digest2) = hasher.hash_basic_block(&batch_groups(&batches), expected_hash);
 
     assert_eq!(digest1, digest2, "memoized digest should match original");
     assert_eq!(digest1, expected_hash);
@@ -418,8 +418,8 @@ fn hash_memoization_basic_blocks_multi_batch() {
     let batches = make_multi_batch(3);
     let expected_hash = compute_basic_block_hash(&batches);
 
-    let (addr1, digest1) = hasher.hash_basic_block(&batches, expected_hash);
-    let (addr2, digest2) = hasher.hash_basic_block(&batches, expected_hash);
+    let (addr1, digest1) = hasher.hash_basic_block(&batch_groups(&batches), expected_hash);
+    let (addr2, digest2) = hasher.hash_basic_block(&batch_groups(&batches), expected_hash);
 
     assert_eq!(digest1, digest2);
     assert_eq!(digest1, expected_hash);
@@ -487,11 +487,12 @@ fn hash_memoization_basic_blocks_check() {
     let loop_body_hash = compute_basic_block_hash(&loop_body_batches);
 
     // BB1: 2-batch basic block
-    let (bb1_addr, bb1_digest) = hasher.hash_basic_block(&batches, bb_hash);
+    let (bb1_addr, bb1_digest) = hasher.hash_basic_block(&batch_groups(&batches), bb_hash);
     assert_eq!(bb1_digest, bb_hash);
 
     // Loop body: different block in between
-    let (_loop_addr, loop_digest) = hasher.hash_basic_block(&loop_body_batches, loop_body_hash);
+    let (_loop_addr, loop_digest) =
+        hasher.hash_basic_block(&batch_groups(&loop_body_batches), loop_body_hash);
     assert_eq!(loop_digest, loop_body_hash);
 
     // Hash Join2 = hash(BB1, Loop)
@@ -504,7 +505,7 @@ fn hash_memoization_basic_blocks_check() {
     assert_eq!(join2_digest, join2_hash);
 
     // BB2: identical to BB1 -- should be memoized
-    let (bb2_addr, bb2_digest) = hasher.hash_basic_block(&batches, bb_hash);
+    let (bb2_addr, bb2_digest) = hasher.hash_basic_block(&batch_groups(&batches), bb_hash);
     assert_eq!(bb2_digest, bb_hash);
     assert_ne!(bb1_addr, bb2_addr, "memoized BB2 should have a different address");
 
@@ -902,6 +903,11 @@ fn make_basic_block_batches(ops: Vec<miden_core::operations::Operation>) -> Vec<
 /// Creates a single OpBatch with a distinct operation (Pad) for testing.
 ///
 /// Uses Pad instead of Noop to ensure the groups differ from those produced by `make_multi_batch`.
+/// Extracts the per-batch group hashes, the form `Hasher::hash_basic_block` consumes.
+fn batch_groups(batches: &[OpBatch]) -> Vec<[Felt; miden_air::trace::chiplets::hasher::RATE_LEN]> {
+    batches.iter().map(|batch| *batch.groups()).collect()
+}
+
 fn make_single_batch() -> Vec<OpBatch> {
     use miden_core::operations::Operation;
     make_basic_block_batches(vec![Operation::Pad])

@@ -11,7 +11,7 @@ use miden_air::trace::{
     },
     poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
-use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::KernelDescriptor};
+use miden_core::{field::PrimeCharacteristicRing, program::KernelDescriptor};
 
 use crate::{
     Felt, ONE, Word, ZERO,

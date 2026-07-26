@@ -247,7 +247,6 @@ impl ExecutionOptions {
         self.max_deferred_elements
     }
 
-    /// Sets the maximum number of field elements allowed in a single live advice map value.
     /// Sets whether the synchronous prover overlaps hasher-chiplet trace building with
     /// program execution (defaults to `true`; ignored on no_std, which always uses the
     /// sequential path).
@@ -261,6 +260,7 @@ impl ExecutionOptions {
         self.overlapped_trace_build
     }
 
+    /// Sets the maximum number of field elements allowed in a single live advice map value.
     pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
         self.max_adv_map_value_size = size;
         self

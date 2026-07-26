@@ -161,24 +161,43 @@ impl FastProcessor {
 
         std::thread::scope(|scope| {
             // Only the receiver crosses threads; execution (and the host) stay on this one.
-            let hasher = scope
-                .spawn(move || build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN));
+            // Spans are thread-local, so the builder thread re-enters this function's span
+            // to keep its work attributed under it in profiling traces.
+            let span = tracing::Span::current();
+            let hasher = scope.spawn(move || {
+                let _span = span.entered();
+                build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
+            });
 
+            // Liveness invariant: both match arms consume `tracer` by value, so the scope
+            // closure captures it by move and any unwind (including a panic in execution)
+            // drops the stream's sender, unblocking the builder before the scope's join.
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
 
             let mut inputs = match execution_output {
                 Ok(output) => Self::trace_build_inputs_from_parts(program, output, tracer),
                 Err(err) => {
                     // Dropping the tracer drops the stream's sender; the builder then sees
-                    // end-of-input and finishes, letting the scope join it cleanly.
+                    // end-of-input and finishes, letting the scope join it cleanly. The
+                    // execution error is the root cause, so the builder's outcome is only
+                    // logged, not propagated.
                     drop(tracer);
-                    let _ = hasher.join().expect("hasher chiplet builder panicked");
+                    match hasher.join() {
+                        Ok(Err(builder_err)) => {
+                            tracing::debug!(%builder_err, "hasher builder also failed");
+                        },
+                        Ok(Ok(_)) => (),
+                        Err(panic) => std::panic::resume_unwind(panic),
+                    }
                     return Err(err);
                 },
             };
             // End the stream before joining the builder.
             drop(inputs.take_hasher_replay());
-            let hasher = hasher.join().expect("hasher chiplet builder panicked")?;
+            let hasher = match hasher.join() {
+                Ok(result) => result?,
+                Err(panic) => std::panic::resume_unwind(panic),
+            };
 
             build_trace_with_prebuilt_hasher(inputs, hasher)
         })
