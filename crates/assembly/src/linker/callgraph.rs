@@ -87,13 +87,6 @@ impl CallGraph {
         Ok(())
     }
 
-    /// Removes the edge between `caller` and `callee` from the graph
-    pub fn remove_edge(&mut self, caller: GlobalItemIndex, callee: GlobalItemIndex) {
-        if let Some(out_edges) = self.nodes.get_mut(&caller) {
-            out_edges.retain(|n| *n != callee);
-        }
-    }
-
     /// Returns the number of predecessors of `id` in the graph, i.e.
     /// the number of procedures which call `id`.
     pub fn num_predecessors(&self, id: GlobalItemIndex) -> usize {

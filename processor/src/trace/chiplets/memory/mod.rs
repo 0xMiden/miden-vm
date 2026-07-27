@@ -426,7 +426,7 @@ impl Memory {
 
     /// Returns the number of words that were accessed at least once across all contexts.
     #[cfg(test)]
-    pub fn num_accessed_words(&self) -> usize {
+    fn num_accessed_words(&self) -> usize {
         self.trace.iter().fold(0, |acc, (_, s)| acc + s.num_accessed_words())
     }
 }

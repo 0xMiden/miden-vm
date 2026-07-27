@@ -148,7 +148,7 @@ impl RangeChecker {
     /// Returns length of execution trace required to describe all 16-bit range checks performed
     /// by the VM.
     #[cfg(test)]
-    pub fn trace_len(&self) -> usize {
+    pub(super) fn trace_len(&self) -> usize {
         self.get_number_range_checker_rows()
     }
 }

@@ -26,7 +26,7 @@ pub struct RowMajorTraceWriter<'a, E> {
 impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
     /// Creates a writer whose physical row width equals the per-row payload.
     #[cfg(test)]
-    pub fn new(data: &'a mut [E], width: usize) -> Self {
+    pub(super) fn new(data: &'a mut [E], width: usize) -> Self {
         Self::with_stride(data, width, width)
     }
 
@@ -380,7 +380,7 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
 /// values its `Push` ops emit. Consumed by decoder / hasher tests that exercise multi-batch
 /// SPAN execution.
 #[cfg(test)]
-pub fn build_span_with_respan_ops() -> (Vec<Operation>, Vec<Felt>) {
+pub(super) fn build_span_with_respan_ops() -> (Vec<Operation>, Vec<Felt>) {
     let iv = [1, 3, 5, 7, 9, 11, 13, 15, 17].to_elements();
     let ops = alloc::vec![
         Operation::Push(iv[0]),

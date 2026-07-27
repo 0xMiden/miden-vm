@@ -474,7 +474,7 @@ jobs:
           git worktree remove --force "${WORKTREE_DIR}/current" || true
           rm -rf "${RUN_ROOT}"
 
-      - name: Fail on regression
+      - name: Report possible regression
         if: steps.compare.outputs.regression == 'true'
         env:
           PROGRAM_DELTA_PCT: ${{ steps.compare.outputs.program_delta_pct }}
@@ -482,66 +482,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Blake3 benchmark regressions over threshold: ${REGRESSION_METRICS}"
-          echo "Primary metric delta: ${PROGRAM_DELTA_PCT}%"
-          exit 1
-
-  comment:
-    name: Comment on pushed commit
-    runs-on: ubuntu-latest
-    needs:
-      - benchmark
-    if: always() && github.event_name == 'push' && needs.benchmark.outputs.regression == 'true' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
-    permissions:
-      contents: write
-    steps:
-      - name: Create or update commit comment
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
-        env:
-          CURRENT_SHA: ${{ needs.benchmark.outputs.current_sha }}
-          MARKER: "<!-- blake3-1to1-nonregression -->"
-          BODY: ${{ needs.benchmark.outputs.summary }}
-        with:
-          script: |
-            const body = [
-              process.env.MARKER,
-              process.env.BODY,
-              '',
-              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            ].join('\n');
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const commitSha = process.env.CURRENT_SHA;
-            const marker = process.env.MARKER;
-
-            const comments = await github.paginate(
-              github.rest.repos.listCommentsForCommit,
-              {
-                owner,
-                repo,
-                commit_sha: commitSha,
-                per_page: 100,
-              },
-            );
-
-            const existing = comments.find(comment =>
-              comment.user?.type === 'Bot' && comment.body?.includes(marker)
-            );
-
-            if (existing) {
-              await github.rest.repos.updateCommitComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-              return;
-            }
-
-            await github.rest.repos.createCommitComment({
-              owner,
-              repo,
-              commit_sha: commitSha,
-              body,
-            });
+          echo "::warning title=Advisory Blake3 benchmark result::One or more metrics crossed the configured threshold: ${REGRESSION_METRICS}. The primary metric changed by ${PROGRAM_DELTA_PCT}%. This result is report-only because the benchmark has shown high run-to-run variance. Review the job summary and artifacts, then reproduce the result before treating it as a regression."

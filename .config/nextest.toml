@@ -3,14 +3,3 @@
 fail-fast = false
 # Put a bound on hanging/slow tests
 slow-timeout = { period = "10m", terminate-after = 1, grace-period = "15s" }
-
-[test-groups]
-serialized = { max-threads = 1 }
-
-[[profile.default.overrides]]
-filter = 'test(cli_test)'
-test-group = 'serialized'
-
-[[profile.ci.overrides]]
-filter = 'test(cli_test)'
-test-group = 'serialized'

@@ -15,7 +15,7 @@ help:
 	@printf "  make test-assembly-syntax        # Test assembly-syntax crate\n"
 	@printf "  make test-core                   # Test core crate\n"
 	@printf "  make test-vm                     # Test miden-vm crate\n"
-	@printf "  make test-crypto                 # Test imported crypto crates\n"
+	@printf "  make test-crypto                 # Test specialized crypto feature configurations\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
@@ -40,8 +40,6 @@ ALL_FEATURES             := --all-features
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
 FAST_TEST_FEATURES       := concurrent,testing
-CRYPTO_TEST_PACKAGES     := -p miden-crypto -p miden-crypto-derive -p miden-field -p miden-serde-utils -p miden-crypto-wycheproof-tests
-CRYPTO_TEST_FEATURES     := miden-crypto/concurrent,miden-crypto/testing,miden-field/testing
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
@@ -172,19 +170,16 @@ test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest
 
 .PHONY: test-build
 test-build: ## Build the test binaries for the workspace (no run)
-	$(MAKE) core-test-build NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
+	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
-test: ## Run all tests for the workspace
-	$(MAKE) core-test NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
+test: ## Run the standard workspace test suite
+	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test-crypto
-test-crypto: ## Run imported crypto crate tests and crypto-specific feature tests
-	cargo nextest run \
-		--profile ci \
-		--cargo-profile test-dev \
-		$(CRYPTO_TEST_PACKAGES) \
-		--features $(CRYPTO_TEST_FEATURES)
+# Ordinary crypto, field, serde, derive, and Wycheproof tests run in the standard workspace suite.
+# This target only adds feature configurations which that suite does not cover.
+test-crypto: ## Run crypto tests requiring specialized feature configurations
 	cargo nextest run \
 		--profile ci \
 		--cargo-profile test-dev \

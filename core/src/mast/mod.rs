@@ -541,7 +541,7 @@ impl MastForest {
     /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
     /// reference to the old [`MastForest`] should be remapped using this map.
     #[cfg(test)]
-    pub fn remove_nodes(
+    fn remove_nodes(
         &mut self,
         nodes_to_remove: &BTreeSet<MastNodeId>,
     ) -> BTreeMap<MastNodeId, MastNodeId> {

@@ -734,6 +734,29 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
             && self.new_pairs.is_empty()
             && self.old_root == self.new_root
     }
+
+    /// Creates a new mutation set from pre-computed components.
+    ///
+    /// This constructor performs no validation. The caller must ensure the components are
+    /// internally consistent, meaning that applying `node_mutations` and `new_pairs` to a tree
+    /// whose root is `old_root` yields a tree whose root is `new_root`. Intended for storage
+    /// backends that compute mutations from persisted tree data instead of an in-memory tree.
+    pub fn from_parts(
+        old_root: Word,
+        node_mutations: impl IntoIterator<Item = (NodeIndex, NodeMutation)>,
+        new_pairs: impl IntoIterator<Item = (K, V)>,
+        new_root: Word,
+    ) -> Self
+    where
+        K: Ord,
+    {
+        Self {
+            old_root,
+            node_mutations: node_mutations.into_iter().collect(),
+            new_pairs: new_pairs.into_iter().collect(),
+            new_root,
+        }
+    }
 }
 
 // SERIALIZATION
