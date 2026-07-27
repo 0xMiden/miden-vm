@@ -498,9 +498,7 @@ fn run_recursive_verifier(data: &VerifierData) {
             exec.copy_advice_to_mem
 
             exec.vm::verify_vm_proof_from_claim
-            # => [D] — keep the obligation as the program's output and truncate the
-            # staging residue; the statement binding is cross-checked via the ACE
-            # READ section.
+            # => [security_level, D]
             exec.sys::truncate_stack
         end
         "

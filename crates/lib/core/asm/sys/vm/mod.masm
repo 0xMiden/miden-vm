@@ -11,13 +11,20 @@ use miden::core::mem
 use miden::core::stark::verifier
 use miden::core::stark::constants
 
-# Acceptable security parameters for Miden VM proof verification.
-# These define the security policy enforced by `assert_acceptable_options`.
-# If the protocol security level changes, update these constants accordingly.
-const ACCEPTABLE_NUM_QUERIES = 27
-const ACCEPTABLE_QUERY_POW_BITS = 16
-const ACCEPTABLE_DEEP_POW_BITS = 12
-const ACCEPTABLE_FOLDING_POW_BITS = 4
+# Minimum conjectured security level (in bits) the canonical `verify_vm_proof` entrypoint
+# accepts. The underlying `verify_vm_proof_from_claim` computes and returns the attained level
+# from the proof's transcript-bound parameters; this threshold is the policy layered on top, so
+# changing it re-roots only the wrapper, not the underlying verifier.
+const CONJECTURED_SECURITY_TARGET = 96
+
+# Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
+# configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
+# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
+# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
+const CONJECTURED_BITS_PER_QUERY_FP = 193382
+
+# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
+const MAX_SECURITY_LEVEL = 128
 
 # Domain tag for the claim commitment: the registered selector
 # (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
@@ -55,22 +62,25 @@ proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
-#! Asserts that the security parameters in memory meet the Miden VM security policy.
+#! Computes the conjectured security level (in bits) attained by the proof's parameters.
 #!
-#! Input:  [...]
-#! Output: [...]
-proc assert_acceptable_options
+#! Reads the FRI query count and query-phase grinding bits from their verifier cells
+#! (populated by `load_security_params`) and evaluates the integer fixed-point formula
+#! `min((num_queries * C) >> 16 + query_pow_bits, 128)`. Must match
+#! miden_air::config::conjectured_security_level bit-for-bit (enforced by cross-tests).
+#!
+#! The generic verifier bounds `num_queries <= 150`, so `num_queries * C` fits in a u32 (the
+#! `u32shr` below requires that).
+#!
+#! Inputs:  [...]
+#! Outputs: [level, ...]
+pub proc conjectured_security_level
     exec.constants::get_number_queries
-    push.ACCEPTABLE_NUM_QUERIES assert_eq.err="num_queries does not match acceptable security policy"
-
-    exec.constants::get_query_pow_bits
-    push.ACCEPTABLE_QUERY_POW_BITS assert_eq.err="query_pow_bits does not match acceptable security policy"
-
-    exec.constants::get_deep_pow_bits
-    push.ACCEPTABLE_DEEP_POW_BITS assert_eq.err="deep_pow_bits does not match acceptable security policy"
-
-    exec.constants::get_folding_pow_bits
-    push.ACCEPTABLE_FOLDING_POW_BITS assert_eq.err="folding_pow_bits does not match acceptable security policy"
+    push.CONJECTURED_BITS_PER_QUERY_FP mul
+    u32shr.16
+    exec.constants::get_query_pow_bits add
+    push.MAX_SECURITY_LEVEL u32min
+    # => [level, ...]
 end
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
@@ -236,6 +246,12 @@ pub proc verify_vm_proof
 
     locaddr.0
     exec.verify_vm_proof_from_claim
+    # => [security_level, D, ...]
+
+    # --- Threshold the attained security level ---
+
+    u32lt.CONJECTURED_SECURITY_TARGET
+    assertz.err="proof security level is below the accepted target"
     # => [D, ...]
 end
 
@@ -247,9 +263,12 @@ end
 #! The proof is consumed from the advice stack; request keys name this procedure's MAST root
 #! (`CoreLibrary::recursive_verifier_root` on the operator side).
 #!
-#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
-#! loaded from the advice stack, validated against the acceptable security policy, and
-#! stored in memory for use by the generic verifier.
+#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
+#! from the advice stack and stored in memory for the generic verifier, which enforces their
+#! structural bounds and binds them into the Fiat-Shamir transcript — so a proof cannot claim
+#! parameters it was not produced with. This procedure computes no policy: it returns the
+#! attained conjectured security level for the caller (or the wrapping `verify_vm_proof`) to
+#! threshold.
 #!
 #! The caller supplies the execution claim as a memory region holding the fully populated
 #! canonical encoding `P (+0) | K (+4) | I (+8) | O (+24)`; every field is the caller's own
@@ -262,16 +281,16 @@ end
 #! expose it in its own statement.
 #!
 #! Inputs:  [claim_ptr, ...]
-#! Outputs: [D, ...]
+#! Outputs: [security_level, D, ...]
 #!
 #! Where:
 #! - claim_ptr is the word-aligned address of the caller's claim region (40 felts).
+#! - security_level is the attained conjectured security level in bits.
 #! - D is the deferred root bound by the verified statement.
 pub proc verify_vm_proof_from_claim
-    # --- Load and validate security parameters from advice stack ---
+    # --- Load security parameters from advice stack ---
 
     exec.load_security_params
-    exec.assert_acceptable_options
     # => [claim_ptr, ...]
 
     # --- Materialize the kernel digest witness from the advice map, keyed by the claim's K ---
@@ -329,8 +348,10 @@ pub proc verify_vm_proof_from_claim
     exec.verifier::verify
     # => [...]
 
-    # --- Return the deferred obligation bound by the statement -----------------
+    # --- Return the deferred obligation and the attained security level --------
 
     exec.public_inputs::load_deferred_root
     # => [D, ...]
+    exec.conjectured_security_level
+    # => [security_level, D, ...]
 end

@@ -202,7 +202,10 @@ fn hydrate_deferred_state(
 }
 
 fn stark_security_level(_proof: &StarkProof) -> u32 {
-    // Mirrors `ExecutionProof::security_level` until the STARK security estimator is available.
+    // TODO: placeholder for the precompile-VM proof's security level. Blocked on the
+    // precompile-VM security estimator (does not exist yet); wire together with the VM-side
+    // native level via `miden_air::config`. `verify` returns `min(vm_level, this)`, so this must
+    // become real before the composite is trustworthy for deferred proofs.
     96
 }
 

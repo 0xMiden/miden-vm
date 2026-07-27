@@ -185,11 +185,12 @@ impl ExecutionProof {
 
     /// Returns conjectured security level of this proof in bits.
     ///
-    /// Currently returns a hardcoded 96 bits. Once the security estimator is implemented
-    /// in Plonky3, this should calculate the actual conjectured security level based on:
-    /// - Proof parameters (FRI folding factor, number of queries, etc.)
-    /// - Hash function collision resistance
-    /// - Field size and extension degree
+    /// TODO: this is a placeholder returning a hardcoded 96 (honest only for the current
+    /// parameter preset). The conjectured estimator now exists as
+    /// `miden_air::config::conjectured_security_level`, but this method cannot call it —
+    /// `miden-air` depends on `miden-core`, not the reverse. The intended fix is to stop having
+    /// the proof self-report a security level and instead grade it in the verifier (which does
+    /// depend on `miden-air`); that native wiring lands together with the precompile-VM level.
     pub fn security_level(&self) -> u32 {
         96
     }

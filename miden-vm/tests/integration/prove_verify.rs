@@ -104,7 +104,7 @@ fn assert_recursive_verify(
             exec.copy_advice_to_mem
 
             exec.vm::verify_vm_proof_from_claim
-            # => [D] — keep the obligation as the program's output; truncate the residue.
+            # => [security_level, D]
             exec.sys::truncate_stack
         end
     ";

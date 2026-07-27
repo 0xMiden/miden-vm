@@ -522,8 +522,8 @@ fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
         exec.copy_advice_to_mem
 
         exec.vm::verify_vm_proof_from_claim
-        # => [D] — discarded: the bench measures verification; obligations are not consumed.
-        dropw
+        # => [security_level, D]
+        drop dropw
         ",
     )
     .expect("write recursive verifier call source");
