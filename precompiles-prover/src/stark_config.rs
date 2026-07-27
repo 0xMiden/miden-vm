@@ -42,7 +42,10 @@ const COMPRESSION_INPUTS: usize = 2;
 
 /// PRECOMPILE_RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, CIRCUIT_COMMITMENT]).
 ///
-/// Compile-time constant binding the Fiat-Shamir transcript to the precompile chiplet AIR set.
+/// Compile-time constant binding the Fiat-Shamir transcript to the canonical per-AIR ACE
+/// circuit generated in `ChipletAir::all()` order. Cross-chiplet external assertions
+/// (`ChipletMultiAir::eval_external`) and trace-height-derived proof order are checked by
+/// the lifted STARK protocol outside this circuit hash.
 /// Keep this in sync with [`crate::ace::build_precompile_multi_air_ace_circuit`].
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [
     Felt::new_unchecked(15901056294547705196),
