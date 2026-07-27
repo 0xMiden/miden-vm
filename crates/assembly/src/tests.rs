@@ -7705,3 +7705,117 @@ fn test_entrypoint_with_locals_via_constructor_panics() {
 
     let _ = Assembler::new(context.source_manager()).assemble_program("test", module);
 }
+
+/// Pins the cycle cost of every instruction documented in
+/// `docs/src/user_docs/assembly/field_operations.md` to the number of operations the assembler
+/// actually emits, so the two cannot drift apart.
+///
+/// Cost is measured by differencing programs containing the instruction once, twice and three
+/// times: this cancels the entrypoint prologue exactly, and requiring the two deltas to agree
+/// rules out any fusion between adjacent copies.
+#[test]
+fn field_operation_cycle_costs_match_docs() {
+    // (source, documented cycles)
+    let cases: &[(&str, usize)] = &[
+        // Assertions and tests
+        ("assert", 1),
+        ("assertz", 2),
+        ("assert_eq", 2),
+        ("assert_eqw", 11),
+        // Arithmetic and Boolean operations
+        ("add", 1),
+        ("add.2", 2),
+        ("sub", 2),
+        ("sub.2", 2),
+        ("mul", 1),
+        ("mul.2", 2),
+        ("div", 2),
+        ("div.2", 2),
+        ("neg", 1),
+        ("inv", 1),
+        ("pow2", 16),
+        ("exp", 73),
+        ("exp.u8", 17),
+        ("exp.u16", 25),
+        ("exp.u32", 41),
+        ("exp.u63", 72),
+        // exp.b: small-power table for b <= 7, then 11 + floor(log2(b))
+        ("exp.0", 3),
+        ("exp.1", 1),
+        ("exp.2", 2),
+        ("exp.3", 4),
+        ("exp.4", 6),
+        ("exp.5", 8),
+        ("exp.6", 10),
+        ("exp.7", 12),
+        ("exp.8", 14),
+        ("exp.16", 15),
+        ("exp.256", 19),
+        ("ilog2", 70),
+        ("not", 1),
+        ("and", 1),
+        ("or", 1),
+        ("xor", 7),
+        // Comparison operations
+        ("eq", 1),
+        ("eq.2", 2),
+        ("neq", 2),
+        ("neq.2", 3),
+        ("lt", 17),
+        ("lt.2", 18),
+        ("lte", 18),
+        ("lte.2", 19),
+        ("gt", 16),
+        ("gt.2", 17),
+        ("gte", 17),
+        ("gte.2", 18),
+        ("is_odd", 6),
+        ("eqw", 15),
+        // Extension field operations
+        ("ext2add", 5),
+        ("ext2sub", 7),
+        ("ext2mul", 3),
+        ("ext2neg", 4),
+        ("ext2inv", 11),
+        ("ext2div", 14),
+    ];
+
+    let ops_for = |instruction: &str, copies: usize| -> usize {
+        let context = TestContext::default();
+        let body = core::iter::repeat_n(instruction, copies).collect::<Vec<_>>().join("\n    ");
+        let source = source_file!(&context, format!("begin\n    {body}\nend"));
+        let program = Assembler::new(context.source_manager())
+            .assemble_program("program", source)
+            .expect("assembly failed")
+            .unwrap_program();
+
+        program
+            .mast_forest()
+            .nodes()
+            .iter()
+            .filter_map(|node| node.get_basic_block())
+            .map(|block| block.raw_operations().count())
+            .sum()
+    };
+
+    let mut mismatches = Vec::new();
+    for (instruction, documented) in cases {
+        let (one, two, three) =
+            (ops_for(instruction, 1), ops_for(instruction, 2), ops_for(instruction, 3));
+        let (first, second) = (two - one, three - two);
+        assert_eq!(
+            first, second,
+            "{instruction}: cost is not additive across copies ({first} then {second}); \
+             the differencing measurement is not valid for this instruction"
+        );
+        if first != *documented {
+            mismatches.push(format!("  {instruction}: documented {documented}, emits {first}"));
+        }
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "field_operations.md is out of date:\n{}",
+        mismatches.join("\n")
+    );
+}
