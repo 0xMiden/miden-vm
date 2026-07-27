@@ -160,4 +160,4 @@ xclippy-fix = [
 ]
 
 [target.wasm32-unknown-unknown]
-rustflags = ['--cfg', 'getrandom_backend="unsupported"']
+rustflags = ['--cfg', 'getrandom_backend="unsupported"', '-C', 'target-feature=+simd128']
