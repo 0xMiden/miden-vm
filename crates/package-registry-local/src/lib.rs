@@ -340,13 +340,12 @@ impl LocalPackageRegistry {
         };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let loaded =
-            MastPackage::read_from_bytes_validated_with_trusted_debug(&bytes).map_err(|error| {
-                LocalRegistryError::PackageDecode {
-                    path: path.clone(),
-                    error: error.to_string(),
-                }
-            })?;
+        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+            LocalRegistryError::PackageDecode {
+                path: path.clone(),
+                error: error.to_string(),
+            }
+        })?;
 
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
         if loaded.name != *package || actual_version != *version {
@@ -832,7 +831,10 @@ impl PackageStore for LocalPackageRegistry {
 
 #[cfg(test)]
 mod tests {
-    use miden_mast_package::{Dependency, Package, Section, SectionId, TargetType};
+    use miden_core::serde::Serializable;
+    use miden_mast_package::{
+        Dependency, Package, Section, SectionId, TargetType, debug_info::PackageDebugInfoBuilder,
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -859,6 +861,10 @@ mod tests {
         let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
         let artifact_dir = tempdir.path().join("sysroot").join("lib");
         LocalPackageRegistry::load(index_path, artifact_dir).expect("failed to load registry")
+    }
+
+    fn valid_debug_info_section() -> Section {
+        Section::new(SectionId::DEBUG_INFO, PackageDebugInfoBuilder::default().build().to_bytes())
     }
 
     #[test]
@@ -1053,9 +1059,7 @@ mod tests {
         let mut registry = load_registry(&tempdir);
 
         let mut package = build_package("pkg", "1.0.0", []);
-        package
-            .sections
-            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        package.sections.push(valid_debug_info_section());
         let expected_sections = package.sections.clone();
 
         let package = Arc::from(package);
@@ -1073,9 +1077,7 @@ mod tests {
         let mut registry = load_registry(&tempdir);
 
         let mut package = build_package("pkg", "1.0.0", []);
-        package
-            .sections
-            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, Vec::from([1, 2, 3])));
+        package.sections.push(valid_debug_info_section());
         let expected_sections = package.sections.clone();
 
         let package_path = tempdir.path().join("pkg.masp");

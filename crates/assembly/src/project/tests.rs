@@ -5,7 +5,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
     operations::Operation,
     serde::{Deserializable, Serializable, SliceReader},
-    utils::hash_string_to_word,
+    utils::{Idx, hash_string_to_word},
 };
 use miden_mast_package::{
     PackageExport, PackageModule, ProcedureExport, Section, SectionId,
@@ -445,7 +445,7 @@ fn push_export_module_path(
 }
 
 #[test]
-fn static_linking_drops_untrusted_dependency_debug_rows() {
+fn static_linking_keeps_validated_dependency_debug_rows() {
     let tempdir = TempDir::new().unwrap();
 
     let depa = debug_bearing_static_package(
@@ -509,8 +509,8 @@ end
         })
     };
     assert!(
-        !has_context("depa_ctx") && !has_context("depb_ctx"),
-        "untrusted preassembled dependency debug rows should be dropped",
+        has_context("depa_ctx") && has_context("depb_ctx"),
+        "validated preassembled dependency debug rows should be retained",
     );
 
     let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
@@ -528,8 +528,8 @@ end
         })
     };
     assert!(
-        !has_round_tripped_context("depa_ctx") && !has_round_tripped_context("depb_ctx"),
-        "round-tripped root debug should not regain dropped dependency debug rows",
+        has_round_tripped_context("depa_ctx") && has_round_tripped_context("depb_ctx"),
+        "round-tripped root debug should retain dependency debug rows",
     );
 }
 

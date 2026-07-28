@@ -153,26 +153,6 @@ impl Package {
         Self::read_from_trusted(&mut reader)
     }
 
-    #[doc(hidden)]
-    #[track_caller]
-    pub fn read_from_validated_with_trusted_debug<R: ByteReader>(
-        source: &mut R,
-    ) -> Result<Self, DeserializationError> {
-        let header = Self::read_header_from(source)?;
-        let mast_forest = Self::read_mast_forest(source, true)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest, true, true)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    pub fn read_from_bytes_validated_with_trusted_debug(
-        bytes: &[u8],
-    ) -> Result<Self, DeserializationError> {
-        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        Self::read_from_validated_with_trusted_debug(&mut reader)
-    }
-
     #[track_caller]
     fn read_mast_forest<R: ByteReader>(
         source: &mut R,
@@ -522,6 +502,56 @@ impl Serializable for PackageManifest {
 }
 
 impl PackageManifest {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        // Read exports
+        let exports_len = source.read_usize()?;
+        let max_exports = source.max_alloc(PackageExport::min_serialized_size());
+        if exports_len > max_exports {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {exports_len} elements but reader can provide at most {max_exports}"
+            )));
+        }
+        let mut exports = Vec::with_capacity(exports_len);
+        for _ in 0..exports_len {
+            exports.push(PackageExport::read_from_trusted(source, mast)?);
+        }
+
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let max_modules = source.max_alloc(PackageModule::min_serialized_size());
+        if modules_len > max_modules {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {modules_len} elements but reader can provide at most {max_modules}"
+            )));
+        }
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
+        // Read dependencies
+        let dependencies = Vec::<Dependency>::read_from(source)?;
+
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
+        PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
+            .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
@@ -656,6 +686,20 @@ impl Serializable for PackageExport {
 }
 
 impl PackageExport {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            1 => ProcedureExport::read_from_trusted(source, mast).map(Self::Procedure),
+            2 => ConstantExport::read_from(source).map(Self::Constant),
+            3 => TypeExport::read_from(source).map(Self::Type),
+            invalid => Err(DeserializationError::InvalidValue(format!(
+                "unexpected PackageExport tag: '{invalid}'"
+            ))),
+        }
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
@@ -714,6 +758,39 @@ impl Serializable for ProcedureExport {
 }
 
 impl ProcedureExport {
+    pub fn read_from_trusted<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        use miden_assembly_syntax::ast::types::FunctionType;
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let node = if source.read_bool()? {
+            Some(MastNodeId::from_u32_safe(source.read_u32()?, mast)?)
+        } else {
+            None
+        };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceNodeId::read_from(source)?)
+        } else {
+            None
+        };
+        let digest = Word::read_from(source)?;
+        let signature = if source.read_bool()? {
+            Some(FunctionType::read_from(source)?)
+        } else {
+            None
+        };
+        let attributes = AttributeSet::read_from(source)?;
+        Ok(Self {
+            path,
+            node,
+            source_node,
+            digest,
+            signature,
+            attributes,
+        })
+    }
+
     pub fn read_from_safe<R: ByteReader>(
         source: &mut R,
         mast: &MastForest,
