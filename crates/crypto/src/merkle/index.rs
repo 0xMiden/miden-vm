@@ -60,7 +60,7 @@ impl NodeIndex {
     /// # Panics
     /// Panics if the `position` is greater than or equal to 2^{depth}.
     #[cfg(test)]
-    pub fn make(depth: u8, position: u64) -> Self {
+    pub(super) fn make(depth: u8, position: u64) -> Self {
         Self::new(depth, position).unwrap()
     }
 

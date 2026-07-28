@@ -37,6 +37,7 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
+use serde_wincode::{SerdeCompat, wincode};
 
 use crate::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 
@@ -90,12 +91,11 @@ pub fn generate_advice_inputs(
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProofData<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
-        StarkProofData<Felt, QuadFelt, P2Config>,
-    > as wincode::config::Deserialize<_>>::deserialize(
-        proof_bytes, proof_encoding_config
-    )
-    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let proof: StarkProofData<Felt, QuadFelt, P2Config> =
+        <SerdeCompat<StarkProofData<Felt, QuadFelt, P2Config>> as wincode::config::Deserialize<
+            _,
+        >>::deserialize(proof_bytes, proof_encoding_config)
+        .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
     let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();

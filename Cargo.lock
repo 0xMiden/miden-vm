@@ -1367,17 +1367,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "escargot"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11c3aea32bc97b500c9ca6a72b768a26e558264303d101d3409cf6d57a9ed0cf"
-dependencies = [
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2318,6 +2307,7 @@ dependencies = [
  "serde_json",
  "serde_spanned",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2411,16 +2401,20 @@ dependencies = [
 name = "miden-mast-package"
 version = "0.28.0"
 dependencies = [
+ "hashbrown 0.17.1",
  "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
+ "miden-utils-indexing",
  "proptest",
  "proptest-derive",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2580,7 +2574,6 @@ dependencies = [
  "serde-wincode",
  "tokio",
  "tracing",
- "wincode",
 ]
 
 [[package]]
@@ -2653,7 +2646,6 @@ dependencies = [
  "serde-wincode",
  "test-case",
  "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -2678,7 +2670,7 @@ dependencies = [
 name = "miden-utils-indexing"
 version = "0.28.0"
 dependencies = [
- "miden-crypto",
+ "miden-serde-utils",
  "miden-test-serde-macros",
  "proptest",
  "serde",
@@ -2708,7 +2700,6 @@ dependencies = [
  "serde",
  "serde-wincode",
  "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -2718,7 +2709,6 @@ dependencies = [
  "assert_cmd",
  "clap",
  "criterion",
- "escargot",
  "hex",
  "miden-assembly",
  "miden-core",
@@ -2734,6 +2724,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-forest",

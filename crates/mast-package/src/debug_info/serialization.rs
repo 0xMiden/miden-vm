@@ -1,611 +1,340 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
+use core::{alloc::Layout, ptr::NonNull};
 
+use miden_assembly_syntax::ast::DebugVarLocation;
 use miden_core::{
-    Word,
+    Felt, Word,
     mast::MastNodeId,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         read_bounded_len,
     },
 };
-use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
+use miden_debug_types::{ColumnIndex, LineIndex};
+use miden_utils_indexing::IndexVec;
+use zerocopy::{Immutable, IntoBytes, KnownLayout};
 
 use super::{
-    DEBUG_ERROR_MESSAGES_VERSION, DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION,
-    DEBUG_SOURCE_MAP_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugErrorMessage,
-    DebugErrorMessagesSection, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
-    DebugFunctionsSection, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceGraphSection,
-    DebugSourceInlineCall, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
-    DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
-    DebugVariantInfo, PackageDebugInfo,
+    DEBUG_INFO_VERSION, DebugErrorMessage, DebugFieldInfo, DebugFileIdx, DebugFileInfo,
+    DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
+    DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
+    DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, OptionalIndex, PackageDebugInfo,
 };
+
+/// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
+/// every row type decoded directly from the payload.
+const POD_BUFFER_ALIGNMENT: usize = align_of::<u64>();
+
+const _: () = {
+    assert!(align_of::<DebugFileInfo>() <= POD_BUFFER_ALIGNMENT);
+    assert!(align_of::<DebugLoc>() <= POD_BUFFER_ALIGNMENT);
+    assert!(align_of::<WireDebugFunctionInfo>() <= POD_BUFFER_ALIGNMENT);
+    assert!(align_of::<DebugSourceNodeId>() <= POD_BUFFER_ALIGNMENT);
+    assert!(align_of::<DebugErrorMessage>() <= POD_BUFFER_ALIGNMENT);
+    assert!(align_of::<DebugSourceAsmOp>() <= POD_BUFFER_ALIGNMENT);
+};
+
+/// Wire form of [`DebugFunctionInfo`]. The domain type cannot be decoded from arbitrary bytes
+/// because its field elements must be validated before constructing a [`Word`].
+#[repr(C, align(8))]
+#[derive(Clone, Copy, zerocopy::FromBytes, Immutable, IntoBytes, KnownLayout)]
+struct WireDebugFunctionInfo {
+    mast_root: [u64; 4],
+    source_node: OptionalIndex<DebugSourceNodeId>,
+    type_idx: OptionalIndex<DebugTypeIdx>,
+    linkage_name_idx: OptionalIndex<DebugStringIdx>,
+    name_idx: DebugStringIdx,
+    file_idx: DebugFileIdx,
+    line: LineIndex,
+    column: ColumnIndex,
+}
 
 // PACKAGE DEBUG INFO SERIALIZATION
 // ================================================================================================
 
+/// Fixed-size tables are padded to their row alignment and written as `zerocopy`-certified rows.
+/// Deserialization copies each payload into an aligned allocation because the padding preserves row
+/// alignment only when measured from an aligned payload base. The function table uses an explicit
+/// wire row because its field elements require validation before constructing domain values.
+#[cfg(target_endian = "little")]
 impl Serializable for PackageDebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_bool(self.types.is_some());
-        if let Some(types) = self.types.as_ref() {
-            types.write_into(target);
-        }
-        target.write_bool(self.sources.is_some());
-        if let Some(sources) = self.sources.as_ref() {
-            sources.write_into(target);
-        }
-        target.write_bool(self.functions.is_some());
-        if let Some(functions) = self.functions.as_ref() {
-            functions.write_into(target);
-        }
-        target.write_bool(self.source_graph.is_some());
-        if let Some(source_graph) = self.source_graph.as_ref() {
-            source_graph.write_into(target);
-        }
-        target.write_bool(self.source_map.is_some());
-        if let Some(source_map) = self.source_map.as_ref() {
-            source_map.write_into(target);
-        }
-        target.write_bool(self.error_messages.is_some());
-        if let Some(error_messages) = self.error_messages.as_ref() {
-            error_messages.write_into(target);
-        }
+        let mut output = Vec::<u8>::with_capacity(16 * 1024);
+
+        self.strings.write_into(&mut output);
+
+        output.write_u32(self.files().len().try_into().unwrap());
+        write_pod_slice(self.files().as_slice(), &mut output);
+
+        output.write_u32(self.locations().len().try_into().unwrap());
+        write_pod_slice(self.locations().as_slice(), &mut output);
+
+        self.types.write_into(&mut output);
+
+        output.write_u32(self.functions().len().try_into().unwrap());
+        pad_to_align::<WireDebugFunctionInfo>(&mut output);
+        write_pod_rows(
+            self.functions().iter().map(|row| {
+                let mast_root = row.mast_root.into_elements().map(|felt| felt.as_canonical_u64());
+                WireDebugFunctionInfo {
+                    mast_root,
+                    source_node: row.source_node,
+                    type_idx: row.type_idx,
+                    linkage_name_idx: row.linkage_name_idx,
+                    name_idx: row.name_idx,
+                    file_idx: row.file_idx,
+                    line: row.line,
+                    column: row.column,
+                }
+            }),
+            &mut output,
+        );
+
+        self.nodes.write_into(&mut output);
+
+        output.write_u32(self.roots().len().try_into().unwrap());
+        write_pod_slice(self.roots(), &mut output);
+
+        output.write_u32(self.error_messages().len().try_into().unwrap());
+        write_pod_slice(self.error_messages(), &mut output);
+
+        target.write_u8(self.version());
+        target.write_usize(output.len());
+        target.write_bytes(&output);
     }
 }
 
+#[cfg(target_endian = "little")]
 impl Deserializable for PackageDebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let types = if source.read_bool()? {
-            Some(DebugTypesSection::read_from(source)?)
-        } else {
-            None
-        };
-        let sources = if source.read_bool()? {
-            Some(DebugSourcesSection::read_from(source)?)
-        } else {
-            None
-        };
-        let functions = if source.read_bool()? {
-            Some(DebugFunctionsSection::read_from(source)?)
-        } else {
-            None
-        };
-        let source_graph = if source.read_bool()? {
-            Some(DebugSourceGraphSection::read_from(source)?)
-        } else {
-            None
-        };
-        let source_map = if source.read_bool()? {
-            Some(DebugSourceMapSection::read_from(source)?)
-        } else {
-            None
-        };
-        let error_messages = if source.read_bool()? {
-            Some(DebugErrorMessagesSection::read_from(source)?)
-        } else {
-            None
-        };
-        Ok(Self {
+        let version = source.read_u8()?;
+        if version != DEBUG_INFO_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported debug_info version: {version}, expected {DEBUG_INFO_VERSION}"
+            )));
+        }
+
+        let data_len = read_bounded_len(source, "package debug info", 1)?;
+        let data = source.read_slice(data_len)?;
+        let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
+        let mut source = PodSliceReader::new(aligned.as_slice());
+
+        let strings =
+            IndexVec::read_from_bounded_with(&mut source, "debug_info strings", 1, read_string)?;
+
+        let files_len = source.read_u32()?;
+        let files = source.read_pod_rows::<DebugFileInfo>(files_len as usize, "debug files")?;
+
+        let locations_len = source.read_u32()?;
+        let locations =
+            source.read_pod_rows::<DebugLoc>(locations_len as usize, "debug locations")?;
+
+        let types = IndexVec::read_from_bounded(&mut source, "debug_info types")?;
+
+        let functions_len = source.read_u32()?;
+        let functions = source.read_pod_rows_with::<WireDebugFunctionInfo, _, _>(
+            functions_len as usize,
+            "debug functions",
+            |row| {
+                Ok(DebugFunctionInfo {
+                    mast_root: Word::new([
+                        read_wire_felt(row.mast_root[0])?,
+                        read_wire_felt(row.mast_root[1])?,
+                        read_wire_felt(row.mast_root[2])?,
+                        read_wire_felt(row.mast_root[3])?,
+                    ]),
+                    source_node: row.source_node,
+                    type_idx: row.type_idx,
+                    linkage_name_idx: row.linkage_name_idx,
+                    name_idx: row.name_idx,
+                    file_idx: row.file_idx,
+                    line: row.line,
+                    column: row.column,
+                })
+            },
+        )?;
+
+        let nodes = IndexVec::read_from_bounded(&mut source, "debug_info nodes")?;
+
+        let roots_len = source.read_u32()? as usize;
+        let roots = source.read_pod_rows::<DebugSourceNodeId>(roots_len, "debug source roots")?;
+
+        let error_messages_len = source.read_u32()? as usize;
+        let error_messages = source
+            .read_pod_rows::<DebugErrorMessage>(error_messages_len, "debug error messages")?;
+
+        let remaining_len = source.remaining_len();
+        if remaining_len != 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "expected {data_len} bytes to have been read, but {remaining_len} remain in the buffer"
+            )));
+        }
+
+        Ok(PackageDebugInfo {
+            version,
+            strings,
+            files: IndexVec::try_from(files).unwrap(),
+            locations: IndexVec::try_from(locations).unwrap(),
             types,
-            sources,
-            functions,
-            source_graph,
-            source_map,
+            functions: IndexVec::try_from(functions).unwrap(),
+            nodes,
+            roots,
             error_messages,
         })
     }
 }
 
-// DEBUG TYPES SECTION SERIALIZATION
+// DEBUG SOURCE NODE SERIALIZATION
 // ================================================================================================
 
-impl Serializable for DebugTypesSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version);
-
-        // Write string table
-        target.write_usize(self.strings.len());
-        for s in &self.strings {
-            s.as_ref().write_into(target);
-        }
-
-        // Write type table
-        target.write_usize(self.types.len());
-        for ty in &self.types {
-            ty.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for DebugTypesSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_TYPES_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_types version: {version}, expected {DEBUG_TYPES_VERSION}"
-            )));
-        }
-
-        // Manual bounds check required: read_string is a local helper, not Deserializable,
-        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
-        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = read_bounded_len(source, "debug_types strings", 1)?;
-        let mut strings = Vec::with_capacity(strings_len);
-        for _ in 0..strings_len {
-            strings.push(read_string(source)?);
-        }
-
-        let types_len = read_bounded_len(source, "debug_types types", 1)?;
-        let types = source.read_many_iter(types_len)?.collect::<Result<_, _>>()?;
-
-        Ok(Self { version, strings, types })
-    }
-}
-
-// DEBUG SOURCES SECTION SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugSourcesSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version);
-
-        // Write string table
-        target.write_usize(self.strings.len());
-        for s in &self.strings {
-            s.as_ref().write_into(target);
-        }
-
-        // Write file table
-        target.write_usize(self.files.len());
-        for file in &self.files {
-            file.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for DebugSourcesSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_SOURCES_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_sources version: {version}, expected {DEBUG_SOURCES_VERSION}"
-            )));
-        }
-
-        // Manual bounds check required: read_string is a local helper, not Deserializable,
-        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
-        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = read_bounded_len(source, "debug_sources strings", 1)?;
-        let mut strings = Vec::with_capacity(strings_len);
-        for _ in 0..strings_len {
-            strings.push(read_string(source)?);
-        }
-
-        let files_len = read_bounded_len(source, "debug_sources files", 1)?;
-        let files = source.read_many_iter(files_len)?.collect::<Result<_, _>>()?;
-
-        Ok(Self { version, strings, files })
-    }
-}
-
-// DEBUG FUNCTIONS SECTION SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugFunctionsSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version);
-
-        // Write string table
-        target.write_usize(self.strings.len());
-        for s in &self.strings {
-            s.as_ref().write_into(target);
-        }
-
-        // Write function table
-        target.write_usize(self.functions.len());
-        for func in &self.functions {
-            func.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for DebugFunctionsSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_FUNCTIONS_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_functions version: {version}, expected {DEBUG_FUNCTIONS_VERSION}"
-            )));
-        }
-
-        // Manual bounds check required: read_string is a local helper, not Deserializable,
-        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
-        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = read_bounded_len(source, "debug_functions strings", 1)?;
-        let mut strings = Vec::with_capacity(strings_len);
-        for _ in 0..strings_len {
-            strings.push(read_string(source)?);
-        }
-
-        let functions_len = read_bounded_len(source, "debug_functions functions", 1)?;
-        let functions = source.read_many_iter(functions_len)?.collect::<Result<_, _>>()?;
-
-        Ok(Self { version, strings, functions })
-    }
-}
-
-// DEBUG SOURCE GRAPH SECTION SERIALIZATION
-// ================================================================================================
-
+/// Fixed-size child and assembly-op tables use the same certified row format as
+/// [`PackageDebugInfo`].
+#[cfg(target_endian = "little")]
 impl Serializable for DebugSourceNode {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.exec_node.into());
-        self.children.write_into(target);
-        target.write_u32(self.op_start);
-        target.write_u32(self.op_end);
+        let mut output = Vec::<u8>::with_capacity(
+            size_of::<DebugSourceNode>()
+                + (self.asm_ops.len() * size_of::<DebugSourceAsmOp>())
+                + (self.debug_vars.len() * size_of::<DebugSourceVar>())
+                + (self.inline_calls.len() * size_of::<DebugSourceInlineCall>()),
+        );
+
+        output.write_u32(self.exec_node.into());
+
+        output.write_u32(self.children.len().try_into().unwrap());
+        write_pod_slice(self.children.as_slice(), &mut output);
+
+        output.write_u32(self.op_start);
+        output.write_u32(self.op_end);
+
+        output.write_u32(self.asm_ops.len().try_into().unwrap());
+        write_pod_slice(self.asm_ops.as_slice(), &mut output);
+
+        self.debug_vars.write_into(&mut output);
+        self.inline_calls.write_into(&mut output);
+
+        target.write_usize(output.len());
+        target.write_bytes(&output);
     }
 }
 
+#[cfg(target_endian = "little")]
 impl Deserializable for DebugSourceNode {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self {
-            exec_node: MastNodeId::new_unchecked(source.read_u32()?),
-            children: read_debug_source_node_ids(source, "debug_source_node children")?,
-            op_start: source.read_u32()?,
-            op_end: source.read_u32()?,
-        })
-    }
+        let data_len = read_bounded_len(source, "debug source node", 1)?;
+        let data = source.read_slice(data_len)?;
+        let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
+        let mut source = PodSliceReader::new(aligned.as_slice());
 
-    fn min_serialized_size() -> usize {
-        12 + Vec::<DebugSourceNodeId>::min_serialized_size()
-    }
-}
+        let exec_node = MastNodeId::new_unchecked(source.read_u32()?);
 
-impl Serializable for DebugSourceGraphSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version());
-        self.nodes().write_into(target);
-        self.roots().write_into(target);
-    }
-}
+        let children_len = source.read_u32()? as usize;
+        let children =
+            source.read_pod_rows::<DebugSourceNodeId>(children_len, "debug source children")?;
 
-impl Deserializable for DebugSourceGraphSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_SOURCE_GRAPH_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_source_graph version: {version}, expected {DEBUG_SOURCE_GRAPH_VERSION}"
+        let op_start = source.read_u32()?;
+        let op_end = source.read_u32()?;
+
+        let asm_ops_len = source.read_u32()? as usize;
+        let asm_ops =
+            source.read_pod_rows::<DebugSourceAsmOp>(asm_ops_len, "debug assembly operations")?;
+
+        let debug_vars = Vec::read_from(&mut source)?;
+        let inline_calls = Vec::read_from(&mut source)?;
+
+        let remaining_len = source.remaining_len();
+        if remaining_len != 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "expected {data_len} bytes to have been read, but {remaining_len} remain in the buffer"
             )));
         }
 
-        let nodes_len = read_bounded_len(source, "debug_source_graph nodes", 1)?;
-        let nodes = source.read_many_iter(nodes_len)?.collect::<Result<_, _>>()?;
-        let roots = read_debug_source_node_ids(source, "debug_source_graph roots")?;
-        Ok(Self::from_parts(nodes, roots))
-    }
-}
-
-// DEBUG SOURCE MAP SECTION SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugSourceAsmOp {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.source_node.write_into(target);
-        target.write_u32(self.op_idx);
-        write_location(&self.location, target);
-        self.context_name.write_into(target);
-        self.op.write_into(target);
-        target.write_u8(self.num_cycles);
-    }
-}
-
-impl Deserializable for DebugSourceAsmOp {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let source_node = DebugSourceNodeId::read_from(source)?;
-        let op_idx = source.read_u32()?;
-        let location = read_location(source)?;
-        let context_name = String::read_from(source)?;
-        let op = String::read_from(source)?;
-        let num_cycles = source.read_u8()?;
         Ok(Self {
-            source_node,
-            op_idx,
-            location,
-            context_name,
-            op,
-            num_cycles,
+            exec_node,
+            children,
+            op_start,
+            op_end,
+            asm_ops,
+            debug_vars,
+            inline_calls,
         })
     }
 
     fn min_serialized_size() -> usize {
-        DebugSourceNodeId::min_serialized_size() + 4 + 1 + 1 + 1 + 1
+        1 + DebugSourceNodeId::min_serialized_size()
+            + Vec::<DebugSourceNodeId>::min_serialized_size()
+            + 8
+            + 1
+            + Vec::<DebugSourceVar>::min_serialized_size()
+            + Vec::<DebugSourceInlineCall>::min_serialized_size()
     }
 }
+
+// DEBUG SOURCE VARIABLE SERIALIZATION
+// ================================================================================================
 
 impl Serializable for DebugSourceVar {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.source_node.write_into(target);
         target.write_u32(self.op_idx);
-        self.var.write_into(target);
+        self.name_idx.write_into(target);
+        self.type_id.write_into(target);
+        target.write_u32(self.arg_idx.map(core::num::NonZeroU32::get).unwrap_or_default());
+        self.location_idx.write_into(target);
+        self.value_location.write_into(target);
     }
 }
 
 impl Deserializable for DebugSourceVar {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let op_idx = source.read_u32()?;
+        let name_idx = DebugStringIdx::read_from(source)?;
+        let type_id = Option::<DebugTypeIdx>::read_from(source)?;
+        let arg_idx = core::num::NonZeroU32::new(source.read_u32()?);
+        let location_idx = Option::<DebugLocIdx>::read_from(source)?;
+        let value_location = DebugVarLocation::read_from(source)?;
         Ok(Self {
-            source_node: DebugSourceNodeId::read_from(source)?,
-            op_idx: source.read_u32()?,
-            var: Deserializable::read_from(source)?,
+            op_idx,
+            name_idx,
+            type_id,
+            arg_idx,
+            location_idx,
+            value_location,
         })
     }
 
     fn min_serialized_size() -> usize {
-        DebugSourceNodeId::min_serialized_size() + 4
+        4 + DebugStringIdx::min_serialized_size()
+            + 1
+            + 4
+            + 1
+            + DebugVarLocation::min_serialized_size()
     }
 }
 
+// DEBUG INLINE CALL SERIALIZATION
+// ================================================================================================
+
 impl Serializable for DebugSourceInlineCall {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.source_node.write_into(target);
         target.write_u32(self.op_idx);
-        target.write_u32(self.callee_idx);
-        target.write_u32(self.file_idx);
-        target.write_u32(self.line.to_u32());
-        target.write_u32(self.column.to_u32());
+        self.callee_idx.write_into(target);
+        self.loc_idx.write_into(target);
     }
 }
 
 impl Deserializable for DebugSourceInlineCall {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let source_node = DebugSourceNodeId::read_from(source)?;
         let op_idx = source.read_u32()?;
-        let callee_idx = source.read_u32()?;
-        let file_idx = source.read_u32()?;
-        let line_raw = source.read_u32()?;
-        let column_raw = source.read_u32()?;
-        let line = LineNumber::new(line_raw).ok_or_else(|| {
-            DeserializationError::InvalidValue(alloc::format!(
-                "debug source inline call line {line_raw} is invalid"
-            ))
-        })?;
-        let column = ColumnNumber::new(column_raw).ok_or_else(|| {
-            DeserializationError::InvalidValue(alloc::format!(
-                "debug source inline call column {column_raw} is invalid"
-            ))
-        })?;
-        Ok(Self::new(source_node, op_idx, callee_idx, file_idx, line, column))
+        let callee_idx = DebugFunctionIdx::read_from(source)?;
+        let loc_idx = DebugLocIdx::read_from(source)?;
+        Ok(DebugSourceInlineCall { op_idx, callee_idx, loc_idx })
     }
 
     fn min_serialized_size() -> usize {
-        DebugSourceNodeId::min_serialized_size() + 20
+        4 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
     }
-}
-
-impl Serializable for DebugSourceMapSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version());
-        target.write_usize(self.locations().len());
-        for location in self.locations() {
-            write_required_location(location, target);
-        }
-
-        target.write_usize(self.strings().len());
-        for string in self.strings() {
-            string.write_into(target);
-        }
-
-        target.write_usize(self.asm_ops().len());
-        for asm_op in self.asm_ops() {
-            write_source_asm_op(asm_op, self.locations(), self.strings(), target);
-        }
-
-        self.debug_vars().write_into(target);
-        self.inline_calls().write_into(target);
-    }
-}
-
-impl Deserializable for DebugSourceMapSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_SOURCE_MAP_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_source_map version: {version}, expected {DEBUG_SOURCE_MAP_VERSION}"
-            )));
-        }
-
-        let locations_len = read_bounded_len(
-            source,
-            "debug_source_map locations",
-            MIN_REQUIRED_LOCATION_SERIALIZED_SIZE,
-        )?;
-        let mut locations = Vec::with_capacity(locations_len);
-        for _ in 0..locations_len {
-            locations.push(read_required_location(source)?);
-        }
-
-        let strings_len = read_bounded_len(source, "debug_source_map strings", 1)?;
-        let mut strings = Vec::with_capacity(strings_len);
-        for _ in 0..strings_len {
-            strings.push(read_owned_string(source)?);
-        }
-
-        let asm_ops_len = read_bounded_len(
-            source,
-            "debug_source_map asm ops",
-            min_source_map_asm_op_row_serialized_size(),
-        )?;
-        let mut asm_ops = Vec::with_capacity(asm_ops_len);
-        for _ in 0..asm_ops_len {
-            asm_ops.push(read_source_asm_op(source, &locations, &strings)?);
-        }
-
-        let debug_vars_len = read_bounded_len(source, "debug_source_map debug vars", 1)?;
-        let debug_vars = source.read_many_iter(debug_vars_len)?.collect::<Result<_, _>>()?;
-        let inline_calls_len = read_bounded_len(source, "debug_source_map inline calls", 1)?;
-        let inline_calls = source.read_many_iter(inline_calls_len)?.collect::<Result<_, _>>()?;
-        Ok(Self::from_parts_with_inline_calls(asm_ops, debug_vars, inline_calls))
-    }
-}
-
-fn write_source_asm_op<W: ByteWriter>(
-    asm_op: &DebugSourceAsmOp,
-    locations: &[Location],
-    strings: &[String],
-    target: &mut W,
-) {
-    asm_op.source_node.write_into(target);
-    target.write_u32(asm_op.op_idx);
-    if let Some(location) = asm_op.location.as_ref() {
-        target.write_bool(true);
-        let location_idx = locations
-            .iter()
-            .position(|candidate| candidate == location)
-            .expect("debug source map location table should contain every row location");
-        target.write_u32(location_idx as u32);
-    } else {
-        target.write_bool(false);
-    }
-    write_source_map_string_ref(&asm_op.context_name, strings, target);
-    write_source_map_string_ref(&asm_op.op, strings, target);
-    target.write_u8(asm_op.num_cycles);
-}
-
-fn read_source_asm_op<R: ByteReader>(
-    source: &mut R,
-    locations: &[Location],
-    strings: &[String],
-) -> Result<DebugSourceAsmOp, DeserializationError> {
-    let source_node = DebugSourceNodeId::read_from(source)?;
-    let op_idx = source.read_u32()?;
-    let location = if source.read_bool()? {
-        let location_idx = source.read_u32()? as usize;
-        Some(locations.get(location_idx).cloned().ok_or_else(|| {
-            DeserializationError::InvalidValue(alloc::format!(
-                "debug source asm op location index {location_idx} out of bounds for {} locations",
-                locations.len()
-            ))
-        })?)
-    } else {
-        None
-    };
-    let context_name = read_source_map_string_ref(source, strings)?;
-    let op = read_source_map_string_ref(source, strings)?;
-    let num_cycles = source.read_u8()?;
-    Ok(DebugSourceAsmOp::new(
-        source_node,
-        op_idx,
-        location,
-        context_name,
-        op,
-        num_cycles,
-    ))
-}
-
-fn min_source_map_asm_op_row_serialized_size() -> usize {
-    // The location index is conditional and is omitted for location-less rows.
-    DebugSourceNodeId::min_serialized_size() + 4 + 1 + 4 + 4 + 1
-}
-
-fn write_source_map_string_ref<W: ByteWriter>(string: &String, strings: &[String], target: &mut W) {
-    let string_idx = strings
-        .iter()
-        .position(|candidate| candidate == string)
-        .expect("debug source map string table should contain every row string");
-    target.write_u32(string_idx as u32);
-}
-
-fn read_source_map_string_ref<R: ByteReader>(
-    source: &mut R,
-    strings: &[String],
-) -> Result<String, DeserializationError> {
-    let string_idx = source.read_u32()? as usize;
-    strings.get(string_idx).cloned().ok_or_else(|| {
-        DeserializationError::InvalidValue(alloc::format!(
-            "debug source asm op string index {string_idx} out of bounds for {} strings",
-            strings.len()
-        ))
-    })
-}
-
-// DEBUG ERROR MESSAGES SECTION SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugErrorMessage {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.err_code);
-        self.message.as_ref().write_into(target);
-    }
-}
-
-impl Deserializable for DebugErrorMessage {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self {
-            err_code: source.read_u64()?,
-            message: read_string(source)?,
-        })
-    }
-
-    fn min_serialized_size() -> usize {
-        8 + 1
-    }
-}
-
-impl Serializable for DebugErrorMessagesSection {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version());
-        self.messages().write_into(target);
-    }
-}
-
-impl Deserializable for DebugErrorMessagesSection {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let version = source.read_u8()?;
-        if version != DEBUG_ERROR_MESSAGES_VERSION {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_error_messages version: {version}, expected {DEBUG_ERROR_MESSAGES_VERSION}"
-            )));
-        }
-
-        let messages_len = read_bounded_len(source, "debug_error_messages messages", 1)?;
-        let messages = source.read_many_iter(messages_len)?.collect::<Result<_, _>>()?;
-        Ok(Self::from_parts(messages))
-    }
-}
-
-fn write_location<W: ByteWriter>(location: &Option<Location>, target: &mut W) {
-    if let Some(location) = location {
-        target.write_bool(true);
-        write_required_location(location, target);
-    } else {
-        target.write_bool(false);
-    }
-}
-
-fn read_location<R: ByteReader>(source: &mut R) -> Result<Option<Location>, DeserializationError> {
-    if !source.read_bool()? {
-        return Ok(None);
-    }
-
-    let uri = Uri::read_from(source)?;
-    let start = ByteIndex::new(source.read_u32()?);
-    let end = ByteIndex::new(source.read_u32()?);
-    Ok(Some(Location::new(uri, start, end)))
-}
-
-const MIN_REQUIRED_LOCATION_SERIALIZED_SIZE: usize = 9;
-
-fn write_required_location<W: ByteWriter>(location: &Location, target: &mut W) {
-    location.uri.write_into(target);
-    target.write_u32(location.start.to_u32());
-    target.write_u32(location.end.to_u32());
-}
-
-fn read_required_location<R: ByteReader>(source: &mut R) -> Result<Location, DeserializationError> {
-    let uri = Uri::read_from(source)?;
-    let start = ByteIndex::new(source.read_u32()?);
-    let end = ByteIndex::new(source.read_u32()?);
-    Ok(Location::new(uri, start, end))
 }
 
 // DEBUG TYPE INFO SERIALIZATION
@@ -629,11 +358,11 @@ impl Serializable for DebugTypeInfo {
             },
             Self::Pointer { pointee_type_idx } => {
                 target.write_u8(TYPE_TAG_POINTER);
-                target.write_u32(pointee_type_idx.as_u32());
+                pointee_type_idx.write_into(target);
             },
             Self::Array { element_type_idx, count } => {
                 target.write_u8(TYPE_TAG_ARRAY);
-                target.write_u32(element_type_idx.as_u32());
+                element_type_idx.write_into(target);
                 target.write_bool(count.is_some());
                 if let Some(count) = count {
                     target.write_u32(*count);
@@ -641,7 +370,7 @@ impl Serializable for DebugTypeInfo {
             },
             Self::Struct { name_idx, size, fields } => {
                 target.write_u8(TYPE_TAG_STRUCT);
-                target.write_u32(*name_idx);
+                name_idx.write_into(target);
                 target.write_u32(*size);
                 target.write_usize(fields.len());
                 for field in fields {
@@ -652,11 +381,11 @@ impl Serializable for DebugTypeInfo {
                 target.write_u8(TYPE_TAG_FUNCTION);
                 target.write_bool(return_type_idx.is_some());
                 if let Some(idx) = return_type_idx {
-                    target.write_u32(idx.as_u32());
+                    idx.write_into(target);
                 }
                 target.write_usize(param_type_indices.len());
                 for idx in param_type_indices {
-                    target.write_u32(idx.as_u32());
+                    idx.write_into(target);
                 }
             },
             Self::Enum {
@@ -666,9 +395,9 @@ impl Serializable for DebugTypeInfo {
                 variants,
             } => {
                 target.write_u8(TYPE_TAG_ENUM);
-                target.write_u32(*name_idx);
+                name_idx.write_into(target);
                 target.write_u32(*size);
-                target.write_u32(discriminant_type_idx.as_u32());
+                discriminant_type_idx.write_into(target);
                 target.write_usize(variants.len());
                 for variant in variants {
                     variant.write_into(target);
@@ -705,7 +434,7 @@ impl Deserializable for DebugTypeInfo {
                 Ok(Self::Array { element_type_idx, count })
             },
             TYPE_TAG_STRUCT => {
-                let name_idx = source.read_u32()?;
+                let name_idx = DebugStringIdx::read_from(source)?;
                 let size = source.read_u32()?;
                 let fields_len = read_bounded_len(source, "debug struct fields", 1)?;
                 let fields = source.read_many_iter(fields_len)?.collect::<Result<_, _>>()?;
@@ -723,7 +452,7 @@ impl Deserializable for DebugTypeInfo {
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
             TYPE_TAG_ENUM => {
-                let name_idx = source.read_u32()?;
+                let name_idx = DebugStringIdx::read_from(source)?;
                 let size = source.read_u32()?;
                 let discriminant_type_idx = DebugTypeIdx::from(source.read_u32()?);
                 let variants_len = read_bounded_len(source, "debug enum variants", 1)?;
@@ -739,6 +468,11 @@ impl Deserializable for DebugTypeInfo {
             _ => Err(DeserializationError::InvalidValue(alloc::format!("invalid type tag: {tag}"))),
         }
     }
+
+    fn min_serialized_size() -> usize {
+        // The unknown type consists solely of its tag. All other variants are larger.
+        1
+    }
 }
 
 // DEBUG FIELD INFO SERIALIZATION
@@ -746,15 +480,15 @@ impl Deserializable for DebugTypeInfo {
 
 impl Serializable for DebugFieldInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.name_idx);
-        target.write_u32(self.type_idx.as_u32());
+        self.name_idx.write_into(target);
+        self.type_idx.write_into(target);
         target.write_u32(self.offset);
     }
 }
 
 impl Deserializable for DebugFieldInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name_idx = source.read_u32()?;
+        let name_idx = DebugStringIdx::read_from(source)?;
         let type_idx = DebugTypeIdx::from(source.read_u32()?);
         let offset = source.read_u32()?;
         Ok(Self { name_idx, type_idx, offset })
@@ -766,10 +500,10 @@ impl Deserializable for DebugFieldInfo {
 
 impl Serializable for DebugVariantInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.name_idx);
+        self.name_idx.write_into(target);
         target.write_bool(self.type_idx.is_some());
         if let Some(type_idx) = self.type_idx {
-            target.write_u32(type_idx.as_u32());
+            type_idx.write_into(target);
         }
         target.write_bool(self.payload_offset.is_some());
         if let Some(payload_offset) = self.payload_offset {
@@ -782,7 +516,7 @@ impl Serializable for DebugVariantInfo {
 
 impl Deserializable for DebugVariantInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name_idx = source.read_u32()?;
+        let name_idx = DebugStringIdx::read_from(source)?;
         let type_idx = if source.read_bool()? {
             Some(DebugTypeIdx::from(source.read_u32()?))
         } else {
@@ -802,6 +536,14 @@ impl Deserializable for DebugVariantInfo {
             discriminant: (hi << 64) | lo,
         })
     }
+
+    fn min_serialized_size() -> usize {
+        // The minimum encoding has no payload type or offset: one string-table index, two
+        // one-byte option discriminants, and the two halves of the discriminant value.
+        DebugStringIdx::min_serialized_size()
+            + 2 * u8::min_serialized_size()
+            + 2 * u64::min_serialized_size()
+    }
 }
 
 // DEBUG FILE INFO SERIALIZATION
@@ -809,106 +551,223 @@ impl Deserializable for DebugVariantInfo {
 
 impl Serializable for DebugFileInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.path_idx);
-
-        target.write_bool(self.checksum.is_some());
-        if let Some(checksum) = &self.checksum {
-            target.write_bytes(checksum.as_ref());
-        }
+        self.path_idx.write_into(target);
+        self.checksum.write_into(target);
     }
 }
 
 impl Deserializable for DebugFileInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let path_idx = source.read_u32()?;
+        let path_idx = DebugStringIdx::read_from(source)?;
 
-        let has_checksum = source.read_bool()?;
-        let checksum = if has_checksum {
-            let bytes = source.read_slice(32)?;
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(bytes);
-            Some(alloc::boxed::Box::new(arr))
-        } else {
-            None
-        };
+        let bytes = source.read_slice(32)?;
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(bytes);
 
         Ok(Self { path_idx, checksum })
     }
-}
 
-// DEBUG FUNCTION INFO SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugFunctionInfo {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.name_idx);
-
-        target.write_bool(self.linkage_name_idx.is_some());
-        if let Some(idx) = self.linkage_name_idx {
-            target.write_u32(idx);
-        }
-
-        target.write_u32(self.file_idx);
-        target.write_u32(self.line.to_u32());
-        target.write_u32(self.column.to_u32());
-
-        target.write_bool(self.type_idx.is_some());
-        if let Some(idx) = self.type_idx {
-            target.write_u32(idx.as_u32());
-        }
-
-        target.write_bool(self.mast_root.is_some());
-        if let Some(root) = &self.mast_root {
-            root.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for DebugFunctionInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name_idx = source.read_u32()?;
-
-        let has_linkage_name = source.read_bool()?;
-        let linkage_name_idx = if has_linkage_name {
-            Some(source.read_u32()?)
-        } else {
-            None
-        };
-
-        let file_idx = source.read_u32()?;
-        let line_raw = source.read_u32()?;
-        let column_raw = source.read_u32()?;
-        let line = LineNumber::new(line_raw).unwrap_or_default();
-        let column = ColumnNumber::new(column_raw).unwrap_or_default();
-
-        let has_type = source.read_bool()?;
-        let type_idx = if has_type {
-            Some(DebugTypeIdx::from(source.read_u32()?))
-        } else {
-            None
-        };
-
-        let has_mast_root = source.read_bool()?;
-        let mast_root = if has_mast_root {
-            Some(Word::read_from(source)?)
-        } else {
-            None
-        };
-
-        Ok(Self {
-            name_idx,
-            linkage_name_idx,
-            file_idx,
-            line,
-            column,
-            type_idx,
-            mast_root,
-        })
+    fn min_serialized_size() -> usize {
+        DebugStringIdx::min_serialized_size() + size_of::<[u8; 32]>()
     }
 }
 
 // HELPER FUNCTIONS
 // ================================================================================================
+
+/// Owns a byte allocation with the alignment required by the certified POD row types.
+struct AlignedBytes {
+    ptr: Option<NonNull<u8>>,
+    layout: Layout,
+}
+
+impl AlignedBytes {
+    fn copy_from_slice(source: &[u8], alignment: usize) -> Result<Self, DeserializationError> {
+        let layout = Layout::from_size_align(source.len(), alignment).map_err(|_| {
+            DeserializationError::InvalidValue(format!(
+                "debug info payload size {} is too large",
+                source.len()
+            ))
+        })?;
+        if source.is_empty() {
+            return Ok(Self { ptr: None, layout });
+        }
+
+        // SAFETY: `layout` is non-zero and valid in this branch.
+        let ptr = unsafe { alloc::alloc::alloc(layout) };
+        let Some(ptr) = NonNull::new(ptr) else {
+            alloc::alloc::handle_alloc_error(layout)
+        };
+        // SAFETY: `ptr` owns `source.len()` writable bytes and does not overlap `source`.
+        unsafe {
+            ptr.as_ptr().copy_from_nonoverlapping(source.as_ptr(), source.len());
+        }
+        Ok(Self { ptr: Some(ptr), layout })
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        let Some(ptr) = self.ptr else {
+            return &[];
+        };
+        // SAFETY: `ptr` was allocated with `self.layout`, every byte was initialized by the copy in
+        // `copy_from_slice`, and the allocation remains owned by `self` for the returned borrow.
+        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), self.layout.size()) }
+    }
+}
+
+impl Drop for AlignedBytes {
+    fn drop(&mut self) {
+        if let Some(ptr) = self.ptr {
+            // SAFETY: `ptr` was allocated with this exact layout and has not been freed.
+            unsafe {
+                alloc::alloc::dealloc(ptr.as_ptr(), self.layout);
+            }
+        }
+    }
+}
+
+struct PodSliceReader<'a> {
+    source: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> PodSliceReader<'a> {
+    fn new(source: &'a [u8]) -> Self {
+        Self { source, pos: 0 }
+    }
+
+    fn remaining_len(&self) -> usize {
+        self.source.len() - self.pos
+    }
+
+    fn read_pod_rows<T>(&mut self, len: usize, label: &str) -> Result<Vec<T>, DeserializationError>
+    where
+        T: Copy + zerocopy::FromBytes + Immutable + KnownLayout,
+    {
+        self.skip_alignment_padding::<T>()?;
+        let byte_len = len.checked_mul(size_of::<T>()).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} row count {len} overflows row size {}",
+                size_of::<T>()
+            ))
+        })?;
+        let bytes = self.read_slice(byte_len)?;
+        let rows: &[T] = <[T] as zerocopy::FromBytes>::ref_from_bytes(bytes).map_err(|_| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} bytes do not form aligned POD rows"
+            ))
+        })?;
+        Ok(rows.to_vec())
+    }
+
+    fn read_pod_rows_with<T, U, F>(
+        &mut self,
+        len: usize,
+        label: &str,
+        map: F,
+    ) -> Result<Vec<U>, DeserializationError>
+    where
+        T: Copy + zerocopy::FromBytes + Immutable + KnownLayout,
+        F: FnMut(T) -> Result<U, DeserializationError>,
+    {
+        self.skip_alignment_padding::<T>()?;
+        let byte_len = len.checked_mul(size_of::<T>()).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} row count {len} overflows row size {}",
+                size_of::<T>()
+            ))
+        })?;
+        let bytes = self.read_slice(byte_len)?;
+        let rows: &[T] = <[T] as zerocopy::FromBytes>::ref_from_bytes(bytes).map_err(|_| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} bytes do not form aligned POD rows"
+            ))
+        })?;
+        rows.iter().copied().map(map).collect()
+    }
+
+    fn skip_alignment_padding<T>(&mut self) -> Result<(), DeserializationError> {
+        let padding_required = self.pos.next_multiple_of(align_of::<T>()) - self.pos;
+        self.pos += padding_required;
+        if self.pos > self.source.len() {
+            Err(DeserializationError::UnexpectedEOF)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl ByteReader for PodSliceReader<'_> {
+    fn max_alloc(&self, element_size: usize) -> usize {
+        self.remaining_len().checked_div(element_size).unwrap_or(usize::MAX)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        let result = self.source[self.pos];
+        self.pos += 1;
+        Ok(result)
+    }
+
+    fn peek_u8(&self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        Ok(self.source[self.pos])
+    }
+
+    fn read_slice(&mut self, len: usize) -> Result<&[u8], DeserializationError> {
+        self.check_eor(len)?;
+        let result = &self.source[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(result)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], DeserializationError> {
+        self.check_eor(N)?;
+        let mut result = [0_u8; N];
+        result.copy_from_slice(&self.source[self.pos..self.pos + N]);
+        self.pos += N;
+        Ok(result)
+    }
+
+    fn check_eor(&self, num_bytes: usize) -> Result<(), DeserializationError> {
+        self.pos
+            .checked_add(num_bytes)
+            .filter(|end| *end <= self.source.len())
+            .map(|_| ())
+            .ok_or(DeserializationError::UnexpectedEOF)
+    }
+
+    fn has_more_bytes(&self) -> bool {
+        self.remaining_len() != 0
+    }
+}
+
+fn pad_to_align<T>(output: &mut Vec<u8>) {
+    let padding_required = output.len().next_multiple_of(align_of::<T>()) - output.len();
+    output.resize(output.len() + padding_required, 0);
+}
+
+fn write_pod_slice<T: IntoBytes + Immutable>(slice: &[T], target: &mut Vec<u8>) {
+    pad_to_align::<T>(target);
+    target.write_bytes(slice.as_bytes());
+}
+
+fn write_pod_rows<T, I>(rows: I, target: &mut Vec<u8>)
+where
+    T: IntoBytes + Immutable,
+    I: IntoIterator<Item = T>,
+{
+    let rows: Vec<T> = rows.into_iter().collect();
+    target.write_bytes(rows.as_bytes());
+}
+
+fn read_wire_felt(value: u64) -> Result<Felt, DeserializationError> {
+    Felt::new(value).map_err(|err| {
+        DeserializationError::InvalidValue(alloc::format!(
+            "invalid field element in debug function MAST root: {err}"
+        ))
+    })
+}
 
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
     let len = read_bounded_len(source, "debug string bytes", 1)?;
@@ -917,18 +776,6 @@ fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, Deserializatio
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
     })?;
     Ok(Arc::from(s))
-}
-
-fn read_owned_string<R: ByteReader>(source: &mut R) -> Result<String, DeserializationError> {
-    read_string(source).map(|value| String::from(value.as_ref()))
-}
-
-fn read_debug_source_node_ids<R: ByteReader>(
-    source: &mut R,
-    label: &str,
-) -> Result<Vec<DebugSourceNodeId>, DeserializationError> {
-    let len = read_bounded_len(source, label, DebugSourceNodeId::min_serialized_size())?;
-    source.read_many_iter(len)?.collect::<Result<_, _>>()
 }
 
 fn read_debug_type_indices<R: ByteReader>(
@@ -941,13 +788,19 @@ fn read_debug_type_indices<R: ByteReader>(
 
 #[cfg(test)]
 mod tests {
-    use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+    use core::cell::Cell;
+
+    use miden_assembly_syntax::ast::DebugVarLocation;
+    use miden_core::{Felt, Word};
+    use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
     use super::*;
+    use crate::debug_info::{DebugFileIdx, PackageDebugInfoBuilder};
 
     struct FixedBudgetReader<'a> {
         inner: miden_core::serde::SliceReader<'a>,
         max_bytes: usize,
+        largest_requested_element_size: Cell<usize>,
     }
 
     impl<'a> FixedBudgetReader<'a> {
@@ -955,6 +808,7 @@ mod tests {
             Self {
                 inner: miden_core::serde::SliceReader::new(bytes),
                 max_bytes,
+                largest_requested_element_size: Cell::new(0),
             }
         }
     }
@@ -985,23 +839,14 @@ mod tests {
         }
 
         fn max_alloc(&self, element_size: usize) -> usize {
+            self.largest_requested_element_size
+                .set(self.largest_requested_element_size.get().max(element_size));
             if element_size == 0 {
                 usize::MAX
             } else {
                 self.max_bytes.checked_div(element_size).unwrap_or(0)
             }
         }
-    }
-
-    fn section_with_strings(version: u8, strings_len: usize) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.write_u8(version);
-        bytes.write_usize(strings_len);
-        for _ in 0..strings_len {
-            "".write_into(&mut bytes);
-        }
-        bytes.write_usize(0);
-        bytes
     }
 
     fn function_type_bytes(params_len: usize) -> Vec<u8> {
@@ -1023,27 +868,160 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_types_section_roundtrip() {
-        let mut section = DebugTypesSection::new();
+    fn pod_row_reader_rejects_byte_length_overflow() {
+        let mut reader = PodSliceReader::new(&[]);
+        let result = reader.read_pod_rows::<DebugErrorMessage>(usize::MAX, "test error messages");
+        let error = result.unwrap_err();
 
-        // Add primitive types
-        let i32_type_idx = section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I32));
-        let felt_type_idx = section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("overflows row size"));
+    }
 
-        // Add a pointer type
-        section.add_type(DebugTypeInfo::Pointer { pointee_type_idx: i32_type_idx });
+    #[test]
+    fn pod_row_reader_decodes_certified_rows() {
+        let expected = DebugErrorMessage::new(42, DebugStringIdx::from(7));
+        let mut aligned = [0_u64; 2];
+        aligned.as_mut_bytes()[..size_of::<DebugErrorMessage>()]
+            .copy_from_slice(expected.as_bytes());
+        let mut reader = PodSliceReader::new(aligned.as_bytes());
+        let decoded = reader.read_pod_rows::<DebugErrorMessage>(1, "test error messages").unwrap();
 
-        // Add an array type
-        section.add_type(DebugTypeInfo::Array {
+        assert_eq!(decoded, [expected]);
+    }
+
+    #[test]
+    fn debug_variant_min_serialized_size_is_accepted_by_slice_reader() {
+        let variant = DebugVariantInfo {
+            name_idx: DebugStringIdx::from(0),
+            type_idx: None,
+            payload_offset: None,
+            discriminant: 0,
+        };
+        let mut bytes = Vec::new();
+        variant.write_into(&mut bytes);
+
+        assert_eq!(bytes.len(), DebugVariantInfo::min_serialized_size());
+
+        let mut reader = miden_core::serde::SliceReader::new(&bytes);
+        let mut variants = reader.read_many_iter::<DebugVariantInfo>(1).unwrap();
+        assert_eq!(variants.next().unwrap().unwrap(), variant);
+        assert!(variants.next().is_none());
+    }
+
+    #[test]
+    fn debug_type_initial_capacity_is_bounded_by_in_memory_size() {
+        const PAYLOAD_BYTES: usize = 256;
+
+        let mut bytes = Vec::new();
+        bytes.write_usize(PAYLOAD_BYTES);
+        bytes.resize(bytes.len() + PAYLOAD_BYTES, u8::MAX);
+        let mut reader = FixedBudgetReader::new(&bytes, PAYLOAD_BYTES);
+
+        let result =
+            IndexVec::<DebugTypeIdx, DebugTypeInfo>::read_from_bounded(&mut reader, "debug types");
+
+        assert!(result.is_err(), "the first invalid type tag should stop decoding");
+        assert_eq!(
+            reader.largest_requested_element_size.get(),
+            size_of::<DebugTypeInfo>(),
+            "the speculative capacity must be bounded using the in-memory row size",
+        );
+    }
+
+    #[test]
+    fn package_debug_info_trailing_data_error_reports_remaining_bytes() {
+        const TRAILING: &[u8] = &[0xaa, 0xbb, 0xcc];
+
+        let serialized = PackageDebugInfo::default().to_bytes();
+        let mut reader = miden_core::serde::SliceReader::new(&serialized);
+        let version = reader.read_u8().unwrap();
+        let data_len = reader.read_usize().unwrap();
+        let data = reader.read_slice(data_len).unwrap().to_vec();
+        assert!(!reader.has_more_bytes());
+
+        let mut malformed = Vec::new();
+        malformed.write_u8(version);
+        malformed.write_usize(data_len + TRAILING.len());
+        malformed.write_bytes(&data);
+        malformed.write_bytes(TRAILING);
+
+        let error =
+            PackageDebugInfo::read_from(&mut miden_core::serde::SliceReader::new(&malformed))
+                .unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("but 3 remain in the buffer"), "{message}");
+    }
+
+    #[test]
+    fn debug_source_node_trailing_data_error_reports_remaining_bytes() {
+        const TRAILING: &[u8] = &[0xaa, 0xbb];
+
+        let source_node = DebugSourceNode {
+            exec_node: MastNodeId::new_unchecked(0),
+            children: Vec::new(),
+            op_start: 0,
+            op_end: 0,
+            asm_ops: Vec::new(),
+            debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+        };
+        let serialized = source_node.to_bytes();
+        let mut reader = miden_core::serde::SliceReader::new(&serialized);
+        let data_len = reader.read_usize().unwrap();
+        let data = reader.read_slice(data_len).unwrap().to_vec();
+        assert!(!reader.has_more_bytes());
+
+        let mut malformed = Vec::new();
+        malformed.write_usize(data_len + TRAILING.len());
+        malformed.write_bytes(&data);
+        malformed.write_bytes(TRAILING);
+
+        let error =
+            DebugSourceNode::read_from(&mut miden_core::serde::SliceReader::new(&malformed))
+                .unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("but 2 remain in the buffer"), "{message}");
+    }
+
+    fn roundtrip_debug_info(value: &PackageDebugInfo) -> PackageDebugInfo {
+        let bytes = value.to_bytes();
+        let result =
+            PackageDebugInfo::read_from(&mut miden_core::serde::SliceReader::new(bytes.as_slice()))
+                .unwrap();
+        assert_eq!(result.version(), value.version());
+        assert_eq!(result.strings(), value.strings());
+        assert_eq!(result.files(), value.files());
+        assert_eq!(result.locations(), value.locations());
+        assert_eq!(result.types(), value.types());
+        assert_eq!(result.functions(), value.functions());
+        assert_eq!(result.nodes().as_slice(), value.nodes().as_slice());
+        assert_eq!(result.roots(), value.roots());
+        assert_eq!(result.error_messages(), value.error_messages());
+        result
+    }
+
+    #[test]
+    fn test_debug_types_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
+
+        let i32_type_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I32));
+        let felt_type_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: i32_type_idx });
+        builder.add_type(DebugTypeInfo::Array {
             element_type_idx: felt_type_idx,
             count: Some(4),
         });
 
-        // Add a struct type
-        let x_idx = section.add_string(Arc::from("x"));
-        let y_idx = section.add_string(Arc::from("y"));
-        let point_idx = section.add_string(Arc::from("Point"));
-        section.add_type(DebugTypeInfo::Struct {
+        let x_idx = builder.add_string("x");
+        let y_idx = builder.add_string("y");
+        let point_idx = builder.add_string("Point");
+        builder.add_type(DebugTypeInfo::Struct {
             name_idx: point_idx,
             size: 16,
             fields: alloc::vec![
@@ -1060,11 +1038,10 @@ mod tests {
             ],
         });
 
-        // Add an enum type
-        let status_idx = section.add_string(Arc::from("Status"));
-        let ok_idx = section.add_string(Arc::from("Ok"));
-        let err_idx = section.add_string(Arc::from("Err"));
-        section.add_type(DebugTypeInfo::Enum {
+        let status_idx = builder.add_string("Status");
+        let ok_idx = builder.add_string("Ok");
+        let err_idx = builder.add_string("Err");
+        builder.add_type(DebugTypeInfo::Enum {
             name_idx: status_idx,
             size: 8,
             discriminant_type_idx: i32_type_idx,
@@ -1084,191 +1061,295 @@ mod tests {
             ],
         });
 
-        roundtrip(&section);
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.strings(), debug_info.strings());
+        assert_eq!(result.types(), debug_info.types());
     }
 
     #[test]
-    fn test_debug_sources_section_roundtrip() {
-        let mut section = DebugSourcesSection::new();
+    fn test_debug_sources_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_file(Uri::new("test.rs"), None);
+        builder.add_file(Uri::new("main.rs"), Some([42u8; 32]));
 
-        let path_idx = section.add_string(Arc::from("test.rs"));
-        section.add_file(DebugFileInfo::new(path_idx));
-
-        let path2_idx = section.add_string(Arc::from("main.rs"));
-        section.add_file(DebugFileInfo::new(path2_idx).with_checksum([42u8; 32]));
-
-        roundtrip(&section);
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.strings(), debug_info.strings());
+        assert_eq!(result.files(), debug_info.files());
+        assert_eq!(result.files()[DebugFileIdx::from(1)].checksum(), Some(&[42u8; 32]));
     }
 
     #[test]
-    fn test_debug_functions_section_roundtrip() {
-        let mut section = DebugFunctionsSection::new();
-
-        let name_idx = section.add_string(Arc::from("test_function"));
-
+    fn test_debug_functions_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("test_function");
+        let file_idx = builder.add_file(Uri::new("test.masm"), None);
         let line = LineNumber::new(10).unwrap();
         let column = ColumnNumber::new(1).unwrap();
-        let func = DebugFunctionInfo::new(name_idx, 0, line, column);
-        section.add_function(func);
+        builder.add_function(DebugFunctionInfo::new(
+            None,
+            name_idx,
+            file_idx,
+            line,
+            column,
+            Word::default(),
+        ));
 
-        roundtrip(&section);
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.functions(), debug_info.functions());
     }
 
     #[test]
-    fn test_debug_source_graph_section_roundtrip() {
-        let section = DebugSourceGraphSection::from_parts(
-            alloc::vec![
-                DebugSourceNode::new(MastNodeId::new_unchecked(0), alloc::vec![], 0, 1),
-                DebugSourceNode::new(
-                    MastNodeId::new_unchecked(1),
-                    alloc::vec![DebugSourceNodeId::from(0)],
-                    1,
-                    3,
-                ),
-            ],
-            alloc::vec![DebugSourceNodeId::from(1)],
-        );
+    fn debug_function_v2_wire_bytes_are_stable() {
+        const EXPECTED_ROW: [u8; size_of::<WireDebugFunctionInfo>()] = [
+            1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
+            0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 0, 13,
+            0, 0, 0, 15, 0, 0, 0, 17, 0, 0, 0, 19, 0, 0, 0,
+        ];
 
-        roundtrip(&section);
-    }
-
-    #[test]
-    fn test_debug_source_map_section_roundtrip() {
-        let source_node = DebugSourceNodeId::from(0);
-        let section = DebugSourceMapSection::from_parts_with_inline_calls(
-            alloc::vec![DebugSourceAsmOp::new(
-                source_node,
-                2,
-                None,
-                "test::ctx".into(),
-                "add".into(),
-                1,
-            )],
-            alloc::vec![DebugSourceVar::new(
-                source_node,
-                2,
-                DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
-            )],
-            alloc::vec![DebugSourceInlineCall::new(
-                source_node,
-                2,
-                0,
-                0,
-                LineNumber::new(10).unwrap(),
-                ColumnNumber::new(5).unwrap(),
-            )],
-        );
-
-        roundtrip(&section);
-    }
-
-    #[test]
-    fn test_debug_source_map_locationless_asm_op_min_size() {
-        let source_node = DebugSourceNodeId::from(0);
-        let asm_op = |op_idx| {
-            DebugSourceAsmOp::new(source_node, op_idx, None, "test::ctx".into(), "add".into(), 1)
+        let function = DebugFunctionInfo {
+            mast_root: Word::new([
+                Felt::new(1).unwrap(),
+                Felt::new(2).unwrap(),
+                Felt::new(3).unwrap(),
+                Felt::new(4).unwrap(),
+            ]),
+            source_node: Some(DebugSourceNodeId::from(7)).into(),
+            type_idx: Some(DebugTypeIdx::from(9)).into(),
+            linkage_name_idx: Some(DebugStringIdx::from(11)).into(),
+            name_idx: DebugStringIdx::from(13),
+            file_idx: DebugFileIdx::from(15),
+            line: LineIndex::from(17),
+            column: ColumnIndex::from(19),
         };
-        let section = DebugSourceMapSection::from_parts(
-            // Three location-less rows exceed the trailing empty debug_vars/inline_calls
-            // length prefixes, so an overestimated row size rejects this section.
-            alloc::vec![asm_op(2), asm_op(3), asm_op(4)],
-            alloc::vec![],
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_function(function);
+        let debug_info = builder.build();
+
+        let bytes = debug_info.to_bytes();
+        assert_eq!(bytes[0], 2);
+        assert!(
+            bytes.windows(EXPECTED_ROW.len()).any(|window| window == EXPECTED_ROW),
+            "serialized debug info did not contain the expected function row",
         );
 
-        let bytes = section.to_bytes();
-        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized.asm_ops(), section.asm_ops());
+        let decoded =
+            PackageDebugInfo::read_from(&mut miden_core::serde::SliceReader::new(&bytes)).unwrap();
+        assert_eq!(decoded.functions(), [function]);
     }
 
     #[test]
-    fn test_debug_source_map_locations_are_deduplicated() {
-        let source_node = DebugSourceNodeId::from(0);
+    fn test_debug_source_graph_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let child = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: alloc::vec![],
+                op_start: 0,
+                op_end: 1,
+                asm_ops: alloc::vec![],
+                debug_vars: alloc::vec![],
+                inline_calls: alloc::vec![],
+            })
+            .unwrap();
+        let root = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(1),
+                children: alloc::vec![child],
+                op_start: 1,
+                op_end: 3,
+                asm_ops: alloc::vec![],
+                debug_vars: alloc::vec![],
+                inline_calls: alloc::vec![],
+            })
+            .unwrap();
+        builder.add_root(root);
+
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.nodes().as_slice(), debug_info.nodes().as_slice());
+        assert_eq!(result.roots(), debug_info.roots());
+    }
+
+    #[test]
+    fn test_debug_source_metadata_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
         let location =
             Location::new(Uri::new("file://test.masm"), ByteIndex::new(10), ByteIndex::new(14));
-        let section = DebugSourceMapSection::from_parts(
-            alloc::vec![
-                DebugSourceAsmOp::new(
-                    source_node,
-                    0,
-                    Some(location.clone()),
-                    "test::ctx".into(),
-                    "push.1".into(),
-                    1,
-                ),
-                DebugSourceAsmOp::new(
-                    source_node,
-                    1,
-                    Some(location.clone()),
-                    "test::ctx".into(),
-                    "add".into(),
-                    1,
-                ),
-            ],
-            alloc::vec![],
-        );
+        let location_idx = builder.add_location(location);
+        let file_idx = builder.debug_info().locations()[location_idx].file_idx;
+        let context_name_idx = builder.add_string("test::ctx");
+        let op_name_idx = builder.add_string("add");
+        let var_name_idx = builder.add_string("x");
+        let function_name_idx = builder.add_string("callee");
+        let function_idx = builder.add_function(DebugFunctionInfo::new(
+            None,
+            function_name_idx,
+            file_idx,
+            LineNumber::new(10).unwrap(),
+            ColumnNumber::new(5).unwrap(),
+            Word::default(),
+        ));
 
-        assert_eq!(section.locations(), &[location]);
+        let root = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: alloc::vec![],
+                op_start: 0,
+                op_end: 3,
+                asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                    2,
+                    Some(location_idx),
+                    context_name_idx,
+                    op_name_idx,
+                    1,
+                )],
+                debug_vars: alloc::vec![DebugSourceVar {
+                    op_idx: 2,
+                    name_idx: var_name_idx,
+                    type_id: None,
+                    arg_idx: None,
+                    location_idx: None,
+                    value_location: DebugVarLocation::Stack(0),
+                }],
+                inline_calls: alloc::vec![DebugSourceInlineCall {
+                    op_idx: 2,
+                    callee_idx: function_idx,
+                    loc_idx: location_idx,
+                }],
+            })
+            .unwrap();
+        builder.add_root(root);
 
-        let bytes = section.to_bytes();
-        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized.locations(), section.locations());
-        assert_eq!(deserialized.asm_ops(), section.asm_ops());
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.nodes().as_slice(), debug_info.nodes().as_slice());
+        assert_eq!(result.locations(), debug_info.locations());
+        assert_eq!(result.functions(), debug_info.functions());
+        assert_eq!(result.get_string(context_name_idx).as_deref(), Some("test::ctx"));
+        assert_eq!(result.get_location(location_idx), debug_info.get_location(location_idx));
     }
 
     #[test]
-    fn test_debug_source_map_strings_are_deduplicated() {
-        let source_node = DebugSourceNodeId::from(0);
-        let section = DebugSourceMapSection::from_parts(
-            alloc::vec![
-                DebugSourceAsmOp::new(source_node, 0, None, "test::ctx".into(), "add".into(), 1,),
-                DebugSourceAsmOp::new(source_node, 1, None, "test::ctx".into(), "mul".into(), 1,),
-                DebugSourceAsmOp::new(source_node, 2, None, "test::other".into(), "add".into(), 1,),
-            ],
-            alloc::vec![],
-        );
+    fn test_debug_source_locations_are_deduplicated() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let location =
+            Location::new(Uri::new("file://test.masm"), ByteIndex::new(10), ByteIndex::new(14));
+        let first_location_idx = builder.add_location(location.clone());
+        let second_location_idx = builder.add_location(location);
+        assert_eq!(first_location_idx, second_location_idx);
+        assert_eq!(builder.debug_info().locations().len(), 1);
 
+        let context_name_idx = builder.add_string("test::ctx");
+        let push_name_idx = builder.add_string("push.1");
+        let add_name_idx = builder.add_string("add");
+        let root = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: alloc::vec![],
+                op_start: 0,
+                op_end: 2,
+                asm_ops: alloc::vec![
+                    DebugSourceAsmOp::new(
+                        0,
+                        Some(first_location_idx),
+                        context_name_idx,
+                        push_name_idx,
+                        1,
+                    ),
+                    DebugSourceAsmOp::new(
+                        1,
+                        Some(second_location_idx),
+                        context_name_idx,
+                        add_name_idx,
+                        1,
+                    ),
+                ],
+                debug_vars: alloc::vec![],
+                inline_calls: alloc::vec![],
+            })
+            .unwrap();
+        builder.add_root(root);
+
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.locations().len(), 1);
         assert_eq!(
-            section.strings(),
-            &[
-                String::from("test::ctx"),
-                String::from("add"),
-                String::from("mul"),
-                String::from("test::other"),
-            ]
+            result.source_node(root).unwrap().asm_ops,
+            debug_info.source_node(root).unwrap().asm_ops
         );
-
-        let bytes = section.to_bytes();
-        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized.strings(), section.strings());
-        assert_eq!(deserialized.asm_ops(), section.asm_ops());
     }
 
     #[test]
-    fn test_debug_error_messages_section_roundtrip() {
-        let section = DebugErrorMessagesSection::from_parts(alloc::vec![DebugErrorMessage::new(
-            42,
-            Arc::from("assertion message"),
-        )]);
+    fn test_debug_source_strings_are_deduplicated() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let context_name_idx = builder.add_string("test::ctx");
+        let same_context_name_idx = builder.add_string("test::ctx");
+        let add_name_idx = builder.add_string("add");
+        let same_add_name_idx = builder.add_string("add");
+        let mul_name_idx = builder.add_string("mul");
+        let other_context_idx = builder.add_string("test::other");
+        assert_eq!(context_name_idx, same_context_name_idx);
+        assert_eq!(add_name_idx, same_add_name_idx);
 
-        roundtrip(&section);
-        assert_eq!(section.message(42).as_deref(), Some("assertion message"));
+        let root = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: alloc::vec![],
+                op_start: 0,
+                op_end: 3,
+                asm_ops: alloc::vec![
+                    DebugSourceAsmOp::new(0, None, context_name_idx, add_name_idx, 1,),
+                    DebugSourceAsmOp::new(1, None, same_context_name_idx, mul_name_idx, 1,),
+                    DebugSourceAsmOp::new(2, None, other_context_idx, same_add_name_idx, 1,),
+                ],
+                debug_vars: alloc::vec![],
+                inline_calls: alloc::vec![],
+            })
+            .unwrap();
+        builder.add_root(root);
+
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.strings(), debug_info.strings());
+        assert_eq!(
+            result.source_node(root).unwrap().asm_ops,
+            debug_info.source_node(root).unwrap().asm_ops
+        );
     }
 
     #[test]
-    fn test_empty_sections_roundtrip() {
-        roundtrip(&DebugTypesSection::new());
-        roundtrip(&DebugSourcesSection::new());
-        roundtrip(&DebugFunctionsSection::new());
-        roundtrip(&DebugSourceGraphSection::new());
-        roundtrip(&DebugSourceMapSection::new());
-        roundtrip(&DebugErrorMessagesSection::new());
+    fn test_debug_error_messages_roundtrip() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        assert!(builder.add_error_message(42, Arc::from("assertion message")));
+
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.error_messages(), debug_info.error_messages());
+        assert_eq!(result.error_message(42).as_deref(), Some("assertion message"));
+    }
+
+    #[test]
+    fn test_empty_debug_info_roundtrip() {
+        let debug_info = PackageDebugInfo::default();
+        let result = roundtrip_debug_info(&debug_info);
+        assert!(result.strings().is_empty());
+        assert!(result.files().is_empty());
+        assert!(result.locations().is_empty());
+        assert!(result.types().is_empty());
+        assert!(result.functions().is_empty());
+        assert!(result.nodes().is_empty());
+        assert!(result.roots().is_empty());
+        assert!(result.error_messages().is_empty());
     }
 
     #[test]
     fn test_all_primitive_types_roundtrip() {
-        let mut section = DebugTypesSection::new();
+        let mut builder = PackageDebugInfoBuilder::default();
 
-        for prim in [
+        for primitive in [
             DebugPrimitiveType::Void,
             DebugPrimitiveType::Bool,
             DebugPrimitiveType::I8,
@@ -1287,10 +1368,12 @@ mod tests {
             DebugPrimitiveType::Word,
             DebugPrimitiveType::U256,
         ] {
-            section.add_type(DebugTypeInfo::Primitive(prim));
+            builder.add_type(DebugTypeInfo::Primitive(primitive));
         }
 
-        roundtrip(&section);
+        let debug_info = *builder.build();
+        let result = roundtrip_debug_info(&debug_info);
+        assert_eq!(result.types(), debug_info.types());
     }
 
     #[test]
@@ -1314,92 +1397,63 @@ mod tests {
 
     #[test]
     fn test_file_info_with_checksum_roundtrip() {
-        let file = DebugFileInfo::new(0).with_checksum([42u8; 32]);
+        let file = DebugFileInfo::new(DebugStringIdx::from(0)).with_checksum([42u8; 32]);
         roundtrip(&file);
     }
 
     #[test]
-    fn test_function_with_mast_root_roundtrip() {
-        let line1 = LineNumber::new(1).unwrap();
-        let col1 = ColumnNumber::new(1).unwrap();
-        let func = DebugFunctionInfo::new(0, 0, line1, col1)
-            .with_linkage_name(1)
-            .with_type(DebugTypeIdx::from(2))
-            .with_mast_root(Word::default());
-
-        roundtrip(&func);
-    }
-
-    #[test]
-    fn test_debug_functions_v1_is_rejected() {
-        let bytes = section_with_strings(1, 0);
+    fn test_debug_info_v1_is_rejected() {
+        let bytes = [1];
         let mut reader = miden_core::serde::SliceReader::new(&bytes);
-        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
+        let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
             panic!("expected InvalidValue error");
         };
-        assert!(message.contains("unsupported debug_functions version: 1"));
+        assert!(message.contains("unsupported debug_info version: 1"));
     }
 
     #[test]
-    fn test_debug_section_string_bounds() {
-        let types_bytes = section_with_strings(DEBUG_TYPES_VERSION, 2);
-        let sources_bytes = section_with_strings(DEBUG_SOURCES_VERSION, 2);
-        let functions_bytes = section_with_strings(DEBUG_FUNCTIONS_VERSION, 2);
+    fn test_debug_info_payload_bounds() {
+        let bytes = PackageDebugInfo::default().to_bytes();
 
-        let mut reader = FixedBudgetReader::new(&types_bytes, 1);
-        let err = DebugTypesSection::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
+        let mut reader = FixedBudgetReader::new(&bytes, 1);
+        let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
             panic!("expected InvalidValue error");
         };
+        assert!(message.contains("package debug info"));
         assert!(message.contains("exceeds budget"));
 
-        let mut reader = FixedBudgetReader::new(&sources_bytes, 1);
-        let err = DebugSourcesSection::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("exceeds budget"));
-
-        let mut reader = FixedBudgetReader::new(&functions_bytes, 1);
-        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("exceeds budget"));
-
-        let types_ok = section_with_strings(DEBUG_TYPES_VERSION, 1);
-        let sources_ok = section_with_strings(DEBUG_SOURCES_VERSION, 1);
-        let functions_ok = section_with_strings(DEBUG_FUNCTIONS_VERSION, 1);
-
-        let mut reader = FixedBudgetReader::new(&types_ok, 1);
-        assert_eq!(DebugTypesSection::read_from(&mut reader).unwrap().strings.len(), 1);
-
-        let mut reader = FixedBudgetReader::new(&sources_ok, 1);
-        assert_eq!(DebugSourcesSection::read_from(&mut reader).unwrap().strings.len(), 1);
-
-        let mut reader = FixedBudgetReader::new(&functions_ok, 1);
-        assert_eq!(DebugFunctionsSection::read_from(&mut reader).unwrap().strings.len(), 1);
+        let mut reader = FixedBudgetReader::new(&bytes, bytes.len());
+        let result = PackageDebugInfo::read_from(&mut reader).unwrap();
+        assert!(result.nodes().is_empty());
     }
 
     #[test]
-    fn test_debug_functions_rejects_oversized_string_table_count() {
-        let bytes = [0x02, 0x08, 0x2a, 0xfe, 0xfe, 0x01];
+    fn test_debug_info_rejects_truncated_string_table() {
+        let mut payload = Vec::new();
+        payload.write_usize(2);
+
+        let mut bytes = Vec::new();
+        bytes.write_u8(DEBUG_INFO_VERSION);
+        bytes.write_usize(payload.len());
+        bytes.write_bytes(&payload);
+
         let mut reader = miden_core::serde::SliceReader::new(&bytes);
-        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
+        let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
             panic!("expected InvalidValue error");
         };
-        assert!(message.contains("debug_functions strings count"));
-        assert!(message.contains("exceeds remaining input"));
+        assert!(message.contains("debug_info strings count 2"));
+        assert!(message.contains("exceeds budget"));
     }
 
     #[test]
     fn test_function_params_bounds() {
         let too_many = function_type_bytes(2);
         let mut reader = FixedBudgetReader::new(&too_many, 4);
-        let err = DebugTypeInfo::read_from(&mut reader).unwrap_err();
-        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+        let error = DebugTypeInfo::read_from(&mut reader).unwrap_err();
+        assert!(matches!(error, DeserializationError::InvalidValue(_)));
 
         let ok = function_type_bytes(1);
         let mut reader = FixedBudgetReader::new(&ok, 4);

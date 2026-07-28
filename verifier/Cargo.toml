@@ -39,4 +39,3 @@ miden-precompiles-prover.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
-wincode.workspace = true

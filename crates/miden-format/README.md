@@ -249,6 +249,8 @@ The syntax of `miden-format.toml` is currently just a set of key/value pairs def
 max_line_length = 100
 # The number of spaces used for indentation
 indent_width = 4
+# Keep overflowing delimited expressions on the assignment line
+overflow_delimited_expr = false
 ```
 
 ### Passing options via `--config`
@@ -257,7 +259,7 @@ The same options supported in `miden-format.toml` are supported via `--config`, 
 
 
 ```
-miden-format --config=max_line_length=80,indent_width=2
+miden-format --config=max_line_length=80,indent_width=2,overflow_delimited_expr=true
 ```
 
 #### Hypothetical future configuration
