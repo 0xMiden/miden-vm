@@ -450,7 +450,6 @@ impl FastProcessor {
     }
 
     /// Executes a single clock cycle synchronously with package-owned source/debug context.
-    #[cfg(any(test, feature = "testing"))]
     pub fn step_with_package_debug_info_sync(
         &mut self,
         host: &mut impl SyncHost,
@@ -522,7 +521,6 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::step_with_package_debug_info_sync`].
-    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     pub async fn step_with_package_debug_info(
         &mut self,
@@ -576,7 +574,7 @@ impl FastProcessor {
         )
     }
 
-    fn source_aware_continuation_stack(
+    pub(super) fn source_aware_continuation_stack(
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: Option<DebugSourceNodeId>,
@@ -633,7 +631,6 @@ impl FastProcessor {
         })
     }
 
-    #[cfg(any(test, feature = "testing"))]
     fn ensure_source_aware_step_context(
         continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
@@ -654,7 +651,6 @@ impl FastProcessor {
         Ok(())
     }
 
-    #[cfg(any(test, feature = "testing"))]
     fn source_root_for_next_continuation(
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
         package_debug_info: &PackageDebugInfo,
