@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use miden_crypto::utils::{
+use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 #[cfg(feature = "arbitrary")]
@@ -534,7 +534,7 @@ mod tests {
         csr.write_into(&mut bytes);
 
         // Deserialize
-        let mut reader = miden_crypto::utils::SliceReader::new(&bytes);
+        let mut reader = miden_serde_utils::SliceReader::new(&bytes);
         let restored: CsrMatrix<TestRowId, u32> = CsrMatrix::read_from(&mut reader).unwrap();
 
         assert_eq!(csr, restored);

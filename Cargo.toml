@@ -169,6 +169,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"] 
 trybuild        = { version = "1.0" }
 windows-sys     = { version = "0.61.2" }
 x25519-dalek    = { version = "3.0.0", default-features = false }
+zerocopy        = { version = "0.8", default-features = false, features = ["derive"] }
 
 p3-air           = { version = "0.6", default-features = false }
 p3-batch-stark   = { version = "0.6", default-features = false }
