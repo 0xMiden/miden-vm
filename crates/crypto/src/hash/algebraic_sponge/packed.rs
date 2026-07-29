@@ -61,10 +61,12 @@ mod tests {
 
     const LANES: usize = PackedFelt::WIDTH;
 
-    /// Checks that permuting a packed state equals permuting each lane's scalar state.
-    fn check(
+    /// Checks that permuting a packed state equals permuting each lane's scalar state,
+    /// with element `i` of lane `lane` set to `value(i, lane)`.
+    fn check_with(
         scalar_permute: fn(&mut [Felt; STATE_WIDTH]),
         packed_permute: impl Fn(&mut [PackedFelt; STATE_WIDTH]),
+        value: impl Fn(usize, usize) -> Felt,
     ) {
         let mut packed = [PackedFelt::ZERO; STATE_WIDTH];
         let mut scalar_states = [[Felt::ZERO; STATE_WIDTH]; LANES];
@@ -72,7 +74,7 @@ mod tests {
             for (i, (packed_elem, scalar)) in
                 packed.iter_mut().zip(scalar_state.iter_mut()).enumerate()
             {
-                let value = Felt::new_unchecked((1 + i * LANES + lane) as u64);
+                let value = value(i, lane);
                 packed_elem.as_slice_mut()[lane] = value;
                 *scalar = value;
             }
@@ -86,6 +88,16 @@ mod tests {
                 assert_eq!(packed[i].as_slice()[lane], scalar_state[i]);
             }
         }
+    }
+
+    /// Checks that permuting a packed state equals permuting each lane's scalar state.
+    fn check(
+        scalar_permute: fn(&mut [Felt; STATE_WIDTH]),
+        packed_permute: impl Fn(&mut [PackedFelt; STATE_WIDTH]),
+    ) {
+        check_with(scalar_permute, packed_permute, |i, lane| {
+            Felt::new_unchecked((1 + i * LANES + lane) as u64)
+        });
     }
 
     #[test]
@@ -103,5 +115,75 @@ mod tests {
         check(Poseidon2Permutation256::apply_permutation, |s| {
             Poseidon2Permutation256.permute_mut(s)
         });
+    }
+
+    /// Canonical values (`< ORDER`) that stress the wraparound corrections in
+    /// vectorized kernels: field extremes and the 2^32 epsilon window.
+    const EDGE_VALS: [u64; 6] = [0, 1, (1 << 32) - 1, 1 << 32, 1 << 63, Felt::ORDER - 1];
+
+    #[test]
+    fn poseidon2_packed_permutation_edge_values() {
+        for rotation in 0..EDGE_VALS.len() {
+            check_with(
+                Poseidon2Permutation256::apply_permutation,
+                |s| Poseidon2Permutation256.permute_mut(s),
+                |i, lane| {
+                    Felt::new_unchecked(EDGE_VALS[(i + 3 * lane + rotation) % EDGE_VALS.len()])
+                },
+            );
+        }
+    }
+
+    /// Checks the packed permutation against the scalar implementation for a state
+    /// that triggers a second-order carry in the initial MDS.
+    // Runs on every packed backend except aarch64 NEON, whose `p3-goldilocks` 0.6.2
+    // path still single-corrects.
+    // TODO: change the gating when we migrate to the latest Plonky3 release.
+    #[cfg(not(all(target_arch = "aarch64", not(target_feature = "sve2"))))]
+    #[test]
+    fn poseidon2_packed_permutation_second_order_carry() {
+        // Every lane identical; this state hits the initial-MDS second-order carry.
+        const S: [u64; STATE_WIDTH] = [
+            0,
+            1,
+            (1 << 32) - 1,
+            1 << 32,
+            (1 << 63) - 1,
+            1 << 63,
+            Felt::ORDER - 1,
+            0,
+            1,
+            (1 << 32) - 1,
+            1 << 32,
+            (1 << 63) - 1,
+        ];
+        check_with(
+            Poseidon2Permutation256::apply_permutation,
+            |s| Poseidon2Permutation256.permute_mut(s),
+            |i, _lane| Felt::new_unchecked(S[i]),
+        );
+    }
+
+    #[test]
+    fn poseidon2_packed_permutation_random_sweep() {
+        let mut seed = 0x243f_6a88_85a3_08d3u64; // deterministic; digits of pi
+        let mut next = move || {
+            // splitmix64
+            seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = seed;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        };
+        for _ in 0..256 {
+            let state: [[Felt; STATE_WIDTH]; LANES] = core::array::from_fn(|_| {
+                core::array::from_fn(|_| Felt::new_unchecked(next() % Felt::ORDER))
+            });
+            check_with(
+                Poseidon2Permutation256::apply_permutation,
+                |s| Poseidon2Permutation256.permute_mut(s),
+                |i, lane| state[lane][i],
+            );
+        }
     }
 }
