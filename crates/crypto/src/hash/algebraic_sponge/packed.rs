@@ -117,14 +117,8 @@ mod tests {
         });
     }
 
-    /// Canonical values that stress the wraparound corrections in vectorized
-    /// kernels: field extremes and the 2^32 epsilon window.
-    ///
-    /// Entry values must be canonical: the vectorized permutations (Plonky3's
-    /// NEON path and the SVE2 kernel that mirrors it) use single-correction
-    /// modular ops whose input contract all production `Felt` constructors
-    /// satisfy. Non-canonical entries diverge from the scalar path even on
-    /// unmodified upstream Plonky3.
+    /// Canonical values (`< ORDER`) that stress the wraparound corrections in
+    /// vectorized kernels: field extremes and the 2^32 epsilon window.
     const EDGE_VALS: [u64; 6] = [0, 1, (1 << 32) - 1, 1 << 32, 1 << 63, Felt::ORDER - 1];
 
     #[test]
@@ -138,6 +132,33 @@ mod tests {
                 },
             );
         }
+    }
+
+    /// Checks the SVE2 packed permutation against the scalar implementation for a
+    /// state that triggers a second-order carry in the initial MDS.
+    #[cfg(all(target_arch = "aarch64", target_feature = "sve2"))]
+    #[test]
+    fn poseidon2_packed_permutation_second_order_carry() {
+        // Every lane identical; this state hits the initial-MDS second-order carry.
+        const S: [u64; STATE_WIDTH] = [
+            0,
+            1,
+            (1 << 32) - 1,
+            1 << 32,
+            (1 << 63) - 1,
+            1 << 63,
+            Felt::ORDER - 1,
+            0,
+            1,
+            (1 << 32) - 1,
+            1 << 32,
+            (1 << 63) - 1,
+        ];
+        check_with(
+            Poseidon2Permutation256::apply_permutation,
+            |s| Poseidon2Permutation256.permute_mut(s),
+            |i, _lane| Felt::new_unchecked(S[i]),
+        );
     }
 
     #[test]

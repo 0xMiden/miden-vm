@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #define GL_EPS 0xFFFFFFFFull
+#define GL_ORDER 0xFFFFFFFF00000001ull /* P = 2^64 - 2^32 + 1 */
 #define GL_HALF_P_PLUS_1 0x7FFFFFFF80000001ull
 
 #define FOR12(M) M(0) M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8) M(9) M(10) M(11)
@@ -47,15 +48,27 @@ static inline svuint64_t gl_mul(svbool_t pg, svuint64_t a, svuint64_t b) {
     return svadd_n_u64_m(ovf, res, GL_EPS);
 }
 
+// Reduce to [0, P). Required on the second operand of gl_add/gl_sub: their
+// single-step epsilon correction is only valid when b <= P, otherwise the
+// correction can itself wrap and that second carry is never paid (e.g.
+// double(double(x)) for x just under 2^63). Mirrors canonicalize() ahead of
+// add_no_double_overflow_64_64 in Plonky3's x86_64_avx512/avx2 and wasm32
+// packing paths; on SVE2 this is the same compare-then-masked-sub AVX-512 uses.
+static inline svuint64_t gl_canonicalize(svbool_t pg, svuint64_t x) {
+    return svsub_n_u64_m(svcmpge_n_u64(pg, x, GL_ORDER), x, GL_ORDER);
+}
+
 static inline svuint64_t gl_add(svbool_t pg, svuint64_t a, svuint64_t b) {
-    svuint64_t res = svadd_u64_x(pg, a, b);
+    svuint64_t bc = gl_canonicalize(pg, b);
+    svuint64_t res = svadd_u64_x(pg, a, bc);
     svbool_t ovf = svcmplt_u64(pg, res, a);
     return svadd_n_u64_m(ovf, res, GL_EPS);
 }
 
 static inline svuint64_t gl_sub(svbool_t pg, svuint64_t a, svuint64_t b) {
-    svbool_t borrow = svcmplt_u64(pg, a, b);
-    svuint64_t res = svsub_u64_x(pg, a, b);
+    svuint64_t bc = gl_canonicalize(pg, b);
+    svbool_t borrow = svcmplt_u64(pg, a, bc);
+    svuint64_t res = svsub_u64_x(pg, a, bc);
     return svsub_n_u64_m(borrow, res, GL_EPS);
 }
 
@@ -98,6 +111,7 @@ static inline uint64_t gl_mul_scalar(uint64_t x, uint64_t y) {
 }
 
 static inline uint64_t gl_add_scalar(uint64_t a, uint64_t b) {
+    if (b >= GL_ORDER) b -= GL_ORDER; // canonicalize b; see gl_canonicalize
     uint64_t res;
     if (__builtin_add_overflow(a, b, &res)) {
         res += GL_EPS;
@@ -106,6 +120,7 @@ static inline uint64_t gl_add_scalar(uint64_t a, uint64_t b) {
 }
 
 static inline uint64_t gl_sub_scalar(uint64_t a, uint64_t b) {
+    if (b >= GL_ORDER) b -= GL_ORDER; // canonicalize b; see gl_canonicalize
     uint64_t res;
     if (__builtin_sub_overflow(a, b, &res)) {
         res -= GL_EPS;
@@ -183,6 +198,11 @@ static inline void gl_mat4(
 
 // add-rc + x^7 for all 12 elements, stage-major. Expanded as macros over the
 // named state so the compiler schedules across everything.
+//
+// Single-correction add, valid only because the second operand rc[i] is
+// canonical (< P) by the kernel's parameter contract: the Rust caller builds
+// every round-constant table via `.as_canonical_u64()`. See gl_canonicalize
+// for why a non-canonical second operand would need reducing first.
 #define GL_RC_ADD1(i) \
     { \
         s##i = svadd_n_u64_x(pg, s##i, (rc)[i]); \
