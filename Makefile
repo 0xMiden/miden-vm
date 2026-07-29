@@ -241,6 +241,12 @@ build-no-std: ## Builds without the standard library
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
 
+.PHONY: test-wasm-simd
+test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128 (requires wasmtime)
+	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+	RUSTFLAGS="-C target-feature=+simd128" \
+	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
+
 .PHONY: check-fuzz
 check-fuzz: ## Checks standalone fuzz workspaces
 	cd tools/miden-core-fuzz && cargo check --locked
