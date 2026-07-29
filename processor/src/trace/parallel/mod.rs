@@ -12,7 +12,7 @@ use miden_air::{
 use miden_core::{
     ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
-    mast::{MastForestId, SparseMastForest},
+    mast::{MastForestId, OpBatch, SparseMastForest},
     operations::opcodes,
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
@@ -601,7 +601,7 @@ fn non_hasher_trace_len(
 
     [1, kernel.proc_hashes().len(), bitwise_len, memory_len, ace_len]
         .into_iter()
-        .try_fold(0usize, |total, len| total.checked_add(len))
+        .try_fold(0usize, usize::checked_add)
         .filter(|&total| total <= max_trace_len)
         .ok_or_else(overflow)
 }
@@ -626,10 +626,8 @@ pub(crate) fn build_hasher_chiplet<'a>(
             },
             ResolvedHasherOp::HashBasicBlock((batch_groups, expected_hash)) => match batch_groups {
                 ResolvedBasicBlockGroups::Borrowed(op_batches) => {
-                    let _ = hasher.hash_basic_block(
-                        op_batches.iter().map(|batch| batch.groups()),
-                        expected_hash,
-                    );
+                    let _ = hasher
+                        .hash_basic_block(op_batches.iter().map(OpBatch::groups), expected_hash);
                 },
                 ResolvedBasicBlockGroups::Owned(batch_groups) => {
                     let _ = hasher.hash_basic_block(batch_groups.iter(), expected_hash);
