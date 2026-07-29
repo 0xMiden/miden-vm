@@ -23,7 +23,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 # Required dependencies
-miden-crypto.workspace = true
+miden-serde-utils.workspace = true
 thiserror.workspace = true
 
 # Optional dependencies

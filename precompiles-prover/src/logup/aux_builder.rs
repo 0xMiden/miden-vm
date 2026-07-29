@@ -1,16 +1,13 @@
 //! Prover-side LogUp aux-trace driver (natural last-row σ-closing).
 //!
-//! Adapted from miden-vm `air/src/lookup/aux_builder.rs::build_logup_aux_trace`
-//! at commit `3176d1f`. The fraction-collection ([`build_lookup_fractions`])
-//! and accumulation ([`accumulate`]) phases are reused unchanged; only the
-//! column-0 handling differs:
+//! Fraction collection and accumulation reuse miden-vm's [`build_lookup_fractions`] and
+//! [`accumulate`]. The shared accumulator returns a centered cyclic trace and
+//! `sigma_prime = sigma / n`; this adapter adds the per-row drift `r * sigma_prime` back into
+//! column 0 to recover the plain running sum, then commits `sigma = n * sigma_prime`.
 //!
-//! - Stock miden: take the running sum's terminal as `committed_final`, truncate the (n+1)-row
-//!   matrix to n rows, and return `(aux_trace, vec![committed_final])`.
-//! - Here: take that same terminal as `σ = Σ_r delta_r` and return it verbatim — column 0 is the
-//!   plain running sum (`aux[0] = 0`, `aux[r] = Σ_{i<r} delta_i`). The constraint side closes it on
-//!   the last row (`when_last: D₀·(σ − Σ acc) − N₀ = 0`, see `constraint.rs`), so no `σ/n` drift
-//!   correction and no reserved dead row are needed.
+//! The constraint side closes the plain running sum on the last row
+//! (`when_last: D₀·(σ − Σ acc) − N₀ = 0`, see `constraint.rs`), so no normalized drift term appears
+//! in the precompile AIR constraints and no reserved dead row is needed.
 
 use alloc::{vec, vec::Vec};
 
@@ -25,14 +22,12 @@ use super::{Challenges, LookupAir, ProverLookupBuilder, accumulate, build_lookup
 /// Prover-side LogUp aux-trace body for `LiftedAir + LookupAir`
 /// chiplets (natural last-row σ-closing).
 ///
-/// Sources `α`, `β`, `max_message_width`, `num_bus_ids`, and the
-/// periodic columns from the AIR's trait methods, runs miden-vm's stock
-/// fraction-collection + fused-accumulator phases, and returns column 0
-/// as the plain running sum (no σ/n correction).
+/// Sources `α`, `β`, `max_message_width`, `num_bus_ids`, and the periodic columns from the AIR's
+/// trait methods, runs miden-vm's fraction-collection and normalized fused-accumulator phases,
+/// then removes the centering from column 0.
 ///
-/// Returns `(aux_trace, vec![sigma])`. The single committed permutation
-/// value is σ — the AIR's full LogUp residue, summed across AIRs and
-/// asserted zero by `MultiAir::eval_external`.
+/// Returns `(aux_trace, vec![sigma])`. The single committed permutation value is `sigma` — the
+/// AIR's full LogUp residue, summed across AIRs and asserted zero by `MultiAir::eval_external`.
 pub fn build_logup_aux_trace<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
@@ -52,26 +47,19 @@ where
 
     let fractions = build_lookup_fractions(air, main, &periodic, &lookup_challenges);
 
-    let full = accumulate(&fractions);
-    let num_cols = full.width;
+    let (mut aux_trace, sigma_prime) = accumulate(&fractions);
+    let num_cols = aux_trace.width;
     let num_rows = main.height();
-    debug_assert_eq!(
-        full.values.len(),
-        (num_rows + 1) * num_cols,
-        "accumulate output buffer is sized for num_rows + 1 rows",
-    );
+    debug_assert_eq!(aux_trace.height(), num_rows);
 
-    // Take σ from col 0 of the trailing row (= Σ_r delta_r), then
-    // truncate to num_rows. No σ/n correction: column 0 is the plain
-    // running sum (row r = Σ_{i<r} delta_i, with aux[0] = 0). The natural
-    // last-row closing constraint folds the final row's interactions into
-    // the committed σ — `when_last: D₀·(σ − Σ acc) − N₀ = 0` (see
-    // `constraint.rs`); the per-AIR quotient degree of 0.26 absorbs its
-    // degree, so no dead row and no σ/n drift are needed.
-    let mut data = full.values;
-    let sigma = data[num_rows * num_cols];
-    data.truncate(num_rows * num_cols);
+    // The shared accumulator stores `centered[r] = plain[r] - r * sigma_prime`. Restore the plain
+    // running sum expected by the natural last-row constraint with an add-only drift scan. After
+    // the final row, `drift = n * sigma_prime = sigma`.
+    let mut drift = EF::ZERO;
+    for row in 0..num_rows {
+        aux_trace.values[row * num_cols] += drift;
+        drift += sigma_prime;
+    }
 
-    let aux_trace = RowMajorMatrix::new(data, num_cols);
-    (aux_trace, vec![sigma])
+    (aux_trace, vec![drift])
 }
