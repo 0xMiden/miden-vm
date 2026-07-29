@@ -1076,6 +1076,35 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
     );
 }
 
+#[test]
+fn chiplet_preflight_caps_combined_trace_len() {
+    let mut bitwise = BitwiseReplay::default();
+    bitwise.record_u32xor(ZERO, ZERO);
+
+    let mut memory_writes = MemoryWritesReplay::default();
+    memory_writes.record_write_element(ZERO, ZERO, ContextId::root(), RowIndex::from(0));
+
+    let kernel = KernelDescriptor::default();
+    let ace = AceReplay::default();
+    let combined_len = OP_CYCLE_LEN + 2;
+
+    assert!(matches!(
+        non_hasher_trace_len(
+            &kernel,
+            &[],
+            &memory_writes,
+            &bitwise,
+            &ace,
+            combined_len - 1,
+        ),
+        Err(ExecutionError::TraceLenExceeded(limit)) if limit == combined_len - 1
+    ));
+    assert_eq!(
+        non_hasher_trace_len(&kernel, &[], &memory_writes, &bitwise, &ace, combined_len).unwrap(),
+        combined_len
+    );
+}
+
 /// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
 /// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
 /// appended by `build_trace_with_max_len`.

@@ -4,7 +4,7 @@ use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, RATE_LEN, STATE_WIDTH},
 };
-use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt};
+use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
 
 use crate::{
     ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
@@ -554,6 +554,11 @@ impl MemoryReadsReplay {
     pub fn iter_read_words(&self) -> impl Iterator<Item = (Word, Felt, ContextId, RowIndex)> {
         self.words_read.iter().copied()
     }
+
+    /// Returns the total number of trace rows contributed by recorded reads, or `None` on overflow.
+    pub fn num_accesses(&self) -> Option<usize> {
+        self.elements_read.len().checked_add(self.words_read.len())
+    }
 }
 
 /// Records and replays all the writes made to memory, in which all elements written to memory
@@ -596,6 +601,12 @@ impl MemoryWritesReplay {
     /// (word, address, context ID, clock cycle).
     pub fn iter_words_written(&self) -> impl Iterator<Item = &(Word, Felt, ContextId, RowIndex)> {
         self.words_written.iter()
+    }
+
+    /// Returns the total number of trace rows contributed by recorded writes, or `None` on
+    /// overflow.
+    pub fn num_accesses(&self) -> Option<usize> {
+        self.elements_written.len().checked_add(self.words_written.len())
     }
 }
 
@@ -763,6 +774,11 @@ impl BitwiseReplay {
     pub fn record_u32xor(&mut self, a: Felt, b: Felt) {
         self.u32op_with_operands.push_back((BitwiseOp::U32Xor, a, b));
     }
+
+    /// Returns the number of recorded operations.
+    pub fn num_operations(&self) -> usize {
+        self.u32op_with_operands.len()
+    }
 }
 
 impl IntoIterator for BitwiseReplay {
@@ -821,6 +837,14 @@ impl AceReplay {
     pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
         let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
+    }
+
+    /// Returns the total number of trace rows contributed by recorded evaluations, or `None` on
+    /// overflow.
+    pub fn trace_len(&self) -> Option<usize> {
+        self.circuit_evaluations
+            .iter()
+            .try_fold(0usize, |len, (_, evaluation)| len.checked_add(evaluation.num_rows()))
     }
 }
 
@@ -1019,7 +1043,7 @@ pub enum HasherOp {
 impl HasherOp {
     /// Resolves the four forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
     /// needs forest access.
-    fn resolve_forest_free(self) -> Option<ResolvedHasherOp> {
+    fn resolve_forest_free<'a>(self) -> Option<ResolvedHasherOp<'a>> {
         match self {
             HasherOp::Permute(s) => Some(ResolvedHasherOp::Permute(s)),
             HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
@@ -1030,18 +1054,26 @@ impl HasherOp {
     }
 }
 
-/// A hasher-chiplet request with all operands resolved, so it can be replayed
-/// without access to the MAST forest store.
-///
-/// This is what the hasher-chiplet builder consumes: the buffered replay
-/// resolves its recorded [`HasherOp`]s into this type at drain time (when the
-/// finalized forest store exists), while the streaming path resolves at record
-/// time and forwards each op to the concurrently running builder.
+/// Basic-block data resolved for replay by the hasher-chiplet builder.
 #[derive(Debug)]
-pub enum ResolvedHasherOp {
+pub enum ResolvedBasicBlockGroups<'a> {
+    /// Buffered replay borrows batches from the finalized MAST forest.
+    Borrowed(&'a [OpBatch]),
+    /// Streamed replay owns the group hashes because it crosses a thread boundary.
+    Owned(Vec<[Felt; RATE_LEN]>),
+}
+
+/// A hasher-chiplet request with all operands resolved, so it can be replayed without further
+/// MAST forest lookups.
+///
+/// This is what the hasher-chiplet builder consumes: the buffered replay resolves its recorded
+/// [`HasherOp`]s at drain time and borrows basic-block batches from the finalized forest, while the
+/// streaming path resolves at record time and forwards owned data to the concurrent builder.
+#[derive(Debug)]
+pub enum ResolvedHasherOp<'a> {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<[Felt; RATE_LEN]>, Word)),
+    HashBasicBlock((ResolvedBasicBlockGroups<'a>, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -1063,7 +1095,7 @@ pub struct HasherRequestReplay {
 enum HasherOpSink {
     Buffered(VecDeque<HasherOp>),
     #[cfg(feature = "std")]
-    Streamed(std::sync::mpsc::Sender<ResolvedHasherOp>),
+    Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
 }
 
 impl Default for HasherOpSink {
@@ -1079,14 +1111,18 @@ impl HasherRequestReplay {
     /// Send failures are ignored: they mean the consumer stopped early, and its error surfaces
     /// when the caller joins it.
     #[cfg(feature = "std")]
-    pub(crate) fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp>) -> Self {
+    pub(crate) fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp<'static>>) -> Self {
         Self { sink: HasherOpSink::Streamed(sender) }
     }
 
     // `resolved` is consumed only by the std-only streamed arm; without std the buffered arm
     // stores the raw op and resolves later at drain.
     #[cfg_attr(not(feature = "std"), allow(unused_variables))]
-    fn record_resolved(&mut self, op: HasherOp, resolved: impl FnOnce() -> ResolvedHasherOp) {
+    fn record_resolved(
+        &mut self,
+        op: HasherOp,
+        resolved: impl FnOnce() -> ResolvedHasherOp<'static>,
+    ) {
         match &mut self.sink {
             HasherOpSink::Buffered(ops) => ops.push_back(op),
             #[cfg(feature = "std")]
@@ -1152,7 +1188,9 @@ impl HasherRequestReplay {
         let expected_hash = basic_block_node.digest();
         self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
             ResolvedHasherOp::HashBasicBlock((
-                basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
+                ResolvedBasicBlockGroups::Owned(
+                    basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
+                ),
                 expected_hash,
             ))
         });
@@ -1184,7 +1222,7 @@ impl HasherRequestReplay {
     pub fn into_resolved_ops<'a>(
         self,
         mast_forest_store: &'a [Arc<SparseMastForest>],
-    ) -> impl Iterator<Item = Result<ResolvedHasherOp, ExecutionError>> + 'a {
+    ) -> impl Iterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>> + 'a {
         let (streamed_err, ops) = match self.sink {
             HasherOpSink::Buffered(ops) => (None, ops),
             #[cfg(feature = "std")]
@@ -1210,7 +1248,7 @@ impl HasherRequestReplay {
                     ));
                 };
                 Ok(ResolvedHasherOp::HashBasicBlock((
-                    basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
+                    ResolvedBasicBlockGroups::Borrowed(basic_block_node.op_batches()),
                     expected_hash,
                 )))
             },

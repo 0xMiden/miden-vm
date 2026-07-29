@@ -168,7 +168,7 @@ impl ExecutionTracer {
     pub(crate) fn new_with_streamed_hasher(
         fragment_size: usize,
         max_stack_depth: usize,
-        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp>,
+        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
     ) -> Self {
         let mut tracer = Self::new(fragment_size, max_stack_depth);
         tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);

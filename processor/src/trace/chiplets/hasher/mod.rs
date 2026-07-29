@@ -189,20 +189,26 @@ impl Hasher {
     /// array per batch (the only part of a batch the hasher absorbs), and returns the result.
     ///
     /// Returns (addr, digest).
-    pub fn hash_basic_block(
+    pub fn hash_basic_block<'a, I>(
         &mut self,
-        batch_groups: &[[Felt; RATE_LEN]],
+        batch_groups: I,
         expected_hash: Digest,
-    ) -> (Felt, Digest) {
+    ) -> (Felt, Digest)
+    where
+        I: IntoIterator<Item = &'a [Felt; RATE_LEN]>,
+        I::IntoIter: ExactSizeIterator,
+    {
         if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
             return memoized;
         }
 
+        let mut batch_groups = batch_groups.into_iter();
+        let num_batches = batch_groups.len();
+        let first_batch = batch_groups.next().expect("basic blocks contain at least one op batch");
+
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
-        let init_state = init_state(&batch_groups[0], ZERO);
-
-        let num_batches = batch_groups.len();
+        let init_state = init_state(first_batch, ZERO);
 
         if num_batches == 1 {
             // One-batch hashes have both boundary flags set.
@@ -236,7 +242,7 @@ impl Hasher {
         );
 
         // Middle batches: no boundary flags.
-        for groups in batch_groups.iter().take(num_batches - 1).skip(1) {
+        for groups in batch_groups.by_ref().take(num_batches - 2) {
             absorb_into_state(&mut state, groups);
             state = self.append_controller_permutation(
                 LINEAR_HASH,
@@ -252,7 +258,9 @@ impl Hasher {
         }
 
         // Last batch: boundary output only.
-        absorb_into_state(&mut state, &batch_groups[num_batches - 1]);
+        let last_batch = batch_groups.next().expect("multi-batch block has a final op batch");
+        debug_assert!(batch_groups.next().is_none());
+        absorb_into_state(&mut state, last_batch);
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,

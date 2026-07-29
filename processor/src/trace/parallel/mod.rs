@@ -6,7 +6,7 @@ use miden_air::{
     CoreCols, Felt, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, decoder::NUM_OP_BITS,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, chiplets::bitwise::OP_CYCLE_LEN, decoder::NUM_OP_BITS,
     },
 };
 use miden_core::{
@@ -26,7 +26,7 @@ use super::{
     trace_state::{
         AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
         ExecutionReplay, HasherRequestReplay, KernelReplay, MemoryWritesReplay, RangeCheckerReplay,
-        ResolvedHasherOp,
+        ResolvedBasicBlockGroups, ResolvedHasherOp,
     },
 };
 use crate::{
@@ -489,11 +489,12 @@ fn initialize_range_checker(
 /// Replays recorded operations to populate chiplet traces. Results were already used during
 /// execution; this pass only needs the trace-recording side effects.
 ///
-/// The five chiplets are populated from disjoint replays, so they build in parallel. Each
-/// builder caps its own trace length at `max_trace_len`, and the combined length check runs
-/// once at the end, returning the same error an incremental check would. The bound before the
-/// error fires is per-chiplet rather than on the sum, so transient allocations can reach a few
-/// times `max_trace_len` on adversarial inputs before the combined check aborts.
+/// The five chiplets are populated from disjoint replays, so they build in parallel. Their
+/// non-hasher lengths are known from the replay metadata; checking those up front and giving the
+/// hasher only the remaining rows preserves the hard cap before any builder materializes its
+/// trace on the buffered path. A prebuilt (streamed) hasher was already built during execution
+/// under the full `max_trace_len` budget and is instead validated against the remaining rows
+/// after the fact.
 fn initialize_chiplets(
     kernel: KernelDescriptor,
     core_trace_contexts: &[CoreTraceFragmentContext],
@@ -506,14 +507,40 @@ fn initialize_chiplets(
     mast_forest_store: &[Arc<SparseMastForest>],
     max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
+    let non_hasher_trace_len = non_hasher_trace_len(
+        &kernel,
+        core_trace_contexts,
+        &memory_writes,
+        &bitwise,
+        &ace_replay,
+        max_trace_len,
+    )?;
+    let max_hasher_trace_len = max_trace_len
+        .checked_sub(non_hasher_trace_len)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+
+    if prebuilt_hasher
+        .as_ref()
+        .is_some_and(|hasher| hasher.trace_len() > max_hasher_trace_len)
+    {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
+
     let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = rayon::join(
         || match prebuilt_hasher {
-            // Built concurrently with execution; its length was already capped.
             Some(hasher) => Ok(hasher),
             None => build_hasher_chiplet(
                 hasher_for_chiplet.into_resolved_ops(mast_forest_store),
-                max_trace_len,
-            ),
+                max_hasher_trace_len,
+            )
+            .map_err(|err| match err {
+                // The builder reports its internal remainder budget; surface the
+                // configured cap instead, like every other rejection site.
+                ExecutionError::TraceLenExceeded(_) => {
+                    ExecutionError::TraceLenExceeded(max_trace_len)
+                },
+                other => other,
+            }),
         },
         || {
             rayon::join(
@@ -540,10 +567,43 @@ fn initialize_chiplets(
         ace: ace?,
         kernel_rom: kernel_rom?,
     };
+    debug_assert_eq!(
+        non_hasher_trace_len,
+        chiplets.trace_len() - chiplets.hasher.trace_len(),
+        "chiplet preflight length differs from the materialized trace",
+    );
+    // Release-only insurance: in debug builds a preflight undercount trips the
+    // assert above before this check can fire.
     if chiplets.trace_len() > max_trace_len {
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
     Ok(chiplets)
+}
+
+fn non_hasher_trace_len(
+    kernel: &KernelDescriptor,
+    core_trace_contexts: &[CoreTraceFragmentContext],
+    memory_writes: &MemoryWritesReplay,
+    bitwise: &BitwiseReplay,
+    ace: &AceReplay,
+    max_trace_len: usize,
+) -> Result<usize, ExecutionError> {
+    let overflow = || ExecutionError::TraceLenExceeded(max_trace_len);
+    let bitwise_len = bitwise.num_operations().checked_mul(OP_CYCLE_LEN).ok_or_else(overflow)?;
+    let memory_reads_len = core_trace_contexts.iter().try_fold(0usize, |len, context| {
+        len.checked_add(context.replay.memory_reads.num_accesses()?)
+    });
+    let memory_len = memory_writes
+        .num_accesses()
+        .and_then(|writes| memory_reads_len.and_then(|reads| writes.checked_add(reads)))
+        .ok_or_else(overflow)?;
+    let ace_len = ace.trace_len().ok_or_else(overflow)?;
+
+    [1, kernel.proc_hashes().len(), bitwise_len, memory_len, ace_len]
+        .into_iter()
+        .try_fold(0usize, |total, len| total.checked_add(len))
+        .filter(|&total| total <= max_trace_len)
+        .ok_or_else(overflow)
 }
 
 /// Builds the hasher chiplet by replaying resolved requests in order.
@@ -551,8 +611,8 @@ fn initialize_chiplets(
 /// The iterator abstracts over the two delivery modes: the buffered replay drained against the
 /// finalized forest store, or a live channel fed by a concurrently executing processor (see
 /// `FastProcessor::execute_and_build_trace_sync`).
-pub(crate) fn build_hasher_chiplet(
-    ops: impl IntoIterator<Item = Result<ResolvedHasherOp, ExecutionError>>,
+pub(crate) fn build_hasher_chiplet<'a>(
+    ops: impl IntoIterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>>,
     max_trace_len: usize,
 ) -> Result<Hasher, ExecutionError> {
     let mut hasher = Hasher::default();
@@ -564,8 +624,16 @@ pub(crate) fn build_hasher_chiplet(
             ResolvedHasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
-            ResolvedHasherOp::HashBasicBlock((batch_groups, expected_hash)) => {
-                let _ = hasher.hash_basic_block(&batch_groups, expected_hash);
+            ResolvedHasherOp::HashBasicBlock((batch_groups, expected_hash)) => match batch_groups {
+                ResolvedBasicBlockGroups::Borrowed(op_batches) => {
+                    let _ = hasher.hash_basic_block(
+                        op_batches.iter().map(|batch| batch.groups()),
+                        expected_hash,
+                    );
+                },
+                ResolvedBasicBlockGroups::Owned(batch_groups) => {
+                    let _ = hasher.hash_basic_block(batch_groups.iter(), expected_hash);
+                },
             },
             ResolvedHasherOp::BuildMerkleRoot((value, path, index)) => {
                 let _ = hasher.build_merkle_root(value, &path, index);
