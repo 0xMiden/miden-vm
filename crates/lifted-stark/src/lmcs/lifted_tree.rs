@@ -5,15 +5,12 @@ use miden_stark_transcript::ProverChannel;
 use miden_stateful_hasher::StatefulHasher;
 use p3_field::PackedValue;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
-use p3_maybe_rayon::prelude::*;
+use p3_maybe_rayon::{iter, prelude::*};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::{
-    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
-    util::par_filled_vec,
-};
+use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -384,9 +381,10 @@ where
     // Memory buffers:
     // - states: Per-leaf scalar states (one per final row), maintained across matrices.
     // - scratch_states: Temporary buffer used when duplicating states during upsampling.
+    // `repeat_n` initializes these large buffers in parallel when concurrency is enabled.
     let default_state = [PD::Value::default(); WIDTH];
     let mut states = info_span!("alloc states", final_height, width = WIDTH)
-        .in_scope(|| par_filled_vec(default_state, final_height));
+        .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
     // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
     // rounds) never need the scratch buffer.
     let mut scratch_states: Vec<[PD::Value; WIDTH]> = Vec::new();
@@ -404,7 +402,7 @@ where
 
             if scratch_states.is_empty() {
                 scratch_states = info_span!("alloc scratch", final_height)
-                    .in_scope(|| par_filled_vec(default_state, final_height));
+                    .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
             }
 
             // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
