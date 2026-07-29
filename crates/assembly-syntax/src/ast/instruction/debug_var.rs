@@ -1,16 +1,16 @@
 use alloc::{format, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
-use miden_debug_types::FileLineCol;
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
+};
+use miden_debug_types::Location;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
-    serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_bounded_len,
-    },
+    ast::{TypeExpr, types::Type},
 };
 
 // DEBUG VARIABLE INFO
@@ -21,19 +21,19 @@ use crate::{
 /// This record provides debuggers with information about where a variable's
 /// value can be found at a particular point in the program execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugVarInfo {
     /// Variable name as it appears in source code.
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_arc_str"))]
     name: Arc<str>,
-    /// Type information (encoded as type index in debug_info section)
-    type_id: Option<u32>,
+    /// The low-level structural type of this variable
+    ty: Option<Type>,
+    /// A type expression corresponding to how `type` was declared in the source code
+    declared_type: Option<Arc<TypeExpr>>,
     /// If this is a function parameter, its 1-based index.
     arg_index: Option<NonZeroU32>,
-    /// Source file location (file:line:column).
+    /// Source location.
     /// This should only be set when the location differs from the AssemblyOp location associated
     /// with the same instruction, to avoid package bloat.
-    location: Option<FileLineCol>,
+    location: Option<Location>,
     /// Where to find the variable's value at this point
     value_location: DebugVarLocation,
 }
@@ -43,7 +43,8 @@ impl DebugVarInfo {
     pub fn new(name: impl Into<Arc<str>>, value_location: DebugVarLocation) -> Self {
         Self {
             name: name.into(),
-            type_id: None,
+            ty: None,
+            declared_type: None,
             arg_index: None,
             location: None,
             value_location,
@@ -51,18 +52,24 @@ impl DebugVarInfo {
     }
 
     /// Returns the variable name.
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &Arc<str> {
         &self.name
     }
 
     /// Returns the type ID if set.
-    pub fn type_id(&self) -> Option<u32> {
-        self.type_id
+    pub fn ty(&self) -> Option<&Type> {
+        self.ty.as_ref()
+    }
+
+    /// Returns the type ID if set.
+    pub fn declared_type(&self) -> Option<Arc<TypeExpr>> {
+        self.declared_type.clone()
     }
 
     /// Sets the type ID for this variable.
-    pub fn set_type_id(&mut self, type_id: u32) {
-        self.type_id = Some(type_id);
+    pub fn set_ty(&mut self, ty: Type, declared_type: Option<Arc<TypeExpr>>) {
+        self.ty = Some(ty);
+        self.declared_type = declared_type;
     }
 
     /// Returns the argument index if this is a function parameter.
@@ -82,14 +89,14 @@ impl DebugVarInfo {
 
     /// Returns the source location if set.
     /// This is only set when the location differs from the AssemblyOp location.
-    pub fn location(&self) -> Option<&FileLineCol> {
+    pub fn location(&self) -> Option<&Location> {
         self.location.as_ref()
     }
 
     /// Sets the source location for this variable.
     /// Only set this when the location differs from the AssemblyOp location
     /// to avoid package bloat.
-    pub fn set_location(&mut self, location: FileLineCol) {
+    pub fn set_location(&mut self, location: Location) {
         self.location = Some(location);
     }
 
@@ -104,17 +111,6 @@ impl DebugVarInfo {
     }
 }
 
-/// Serde deserializer for `Arc<str>`.
-#[cfg(feature = "serde")]
-fn deserialize_arc_str<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use alloc::string::String;
-    let s = String::deserialize(deserializer)?;
-    Ok(Arc::from(s))
-}
-
 impl fmt::Display for DebugVarInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "var.{}", self.name)?;
@@ -126,7 +122,7 @@ impl fmt::Display for DebugVarInfo {
         write!(f, " = {}", self.value_location)?;
 
         if let Some(loc) = &self.location {
-            write!(f, " {loc}")?;
+            write!(f, " [{}@{}..{}]", loc.uri, loc.start, loc.end)?;
         }
 
         Ok(())
@@ -262,51 +258,11 @@ impl Deserializable for DebugVarLocation {
             ))),
         }
     }
-}
 
-impl Serializable for DebugVarInfo {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        (*self.name).write_into(target);
-        self.value_location.write_into(target);
-        self.type_id.write_into(target);
-        self.arg_index.map(core::num::NonZero::get).write_into(target);
-        self.location.write_into(target);
+    fn min_serialized_size() -> usize {
+        // `Stack` is encoded as a one-byte tag followed by a one-byte stack position.
+        u8::min_serialized_size() + u8::min_serialized_size()
     }
-}
-
-impl Deserializable for DebugVarInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name = read_bounded_string(source, "debug variable name bytes")?;
-        let value_location = DebugVarLocation::read_from(source)?;
-        let type_id = Option::<u32>::read_from(source)?;
-        let arg_index = Option::<u32>::read_from(source)?
-            .map(|n| {
-                NonZeroU32::new(n).ok_or_else(|| {
-                    DeserializationError::InvalidValue("arg_index must be non-zero".into())
-                })
-            })
-            .transpose()?;
-        let location = Option::<FileLineCol>::read_from(source)?;
-
-        Ok(Self {
-            name,
-            type_id,
-            arg_index,
-            location,
-            value_location,
-        })
-    }
-}
-
-fn read_bounded_string<R: ByteReader>(
-    source: &mut R,
-    label: &str,
-) -> Result<Arc<str>, DeserializationError> {
-    let len = read_bounded_len(source, label, 1)?;
-    let bytes = source.read_slice(len)?;
-    let value = core::str::from_utf8(bytes)
-        .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
-    Ok(Arc::from(value))
 }
 
 fn read_bounded_bytes<R: ByteReader>(
@@ -321,27 +277,15 @@ fn read_bounded_bytes<R: ByteReader>(
 mod tests {
     use alloc::string::ToString;
 
-    use miden_debug_types::{ColumnNumber, LineNumber, Uri};
+    use miden_core::serde::{Deserializable, Serializable, SliceReader};
+    use miden_debug_types::{ByteIndex, Uri};
 
     use super::*;
-    use crate::serde::{Deserializable, Serializable, SliceReader};
 
     #[test]
     fn debug_var_info_display_simple() {
         let var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
         assert_eq!(var.to_string(), "var.x = stack[0]");
-    }
-
-    #[test]
-    fn debug_var_info_rejects_oversized_name_length() {
-        let bytes = [0x08, 0x2a, 0xfe, 0xfe, 0x01];
-        let mut reader = SliceReader::new(&bytes);
-        let err = DebugVarInfo::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("debug variable name bytes count"));
-        assert!(message.contains("exceeds remaining input"));
     }
 
     #[test]
@@ -366,12 +310,12 @@ mod tests {
     #[test]
     fn debug_var_info_display_with_location() {
         let mut var = DebugVarInfo::new("y", DebugVarLocation::Memory(100));
-        var.set_location(FileLineCol::new(
+        var.set_location(Location::new(
             Uri::new("test.rs"),
-            LineNumber::new(42).unwrap(),
-            ColumnNumber::new(5).unwrap(),
+            ByteIndex::from(0u32),
+            ByteIndex::from(5u32),
         ));
-        assert_eq!(var.to_string(), "var.y = mem[100] [test.rs@42:5]");
+        assert_eq!(var.to_string(), "var.y = mem[100] [test.rs@0..5]");
     }
 
     #[test]
@@ -411,21 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn debug_var_info_serialization_round_trip_all_fields() {
-        let mut var = DebugVarInfo::new("full", DebugVarLocation::Expression(vec![0xaa, 0xbb]));
-        var.set_type_id(7);
-        var.set_arg_index(2);
-        var.set_location(FileLineCol::new(
-            Uri::new("lib.rs"),
-            LineNumber::new(50).unwrap(),
-            ColumnNumber::new(10).unwrap(),
-        ));
+    fn debug_var_location_min_serialized_size_matches_shortest_variant() {
+        let locations = [DebugVarLocation::Stack(0), DebugVarLocation::Expression(Vec::new())];
+        let min_serialized_size = DebugVarLocation::min_serialized_size();
 
-        let mut bytes = Vec::new();
-        var.write_into(&mut bytes);
-        let mut reader = SliceReader::new(&bytes);
-        let deser = DebugVarInfo::read_from(&mut reader).unwrap();
-        assert_eq!(deser, var);
+        assert_eq!(min_serialized_size, 2);
+        for location in locations {
+            let mut bytes = Vec::new();
+            location.write_into(&mut bytes);
+            assert_eq!(bytes.len(), min_serialized_size);
+        }
     }
 
     #[test]

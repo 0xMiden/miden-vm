@@ -1,4 +1,4 @@
-//! Boundary corrections and committed-final metadata for the Miden VM LogUp argument.
+//! Boundary corrections and normalized committed-sum metadata for the Miden VM LogUp argument.
 
 use alloc::vec::Vec;
 
@@ -7,10 +7,11 @@ use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
 use crate::{MIDEN_AIR_COUNT, lookup::BoundaryBuilder};
 
-// COMMITTED-FINALS COUNT
+// COMMITTED NORMALIZED SUM COUNT
 // ================================================================================================
 
-/// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
+/// Number of committed normalized LogUp sums (`sigma_prime`) in the multi-AIR proof shape: one per
+/// AIR.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 
 // BOUNDARY EMITTERS
