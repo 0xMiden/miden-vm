@@ -1,15 +1,20 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use core::fmt::Debug;
 
 use miden_core::{
     Word,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, SubtreeIterator},
-    operations::{AssemblyOp, DebugVarInfo},
+    mast::{
+        BasicBlockNode, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
+        SubtreeIterator,
+    },
 };
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
+    DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+};
 
 use super::{
     MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceNodeRef,
-    truncate_index_vec,
 };
 use crate::diagnostics::Report;
 
@@ -28,15 +33,15 @@ struct StaticLinkedRoot {
 #[derive(Default)]
 pub(super) struct StaticSourceMetadata {
     op_range: Option<(usize, usize)>,
-    asm_ops: Vec<(usize, AssemblyOp)>,
-    debug_vars: Vec<(usize, DebugVarInfo)>,
+    asm_ops: Vec<DebugSourceAsmOp>,
+    debug_vars: Vec<DebugSourceVar>,
+    inline_calls: Vec<DebugSourceInlineCall>,
+    functions: Vec<DebugFunctionIdx>,
 }
 
 struct StaticPendingDraft {
     draft: PendingMastNodeDraft,
     source_op_range: Option<(usize, usize)>,
-    asm_op_checkpoint: usize,
-    debug_var_checkpoint: usize,
 }
 
 /// Result of resolving an exact static-library root provenance hint.
@@ -58,37 +63,30 @@ impl MastForestBuilder {
         source_node: MastNode,
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
-    ) -> Result<StaticPendingDraft, Report> {
+    ) -> StaticPendingDraft {
         let digest = source_node.digest();
         let kind = PendingMastNodeKind::from_node(source_node);
-        let (asm_ops, debug_vars, op_range) = source_metadata
-            .map(|metadata| (metadata.asm_ops, metadata.debug_vars, metadata.op_range))
-            .unwrap_or_else(|| (Vec::new(), Vec::new(), None));
 
-        let asm_op_checkpoint = self.asm_op_by_ref.len();
-        let debug_var_checkpoint = self.debug_vars.len();
-        let indexed_asm_ops = self.indexed_asm_op_refs(asm_ops)?;
-        let indexed_debug_vars = match self.indexed_debug_var_refs(debug_vars) {
-            Ok(vars) => vars,
-            Err(err) => {
-                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
-                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
-                return Err(err);
-            },
-        };
+        let StaticSourceMetadata {
+            op_range,
+            asm_ops,
+            debug_vars,
+            inline_calls,
+            functions,
+        } = source_metadata.unwrap_or_default();
 
-        Ok(StaticPendingDraft {
+        StaticPendingDraft {
             draft: PendingMastNodeDraft {
                 digest,
                 kind,
                 child_refs,
-                asm_ops: indexed_asm_ops,
-                debug_vars: indexed_debug_vars,
+                asm_ops,
+                debug_vars,
+                inline_calls,
+                functions,
             },
             source_op_range: op_range,
-            asm_op_checkpoint,
-            debug_var_checkpoint,
-        })
+        }
     }
 
     /// Copies a statically linked node into this builder while keeping source metadata in the
@@ -99,16 +97,8 @@ impl MastForestBuilder {
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
     ) -> Result<MastNodeRef, Report> {
-        let StaticPendingDraft {
-            draft,
-            source_op_range,
-            asm_op_checkpoint,
-            debug_var_checkpoint,
-        } = self.pending_draft_for_statically_linked_source(
-            source_node,
-            child_refs,
-            source_metadata,
-        )?;
+        let StaticPendingDraft { draft, source_op_range } = self
+            .pending_draft_for_statically_linked_source(source_node, child_refs, source_metadata);
         let dedup_key = self.dedup_key_for_pending_data(&draft);
         let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
         if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
@@ -121,11 +111,10 @@ impl MastForestBuilder {
             return Ok(node_ref);
         }
 
-        let node_ref = self.insert_pending_node_with_allocated_metadata_refs(
+        let node_ref = self.insert_or_replace_pending_node_record_ref(
             dedup_key,
             draft.clone(),
-            asm_op_checkpoint,
-            debug_var_checkpoint,
+            &source_child_refs,
         )?;
         self.record_static_source_occurrence(node_ref, source_child_refs, &draft, source_op_range)?;
         Ok(node_ref)
@@ -147,6 +136,8 @@ impl MastForestBuilder {
             op_end,
             draft.asm_ops.clone(),
             draft.debug_vars.clone(),
+            draft.inline_calls.clone(),
+            &draft.functions,
             true,
         )
     }
@@ -155,18 +146,21 @@ impl MastForestBuilder {
         &self,
         source_forest: &MastForest,
         source_node_id: MastNodeId,
-        mappings: Vec<(usize, T)>,
-    ) -> Vec<(usize, T)> {
+        mut mappings: Vec<T>,
+        get_element_op_idx: impl Fn(&mut T) -> &mut u32,
+    ) -> Vec<T> {
         if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_node_id) {
             let unadjusted_indices = BasicBlockNode::unadjust_asm_op_indices(
-                mappings.iter().map(|(op_idx, _)| (*op_idx, ())).collect(),
+                mappings
+                    .iter_mut()
+                    .map(|element| *get_element_op_idx(element) as usize)
+                    .collect(),
                 block.op_batches(),
             );
-            unadjusted_indices
-                .into_iter()
-                .zip(mappings)
-                .map(|((op_idx, ()), (_, value))| (op_idx, value))
-                .collect()
+            for (op_idx, element) in unadjusted_indices.into_iter().zip(mappings.iter_mut()) {
+                *get_element_op_idx(element) = op_idx as u32;
+            }
+            mappings
         } else {
             mappings
         }
@@ -326,9 +320,12 @@ impl MastForestBuilder {
                         source_node.exec_node, source.source_root_id
                     )));
                 }
+                let tables =
+                    self.import_static_debug_tables(source.forest_idx, &package_debug_info)?;
                 return self.copy_package_debug_source_subtree_ref(
                     source_forest.as_ref(),
                     &package_debug_info,
+                    &tables,
                     source_debug_root_id,
                 );
             }
@@ -349,16 +346,40 @@ impl MastForestBuilder {
             .expect("statically linked subtree root must be copied"))
     }
 
+    fn import_static_debug_tables(
+        &mut self,
+        forest_idx: usize,
+        package_debug_info: &PackageDebugInfo,
+    ) -> Result<Arc<DebugInfoTableRemapping>, Report> {
+        let slot = self
+            .statically_linked_debug_table_remappings
+            .get_mut(forest_idx)
+            .expect("static debug table mappings must remain parallel to static libraries");
+        if let Some(tables) = slot.as_ref() {
+            return Ok(Arc::clone(tables));
+        }
+
+        let tables = Arc::new(package_debug_info.merge_tables_into(&mut self.debug_info).map_err(
+            |error| {
+                Report::msg(format!("failed to import statically linked debug tables: {error}"))
+            },
+        )?);
+        *slot = Some(Arc::clone(&tables));
+        Ok(tables)
+    }
+
     fn copy_package_debug_source_subtree_ref(
         &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
+        tables: &DebugInfoTableRemapping,
         source_root_id: DebugSourceNodeId,
     ) -> Result<MastNodeRef, Report> {
         let mut node_refs_by_source_id = BTreeMap::new();
         self.copy_package_debug_source_node_ref(
             source_forest,
             package_debug_info,
+            tables,
             source_root_id,
             &mut node_refs_by_source_id,
         )
@@ -368,6 +389,7 @@ impl MastForestBuilder {
         &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
+        tables: &DebugInfoTableRemapping,
         source_node_id: DebugSourceNodeId,
         node_refs_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeRef>,
     ) -> Result<MastNodeRef, Report> {
@@ -418,16 +440,19 @@ impl MastForestBuilder {
             child_refs.push(self.copy_package_debug_source_node_ref(
                 source_forest,
                 package_debug_info,
+                tables,
                 child_source_node_id,
                 node_refs_by_source_id,
             )?);
         }
+
         let metadata = self.package_source_metadata(
             source_forest,
             package_debug_info,
+            tables,
             source_node_id,
             source_exec_node_id,
-        );
+        )?;
         let node_ref = self.ensure_node_from_statically_linked_source_ref(
             source_exec_node,
             child_refs,
@@ -438,30 +463,76 @@ impl MastForestBuilder {
     }
 
     fn package_source_metadata(
-        &self,
+        &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
+        tables: &DebugInfoTableRemapping,
         source_node_id: DebugSourceNodeId,
         source_exec_node_id: MastNodeId,
-    ) -> StaticSourceMetadata {
+    ) -> Result<StaticSourceMetadata, Report> {
         let asm_ops = package_debug_info
             .asm_ops_for_source_node(source_node_id)
             .map(|row| {
-                (
-                    row.op_idx as usize,
-                    AssemblyOp::new(
-                        row.location.clone(),
-                        row.context_name.clone(),
-                        row.num_cycles,
-                        row.op.clone(),
-                    ),
-                )
+                let location_idx = row
+                    .location_idx
+                    .into_option()
+                    .map(|index| remapped_debug_index(tables.location(index), index, "location"))
+                    .transpose()?;
+                let context_name_idx = remapped_debug_index(
+                    tables.string(row.context_name_idx),
+                    row.context_name_idx,
+                    "string",
+                )?;
+                let op_name_idx = remapped_debug_index(
+                    tables.string(row.op_name_idx),
+                    row.op_name_idx,
+                    "string",
+                )?;
+                Ok(DebugSourceAsmOp::new(
+                    row.op_idx,
+                    location_idx,
+                    context_name_idx,
+                    op_name_idx,
+                    row.num_cycles,
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>, Report>>()?;
         let debug_vars = package_debug_info
             .debug_vars_for_source_node(source_node_id)
-            .map(|row| (row.op_idx as usize, row.var.clone()))
-            .collect();
+            .map(|row| {
+                let name_idx =
+                    remapped_debug_index(tables.string(row.name_idx), row.name_idx, "string")?;
+                let location_idx = row
+                    .location_idx
+                    .map(|index| remapped_debug_index(tables.location(index), index, "location"))
+                    .transpose()?;
+                let type_id = row
+                    .type_id
+                    .map(|index| remapped_debug_index(tables.ty(index), index, "type"))
+                    .transpose()?;
+                Ok(DebugSourceVar {
+                    op_idx: row.op_idx,
+                    name_idx,
+                    type_id,
+                    arg_idx: row.arg_idx,
+                    location_idx,
+                    value_location: row.value_location.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, Report>>()?;
+        let inline_calls = package_debug_info
+            .inline_calls_for_source_node(source_node_id)
+            .map(|row| {
+                let loc_idx =
+                    remapped_debug_index(tables.location(row.loc_idx), row.loc_idx, "location")?;
+                let callee_idx = remapped_debug_index(
+                    tables.function(row.callee_idx),
+                    row.callee_idx,
+                    "function",
+                )?;
+                Ok(DebugSourceInlineCall { op_idx: row.op_idx, callee_idx, loc_idx })
+            })
+            .collect::<Result<Vec<_>, Report>>()?;
         let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
             self.unadjust_source_block_range(
                 source_forest,
@@ -471,19 +542,48 @@ impl MastForestBuilder {
             )
         });
 
-        StaticSourceMetadata {
+        let mast_root = source_forest.get_digest_by_id(source_exec_node_id).unwrap();
+        let functions = package_debug_info
+            .functions()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, function)| {
+                let function_source_node = function.source_node.into_option();
+                if function_source_node.is_some_and(|snid| snid == source_node_id)
+                    || function_source_node.is_none() && function.mast_root == mast_root
+                {
+                    let function_index = DebugFunctionIdx::from(
+                        u32::try_from(index).expect("invalid function index"),
+                    );
+                    tables.function(function_index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Ok(StaticSourceMetadata {
             op_range,
             asm_ops: self.unadjust_source_block_indices(
                 source_forest,
                 source_exec_node_id,
                 asm_ops,
+                |asm_op| &mut asm_op.op_idx,
             ),
             debug_vars: self.unadjust_source_block_indices(
                 source_forest,
                 source_exec_node_id,
                 debug_vars,
+                |debug_var| &mut debug_var.op_idx,
             ),
-        }
+            inline_calls: self.unadjust_source_block_indices(
+                source_forest,
+                source_exec_node_id,
+                inline_calls,
+                |inline_call| &mut inline_call.op_idx,
+            ),
+            functions,
+        })
     }
 
     fn unadjust_source_block_range(
@@ -499,12 +599,24 @@ impl MastForestBuilder {
 
         if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_node_id) {
             let unadjusted_indices = BasicBlockNode::unadjust_asm_op_indices(
-                vec![(op_start, ()), (op_end - 1, ())],
+                vec![op_start, op_end - 1],
                 block.op_batches(),
             );
-            (unadjusted_indices[0].0, unadjusted_indices[1].0 + 1)
+            (unadjusted_indices[0], unadjusted_indices[1] + 1)
         } else {
             (op_start, op_end)
         }
     }
+}
+
+fn remapped_debug_index<I: Debug, T>(
+    mapped: Option<T>,
+    index: I,
+    table: &str,
+) -> Result<T, Report> {
+    mapped.ok_or_else(|| {
+        Report::msg(format!(
+            "statically linked debug info references missing {table} index {index:?}"
+        ))
+    })
 }

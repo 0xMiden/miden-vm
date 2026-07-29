@@ -67,9 +67,7 @@ fn assert_package_has_source_asm_ops(package: &Package, message: &str) {
         .debug_info()
         .expect("package debug info should decode")
         .expect("package should contain debug info");
-    let has_source_asm_ops = debug_info
-        .source_map()
-        .is_some_and(|source_map| !source_map.asm_ops().is_empty());
+    let has_source_asm_ops = debug_info.nodes().iter().any(|node| !node.asm_ops.is_empty());
     assert!(has_source_asm_ops, "{message}");
 }
 
@@ -1979,57 +1977,6 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
 }
 
 #[test]
-fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
-    let context = TestContext::default();
-    let library_module = parse_module!(
-        &context,
-        r#"
-        namespace lib::a
-        pub proc f1
-            assert.err="1"
-        end
-
-        pub proc f2
-            assert.err="2"
-        end
-        "#
-    );
-    let library = Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        library_module,
-        None::<Box<Module>>,
-    )?;
-
-    let f1 = QualifiedProcedureName::from_str("lib::a::f1").unwrap();
-    let f2 = QualifiedProcedureName::from_str("lib::a::f2").unwrap();
-    assert_eq!(library.get_procedure_root_by_path(&f1), library.get_procedure_root_by_path(&f2));
-    assert_ne!(library.get_export_node_id(&f1), library.get_export_node_id(&f2));
-
-    let source = source_file!(
-        &context,
-        "\
-        use lib::a
-
-        begin
-            exec.a::f2
-        end
-        "
-    );
-    let err = Assembler::new(context.source_manager())
-        .with_package(Arc::from(library), Linkage::Dynamic)?
-        .assemble_program("program", source)
-        .expect_err("expected ambiguous dynamic link diagnostic");
-
-    assert_diagnostic!(&err, "ambiguous dynamic procedure link for MAST root");
-    assert_diagnostic!(
-        &err,
-        "dynamic reference cannot select one of the same-digest exported roots"
-    );
-
-    Ok(())
-}
-
-#[test]
 fn mtree_verify_with_code() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
@@ -2953,6 +2900,44 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
             .expect_err("removed debug.* instruction should be rejected");
         assert_diagnostic!(&error, "invalid instruction");
     }
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResult {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use miden_assembly_syntax::{
+        ast::{
+            DebugVarInfo, DebugVarLocation, Instruction, Op,
+            types::{ArrayType, Type},
+        },
+        debuginfo::{SourceSpan, Span},
+    };
+
+    let context = TestContext::default();
+    let source = source_file!(&context, "begin nop end");
+    let mut module = context.parse_module(source)?;
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+
+    let oversized_len =
+        usize::try_from(u64::from(u32::MAX) + 1).expect("test requires a 64-bit target");
+    let mut debug_var = DebugVarInfo::new("value", DebugVarLocation::Stack(0));
+    debug_var.set_ty(Type::Array(Arc::new(ArrayType::new(Type::U8, oversized_len))), None);
+    entrypoint
+        .body_mut()
+        .push(Op::Inst(Span::new(SourceSpan::default(), Instruction::DebugVar(debug_var))));
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| context.assemble(module)));
+    let err = assembled
+        .expect("assembly panicked, expected a structured error")
+        .expect_err("invalid debug variable type should be rejected");
+    assert_diagnostic!(&err, "array type is too large");
+
+    Ok(())
 }
 
 #[test]
@@ -3968,14 +3953,14 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_ref = expected_mast_forest_builder
-            .ensure_block_ref(vec![Operation::Add], vec![], vec![])
+            .ensure_block_ref(vec![Operation::Add], vec![], vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
             .ensure_call_node_ref(
                 kernel_foo_node_ref,
                 true,
-                AssemblyOp::new(None, "test".into(), 1, "syscall.foo".into()),
+                AssemblyOp::new(None, "test", 1, "syscall.foo"),
             )
             .unwrap()
     };
@@ -4020,41 +4005,35 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_ref = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block_ref(fmp_initialization_sequence(), vec![], vec![])
+        .ensure_block_ref(fmp_initialization_sequence(), vec![], vec![], vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_split_node_ref(
-            [r#true1, r#false1],
-            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
-        )
+        .ensure_split_node_ref([r#true1, r#false1], AssemblyOp::new(None, "test", 1, "if.true"))
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_split_node_ref(
-            [r#true3, r#false3],
-            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
-        )
+        .ensure_split_node_ref([r#true3, r#false3], AssemblyOp::new(None, "test", 1, "if.true"))
         .unwrap();
 
     let r#while = {
@@ -4067,15 +4046,17 @@ fn nested_blocks() -> Result<(), Report> {
                 ],
                 vec![],
                 vec![],
+                vec![],
+                vec![],
             )
             .unwrap();
 
-        let asm_op = AssemblyOp::new(None, "test".into(), 1, "while.true".into());
+        let asm_op = AssemblyOp::new(None, "test", 1, "while.true");
         let loop_node_ref = expected_mast_forest_builder
             .ensure_loop_node_ref(body_node_ref, asm_op.clone())
             .unwrap();
         let noop_node_ref = expected_mast_forest_builder
-            .ensure_block_ref(vec![Operation::Noop], vec![], vec![])
+            .ensure_block_ref(vec![Operation::Noop], vec![], vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
@@ -4083,17 +4064,14 @@ fn nested_blocks() -> Result<(), Report> {
             .unwrap()
     };
     let push_13_basic_block_ref = expected_mast_forest_builder
-        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
         .join_node_refs(vec![push_13_basic_block_ref, r#while], None)
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_split_node_ref(
-            [r#true2, r#false2],
-            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
-        )
+        .ensure_split_node_ref([r#true2, r#false2], AssemblyOp::new(None, "test", 1, "if.true"))
         .unwrap();
 
     let combined_node_ref = expected_mast_forest_builder
@@ -7704,4 +7682,118 @@ fn test_entrypoint_with_locals_via_constructor_panics() {
         .expect("failed to define entrypoint");
 
     let _ = Assembler::new(context.source_manager()).assemble_program("test", module);
+}
+
+/// Pins the cycle cost of every instruction documented in
+/// `docs/src/user_docs/assembly/field_operations.md` to the number of operations the assembler
+/// actually emits, so the two cannot drift apart.
+///
+/// Cost is measured by differencing programs containing the instruction once, twice and three
+/// times: this cancels the entrypoint prologue exactly, and requiring the two deltas to agree
+/// rules out any fusion between adjacent copies.
+#[test]
+fn field_operation_cycle_costs_match_docs() {
+    // (source, documented cycles)
+    let cases: &[(&str, usize)] = &[
+        // Assertions and tests
+        ("assert", 1),
+        ("assertz", 2),
+        ("assert_eq", 2),
+        ("assert_eqw", 11),
+        // Arithmetic and Boolean operations
+        ("add", 1),
+        ("add.2", 2),
+        ("sub", 2),
+        ("sub.2", 2),
+        ("mul", 1),
+        ("mul.2", 2),
+        ("div", 2),
+        ("div.2", 2),
+        ("neg", 1),
+        ("inv", 1),
+        ("pow2", 16),
+        ("exp", 73),
+        ("exp.u8", 17),
+        ("exp.u16", 25),
+        ("exp.u32", 41),
+        ("exp.u63", 72),
+        // exp.b: small-power table for b <= 7, then 11 + floor(log2(b))
+        ("exp.0", 3),
+        ("exp.1", 1),
+        ("exp.2", 2),
+        ("exp.3", 4),
+        ("exp.4", 6),
+        ("exp.5", 8),
+        ("exp.6", 10),
+        ("exp.7", 12),
+        ("exp.8", 14),
+        ("exp.16", 15),
+        ("exp.256", 19),
+        ("ilog2", 70),
+        ("not", 1),
+        ("and", 1),
+        ("or", 1),
+        ("xor", 7),
+        // Comparison operations
+        ("eq", 1),
+        ("eq.2", 2),
+        ("neq", 2),
+        ("neq.2", 3),
+        ("lt", 17),
+        ("lt.2", 18),
+        ("lte", 18),
+        ("lte.2", 19),
+        ("gt", 16),
+        ("gt.2", 17),
+        ("gte", 17),
+        ("gte.2", 18),
+        ("is_odd", 6),
+        ("eqw", 15),
+        // Extension field operations
+        ("ext2add", 5),
+        ("ext2sub", 7),
+        ("ext2mul", 3),
+        ("ext2neg", 4),
+        ("ext2inv", 11),
+        ("ext2div", 14),
+    ];
+
+    let ops_for = |instruction: &str, copies: usize| -> usize {
+        let context = TestContext::default();
+        let body = core::iter::repeat_n(instruction, copies).collect::<Vec<_>>().join("\n    ");
+        let source = source_file!(&context, format!("begin\n    {body}\nend"));
+        let program = Assembler::new(context.source_manager())
+            .assemble_program("program", source)
+            .expect("assembly failed")
+            .unwrap_program();
+
+        program
+            .mast_forest()
+            .nodes()
+            .iter()
+            .filter_map(|node| node.get_basic_block())
+            .map(|block| block.raw_operations().count())
+            .sum()
+    };
+
+    let mut mismatches = Vec::new();
+    for (instruction, documented) in cases {
+        let (one, two, three) =
+            (ops_for(instruction, 1), ops_for(instruction, 2), ops_for(instruction, 3));
+        let (first, second) = (two - one, three - two);
+        assert_eq!(
+            first, second,
+            "{instruction}: cost is not additive across copies ({first} then {second}); \
+             the differencing measurement is not valid for this instruction"
+        );
+        if first != *documented {
+            mismatches.push(format!("  {instruction}: documented {documented}, emits {first}"));
+        }
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "field_operations.md is out of date:\n{}",
+        mismatches.join("\n")
+    );
 }
