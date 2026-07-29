@@ -88,6 +88,11 @@
 - [BREAKING] Bound MMR peak commitments to the leaf count by hashing `[num_leaves, 0, 0, 0] || padded_peaks`, and updated the core library `mmr::pack`/`mmr::unpack` procedures to use the same preimage ([#3388](https://github.com/0xMiden/miden-vm/pull/3388)).
 
 ## miden-vm v0.25.8 (2026-07-22)
+## v0.25.9 (TBD)
+
+- Added a typed view over a package manifest's procedure signatures, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
+## v0.25.8 (2026-07-22)
 
 - Fix validation of procedure names in package manifest exports when extracting module info
 - [BREAKING] Consolidate all package debug info sections into `PackageDebugInfo`, and rewrite its serialization format to remove as much excess overhead as possible. This addresses the issue where the presence of package debug info causes massive execution-time overhead when requesting the debug info for the package. It also simplifies construction/maintenance of debug info, and provides more ergonomic APIs for accessing specific types of information. ([#3398](https://github.com/0xMiden/miden-vm/pull/3398))
