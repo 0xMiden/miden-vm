@@ -367,7 +367,7 @@ impl DependencyGraph {
 
         Ok(self.compute_path_source_hash_from_sources(
             &context.package,
-            Some(context.project_root),
+            Some(context.project_root.as_ref()),
             context.target,
             context.profile,
             &source_provenance,

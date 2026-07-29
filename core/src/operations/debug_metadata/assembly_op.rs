@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::sync::Arc;
 use core::fmt;
 
 use miden_debug_types::Location;
@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 pub struct AssemblyOp {
     #[cfg_attr(feature = "serde", serde(default))]
     location: Option<Location>,
-    context_name: String,
-    op: String,
+    context_name: Arc<str>,
+    op: Arc<str>,
     num_cycles: u8,
 }
 
@@ -25,11 +25,16 @@ impl AssemblyOp {
     /// of cycles it takes to execute the assembly instruction.
     pub fn new(
         location: Option<Location>,
-        context_name: String,
+        context_name: impl Into<Arc<str>>,
         num_cycles: u8,
-        op: String,
+        op: impl Into<Arc<str>>,
     ) -> Self {
-        Self { location, context_name, op, num_cycles }
+        Self {
+            location,
+            context_name: context_name.into(),
+            op: op.into(),
+            num_cycles,
+        }
     }
 
     /// Returns the [Location] for this operation, if known
@@ -38,7 +43,7 @@ impl AssemblyOp {
     }
 
     /// Returns the context name for this operation.
-    pub fn context_name(&self) -> &str {
+    pub fn context_name(&self) -> &Arc<str> {
         &self.context_name
     }
 
@@ -48,7 +53,7 @@ impl AssemblyOp {
     }
 
     /// Returns the assembly instruction corresponding to this source mapping.
-    pub fn op(&self) -> &str {
+    pub fn op(&self) -> &Arc<str> {
         &self.op
     }
 

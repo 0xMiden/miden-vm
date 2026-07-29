@@ -192,7 +192,8 @@ pub fn exp(
 /// - pow = 5: 8 cycles
 /// - pow = 6: 10 cycles
 /// - pow = 7: 12 cycles
-/// - pow > 7: 9 + Ceil(log2(pow))
+/// - pow > 7: 11 + Floor(log2(pow)) — one `Push` plus `exp`'s 9 + num_pow_bits, where num_pow_bits
+///   is the bit length of pow
 pub fn exp_imm(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
@@ -272,7 +273,7 @@ fn perform_exp_for_small_power(span_builder: &mut BasicBlockBuilder, pow: u64) {
 /// Appends a sequence of operations to calculate the base 2 integer logarithm of the stack top
 /// element, using non-deterministic technique (i.e. it takes help of advice provider).
 ///
-/// This operation takes 66 VM cycles.
+/// This operation takes 70 VM cycles.
 ///
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals ZERO.
