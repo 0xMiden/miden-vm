@@ -201,6 +201,8 @@ fn build_advice(
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
+    // Normalized LogUp sums (`sigma_prime`), one per AIR in proof order. The recursive verifier
+    // scales each value by the matching trace length for the outer boundary check.
     for aux_values in &stark.all_aux_values {
         advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
     }

@@ -3,6 +3,7 @@
 ## v0.28.0 (unreleased)
 
 #### Changes
+- [BREAKING] Normalized each AIR's committed LogUp sum by its trace length and changed the running-sum constraint to close cyclically, removing the requirement that lookup activity be absent from the last row ([#3412](https://github.com/0xMiden/miden-vm/pull/3412)).
 - `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
 
 - Opened the `LargeSmtForest` backend API for external implementations: made `LineageMutation::new` and `AppliedLineageMutation::new` public and added `LineageId::as_bytes` and `MutationSet::from_parts`.
