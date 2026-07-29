@@ -134,9 +134,12 @@ mod tests {
         }
     }
 
-    /// Checks the SVE2 packed permutation against the scalar implementation for a
-    /// state that triggers a second-order carry in the initial MDS.
-    #[cfg(all(target_arch = "aarch64", target_feature = "sve2"))]
+    /// Checks the packed permutation against the scalar implementation for a state
+    /// that triggers a second-order carry in the initial MDS.
+    // Runs on every packed backend except aarch64 NEON, whose `p3-goldilocks` 0.6.2
+    // path still single-corrects.
+    // TODO: change the gating when we migrate to the latest Plonky3 release.
+    #[cfg(not(all(target_arch = "aarch64", not(target_feature = "sve2"))))]
     #[test]
     fn poseidon2_packed_permutation_second_order_carry() {
         // Every lane identical; this state hits the initial-MDS second-order carry.
