@@ -3,3 +3,4 @@
 pub mod ecdsa_k256_keccak;
 pub mod eddsa_25519_sha512;
 pub mod falcon512_poseidon2;
+pub mod leansig_poseidon2;

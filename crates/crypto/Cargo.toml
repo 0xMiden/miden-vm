@@ -120,6 +120,7 @@ rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = t
 serde            = { features = ["derive"], optional = true, workspace = true }
 sha2             = { workspace = true }
 sha3             = { workspace = true }
+shake            = { workspace = true }
 subtle           = { workspace = true }
 thiserror        = { workspace = true }
 x25519-dalek     = { features = ["static_secrets"], workspace = true }
@@ -143,7 +144,6 @@ itertools      = { features = ["use_std"], workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
-shake          = { workspace = true }
 tempfile       = { workspace = true }
 
 [build-dependencies]
