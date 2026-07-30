@@ -99,16 +99,16 @@ impl ProcessorStateSnapshot {
 #[derive(Debug, Clone)]
 pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// List of event IDs that have been received
-    pub event_handler: Vec<u32>,
+    pub event_handler: Vec<u64>,
 
     /// List of trace IDs that have been received
-    pub trace_handler: Vec<u32>,
+    pub trace_handler: Vec<u64>,
 
     /// Process state snapshots captured at emitted test checkpoints.
-    snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
+    snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// Process state snapshots captured at trace checkpoints.
-    trace_snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
+    trace_snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
@@ -145,12 +145,12 @@ impl TestHost {
     }
 
     /// Gets the processor state snapshots captured by emitted test checkpoints.
-    pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
+    pub fn snapshots(&self) -> &BTreeMap<u64, Vec<ProcessorStateSnapshot>> {
         &self.snapshots
     }
 
     /// Gets the processor state snapshots captured at trace checkpoints.
-    pub fn trace_snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
+    pub fn trace_snapshots(&self) -> &BTreeMap<u64, Vec<ProcessorStateSnapshot>> {
         &self.trace_snapshots
     }
 }
@@ -184,7 +184,7 @@ where
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
+        let event_id = process.get_stack_item(0).as_canonical_u64();
         self.event_handler.push(event_id);
         self.snapshots
             .entry(event_id)
@@ -194,7 +194,7 @@ where
     }
 
     fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
-        let trace_id: u32 = process.get_stack_item(1).as_canonical_u64().try_into().unwrap();
+        let trace_id = process.get_stack_item(1).as_canonical_u64();
         self.trace_handler.push(trace_id);
         self.trace_snapshots
             .entry(trace_id)
@@ -215,8 +215,8 @@ mod tests {
 
     #[test]
     fn test_host_records_trace_and_snapshot() {
-        const TRACE_ID_1: u32 = 100;
-        const TRACE_ID_2: u32 = 200;
+        const TRACE_ID_1: u64 = 100;
+        const TRACE_ID_2: u64 = 200;
         let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_u64();
 
         let source = format!(

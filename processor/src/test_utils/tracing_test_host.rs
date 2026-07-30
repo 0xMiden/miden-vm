@@ -17,9 +17,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct TracingTestHost {
     /// Regular host event IDs received via [`SyncHost::on_event`], in emission order.
-    pub events: Vec<u32>,
+    pub events: Vec<u64>,
     /// Trace event IDs received via [`SyncHost::on_trace`], in emission order.
-    pub traces: Vec<u32>,
+    pub traces: Vec<u64>,
     source_manager: Arc<DefaultSourceManager>,
 }
 
@@ -57,13 +57,13 @@ impl SyncHost for TracingTestHost {
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
+        let event_id = process.get_stack_item(0).as_canonical_u64();
         self.events.push(event_id);
         Ok(Vec::new())
     }
 
     fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
-        let trace_event_id: u32 = process.get_stack_item(1).as_canonical_u64().try_into().unwrap();
+        let trace_event_id = process.get_stack_item(1).as_canonical_u64();
         self.traces.push(trace_event_id);
         Ok(())
     }
@@ -81,7 +81,7 @@ impl SyncHost for TracingTestHost {
 #[derive(Debug, Clone)]
 pub struct NonTracingTestHost {
     /// Regular host event IDs received via [`SyncHost::on_event`], in emission order.
-    pub events: Vec<u32>,
+    pub events: Vec<u64>,
     source_manager: Arc<DefaultSourceManager>,
 }
 
@@ -122,7 +122,7 @@ impl SyncHost for NonTracingTestHost {
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
+        let event_id = process.get_stack_item(0).as_canonical_u64();
         self.events.push(event_id);
         Ok(Vec::new())
     }
@@ -139,8 +139,8 @@ mod tests {
     /// the default no-op implementation, and trace events must not be routed to `on_event`.
     #[test]
     fn non_tracing_host_ignores_trace_events() {
-        const REGULAR_EVENT_ID_1: u32 = 3000;
-        const REGULAR_EVENT_ID_2: u32 = 4000;
+        const REGULAR_EVENT_ID_1: u64 = 3000;
+        const REGULAR_EVENT_ID_2: u64 = 4000;
         const TRACE_ID: u32 = 1000;
         let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_u64();
 
