@@ -238,14 +238,14 @@ impl TraceHandlerRegistry {
     ) -> Result<(), ExecutionError> {
         // Check if the event is a reserved system event
         if SystemEvent::from_name(event.as_str()).is_some() {
-            return Err(crate::errors::HostError::ReservedTraceNamespace { event }.into());
+            return Err(crate::errors::HostError::ReservedEventNamespace { event }.into());
         }
 
         let id = event.to_event_id();
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => {
-                return Err(crate::errors::HostError::DuplicateTraceHandler { event }.into());
+                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
             },
         };
         Ok(())
@@ -498,10 +498,10 @@ mod tests {
         let mut registry = TraceHandlerRegistry::new();
         let err = registry.register(reserved.clone(), Arc::new(NoopTraceHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::ReservedTraceNamespace { event }) => {
+            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
                 assert_eq!(event, reserved);
             },
-            other => panic!("expected ReservedTraceNamespace, got {other:?}"),
+            other => panic!("expected ReservedEventNamespace, got {other:?}"),
         }
     }
 
@@ -513,10 +513,10 @@ mod tests {
 
         let err = registry.register(NAME, Arc::new(NoopTraceHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::DuplicateTraceHandler { event }) => {
+            ExecutionError::HostError(HostError::DuplicateEventHandler { event }) => {
                 assert_eq!(event, NAME);
             },
-            other => panic!("expected DuplicateTraceHandler, got {other:?}"),
+            other => panic!("expected DuplicateEventHandler, got {other:?}"),
         }
     }
 
@@ -560,7 +560,7 @@ mod tests {
 
         assert!(matches!(
             host.register_trace_handler(NAME, Arc::new(NoopTraceHandler)),
-            Err(ExecutionError::HostError(HostError::DuplicateTraceHandler { .. }))
+            Err(ExecutionError::HostError(HostError::DuplicateEventHandler { .. }))
         ));
 
         assert!(host.unregister_trace_handler(id));

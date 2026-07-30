@@ -90,7 +90,6 @@ impl FastProcessor {
 
     /// `trace_id` refers to the event defined by the user, which is on the stack below
     /// `SystemEvent::TraceEvent`.
-    #[inline(always)]
     fn handle_trace_result<F>(
         &mut self,
         host: &impl BaseHost,
