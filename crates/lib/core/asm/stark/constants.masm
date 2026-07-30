@@ -103,9 +103,10 @@ const BOUNDARY_INPUTS_ADDRESS_PTR = 3223322670
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
 
-### Caller-supplied base address of the kernel-procedure digests (N word-aligned digests). Persisted
-### by `stage_boundary_inputs` from its operand so the step-II boundary fold can re-read the same region the
-### kernel commitment hashes.
+### Base address of the kernel-procedure digests (N word-aligned digests): the verifier-owned
+### witness region (`KERNEL_WITNESS_PTR`) that `verify_vm_proof` fetches into from the advice map.
+### Persisted by `stage_boundary_inputs` from its operand so the step-II boundary fold can re-read
+### the same region the kernel commitment hashes.
 const KERNEL_DIGESTS_ADDRESS_PTR = 3223322706
 
 ### Caller-supplied base address of the claim region (40 base felts: P | K | I | O).

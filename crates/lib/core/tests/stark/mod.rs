@@ -507,8 +507,11 @@ fn stark_verifier_e2f4_request_multi_proof() {
 /// These runs are the differential guardrail that pins the proof-stream order against the MASM
 /// consumption sequence, so they deliberately feed `verify_vm_proof` the proof stream directly
 /// rather than fetching it through a request.
-fn run_recursive_verifier(data: &VerifierData) {
-    let source = format!(
+/// The MASM program that stages the claim into memory at `claim_ptr = 4096` and runs
+/// `verify_vm_proof` positionally. Shared by the differential runner and the negative tests that
+/// tamper the advice before verifying.
+fn verify_vm_proof_program() -> String {
+    format!(
         "
         use miden::core::sys
         use miden::core::sys::vm
@@ -528,7 +531,11 @@ fn run_recursive_verifier(data: &VerifierData) {
             exec.sys::truncate_stack
         end
         "
-    );
+    )
+}
+
+fn run_recursive_verifier(data: &VerifierData) {
+    let source = verify_vm_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack,
@@ -538,8 +545,135 @@ fn run_recursive_verifier(data: &VerifierData) {
     );
     let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
 
+    // `verify_vm_proof` returns [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
+    // Pin D (stack positions 0..4) to the proof-stream value and the parameter tail (positions
+    // 4..8) to the deployed PCS config so a change to the returned tuple's values or order is
+    // caught across every e2e configuration.
+    let params = miden_air::config::pcs_params();
+    let returned = |i: usize| output.stack.get_element(i).map(|f| f.as_canonical_u64());
+    for i in 0..WORD_SIZE {
+        assert_eq!(returned(i), Some(data.proof_stream[4 + i]), "returned deferred root felt {i}");
+    }
+    assert_eq!(returned(4), Some(params.num_queries() as u64), "returned num_queries");
+    assert_eq!(returned(5), Some(params.query_pow_bits() as u64), "returned query_pow_bits");
+    assert_eq!(returned(6), Some(params.deep_pow_bits() as u64), "returned deep_pow_bits");
+    assert_eq!(returned(7), Some(params.folding_pow_bits() as u64), "returned folding_pow_bits");
+
     // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
     ace_read_check::cross_check_ace_circuit(&output);
+}
+
+/// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,
+/// folding_pow_bits) is absorbed into the Fiat-Shamir transcript, so forging any one of them in
+/// the proof stream diverges the transcript and fails verification. They are the first four
+/// advice values `verify_vm_proof` reads, i.e. `proof_stream[0..4]`.
+#[test]
+fn each_security_parameter_is_transcript_bound() {
+    let source = verify_vm_proof_program();
+    let base = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    for param in 0usize..4 {
+        let mut data = base.clone();
+        // Forge the parameter downward. In particular, the proof's original PoW nonces satisfy
+        // the weaker targets, so rejection cannot be explained solely by demanding more work;
+        // the changed transcript/verification schedule must invalidate the proof.
+        data.proof_stream[param] -= 1;
+        let test = build_test!(
+            source.as_str(),
+            &data.initial_stack,
+            &data.advice_stack(),
+            data.store.clone(),
+            data.advice_map.clone()
+        );
+        assert!(
+            test.execute_for_output().is_err(),
+            "verifier accepted a forged security parameter (index {param})"
+        );
+    }
+}
+
+/// The advice-fetched kernel digest list is copied into the verifier-owned region, then must hash
+/// to the claim's kernel commitment K before it is folded into the outer-LogUp boundary. That
+/// equality check in `verify_vm_proof` is the sole binding of the fetched digests to K, so its
+/// rejection arm is pinned here: tampering the witness under K must fail at *that* assertion
+/// specifically (matched by error code), not merely somewhere downstream — the boundary check
+/// would also reject a tampered witness, so a plain `is_err` would not prove the bind is enforced.
+#[test]
+fn tampered_kernel_witness_is_rejected() {
+    let mut data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(KERNEL_EVEN_NUM_PROC),
+    );
+    let k = claim_kernel_commitment(&data);
+    let witness = advice_map_value_mut(&mut data, k);
+    // Flip one felt of the first digest; the count (index 0) stays valid so the flow reaches the
+    // hash check rather than the count bound.
+    witness[1] = Felt::new_unchecked(witness[1].as_canonical_u64() ^ 1);
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack,
+        &data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(
+        test,
+        "fetched kernel digests do not hash to the claim's kernel commitment"
+    );
+}
+
+/// `verify_vm_proof` bounds the advice-supplied kernel digest count before copying it, on the
+/// actual advice-map path (the direct `stage_boundary_inputs` bound is covered in `sys`). A
+/// witness claiming 256 digests (one over `KernelDescriptor::MAX_NUM_PROCEDURES`) under K must be
+/// rejected at that bound.
+#[test]
+fn verify_vm_proof_rejects_oversized_kernel_witness() {
+    let mut data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(KERNEL_EVEN_NUM_PROC),
+    );
+    let k = claim_kernel_commitment(&data);
+    // Replace the witness with a count one over the maximum; the bound fires before the copy, so
+    // no digests are needed.
+    *advice_map_value_mut(&mut data, k) = vec![Felt::new_unchecked(256)];
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack,
+        &data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(
+        test,
+        "number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+    );
+}
+
+/// The claim's kernel commitment K, read from felts [4, 8) of the claim encoding stored in the
+/// advice map under the claim commitment.
+fn claim_kernel_commitment(data: &VerifierData) -> Word {
+    let claim = &data
+        .advice_map
+        .iter()
+        .find(|(key, _)| *key == data.claim_commitment)
+        .expect("claim encoding is registered under its commitment")
+        .1;
+    Word::new([claim[4], claim[5], claim[6], claim[7]])
+}
+
+/// Mutable reference to the advice-map value stored under `key`.
+fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
+    let entry = data
+        .advice_map
+        .iter_mut()
+        .find(|(k, _)| *k == key)
+        .expect("advice map has an entry under the requested key");
+    &mut entry.1
 }
 
 // EXAMPLE PROGRAMS
@@ -625,7 +759,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&program_digest);
-    advice_stack.extend(expected_kernel_h.iter().map(|f| f.as_canonical_u64()));
+    advice_stack.extend(expected_kernel_h.iter().map(Felt::as_canonical_u64));
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
     advice_stack.extend_from_slice(&deferred_root);
@@ -771,17 +905,17 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
     );
 }
 
-/// The recursive verifier must reject statements with more kernel-procedure digests than a
-/// `KernelDescriptor` can contain. 256 digests is one over the maximum, so
-/// `stage_boundary_inputs` must fail on the digest-count bound before reading caller memory or
-/// advice.
+/// `stage_boundary_inputs` must reject a kernel-procedure digest count over the maximum
+/// (`KernelDescriptor::MAX_NUM_PROCEDURES` = 255) before reading caller memory or advice — the
+/// count bound is its first check. The same bound on the top-level `verify_vm_proof` advice path
+/// is covered by `verify_vm_proof_rejects_oversized_kernel_witness`.
 #[test]
 fn rejects_too_many_kernel_proc_digests() {
     let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
 
-    // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3]. The bound on N is the first check in
-    // `stage_boundary_inputs`, so no caller memory or advice is needed.
-    let initial_stack = vec![0_u64, num_kernel_proc_digests, 4096, 1, 2, 3, 4];
+    // Operands: [claim_ptr, kernel_ptr, N]. The bound on N is the first check in
+    // `stage_boundary_inputs`, so the pointer operands are unused and no memory or advice is set.
+    let initial_stack = vec![0_u64, 0, num_kernel_proc_digests];
 
     let source = "
         use miden::core::sys::vm::public_inputs
@@ -794,7 +928,7 @@ fn rejects_too_many_kernel_proc_digests() {
     let test = build_test!(source, &initial_stack);
     assert!(
         test.execute_for_output().is_err(),
-        "verifier accepted {num_kernel_proc_digests} kernel digests, exceeding max_aux_inputs"
+        "stage_boundary_inputs accepted {num_kernel_proc_digests} kernel digests, exceeding the maximum"
     );
 }
 

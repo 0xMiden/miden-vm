@@ -49,9 +49,9 @@ use miden::core::sys::vm::claim
 # Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
 #   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
 # where CLAIM_HASH is the canonical execution-claim commitment over
-# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` (computed inline by
-# `compute_claim_commitment`). With RELATION_DIGEST pre-loaded in the transcript capacity by
-# `init_seed`, the state after this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` (computed over the caller's claim
+# region by `claim::claim_commitment`). With RELATION_DIGEST pre-loaded in the transcript
+# capacity by `init_seed`, the state after this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
 # The raw stack i/o and kernel digests remain public values for the constraint checks and the
 # LogUp boundary without being separately absorbed.
 #
@@ -74,12 +74,6 @@ use miden::core::sys::vm::claim
 # Number of fixed length public inputs (in field elements): stack inputs (16) + stack
 # outputs (16). These are the only public values referenced by the ACE circuit; the program
 # digest and deferred root live in the caller-facing boundary-inputs block instead.
-# Domain tag for the claim commitment: the registered selector
-# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (0x010001 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match
-# miden_core::program::CLAIM_DOMAIN_TAG and the const in claim.masm (enforced by the
-# e2e recursion tests).
-const CLAIM_DOMAIN_TAG = 0x01000101
 
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
@@ -354,7 +348,7 @@ end
 #! (step II). Requires the aux randomness to have been sampled into `AUX_RAND_ELEM_PTR` by
 #! `generate_aux_randomness` first.
 #!
-#! Derives `γ = β^16`, then folds the request/response terms over the caller-owned kernel digests
+#! Derives `γ = β^16`, then folds the request/response terms over the verifier-owned kernel digests
 #! at `KERNEL_DIGESTS_ADDRESS_PTR` (count at `NUM_KERNEL_DIGESTS_PTR`) and the program digest /
 #! deferred root in the boundary-inputs block, all staged in `stage_boundary_inputs`. Mirrors the module
 #! banner's `c_total` definition and `MidenMultiAir::eval_external`.
@@ -402,21 +396,12 @@ pub proc compute_outer_logup_correction
     # => [...]
 end
 
-#! Observes the 16-felt boundary-inputs window at `boundary_inputs_ptr + 0..+15` into the FS
-#! transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
-#!   Chunk 1: `[kernel_H | program_digest]`   at boundary_inputs+0..+7.
-#!   Chunk 2: `[deferred_root | zero_pad]` at boundary_inputs+8..+15.
-#! The trailing pad word is written to zero here so the absorption does not depend on the scratch
-#! region being zero-initialized.
-#!
-#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
-#!
-#! Input:  [...]
-#! Output: [...]
 #! Absorbs the single statement block `[CLAIM_HASH | D]` into the FS transcript, mirroring
 #! `MidenMultiAir::observe`. With RELATION_DIGEST pre-loaded in the transcript capacity
 #! (`init_seed`), the resulting state realizes the factored statement binding
-#! `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+#! `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`. `D` is read from the boundary-inputs window.
+#!
+#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
 #!
 #! Input:  [CLAIM_HASH, ...]
 #! Output: [...]
@@ -443,7 +428,7 @@ proc absorb_claim_and_deferred_into_fs
     # => [...]
 end
 
-#! Loads stack i/o from caller memory at `STACK_IO_ADDRESS_PTR` and stores it at `pi_ptr` as
+#! Loads the claim region's stack i/o (at `claim_address_ptr + 8`) and stores it at `pi_ptr` as
 #! extension field elements (each base felt at offset `2*i`, zero in the high coordinate).
 #!
 #! The values are public inputs for the constraint checks only; they are NOT absorbed into the

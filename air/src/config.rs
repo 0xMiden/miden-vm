@@ -483,6 +483,22 @@ mod tests {
         );
     }
 
+    /// The deployed PCS preset attains exactly the conjectured target (96 bits) at its actual
+    /// query count and query-PoW constants. Unlike the reference-vector test below (which pins the
+    /// formula against hard-coded inputs), this pins the live `NUM_QUERIES` / `QUERY_POW_BITS`
+    /// preset, so a query-count or query-PoW downgrade is caught here rather than only indirectly.
+    #[test]
+    fn deployed_preset_attains_conjectured_target() {
+        assert_eq!(
+            super::conjectured_security_level(
+                super::NUM_QUERIES as u32,
+                super::QUERY_POW_BITS as u32
+            ),
+            96,
+            "deployed preset no longer attains 96 conjectured bits",
+        );
+    }
+
     /// The integer fixed-point conjectured-security computation must reproduce the
     /// reference values of the random-words formula (2025/2010, section 1.5), precomputed
     /// externally; in particular the calibration points (27, 16) -> 95 and (27, 17) -> 96.

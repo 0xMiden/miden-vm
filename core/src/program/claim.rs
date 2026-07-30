@@ -58,10 +58,9 @@ pub const REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1)
 /// executed code and its syscall authorization set; the stack inputs and outputs are the
 /// execution's public I/O.
 ///
-/// Stack inputs are ordered as if pushed onto the stack one by one, so the last value in the
-/// slice ends up on top of the stack; stack outputs are ordered as if popped off one by one, so
-/// the top of the stack is the first value. The claim stores both in their canonical
-/// zero-padded 16-element form.
+/// Stack inputs and stack outputs are both stored top-of-stack first: the first value in each
+/// slice is the top of the operand stack. The claim stores both in their canonical zero-padded
+/// 16-element form.
 ///
 /// The deferred root is deliberately absent: verification returns it as an obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]

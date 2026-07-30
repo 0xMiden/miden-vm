@@ -19,13 +19,6 @@ const CONJECTURED_BITS_PER_QUERY_FP = 193382
 # Cap on any reported security level: min(challenge-field bits, hash collision resistance).
 const MAX_SECURITY_LEVEL = 128
 
-# Domain tag for the claim commitment: the registered selector
-# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (0x010001 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026). Must match
-# miden_core::program::CLAIM_DOMAIN_TAG and the const in claim.masm (enforced by the
-# e2e recursion tests).
-const CLAIM_DOMAIN_TAG = 0x01000101
-
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
 const RELATION_DIGEST_0 = 6228634522968454696
 const RELATION_DIGEST_1 = 9493741029039437490

@@ -25,11 +25,12 @@
 //! | `0x010001` | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
 //! | `0x010002` | 1       | proof request key ([`REQUEST_DOMAIN_TAG`](super::REQUEST_DOMAIN_TAG)) |
 //!
-//! Selectors share one namespace with the `merge_in_domain` values used for MAST control-block
-//! hashing. Those are opcode-sized (`< 256`) while every registered selector is `>= 257`
-//! (`domain_id >= 1`), so the ranges cannot collide. The sequential and two-to-one
-//! constructions share the capacity layout deliberately: a registered id must not be reused as
-//! a merge domain.
+//! Selectors share one capacity namespace with the `merge_in_domain` values used for MAST
+//! control-block hashing. Those are opcode-sized (`< 256`) while every registered selector is
+//! `>= 257` (`domain_id >= 1`), so those two ranges cannot collide. Distinctness among registered
+//! selectors is the registry's responsibility: each `domain_id` is allocated once within its
+//! maintainer's range, and the three defined here are pinned distinct by
+//! `registry_entries_are_valid_and_distinct_selectors`.
 
 use crate::Felt;
 
