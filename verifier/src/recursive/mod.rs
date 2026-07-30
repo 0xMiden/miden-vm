@@ -1,6 +1,6 @@
 //! Building the advice a MASM recursive verifier consumes to verify a Miden VM proof.
 //!
-//! `exec.vm::verify_vm_proof_from_claim` reads a STARK proof from the advice provider in a fixed
+//! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed
 //! order. This module is the producer side of that ABI: it destructures an [`ExecutionProof`]
 //! against its [`ExecutionClaim`] into the advice-stack stream, the Merkle store, and the query
 //! advice-map entries the verifier consumes. The consumption order is exercised end to end by the
@@ -14,11 +14,11 @@
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
 //! The consumer stages the 40-felt claim encoding into VM memory from its own claim;
-//! `verify_vm_proof_from_claim` verifies this stream against that claim, so a substituted stream
+//! `verify_vm_proof` verifies this stream against that claim, so a substituted stream
 //! fails rather than redefining the claim. Everything else is content-addressed in the advice
 //! map and merges across proofs without collision: the kernel digest witness under the kernel
-//! commitment K (`[count, digests..]`), the claim encoding under its commitment (fetched by the
-//! commitment-first `verify_vm_proof`), and the query rows, Merkle store, and ACE circuit.
+//! commitment K (`[count, digests..]`), the claim encoding under its commitment (fetched by
+//! consumers that hold the claim commitment), and the query rows, Merkle store, and ACE circuit.
 
 use alloc::{
     string::{String, ToString},
@@ -64,13 +64,12 @@ const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 /// The advice a MASM recursive verifier consumes to verify one Miden VM proof.
 ///
-/// The `advice_stack` stream feeds `exec.vm::verify_vm_proof_from_claim` directly;
+/// The `advice_stack` stream feeds `exec.vm::verify_vm_proof` directly;
 /// [`Self::into_request_package`] instead registers it in the advice map under
-/// `request_key(verifier_root, claim_commitment)` for consumers that fetch proofs by content
-/// (`exec.vm::verify_vm_proof`).
+/// `request_key(verifier_root, claim_commitment)` for consumers that fetch proofs by content.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
-    /// The advice-stack stream, in the order `verify_vm_proof_from_claim` (with the standard
+    /// The advice-stack stream, in the order `verify_vm_proof` (with the standard
     /// staging prologue) consumes it.
     pub advice_stack: Vec<Felt>,
     /// Merkle store backing the query openings (`mtree_get` authentication paths).
@@ -89,9 +88,9 @@ impl RecursiveVerifierInputs {
     ///
     /// All of it (Merkle nodes, query rows, proof stream) is content-addressed, so packages
     /// for any number of proofs merge into one advice provider in any order. A consumer holding the
-    /// claim commitment fetches and verifies the proof with `exec.vm::verify_vm_proof`; the key
-    /// is addressing, not trust — a package that does not match the consumer's claim fails
-    /// verification.
+    /// claim commitment fetches the package under this key and verifies it with
+    /// `exec.vm::verify_vm_proof`; the key is addressing, not trust — a package that does not match
+    /// the consumer's claim fails verification.
     pub fn into_request_package(mut self, verifier_root: Word) -> Self {
         let key = request_key(verifier_root, self.claim_commitment);
         let proof_stream = core::mem::take(&mut self.advice_stack);

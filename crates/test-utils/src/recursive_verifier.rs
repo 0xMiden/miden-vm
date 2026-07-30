@@ -18,17 +18,17 @@ use crate::crypto::MerkleStore;
 ///
 /// `claim_advice` (the consumer's claim: the canonical 40-felt encoding) and `proof_stream`
 /// (the proof as the verifier consumes it) are kept separate because they feed different
-/// channels: a directly staged run concatenates them on the advice stack; a run through
-/// `verify_vm_proof` puts neither on the advice stack — the claim encoding and the proof are
-/// registered in the advice map instead.
+/// channels: a directly staged run concatenates them on the advice stack; a request-fetched run
+/// puts neither on the advice stack — the claim encoding and the proof are registered in the
+/// advice map instead.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
-    /// Operand stack for `verify_vm_proof_from_claim`: `[claim_ptr]`.
+    /// Operand stack for `verify_vm_proof`: `[claim_ptr]`.
     pub initial_stack: Vec<u64>,
     /// The consumer's claim, copied into VM memory before verification: the canonical 40-felt
     /// encoding `P | K | I | O`.
     pub claim_advice: Vec<u64>,
-    /// The proof stream consumed by `verify_vm_proof_from_claim` (production advice-builder
+    /// The proof stream consumed by `verify_vm_proof` (production advice-builder
     /// output).
     pub proof_stream: Vec<u64>,
     pub store: MerkleStore,
@@ -40,7 +40,7 @@ pub struct VerifierData {
 impl VerifierData {
     /// The full advice stack for a directly staged run: the consumer's claim followed by the
     /// proof stream, in consumption order — the prologue copies the claim into memory, then
-    /// `verify_vm_proof_from_claim` consumes the proof.
+    /// `verify_vm_proof` consumes the proof.
     pub fn advice_stack(&self) -> Vec<u64> {
         [self.claim_advice.as_slice(), self.proof_stream.as_slice()].concat()
     }

@@ -64,9 +64,8 @@ pub const DEEP_POW_BITS: usize = 12;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
 /// Proof-of-work bits for query phase, calibrated so that with 27 queries
-/// `conjectured_security_level(27, 17) == 96` — exactly the recursion wrapper's acceptance
-/// target (`CONJECTURED_SECURITY_TARGET` in `sys/vm/mod.masm`), with no margin: lowering this
-/// or the per-query rate would drop the preset below the target and reject every proof.
+/// `conjectured_security_level(27, 17) == 96`, with no margin: lowering this or the per-query
+/// rate drops the preset below 96 conjectured bits.
 const QUERY_POW_BITS: usize = 17;
 
 // CONJECTURED SECURITY LEVEL

@@ -309,7 +309,7 @@ pub fn generate_recursive_verifier_data(
     generate_advice_inputs(&proof, &claim).unwrap()
 }
 
-/// The MAST root of `sys::vm::verify_vm_proof_from_claim` — the verifier identity request keys
+/// The MAST root of `sys::vm::verify_vm_proof` - the verifier identity request keys
 /// name. The operator side is `CoreLibrary::recursive_verifier_root`; a consumer computes the
 /// identical value in-VM with `procref` (a procedure's root is intrinsic to its own MAST,
 /// independent of the enclosing program), so the two sides agree without any shared constant.
@@ -335,9 +335,11 @@ pub(crate) const COPY_ADVICE_TO_MEM: &str = "
         end
 ";
 
-/// Builds the consumer program: fill the claim into memory from the consumer's own inputs (the
-/// advice tape), derive its commitment, and call `verify_vm_proof` — the fields-owning
-/// caller's flow.
+/// Builds the consumer program: stage the claim from the consumer's own inputs, derive its
+/// commitment, fetch the proof package registered under
+/// `request_key(verifier_root, claim_commitment)`, verify, then grade the returned security
+/// parameters and assert an acceptance threshold. `verify_vm_proof` holds no estimate formula
+/// and no policy; both live in the consumer.
 fn request_consumer_source() -> String {
     format!(
         "
@@ -351,14 +353,33 @@ fn request_consumer_source() -> String {
             # Initial stack: [claim_ptr].
 
             # 1) Fill the claim (the canonical 40-felt encoding) into VM memory from the
-            #    consumer's own inputs (the advice tape).
+            #    consumer's own inputs (the advice tape) and derive the commitment that names it.
             push.40 push.4096
             exec.copy_advice_to_mem
-
-            # 2) Derive the claim commitment and verify by name; a wrong or substituted
-            #    package fails verification.
             exec.claim::claim_commitment
+            # => [CLAIM_COMMITMENT]
+
+            # 2) Fetch the registered proof package by content: request keys name
+            #    verify_vm_proof's root, derived in-VM via procref.
+            procref.vm::verify_vm_proof exec.claim::request_key
+            adv.push_mapval dropw
+            # => [...]
+
+            # 3) Verify the staged claim; verify_vm_proof returns the deferred obligation
+            #    and the proof's transcript-bound security parameters.
+            push.4096
             exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+
+            # 4) Grade the returned parameters and assert the consumer's acceptance
+            #    threshold (>= 96 conjectured bits).
+            swapw
+            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
+            exec.vm::conjectured_security_level
+            # => [conjectured_level, deep_pow_bits, folding_pow_bits, D]
+            u32lt.96 assertz.err=\"proof security level is below the accepted target\"
+            drop drop
+            # => [D]
             exec.sys::truncate_stack
         end
         "
@@ -416,9 +437,8 @@ fn request_flow_binds_proof_to_claim() {
     );
 }
 
-/// Multi-proof consumption through `verify_vm_proof`: two independently proven
-/// executions of one program
-/// (distinct stack i/o) are verified inside a single consumer program — each proof is registered
+/// Two independently proven executions of one program (distinct stack i/o) verified inside a
+/// single consumer program — each proof is registered
 /// under `request_key(verifier_root, claim_commitment)` and fetched by content, independent of
 /// its position in the advice. The consumer stages each claim from its own inputs and derives
 /// the commitment that addresses the claim and proof entries, so passing requires the in-VM
@@ -457,11 +477,18 @@ fn stark_verifier_e2f4_request_multi_proof() {
         {COPY_ADVICE_TO_MEM}
 
         proc verify_one_claim
-            # Stage the claim fields from the consumer's own inputs, derive the commitment that
-            # names the claim, and fetch and verify the proof it addresses.
+            # Per claim: stage the fields from the consumer's own inputs, derive the
+            # commitment that names the claim, fetch and verify the proof package it
+            # addresses, then grade the returned parameters against the acceptance
+            # threshold.
             push.40 push.4096 exec.copy_advice_to_mem    # claim encoding -> claim region
             push.4096 exec.claim::claim_commitment       # => [CLAIM_COMMITMENT]
-            exec.vm::verify_vm_proof                     # => [D]
+            procref.vm::verify_vm_proof exec.claim::request_key
+            adv.push_mapval dropw                        # proof package -> advice stack
+            push.4096 exec.vm::verify_vm_proof           # => [D, nq, q_pow, deep_pow, fold_pow]
+            swapw exec.vm::conjectured_security_level    # => [level, deep_pow, fold_pow, D]
+            u32lt.96 assertz.err=\"proof security level is below the accepted target\"
+            drop drop                                    # => [D]
         end
 
         begin
@@ -473,14 +500,13 @@ fn stark_verifier_e2f4_request_multi_proof() {
     );
 
     let test = build_test!(source.as_str(), &[0_u64], &tape, store, advice_map);
-    test.execute_for_output()
-        .expect("both proofs must verify through the commitment-first entrypoint");
+    test.execute_for_output().expect("both content-addressed proofs must verify");
 }
 
 /// Runs the recursive verifier MASM program with the proof pre-loaded on the advice stack.
 /// These runs are the differential guardrail that pins the proof-stream order against the MASM
-/// consumption sequence, so they deliberately feed `verify_vm_proof_from_claim` directly rather
-/// than fetching the proof through a request.
+/// consumption sequence, so they deliberately feed `verify_vm_proof` the proof stream directly
+/// rather than fetching it through a request.
 fn run_recursive_verifier(data: &VerifierData) {
     let source = format!(
         "
@@ -497,8 +523,8 @@ fn run_recursive_verifier(data: &VerifierData) {
             push.40 push.4096
             exec.copy_advice_to_mem
 
-            exec.vm::verify_vm_proof_from_claim
-            # => [security_level, D]
+            exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
             exec.sys::truncate_stack
         end
         "

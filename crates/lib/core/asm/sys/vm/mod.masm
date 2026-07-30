@@ -6,16 +6,9 @@ pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 
-use miden::core::crypto::hashes::poseidon2
 use miden::core::mem
 use miden::core::stark::verifier
 use miden::core::stark::constants
-
-# Minimum conjectured security level (in bits) the canonical `verify_vm_proof` entrypoint
-# accepts. The underlying `verify_vm_proof_from_claim` computes and returns the attained level
-# from the proof's transcript-bound parameters; this threshold is the policy layered on top, so
-# changing it re-roots only the wrapper, not the underlying verifier.
-const CONJECTURED_SECURITY_TARGET = 96
 
 # Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
 # configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
@@ -62,23 +55,22 @@ proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
-#! Computes the conjectured security level (in bits) attained by the proof's parameters.
+#! Computes the conjectured security level (in bits) attained by the given proof parameters.
 #!
-#! Reads the FRI query count and query-phase grinding bits from their verifier cells
-#! (populated by `load_security_params`) and evaluates the integer fixed-point formula
-#! `min((num_queries * C) >> 16 + query_pow_bits, 128)`. Must match
-#! miden_air::config::conjectured_security_level bit-for-bit (enforced by cross-tests).
+#! Evaluates the integer fixed-point formula `min((num_queries * C) >> 16 + query_pow_bits, 128)`.
+#! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
+#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
 #!
-#! The generic verifier bounds `num_queries <= 150`, so `num_queries * C` fits in a u32 (the
-#! `u32shr` below requires that).
+#! PRECONDITION: `num_queries <= 150`, so `num_queries * C` fits in a u32 (the `u32shr` below
+#! requires that). Parameters returned by `verify_vm_proof` satisfy this bound: the generic
+#! verifier enforces it.
 #!
-#! Inputs:  [...]
+#! Inputs:  [num_queries, query_pow_bits, ...]
 #! Outputs: [level, ...]
 pub proc conjectured_security_level
-    exec.constants::get_number_queries
     push.CONJECTURED_BITS_PER_QUERY_FP mul
     u32shr.16
-    exec.constants::get_query_pow_bits add
+    add
     push.MAX_SECURITY_LEVEL u32min
     # => [level, ...]
 end
@@ -192,83 +184,23 @@ proc store_ace_registry_root
     dropw dropw
 end
 
-#! Verifies a proof of the execution claim named by the given commitment and returns the
-#! deferred obligation the proof binds.
-#!
-#! Only the claim's name crosses the caller boundary: the 40-felt claim encoding is fetched from
-#! the advice map under CLAIM_COMMITMENT into this procedure's frame and checked by rehashing —
-#! the binding of the fetched fields to the caller's name, so a package for a different claim
-#! cannot pass. The proof is then fetched under `request_key(verifier_root, claim_commitment)`
-#! (the verifier root via `procref` of `verify_vm_proof_from_claim`, the underlying verifier)
-#! and verified; the proof needs no separate binding check — a wrong or substituted stream
-#! fails Fiat-Shamir against the claim.
-#!
-#! A caller that owns the claim fields instead of the name stages them itself, derives the name
-#! with `claim::claim_commitment`, and calls this procedure.
-#!
-#! Inputs:  [CLAIM_COMMITMENT, ...]
-#! Outputs: [D, ...]
-#!
-#! Where:
-#! - CLAIM_COMMITMENT is the canonical commitment to the claim (`CLAIM_HASH`), a value the
-#!   caller owns: derived from its own data or carried in its own statement, never fetched.
-#! - D is the deferred root bound by the verified statement.
-@locals(40)
-pub proc verify_vm_proof
-    # --- Fetch the claim fields by name and unhash them into the local claim region ---
-
-    adv.push_mapval
-    # => [CLAIM_COMMITMENT, ...]           advice: [P | K | I | O] (40 felts)
-
-    locaddr.0
-    push.0.0.CLAIM_DOMAIN_TAG.0
-    # => [C = [0, tag, 0, 0], write_ptr, CLAIM_COMMITMENT, ...]   (capacity: 40 % 8 = 0)
-    padw padw
-    # => [R0, R1, C, write_ptr, CLAIM_COMMITMENT, ...]
-    repeat.5
-        adv_pipe
-        exec.poseidon2::permute
-    end
-    exec.poseidon2::squeeze_digest
-    movup.4 drop
-    # => [CLAIM_HASH', CLAIM_COMMITMENT, ...]
-    dupw.1 assert_eqw.err="fetched claim does not hash to the requested commitment"
-    # => [CLAIM_COMMITMENT, ...]
-
-    # --- Fetch the proof onto the advice stack and verify the staged claim ---
-
-    procref.verify_vm_proof_from_claim
-    # => [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
-    exec.claim::request_key
-    # => [REQUEST_KEY, ...]
-    adv.push_mapval dropw
-    # => [...]
-
-    locaddr.0
-    exec.verify_vm_proof_from_claim
-    # => [security_level, D, ...]
-
-    # --- Threshold the attained security level ---
-
-    u32lt.CONJECTURED_SECURITY_TARGET
-    assertz.err="proof security level is below the accepted target"
-    # => [D, ...]
-end
-
 #! Verifies a STARK proof of the caller-staged execution claim and returns the deferred
-#! obligation the proof binds. This is the underlying stream-level verifier: `verify_vm_proof`
-#! (the canonical commitment-first entrypoint) wraps it, and callers that own the claim fields
-#! and deliver the proof positionally call it directly.
+#! obligation the proof binds and the proof's transcript-bound security parameters.
 #!
 #! The proof is consumed from the advice stack; request keys name this procedure's MAST root
-#! (`CoreLibrary::recursive_verifier_root` on the operator side).
+#! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
+#! proof by content derives the identical root in-VM via `procref` of this procedure, computes
+#! `request_key(verifier_root, claim_commitment)` with `claim::request_key`, and moves the
+#! registered proof package onto the advice stack before calling it.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
 #! from the advice stack and stored in memory for the generic verifier, which enforces their
-#! structural bounds and binds them into the Fiat-Shamir transcript — so a proof cannot claim
-#! parameters it was not produced with. This procedure computes no policy: it returns the
-#! attained conjectured security level for the caller (or the wrapping `verify_vm_proof`) to
-#! threshold.
+#! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
+#! parameters it was not produced with. This procedure holds no security-estimate formula and
+#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
+#! (e.g. with `conjectured_security_level`) under its own policy. An estimate or policy change
+#! therefore never moves this procedure's root - request keys and registered proof packages
+#! stay valid across such changes.
 #!
 #! The caller supplies the execution claim as a memory region holding the fully populated
 #! canonical encoding `P (+0) | K (+4) | I (+8) | O (+24)`; every field is the caller's own
@@ -281,13 +213,14 @@ end
 #! expose it in its own statement.
 #!
 #! Inputs:  [claim_ptr, ...]
-#! Outputs: [security_level, D, ...]
+#! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #!
 #! Where:
 #! - claim_ptr is the word-aligned address of the caller's claim region (40 felts).
-#! - security_level is the attained conjectured security level in bits.
 #! - D is the deferred root bound by the verified statement.
-pub proc verify_vm_proof_from_claim
+#! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
+#!   transcript-bound security parameters.
+pub proc verify_vm_proof
     # --- Load security parameters from advice stack ---
 
     exec.load_security_params
@@ -348,10 +281,13 @@ pub proc verify_vm_proof_from_claim
     exec.verifier::verify
     # => [...]
 
-    # --- Return the deferred obligation and the attained security level --------
+    # --- Return the deferred obligation and the transcript-bound security parameters ---
 
+    exec.constants::get_folding_pow_bits
+    exec.constants::get_deep_pow_bits
+    exec.constants::get_query_pow_bits
+    exec.constants::get_number_queries
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
     exec.public_inputs::load_deferred_root
-    # => [D, ...]
-    exec.conjectured_security_level
-    # => [security_level, D, ...]
+    # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 end

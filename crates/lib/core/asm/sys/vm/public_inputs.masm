@@ -59,7 +59,7 @@ use miden::core::sys::vm::claim
 #   - claim region: caller memory at `claim_ptr` (operand), 40 base felts `P | K | I | O`,
 #     fully populated by the caller from its own trusted data.
 #   - kernel digests: verifier memory at `kernel_ptr` (operand), N word-aligned digests.
-#     `verify_vm_proof_from_claim` fetches them from the advice map and asserts they hash to
+#     `verify_vm_proof` fetches them from the advice map and asserts they hash to
 #     the claim's K before calling into this module; the step-II boundary fold reads them
 #     from the same region.
 #   - deferred_root: advice (4 canonical felts), loaded by `stage_boundary_inputs`.
@@ -158,10 +158,10 @@ proc store_boundary_inputs_address
 end
 
 #! Stages the boundary-inputs block at the fixed standalone `BOUNDARY_INPUTS_PTR` before the
-#! transcript starts (called by `verify_vm_proof_from_claim`).
+#! transcript starts (called by `verify_vm_proof`).
 #!
 #! Precondition: the claim region is fully populated, and the digest witness at `kernel_ptr`
-#! hashes to its K field (`verify_vm_proof_from_claim` asserts this before calling).
+#! hashes to its K field (`verify_vm_proof` asserts this before calling).
 #!
 #! Writes, in order:
 #!   boundary_inputs+0  : K, copied from the claim region (+4), for the step-II boundary fold

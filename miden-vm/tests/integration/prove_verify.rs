@@ -103,8 +103,8 @@ fn assert_recursive_verify(
             push.40 push.4096
             exec.copy_advice_to_mem
 
-            exec.vm::verify_vm_proof_from_claim
-            # => [security_level, D]
+            exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
             exec.sys::truncate_stack
         end
     ";

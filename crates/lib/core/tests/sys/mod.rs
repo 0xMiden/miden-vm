@@ -308,7 +308,8 @@ fn request_round_trip_retrieves_registered_package() {
 /// `num_queries` is effectively a `u8` (the generic verifier bounds it to `<= 150`) and
 /// `query_pow_bits < 32`. One VM run evaluates the whole grid, storing the MASM level for
 /// `(nq, pow)` at address `nq * POW_BOUND + pow`; the host then checks every cell against the
-/// native value. This includes the calibration points (27, 16) -> 95 and (27, 17) -> 96.
+/// native value. This includes the calibration points
+/// (27, 16) -> 95 and (27, 17) -> 96.
 #[test]
 fn masm_conjectured_security_level_matches_native() {
     use miden_core::Felt;
@@ -320,7 +321,6 @@ fn masm_conjectured_security_level_matches_native() {
     let source = format!(
         "
         use miden::core::sys::vm
-        use miden::core::stark::constants
 
         begin
             push.0
@@ -331,8 +331,8 @@ fn masm_conjectured_security_level_matches_native() {
                 dup push.{POW_BOUND} u32lt
                 while.true
                     # => [pow, nq]
-                    dup.1 exec.constants::set_number_queries
-                    dup exec.constants::set_query_pow_bits
+                    dup dup.2
+                    # => [nq, pow, pow, nq]
                     exec.vm::conjectured_security_level
                     # => [level, pow, nq]
                     dup.2 push.{POW_BOUND} mul dup.2 add
@@ -370,23 +370,22 @@ fn masm_conjectured_security_level_matches_native() {
     }
 }
 
-/// The security-level threshold the canonical `verify_vm_proof` wrapper applies
-/// (`u32lt.TARGET assertz` over the attained level) must reject a below-target level and accept
-/// an at-target one. This exercises the real estimator and threshold pattern; a full end-to-end
-/// wrapper rejection would need a reduced-query proof, which the standard prover does not emit.
+/// A consumer's acceptance threshold (`u32lt.TARGET assertz` over the estimator's level) must
+/// reject a below-target level and accept an at-target one. This exercises the estimator and
+/// threshold in isolation; the stark e2e consumer tests apply the same threshold after a real
+/// verification but cannot reach the reject arm, because the standard prover does not emit
+/// reduced-query proofs.
 #[test]
 fn security_level_threshold_rejects_below_target() {
-    // Must match `CONJECTURED_SECURITY_TARGET` in `sys/vm/mod.masm`.
+    // Same target as the stark e2e consumer program.
     const TARGET: u64 = 96;
 
     let source = format!(
         "
         use miden::core::sys::vm
-        use miden::core::stark::constants
 
         begin
-            exec.constants::set_number_queries
-            exec.constants::set_query_pow_bits
+            # Stack: [num_queries, query_pow_bits] - as returned by `verify_vm_proof`.
             exec.vm::conjectured_security_level
             u32lt.{TARGET} assertz
         end
