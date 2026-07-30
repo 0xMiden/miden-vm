@@ -83,25 +83,28 @@ pub fn pcs_params() -> PcsParams {
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
 // ================================================================================================
 
+/// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
+pub type RelationDigest = [Felt; 4];
+
 /// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
-pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(1054594910562052599),
-    Felt::new_unchecked(11984096228624862183),
-    Felt::new_unchecked(16222035304856376939),
-    Felt::new_unchecked(17104265933749949296),
+pub const RELATION_DIGEST: RelationDigest = [
+    Felt::new_unchecked(6228634522968454696),
+    Felt::new_unchecked(9493741029039437490),
+    Felt::new_unchecked(16565065039104926463),
+    Felt::new_unchecked(1338979827357058143),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(15847950920222870147),
-    Felt::new_unchecked(7047508041269431782),
-    Felt::new_unchecked(16167476278294667840),
-    Felt::new_unchecked(12153679197399633766),
+    Felt::new_unchecked(6703562205535399821),
+    Felt::new_unchecked(4902180974408534340),
+    Felt::new_unchecked(2376205887554034497),
+    Felt::new_unchecked(2131879092839069624),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -122,40 +125,40 @@ const _: () = assert!(
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(14350200979877962472),
-        Felt::new_unchecked(103089701495165480),
-        Felt::new_unchecked(9854064066123798283),
-        Felt::new_unchecked(12174181773921540602),
+        Felt::new_unchecked(14950454962026649157),
+        Felt::new_unchecked(18381334423201801371),
+        Felt::new_unchecked(3505576435670816154),
+        Felt::new_unchecked(10492020312020072697),
     ],
     [
-        Felt::new_unchecked(5246651242980857613),
-        Felt::new_unchecked(1618297549716024731),
-        Felt::new_unchecked(1061405701969296361),
-        Felt::new_unchecked(17297391313466625441),
+        Felt::new_unchecked(16360681022883134878),
+        Felt::new_unchecked(3383008486129604525),
+        Felt::new_unchecked(12128423521814793071),
+        Felt::new_unchecked(15484732731492441141),
     ],
     [
-        Felt::new_unchecked(16036278270407702678),
-        Felt::new_unchecked(8080086475134229442),
-        Felt::new_unchecked(17598264714838810328),
-        Felt::new_unchecked(8480121305785686269),
+        Felt::new_unchecked(9558598998948809127),
+        Felt::new_unchecked(5625297958135351357),
+        Felt::new_unchecked(6045843798313457949),
+        Felt::new_unchecked(11084501094466476362),
     ],
     [
-        Felt::new_unchecked(5978319484544539769),
-        Felt::new_unchecked(11472236488368657853),
-        Felt::new_unchecked(16907876063844059339),
-        Felt::new_unchecked(16419555801865071852),
+        Felt::new_unchecked(7246951904958279967),
+        Felt::new_unchecked(9113637511529023284),
+        Felt::new_unchecked(6771609253107818884),
+        Felt::new_unchecked(9655557337986743765),
     ],
     [
-        Felt::new_unchecked(15319518752942062709),
-        Felt::new_unchecked(2570562416486635634),
-        Felt::new_unchecked(16366026173493615048),
-        Felt::new_unchecked(11052119545944915459),
+        Felt::new_unchecked(5400103277155201926),
+        Felt::new_unchecked(13221982994882074493),
+        Felt::new_unchecked(4281571135509886317),
+        Felt::new_unchecked(8539761392286494695),
     ],
     [
-        Felt::new_unchecked(17327818317567783689),
-        Felt::new_unchecked(5978149467245783274),
-        Felt::new_unchecked(12627338572399706497),
-        Felt::new_unchecked(13452413375315601834),
+        Felt::new_unchecked(15834849235453051024),
+        Felt::new_unchecked(14635731417693870212),
+        Felt::new_unchecked(2486581593759991827),
+        Felt::new_unchecked(2068667486060323890),
     ],
     [
         Felt::new_unchecked(1422687632582465263),
@@ -179,9 +182,9 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// Observes PCS protocol parameters into the challenger.
 ///
 /// Call on a challenger obtained from `config.challenger()` to complete the
-/// domain-separated transcript initialization. The config factories already bind
-/// RELATION_DIGEST into the prototype challenger; this function adds the remaining
-/// protocol parameters.
+/// domain-separated transcript initialization. The config factories bind the
+/// caller-supplied relation digest into the prototype challenger; this function
+/// adds the remaining protocol parameters.
 pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
     challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
@@ -219,43 +222,47 @@ type AlgLmcs<P> = LmcsConfig<
 /// Algebraic duplex challenger (for RPO, Poseidon2, RPX).
 type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
 
+/// Concrete STARK configuration type for RPO.
+pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>>;
+
 /// Concrete STARK configuration type for Poseidon2.
 pub type Poseidon2Config =
     MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
 
-/// Creates an RPO-based STARK configuration.
-pub fn rpo_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>> {
-    alg_config(params, RpoPermutation256)
+/// Concrete STARK configuration type for RPX.
+pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
+
+/// Creates an RPO-based STARK configuration bound to `relation_digest`.
+pub fn rpo_config(params: PcsParams, relation_digest: RelationDigest) -> RpoConfig {
+    alg_config(params, RpoPermutation256, relation_digest)
 }
 
-/// Creates a Poseidon2-based STARK configuration.
-pub fn poseidon2_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>> {
-    alg_config(params, Poseidon2Permutation256)
+/// Creates a Poseidon2-based STARK configuration bound to `relation_digest`.
+pub fn poseidon2_config(params: PcsParams, relation_digest: RelationDigest) -> Poseidon2Config {
+    alg_config(params, Poseidon2Permutation256, relation_digest)
 }
 
-/// Creates an RPX-based STARK configuration.
-pub fn rpx_config(
-    params: PcsParams,
-) -> MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>> {
-    alg_config(params, RpxPermutation256)
+/// Creates an RPX-based STARK configuration bound to `relation_digest`.
+pub fn rpx_config(params: PcsParams, relation_digest: RelationDigest) -> RpxConfig {
+    alg_config(params, RpxPermutation256, relation_digest)
 }
 
 /// Internal helper: builds an algebraic STARK configuration from a permutation.
 ///
-/// The prototype challenger has RELATION_DIGEST pre-loaded in the sponge capacity.
+/// The prototype challenger has the relation digest pre-loaded in the sponge capacity.
 /// When `observe_protocol_params` is called, the first duplexing permutes this
 /// capacity together with the PCS parameters written into the rate.
-fn alg_config<P>(params: PcsParams, perm: P) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
+fn alg_config<P>(
+    params: PcsParams,
+    perm: P,
+    relation_digest: RelationDigest,
+) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
 where
     P: CryptographicPermutation<[Felt; SPONGE_WIDTH]> + Copy,
 {
     let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
     let mut state = [Felt::ZERO; SPONGE_WIDTH];
-    state[CAPACITY_RANGE].copy_from_slice(&RELATION_DIGEST);
+    state[CAPACITY_RANGE].copy_from_slice(&relation_digest);
     let challenger = DuplexChallenger {
         sponge_state: state,
         input_buffer: vec![],
@@ -285,14 +292,17 @@ type BlakeLmcs = LmcsConfig<
 type BlakeChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Blake3Hasher, BLAKE_DIGEST_SIZE>>;
 
-/// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, BlakeChallenger> {
+/// Concrete STARK configuration type for Blake3.
+pub type Blake3Config = MidenStarkConfig<BlakeLmcs, BlakeChallenger>;
+
+/// Creates a Blake3_256-based STARK configuration bound to `relation_digest`.
+pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> Blake3Config {
     let lmcs = LmcsConfig::new(
         ChainingHasher::new(Blake3Hasher),
         CompressionFunctionFromHasher::new(Blake3Hasher),
     );
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
-    challenger.observe_slice(&RELATION_DIGEST);
+    challenger.observe_slice(&relation_digest);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
@@ -325,17 +335,20 @@ type KeccakLmcs = LmcsConfig<
 type KeccakChallenger =
     SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, KECCAK_CHALLENGER_DIGEST_SIZE>>;
 
+/// Concrete STARK configuration type for Keccak.
+pub type KeccakConfig = MidenStarkConfig<KeccakLmcs, KeccakChallenger>;
+
 /// Creates a Keccak-based STARK configuration.
 ///
 /// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
 /// for SIMD parallelization.
-pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakChallenger> {
+pub fn keccak_config(params: PcsParams, relation_digest: RelationDigest) -> KeccakConfig {
     let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
     let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
     let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));
     let lmcs = LmcsConfig::new(sponge, compress);
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
-    challenger.observe_slice(&RELATION_DIGEST);
+    challenger.observe_slice(&relation_digest);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
@@ -349,7 +362,7 @@ mod tests {
 
     use crate::{ProofOrder, ace};
 
-    const PROTOCOL_ID: u64 = 0;
+    const PROTOCOL_ID: u64 = 1;
     const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 

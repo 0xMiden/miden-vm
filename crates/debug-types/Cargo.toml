@@ -46,6 +46,7 @@ proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_spanned = { version = "1.0", optional = true, default-features = false }
 thiserror.workspace = true
+zerocopy.workspace = true
 
 [dev-dependencies]
 miden-test-serde-macros.workspace = true

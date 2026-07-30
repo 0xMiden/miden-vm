@@ -19,7 +19,7 @@ use miden_processor::{
     FastProcessor, Program,
     trace::{ExecutionTrace, build_trace},
 };
-use serde_wincode::SerdeCompat;
+use serde_wincode::{SerdeCompat, wincode};
 use tracing::instrument;
 
 mod proving_options;
@@ -27,7 +27,7 @@ mod proving_options;
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{DeserializationError, MidenAir, PublicInputs, config};
-pub use miden_core::proof::{ExecutionProof, HashFunction};
+pub use miden_core::proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof};
 pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend, Host, InputError,
     ProgramInfo, StackInputs, StackOutputs, SyncHost, TraceBuildInputs, TraceGenerationContext,
@@ -57,8 +57,8 @@ impl TraceProvingInputs {
 // PROVER
 // ================================================================================================
 
-/// Executes and proves the specified `program` and returns the result together with a STARK-based
-/// proof of the program's execution.
+/// Executes and proves the specified `program` and returns the result together with a final
+/// STARK-based proof of the program's execution.
 ///
 /// - `stack_inputs` specifies the initial state of the stack for the VM.
 /// - `advice_inputs` provides the initial nondeterministic inputs for the VM.
@@ -82,11 +82,41 @@ pub async fn prove(
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_trace_inputs(program, host).await?
+    };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
-/// Synchronous wrapper for [`prove()`].
+/// Executes and proves the specified `program`, preserving wire-backed deferred proof material.
+///
+/// Use this when precompile claims should be proved later by a delegated or batching prover. The
+/// default [`prove`] API produces final deferred proof material instead.
+#[instrument("prove_program_partial", skip_all)]
+pub async fn prove_partial(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+        .map_err(ExecutionError::advice_error_no_context)?;
+
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_trace_inputs(program, host).await?
+    };
+    prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
+}
+
+/// Synchronous variant of [`prove()`].
+///
+/// Unlike `prove`, the sync path can overlap hasher-chiplet trace building with program
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
+/// default); the produced trace and proof are identical either way.
 #[instrument("prove_program_sync", skip_all)]
 pub fn prove_sync(
     program: &Program,
@@ -96,11 +126,69 @@ pub fn prove_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    // Snapshot the overlap flag before `execution_options` moves into the processor. The
+    // binding is std-gated only because the branch consuming it is: on no_std the streaming
+    // builder's thread does not exist and the flag is documented as ignored.
+    #[cfg(feature = "std")]
+    let overlapped_trace_build = execution_options.overlapped_trace_build();
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
         .map_err(ExecutionError::advice_error_no_context)?;
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+    // Overlapped path: the hasher chiplet builds concurrently with execution,
+    // hiding the dominant serial part of trace building.
+    #[cfg(feature = "std")]
+    if overlapped_trace_build {
+        let trace = {
+            let _span = tracing::info_span!("execute_miden_vm").entered();
+            processor.execute_and_build_trace_sync(program, host)?
+        };
+        return prove_final_execution_trace(trace, proving_options);
+    }
+
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_trace_inputs_sync(program, host)?
+    };
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
+}
+
+/// Synchronous variant of [`prove_partial()`].
+///
+/// Like [`prove_sync`], the sync path can overlap hasher-chiplet trace building with program
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
+/// default); the produced trace and proof are identical either way.
+#[instrument("prove_program_partial_sync", skip_all)]
+pub fn prove_partial_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    // Snapshot the overlap flag before `execution_options` moves into the processor. The
+    // binding is std-gated only because the branch consuming it is: on no_std the streaming
+    // builder's thread does not exist and the flag is documented as ignored.
+    #[cfg(feature = "std")]
+    let overlapped_trace_build = execution_options.overlapped_trace_build();
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+        .map_err(ExecutionError::advice_error_no_context)?;
+
+    // Overlapped path, mirroring `prove_sync`.
+    #[cfg(feature = "std")]
+    if overlapped_trace_build {
+        let trace = {
+            let _span = tracing::info_span!("execute_miden_vm").entered();
+            processor.execute_and_build_trace_sync(program, host)?
+        };
+        return prove_partial_execution_trace(trace, proving_options);
+    }
+
+    let trace_inputs = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_trace_inputs_sync(program, host)?
+    };
+    prove_partial_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
 /// Builds an execution trace from pre-executed trace inputs and proves it synchronously.
@@ -113,13 +201,65 @@ pub fn prove_from_trace_sync(
     inputs: TraceProvingInputs,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let (trace_inputs, options) = inputs.into_parts();
-    let trace = build_trace(trace_inputs)?;
-    prove_execution_trace(trace, options)
+    let trace = {
+        let _span = tracing::info_span!("build_miden_vm_trace").entered();
+        build_trace(trace_inputs)?
+    };
+    prove_final_execution_trace(trace, options)
 }
 
-fn prove_execution_trace(
+/// Builds an execution trace from pre-executed trace inputs and proves it synchronously, preserving
+/// wire-backed deferred proof material.
+///
+/// This is the explicit partial-proof counterpart to [`prove_from_trace_sync`].
+#[instrument("prove_partial_trace_sync", skip_all)]
+pub fn prove_partial_from_trace_sync(
+    inputs: TraceProvingInputs,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let (trace_inputs, options) = inputs.into_parts();
+    let trace = {
+        let _span = tracing::info_span!("build_miden_vm_trace").entered();
+        build_trace(trace_inputs)?
+    };
+    prove_partial_execution_trace(trace, options)
+}
+
+fn prove_final_execution_trace(
     trace: ExecutionTrace,
     options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let hash_fn = options.hash_fn();
+    let deferred_proof = {
+        let _span = tracing::info_span!("precompile_vm").entered();
+        miden_precompiles_prover::prove_deferred_state(trace.deferred_state(), hash_fn)
+            .map_err(|err| ExecutionError::ProvingError(err.to_string()))?
+    };
+
+    prove_miden_vm_execution_trace(trace, options, deferred_proof)
+}
+
+fn prove_partial_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let deferred_proof = {
+        let _precompile_vm_span = tracing::info_span!("precompile_vm").entered();
+        let _serialize_witness_span = tracing::info_span!("serialize_witness").entered();
+        let wire = trace
+            .deferred_state()
+            .to_wire()
+            .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
+        DeferredProof::Wire(wire)
+    };
+
+    prove_miden_vm_execution_trace(trace, options, deferred_proof)
+}
+
+#[instrument("miden_vm", skip_all)]
+fn prove_miden_vm_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+    deferred_proof: DeferredProof,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let trace_len_summary = trace.trace_len_summary();
     tracing::event!(
@@ -134,23 +274,16 @@ fn prove_execution_trace(
 
     let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
-    let deferred_wire = trace
-        .deferred_state()
-        .to_wire()
-        .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
-    let (core_matrix, chiplets_matrix, poseidon2_matrix) = {
-        let _span = tracing::info_span!("into_air_matrices").entered();
-        trace.into_air_matrices()
-    };
+    let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.into_air_matrices();
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(params);
+            let config = config::blake3_256_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -161,7 +294,7 @@ fn prove_execution_trace(
             )
         },
         HashFunction::Keccak => {
-            let config = config::keccak_config(params);
+            let config = config::keccak_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -172,7 +305,7 @@ fn prove_execution_trace(
             )
         },
         HashFunction::Rpo256 => {
-            let config = config::rpo_config(params);
+            let config = config::rpo_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -183,7 +316,7 @@ fn prove_execution_trace(
             )
         },
         HashFunction::Poseidon2 => {
-            let config = config::poseidon2_config(params);
+            let config = config::poseidon2_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -194,7 +327,7 @@ fn prove_execution_trace(
             )
         },
         HashFunction::Rpx256 => {
-            let config = config::rpx_config(params);
+            let config = config::rpx_config(params, config::RELATION_DIGEST);
             prove_stark(
                 &config,
                 core_matrix,
@@ -206,18 +339,20 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
+    let proof = ExecutionProof::from_parts(proof_bytes, hash_fn, deferred_proof);
 
     Ok((stack_outputs, proof))
 }
+
 // STARK PROOF GENERATION
 // ================================================================================================
 
 /// Generates a multi-AIR STARK proof for the Miden trace set and public values.
 ///
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
-/// statement `aux_inputs` (program hash, transcript state, and the concatenated kernel-procedure
+/// statement `aux_inputs` (program hash, final deferred root, and the concatenated kernel-procedure
 /// digests). Then delegates to the lifted multi-AIR prover.
+#[instrument("prove_stark", skip_all)]
 pub fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,

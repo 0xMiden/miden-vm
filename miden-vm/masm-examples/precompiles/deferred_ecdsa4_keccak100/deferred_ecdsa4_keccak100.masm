@@ -1,0 +1,26 @@
+use miden::core::crypto::dsa::ecdsa_k256_keccak
+use miden::core::crypto::hashes::keccak256
+
+begin
+    # Input: [num_keccaks]
+    # Hash the same rolling 8-limb state recursively.
+    padw padw
+    # => [STATE_U32[8], num_keccaks]
+    dup.8 neq.0
+    while.true
+        # => [STATE_U32[8], num_keccaks_left]
+        exec.keccak256::hash
+        # => [NEXT_STATE_U32[8], num_keccaks_left]
+        movup.8 sub.1 movdn.8
+        # => [NEXT_STATE_U32[8], num_keccaks_left - 1]
+        dup.8 neq.0
+    end
+    dropw dropw drop
+
+    # ECDSA fixtures stay in advice because generating valid signatures is host-side work.
+    repeat.4
+        padw adv_loadw
+        padw adv_loadw
+        exec.ecdsa_k256_keccak::verify
+    end
+end

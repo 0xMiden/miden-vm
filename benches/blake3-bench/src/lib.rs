@@ -7,7 +7,7 @@ use std::{
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
     Assembler, DefaultHost, ExecutionOptions, FastProcessor, HashFunction, Program, ProvingOptions,
-    StackInputs, TraceBuildInputs, TraceProvingInputs,
+    StackInputs, TraceBuildInputs, TraceProvingInputs, Verifier,
     advice::AdviceInputs,
     assembly::{
         DefaultSourceManager, Path as LibraryPath,
@@ -15,7 +15,7 @@ use miden_vm::{
         package::debug_info::{DebugSourceNodeId, PackageDebugInfo},
     },
     internal::InputFile,
-    prove_from_trace_sync, trace, verify,
+    prove_from_trace_sync, trace,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{Subscriber, span};
@@ -159,7 +159,8 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
     let stack_inputs = fixture.stack_inputs;
     let trace_inputs = execute_trace_inputs(fixture);
     let (stack_outputs, proof) = prove_trace_outputs(trace_inputs);
-    verify(fixture.program.to_info(), stack_inputs, stack_outputs, proof)
+    Verifier::new()
+        .verify(fixture.program.to_info(), stack_inputs, stack_outputs, proof)
         .expect("failed to verify Blake3 benchmark proof");
 }
 

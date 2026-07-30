@@ -3,6 +3,7 @@ use alloc::string::String;
 use miden_core::serde::DeserializationError;
 
 use super::section::SectionId;
+use crate::debug_info::InvalidOptionalIndexError;
 
 /// Errors raised while stripping package-owned debug information.
 #[derive(Debug, thiserror::Error)]
@@ -44,4 +45,10 @@ pub enum PackageDebugInfoError {
     },
     #[error("invalid package debug info: {message}")]
     InvalidReference { message: String },
+    #[error("invalid optional field discriminant for {context}: {err}")]
+    InvalidOptionField {
+        #[source]
+        err: InvalidOptionalIndexError,
+        context: String,
+    },
 }

@@ -38,7 +38,7 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
-    advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    advice::{AdviceInputs, AdviceProvider, AdviceStack},
     trace::ExecutionTrace,
 };
 use miden_processor::{
@@ -48,7 +48,7 @@ use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::verify;
+pub use miden_verifier::Verifier;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -71,9 +71,9 @@ pub mod rand;
 pub mod recursive_verifier;
 
 mod test_builders;
-
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
+pub use test_builders::{IntoAdviceStackInput, advice_stack_from};
 
 pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
@@ -694,9 +694,13 @@ impl Test {
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
+            assert!(
+                Verifier::new()
+                    .verify(program_info, stack_inputs, stack_outputs, proof)
+                    .is_err()
+            );
         } else {
-            let result = verify(program_info, stack_inputs, stack_outputs, proof);
+            let result = Verifier::new().verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }

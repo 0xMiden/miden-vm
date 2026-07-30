@@ -5,7 +5,7 @@ use p3_challenger::UniformSamplingField;
 use p3_field::{
     Field, InjectiveMonomial, PermutationMonomial, PrimeCharacteristicRing, PrimeField,
     PrimeField64, TwoAdicField,
-    extension::{BinomiallyExtendable, HasTwoAdicBinomialExtension},
+    extension::{Binomial, BinomiallyExtendable, ExtensionAlgebra, HasTwoAdicBinomialExtension},
     integers::QuotientMap,
 };
 use proptest::prelude::*;
@@ -205,6 +205,42 @@ proptest! {
         let g = <rand::distr::StandardUniform as Distribution<Goldilocks>>::sample(&rand::distr::StandardUniform, &mut rng1);
         let f = <rand::distr::StandardUniform as Distribution<Felt>>::sample(&rand::distr::StandardUniform, &mut rng2);
         prop_assert_eq!(f, g);
+    }
+
+    /// `ext_square` agrees with `ext_mul(a, a, _)` and with `Goldilocks`'s own specialized
+    /// kernel, for the quadratic extension.
+    #[test]
+    fn felt_ext_square_matches_ext_mul_and_goldilocks_quadratic(a in any::<[u64; 2]>()) {
+        let felt: [Felt; 2] = a.map(Felt::new_unchecked);
+        let gold: [Goldilocks; 2] = a.map(Goldilocks::new);
+
+        let mut mul_res = [Felt::ZERO; 2];
+        <Felt as ExtensionAlgebra<Felt, 2, Binomial<Felt>>>::ext_mul(&felt, &felt, &mut mul_res);
+        let mut sq_res = [Felt::ZERO; 2];
+        <Felt as ExtensionAlgebra<Felt, 2, Binomial<Felt>>>::ext_square(&felt, &mut sq_res);
+        prop_assert_eq!(mul_res, sq_res);
+
+        let mut g_sq_res = [Goldilocks::ZERO; 2];
+        <Goldilocks as ExtensionAlgebra<Goldilocks, 2, Binomial<Goldilocks>>>::ext_square(&gold, &mut g_sq_res);
+        prop_assert_eq!(sq_res.map(Goldilocks::from), g_sq_res);
+    }
+
+    /// `ext_square` agrees with `ext_mul(a, a, _)` and with `Goldilocks`'s own specialized
+    /// kernel, for the quintic extension.
+    #[test]
+    fn felt_ext_square_matches_ext_mul_and_goldilocks_quintic(a in any::<[u64; 5]>()) {
+        let felt: [Felt; 5] = a.map(Felt::new_unchecked);
+        let gold: [Goldilocks; 5] = a.map(Goldilocks::new);
+
+        let mut mul_res = [Felt::ZERO; 5];
+        <Felt as ExtensionAlgebra<Felt, 5, Binomial<Felt>>>::ext_mul(&felt, &felt, &mut mul_res);
+        let mut sq_res = [Felt::ZERO; 5];
+        <Felt as ExtensionAlgebra<Felt, 5, Binomial<Felt>>>::ext_square(&felt, &mut sq_res);
+        prop_assert_eq!(mul_res, sq_res);
+
+        let mut g_sq_res = [Goldilocks::ZERO; 5];
+        <Goldilocks as ExtensionAlgebra<Goldilocks, 5, Binomial<Goldilocks>>>::ext_square(&gold, &mut g_sq_res);
+        prop_assert_eq!(sq_res.map(Goldilocks::from), g_sq_res);
     }
 }
 

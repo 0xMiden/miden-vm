@@ -62,7 +62,6 @@ pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 
 /// Index of the last row in a permutation cycle (0-based).
 pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
-pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
@@ -76,7 +75,6 @@ pub const NUM_SELECTORS: usize = 3;
 ///
 /// This gives `1 + 3 + 7 + 1 + 3 + 1 = 16` rows.
 pub const HASH_CYCLE_LEN: usize = 16;
-pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;

@@ -6,9 +6,8 @@ sidebar_position: 2
 # Deferred state semantics and API contract
 
 `DeferredState` is the host-side witness for deferred DAG verification and the deferred root
-commitment. The in-memory state is not serialized directly; `ExecutionProof` carries
-`DeferredStateWire`, and `DeferredState::from_wire` rebuilds a trusted state by decoding canonical
-wire and evaluating the wire's implicit root under the installed `PrecompileRegistry`.
+commitment. It is not serialized directly: partial proofs carry `DeferredStateWire`; final non-empty
+proofs carry a precompile VM STARK proof for the exact deferred root.
 
 The simplified state model is:
 
@@ -133,8 +132,31 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 The wire root is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the
 final entry. `from_wire(registry, wire, max_elements)` decodes untrusted wire, rejects non-canonical
 or dangling wire by requiring `state.to_wire() == wire`, then evaluates the implicit wire root to
-`Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the wire nodes. Proof
-verification compares the returned `state.root()` to the externally committed deferred root.
+`Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the wire nodes.
+
+## Deferred proof root resolution
+
+`DeferredProof` carries the material needed to bind VM proof verification to a deferred root:
+
+- `Empty` is final and resolves to `TRUE_DIGEST`.
+- `Wire` is partial/delegable material backed by canonical `DeferredStateWire`.
+- `Stark` is final: verification checks the precompile STARK proof against its embedded public root,
+  then returns that root.
+
+The public final verifier accepts only final deferred proof forms. It rejects `Wire`; wire-backed
+partial proofs are handled by the explicit `Verifier::verify_partial` path. Partial verification
+rehydrates the wire into a `DeferredState` with the standard precompile registry, verifies the VM
+STARK against the hydrated state's root, and returns the hydrated state. It rejects `Empty` and
+`Stark` because neither carries wire material to hydrate.
+
+The VM STARK public inputs are built with the resolved final root or hydrated partial root.
+High-level `miden-prover` proving APIs and the `miden-vm` proving facade produce final proofs by
+default: `Empty` when no precompile claims were logged, or `Stark` for non-empty deferred roots. The
+`miden-vm` facade exposes only final proving; callers that intentionally delegate or batch precompile
+proving use the explicit `miden-prover::prove_partial*` APIs to preserve `Wire` proof material, then
+`verify_partial` to validate and rehydrate that material before producing a final deferred proof.
+
+The current STARK-backed variant is exact-root only; batch-backed proofs need a separate proof form.
 
 ## Low-level framework API
 
@@ -161,9 +183,14 @@ of the public contract.
 
 ## Scope note
 
-Deferred state is the proof-bound precompile witness model: proofs carry `DeferredStateWire`,
-verification rehydrates it under the built-in `miden_precompiles::registry()` in the public
-VM/prover/verifier path, and the final deferred root is the public value checked by the STARK proof.
+Deferred state is the proof-bound precompile witness model. VM execution accumulates a deferred
+root for logged precompile claims; `DeferredProof` explains why that root should be accepted.
+Final public verification accepts only final proof forms, resolving `Empty` or a verified `Stark`
+root before VM STARK verification. Wire-backed material is partial/delegable:
+`Verifier::verify_partial` rehydrates `Wire` under the built-in `miden_precompiles::registry()`,
+verifies the VM STARK against the hydrated root, and returns the hydrated state.
+
 The lower-level `DeferredState` APIs remain parameterized by `PrecompileRegistry` for framework
-construction, tests, and non-verifier wire validation. Public proof verification always uses the
-built-in `miden_precompiles::registry()` policy.
+construction, tests, and non-verifier wire validation. The default registry is empty, but the public
+VM/prover/verifier path installs the standard `miden_precompiles::registry()` policy and does not
+accept caller-supplied precompile registries.

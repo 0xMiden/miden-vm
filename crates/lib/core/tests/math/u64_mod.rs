@@ -621,7 +621,6 @@ fn advice_push_u64div() {
     // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
     let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
     let test = build_test!(source, &input_stack);
-    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push adv_push: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push adv_push: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
@@ -695,7 +694,6 @@ fn advice_push_u64div_local_procedure() {
     // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
     let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
     let test = build_test!(source, &input_stack);
-    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push adv_push: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push adv_push: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
@@ -728,7 +726,6 @@ fn advice_push_u64div_conditional_execution() {
     // After eq (1==1 → true): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
     // Input array (top to bottom): [1, 1, 4, 0, 8, 0]
     let test = build_test!(&source, &[1, 1, 4, 0, 8, 0]);
-    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push adv_push: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push adv_push: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]

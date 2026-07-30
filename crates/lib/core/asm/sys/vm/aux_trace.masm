@@ -3,19 +3,108 @@ use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::public_inputs
 
+#! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
+#! count `n = 2^log_height`.
+#!
+#! `log_height` was u32-constrained to `6..=29` by `load_air_context`, so `pow2` produces the exact
+#! row count. `boundary_offset` is a base-felt offset into the proof-order aux boundary region.
+#!
+#! Input:  [boundary_offset, log_height, ...]
+#! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
+proc load_weighted_aux_sum
+    swap pow2
+    # => [n, boundary_offset, ...]
+
+    exec.constants::aux_bus_boundary_ptr movup.2 add
+    # => [boundary_ptr, n, ...]
+
+    dup mem_load
+    # => [sigma_prime_0, boundary_ptr, n, ...]
+    dup.2 mul
+    # => [n_sigma_prime_0, boundary_ptr, n, ...]
+
+    swap add.1 mem_load
+    # => [sigma_prime_1, n_sigma_prime_0, n, ...]
+    movup.2 mul swap
+    # => [n_sigma_prime_0, n_sigma_prime_1, ...]
+end
+
+#! Push the AIR log heights in the same proof order as the absorbed auxiliary boundary values.
+#!
+#! `ORDER_TAG` is the Lehmer rank derived by `load_air_context`. It is memory-backed verifier state,
+#! not advice. Each branch pushes `[log_0, log_1, log_2]`, where the positions correspond to aux
+#! boundary offsets `[0, 2, 4]`.
+#!
+#! Input:  [...]
+#! Output: [log_0, log_1, log_2, ...]
+proc push_proof_order_log_heights
+    exec.constants::assert_valid_order_tag
+    exec.constants::get_order_tag
+    dup eq.0
+    if.true
+        drop
+        # Core, Chiplets, Poseidon2Permutation.
+        exec.constants::get_poseidon2_permutation_trace_length_log
+        exec.constants::get_chiplets_trace_length_log
+        exec.constants::get_core_trace_length_log
+    else
+        dup eq.1
+        if.true
+            drop
+            # Core, Poseidon2Permutation, Chiplets.
+            exec.constants::get_chiplets_trace_length_log
+            exec.constants::get_poseidon2_permutation_trace_length_log
+            exec.constants::get_core_trace_length_log
+        else
+            dup eq.2
+            if.true
+                drop
+                # Chiplets, Core, Poseidon2Permutation.
+                exec.constants::get_poseidon2_permutation_trace_length_log
+                exec.constants::get_core_trace_length_log
+                exec.constants::get_chiplets_trace_length_log
+            else
+                dup eq.3
+                if.true
+                    drop
+                    # Chiplets, Poseidon2Permutation, Core.
+                    exec.constants::get_core_trace_length_log
+                    exec.constants::get_poseidon2_permutation_trace_length_log
+                    exec.constants::get_chiplets_trace_length_log
+                else
+                    dup eq.4
+                    if.true
+                        drop
+                        # Poseidon2Permutation, Core, Chiplets.
+                        exec.constants::get_chiplets_trace_length_log
+                        exec.constants::get_core_trace_length_log
+                        exec.constants::get_poseidon2_permutation_trace_length_log
+                    else
+                        eq.5 assert.err="invalid proof-order tag"
+                        # Poseidon2Permutation, Chiplets, Core.
+                        exec.constants::get_core_trace_length_log
+                        exec.constants::get_chiplets_trace_length_log
+                        exec.constants::get_poseidon2_permutation_trace_length_log
+                    end
+                end
+            end
+        end
+    end
+end
+
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the boundary values (3 extension field elements = 6 base field elements).
+#! and absorbs the normalized boundary sums (3 extension field elements = 6 base field elements).
 #!
-#! The advice provider supplies the commitment, then aux finals in proof order:
-#!   [commitment, aux0, aux1, aux2]
+#! The advice provider supplies the commitment, then normalized sums in proof order:
+#!   [commitment, sigma_prime_0, sigma_prime_1, sigma_prime_2]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
 #! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
 #! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
-#! step I), then asserts `c_total + aux_sum == 0`, where `aux_sum` is the sum of the
-#! per-AIR LogUp finals. The sum is independent of proof order.
+#! step I), then asserts `c_total + sum_i(n_i * sigma_prime_i) == 0`. The values and matching
+#! trace lengths are paired in proof order.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -78,23 +167,30 @@ pub proc observe_aux_trace
     # Fresh output available.
     push.8 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Outer-LogUp boundary check: assert c_total + aux_sum == 0 coordinate-wise ---
+    # --- Outer-LogUp boundary check ---
+    # Scale each normalized sum by the trace length at the same proof-order position.
+    exec.push_proof_order_log_heights
+    # => [log_0, log_1, log_2, ...]
 
-    # aux_sum = sum of the three per-AIR LogUp finals absorbed above.
-    padw exec.constants::aux_bus_boundary_ptr mem_loadw_le
-    # => [b0_0, b0_1, b1_0, b1_1, ...]
+    push.0 exec.load_weighted_aux_sum
+    # => [n_0*sigma_prime_0_0, n_0*sigma_prime_0_1, log_1, log_2, ...]
+
+    movup.2 push.2 exec.load_weighted_aux_sum
+    # => [n_1*sigma_prime_1_0, n_1*sigma_prime_1_1,
+    #     n_0*sigma_prime_0_0, n_0*sigma_prime_0_1, log_2, ...]
     ext2add
-    # => [sum0, sum1, ...]
-    exec.constants::aux_bus_boundary_ptr add.5 mem_load
-    exec.constants::aux_bus_boundary_ptr add.4 mem_load
-    # => [b2_0, b2_1, sum0, sum1, ...]
+    # => [weighted_sum_0, weighted_sum_1, log_2, ...]
+
+    movup.2 push.4 exec.load_weighted_aux_sum
+    # => [n_2*sigma_prime_2_0, n_2*sigma_prime_2_1, weighted_sum_0, weighted_sum_1, ...]
     ext2add
-    # => [sum0, sum1, ...]
+    # => [weighted_sum_0, weighted_sum_1, ...]
+
     exec.constants::c_total_ptr add.1 mem_load
     exec.constants::c_total_ptr mem_load
-    # => [c_total0, c_total1, sum0, sum1, ...]
+    # => [c_total_0, c_total_1, weighted_sum_0, weighted_sum_1, ...]
     ext2add
-    # => [r0, r1, ...]
-    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 0"
-    assertz.err="outer-LogUp boundary mismatch: c_total + aux_sum coord 1"
+    # => [residual_0, residual_1, ...]
+    assertz.err="outer-LogUp boundary mismatch: weighted sums coord 0"
+    assertz.err="outer-LogUp boundary mismatch: weighted sums coord 1"
 end

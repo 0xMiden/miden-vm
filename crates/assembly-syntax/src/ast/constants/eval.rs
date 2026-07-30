@@ -92,16 +92,6 @@ pub enum ConstEvalError {
 
 impl ConstEvalError {
     #[inline]
-    pub fn undefined<Env>(symbol: Ident, env: &Env) -> Self
-    where
-        Env: ?Sized + ConstEnvironment,
-        <Env as ConstEnvironment>::Error: From<Self>,
-    {
-        let source_file = env.get_source_file_for(symbol.span());
-        Self::UndefinedSymbol { symbol, source_file }
-    }
-
-    #[inline]
     pub fn invalid_constant<Env>(span: SourceSpan, expected: &'static str, env: &Env) -> Self
     where
         Env: ?Sized + ConstEnvironment,

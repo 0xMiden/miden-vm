@@ -411,6 +411,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -531,6 +537,9 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash",
+]
 
 [[package]]
 name = "hkdf"
@@ -783,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "blake3",
  "cc",
@@ -822,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -843,11 +852,12 @@ dependencies = [
  "serde",
  "serde_spanned",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
 name = "miden-field"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -873,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -885,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -908,12 +918,16 @@ dependencies = [
 name = "miden-mast-package"
 version = "0.28.0"
 dependencies = [
+ "hashbrown",
  "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
+ "miden-utils-indexing",
+ "rustc-hash",
  "serde",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -993,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1001,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1011,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.28.0"
+version = "0.28.1"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1039,7 +1053,7 @@ dependencies = [
 name = "miden-utils-indexing"
 version = "0.28.0"
 dependencies = [
- "miden-crypto",
+ "miden-serde-utils",
  "proptest",
  "serde",
  "thiserror",
