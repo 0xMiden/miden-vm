@@ -2518,6 +2518,7 @@ dependencies = [
 name = "miden-processor"
 version = "0.28.0"
 dependencies = [
+ "hashbrown 0.17.1",
  "insta",
  "itertools 0.15.0",
  "miden-air",
@@ -2537,6 +2538,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

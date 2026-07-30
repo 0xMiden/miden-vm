@@ -23,7 +23,7 @@ use rstest::{fixture, rstest};
 use super::*;
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
-    trace::trace_state::MemoryReadsReplay,
+    trace::trace_state::{HasherOp, MemoryReadsReplay},
 };
 
 const DEFAULT_STACK: &[Felt] =
@@ -978,7 +978,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     trace_inputs
         .trace_generation_context_mut()
         .hasher_for_chiplet
-        .record_hash_basic_block(forest_id, bogus_node_id, [ZERO; 4].into());
+        .record_raw(HasherOp::HashBasicBlock((forest_id, bogus_node_id, [ZERO; 4].into())));
 
     let result = build_trace(trace_inputs);
     assert!(
@@ -1073,6 +1073,35 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
          the mast_forest_store"
+    );
+}
+
+#[test]
+fn chiplet_preflight_caps_combined_trace_len() {
+    let mut bitwise = BitwiseReplay::default();
+    bitwise.record_u32xor(ZERO, ZERO);
+
+    let mut memory_writes = MemoryWritesReplay::default();
+    memory_writes.record_write_element(ZERO, ZERO, ContextId::root(), RowIndex::from(0));
+
+    let kernel = KernelDescriptor::default();
+    let ace = AceReplay::default();
+    let combined_len = OP_CYCLE_LEN + 2;
+
+    assert!(matches!(
+        non_hasher_trace_len(
+            &kernel,
+            &[],
+            &memory_writes,
+            &bitwise,
+            &ace,
+            combined_len - 1,
+        ),
+        Err(ExecutionError::TraceLenExceeded(limit)) if limit == combined_len - 1
+    ));
+    assert_eq!(
+        non_hasher_trace_len(&kernel, &[], &memory_writes, &bitwise, &ace, combined_len).unwrap(),
+        combined_len
     );
 }
 
