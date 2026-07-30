@@ -1359,10 +1359,13 @@ impl HasherRequestReplay {
     pub(crate) fn iter_hash_basic_block_forest_ids(
         &self,
     ) -> impl Iterator<Item = MastForestId> + '_ {
-        self.buffered_ops().into_iter().flat_map(|ops| ops.iter()).filter_map(|op| match op {
-            HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
-            _ => None,
-        })
+        self.buffered_ops()
+            .into_iter()
+            .flat_map(|ops| ops.iter())
+            .filter_map(|op| match op {
+                HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
+                _ => None,
+            })
     }
 
     fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
@@ -2144,7 +2147,9 @@ impl Serializable for HasherRequestReplay {
 
 impl Deserializable for HasherRequestReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self { sink: HasherOpSink::Buffered(read_vec_deque(source)?) })
+        Ok(Self {
+            sink: HasherOpSink::Buffered(read_vec_deque(source)?),
+        })
     }
 }
 
