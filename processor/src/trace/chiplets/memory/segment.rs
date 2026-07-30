@@ -332,7 +332,7 @@ impl MemorySegmentTrace {
 
     /// Returns the number of words that were accessed at least once.
     #[cfg(test)]
-    pub fn num_accessed_words(&self) -> usize {
+    pub(super) fn num_accessed_words(&self) -> usize {
         self.0.len()
     }
 }

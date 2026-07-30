@@ -51,7 +51,9 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs, trace::TraceLenSummary,
+    DefaultHost, ExecutionOptions, FastProcessor,
+    advice::{AdviceInputs, AdviceStack},
+    trace::TraceLenSummary,
 };
 use miden_prover::prove_sync;
 use miden_utils_testing::recursive_verifier::generate_advice_inputs;
@@ -601,9 +603,10 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
     );
     let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
 
+    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack())
+        .expect("recursive advice stack values must be canonical");
     let advice_inputs = AdviceInputs::default()
-        .with_stack_values(verifier_inputs.advice_stack())
-        .expect("recursive advice stack values must be canonical")
+        .with_advice_stack(advice_stack)
         .with_merkle_store(verifier_inputs.store)
         .with_map(verifier_inputs.advice_map);
 

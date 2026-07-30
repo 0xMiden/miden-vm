@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, collections::BTreeMap, format, string::ToString, sync::Arc, vec::Vec};
+use core::ops::ControlFlow;
 use std::{
     fs,
     path::{Path as FsPath, PathBuf},
@@ -187,6 +188,41 @@ impl SourceProviderRegistry {
     }
 }
 
+/// Returned when assembly is interrupted early by a [ProjectSourceProvider]
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct AssemblyInterrupted {
+    /// The package that was being assembled
+    pub package: PackageId,
+    /// The target being assembled to produce this package
+    pub target_name: Arc<str>,
+    /// The type of target being assembled
+    pub target_type: TargetType,
+    /// What role this package plays in assembly of the top-level selected target
+    pub role: InterruptedTargetRole,
+}
+
+/// This represents the reason a target was being assembled when assembly was interrupted
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum InterruptedTargetRole {
+    /// The target that was interrupted was the top-level/root selected target
+    Root,
+    /// The target was a required/implicit library of the top-level selected target
+    RequiredLibrary,
+    /// The target was a dependency (direct or transitive) of the top-level selected target
+    Dependency,
+}
+
+impl core::fmt::Display for InterruptedTargetRole {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Root => f.write_str("root"),
+            Self::RequiredLibrary => f.write_str("required library"),
+            Self::Dependency => f.write_str("dependency"),
+        }
+    }
+}
+
 pub struct ProjectAssembler<'a, S: PackageCache> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
@@ -220,11 +256,44 @@ where
     /// * `target_selector` cannot find a matching target in the current project
     /// * `profile_name` is not a profile defined in this project
     /// * An error occurs during assembly of the project or one of its dependencies
+    /// * Assembly was interrupted by a source provider for the project or one of its dependencies
     pub fn assemble(
         &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
     ) -> Result<Arc<MastPackage>, Report> {
+        let result = self.assemble_interruptible(target_selector, profile_name)?;
+
+        match result {
+            ControlFlow::Continue(package) => Ok(package),
+            ControlFlow::Break(AssemblyInterrupted { package, target_name, target_type, role }) => {
+                Err(Report::msg(format!(
+                    "assembly of {role} package '{package}' was interrupted by the source provider for target '{target_name}' (type={target_type})"
+                )))
+            },
+        }
+    }
+
+    /// Like [`Self::assemble`], but allows for assembly to be interrupted by source providers
+    /// early.
+    ///
+    /// Returns [`ControlFlow`] representing whether assembly should break early (i.e. it was
+    /// interrupted), or continue as normal (i.e. it succeeded, and a package was produced).
+    ///
+    /// When assembly is interrupted early, a [AssemblyInterrupted] value is returned via
+    /// `ControlFlow::Break`, identifying what package (and target) caused the interruption, and
+    /// what role that package/target played in assembly of the root selected target.
+    ///
+    /// Returns an error if:
+    ///
+    /// * `target_selector` cannot find a matching target in the current project
+    /// * `profile_name` is not a profile defined in this project
+    /// * An error occurs during assembly of the project or one of its dependencies
+    pub fn assemble_interruptible(
+        &mut self,
+        target_selector: ProjectTargetSelector<'_>,
+        profile_name: &str,
+    ) -> Result<ControlFlow<AssemblyInterrupted, Arc<MastPackage>>, Report> {
         let target = target_selector.select_target(self.project.as_ref())?;
 
         // When building an executable target from a project with a library target, we require
@@ -235,16 +304,20 @@ where
             && let Some(library_target) =
                 self.project.library_target().map(|target| target.inner().clone())
         {
-            Some(self.assemble_source_package(
+            match self.assemble_source_package(
                 root_id.clone(),
                 Arc::clone(&self.project),
                 &library_target,
                 profile_name,
+                InterruptedTargetRole::RequiredLibrary,
                 None,
                 None,
                 None,
                 &mut cache,
-            )?)
+            )? {
+                ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                ControlFlow::Continue(resolved) => Some(resolved),
+            }
         } else {
             None
         };
@@ -254,19 +327,26 @@ where
             Arc::clone(&self.project),
             &target,
             profile_name,
+            InterruptedTargetRole::Root,
             required_lib,
             None,
             None,
             &mut cache,
         )
-        .map(|resolved| resolved.package)
+        .map(|resolved| resolved.map_continue(|r| r.package))
     }
 
     /// This is a low-level utility function of the project assembly infrastructure for assembling
     /// a project target whose sources and source provenance may have already been computed by the
     /// caller.
     ///
-    /// In almost all cases you should prefer to use [`ProjectAssembler::assemble`].
+    /// This API supports early interruption by source providers, represented by the `ControlFlow`
+    /// value which is returned. The [AssemblyInterrupted] value carried in the `Break` variant
+    /// indicates the package/target which was interrupted, and the role that target played in
+    /// assembly of the provided project and target.
+    ///
+    /// In almost all cases you should prefer to use [`ProjectAssembler::assemble`] or
+    /// [`ProjectAssembler::assemble_interruptible`] instead.
     ///
     /// Callers are required to uphold the following invariants:
     ///
@@ -283,11 +363,12 @@ where
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
+        package_role: InterruptedTargetRole,
         required_lib: Option<ResolvedPackage>,
         sources: Option<ProjectSourceInputs>,
         source_provenance: Option<ProjectSourceProvenanceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
-    ) -> Result<ResolvedPackage, Report> {
+    ) -> Result<ControlFlow<AssemblyInterrupted, ResolvedPackage>, Report> {
         assert!(
             source_provenance.is_none() || sources.is_some(),
             "source provenance may only be provided with sources"
@@ -296,7 +377,7 @@ where
         let cache_key = project.target_package_name(target);
         if let Some(package) = cache.get(&cache_key).cloned() {
             assert_eq!(package.package.kind, target.ty);
-            return Ok(package);
+            return Ok(ControlFlow::Continue(package));
         }
 
         let profile = project.resolve_profile(profile_name)?;
@@ -326,7 +407,10 @@ where
         let dependencies = node.dependencies.clone();
         for edge in dependencies.iter() {
             let dependency_package =
-                self.resolve_dependency_package(&edge.dependency, profile_name, cache)?;
+                match self.resolve_dependency_package(&edge.dependency, profile_name, cache)? {
+                    ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                    ControlFlow::Continue(pkg) => pkg,
+                };
             if !dependency_package.package.is_library() {
                 return Err(Report::msg(format!(
                     "dependency '{}' resolved to executable package '{}', but only library-like packages can be linked",
@@ -343,7 +427,12 @@ where
         let manually_provided_sources = sources.is_some();
         let ProjectSourceInputs { root, support } = match sources {
             Some(sources) => sources,
-            None => self.load_target_sources(project.clone(), target, profile)?,
+            None => {
+                match self.load_target_sources(project.clone(), target, profile, package_role)? {
+                    ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                    ControlFlow::Continue(sources) => sources,
+                }
+            },
         };
 
         // Collect specific well-known custom sections produced by the project assembler
@@ -393,7 +482,7 @@ where
             .extend_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
 
-        let mut package = product.into_artifact()?;
+        let mut package = product.into_artifact(profile.should_emit_debug_info())?;
         package.name = project.target_package_name(target);
         package.version = project.version().into_inner().clone();
         package.description = project.description().map(|description| description.to_string());
@@ -412,7 +501,7 @@ where
         };
         cache.insert(package_id, resolved.clone());
 
-        Ok(resolved)
+        Ok(ControlFlow::Continue(resolved))
     }
 
     fn resolve_dependency_package(
@@ -420,9 +509,9 @@ where
         package_id: &PackageId,
         profile_name: &str,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
-    ) -> Result<ResolvedPackage, Report> {
+    ) -> Result<ControlFlow<AssemblyInterrupted, ResolvedPackage>, Report> {
         if let Some(package) = cache.get(package_id).cloned() {
-            return Ok(package);
+            return Ok(ControlFlow::Continue(package));
         }
 
         let node = self.dependency_graph.get(package_id)?;
@@ -472,16 +561,20 @@ where
                         false,
                     ),
                     reuse => {
-                        let package = self.assemble_source_package(
+                        let package = match self.assemble_source_package(
                             package_id.clone(),
                             project,
                             &target,
                             profile_name,
+                            InterruptedTargetRole::Dependency,
                             None,
                             None,
                             None,
                             cache,
-                        )?;
+                        )? {
+                            ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                            ControlFlow::Continue(package) => package,
+                        };
                         match reuse {
                             RegisteredSourcePackage::Missing => (),
                             RegisteredSourcePackage::IndexedButUnreadable(expected) => {
@@ -557,7 +650,7 @@ where
             self.cache_resolved_package(&package)?;
         }
         cache.insert(package_id.clone(), package.clone());
-        Ok(package)
+        Ok(ControlFlow::Continue(package))
     }
 
     fn resolve_linked_kernel_package(
@@ -714,11 +807,22 @@ where
         project: Arc<ProjectPackage>,
         target: &Target,
         profile: &Profile,
-    ) -> Result<ProjectSourceInputs, Report> {
+        role: InterruptedTargetRole,
+    ) -> Result<ControlFlow<AssemblyInterrupted, ProjectSourceInputs>, Report> {
         let (provider, context) =
             self.get_provider_and_target_assembly_context(&project, target, profile)?;
 
-        let inputs = provider.provide_sources(&context)?;
+        let inputs = match provider.provide_sources_interruptible(&context)? {
+            ControlFlow::Break(_) => {
+                return Ok(ControlFlow::Break(AssemblyInterrupted {
+                    package: project.name().into_inner(),
+                    target_name: target.name.inner().clone(),
+                    target_type: target.ty,
+                    role,
+                }));
+            },
+            ControlFlow::Continue(inputs) => inputs,
+        };
         match target.ty {
             TargetType::Executable if !inputs.root.kind().is_executable() => {
                 Err(Report::msg(format!(
@@ -740,7 +844,7 @@ where
                     inputs.root.path()
                 )))
             },
-            _ => Ok(inputs),
+            _ => Ok(ControlFlow::Continue(inputs)),
         }
     }
 
@@ -765,16 +869,25 @@ where
         target: &'this Target,
         profile: &'this Profile,
     ) -> Result<(&'this dyn ProjectSourceProvider, TargetAssemblyContext<'this>), Report> {
-        let manifest_path = project.expect_manifest_path()?;
-        let mut context = TargetAssemblyContext::new(
-            project.clone(),
-            manifest_path,
-            target,
-            profile,
-            self.dependency_graph.as_ref(),
-            self.store,
-            self.assembler.source_manager(),
-        )?;
+        let mut context = match project.manifest_path() {
+            Some(manifest_path) => TargetAssemblyContext::new(
+                project.clone(),
+                manifest_path,
+                target,
+                profile,
+                self.dependency_graph.as_ref(),
+                self.store,
+                self.assembler.source_manager(),
+            )?,
+            None => TargetAssemblyContext::new_virtual(
+                project.clone(),
+                target,
+                profile,
+                self.dependency_graph.as_ref(),
+                self.store,
+                self.assembler.source_manager(),
+            )?,
+        };
         context.with_warnings_as_errors(self.assembler.warnings_as_errors());
 
         let extension = context.resolved_target_root.extension().ok_or_else(|| {

@@ -667,7 +667,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // One committed LogUp final per AIR instance.
+        // One committed normalized LogUp sum `sigma_prime = sigma / n` per AIR instance.
         1
     }
 
@@ -682,7 +682,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         debug_assert_eq!(
             committed.len(),
             1,
-            "build_logup_aux_trace returns one committed final per AIR"
+            "build_logup_aux_trace returns one normalized LogUp sum per AIR"
         );
         (aux_trace, committed)
     }
@@ -764,8 +764,8 @@ where
 
 /// The cross-AIR statement for the Miden VM proof.
 ///
-/// AIR instances come from [`AIRS`], and the external reduction sums the committed LogUp finals
-/// with the open-bus boundary corrections.
+/// AIR instances come from [`AIRS`], and the external reduction combines the trace-length-weighted
+/// normalized LogUp sums with the open-bus boundary corrections.
 ///
 /// Instance order is `[Core, Chiplets, Poseidon2Permutation]`; every per-AIR slice follows that
 /// ordering.
@@ -844,10 +844,11 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         }
     }
 
-    /// Cross-AIR LogUp closure: the sum of every committed aux final plus the
-    /// per-trace boundary corrections must vanish. `aux_inputs` carries the program hash and
-    /// deferred root (consumed by the core boundary) followed by the kernel digests
-    /// (consumed by the chiplets boundary).
+    /// Cross-AIR LogUp closure: each AIR commits `sigma_prime_i = sigma_i / n_i`, so the
+    /// trace-length-weighted sum `sum_i(n_i * sigma_prime_i)` plus the per-trace boundary
+    /// corrections must vanish. Boundary corrections are added once and are not trace-length
+    /// scaled. `aux_values` and `log_trace_heights` are parallel in instance order. `aux_inputs`
+    /// carries the program hash and deferred root followed by kernel digests.
     fn eval_external(
         &self,
         challenges: &[EF],
@@ -909,9 +910,11 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             BusId::COUNT,
         );
 
-        let mut aux_sum = EF::ZERO;
+        let mut weighted_aux_sum = EF::ZERO;
         let mut boundary_correction = EF::ZERO;
-        for (air, values) in AIRS.iter().copied().zip(aux_values.iter()) {
+        for ((air, values), &log_height) in
+            AIRS.iter().copied().zip(aux_values.iter()).zip(log_trace_heights)
+        {
             boundary_correction += air.boundary_correction(&challenges, air_inputs, aux_inputs)?;
             let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
             if values.len() != expected {
@@ -922,10 +925,18 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
                 )
                 .into());
             }
-            aux_sum += values.iter().copied().sum::<EF>();
+
+            let trace_length = 1_u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
+                ReductionError::from(format!(
+                    "{} log trace height {log_height} does not fit in u64",
+                    air.name()
+                ))
+            })?;
+            weighted_aux_sum +=
+                values.iter().copied().sum::<EF>() * Felt::new_unchecked(trace_length);
         }
 
-        Ok(vec![aux_sum + boundary_correction])
+        Ok(vec![weighted_aux_sum + boundary_correction])
     }
 }
 
@@ -1026,7 +1037,7 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 mod tests {
     use alloc::string::ToString;
 
-    use miden_core::field::QuadFelt;
+    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
     use super::*;
 
@@ -1039,6 +1050,51 @@ mod tests {
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn eval_external_weights_normalized_sums_by_trace_length() {
+        let multi_air = MidenMultiAir::new();
+        let raw_challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
+        let normalized_sums =
+            [QuadFelt::from_u32(13), QuadFelt::from_u32(17), QuadFelt::from_u32(19)];
+        let core_values = [normalized_sums[0]];
+        let chiplets_values = [normalized_sums[1]];
+        let poseidon2_values = [normalized_sums[2]];
+        let aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
+            [&core_values, &chiplets_values, &poseidon2_values];
+        let log_trace_heights = [6, 9, 7];
+
+        let lookup_challenges = Challenges::new(
+            raw_challenges[0],
+            raw_challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+        let mut boundary_correction = QuadFelt::ZERO;
+        for air in AIRS {
+            boundary_correction +=
+                air.boundary_correction(&lookup_challenges, &air_inputs, &aux_inputs).unwrap();
+        }
+
+        let result = <MidenMultiAir as MultiAir<Felt, QuadFelt>>::eval_external(
+            &multi_air,
+            &raw_challenges,
+            &air_inputs,
+            &aux_inputs,
+            &aux_values,
+            &log_trace_heights,
+        )
+        .unwrap();
+
+        let weighted_sum = normalized_sums
+            .iter()
+            .zip(log_trace_heights)
+            .map(|(&value, log_height)| value * Felt::new_unchecked(1_u64 << u32::from(log_height)))
+            .sum::<QuadFelt>();
+        assert_eq!(result, vec![weighted_sum + boundary_correction]);
     }
 
     #[test]

@@ -1802,7 +1802,7 @@ fn build_expected_hasher_state(values: &[Felt]) -> [Felt; NUM_HASHER_COLUMNS] {
 
 /// Build an operation group from the specified list of operations.
 #[cfg(test)]
-pub fn build_op_group(ops: &[Operation]) -> Felt {
+fn build_op_group(ops: &[Operation]) -> Felt {
     use miden_core::mast::OP_GROUP_SIZE;
 
     let mut group = 0u64;

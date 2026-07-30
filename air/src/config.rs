@@ -121,20 +121,20 @@ pub type RelationDigest = [Felt; 4];
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(837197885082815666),
-    Felt::new_unchecked(17812429367884914),
-    Felt::new_unchecked(12945170128166309606),
-    Felt::new_unchecked(6547471563106428306),
+    Felt::new_unchecked(6228634522968454696),
+    Felt::new_unchecked(9493741029039437490),
+    Felt::new_unchecked(16565065039104926463),
+    Felt::new_unchecked(1338979827357058143),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(14555859356618613041),
-    Felt::new_unchecked(12263818504402094214),
-    Felt::new_unchecked(8947171757737633119),
-    Felt::new_unchecked(15898708917413488144),
+    Felt::new_unchecked(6703562205535399821),
+    Felt::new_unchecked(4902180974408534340),
+    Felt::new_unchecked(2376205887554034497),
+    Felt::new_unchecked(2131879092839069624),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -155,40 +155,40 @@ const _: () = assert!(
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
     [
-        Felt::new_unchecked(11837859209345903758),
-        Felt::new_unchecked(9815638019877886793),
-        Felt::new_unchecked(9625207076207895997),
-        Felt::new_unchecked(9695069585445924735),
+        Felt::new_unchecked(14950454962026649157),
+        Felt::new_unchecked(18381334423201801371),
+        Felt::new_unchecked(3505576435670816154),
+        Felt::new_unchecked(10492020312020072697),
     ],
     [
-        Felt::new_unchecked(9259510150343331840),
-        Felt::new_unchecked(9964209990365158348),
-        Felt::new_unchecked(9771094394334616804),
-        Felt::new_unchecked(6801591902715947619),
+        Felt::new_unchecked(16360681022883134878),
+        Felt::new_unchecked(3383008486129604525),
+        Felt::new_unchecked(12128423521814793071),
+        Felt::new_unchecked(15484732731492441141),
     ],
     [
-        Felt::new_unchecked(13344682865201754218),
-        Felt::new_unchecked(15894423116029143536),
-        Felt::new_unchecked(14467138423458194619),
-        Felt::new_unchecked(7897270834863694594),
+        Felt::new_unchecked(9558598998948809127),
+        Felt::new_unchecked(5625297958135351357),
+        Felt::new_unchecked(6045843798313457949),
+        Felt::new_unchecked(11084501094466476362),
     ],
     [
-        Felt::new_unchecked(4099186920626073427),
-        Felt::new_unchecked(682092905703283829),
-        Felt::new_unchecked(12849329509929050984),
-        Felt::new_unchecked(16382140914209989580),
+        Felt::new_unchecked(7246951904958279967),
+        Felt::new_unchecked(9113637511529023284),
+        Felt::new_unchecked(6771609253107818884),
+        Felt::new_unchecked(9655557337986743765),
     ],
     [
-        Felt::new_unchecked(14539896184148634413),
-        Felt::new_unchecked(16739205143055038643),
-        Felt::new_unchecked(714188673764061491),
-        Felt::new_unchecked(212073732483360886),
+        Felt::new_unchecked(5400103277155201926),
+        Felt::new_unchecked(13221982994882074493),
+        Felt::new_unchecked(4281571135509886317),
+        Felt::new_unchecked(8539761392286494695),
     ],
     [
-        Felt::new_unchecked(3223252693442251987),
-        Felt::new_unchecked(16359545287906460326),
-        Felt::new_unchecked(7603623116366423371),
-        Felt::new_unchecked(1382565076671067911),
+        Felt::new_unchecked(15834849235453051024),
+        Felt::new_unchecked(14635731417693870212),
+        Felt::new_unchecked(2486581593759991827),
+        Felt::new_unchecked(2068667486060323890),
     ],
     [
         Felt::new_unchecked(1422687632582465263),
@@ -392,7 +392,7 @@ mod tests {
 
     use crate::{ProofOrder, ace};
 
-    const PROTOCOL_ID: u64 = 0;
+    const PROTOCOL_ID: u64 = 1;
     const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 

@@ -49,6 +49,7 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
+use serde_wincode::wincode;
 
 // TYPES
 // ================================================================================================

@@ -4,8 +4,13 @@
 
 #### Changes
 - [BREAKING] Reworked recursive verification around canonical execution claims: `ExecutionClaim` carries a domain-tagged commitment bound into the Fiat-Shamir statement; native verification becomes `Verifier::verify`/`verify_partial(proof, claim)` returning the deferred obligation as a `#[must_use]` token; the canonical MASM entrypoint becomes `exec.vm::verify_vm_proof [CLAIM_COMMITMENT] -> [D]`, with the claim, kernel witness, and proof delivered content-addressed through the advice map over the stream-level `exec.vm::verify_vm_proof_from_claim`; `miden_verifier::recursive` builds the advice ([#3422](https://github.com/0xMiden/miden-vm/pull/3422)).
+- [BREAKING] Normalized each AIR's committed LogUp sum by its trace length and changed the running-sum constraint to close cyclically, removing the requirement that lookup activity be absent from the last row ([#3412](https://github.com/0xMiden/miden-vm/pull/3412)).
 - `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
 
+- Opened the `LargeSmtForest` backend API for external implementations: made `LineageMutation::new` and `AppliedLineageMutation::new` public and added `LineageId::as_bytes` and `MutationSet::from_parts`.
+- Parallelized commitment buffer initialization and made the LMCS upsampling scratch buffer lazy ([#3406](https://github.com/0xMiden/miden-vm/pull/3406)).
+- [BREAKING] Added `AdviceStack` as the public advice stack type. `AdviceInputs` and `AdviceProvider` now use it, and the old raw stack field and `extend_stack` helpers were removed ([#3423](https://github.com/0xMiden/miden-vm/pull/3423)).
+- Faster Poseidon2 hashing on aarch64 targets with SVE2 via an SVE2 kernel ([#3405](https://github.com/0xMiden/miden-vm/pull/3405)).
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
@@ -42,6 +47,7 @@
 - [BREAKING] Replaced the free `verify_with_max_deferred_elements` functions in `miden-verifier` and `miden-vm` with the configurable `Verifier` API. Use `Verifier::with_max_deferred_elements(...)` followed by `verify(...)` or `verify_partial(...)`.
 - Added `Package::get_export_node()` and `Package::procedures_with_attribute()` APIs ([#3320](https://github.com/0xMiden/miden-vm/issues/3320)).
 - [BREAKING] Add dead-node elimination in ACE DAG ([#3408](https://github.com/0xMiden/miden-vm/pull/3408)).
+- [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 
 #### Fixes
 
@@ -57,6 +63,20 @@
 - Restored compact SMT serialization budgets so an empty-subtree-only `NodeValue` can be read under a tight budget ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Built the crypto SVE archive from target cfg (`CARGO_CFG_TARGET_ARCH` / `CARGO_CFG_TARGET_FEATURE`) instead of `#[cfg(target_feature = "sve")]`, which does not fire in build scripts ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Qualified the word-wrapper derive macro's emitted `String` as `alloc::string::String` and wrapped the impl in `const _: () = { extern crate alloc; ... }` for `no_std` and `#![no_implicit_prelude]` consumers ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Fixed `miden-format` producing lines longer than the configured maximum for item imports; imports now wrap one item per line. Added `overflow_delimited_expr` to opt into keeping long `word(...)`/`event(...)` call heads on the assignment line when they fit ([#3380](https://github.com/0xMiden/miden-vm/pull/3380)).
+
+## miden-vm v0.25.8 (2026-07-22)
+
+- Fix validation of procedure names in package manifest exports when extracting module info
+- [BREAKING] Consolidate all package debug info sections into `PackageDebugInfo`, and rewrite its serialization format to remove as much excess overhead as possible. This addresses the issue where the presence of package debug info causes massive execution-time overhead when requesting the debug info for the package. It also simplifies construction/maintenance of debug info, and provides more ergonomic APIs for accessing specific types of information. ([#3398](https://github.com/0xMiden/miden-vm/pull/3398))
+
+## miden-vm v0.25.7 (2026-07-20)
+
+- Use the `wincode` crate re-exported by `serde-wincode` for proof encoding.
+
+## miden-vm v0.25.6 (2026-07-19)
+
+- Update `wincode` dependency to v0.6.
 
 ## miden-vm v0.25.5 (2026-07-16)
 
