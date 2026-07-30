@@ -19,16 +19,16 @@ use miden::core::crypto::hashes::poseidon2
 # miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
 
 # Domain tag for the claim commitment: the registered selector
-# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (33 << 8) | 1, per the Miden
+# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (0x010001 << 8) | 1, per the Miden
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
 # Must match miden_core::program::CLAIM_DOMAIN_TAG (enforced by cross-tests).
-const CLAIM_DOMAIN_TAG = 8449
+const CLAIM_DOMAIN_TAG = 0x01000101
 
 # Domain tag for the kernel commitment: the registered selector
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (32 << 8) | 1, per the Miden
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
 # Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
-const KERNEL_DOMAIN_TAG = 8193
+const KERNEL_DOMAIN_TAG = 0x01000001
 
 # Number of field elements in the canonical claim encoding.
 const NUM_CLAIM_ELEMENTS = 40
@@ -75,10 +75,10 @@ pub proc kernel_commitment
 end
 
 # Domain tag for the proof-request key: the registered selector
-# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (34 << 8) | 1, per the Miden
+# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (0x010002 << 8) | 1, per the Miden
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
 # Must match miden_core::program::REQUEST_DOMAIN_TAG (enforced by cross-tests).
-const REQUEST_DOMAIN_TAG = 8705
+const REQUEST_DOMAIN_TAG = 0x01000201
 
 #! Computes the advice-map key addressing a proof package for a claim under a verifier.
 #!

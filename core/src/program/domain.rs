@@ -15,15 +15,15 @@
 //!
 //! # Provisional registry entries
 //!
-//! No machine-readable registry exists yet; these are its first entries and must be migrated
-//! there when it lands. The miden-vm verifier-API block starts at `domain_id = 32`, leaving
-//! 1..=31 for miden-crypto primitives:
+//! The RFC's draft registry allocates `0x010000..0x01ffff` to miden-vm, with concrete entries
+//! delegated to this repository. These are the range's first entries, to be migrated into the
+//! machine-readable registry when it lands:
 //!
-//! | domain_id | version | domain |
-//! |-----------|---------|-------------------------------------------|
-//! | 32        | 1       | kernel commitment ([`KERNEL_DOMAIN_TAG`](super::KERNEL_DOMAIN_TAG)) |
-//! | 33        | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
-//! | 34        | 1       | proof request key ([`REQUEST_DOMAIN_TAG`](super::REQUEST_DOMAIN_TAG)) |
+//! | domain_id  | version | domain |
+//! |------------|---------|-------------------------------------------|
+//! | `0x010000` | 1       | kernel commitment ([`KERNEL_DOMAIN_TAG`](super::KERNEL_DOMAIN_TAG)) |
+//! | `0x010001` | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
+//! | `0x010002` | 1       | proof request key ([`REQUEST_DOMAIN_TAG`](super::REQUEST_DOMAIN_TAG)) |
 //!
 //! Selectors share one namespace with the `merge_in_domain` values used for MAST control-block
 //! hashing. Those are opcode-sized (`< 256`) while every registered selector is `>= 257`
@@ -34,13 +34,13 @@
 use crate::Felt;
 
 /// Registered domain id for the kernel commitment.
-pub const KERNEL_COMMITMENT_DOMAIN_ID: u32 = 32;
+pub const KERNEL_COMMITMENT_DOMAIN_ID: u32 = 0x010000;
 
 /// Registered domain id for the execution-claim commitment.
-pub const EXECUTION_CLAIM_DOMAIN_ID: u32 = 33;
+pub const EXECUTION_CLAIM_DOMAIN_ID: u32 = 0x010001;
 
 /// Registered domain id for the proof-request key.
-pub const PROOF_REQUEST_DOMAIN_ID: u32 = 34;
+pub const PROOF_REQUEST_DOMAIN_ID: u32 = 0x010002;
 
 /// Packs a registered domain id and per-domain version into a domain selector.
 ///
