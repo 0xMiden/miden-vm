@@ -7,7 +7,7 @@ use miden_processor::{
     event::{EventName, SystemEvent, TraceError},
 };
 
-use super::TracingTestHost;
+use super::TestHost;
 
 #[test]
 fn test_trace_event_handling() {
@@ -41,7 +41,7 @@ fn test_trace_event_handling() {
         .assemble_program("program", &source)
         .unwrap()
         .unwrap_program();
-    let mut host = TracingTestHost::default();
+    let mut host = TestHost::default();
     miden_processor::execute_sync(
         &program,
         StackInputs::default(),
@@ -51,8 +51,8 @@ fn test_trace_event_handling() {
     )
     .unwrap();
 
-    assert_eq!(host.events, vec![3000, 4000]);
-    assert_eq!(host.traces, vec![1000, 2000]);
+    assert_eq!(host.event_handler, vec![3000, 4000]);
+    assert_eq!(host.trace_handler, vec![1000, 2000]);
 }
 
 /// Assembles a program that emits a single trace event.

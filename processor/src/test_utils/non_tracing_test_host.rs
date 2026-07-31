@@ -4,70 +4,8 @@ use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManage
 
 use crate::{
     BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
-    event::EventError, host::handlers::TraceError,
+    event::EventError,
 };
-
-/// A minimal testing host that records trace events.
-///
-/// Intended only for running self-contained programs built directly from source. It resolves no
-/// external MAST forests, loads no kernels, and produces no advice mutations.
-///
-/// Trace events are triggered by emitting `SystemEvent::TraceEvent` identifier and the id of the
-/// trace event is expected below that on the stack.
-#[derive(Debug, Clone)]
-pub struct TracingTestHost {
-    /// Regular host event IDs received via [`SyncHost::on_event`], in emission order.
-    pub events: Vec<u64>,
-    /// Trace event IDs received via [`SyncHost::on_trace`], in emission order.
-    pub traces: Vec<u64>,
-    source_manager: Arc<DefaultSourceManager>,
-}
-
-impl TracingTestHost {
-    pub fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            traces: Vec::new(),
-            source_manager: Arc::new(DefaultSourceManager::default()),
-        }
-    }
-}
-
-impl Default for TracingTestHost {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BaseHost for TracingTestHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
-    }
-}
-
-impl SyncHost for TracingTestHost {
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
-        // This host only runs self-contained programs; external MAST forests are not resolved.
-        None
-    }
-
-    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = process.get_stack_item(0).as_canonical_u64();
-        self.events.push(event_id);
-        Ok(Vec::new())
-    }
-
-    fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
-        let trace_event_id = process.get_stack_item(1).as_canonical_u64();
-        self.traces.push(trace_event_id);
-        Ok(())
-    }
-}
 
 /// A minimal testing host that records regular events.
 ///
