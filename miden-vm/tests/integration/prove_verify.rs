@@ -502,10 +502,10 @@ fn test_partial_obligation_flow() {
     let _state = pending.into_state();
 }
 
-/// The deferred root is statement-bound: substituting deferred material that resolves to a
-/// different root must fail STARK verification.
+/// A STARK-backed deferred proof must be exactly encoded and match the root bound by the outer VM
+/// proof.
 #[test]
-fn test_deferred_root_is_statement_bound() {
+fn test_deferred_stark_proof_requires_exact_encoding_and_bound_root() {
     // a program with a deferred request binds a non-TRUE deferred root into its statement
     let source = "
         begin
@@ -533,8 +533,17 @@ fn test_deferred_root_is_statement_bound() {
 
     verify(proof.clone(), claim.clone()).expect("untampered deferred proof should verify");
 
-    // swap in empty deferred material: it resolves to TRUE, which the statement did not bind
+    // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
     let stark = proof.miden_proof();
+    let mut proof_bytes = stark.bytes().to_vec();
+    proof_bytes.push(0);
+    let trailing = ExecutionProof::new(
+        StarkProof::new(proof_bytes, stark.hash_fn()),
+        proof.deferred_proof().clone(),
+    );
+    verify(trailing, claim.clone()).expect_err("trailing proof bytes must be rejected");
+
+    // The deferred root is statement-bound: replacing it with TRUE must fail.
     let tampered = ExecutionProof::new(
         StarkProof::new(stark.bytes().to_vec(), stark.hash_fn()),
         DeferredProof::empty(),
