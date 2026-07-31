@@ -81,10 +81,9 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: 1.96.1
-          targets: wasm32-wasip1
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32-wasip1
       - name: Install cargo-binstall
         uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
         with:
