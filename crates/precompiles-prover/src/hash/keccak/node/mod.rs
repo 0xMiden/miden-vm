@@ -171,7 +171,7 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 /// - col 7/8: keccak-node P2 perm — `Poseidon2In` rate0+rate1, then cap + `Poseidon2Out(H_keccak)`.
 pub const NUM_AUX_COLS: usize = 9;
 
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================

@@ -2,7 +2,7 @@
 source: crates/precompiles-prover/src/stark_config.rs
 expression: snapshot
 ---
-num_inputs: 3128
-num_eval_gates: 9664
-stream_len: 12680
-relation_digest: [15901056294547705196, 13548154566962352054, 13148050606838836712, 2433548564999773594]
+num_inputs: 3072
+num_eval_gates: 9576
+stream_len: 12592
+relation_digest: [14908530032554120817, 6253902297572432860, 17042470880692173314, 1364863901074227591]
