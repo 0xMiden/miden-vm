@@ -187,14 +187,13 @@ fn build_from_proof_bytes(
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
 ) -> Result<RecursiveVerifierInputs, RecursiveAdviceError> {
-    let params = config::pcs_params();
-    let config = config::poseidon2_config(params, config::RELATION_DIGEST);
+    let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
 
     let proof = deserialize_proof(proof_bytes)?;
 
     let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
-    config::observe_protocol_params(&mut challenger);
+    config::observe_protocol_params(config.pcs(), &mut challenger);
 
     let statement =
         Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
@@ -206,7 +205,7 @@ fn build_from_proof_bytes(
 
     let heights = miden_trace_heights(&stark)?;
 
-    build_advice(&config, params, &stark, heights, pub_inputs, claim_commitment)
+    build_advice(&config, &stark, heights, pub_inputs, claim_commitment)
 }
 
 /// Deserializes a wincode-encoded Poseidon2 STARK proof, bounding preallocation by
@@ -239,7 +238,6 @@ fn miden_trace_heights(
 /// Packs the parsed STARK transcript into the advice-stack stream, Merkle store, and advice map.
 fn build_advice(
     config: &P2Config,
-    params: PcsParams,
     stark: &StarkProof<Challenge, P2Lmcs>,
     heights: MidenTraceHeights,
     pub_inputs: &PublicInputs,
@@ -261,14 +259,7 @@ fn build_advice(
     // The section order below mirrors the consumption-order list in the module doc; both are
     // pinned against the MASM verifier by the stark e2e differential tests.
 
-    // Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]. DEEP
-    // and folding PoW bits are not publicly exposed on PcsParams; use the config constants.
-    let mut advice_stack = vec![
-        Felt::new_unchecked(params.num_queries() as u64),
-        Felt::new_unchecked(params.query_pow_bits() as u64),
-        Felt::new_unchecked(config::DEEP_POW_BITS as u64),
-        Felt::new_unchecked(config::FOLDING_POW_BITS as u64),
-    ];
+    let mut advice_stack = security_parameter_words(config.pcs()).to_vec();
 
     // Final deferred root, loaded by `public_inputs::stage_boundary_inputs`.
     advice_stack.extend_from_slice(pub_inputs.deferred_root().as_ref());
@@ -313,6 +304,16 @@ fn build_advice(
         advice_map,
         claim_commitment,
     })
+}
+
+/// Returns the proof-package header in the order consumed by the recursive MASM verifier.
+fn security_parameter_words(params: &PcsParams) -> [Felt; 4] {
+    [
+        Felt::new_unchecked(params.num_queries() as u64),
+        Felt::new_unchecked(params.query_pow_bits() as u64),
+        Felt::new_unchecked(params.deep_pow_bits() as u64),
+        Felt::new_unchecked(params.folding_pow_bits() as u64),
+    ]
 }
 
 // OOD EVALUATIONS
@@ -471,6 +472,15 @@ mod tests {
             err,
             RecursiveAdviceError::UnsupportedHashFunction(HashFunction::Blake3_256)
         ));
+    }
+
+    /// The proof-package header must describe the supplied PCS parameters rather than the Miden
+    /// VM's current defaults; otherwise its transcript and MASM security checks can disagree.
+    #[test]
+    fn security_parameter_header_uses_the_supplied_pcs_params() {
+        let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
+
+        assert_eq!(security_parameter_words(&params), [19, 13, 11, 5].map(Felt::new_unchecked),);
     }
 
     /// Request packaging is a pure repackaging: the proof stream moves — unchanged and in

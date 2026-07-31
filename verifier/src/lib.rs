@@ -315,7 +315,7 @@ where
     )?;
 
     let mut challenger = config.challenger();
-    config::observe_protocol_params(&mut challenger);
+    config::observe_protocol_params(config.pcs(), &mut challenger);
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
     // statement inputs read during observation/boundary correction. The lifted verifier absorbs

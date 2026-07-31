@@ -214,16 +214,16 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// Call on a challenger obtained from `config.challenger()` to complete the
 /// domain-separated transcript initialization. The config factories bind the
 /// caller-supplied relation digest into the prototype challenger; this function
-/// adds the remaining protocol parameters.
-pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
+/// adds the actual PCS parameters used by that config.
+pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
-    challenger.observe(Felt::new_unchecked(QUERY_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(DEEP_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(FOLDING_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(LOG_BLOWUP as u64));
-    challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
-    challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
+    challenger.observe(Felt::new_unchecked(params.num_queries() as u64));
+    challenger.observe(Felt::new_unchecked(params.query_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.deep_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.folding_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.log_blowup() as u64));
+    challenger.observe(Felt::new_unchecked(params.log_final_degree() as u64));
+    challenger.observe(Felt::new_unchecked(1_u64 << params.log_folding_arity()));
     challenger.observe(Felt::ZERO);
 }
 
@@ -388,13 +388,40 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-    use miden_crypto::merkle::MerkleTree;
+    use miden_crypto::{
+        merkle::MerkleTree,
+        stark::{challenger::CanObserve, pcs::PcsParams},
+    };
 
     use crate::{ProofOrder, ace};
 
     const PROTOCOL_ID: u64 = 1;
     const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
+
+    #[derive(Default)]
+    struct RecordingChallenger(Vec<Felt>);
+
+    impl CanObserve<Felt> for RecordingChallenger {
+        fn observe(&mut self, value: Felt) {
+            self.0.push(value);
+        }
+    }
+
+    /// Transcript domain separation must bind the parameters actually supplied to the config,
+    /// not the Miden VM's current compile-time defaults.
+    #[test]
+    fn protocol_observation_uses_the_supplied_pcs_params() {
+        let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
+        let mut challenger = RecordingChallenger::default();
+        super::observe_protocol_params(&params, &mut challenger);
+        assert_eq!(
+            challenger.0,
+            [19, 13, 11, 5, 4, 6, 8, 0].map(Felt::new_unchecked),
+            "the transcript must encode [queries, query PoW, DEEP PoW, folding PoW, blowup log, \
+             final-degree log, folding arity, padding]",
+        );
+    }
 
     fn padding_leaf(index: usize) -> Word {
         Poseidon2::hash_elements(&[

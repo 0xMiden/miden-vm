@@ -343,7 +343,7 @@ impl SessionTraces {
             .expect("chiplet trace shapes are valid");
 
         let mut challenger = config.challenger();
-        observe_protocol_params(&mut challenger);
+        observe_protocol_params(config.pcs(), &mut challenger);
 
         let output: StarkOutput<Felt, QuadFelt, SC> =
             ProverInstance::new(config, &prover_statement, Some(preprocessed))?
@@ -437,7 +437,7 @@ where
             .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
-    observe_protocol_params(&mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
         .verify(&proof, challenger)?;
