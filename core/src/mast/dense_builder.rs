@@ -79,18 +79,6 @@ impl DenseMastForestBuilder {
             advice_map: self.advice_map,
         })
     }
-
-    /// Finalizes this builder into a dense [`MastForest`].
-    pub fn finish(self) -> Result<MastForest, MastForestError> {
-        self.build()
-    }
-
-    /// Finalizes this builder and returns the builder-local to final node ID map.
-    pub fn finish_with_id_map(
-        self,
-    ) -> Result<(MastForest, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
-        self.build_with_id_map()
-    }
 }
 
 impl MastNodeContext for DenseMastForestBuilder {

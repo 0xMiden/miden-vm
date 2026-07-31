@@ -69,6 +69,9 @@ use crate::{
     debug_info::DebugSourceNodeId,
 };
 
+#[cfg(test)]
+mod tests;
+
 // CONSTANTS
 // ================================================================================================
 
@@ -815,6 +818,3 @@ impl Deserializable for TypeExport {
         Ok(Self { path, ty })
     }
 }
-
-#[cfg(test)]
-mod tests;

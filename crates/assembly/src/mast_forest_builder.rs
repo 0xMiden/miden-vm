@@ -111,19 +111,16 @@ pub struct MastForestBuilder {
 
 /// Statically-linked library data used by [`MastForestBuilder`].
 pub(crate) struct StaticLibrary<'a> {
-    pub(crate) mast: &'a MastForest,
+    mast: &'a MastForest,
     /// This field is expected to hold _validated_ package debug info - invalid debug info may
     /// cause panics during assembly.
-    pub(crate) debug_info: Option<PackageDebugInfo>,
-    pub(crate) source_library_commitment: Word,
-    pub(crate) alternate_source_library_commitment: Option<Word>,
+    debug_info: Option<PackageDebugInfo>,
+    source_library_commitment: Word,
+    alternate_source_library_commitment: Option<Word>,
 }
 
 impl<'a> StaticLibrary<'a> {
-    pub(crate) fn from_mast_forest(
-        mast: &'a MastForest,
-        debug_info: Option<PackageDebugInfo>,
-    ) -> Self {
+    fn from_mast_forest(mast: &'a MastForest, debug_info: Option<PackageDebugInfo>) -> Self {
         Self {
             mast,
             debug_info,
@@ -144,18 +141,12 @@ impl<'a> StaticLibrary<'a> {
             .with_alternate_source_library_commitment(library.interface_digest()?))
     }
 
-    pub(crate) fn with_source_library_commitment(
-        mut self,
-        source_library_commitment: Word,
-    ) -> Self {
+    fn with_source_library_commitment(mut self, source_library_commitment: Word) -> Self {
         self.source_library_commitment = source_library_commitment;
         self
     }
 
-    pub(crate) fn with_alternate_source_library_commitment(
-        mut self,
-        source_library_commitment: Word,
-    ) -> Self {
+    fn with_alternate_source_library_commitment(mut self, source_library_commitment: Word) -> Self {
         self.alternate_source_library_commitment = Some(source_library_commitment);
         self
     }
