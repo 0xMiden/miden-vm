@@ -72,7 +72,7 @@
 //!   alpha          Composition challenge. Horner accumulator for constraint folding.
 //!   z^N            Trace-length power. Vanishing factor and delta base in quotient
 //!                  recomposition.
-//!   z_k            Periodic column evaluation point (z^(N / max_cycle_len)).
+//!   z_k            Shared periodic-column basis (z^(N_max / shared_period)).
 //!   is_first       Precomputed selector (z^N - 1) / (z - 1).
 //!   is_last        Precomputed selector (z^N - 1) / (z - g^{-1}).
 //!   is_transition  Precomputed selector z - g^{-1}.

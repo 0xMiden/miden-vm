@@ -6,7 +6,7 @@
 - [BREAKING] Normalized each AIR's committed LogUp sum by its trace length and changed the running-sum constraint to close cyclically, removing the requirement that lookup activity be absent from the last row ([#3412](https://github.com/0xMiden/miden-vm/pull/3412)).
 - `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
 
-- Sped up constraints evaluation during proving: the prover now runs generated, globally-CSE'd constraint evaluators, and ACE lowering consumes the same captured constraint IR ([#3404](https://github.com/0xMiden/miden-vm/pull/3404)).
+- [BREAKING] Sped up constraints evaluation during proving: the prover now runs generated, globally-CSE'd constraint evaluators, and ACE lowering consumes the same captured constraint IR. The public ACE pipeline now targets Miden's `Felt`/`QuadFelt` field pair instead of accepting arbitrary base and extension fields ([#3404](https://github.com/0xMiden/miden-vm/pull/3404)).
 - Opened the `LargeSmtForest` backend API for external implementations: made `LineageMutation::new` and `AppliedLineageMutation::new` public and added `LineageId::as_bytes` and `MutationSet::from_parts`.
 - Parallelized commitment buffer initialization and made the LMCS upsampling scratch buffer lazy ([#3406](https://github.com/0xMiden/miden-vm/pull/3406)).
 - [BREAKING] Added `AdviceStack` as the public advice stack type. `AdviceInputs` and `AdviceProvider` now use it, and the old raw stack field and `extend_stack` helpers were removed ([#3423](https://github.com/0xMiden/miden-vm/pull/3423)).

@@ -51,25 +51,26 @@ fn generated_evaluators_match_handwritten_structurally() {
 /// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that
-/// differ from the handwritten capture's somewhere. If `HandwrittenMidenAir`
-/// and `MidenAir` ever route to the same evaluator, both drift oracles silently
-/// compare the generated path against itself — and this test fails instead.
+/// differ from the handwritten capture's for every AIR. If
+/// `HandwrittenMidenAir` and `MidenAir` ever route to the same evaluator for
+/// even one AIR, both drift oracles silently compare the generated path against
+/// itself for that AIR — and this test fails instead.
 #[test]
 fn handwritten_and_generated_are_distinct_captures() {
-    let mut any_difference = false;
     for air in AIRS {
         let mut builder = Graph::builder();
         let handwritten = capture_into(&HandwrittenMidenAir(air), &mut builder);
         let generated = capture_into(&air, &mut builder);
         let _ = builder.freeze();
-        any_difference |= handwritten.base_roots != generated.base_roots
+        let differs = handwritten.base_roots != generated.base_roots
             || handwritten.ext_roots != generated.ext_roots;
+        assert!(
+            differs,
+            "{} handwritten and generated evaluators captured identically: the drift \
+             oracles would be comparing the generated evaluator against itself",
+            air.name()
+        );
     }
-    assert!(
-        any_difference,
-        "handwritten and generated evaluators captured identically: the drift \
-         oracles would be comparing the generated evaluators against themselves"
-    );
 }
 
 /// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children
