@@ -654,6 +654,21 @@ fn verify_vm_proof_rejects_oversized_kernel_witness() {
     );
 }
 
+/// Reject a claim that crosses into verifier-owned memory.
+#[test]
+fn verify_vm_proof_rejects_claim_crossing_verifier_memory_start() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::sys::vm
+        begin
+            exec.constants::verifier_memory_start sub.4
+            exec.vm::verify_vm_proof
+        end
+    ";
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(test, "claim memory region overlaps verifier-owned memory");
+}
+
 /// The claim's kernel commitment K, read from felts [4, 8) of the caller-owned claim input.
 fn claim_kernel_commitment(data: &VerifierData) -> Word {
     Word::new([
@@ -833,8 +848,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
         );
     }
 
-    // 5) program_digest / deferred_root pass through to boundary_inputs+4..12; the trailing pad
-    //    word at +12..16 must be zero.
+    // 5) program_digest / deferred_root pass through to boundary_inputs+4..12.
     for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
             read_elem(reduced_ptr + 4 + i as u32),
@@ -842,10 +856,6 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usi
             "boundary-inputs window felt {i} mismatch"
         );
     }
-    for i in 12..16 {
-        assert_eq!(read_elem(reduced_ptr + i), 0, "boundary-inputs pad felt {i} must be zero");
-    }
-
     // 6) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).
     for (i, &v) in stack_inputs.iter().chain(stack_outputs.iter()).enumerate() {
         assert_eq!(read_elem(pi_ptr + 2 * i as u32), v, "FLPI slot {i} value mismatch");

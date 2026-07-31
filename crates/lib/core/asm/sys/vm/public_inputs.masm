@@ -7,27 +7,22 @@ use miden::core::sys::vm::claim
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
 #
-# This module handles the Miden VM-specific public input processing for the recursive verifier.
-# It (a) populates the caller-facing boundary-inputs block (kernel commitment, program digest,
-# deferred root) and the FLPI section of the ACE READ region, and (b) absorbs every public input
-# into the Fiat-Shamir transcript in a rate-aligned schedule mirroring `MidenMultiAir::observe`
-# on the Rust side. The outer-LogUp boundary correction `c_total` is computed later, in step II
-# (`observe_aux_trace`), once the aux randomness has been sampled from the transcript.
+# This module stages the VM statement and absorbs `[CLAIM_HASH | deferred_root]` into Fiat-Shamir,
+# matching `MidenMultiAir::observe`. CLAIM_HASH binds the program digest, kernel commitment, and
+# stack I/O. The outer-LogUp correction `c_total` is computed in step II after sampling aux
+# randomness.
 #
 # Memory layout populated (low -> high addresses):
 #
-#   boundary_inputs_ptr --> [ kernel_H          (4 felts) ]   caller-facing boundary-inputs
-#                           [ program_digest    (4 felts) ]   block (16 felts). The trailing
-#                           [ deferred_root     (4 felts) ]   pad keeps the FS observation
-#                           [ zero pad          (4 felts) ]   rate-aligned (two 8-felt chunks).
+#   boundary_inputs_ptr --> [ kernel_H       (4 felts) ]
+#                           [ program_digest (4 felts) ]
+#                           [ deferred_root  (4 felts) ]
+#                           [ reserved       (4 felts) ]
 #
 #   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
 #
 #   anchor             -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   AUX_RAND_ELEM_PTR (sampled
 #                                                                     from the transcript in step II)
-#
-# The trailing pad slot is written to zero before the boundary-inputs window is absorbed, so the FS
-# observation does not depend on the scratch region being zero-initialized.
 #
 # The outer-LogUp boundary correction accumulated at `C_TOTAL_PTR` is the signed sum of one
 # inverted bus term per boundary interaction:
@@ -64,16 +59,10 @@ use miden::core::sys::vm::claim
 #     from the same region.
 #   - deferred_root: advice (4 canonical felts), loaded by `stage_boundary_inputs`.
 #
-# `stage_boundary_inputs` stages the kernel commitment, program_digest and deferred_root into
-# the boundary-inputs block before the transcript starts; `process_public_inputs` then only
-# absorbs into FS.
-#
 # CONSTANTS
 # =================================================================================================
 
-# Number of fixed length public inputs (in field elements): stack inputs (16) + stack
-# outputs (16). These are the only public values referenced by the ACE circuit; the program
-# digest and deferred root live in the caller-facing boundary-inputs block instead.
+# ACE public inputs: 16 stack inputs + 16 stack outputs.
 
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
@@ -86,7 +75,7 @@ const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_DEFERRED_ROOT_PLUS_ONE         = 3   # LogDeferredRoot (2) + 1
 
 # Word offsets into the 16-felt boundary-inputs block at `boundary_inputs_ptr`:
-#   [ kernel_H (+0) | program_digest (+4) | deferred_root (+8) | zero pad (+12) ].
+#   [ kernel_H (+0) | program_digest (+4) | deferred_root (+8) | reserved (+12) ].
 const BOUNDARY_INPUTS_PROGRAM_OFFSET    = 4
 const BOUNDARY_INPUTS_DEFERRED_OFFSET   = 8
 
@@ -118,22 +107,20 @@ pub proc process_public_inputs
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="process_public_inputs: input buffer must be empty"
 
-    # 1) Compute and store `pi_ptr`; publish the fixed boundary-inputs block address separately.
+    # 1) Store the ACE and boundary-data pointers.
     exec.get_num_fixed_len_public_inputs
     exec.public_inputs::compute_and_store_public_inputs_address
     exec.store_boundary_inputs_address
     # => [...]
 
-    # 2) Compute CLAIM_HASH over the caller's claim region (completed by
-    #    `stage_boundary_inputs`) and absorb the statement block [CLAIM_HASH | D] into FS.
+    # 2) Absorb [CLAIM_HASH | D].
     exec.constants::claim_address_ptr mem_load
     exec.claim::claim_commitment
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
 
-    # 3) Load FLPI (stack i/o) from caller memory into the FLPI region (public values for the
-    #    constraint checks; not separately absorbed — the transcript sees them via CLAIM_HASH).
+    # 3) Copy stack I/O into ACE READ. CLAIM_HASH already binds these values.
     exec.load_public_inputs
     # => [...]
 
@@ -151,21 +138,18 @@ proc store_boundary_inputs_address
     exec.constants::boundary_inputs_address_ptr mem_store
 end
 
-#! Stages the boundary-inputs block at the fixed standalone `BOUNDARY_INPUTS_PTR` before the
-#! transcript starts (called by `verify_vm_proof`).
+#! Stages VM boundary data before the transcript starts.
 #!
 #! Precondition: the claim region is fully populated, and the digest witness at `kernel_ptr`
 #! hashes to its K field (`verify_vm_proof` asserts this before calling).
 #!
-#! Writes, in order:
-#!   boundary_inputs+0  : K, copied from the claim region (+4), for the step-II boundary fold
-#!                        and caller-facing readers.
-#!   boundary_inputs+4  : program_digest, copied from the claim region.
-#!   boundary_inputs+8  : deferred_root, loaded from advice.
+#! Writes:
+#! - +0: K from the claim
+#! - +4: program_digest from the claim
+#! - +8: deferred_root from advice
+#! - +12: reserved and unchanged
 #!
-#! Also persists `claim_ptr`, `kernel_ptr`, and the digest count `N` into their fixed cells
-#! for the step-I FLPI load and the step-II boundary fold.
-#! The trailing pad word of the window is never written and reads as zero.
+#! Also stores `claim_ptr`, `kernel_ptr`, and N for later steps.
 #!
 #! Input:  [claim_ptr, kernel_ptr, N, ...]
 #! Output: [...]

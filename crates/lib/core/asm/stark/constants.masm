@@ -95,9 +95,7 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
-### Address storing a pointer to the boundary-inputs block
-### [kernel_H | program_digest | deferred_root | zero_pad] (16 felts). The block lives at the
-### fixed standalone address BOUNDARY_INPUTS_PTR; this cell holds that pointer for the readers.
+### Pointer to the boundary data at BOUNDARY_INPUTS_PTR.
 const BOUNDARY_INPUTS_ADDRESS_PTR = 3223322670
 
 ### Address storing a pointer to the public inputs
@@ -184,10 +182,8 @@ const ORDER_TAG_PTR = 3223322764
 const RELATION_DIGEST_PTR = 3223322768
 const ACE_REGISTRY_ROOT_PTR = 3223322772
 
-### Fixed standalone boundary-inputs block (16 felts):
-### [kernel_H (4) | program_digest (4) | deferred_root (4) | zero_pad (4)]. The verifier writes
-### it and absorbs it into Fiat-Shamir; the ACE circuit never reads it, so it lives in the fixed
-### verifier region rather than the OOD-derived ACE READ region.
+### Boundary data: [kernel_H | program_digest | deferred_root | reserved].
+### Each entry is one word; the trailing word is unused.
 const BOUNDARY_INPUTS_PTR = 3223322836
 
 ### Kernel digest witness region (up to 255 digests = 1020 felts, bounded by
@@ -219,16 +215,12 @@ const KERNEL_WITNESS_PTR = 3223322852
 ##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
 ##                                                          ... EVAL section follows ...
 ##
-## The boundary-inputs block (kernel_H | program_digest | deferred_root | zero pad) is NOT part
-## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
-## the fixed standalone `BOUNDARY_INPUTS_PTR` above, staged by `verify_vm_proof` and absorbed into
-## Fiat-Shamir; it is not carved out of this region.
+## Boundary data is stored separately at `BOUNDARY_INPUTS_PTR`. ACE reads stack inputs and outputs
+## from `pi_ptr`; it does not read the boundary data. `CLAIM_HASH` binds kernel_H and program_digest;
+## deferred_root is absorbed separately into Fiat-Shamir.
 ##
-## After `verify_vm_proof` returns, the 16 felts at `BOUNDARY_INPUTS_PTR` together with the FLPI
-## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
-## commitment the caller can bind against. The FLPI pointer is dynamic (stored at
-## PUBLIC_INPUTS_ADDRESS_PTR); the boundary-inputs pointer cell (BOUNDARY_INPUTS_ADDRESS_PTR) holds
-## the fixed `BOUNDARY_INPUTS_PTR`. All other pointers are fixed constants.
+## `PUBLIC_INPUTS_ADDRESS_PTR` stores `pi_ptr`; read stack values at `pi_ptr + 2*i`.
+## `BOUNDARY_INPUTS_ADDRESS_PTR` stores the fixed `BOUNDARY_INPUTS_PTR`.
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
@@ -263,7 +255,7 @@ const AUXILIARY_ACE_INPUTS_PTR = 3225420336   # AUX_BUS_BOUNDARY_PTR + 8
 const ACE_CIRCUIT_STREAM_PTR = 3225420376     # AUXILIARY_ACE_INPUTS_PTR + 40
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420972            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225420960            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (584 for multi-AIR)
 
 ## FRI
 ##
@@ -358,6 +350,11 @@ end
 
 pub proc get_fri_fold_arity
     push.FRI_FOLD_ARITY
+end
+
+#! Returns the first verifier-owned memory address.
+pub proc verifier_memory_start
+    push.LDE_DOMAIN_INFO_PTR
 end
 
 #! Store details about the LDE domain.

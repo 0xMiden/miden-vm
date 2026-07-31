@@ -48,6 +48,20 @@ proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
+#! Checks that the 40-felt claim region is word-aligned and below verifier-owned memory.
+#! Must run before the verifier writes to memory.
+#!
+#! Input:  [claim_ptr, ...]
+#! Output: [claim_ptr, ...]
+proc assert_valid_claim_region
+    # u32mod also validates that claim_ptr is a u32.
+    dup u32mod.4 assertz.err="claim_ptr must be word-aligned"
+
+    # Require [claim_ptr, claim_ptr + 40) to end before verifier memory.
+    dup add.40 exec.constants::verifier_memory_start
+    u32lte assert.err="claim memory region overlaps verifier-owned memory"
+end
+
 #! Computes the conjectured security level (in bits) attained by the given proof parameters.
 #!
 #! Evaluates the integer fixed-point formula `min((num_queries * C) >> 16 + query_pow_bits, 128)`.
@@ -195,25 +209,29 @@ end
 #! therefore never moves this procedure's root - request keys and registered proof packages
 #! stay valid across such changes.
 #!
-#! The caller supplies the execution claim as a memory region holding the fully populated
-#! canonical encoding `P (+0) | K (+4) | I (+8) | O (+24)`; every field is the caller's own
-#! trusted data. The kernel digest witness is not caller-supplied: this procedure fetches it
-#! from the advice map under K (`[num_digests, digest_0, ..]`), stages it into the
-#! verifier-owned witness region (`constants::kernel_witness_ptr`), and asserts it hashes to
-#! the claim's K. The verifier binds the transcript to the claim commitment and evaluates the
-#! kernel-ROM boundary from the fetched witness. The final deferred root is loaded from advice,
-#! bound by the statement, and returned on the operand stack: the caller must settle it or
-#! expose it in its own statement.
+#! The caller stores the claim as `P (+0) | K (+4) | I (+8) | O (+24)`. The complete 40-felt
+#! region must be below `constants::verifier_memory_start`.
+#!
+#! The verifier fetches the kernel digest list from the advice map under K, copies it to
+#! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
+#! claim commitment and checks the kernel-ROM boundary against this list.
+#!
+#! The returned deferred root is bound by the verified statement. The caller must settle it or
+#! include it in its own statement.
 #!
 #! Inputs:  [claim_ptr, ...]
 #! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #!
 #! Where:
-#! - claim_ptr is the word-aligned address of the caller's claim region (40 felts).
+#! - claim_ptr is word-aligned; its 40-felt region ends at or before
+#!   `constants::verifier_memory_start`.
 #! - D is the deferred root bound by the verified statement.
 #! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
 #!   transcript-bound security parameters.
 pub proc verify_vm_proof
+    # Validate before load_security_params writes verifier memory.
+    exec.assert_valid_claim_region
+
     # --- Load security parameters from advice stack ---
 
     exec.load_security_params

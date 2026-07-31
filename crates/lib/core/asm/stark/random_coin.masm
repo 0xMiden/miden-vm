@@ -829,8 +829,13 @@ pub proc generate_list_indices
     exec.constants::get_lde_domain_depth
     #=> [depth, query_ptr, num_queries, ...]
 
-    # Pre-compute mask = 2^depth - 1.
-    dup pow2 u32assert u32overflowing_sub.1 assertz
+    # mask = 2^depth - 1. Depth is at most 32; use the u32 all-ones mask at that boundary.
+    dup eq.32
+    if.true
+        push.0xffffffff
+    else
+        dup pow2 u32assert u32overflowing_sub.1 assertz
+    end
     #=> [mask, depth, query_ptr, num_queries, ...]
 
     # Rearrange to loop layout: [query_ptr, num_queries, mask, depth, ...]

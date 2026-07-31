@@ -106,9 +106,14 @@ fn reference_source(setup: &str) -> String {
 
     #! sample_bits using the safe wrapper.
     proc sample_bits_safe
-        dup
-        pow2
-        u32assert u32overflowing_sub.1 assertz
+        dup eq.32
+        if.true
+            push.0xffffffff
+        else
+            dup
+            pow2
+            u32assert u32overflowing_sub.1 assertz
+        end
         exec.sample_felt_safe
         u32split
         swap
@@ -234,15 +239,14 @@ fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
     assert_batch_matches_reference(&sponge, 7, num_queries, 17);
 }
 
-/// Test across a range of LDE domain depths.
-/// depth must be in 1..=31 (since pow2_shift = 2^(32-depth) must fit in u32,
-/// and mask = 2^depth - 1 must be valid).
+/// Depth 32 requires an all-ones u32 mask.
 #[rstest]
 #[case::depth_10(10)]
 #[case::depth_13(13)]
 #[case::depth_17(17)]
 #[case::depth_20(20)]
 #[case::depth_24(24)]
+#[case::depth_32(32)]
 fn batch_vs_reference_depth(#[case] depth: u32) {
     let sponge = random_sponge(99);
     assert_batch_matches_reference(&sponge, 7, 27, depth);
