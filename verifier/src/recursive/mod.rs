@@ -17,8 +17,7 @@
 //! `verify_vm_proof` verifies this stream against that claim, so a substituted stream
 //! fails rather than redefining the claim. Everything else is content-addressed in the advice
 //! map and merges across proofs without collision: the kernel digest witness under the kernel
-//! commitment K (`[count, digests..]`), the claim encoding under its commitment (fetched by
-//! consumers that hold the claim commitment), and the query rows, Merkle store, and ACE circuit.
+//! commitment K (`[count, digests..]`), the query rows, Merkle store, and ACE circuit.
 
 use alloc::{
     string::{String, ToString},
@@ -76,7 +75,7 @@ pub struct RecursiveVerifierInputs {
     /// Merkle store backing the query openings (`mtree_get` authentication paths).
     pub store: MerkleStore,
     /// Content-addressed advice-map entries: query rows (`leaf_hash -> leaf_data`), the ACE
-    /// circuit, the kernel digest witness under K, and the claim encoding under its commitment.
+    /// circuit, and the kernel digest witness under K.
     pub advice_map: Vec<(Word, Vec<Felt>)>,
     /// Commitment to the execution claim: the content address (paired with a verifier root) the
     /// proof stream is registered under.
@@ -151,16 +150,14 @@ pub fn advice_inputs(
 
     let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim.commitment())?;
 
-    // Content-addressed claim advice: the kernel digest witness under K and the claim encoding
-    // under its commitment. The verifier checks each fetched value against its key, so proofs
-    // sharing a kernel or a claim produce identical entries that merge.
+    // Content-addressed kernel advice. The verifier checks the fetched witness against K, so
+    // proofs sharing a kernel produce identical entries that merge.
     let kernel = claim.kernel();
     let mut kernel_witness = vec![Felt::new_unchecked(kernel.proc_hashes().len() as u64)];
     for digest in kernel.proc_hashes() {
         kernel_witness.extend_from_slice(digest.as_elements());
     }
     inputs.advice_map.push((kernel.commitment(), kernel_witness));
-    inputs.advice_map.push((claim.commitment(), claim.to_elements().to_vec()));
 
     Ok(inputs)
 }

@@ -418,8 +418,8 @@ fn request_flow_binds_proof_to_claim() {
 
     // Substitution: a different claim's proof under the same key fails against the consumer's
     // claim — the advice provider cannot pass off another proof. The intended claim's own
-    // content-addressed entries stay available so the claim fetch succeeds and rejection
-    // happens in verification, not as a missing key.
+    // content-addressed entries stay available so the kernel-witness fetch succeeds and
+    // rejection happens in verification, not because of a missing key.
     let (k, v) = entry(&other.proof_stream);
     let mut advice_map = other.advice_map.clone();
     advice_map.extend(intended.advice_map.iter().cloned());
@@ -441,8 +441,8 @@ fn request_flow_binds_proof_to_claim() {
 /// single consumer program — each proof is registered
 /// under `request_key(verifier_root, claim_commitment)` and fetched by content, independent of
 /// its position in the advice. The consumer stages each claim from its own inputs and derives
-/// the commitment that addresses the claim and proof entries, so passing requires the in-VM
-/// claim-commitment, kernel-commitment, and request-key derivations to match their native
+/// the commitment that names the claim and addresses its proof entry, so passing requires the
+/// in-VM claim-commitment, kernel-commitment, and request-key derivations to match their native
 /// mirrors (a mismatch is a missing advice-map key).
 #[test]
 fn stark_verifier_e2f4_request_multi_proof() {
@@ -455,7 +455,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
 
     // One advice provider for both proofs: the tape carries only the consumer's claims; the
     // proof streams are content-addressed in the advice map, merged with the (also
-    // content-addressed) query maps, claim/kernel entries, and Merkle stores.
+    // content-addressed) query maps, kernel entries, and Merkle stores.
     let verifier_root = verify_vm_proof_root();
     let mut tape = Vec::new();
     let mut store = MerkleStore::new();
@@ -654,16 +654,14 @@ fn verify_vm_proof_rejects_oversized_kernel_witness() {
     );
 }
 
-/// The claim's kernel commitment K, read from felts [4, 8) of the claim encoding stored in the
-/// advice map under the claim commitment.
+/// The claim's kernel commitment K, read from felts [4, 8) of the caller-owned claim input.
 fn claim_kernel_commitment(data: &VerifierData) -> Word {
-    let claim = &data
-        .advice_map
-        .iter()
-        .find(|(key, _)| *key == data.claim_commitment)
-        .expect("claim encoding is registered under its commitment")
-        .1;
-    Word::new([claim[4], claim[5], claim[6], claim[7]])
+    Word::new([
+        Felt::new_unchecked(data.claim_advice[4]),
+        Felt::new_unchecked(data.claim_advice[5]),
+        Felt::new_unchecked(data.claim_advice[6]),
+        Felt::new_unchecked(data.claim_advice[7]),
+    ])
 }
 
 /// Mutable reference to the advice-map value stored under `key`.

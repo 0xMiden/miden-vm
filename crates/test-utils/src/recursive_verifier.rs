@@ -19,8 +19,7 @@ use crate::crypto::MerkleStore;
 /// `claim_advice` (the consumer's claim: the canonical 40-felt encoding) and `proof_stream`
 /// (the proof as the verifier consumes it) are kept separate because they feed different
 /// channels: a directly staged run concatenates them on the advice stack; a request-fetched run
-/// puts neither on the advice stack — the claim encoding and the proof are registered in the
-/// advice map instead.
+/// keeps the claim on the advice stack and registers the proof in the advice map instead.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
     /// Operand stack for `verify_vm_proof`: `[claim_ptr]`.
