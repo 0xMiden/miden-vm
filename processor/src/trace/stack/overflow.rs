@@ -2,6 +2,7 @@ use miden_air::trace::RowIndex;
 use miden_utils_indexing::IndexVec;
 
 use super::{Felt, ZERO};
+use crate::operation::OperationError;
 
 // OVERFLOW TABLE
 // ================================================================================================
@@ -106,6 +107,7 @@ impl OverflowTable {
     /// returned.
     pub fn last_update_clk_in_current_ctx(&self) -> Felt {
         self.get_current_overflow_stack()
+            .expect("overflow table should always have at least one stack")
             .last()
             .map_or(ZERO, |entry| Felt::from(entry.clk))
     }
@@ -120,7 +122,9 @@ impl OverflowTable {
     /// Used by `ExecutionTracer` to compute `parent_next_overflow_addr` for `DYNCALL` before
     /// the actual pop has occurred (fixes #2813 / addresses huitseeker's review on PR #2904).
     pub fn clk_after_pop_in_current_ctx(&self) -> Felt {
-        let stack = self.get_current_overflow_stack();
+        let stack = self
+            .get_current_overflow_stack()
+            .expect("overflow table should always have at least one stack");
         let entries = stack.overflow.as_slice();
         if entries.len() < 2 {
             ZERO
@@ -131,7 +135,9 @@ impl OverflowTable {
 
     /// Returns the number of elements in the overflow stack for the current context.
     pub fn num_elements_in_current_ctx(&self) -> usize {
-        self.get_current_overflow_stack().num_elements()
+        self.get_current_overflow_stack()
+            .expect("overflow table should always have at least one stack")
+            .num_elements()
     }
 
     // PUBLIC MUTATORS
@@ -139,13 +145,16 @@ impl OverflowTable {
 
     /// Pushes a value into the overflow table in the current context.
     pub fn push(&mut self, value: Felt, clk: RowIndex) {
-        self.get_current_overflow_stack_mut().push(OverflowStackEntry::new(value, clk));
+        self.get_current_overflow_stack_mut()
+            .expect("overflow table should always have at least one stack")
+            .push(OverflowStackEntry::new(value, clk));
     }
 
     /// Removes the last value from the overflow table in the current context, if any, and returns
     /// it.
     pub fn pop(&mut self) -> Option<Felt> {
         self.get_current_overflow_stack_mut()
+            .expect("overflow table should always have at least one stack")
             .pop()
             .as_ref()
             .map(OverflowStackEntry::value)
@@ -163,17 +172,27 @@ impl OverflowTable {
 
     /// Restores the specified context.
     ///
-    /// # Panics
-    /// - if there is no overflow stack for the current context.
-    /// - if the overflow stack for the current context is not empty.
-    ///   - i.e. this should be checked before calling this function.
-    pub fn restore_context(&mut self) {
-        // 1. pop the last overflow stack for the current context, and make sure it is empty.
-        let overflow_stack_for_ctx = self.overflow.swap_remove(self.overflow.len() - 1);
-        assert!(
-            overflow_stack_for_ctx.is_empty(),
-            "the overflow stack for the current context should be empty when restoring a context"
-        );
+    /// Returns an error if the overflow table has no stacks (i.e. there is no current context)
+    /// or if the overflow stack for the current context is not empty (i.e. the caller should
+    /// have drained it before calling this function).
+    pub fn restore_context(&mut self) -> Result<(), OperationError> {
+        let len = self.overflow.len();
+
+        if len <= 1 {
+            return Err(OperationError::Internal(
+                "cannot restore context: must have at least one child context above the root stack",
+            ));
+        }
+
+        let is_empty = self.overflow.as_slice().last().expect("len > 0").is_empty();
+        if !is_empty {
+            return Err(OperationError::Internal(
+                "cannot restore context: overflow stack for the current context is not empty",
+            ));
+        }
+
+        self.overflow.swap_remove(len - 1);
+        Ok(())
     }
 
     // HELPERS
@@ -184,22 +203,70 @@ impl OverflowTable {
     /// Specifically, this is a reference to the more recent overflow stack in the list of overflow
     /// stacks for the current context. Recall that for all contexts other than the root context,
     /// there is at most one overflow stack, but for the root context, there can be two.
-    fn get_current_overflow_stack(&self) -> &OverflowStack {
-        self.overflow
-            .as_slice()
-            .last()
-            .expect("The current context should always have an overflow stack initialized")
+    fn get_current_overflow_stack(&self) -> Result<&OverflowStack, OperationError> {
+        self.overflow.as_slice().last().ok_or(OperationError::Internal(
+            "the current context should always have an overflow stack initialized",
+        ))
     }
 
     /// Mutable version of `get_current_overflow_stack()`.
-    fn get_current_overflow_stack_mut(&mut self) -> &mut OverflowStack {
+    fn get_current_overflow_stack_mut(&mut self) -> Result<&mut OverflowStack, OperationError> {
         let len = self.overflow.len();
-        &mut self.overflow[RowIndex::from(len - 1)]
+        if len == 0 {
+            return Err(OperationError::Internal(
+                "the current context should always have an overflow stack initialized",
+            ));
+        }
+        Ok(&mut self.overflow[RowIndex::from(len - 1)])
     }
 }
 
 impl Default for OverflowTable {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_air::trace::RowIndex;
+
+    use super::*;
+
+    #[test]
+    fn restore_context_rejects_root_only_table() {
+        let mut table = OverflowTable::new();
+        // Table has only the root stack (len == 1), restore should fail.
+        let result = table.restore_context();
+        assert!(result.is_err(), "restore_context should reject root-only table");
+        // Table should be unchanged: still has 1 stack.
+        assert_eq!(table.num_elements_in_current_ctx(), 0);
+    }
+
+    #[test]
+    fn restore_context_rejects_non_empty_child_stack() {
+        let mut table = OverflowTable::new();
+        table.start_context();
+        table.push(Felt::new(42).unwrap(), RowIndex::from(1));
+        // Child stack is not empty, restore should fail.
+        let result = table.restore_context();
+        assert!(result.is_err(), "restore_context should reject non-empty child stack");
+        // Table should be unchanged: child stack still has 1 element.
+        assert_eq!(table.num_elements_in_current_ctx(), 1);
+    }
+
+    #[test]
+    fn restore_context_succeeds_with_empty_child_stack() {
+        let mut table = OverflowTable::new();
+        table.start_context();
+        // Child stack is empty, restore should succeed.
+        let result = table.restore_context();
+        assert!(result.is_ok(), "restore_context should succeed with empty child stack");
+        // Back to root stack.
+        assert_eq!(table.num_elements_in_current_ctx(), 0);
+
+        // Second call should fail — only root stack remains.
+        let result2 = table.restore_context();
+        assert!(result2.is_err(), "restore_context on root stack should fail");
     }
 }

@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId,
+    ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
@@ -100,7 +100,7 @@ pub trait Tracer {
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Self::Forest,
-    );
+    ) -> Result<(), ExecutionError>;
 
     // MAST FOREST RESOLUTION
     // --------------------------------------------------------------------------------------------

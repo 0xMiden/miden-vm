@@ -157,39 +157,65 @@ package_archive_matches_published() {
     local package="$1"
     local version="$2"
     local workspace_root="$3"
-    local package_target_dir local_archive published_archive local_dir published_dir
+    local package_target_dir package_log local_archive published_archive local_dir published_dir
+    local diff_output diff_status
 
     check_command "diff"
     check_command "tar"
 
     package_target_dir="$RELEASE_PLAN_TMPDIR/package-target/$package"
+    package_log="$RELEASE_PLAN_TMPDIR/package-logs/$package.log"
     local_archive="$package_target_dir/package/$package-$version.crate"
     published_archive="$RELEASE_PLAN_TMPDIR/published-crates/$package-$version.crate"
     local_dir="$RELEASE_PLAN_TMPDIR/package-compare/$package/local"
     published_dir="$RELEASE_PLAN_TMPDIR/package-compare/$package/published"
+    diff_output="$RELEASE_PLAN_TMPDIR/package-compare/$package/diff.txt"
 
-    mkdir -p "$(dirname "$published_archive")" "$local_dir" "$published_dir"
+    mkdir -p "$(dirname "$package_log")" "$(dirname "$published_archive")" "$local_dir" "$published_dir"
 
-    cargo package \
+    if ! cargo package \
         --manifest-path "$workspace_root/Cargo.toml" \
         --package "$package" \
         --locked \
         --allow-dirty \
         --no-verify \
-        --target-dir "$package_target_dir" >/dev/null
+        --target-dir "$package_target_dir" >"$package_log" 2>&1; then
+        echo "ERROR: failed to package $package v$version for comparison with crates.io:" >&2
+        sed 's/^/  /' "$package_log" >&2
+        return 2
+    fi
 
     if [[ ! -f "$local_archive" ]]; then
         echo "ERROR: cargo package did not create $local_archive" >&2
-        exit 1
+        return 2
     fi
 
     download_published_crate "$package" "$version" "$published_archive"
 
-    tar -xzf "$local_archive" -C "$local_dir"
-    tar -xzf "$published_archive" -C "$published_dir"
+    if ! tar -xzf "$local_archive" -C "$local_dir"; then
+        echo "ERROR: could not extract local archive for $package v$version" >&2
+        return 2
+    fi
+    if ! tar -xzf "$published_archive" -C "$published_dir"; then
+        echo "ERROR: could not extract published archive for $package v$version" >&2
+        return 2
+    fi
 
     find "$local_dir" "$published_dir" -name .cargo_vcs_info.json -delete
-    diff -qr "$local_dir" "$published_dir" >/dev/null
+    if diff -qr "$local_dir" "$published_dir" >"$diff_output"; then
+        return 0
+    else
+        diff_status=$?
+    fi
+
+    if [[ "$diff_status" -ne 1 ]]; then
+        echo "ERROR: could not compare local and published archives for $package v$version" >&2
+        return 2
+    fi
+
+    echo "Package archive differences for $package v$version:" >&2
+    sed 's/^/  /' "$diff_output" >&2
+    return 1
 }
 
 version_cmp() {
@@ -248,7 +274,7 @@ package_has_library_target() {
           | $m.packages[]
           | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
           | .targets[]
-          | select(.kind | index("lib"))
+          | select(.kind | index("lib") or index("rlib"))
         ' >/dev/null
 }
 
@@ -261,7 +287,7 @@ package_rustdoc_name() {
           | $m.packages[]
           | select(.name == $package and (.id as $id | $m.workspace_members | index($id)))
           | .targets[]
-          | select(.kind | index("lib"))
+          | select(.kind | index("lib") or index("rlib"))
           | .name
           | gsub("-"; "_")
         ' |

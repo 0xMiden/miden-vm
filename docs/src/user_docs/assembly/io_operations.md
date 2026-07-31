@@ -73,9 +73,9 @@ As mentioned above, nondeterministic inputs are provided to the VM via the advic
 
 > **Note**: When using multiple sequential `adv_push` instructions (e.g., `repeat.n adv_push end`), data is pushed so that the first element is placed deepest in the stack. For example, if the advice stack contains `a,b,c,d` and you use `repeat.4 adv_push end`, the operand stack will be `d,c,b,a`.
 
-The second category injects new data into the advice provider or updates host-side deferred state. These operations are called _system events_. They do not directly change ordinary VM state such as the operand stack or memory. Handling system events uses the same mechanism as standard events using `emit` (i.e., these instructions are executed in $3$ cycles). System events use direct numeric event IDs in the reserved range 0-255, while user-defined events use string-based `EventId::from_name()` derivation with unique, descriptive names following hierarchical naming conventions to avoid conflicts.
+The second category injects new data into the advice provider or updates host-side deferred state. These operations are called _system events_. They do not directly change ordinary VM state such as the operand stack or memory. Handling system events uses the same mechanism as standard events using `emit` (i.e., these instructions are executed in $3$ cycles). Defined system events are reserved, use names in the `sys::` namespace, and are dispatched by the VM, while user-defined events use string-based `EventId::from_name()` derivation with unique, descriptive names following hierarchical naming conventions to avoid conflicts.
 
-System events can push data onto the advice stack, insert data into the advice map, or update host-side deferred state.
+System events can push data onto the advice stack, insert data into the advice map, or update host-side deferred state. One exception is `sys::trace_event`: it is a non-mutating system event used only to signal optional, read-only trace events to the host. See the [events documentation](./events.md#trace-events-optional-read-only-events) for details.
 
 For deferred DAG instructions, `TAG` and every digest are one word (4 field elements), while one
 data chunk is 8 field elements (two words).

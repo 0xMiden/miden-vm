@@ -1666,7 +1666,7 @@ mod tests {
             .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
             .unwrap();
         forest_builder.mark_root(block);
-        let (forest, remapping) = forest_builder.finish_with_id_map().unwrap();
+        let (forest, remapping) = forest_builder.build_with_id_map().unwrap();
         let block = remapping.get(block).unwrap();
         let (_merged_forest, root_map) = MastForest::merge([&forest]).unwrap();
 
@@ -1726,7 +1726,7 @@ mod tests {
                 .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
                 .unwrap();
             builder.mark_root(block);
-            let (forest, remapping) = builder.finish_with_id_map().unwrap();
+            let (forest, remapping) = builder.build_with_id_map().unwrap();
             let block = remapping.get(block).unwrap();
             (forest, block)
         }
@@ -1861,7 +1861,7 @@ mod tests {
             .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
             .unwrap();
         source_builder.mark_root(block);
-        let (source_forest, source_remapping) = source_builder.finish_with_id_map().unwrap();
+        let (source_forest, source_remapping) = source_builder.build_with_id_map().unwrap();
         let block = source_remapping.get(block).unwrap();
 
         // External nodes are finalized before basic blocks, forcing the first forest's block ID to
@@ -1869,7 +1869,7 @@ mod tests {
         let mut other_builder = DenseMastForestBuilder::new();
         let external = other_builder.push_node(ExternalNodeBuilder::new(Word::default())).unwrap();
         other_builder.mark_root(external);
-        let (other_forest, _) = other_builder.finish_with_id_map().unwrap();
+        let (other_forest, _) = other_builder.build_with_id_map().unwrap();
 
         let (_merged_forest, root_map) =
             MastForest::merge([&source_forest, &other_forest]).unwrap();
@@ -1937,7 +1937,7 @@ mod tests {
                 .push_node(BasicBlockNodeBuilder::new(alloc::vec![Operation::Add]))
                 .unwrap();
             builder.mark_root(block);
-            let (forest, remapping) = builder.finish_with_id_map().unwrap();
+            let (forest, remapping) = builder.build_with_id_map().unwrap();
             (forest, remapping.get(block).unwrap())
         }
 
@@ -2011,7 +2011,7 @@ mod tests {
             .unwrap();
         let call = builder.push_node(CallNodeBuilder::new(callee)).unwrap();
         builder.mark_root(call);
-        let (forest, remapping) = builder.finish_with_id_map().unwrap();
+        let (forest, remapping) = builder.build_with_id_map().unwrap();
         let callee = remapping.get(callee).unwrap();
         let call = remapping.get(call).unwrap();
 
