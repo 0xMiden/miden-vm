@@ -48,7 +48,8 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
-use serde_wincode::wincode;
+use serde_wincode::{SerdeCompat, wincode};
+use wincode::io::Reader as _;
 
 // TYPES
 // ================================================================================================
@@ -104,6 +105,8 @@ impl RecursiveVerifierInputs {
 pub enum RecursiveAdviceError {
     #[error("proof deserialization error: {0}")]
     ProofDeserialization(String),
+    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
+    ProofTooLarge { size: usize, max: usize },
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),
     #[error("statement assembly error: {0}")]
@@ -208,16 +211,34 @@ fn build_from_proof_bytes(
     build_advice(&config, &stark, heights, pub_inputs, claim_commitment)
 }
 
-/// Deserializes a wincode-encoded Poseidon2 STARK proof, bounding preallocation by
-/// [`MAX_STARK_PROOF_BYTES`].
+/// Deserializes a wincode-encoded Poseidon2 STARK proof, enforcing the total byte limit,
+/// bounding preallocation, and rejecting trailing bytes.
 fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveAdviceError> {
+    if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
+        return Err(RecursiveAdviceError::ProofTooLarge {
+            size: proof_bytes.len(),
+            max: MAX_STARK_PROOF_BYTES,
+        });
+    }
+
     let encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    <serde_wincode::SerdeCompat<P2ProofData> as wincode::config::Deserialize<_>>::deserialize(
-        proof_bytes,
-        encoding_config,
-    )
-    .map_err(|e| RecursiveAdviceError::ProofDeserialization(e.to_string()))
+    deserialize_serde_exact::<P2ProofData, _>(proof_bytes, encoding_config)
+        .map_err(|e| RecursiveAdviceError::ProofDeserialization(e.to_string()))
+}
+
+/// Configuration-aware exact decoding for serde-backed types.
+fn deserialize_serde_exact<'de, T, C>(mut bytes: &'de [u8], _: C) -> wincode::ReadResult<T>
+where
+    C: wincode::config::Config,
+    SerdeCompat<T>: wincode::SchemaRead<'de, C, Dst = T>,
+{
+    let value = <SerdeCompat<T> as wincode::SchemaRead<'de, C>>::get(bytes.by_ref())?;
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(wincode::error::trailing_bytes())
+    }
 }
 
 fn miden_trace_heights(
@@ -372,21 +393,17 @@ fn build_merkle_data(
     let pcs = &stark.pcs_proof;
     let lmcs = config.lmcs();
 
-    let mut partial_trees = Vec::new();
+    let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
 
     // DEEP openings (one BatchProof per commitment: main, aux, quotient), then FRI openings
     // (one per FRI round).
     for batch_proof in pcs.deep_witnesses.iter().chain(pcs.fri_witnesses.iter()) {
         let (tree, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
-        partial_trees.push(tree);
+        store.extend(tree.inner_nodes());
         advice_map.extend(entries);
     }
 
-    let mut store = MerkleStore::new();
-    for tree in &partial_trees {
-        store.extend(tree.inner_nodes());
-    }
     let registry_tree = config::ace_circuit_registry_tree();
     store.extend(registry_tree.inner_nodes());
 
@@ -481,6 +498,34 @@ mod tests {
         let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
 
         assert_eq!(security_parameter_words(&params), [19, 13, 11, 5].map(Felt::new_unchecked),);
+    }
+
+    #[test]
+    fn proof_deserialization_rejects_oversized_input() {
+        let proof_bytes = vec![0; MAX_STARK_PROOF_BYTES + 1];
+
+        let err = deserialize_proof(&proof_bytes).expect_err("oversized proof must be rejected");
+        assert!(matches!(
+            err,
+            RecursiveAdviceError::ProofTooLarge {
+                size,
+                max: MAX_STARK_PROOF_BYTES,
+            } if size == proof_bytes.len()
+        ));
+    }
+
+    #[test]
+    fn exact_schema_decoding_rejects_trailing_bytes() {
+        let encoding_config = wincode::config::Configuration::default()
+            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+        let mut encoded =
+            <SerdeCompat<u8> as wincode::config::Serialize<_>>::serialize(&7, encoding_config)
+                .expect("u8 serialization must succeed");
+        encoded.push(0);
+
+        let err = deserialize_serde_exact::<u8, _>(&encoded, encoding_config)
+            .expect_err("trailing bytes must be rejected");
+        assert!(matches!(err, wincode::error::ReadError::TrailingBytes));
     }
 
     /// Request packaging is a pure repackaging: the proof stream moves — unchanged and in

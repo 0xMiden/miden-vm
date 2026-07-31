@@ -531,6 +531,8 @@ fn test_deferred_root_is_statement_bound() {
     .expect("Proving failed");
     let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
 
+    verify(proof.clone(), claim.clone()).expect("untampered deferred proof should verify");
+
     // swap in empty deferred material: it resolves to TRUE, which the statement did not bind
     let stark = proof.miden_proof();
     let tampered = ExecutionProof::new(
