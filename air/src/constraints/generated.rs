@@ -9,9 +9,10 @@
 
 use miden_core::Felt;
 use miden_crypto::{
-    field::{Dup, PrimeCharacteristicRing},
+    field::PrimeCharacteristicRing,
     stark::air::{LiftedAirBuilder, WindowAccess},
 };
+use p3_field::Dup;
 
 /// Generated globally-CSE'd evaluator for `MidenAir::Core`.
 ///

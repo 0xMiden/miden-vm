@@ -61,9 +61,10 @@ pub fn emit_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
 const MODULE_IMPORTS: &str = r"
 use miden_core::Felt;
 use miden_crypto::{
-    field::{Dup, PrimeCharacteristicRing},
+    field::PrimeCharacteristicRing,
     stark::air::{LiftedAirBuilder, WindowAccess},
 };
+use p3_field::Dup;
 ";
 
 /// Opens every evaluator function: window handles over the main and aux trace
@@ -451,9 +452,10 @@ mod tests {
 
 use miden_core::Felt;
 use miden_crypto::{
-    field::{Dup, PrimeCharacteristicRing},
+    field::PrimeCharacteristicRing,
     stark::air::{LiftedAirBuilder, WindowAccess},
 };
+use p3_field::Dup;
 
 /// Generated globally-CSE'd evaluator for `MockAir::BASE`.
 ///

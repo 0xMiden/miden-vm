@@ -32,6 +32,7 @@ miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+p3-field.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true

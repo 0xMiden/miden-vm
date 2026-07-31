@@ -2061,6 +2061,7 @@ dependencies = [
  "miden-crypto",
  "miden-test-serde-macros",
  "miden-utils-indexing",
+ "p3-field",
  "proptest",
  "thiserror",
  "tracing",
