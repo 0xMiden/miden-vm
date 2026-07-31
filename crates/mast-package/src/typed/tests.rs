@@ -44,9 +44,7 @@ fn tuple_struct<const N: usize>(name: &str, fields: [Type; N]) -> Type {
 }
 
 fn unnamed_record<const N: usize>(fields: [(&str, Type); N]) -> Type {
-    Type::Struct(Arc::new(StructType::new(
-        fields.map(|(name, ty)| (Arc::<str>::from(name), ty)),
-    )))
+    Type::Struct(Arc::new(StructType::new(fields.map(|(name, ty)| (Arc::<str>::from(name), ty)))))
 }
 
 fn unnamed_tuple<const N: usize>(fields: [Type; N]) -> Type {
