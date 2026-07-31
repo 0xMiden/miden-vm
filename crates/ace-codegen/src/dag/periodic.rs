@@ -18,6 +18,7 @@ pub(super) fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,
+    shared_period: usize,
 ) -> Vec<NodeId>
 where
     EF: Field,
@@ -31,13 +32,25 @@ where
         "layout must include ZK for periodic columns"
     );
 
-    let max_len = periodic.max_period();
+    assert!(
+        shared_period.is_power_of_two(),
+        "shared periodic-column period must be a power of two"
+    );
+    assert!(
+        shared_period >= periodic.max_period(),
+        "shared periodic-column period must cover every local period"
+    );
+
     let mut z_cache = HashMap::<u32, NodeId>::new();
     let mut zpow_cache = HashMap::<u32, Vec<NodeId>>::new();
     let mut nodes = Vec::with_capacity(periodic.num_columns());
     for column in periodic.columns() {
         let col_len = column.period();
-        let ratio = max_len / col_len;
+        assert!(
+            shared_period.is_multiple_of(col_len),
+            "periodic-column period must divide the shared period"
+        );
+        let ratio = shared_period / col_len;
         let log_pow_col = ratio.ilog2();
         let log_len = col_len.ilog2();
 

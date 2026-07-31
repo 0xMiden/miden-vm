@@ -76,6 +76,11 @@ const FN_PROLOGUE: &str = r"    let main = builder.main();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);";
 
+const PREPROCESSED_PROLOGUE: &str = r"    let preprocessed = builder.preprocessed();
+    let p0 = preprocessed.current_slice();
+    let p1 = preprocessed.next_slice();
+    let _ = &p1;";
+
 /// Whether a binding is a Copy builder `Var`/`VarEF` (a trace-window read) or a
 /// materialized `Expr`/`ExprEF` (every op result and every non-trace leaf).
 ///
@@ -221,6 +226,9 @@ impl<'g> Emitter<'g> {
 
     fn leaf_token(&mut self, leaf: Leaf) -> Token {
         match leaf {
+            Leaf::Preprocessed { offset, index } => {
+                self.base_var_leaf(format!("p{offset}[{index}]"))
+            },
             Leaf::Main { offset, index } => self.base_var_leaf(format!("m{offset}[{index}]")),
             Leaf::Public(index) => {
                 self.base_leaf(format!("builder.public_values()[{index}].into()"))
@@ -376,6 +384,13 @@ fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
     )
     .unwrap();
     writeln!(out, "{FN_PROLOGUE}").unwrap();
+    if eval
+        .graph
+        .iter()
+        .any(|(_, node)| matches!(node, Node::Leaf(Leaf::Preprocessed { .. })))
+    {
+        writeln!(out, "{PREPROCESSED_PROLOGUE}").unwrap();
+    }
     for line in &e.lines {
         writeln!(out, "{line}").unwrap();
     }

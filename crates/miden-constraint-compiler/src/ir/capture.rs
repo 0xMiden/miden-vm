@@ -72,14 +72,13 @@ where
 ///
 /// # Panics
 ///
-/// Panics if the AIR uses features outside the supported surface: preprocessed
-/// columns, or main/aux row offsets greater than 1.
+/// Panics if the AIR uses main, preprocessed, or aux row offsets greater than 1.
 pub fn capture_into<A>(air: &A, builder: &mut GraphBuilder) -> CapturedConstraints
 where
     A: LiftedAir<Felt, EF>,
 {
     let air_layout = AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: BaseAir::<Felt>::preprocessed_width(air),
         main_width: BaseAir::<Felt>::width(air),
         num_public_values: BaseAir::<Felt>::num_public_values(air),
         permutation_width: LiftedAir::<Felt, EF>::aux_width(air),
@@ -158,8 +157,11 @@ impl<'a> Walker<'a> {
                         },
                         BaseEntry::Public => Leaf::Public(v.index),
                         BaseEntry::Periodic => Leaf::Periodic(v.index),
-                        BaseEntry::Preprocessed { .. } => {
-                            panic!("preprocessed columns not supported")
+                        BaseEntry::Preprocessed { offset } if offset <= 1 => {
+                            Leaf::Preprocessed { offset, index: v.index }
+                        },
+                        BaseEntry::Preprocessed { offset } => {
+                            panic!("unsupported preprocessed row offset {offset}")
                         },
                     },
                     BaseLeaf::IsFirstRow => Leaf::IsFirst,

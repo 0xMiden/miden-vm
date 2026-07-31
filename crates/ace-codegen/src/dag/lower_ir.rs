@@ -40,9 +40,9 @@
 //!
 //! ## Periodic columns
 //!
-//! Periodic columns are polynomials evaluated at `z_k = z^(N / max_cycle_len)`.
-//! Each column's coefficients are Horner-evaluated at `z_k` (or a power of
-//! `z_k` for columns whose period divides `max_cycle_len`).
+//! Periodic columns are polynomials evaluated from the shared basis
+//! `z_k = z^(N_max / shared_period)`. Each period-`p` column's coefficients are
+//! evaluated at `z_k^(shared_period / p)`.
 //!
 //! ## Quotient recomposition
 //!
@@ -120,10 +120,11 @@ pub fn build_verifier_dag_from_ir(
     constraints: &CapturedConstraints,
     layout: &InputLayout,
     periodic: Option<&PeriodicColumnData<QuadFelt>>,
+    shared_period: usize,
 ) -> AceDag<QuadFelt> {
     let mut builder = DagBuilder::<QuadFelt>::new();
     let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, layout, data),
+        Some(data) => build_periodic_nodes(&mut builder, layout, data, shared_period),
         None => Vec::new(),
     };
     let alpha = builder.input(InputKey::Alpha);
@@ -179,6 +180,9 @@ fn lower_ir_expr(
 ) -> NodeId {
     match graph.node(id) {
         Node::Leaf(leaf) => match leaf {
+            Leaf::Preprocessed { offset, index } => {
+                builder.input(InputKey::Preprocessed { offset, index })
+            },
             Leaf::Main { offset, index } => builder.input(InputKey::Main { offset, index }),
             Leaf::Public(index) => builder.input(InputKey::Public(index)),
             Leaf::Periodic(index) => *periodic_nodes

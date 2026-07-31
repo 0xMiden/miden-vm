@@ -2,12 +2,10 @@
 //!
 //! This is the original lowering, superseded in production by the IR-driven
 //! [`super::lower_ir`] (which documents the verifier expression both build). It
-//! is compiled only for tests, where the node-for-node differential in
-//! `miden-air` (`tests/ace_codegen.rs`) checks that the IR path replicates this
-//! path's `DagBuilder` interning order exactly. Delete after the checked-in
-//! circuit digests survive a release cycle on the IR path; the node-for-node
-//! differential retires with it (semantic coverage then rests on
-//! `all_airs_dag_matches_manual_eval`). Do not extend it.
+//! is compiled only for tests, where node-for-node differentials check that the
+//! IR path replicates this path's `DagBuilder` interning order exactly. Delete
+//! after the checked-in circuit digests survive a release cycle on the IR path;
+//! the node-for-node differential retires with it. Do not add production callers.
 
 use miden_crypto::{
     field::{ExtensionField, Field},
@@ -49,8 +47,8 @@ where
                     .get(v.index)
                     .copied()
                     .unwrap_or_else(|| panic!("periodic column index {} is out of range", v.index)),
-                BaseEntry::Preprocessed { .. } => {
-                    panic!("preprocessed trace entries are not supported")
+                BaseEntry::Preprocessed { offset } => {
+                    builder.input(InputKey::Preprocessed { offset, index: v.index })
                 },
             },
             BaseLeaf::IsFirstRow => builder.input(InputKey::IsFirst),
@@ -138,16 +136,13 @@ where
 }
 
 /// Build the verifier-equivalent root expression DAG.
-///
-/// This constructs the folded constraint accumulator, divides by the vanishing
-/// polynomial, recomposes the quotient, and subtracts both sides to yield the
-/// root expression evaluated by the ACE circuit.
 pub fn build_verifier_dag<F, EF>(
     base_constraints: &[SymbolicExpression<F>],
     ext_constraints: &[SymbolicExpressionExt<F, EF>],
     constraint_layout: &ConstraintLayout,
     layout: &InputLayout,
     periodic: Option<&PeriodicColumnData<EF>>,
+    shared_period: usize,
 ) -> AceDag<EF>
 where
     F: Field,
@@ -155,7 +150,7 @@ where
 {
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, layout, data),
+        Some(data) => build_periodic_nodes(&mut builder, layout, data, shared_period),
         None => Vec::new(),
     };
     let alpha = builder.input(InputKey::Alpha);

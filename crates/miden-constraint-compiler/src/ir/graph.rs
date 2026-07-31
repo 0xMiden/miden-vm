@@ -43,6 +43,8 @@ pub enum Class {
 /// Leaf sources, mirroring the constraint evaluator's inputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Leaf {
+    /// Preprocessed trace column at row offset 0 (current) or 1 (next).
+    Preprocessed { offset: usize, index: usize },
     /// Main trace column at row offset 0 (current) or 1 (next).
     Main { offset: usize, index: usize },
     /// Public value.

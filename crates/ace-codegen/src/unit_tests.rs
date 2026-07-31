@@ -10,6 +10,7 @@ use crate::{
 /// Minimal layout with only public inputs populated.
 fn minimal_layout(num_public: usize) -> InputLayout {
     let counts = InputCounts {
+        preprocessed_width: 0,
         width: 0,
         aux_width: 0,
         num_aux_boundary: 0,

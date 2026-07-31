@@ -166,8 +166,9 @@ fn eval_graph(graph: &Graph, seed: u64) -> Vec<QuadFelt> {
 fn leaf_value(seed: u64, leaf: Leaf) -> QuadFelt {
     let base = |tag: u64, a: u64| QuadFelt::from(Felt::from_u64(mix(seed, tag, a, 0)));
     let ext = |tag: u64, a: u64| quad(mix(seed, tag, a, 0), mix(seed, tag, a, 1));
-    // One tag per leaf kind; Main and Aux use two (one per row offset).
+    // One tag per leaf kind; windowed inputs use one per row offset.
     match leaf {
+        Leaf::Preprocessed { offset, index } => base(12 + offset as u64, index as u64),
         Leaf::Main { offset, index } => base(1 + offset as u64, index as u64),
         Leaf::Public(i) => base(3, i as u64),
         Leaf::Periodic(i) => base(4, i as u64),

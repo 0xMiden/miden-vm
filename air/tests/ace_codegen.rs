@@ -313,6 +313,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
             &builder.constraint_layout(),
             &artifacts.layout,
             periodic_data.as_ref(),
+            periodic_columns.iter().map(Vec::len).max().unwrap_or(1),
         );
 
         let (tree_nodes, tree_root) = normalized(&tree_dag);
