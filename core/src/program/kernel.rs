@@ -167,8 +167,8 @@ mod tests {
 
     #[test]
     fn empty_kernel_commitment_matches_hash_of_no_elements() {
-        // The empty kernel is the common case; its commitment must equal the canonical
-        // domain-tagged hash of zero elements, which the recursive verifier mirrors via
+        // The empty kernel's commitment must equal the canonical domain-tagged hash of zero
+        // elements, which the recursive verifier mirrors via
         // `hash_elements_in_domain(ptr, 0, KERNEL_DOMAIN_TAG)`.
         let empty = KernelDescriptor::default();
         assert_eq!(

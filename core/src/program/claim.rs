@@ -25,11 +25,6 @@
 //! `CLAIM_HASH = Poseidon2::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`, i.e. the
 //! domain tag rides in the second capacity element while the first carries the Sponge2 padding
 //! rule of <https://eprint.iacr.org/2024/911> (here `40 % 8 = 0`).
-//!
-//! The commitment is verifier-independent: no relation identity enters its preimage, so a claim
-//! can be named — for proof requests, or for binding into a consumer's statement — before any
-//! verifier is chosen. The transcript binds it to a relation at seeding time, absorbing this
-//! commitment together with the relation digest and the deferred root.
 
 use super::{
     KernelDescriptor, ProgramInfo, StackInputs, StackOutputs,

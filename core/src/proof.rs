@@ -190,7 +190,7 @@ impl ExecutionProof {
     /// `miden_air::config::conjectured_security_level`, but this method cannot call it —
     /// `miden-air` depends on `miden-core`, not the reverse. The intended fix is to stop having
     /// the proof self-report a security level and instead grade it in the verifier (which does
-    /// depend on `miden-air`); that native wiring lands together with the precompile-VM level.
+    /// depend on `miden-air`).
     pub fn security_level(&self) -> u32 {
         96
     }
