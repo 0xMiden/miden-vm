@@ -31,7 +31,7 @@ miden-debug-types.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
-hashbrown = "0.17"
+hashbrown.workspace = true
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }

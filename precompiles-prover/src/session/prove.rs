@@ -33,12 +33,6 @@ use super::preprocessed_cache;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
-/// Temporary relation digest for the precompile chiplet AIR set.
-///
-/// This is intentionally private: until the generated precompile/ACE relation digest exists,
-/// callers should not treat the all-zero placeholder as a stable protocol parameter.
-const PLACEHOLDER_RELATION_DIGEST: RelationDigest = [Felt::ZERO; 4];
-
 use crate::{
     ProveError,
     ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
@@ -50,7 +44,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{
-        DEFAULT_HASH_FUNCTION, RelationDigest, blake3_256_config, keccak_config,
+        DEFAULT_HASH_FUNCTION, PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config,
         observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
         test_challenger,
     },
@@ -296,27 +290,27 @@ impl SessionTraces {
         let params = precompile_pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
-                let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::blake3(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpo256 => {
-                let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::rpo(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpx256 => {
-                let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::rpx(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Poseidon2 => {
-                let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::poseidon2(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
-                let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::keccak(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
@@ -386,27 +380,27 @@ pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), Ver
     let params = precompile_pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
-            let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::blake3(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpo256 => {
-            let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::rpo(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpx256 => {
-            let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::rpx(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::poseidon2(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Keccak => {
-            let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::keccak(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },

@@ -39,9 +39,9 @@
 //!
 //! ## Periodic columns
 //!
-//! Periodic columns are polynomials evaluated at `z_k = z^(N / max_cycle_len)`.
-//! Each column's coefficients are Horner-evaluated at `z_k` (or a power of
-//! `z_k` for columns whose period divides `max_cycle_len`).
+//! Periodic columns are polynomials evaluated from the shared basis
+//! `z_k = z^(N_max / shared_period)`. Each period-`p` column's coefficients are Horner-evaluated at
+//! `z_k^(shared_period / p)`.
 //!
 //! ## Quotient recomposition
 //!
@@ -71,7 +71,7 @@
 //!   alpha          Composition challenge. Horner accumulator for constraint folding.
 //!   z^N            Trace-length power. Vanishing factor and delta base in quotient
 //!                  recomposition.
-//!   z_k            Periodic column evaluation point (z^(N / max_cycle_len)).
+//!   z_k            Shared periodic-column basis (z^(N_max / shared_period)).
 //!   is_first       Precomputed selector (z^N - 1) / (z - 1).
 //!   is_last        Precomputed selector (z^N - 1) / (z - g^{-1}).
 //!   is_transition  Precomputed selector z - g^{-1}.
@@ -122,8 +122,8 @@ where
                     .get(v.index)
                     .copied()
                     .unwrap_or_else(|| panic!("periodic column index {} is out of range", v.index)),
-                BaseEntry::Preprocessed { .. } => {
-                    panic!("preprocessed trace entries are not supported")
+                BaseEntry::Preprocessed { offset } => {
+                    builder.input(InputKey::Preprocessed { offset, index: v.index })
                 },
             },
             BaseLeaf::IsFirstRow => builder.input(InputKey::IsFirst),
@@ -221,6 +221,7 @@ pub fn build_verifier_dag<F, EF>(
     constraint_layout: &ConstraintLayout,
     layout: &InputLayout,
     periodic: Option<&PeriodicColumnData<EF>>,
+    shared_period: usize,
 ) -> AceDag<EF>
 where
     F: Field,
@@ -228,7 +229,7 @@ where
 {
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, layout, data),
+        Some(data) => build_periodic_nodes(&mut builder, layout, data, shared_period),
         None => Vec::new(),
     };
     let alpha = builder.input(InputKey::Alpha);
@@ -271,6 +272,7 @@ fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,
+    shared_period: usize,
 ) -> Vec<NodeId>
 where
     EF: Field,
@@ -284,13 +286,25 @@ where
         "layout must include ZK for periodic columns"
     );
 
-    let max_len = periodic.max_period();
+    assert!(
+        shared_period.is_power_of_two(),
+        "shared periodic-column period must be a power of two"
+    );
+    assert!(
+        shared_period >= periodic.max_period(),
+        "shared periodic-column period must cover every local period"
+    );
+
     let mut z_cache = HashMap::<u32, NodeId>::new();
     let mut zpow_cache = HashMap::<u32, Vec<NodeId>>::new();
     let mut nodes = Vec::with_capacity(periodic.num_columns());
     for column in periodic.columns() {
         let col_len = column.period();
-        let ratio = max_len / col_len;
+        assert!(
+            shared_period.is_multiple_of(col_len),
+            "periodic-column period must divide the shared period"
+        );
+        let ratio = shared_period / col_len;
         let log_pow_col = ratio.ilog2();
         let log_len = col_len.ilog2();
 

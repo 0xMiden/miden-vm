@@ -69,5 +69,6 @@ pub use crate::{
     layout::{InputCounts, InputKey, InputLayout},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
+        build_multi_air_ace_circuit,
     },
 };

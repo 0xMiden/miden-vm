@@ -12,6 +12,7 @@ use miden_air::{
     },
 };
 use miden_core::chiplets::hasher::Hasher;
+use rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
@@ -363,48 +364,56 @@ pub(super) fn fill_poseidon2_permutation_trace(
     trace: &mut [Felt],
 ) {
     const W: usize = NUM_POSEIDON2_PERMUTATION_COLS;
-    debug_assert_eq!(trace.len() % W, 0, "Poseidon2 trace buffer is not row-aligned");
+    // Real asserts, not debug: a violated length invariant here would otherwise
+    // produce a silently wrong trace in release builds (all-zero skipped cycles),
+    // caught only at proving time. The cost is three comparisons per call.
+    assert_eq!(trace.len() % W, 0, "Poseidon2 trace buffer is not row-aligned");
 
     let (rows, _) = trace.as_chunks_mut::<W>();
-    debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "Poseidon2 height must align to cycles");
-    debug_assert!(
+    assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "Poseidon2 height must align to cycles");
+    assert!(
         (perm_requests.len() + 1) * HASH_CYCLE_LEN <= rows.len(),
         "Poseidon2 trace buffer is too short for permutation requests",
     );
 
     let request_count = perm_requests.len();
-    let mut row_idx = 0;
-    for (perm_id, request) in perm_requests.into_iter().enumerate() {
-        let state = request.state.map(Felt::new_unchecked);
-        write_poseidon2_permutation_cycle(
-            &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
-            &state,
-            perm_id_felt(perm_id),
-            Felt::new_unchecked(request.multiplicity),
-        );
-        row_idx += HASH_CYCLE_LEN;
-    }
-
-    // Padding cycles use zero multiplicity and continue the cycle-id sequence.
-    let mut perm_id = request_count;
+    // Each cycle is an independent permutation writing a disjoint row chunk,
+    // so the fill parallelizes; on large traces this loop dominates the
+    // chiplet's build time.
+    rows[..request_count * HASH_CYCLE_LEN]
+        .par_chunks_exact_mut(HASH_CYCLE_LEN)
+        .zip(perm_requests.par_iter())
+        .enumerate()
+        .for_each(|(perm_id, (cycle_rows, request))| {
+            let state = request.state.map(Felt::new_unchecked);
+            write_poseidon2_permutation_cycle(
+                cycle_rows,
+                &state,
+                perm_id_felt(perm_id),
+                Felt::new_unchecked(request.multiplicity),
+            );
+        });
+    // Padding cycles use zero multiplicity and continue the cycle-id sequence:
+    // one template cycle is computed, then replicated into the remaining rows
+    // in parallel with each cycle's perm-id patched.
+    let padding_start = request_count * HASH_CYCLE_LEN;
     let zero_state = [ZERO; STATE_WIDTH];
-    if row_idx < rows.len() {
-        let padding_start = row_idx;
+    if padding_start < rows.len() {
         write_poseidon2_permutation_cycle(
             &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
             &zero_state,
-            perm_id_felt(perm_id),
+            perm_id_felt(request_count),
             ZERO,
         );
-        row_idx += HASH_CYCLE_LEN;
-        perm_id += 1;
 
-        while row_idx < rows.len() {
-            rows.copy_within(padding_start..padding_start + HASH_CYCLE_LEN, row_idx);
-            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], perm_id_felt(perm_id));
-            row_idx += HASH_CYCLE_LEN;
-            perm_id += 1;
-        }
+        let (head, tail) = rows.split_at_mut(padding_start + HASH_CYCLE_LEN);
+        let template = &head[padding_start..];
+        tail.par_chunks_exact_mut(HASH_CYCLE_LEN)
+            .enumerate()
+            .for_each(|(cycle, cycle_rows)| {
+                cycle_rows.copy_from_slice(template);
+                set_perm_id(cycle_rows, perm_id_felt(request_count + 1 + cycle));
+            });
     }
 }
 
