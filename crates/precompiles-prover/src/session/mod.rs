@@ -1,4 +1,4 @@
-//! Orchestration facade over the thirteen-chiplet stack: the Keccak
+//! Orchestration facade over the ten-chiplet stack: the Keccak
 //! transcript, the uint store and its arithmetic relations, and the EC
 //! layer (group table + point store + group-law add).
 //!
@@ -47,16 +47,17 @@ use crate::{
             require,
             trace::{EcExprPtr, EcMsmRequires, generate_trace as msm_trace},
         },
-        trace::{EcGroupPtr, generate_traces as ec_store_traces},
+        point_store_groups::trace::generate_trace as ec_store_trace,
+        trace::EcGroupPtr,
     },
     hash::{
         chunk::trace::ChunkRequires,
-        chunk_node::trace::generate_trace as chunk_node_trace,
+        chunk_node_sponge::trace::generate_trace as chunk_node_sponge_trace,
         keccak::{
             digest::KeccakDigest,
             node::trace::KeccakNodeRequires,
             round::{RoundRequires, generate_trace as round_trace},
-            sponge::trace::{SpongeRequires, generate_trace as sponge_trace},
+            sponge::trace::SpongeRequires,
         },
     },
     math::{U256, from_limbs32, to_limbs32},
@@ -84,7 +85,7 @@ pub mod strategies;
 pub use prove::{ChipletAir, ChipletMultiAir, VerifyError, verify_deferred, verify_stark};
 
 /// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
-pub const NUM_CHIPLETS: usize = 12;
+pub const NUM_CHIPLETS: usize = 10;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -455,9 +456,11 @@ impl Session {
         self.eval.assert_no_stray_values();
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
-        let chunk_node = trace_span!("chunk_node", chunk_node_trace(self.chunk, self.node));
+        let chunk_node_sponge = trace_span!(
+            "chunk_node_sponge",
+            chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
+        );
         let p2 = trace_span!("poseidon2", p2_trace(self.p2));
-        let sponge = trace_span!("keccak_sponge", sponge_trace(self.sponge));
         let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
@@ -480,19 +483,17 @@ impl Session {
         // (which is traced last, below).
         let ec_add =
             trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
-        let (ec_groups, ec) = trace_span!("ec_store", ec_store_traces(self.ec.store));
+        let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
         let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
         SessionTraces {
-            chunk_node,
+            chunk_node_sponge,
             p2,
             round,
             bpl,
-            sponge,
             eval,
             uint,
             add,
-            ec_groups,
             ec,
             ec_add,
             msm,
@@ -507,19 +508,17 @@ impl Default for Session {
     }
 }
 
-/// The twelve chiplet main traces plus the transcript root, ready to
+/// The ten chiplet main traces plus the transcript root, ready to
 /// feed `prove_multi` or a bus-balance check.
 #[derive(Debug)]
 pub struct SessionTraces {
-    chunk_node: RowMajorMatrix<Felt>,
+    chunk_node_sponge: RowMajorMatrix<Felt>,
     p2: RowMajorMatrix<Felt>,
     round: RowMajorMatrix<Felt>,
     bpl: RowMajorMatrix<Felt>,
-    sponge: RowMajorMatrix<Felt>,
     eval: RowMajorMatrix<Felt>,
     uint: RowMajorMatrix<Felt>,
     add: RowMajorMatrix<Felt>,
-    ec_groups: RowMajorMatrix<Felt>,
     ec: RowMajorMatrix<Felt>,
     ec_add: RowMajorMatrix<Felt>,
     msm: RowMajorMatrix<Felt>,
@@ -527,41 +526,37 @@ pub struct SessionTraces {
 }
 
 impl SessionTraces {
-    /// The twelve main traces in canonical chiplet order: chunk-node,
-    /// poseidon2, round, byte_pair_lut, sponge, eval, uint-store-mul,
-    /// uint-add, ec-groups, ec-points, ec-add, ec-msm. The AIRs, provers,
-    /// and public values a caller assembles must line up with this order.
+    /// The ten main traces in canonical chiplet order: chunk-node-sponge,
+    /// poseidon2, round, byte_pair_lut, eval, uint-store-mul, uint-add,
+    /// ec-point-store-groups, ec-add, ec-msm. The AIRs, provers, and
+    /// public values a caller assembles must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
-            &self.chunk_node,
+            &self.chunk_node_sponge,
             &self.p2,
             &self.round,
             &self.bpl,
-            &self.sponge,
             &self.eval,
             &self.uint,
             &self.add,
-            &self.ec_groups,
             &self.ec,
             &self.ec_add,
             &self.msm,
         ]
     }
 
-    /// The twelve main traces by value in [`mains`](Self::mains) order,
+    /// The ten main traces by value in [`mains`](Self::mains) order,
     /// consuming the bundle — lets the prover take ownership rather than
     /// clone the (potentially large) traces.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
         vec![
-            self.chunk_node,
+            self.chunk_node_sponge,
             self.p2,
             self.round,
             self.bpl,
-            self.sponge,
             self.eval,
             self.uint,
             self.add,
-            self.ec_groups,
             self.ec,
             self.ec_add,
             self.msm,

@@ -335,15 +335,9 @@ impl EcStoreRequires {
     }
 }
 
-/// Build **both** EC store main traces from the accumulator (consumed —
-/// trace-gen is terminal, so the double-lay hazard is a compile error),
-/// returning `(groups_main, points_main)` in
-/// [`SessionTraces`](crate::session::SessionTraces) order. Pure reads of
-/// the demand ledgers: every cross-chiplet consumer has already fed them
-/// — the points' own `EcGroup` consume at intern (the store's
-/// bound-ref analogue), the add relation's `EcGroup` / `EcPoint`
-/// consumes in [`super::add::trace::generate_trace`], run first by the
-/// Session sweep.
+/// Build the standalone group and point-store traces for component tests.
+/// Callers must record all cross-chiplet requirements before consuming the
+/// accumulator here.
 pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     (groups_trace(&requires), points_trace(&requires))
 }
@@ -353,7 +347,20 @@ pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowM
 /// `ptr = row + 1` on every row, so pads carry their ptr too — they are
 /// simply rows whose `mult` (and params) stay zero, touching no bus.
 fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
-    let height = requires.groups.len().next_power_of_two().max(2);
+    groups_trace_padded_to(requires, 0)
+}
+
+/// [`groups_trace`] with a height floor — for sharing the group table's
+/// row range with another AIR (see [`super::point_store_groups`]): pads
+/// past the natural height are the table's own padding mechanism
+/// (`ptr = row + 1` continued, `mult` and params zero). `min_height`
+/// must be 0 or a power of two so the padded height remains a power of two.
+pub(crate) fn groups_trace_padded_to(
+    requires: &EcStoreRequires,
+    min_height: usize,
+) -> RowMajorMatrix<Felt> {
+    debug_assert!(min_height == 0 || min_height.is_power_of_two());
+    let height = requires.groups.len().next_power_of_two().max(2).max(min_height);
     let mut vals = Vec::with_capacity(height * G_NUM_MAIN_COLS);
 
     for i in 0..height {
@@ -377,7 +384,7 @@ fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
 /// The point store — one row per point in allocation order
 /// (ptr = row + 1), padded to a power-of-two height (min 2) with
 /// all-zero (`act = 0`) rows that touch no bus.
-fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
+pub(crate) fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
     let height = requires.points.len().next_power_of_two().max(2);
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
 

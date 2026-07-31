@@ -1,12 +1,11 @@
 //! EC layer — short-Weierstrass groups and points over the uint layer.
 //!
-//! Three chiplets, two stores and a relation:
+//! The production relation packs the two binding stores into one chiplet and keeps group addition
+//! separate:
 //!
-//! - [`groups::EcGroupsAir`] — the **group table**: one row per group binding `group_ptr → (a, b,
-//!   bound, scalar_bound)`; *provides* [`EcGroup`](crate::relations::BusId::EcGroup).
-//! - [`EcPointStoreAir`] (this module) — the **point store**: one row per point; *provides*
-//!   [`EcPoint`](crate::relations::BusId::EcPoint), *consumes* its group's tuple and — unless
-//!   `is_pai` — the curve-membership MAC trio.
+//! - [`point_store_groups::EcPointStoreGroupsAir`] contains the **group table** and **point store**
+//!   in disjoint column bands over one row range. The standalone [`groups::EcGroupsAir`] and
+//!   [`EcPointStoreAir`] implementations remain as component AIRs for isolated tests.
 //! - [`add::EcGroupAddAir`] — the complete group-law addition over the two stores.
 //!
 //! Both stores are **binding stores**, deliberately the thinnest
@@ -52,6 +51,7 @@
 pub mod add;
 pub mod groups;
 pub mod msm;
+pub mod point_store_groups;
 pub mod require;
 pub mod trace;
 
@@ -192,9 +192,9 @@ pub const NUM_MAIN_COLS: usize = 14;
 // on-curve-cert consume (col 1), and the three trio MAC consumes — each
 // degree 3, so each sits alone (cols 2-4). The trio and the cert are
 // mutually-exclusive membership modes.
-const NUM_LOGUP_COLS: usize = 5;
+pub(crate) const NUM_LOGUP_COLS: usize = 5;
 const AUX_WIDTH: usize = 5;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 1, 1, 1];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 1, 1, 1];
 
 // AIR
 // ================================================================================================
@@ -236,58 +236,66 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let is_pai: AB::Expr = local[COL_IS_PAI].into();
-        let is_cert: AB::Expr = local[COL_IS_CERT].into();
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let ptr: AB::Expr = local[COL_PTR].into();
-        let ptr_next: AB::Expr = next[COL_PTR].into();
-
-        // Booleanity.
-        builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - is_pai.clone()));
-        builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - is_cert.clone()));
-        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
-        // A cert point is finite — the two membership modes are exclusive.
-        builder.assert_zero(is_pai.clone() * is_cert.clone());
-
-        // PAI rows reference no uints: coordinate / transient ptrs are the
-        // none-sentinel.
-        for col in [COL_X_PTR, COL_Y_PTR, COL_U_PTR, COL_W_PTR] {
-            let cell: AB::Expr = local[col].into();
-            builder.assert_zero(is_pai.clone() * cell);
-        }
-        // Cert rows carry real coordinates but no MAC transients — the trio
-        // ptrs are the none-sentinel (the cert discharges membership instead).
-        for col in [COL_U_PTR, COL_W_PTR] {
-            let cell: AB::Expr = local[col].into();
-            builder.assert_zero(is_cert.clone() * cell);
-        }
-        // Inactive rows cannot provide phantom EcPoint tuples: their group and
-        // membership consumes are act-gated, while the provide self-gates via
-        // this multiplicity cell.
-        let point_mult: AB::Expr = local[COL_ECPOINT_MULT].into();
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * point_mult);
-
-        // act is monotone (pads only at the tail; the wrap is dropped so
-        // the cyclic last → first edge stays free)…
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
-        // …and ptrs are consecutive along the active prefix, starting at 1
-        // (an all-pad trace starts at 0).
-        builder
-            .when_transition()
-            .assert_zero(act_next * (ptr_next - ptr.clone() - AB::Expr::ONE));
-        builder.when_first_row().assert_zero(ptr - act);
+        eval_point_store_main(builder, 0);
 
         // Phase 2: LogUp.
         let mut lb =
             CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
+}
+
+/// Evaluate this component's base constraints in a main-trace column band.
+pub(crate) fn eval_point_store_main<AB>(builder: &mut AB, main_col_offset: usize)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+
+    let is_pai: AB::Expr = local[COL_IS_PAI].into();
+    let is_cert: AB::Expr = local[COL_IS_CERT].into();
+    let act: AB::Expr = local[COL_ACT].into();
+    let act_next: AB::Expr = next[COL_ACT].into();
+    let ptr: AB::Expr = local[COL_PTR].into();
+    let ptr_next: AB::Expr = next[COL_PTR].into();
+
+    // Booleanity.
+    builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - is_pai.clone()));
+    builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - is_cert.clone()));
+    builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+    // A cert point is finite — the two membership modes are exclusive.
+    builder.assert_zero(is_pai.clone() * is_cert.clone());
+
+    // PAI rows reference no uints: coordinate / transient ptrs are the
+    // none-sentinel.
+    for col in [COL_X_PTR, COL_Y_PTR, COL_U_PTR, COL_W_PTR] {
+        let cell: AB::Expr = local[col].into();
+        builder.assert_zero(is_pai.clone() * cell);
+    }
+    // Cert rows carry real coordinates but no MAC transients — the trio
+    // ptrs are the none-sentinel (the cert discharges membership instead).
+    for col in [COL_U_PTR, COL_W_PTR] {
+        let cell: AB::Expr = local[col].into();
+        builder.assert_zero(is_cert.clone() * cell);
+    }
+    // Inactive rows cannot provide phantom EcPoint tuples: their group and
+    // membership consumes are act-gated, while the provide self-gates via
+    // this multiplicity cell.
+    let point_mult: AB::Expr = local[COL_ECPOINT_MULT].into();
+    builder.assert_zero((AB::Expr::ONE - act.clone()) * point_mult);
+
+    // act is monotone (pads only at the tail; the wrap is dropped so
+    // the cyclic last → first edge stays free)…
+    builder
+        .when_transition()
+        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+    // …and ptrs are consecutive along the active prefix, starting at 1
+    // (an all-pad trace starts at 0).
+    builder
+        .when_transition()
+        .assert_zero(act_next * (ptr_next - ptr.clone() - AB::Expr::ONE));
+    builder.when_first_row().assert_zero(ptr - act);
 }
 
 // LOOKUP AIR
@@ -314,152 +322,160 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-
-        let ptr: LB::Expr = local[COL_PTR].into();
-        let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
-        let a_ptr: LB::Expr = local[COL_A_PTR].into();
-        let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].into();
-        let x_ptr: LB::Expr = local[COL_X_PTR].into();
-        let y_ptr: LB::Expr = local[COL_Y_PTR].into();
-        let u_ptr: LB::Expr = local[COL_U_PTR].into();
-        let w_ptr: LB::Expr = local[COL_W_PTR].into();
-        let is_pai: LB::Expr = local[COL_IS_PAI].into();
-        let is_cert: LB::Expr = local[COL_IS_CERT].into();
-        let act: LB::Expr = local[COL_ACT].into();
-
-        // Pads zero the mult cell, so the provide needs no act gate; the
-        // consumes do (an all-zero pad row must touch no bus). The trio fires
-        // on finite, non-cert rows; the cert consume on finite cert rows —
-        // disjoint, partitioning a finite point's one membership obligation.
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].into();
-        let member_flag: LB::Expr =
-            act.clone() * (LB::Expr::ONE - is_pai.clone()) * (LB::Expr::ONE - is_cert.clone());
-        let cert_flag: LB::Expr = act.clone() * is_cert;
-
-        let one: LB::Expr = LB::Expr::ONE;
-        let zero: LB::Expr = LB::Expr::ZERO;
-
-        let provide_deg = Deg { v: 1, u: 1 };
-        let consume_deg = Deg { v: 1, u: 1 };
-        let member_deg = Deg { v: 3, u: 1 };
-        let cert_deg = Deg { v: 2, u: 1 };
-        let single_deg = Deg { v: 1, u: 2 };
-        let paired_deg = Deg { v: 3, u: 2 };
-
-        // col 0: the point binding, alone — the gated running-sum anchor.
-        frac_col!(
-            builder,
-            "ec-points",
-            single_deg,
-            (
-                "provide-ecpoint",
-                neg_mult,
-                EcPointMsg {
-                    point_ptr: ptr.clone(),
-                    group_ptr: group_ptr.clone(),
-                    x_ptr: x_ptr.clone(),
-                    y_ptr: y_ptr.clone(),
-                    is_pai: is_pai.clone(),
-                },
-                provide_deg
-            ),
-        );
-        // col 1 (paired, lqd-1): the group binding consume (forcing
-        // group_ptr onto a real group row and the a/b/bound/sbound cells
-        // onto its context — for PAI rows the only tie to a real group)
-        // paired with the closure-cert consume (a fresh group-law
-        // result's on-curve membership, discharged in place of the trio).
-        frac_col!(
-            builder,
-            "ec-points",
-            paired_deg,
-            (
-                "consume-ecgroup",
-                act,
-                EcGroupMsg {
-                    group_ptr: group_ptr.clone(),
-                    a_ptr: a_ptr.clone(),
-                    b_ptr: b_ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    scalar_bound_ptr: sbound_ptr.clone(),
-                },
-                consume_deg
-            ),
-            (
-                "consume-ecgroupadd-cert",
-                cert_flag,
-                EcOnCurveCertMsg {
-                    group_ptr: group_ptr.clone(),
-                    r_ptr: ptr.clone()
-                },
-                cert_deg
-            ),
-        );
-        // cols 2-4: the curve-membership MAC trio (shared r_ptr = w makes
-        // y² = x³ + ax + b an identity of stored values), each degree 3
-        // so each sits alone.
-        frac_col!(
-            builder,
-            "ec-points",
-            single_deg,
-            (
-                "consume-mac-u",
-                member_flag.clone(),
-                UintMulMsg {
-                    kappa_a: one.clone(),
-                    kappa_c: one.clone(),
-                    a_ptr: x_ptr.clone(),
-                    b_ptr: x_ptr.clone(),
-                    c_ptr: a_ptr.clone(),
-                    r_ptr: u_ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    is_sub: LB::Expr::ZERO,
-                },
-                member_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "ec-points",
-            single_deg,
-            (
-                "consume-mac-w",
-                member_flag.clone(),
-                UintMulMsg {
-                    kappa_a: one.clone(),
-                    kappa_c: one.clone(),
-                    a_ptr: x_ptr.clone(),
-                    b_ptr: u_ptr.clone(),
-                    c_ptr: b_ptr.clone(),
-                    r_ptr: w_ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    is_sub: LB::Expr::ZERO,
-                },
-                member_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "ec-points",
-            single_deg,
-            (
-                "consume-mac-y",
-                member_flag,
-                UintMulMsg {
-                    kappa_a: one,
-                    kappa_c: zero,
-                    a_ptr: y_ptr.clone(),
-                    b_ptr: y_ptr.clone(),
-                    c_ptr: bound_ptr.clone(),
-                    r_ptr: w_ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    is_sub: LB::Expr::ZERO,
-                },
-                member_deg
-            ),
-        );
+        eval_point_store_lookups(builder, 0);
     }
+}
+
+/// Evaluate this component's LogUp columns in a main-trace column band.
+pub(crate) fn eval_point_store_lookups<LB>(builder: &mut LB, main_col_offset: usize)
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+
+    let ptr: LB::Expr = local[COL_PTR].into();
+    let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
+    let a_ptr: LB::Expr = local[COL_A_PTR].into();
+    let b_ptr: LB::Expr = local[COL_B_PTR].into();
+    let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
+    let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].into();
+    let x_ptr: LB::Expr = local[COL_X_PTR].into();
+    let y_ptr: LB::Expr = local[COL_Y_PTR].into();
+    let u_ptr: LB::Expr = local[COL_U_PTR].into();
+    let w_ptr: LB::Expr = local[COL_W_PTR].into();
+    let is_pai: LB::Expr = local[COL_IS_PAI].into();
+    let is_cert: LB::Expr = local[COL_IS_CERT].into();
+    let act: LB::Expr = local[COL_ACT].into();
+
+    // Pads zero the mult cell, so the provide needs no act gate; the
+    // consumes do (an all-zero pad row must touch no bus). The trio fires
+    // on finite, non-cert rows; the cert consume on finite cert rows —
+    // disjoint, partitioning a finite point's one membership obligation.
+    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].into();
+    let member_flag: LB::Expr =
+        act.clone() * (LB::Expr::ONE - is_pai.clone()) * (LB::Expr::ONE - is_cert.clone());
+    let cert_flag: LB::Expr = act.clone() * is_cert;
+
+    let one: LB::Expr = LB::Expr::ONE;
+    let zero: LB::Expr = LB::Expr::ZERO;
+
+    let provide_deg = Deg { v: 1, u: 1 };
+    let consume_deg = Deg { v: 1, u: 1 };
+    let member_deg = Deg { v: 3, u: 1 };
+    let cert_deg = Deg { v: 2, u: 1 };
+    let single_deg = Deg { v: 1, u: 2 };
+    let paired_deg = Deg { v: 3, u: 2 };
+
+    // col 0: the point binding, alone — the gated running-sum anchor.
+    frac_col!(
+        builder,
+        "ec-points",
+        single_deg,
+        (
+            "provide-ecpoint",
+            neg_mult,
+            EcPointMsg {
+                point_ptr: ptr.clone(),
+                group_ptr: group_ptr.clone(),
+                x_ptr: x_ptr.clone(),
+                y_ptr: y_ptr.clone(),
+                is_pai: is_pai.clone(),
+            },
+            provide_deg
+        ),
+    );
+    // col 1 (paired, lqd-1): the group binding consume (forcing
+    // group_ptr onto a real group row and the a/b/bound/sbound cells
+    // onto its context — for PAI rows the only tie to a real group)
+    // paired with the closure-cert consume (a fresh group-law
+    // result's on-curve membership, discharged in place of the trio).
+    frac_col!(
+        builder,
+        "ec-points",
+        paired_deg,
+        (
+            "consume-ecgroup",
+            act,
+            EcGroupMsg {
+                group_ptr: group_ptr.clone(),
+                a_ptr: a_ptr.clone(),
+                b_ptr: b_ptr.clone(),
+                bound_ptr: bound_ptr.clone(),
+                scalar_bound_ptr: sbound_ptr.clone(),
+            },
+            consume_deg
+        ),
+        (
+            "consume-ecgroupadd-cert",
+            cert_flag,
+            EcOnCurveCertMsg {
+                group_ptr: group_ptr.clone(),
+                r_ptr: ptr.clone()
+            },
+            cert_deg
+        ),
+    );
+    // cols 2-4: the curve-membership MAC trio (shared r_ptr = w makes
+    // y² = x³ + ax + b an identity of stored values), each degree 3
+    // so each sits alone.
+    frac_col!(
+        builder,
+        "ec-points",
+        single_deg,
+        (
+            "consume-mac-u",
+            member_flag.clone(),
+            UintMulMsg {
+                kappa_a: one.clone(),
+                kappa_c: one.clone(),
+                a_ptr: x_ptr.clone(),
+                b_ptr: x_ptr.clone(),
+                c_ptr: a_ptr.clone(),
+                r_ptr: u_ptr.clone(),
+                bound_ptr: bound_ptr.clone(),
+                is_sub: LB::Expr::ZERO,
+            },
+            member_deg
+        ),
+    );
+    frac_col!(
+        builder,
+        "ec-points",
+        single_deg,
+        (
+            "consume-mac-w",
+            member_flag.clone(),
+            UintMulMsg {
+                kappa_a: one.clone(),
+                kappa_c: one.clone(),
+                a_ptr: x_ptr.clone(),
+                b_ptr: u_ptr.clone(),
+                c_ptr: b_ptr.clone(),
+                r_ptr: w_ptr.clone(),
+                bound_ptr: bound_ptr.clone(),
+                is_sub: LB::Expr::ZERO,
+            },
+            member_deg
+        ),
+    );
+    frac_col!(
+        builder,
+        "ec-points",
+        single_deg,
+        (
+            "consume-mac-y",
+            member_flag,
+            UintMulMsg {
+                kappa_a: one,
+                kappa_c: zero,
+                a_ptr: y_ptr.clone(),
+                b_ptr: y_ptr.clone(),
+                c_ptr: bound_ptr.clone(),
+                r_ptr: w_ptr.clone(),
+                bound_ptr: bound_ptr.clone(),
+                is_sub: LB::Expr::ZERO,
+            },
+            member_deg
+        ),
+    );
 }

@@ -91,7 +91,7 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 pub const NUM_AUX_COLS: usize = 5;
 
 /// Per-column fraction counts, matching the pairing above.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 1];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 1];
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; aggregating the Memory64 + Poseidon2In

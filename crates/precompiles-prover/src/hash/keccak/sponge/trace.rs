@@ -382,8 +382,24 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 /// of two are inactive (`act = 0`). Returns a [`NUM_MAIN_COLS`]-column
 /// trace.
 pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, 0)
+}
+
+/// Same as [`generate_trace`], but the trace height is at least `min_height`
+/// (still rounded up to a power of two) — lets a caller sharing this
+/// chiplet's row range with another AIR (see `hash::chunk_node_sponge`) pad
+/// the sponge's trace up to match the other side's height. Pads past the
+/// natural height are the sponge's own trailing inactive rows (`act = 0`,
+/// the `sponge_seq_id` / `bytes_left` chains continued).
+pub(crate) fn generate_trace_padded_to(
+    requires: SpongeRequires,
+    min_height: usize,
+) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_active_rows() as usize;
-    let height = active_rows.next_power_of_two().max(SPONGE_PERIOD);
+    let min_height = min_height
+        .checked_next_power_of_two()
+        .expect("minimum sponge trace height exceeds the host power-of-two range");
+    let height = active_rows.next_power_of_two().max(SPONGE_PERIOD).max(min_height);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
@@ -642,6 +658,8 @@ pub(crate) fn build_aux(
 mod tests {
     use std::vec;
 
+    use miden_core::utils::Matrix;
+
     use super::*;
 
     #[test]
@@ -671,5 +689,11 @@ mod tests {
         // block 1 consumes the remaining 11 incl. 3 garbage-tail
         // lanes past the input).
         assert_eq!(Invocation { input: vec![0; 200] }.chunk_lanes(), 28);
+    }
+
+    #[test]
+    fn padded_height_rounds_the_floor_to_a_power_of_two() {
+        let trace = generate_trace_padded_to(SpongeRequires::new(), 33);
+        assert_eq!(trace.height(), 64);
     }
 }
