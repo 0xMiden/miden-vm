@@ -52,6 +52,7 @@
 - [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 - [BREAKING] Bump Plonky3 related dependencies to integrate SVE2 and WASM-SIMD128 speed-ups and include a NEON bugfix. ([#3441](https://github.com/0xMiden/miden-vm/pull/3441)).
 - Bumped the imported crypto crates to 0.28.2 after the standalone crypto repository published different 0.28.1 package contents, and raised the minimum `p3-field` version to match `num-bigint` 0.5.
+- Split dense `MastForest` order helpers and package serialization tests into smaller modules, and routed dense forest finalization and static library setup through dedicated builder and library methods ([#3346](https://github.com/0xMiden/miden-vm/pull/3346)).
 
 #### Fixes
 

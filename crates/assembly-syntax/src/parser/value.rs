@@ -319,7 +319,7 @@ impl fmt::Display for IntValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", &value.as_canonical_u64().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", value.as_canonical_u64().to_be()),
         }
     }
 }
