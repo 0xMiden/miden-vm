@@ -38,7 +38,7 @@ push.<felt> emit drop
 
 Trace events are a special class of optional, read-only events. Unlike regular custom events, they cannot mutate the advice provider, and emitting one for which the host has no handler registered should not result in an error.
 
-A trace event is emitted by pushing the user trace event ID and then the `sys::trace_event` system event ID before `emit`. There is currently no `emit.<event_id>`-style immediate form for trace events.
+A trace event is emitted by pushing the user trace event ID and then the `sys::trace_event` system event ID before `emit`.
 
 ```miden
 const MY_TRACE = event("miden_debug::println")
@@ -49,8 +49,14 @@ push.SYS_EVENT
 emit
 drop
 drop
+
+# Since `emit.<event_id>` expands to `push.<event_id>, emit, drop`, this can be shortened too:
+
+push.MY_TRACE
+emit.SYS_EVENT
+drop
 ```
 
-When the host trace handler runs, `sys::trace_event` is at stack position 0 and `MY_TRACE` is at stack position 1. The full sequence above is stack-neutral and takes 5 cycles.
+When the host trace handler runs, `sys::trace_event` is at stack position 0 and `MY_TRACE` is at stack position 1. Both sequences above are stack-neutral and take 5 cycles.
 
 On the Rust side, hosts can register trace handlers via `DefaultHost::register_trace_handler`, or implement `SyncHost::on_trace` / `Host::on_trace`. Hosts that do not implement `on_trace` still execute programs containing trace events: the default implementation is a no-op, and trace events are not routed to the regular `on_event` handler.
