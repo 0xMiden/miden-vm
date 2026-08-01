@@ -327,25 +327,28 @@ jobs:
           git worktree add --detach "${WORKTREE_DIR}/baseline" "${BASELINE_SHA}"
           git worktree add --detach "${WORKTREE_DIR}/current" "${CURRENT_SHA}"
 
-      - name: Install current Blake3 benchmark harness
+      - name: Install missing Blake3 benchmark harness
         env:
           WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
         shell: bash
         run: |
           set -euo pipefail
 
-          install_harness() {
+          install_harness_if_missing() {
             local target="$1"
-            mkdir -p "${target}/benches"
-            rm -rf "${target}/benches/blake3-bench"
-            cp -R "${GITHUB_WORKSPACE}/benches/blake3-bench" "${target}/benches/blake3-bench"
+            # Keep the ref's harness because it may target a different public API.
+            if [[ ! -f "${target}/benches/blake3-bench/Cargo.toml" ]]; then
+              mkdir -p "${target}/benches"
+              cp -R "${GITHUB_WORKSPACE}/benches/blake3-bench" "${target}/benches/blake3-bench"
+            fi
+
             if ! grep -q '"benches/blake3-bench"' "${target}/Cargo.toml"; then
               perl -0pi -e 's/members = \[\n/members = [\n    "benches\/blake3-bench",\n/' "${target}/Cargo.toml"
             fi
           }
 
-          install_harness "${WORKTREE_DIR}/baseline"
-          install_harness "${WORKTREE_DIR}/current"
+          install_harness_if_missing "${WORKTREE_DIR}/baseline"
+          install_harness_if_missing "${WORKTREE_DIR}/current"
 
       - name: Run baseline benchmark
         env:
