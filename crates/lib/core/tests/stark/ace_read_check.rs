@@ -30,7 +30,7 @@ fn recursive_verifier_layout() -> InputLayout {
         num_airs: MIDEN_AIR_COUNT,
     };
 
-    build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &ProofOrder::instance_order())
+    build_multi_air_ace_circuit_for_order(config, &ProofOrder::instance_order())
         .expect("multi-AIR ace circuit")
         .layout()
         .clone()
@@ -148,8 +148,8 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
     };
 
     let order = extract_order(output);
-    let circuit = build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order)
-        .expect("multi-AIR ace circuit");
+    let circuit =
+        build_multi_air_ace_circuit_for_order(config, &order).expect("multi-AIR ace circuit");
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(output, layout);

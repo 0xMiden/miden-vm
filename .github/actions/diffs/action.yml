@@ -58,6 +58,7 @@ runs:
             - 'crates/debug-types/**'
             - 'crates/lib/core/**'
             - 'crates/mast-package/**'
+            - 'crates/miden-constraint-compiler/**'
             - 'crates/midenc-hir-type/**'
             - 'crates/package-registry/**'
             - 'crates/package-registry-local/**'

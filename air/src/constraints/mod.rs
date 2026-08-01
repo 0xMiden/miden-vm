@@ -19,6 +19,7 @@ pub mod columns;
 pub mod constants;
 pub mod decoder;
 pub mod ext_field;
+pub mod generated;
 pub mod lookup;
 pub(crate) mod op_flags;
 pub mod poseidon2_permutation;

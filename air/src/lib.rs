@@ -625,6 +625,75 @@ impl MidenAir {
             },
         }
     }
+
+    /// Evaluate the hand-written constraint definitions.
+    ///
+    /// [`LiftedAir::eval`] runs the generated evaluators instead; use this entry
+    /// point (via [`HandwrittenMidenAir`] where an AIR value is expected) when
+    /// the hand-written source itself is required — regenerating the evaluators,
+    /// or checking them for drift.
+    pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        match self {
+            Self::Core => CoreAir.eval(builder),
+            Self::Chiplets => ChipletsAir.eval(builder),
+            Self::Poseidon2Permutation => Poseidon2PermutationAir.eval(builder),
+        }
+    }
+}
+
+/// [`MidenAir`] with `eval` routed to the hand-written constraint definitions.
+///
+/// Symbolic capture that feeds artifact generation, or anchors an equivalence
+/// oracle, must consume the hand-written source — a generated evaluator as input
+/// makes regeneration self-referential and severs the chain back to the auditable
+/// source. Passing this wrapper enforces that by construction.
+#[derive(Copy, Clone, Debug)]
+pub struct HandwrittenMidenAir(pub MidenAir);
+
+impl BaseAir<Felt> for HandwrittenMidenAir {
+    fn width(&self) -> usize {
+        self.0.width()
+    }
+
+    fn num_public_values(&self) -> usize {
+        BaseAir::<Felt>::num_public_values(&self.0)
+    }
+
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        self.0.periodic_columns()
+    }
+}
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for HandwrittenMidenAir {
+    fn num_randomness(&self) -> usize {
+        LiftedAir::<Felt, EF>::num_randomness(&self.0)
+    }
+
+    fn aux_width(&self) -> usize {
+        LiftedAir::<Felt, EF>::aux_width(&self.0)
+    }
+
+    fn num_aux_values(&self) -> usize {
+        LiftedAir::<Felt, EF>::num_aux_values(&self.0)
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
+
+    fn constraint_degree(&self) -> ConstraintDegrees {
+        LiftedAir::<Felt, EF>::constraint_degree(&self.0)
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        self.0.eval_handwritten(builder)
+    }
 }
 
 impl BaseAir<Felt> for MidenAir {
@@ -692,10 +761,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        // The generated, globally-CSE'd evaluators: same constraint values in
+        // the same global order as the hand-written definitions, machine-checked
+        // by tests/generated_drift.rs. The definitions themselves remain
+        // available via `eval_handwritten`.
         match self {
-            Self::Core => CoreAir.eval(builder),
-            Self::Chiplets => ChipletsAir.eval(builder),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.eval(builder),
+            Self::Core => constraints::generated::eval_core(builder),
+            Self::Chiplets => constraints::generated::eval_chiplets(builder),
+            Self::Poseidon2Permutation => {
+                constraints::generated::eval_poseidon2_permutation(builder)
+            },
         }
     }
 }

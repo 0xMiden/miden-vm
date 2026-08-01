@@ -179,6 +179,36 @@ fn compact_removes_dead_operation_subtree() {
 }
 
 #[test]
+#[should_panic(expected = "DAG node must come from this DagBuilder")]
+fn compact_rejects_stale_node_ids() {
+    // A NodeId issued before a compaction that removes nodes must not resolve
+    // afterwards: such a compaction renumbers indices and stamps a fresh
+    // dag_id, so provenance checks reject the stale id instead of resolving it
+    // to whichever node now sits at its old index.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let three = builder.constant(QuadFelt::from(Felt::new_unchecked(3)));
+    let five = builder.constant(QuadFelt::from(Felt::new_unchecked(5)));
+    let eight = builder.add(three, five);
+    let root = builder.mul(a, eight);
+    // Constant folding orphans `three` at build time and compaction removes
+    // it, while its old index stays in range afterwards — the exact shape
+    // that would alias a different node.
+    let stale = three;
+
+    let mut dag = builder.build(root);
+    dag.compact();
+    assert!(
+        stale.index() < dag.nodes().len(),
+        "test premise broken: the stale index must stay in range so the \
+         provenance check, not the bounds check, is what rejects it"
+    );
+
+    let mut resumed = DagBuilder::from_dag(dag);
+    let _ = resumed.neg(stale);
+}
+
+#[test]
 fn compact_preserves_already_compact_dag() {
     // A DAG with no dead nodes must be unchanged by compaction.
     let mut builder = DagBuilder::<QuadFelt>::new();
