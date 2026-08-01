@@ -2,7 +2,7 @@
 //!
 //! This benchmark separates the transaction proof from the recursive verifier cost:
 //! transaction proofs are generated before timing, then the timed program verifies
-//! the configured number of proofs via `exec.vm::verify_proof`.
+//! the configured number of proofs via `exec.vm::verify_vm_proof`.
 //!
 //! For each requested proof count, the setup builds one recursive-verifier program and one advice
 //! provider. The program contains one verifier call per inner proof. The advice stack segments for
@@ -44,8 +44,8 @@ use miden_assembly::Linkage;
 use miden_core::{
     Felt,
     crypto::hash::Blake3_256,
-    deferred::TRUE_DIGEST,
     field::QuotientMap,
+    program::ExecutionClaim,
     serde::{Deserializable, Serializable},
     utils::to_hex,
 };
@@ -55,7 +55,7 @@ use miden_processor::{
     advice::{AdviceInputs, AdviceStack},
     trace::TraceLenSummary,
 };
-use miden_prover::{PublicInputs, prove_sync};
+use miden_prover::prove_sync;
 use miden_utils_testing::recursive_verifier::generate_advice_inputs;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackInputs,
@@ -63,9 +63,7 @@ use miden_vm::{
 };
 
 const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
-const KERNEL_DIGEST_PTR: u64 = 0;
-const STACK_IO_PTR: u64 = 4096;
-const STACK_IO_VALUE_COUNT: u64 = 32;
+const CLAIM_PTR: u64 = 4096;
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v1";
 
 struct TxProofFixture {
@@ -472,8 +470,6 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 }
                 (stack_outputs, proof, "miss")
             };
-            let deferred_entries =
-                proof.deferred_proof().as_wire().map_or(0, |wire| wire.entries.len());
             assert!(
                 proof.deferred_proof().is_empty(),
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
@@ -491,11 +487,11 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
             let proof_digest_hex = to_hex(proof_digest);
             println!(
                 "    proof={proof_index} stack={stack_values:?} proof_bytes={proof_bytes_len} \
-                 deferred_entries={deferred_entries}",
+                 deferred_entries=0",
             );
             println!(
                 "BENCH_TX_PROOF index={proof_index} stack={stack_values:?} \
-                 proof_bytes={proof_bytes_len} deferred_entries={deferred_entries} \
+                 proof_bytes={proof_bytes_len} deferred_entries=0 \
                  proof_cache={proof_cache_status} proof_digest={proof_digest_hex} \
                  proof_prefix={proof_prefix}",
             );
@@ -510,28 +506,27 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
         .collect()
 }
 
-/// MASM for one `exec.vm::verify_proof` call.
+/// MASM for one `exec.vm::verify_vm_proof` call.
 ///
 /// The generated program appends one block like this per inner transaction proof.
 fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
     let mut source = String::new();
-    // `initial_stack[0]` must be on top when `verify_proof` starts.
+    // `initial_stack[0]` must be on top when `verify_vm_proof` starts.
     for value in initial_stack.iter().rev() {
         writeln!(source, "push.{value}").expect("write recursive verifier call source");
     }
     writeln!(
         source,
         "
-        # Copy 4 * num_kernel_digests felts from advice into the kernel region.
-        dup.1 mul.4 push.{KERNEL_DIGEST_PTR}
+        # Copy the claim encoding P | K | I | O (40 felts) into the claim region; the kernel
+        # digest witness travels in the advice map.
+        push.40 push.{CLAIM_PTR}
         exec.copy_advice_to_mem
 
-        # Copy stack inputs and outputs into the stack i/o region.
-        push.{STACK_IO_VALUE_COUNT} push.{STACK_IO_PTR}
-        exec.copy_advice_to_mem
-
-        exec.vm::verify_proof
-        "
+        exec.vm::verify_vm_proof
+        # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+        dropw dropw
+        ",
     )
     .expect("write recursive verifier call source");
     source
@@ -539,7 +534,8 @@ fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
 
 /// Full MASM program used by the benchmark.
 ///
-/// `verify_calls` is a sequence of `exec.vm::verify_proof` calls, one per inner proof.
+/// `verify_calls` is a sequence of `exec.vm::verify_vm_proof` calls, one per inner
+/// proof.
 fn recursive_verifier_program_masm(verify_calls: &str) -> String {
     format!(
         "
@@ -597,19 +593,17 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
 /// Build the advice provider consumed by one recursive verifier call.
 ///
 /// `generate_advice_inputs` parses the inner STARK proof and returns the exact advice stack,
-/// Merkle store, and advice-map entries expected by `exec.vm::verify_proof`.
+/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
 /// The stack is ordered so its first element is the next value consumed by the VM.
 fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
-    let pub_inputs = PublicInputs::new(
+    let claim = ExecutionClaim::from_program_info(
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,
-        TRUE_DIGEST,
     );
-    let verifier_inputs = generate_advice_inputs(fixture.proof.miden_proof().bytes(), pub_inputs)
-        .expect("recursive advice");
+    let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
 
-    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack)
+    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack())
         .expect("recursive advice stack values must be canonical");
     let advice_inputs = AdviceInputs::default()
         .with_advice_stack(advice_stack)

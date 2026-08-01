@@ -377,7 +377,7 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
             ..TestAir::simple()
         },
     ];
-    let circuit = build_multi_air_ace_circuit::<_, F, EF>(
+    let circuit = build_multi_air_ace_circuit(
         &airs,
         &[2, 0, 1],
         AceConfig {
@@ -450,7 +450,7 @@ fn mixed_air_periods_use_one_shared_basis() {
         TestAir { period: 4, ..TestAir::simple() },
         TestAir { period: 32, ..TestAir::simple() },
     ];
-    let circuit = build_multi_air_ace_circuit::<_, F, EF>(
+    let circuit = build_multi_air_ace_circuit(
         &airs,
         &[0, 1],
         AceConfig {
@@ -485,9 +485,9 @@ fn multi_air_rejects_invalid_proof_orders() {
         num_airs: 2,
     };
 
-    assert!(build_multi_air_ace_circuit::<_, F, EF>(&airs, &[0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit::<_, F, EF>(&airs, &[0, 0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit::<_, F, EF>(&airs, &[0, 2], config, 2).is_err());
+    assert!(build_multi_air_ace_circuit(&airs, &[0], config, 2).is_err());
+    assert!(build_multi_air_ace_circuit(&airs, &[0, 0], config, 2).is_err());
+    assert!(build_multi_air_ace_circuit(&airs, &[0, 2], config, 2).is_err());
 }
 
 #[test]
@@ -498,7 +498,7 @@ fn test_preprocessed_entries_lower_to_input_keys() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
 
     assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
     assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
@@ -521,7 +521,7 @@ fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let mut inputs = vec![EF::ZERO; layout.total_inputs];
     inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
@@ -543,7 +543,7 @@ fn test_verifier_dag_matches_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -591,7 +591,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -638,7 +638,7 @@ fn test_emitted_circuit_matches_dag_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
 
@@ -657,7 +657,7 @@ fn pipeline_rejects_zero_airs() {
         num_airs: 0,
     };
 
-    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    let err = build_ace_dag_for_air(&air, config).unwrap_err();
     assert!(
         matches!(err, crate::AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
@@ -673,7 +673,7 @@ fn pipeline_rejects_zero_quotient_chunks() {
         num_airs: 1,
     };
 
-    let err = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap_err();
+    let err = build_ace_dag_for_air(&air, config).unwrap_err();
     assert!(
         matches!(err, crate::AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
@@ -688,7 +688,7 @@ fn test_encoded_circuit_structure() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
 

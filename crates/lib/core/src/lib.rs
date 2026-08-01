@@ -6,13 +6,15 @@ extern crate std;
 #[cfg(any(feature = "constraints-tools", all(test, feature = "std")))]
 pub mod constraints_regen;
 pub mod dsa;
+#[cfg(feature = "constraints-tools")]
+pub mod evaluator_regen;
 pub mod handlers;
 
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::{events::EventName, mast::MastForest};
+use miden_core::{Word, events::EventName, mast::MastForest};
 use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
@@ -120,6 +122,19 @@ impl CoreLibrary {
     /// Returns a reference to the underlying [`Arc<Package>`].
     pub fn package(&self) -> Arc<Package> {
         self.0.clone()
+    }
+
+    /// Returns the MAST root of `sys::vm::verify_vm_proof` — the verifier identity under
+    /// which recursive proofs are content-addressed.
+    ///
+    /// Operators pass this root when registering a proof package in the advice map
+    /// (`RecursiveVerifierInputs::into_request_package`). A consumer derives the identical value
+    /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
+    /// agree without a shared constant; consumers key their proof fetches by this root.
+    pub fn recursive_verifier_root(&self) -> Word {
+        self.0
+            .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
+            .expect("verify_vm_proof is exported from the core library")
     }
 
     /// Returns the default event handlers required by the core library.

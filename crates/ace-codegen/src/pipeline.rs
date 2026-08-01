@@ -1,22 +1,19 @@
 //! High-level ACE codegen pipeline helpers.
 //!
 //! This module ties together the major layers:
-//! - build a verifier-style DAG from AIR constraints,
+//! - capture AIR constraints into the compiler IR,
+//! - build a verifier-style DAG from that IR,
 //! - choose a READ layout for inputs,
 //! - emit a circuit that matches verifier evaluation.
 
-use miden_crypto::{
-    field::{Algebra, ExtensionField, Field, TwoAdicField},
-    stark::air::{
-        BaseAir, LiftedAir,
-        symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
-    },
-};
+use miden_constraint_compiler::ir::capture;
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::stark::air::{BaseAir, LiftedAir};
 
 use crate::{
     AceError, EXT_DEGREE,
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag},
+    dag::{AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir},
     layout::{InputCounts, InputKey, InputLayout},
 };
 
@@ -53,17 +50,22 @@ pub struct AceArtifacts<EF> {
 }
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
-pub fn build_ace_circuit_for_air<A, F, EF>(
+///
+/// This builds the constraint-evaluation DAG, validates layout invariants, and
+/// emits the off-VM circuit representation. The circuit performs the constraint
+/// evaluation check at the out-of-domain point z.
+///
+/// The constraints are captured from `air.eval`: callers producing production
+/// artifacts must pass an AIR whose `eval` routes to the hand-written
+/// definitions (e.g. `HandwrittenMidenAir`).
+pub fn build_ace_circuit_for_air<A>(
     air: &A,
     config: AceConfig,
-) -> Result<AceCircuit<EF>, AceError>
+) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
-    let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
+    let artifacts = build_ace_dag_for_air(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
 }
 
@@ -72,17 +74,17 @@ where
 /// `airs` defines stable instance indices, while `proof_order` controls trace-region placement and
 /// the beta-Horner fold. `trace_width_alignment` is the base-field alignment used for each AIR's
 /// preprocessed, main, and auxiliary trace regions.
-pub fn build_multi_air_ace_circuit<A, F, EF>(
+///
+/// As with [`build_ace_circuit_for_air`], each AIR's `eval` must route to the hand-written
+/// definitions when this function produces a committed artifact.
+pub fn build_multi_air_ace_circuit<A>(
     airs: &[A],
     proof_order: &[usize],
     config: AceConfig,
     trace_width_alignment: usize,
-) -> Result<AceCircuit<EF>, AceError>
+) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     let num_airs = airs.len();
     if num_airs == 0 || config.num_airs != num_airs {
@@ -112,7 +114,7 @@ where
     }
 
     let sub_config = AceConfig { num_airs: 1, ..config };
-    let artifacts = build_ace_dags_for_airs::<A, F, EF>(airs, sub_config)?;
+    let artifacts = build_ace_dags_for_airs(airs, sub_config)?;
     let shared = artifacts[0].layout.counts;
     if artifacts.iter().any(|air| air.layout.counts.num_public != shared.num_public) {
         return Err(AceError::InvalidInputLayout {
@@ -152,7 +154,7 @@ where
     };
 
     // Re-emit in stable instance order; only placement and the final fold follow proof order.
-    let mut builder = DagBuilder::new();
+    let mut builder = DagBuilder::<QuadFelt>::new();
     let mut roots = Vec::with_capacity(num_airs);
     for (air_index, artifacts) in artifacts.iter().enumerate() {
         roots.push(reemit_air_root(&mut builder, &artifacts.dag, air_index, offsets[air_index]));
@@ -180,15 +182,14 @@ where
 }
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
-pub fn build_ace_dag_for_air<A, F, EF>(
+///
+/// See [`build_ace_circuit_for_air`] for the capture invariant on `air`.
+pub fn build_ace_dag_for_air<A>(
     air: &A,
     config: AceConfig,
-) -> Result<AceArtifacts<EF>, AceError>
+) -> Result<AceArtifacts<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     if config.num_airs == 0 {
         return Err(AceError::InvalidInputLayout {
@@ -202,17 +203,15 @@ where
 }
 
 /// Build verifier-equivalent DAGs against one shared periodic-column basis.
-fn build_ace_dags_for_airs<A, F, EF>(
+fn build_ace_dags_for_airs<A>(
     airs: &[A],
     config: AceConfig,
-) -> Result<Vec<AceArtifacts<EF>>, AceError>
+) -> Result<Vec<AceArtifacts<QuadFelt>>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
-    let periodic_columns_by_air: Vec<_> = airs.iter().map(BaseAir::periodic_columns).collect();
+    let periodic_columns_by_air: Vec<_> =
+        airs.iter().map(BaseAir::<Felt>::periodic_columns).collect();
     let shared_period = periodic_columns_by_air
         .iter()
         .map(|columns| max_period(columns))
@@ -232,19 +231,16 @@ where
         .collect()
 }
 
-fn build_ace_dag_for_air_with_periodic_columns<A, F, EF>(
+fn build_ace_dag_for_air_with_periodic_columns<A>(
     air: &A,
     config: AceConfig,
-    periodic_columns: Vec<Vec<F>>,
+    periodic_columns: Vec<Vec<Felt>>,
     shared_period: usize,
-) -> Result<AceArtifacts<EF>, AceError>
+) -> Result<AceArtifacts<QuadFelt>, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
-    let counts = input_counts_for_air::<A, F, EF>(air, config)?;
+    let counts = input_counts_for_air(air, config)?;
     let layout = match (config.layout, config.num_airs >= 2) {
         (LayoutKind::Native, false) => InputLayout::new(counts),
         (LayoutKind::Masm, false) => InputLayout::new_masm(counts),
@@ -253,27 +249,12 @@ where
     };
     layout.validate();
 
-    let air_layout = AirLayout {
-        preprocessed_width: counts.preprocessed_width,
-        main_width: counts.width,
-        num_public_values: counts.num_public,
-        permutation_width: counts.aux_width,
-        num_permutation_challenges: counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: periodic_columns.len(),
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
-
+    let (graph, constraints) = capture(air);
     let periodic_data = (!periodic_columns.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns));
-    let dag = build_verifier_dag::<F, EF>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
+        .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns));
+    let dag = build_verifier_dag_from_ir(
+        &graph,
+        &constraints,
         &layout,
         periodic_data.as_ref(),
         shared_period,
@@ -294,15 +275,15 @@ struct TraceOffsets {
     boundary: usize,
 }
 
-fn reemit_air_root<EF: Field>(
-    builder: &mut DagBuilder<EF>,
-    source: &AceDag<EF>,
+fn reemit_air_root(
+    builder: &mut DagBuilder<QuadFelt>,
+    source: &AceDag<QuadFelt>,
     air_index: usize,
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
     debug_assert_eq!(source.root().index() + 1, source.nodes.len());
     let NodeKind::Sub(accumulator, quotient_binding) = source.nodes[source.root().index()] else {
-        unreachable!("build_verifier_dag always emits an accumulator - q*v root")
+        unreachable!("verifier DAGs always emit an accumulator - q*v root")
     };
 
     let mut translated = Vec::with_capacity(source.nodes.len() - 1);
@@ -344,11 +325,9 @@ fn reemit_air_root<EF: Field>(
     (translated[accumulator.index()], translated[quotient_binding.index()])
 }
 
-fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
+fn input_counts_for_air<A>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
 where
-    A: LiftedAir<F, EF>,
-    F: Field,
-    EF: ExtensionField<F>,
+    A: LiftedAir<Felt, QuadFelt>,
 {
     if config.num_quotient_chunks == 0 {
         return Err(AceError::InvalidInputLayout {

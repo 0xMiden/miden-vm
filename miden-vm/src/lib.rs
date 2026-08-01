@@ -9,7 +9,10 @@ pub use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics,
 };
-pub use miden_core::proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof};
+pub use miden_core::{
+    program::ExecutionClaim,
+    proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof},
+};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
@@ -21,7 +24,7 @@ pub use miden_processor::{
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::{prove_from_trace_sync, prove_sync};
-pub use miden_verifier::{VerificationError, Verifier};
+pub use miden_verifier::{Unsettled, VerificationError, Verifier};
 
 // (private) exports
 // ================================================================================================
@@ -29,18 +32,10 @@ pub use miden_verifier::{VerificationError, Verifier};
 #[cfg(feature = "internal")]
 pub mod internal;
 
-/// Verifies a final Miden proof.
+/// Verifies a final Miden proof of the given execution claim.
 ///
-/// Wire-backed deferred proofs are partial/delegable proof material and are rejected by this
-/// verifier. Use [`Verifier::verify_partial`] to verify and hydrate wire-backed partial proofs.
-///
-/// Deprecated compatibility shim for [`Verifier::verify`].
-#[deprecated(since = "0.25.0", note = "use Verifier::new().verify(...) instead")]
-pub fn verify(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    Verifier::new().verify(program_info, stack_inputs, stack_outputs, proof)
+/// Wire-backed deferred proofs are partial/delegable proof material and are rejected here; use
+/// [`Verifier::verify_partial`] to verify and hydrate wire-backed partial proofs.
+pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
+    miden_verifier::verify(proof, claim)
 }

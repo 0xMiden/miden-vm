@@ -60,6 +60,13 @@ pub fn hash_elements(elements: &[Felt]) -> Digest {
     Hasher::hash_elements(elements)
 }
 
+/// Returns a hash of the provided list of field elements with the specified domain in the
+/// second capacity element (the first carries the padding rule).
+#[inline(always)]
+pub fn hash_elements_in_domain(elements: &[Felt], domain: Felt) -> Digest {
+    Hasher::hash_elements_in_domain(elements, domain)
+}
+
 /// Applies a single Poseidon2 "step" to the provided state.
 ///
 /// The step number must be specified via `round` parameter, which must be between 0 and 30

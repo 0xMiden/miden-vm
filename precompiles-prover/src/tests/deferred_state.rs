@@ -7,7 +7,7 @@ use miden_core::{
         DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
         TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
     },
-    proof::{DeferredProof, HashFunction},
+    proof::{DeferredProof, HashFunction, StarkProof},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
@@ -18,7 +18,7 @@ use crate::{
     hash::keccak::sponge::trace::keccak_oracle,
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
-    session::{Session, SessionTraces, verify_deferred},
+    session::{Session, SessionTraces, VerifyError, verify_deferred},
     transcript::poseidon2::P2Digest,
 };
 
@@ -407,7 +407,7 @@ fn trailing_zero_input_changes_root() {
 }
 
 #[test]
-fn keccak_deferred_state_root_proves_and_verifies() {
+fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     let input = b"abc";
     let synthetic = synthetic_keccak_state(input);
     let DeferredSession { session, root } = session_from_deferred_state(&synthetic.state).unwrap();
@@ -416,11 +416,21 @@ fn keccak_deferred_state_root_proves_and_verifies() {
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
-    let Some((_, public_root)) = proof.as_stark() else {
+    let Some((stark, public_root)) = proof.as_stark() else {
         panic!("precompile session should produce a deferred STARK proof");
     };
     assert_eq!(P2Digest::from(public_root), synthetic.root);
     verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
+
+    // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
+    let mut proof_bytes = stark.bytes().to_vec();
+    proof_bytes.push(0);
+    let trailing = DeferredProof::stark(StarkProof::new(proof_bytes, stark.hash_fn()), public_root);
+    let err = verify_deferred(&trailing).expect_err("trailing proof bytes must be rejected");
+    assert!(matches!(
+        err,
+        VerifyError::Deserialization(wincode::error::ReadError::TrailingBytes)
+    ));
 }
 
 #[test]

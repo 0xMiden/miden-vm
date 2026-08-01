@@ -32,6 +32,7 @@ miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+p3-field.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
@@ -39,5 +40,6 @@ tracing.workspace = true
 [dev-dependencies]
 insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-constraint-compiler.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true

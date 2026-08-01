@@ -435,9 +435,9 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         processor: &ReplayProcessor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Arc<SparseMastForest>,
-    ) {
+    ) -> Result<(), ExecutionError> {
         if self.error_encountered.is_some() {
-            return;
+            return Ok(());
         }
 
         use Continuation::*;
@@ -623,6 +623,8 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         if let Err(e) = result {
             self.error_encountered = Some(e);
         }
+
+        Ok(())
     }
 }
 

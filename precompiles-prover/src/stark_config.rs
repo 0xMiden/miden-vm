@@ -81,7 +81,7 @@ pub fn precompile_pcs_params() -> PcsParams {
         4,  // folding_pow_bits
         12, // deep_pow_bits
         27, // num_queries
-        16, // query_pow_bits
+        17, // query_pow_bits
     )
     .expect("invalid precompile PCS parameters")
 }

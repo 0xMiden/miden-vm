@@ -18,7 +18,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::EventError;
+use handlers::{EventError, TraceError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
@@ -52,9 +52,10 @@ impl AdviceMutation {
 
 /// Defines the host functionality shared by both sync and async execution.
 ///
-/// There are three main categories of interactions between the VM and the host:
+/// There are two main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
-/// 2. handling VM events (which can mutate the process' advice provider).
+/// 2. handling VM events (regular events can mutate the process' advice provider, while trace
+///    events are read-only),
 pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -75,6 +76,14 @@ pub trait BaseHost {
     fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
         None
     }
+
+    /// Returns the [`EventName`] registered for the provided trace [`EventId`], if any.
+    ///
+    /// Hosts that maintain an trace handler registry can override this method to surface
+    /// human-readable names for diagnostics. The default implementation returns `None`.
+    fn resolve_trace(&self, _trace_id: EventId) -> Option<&EventName> {
+        None
+    }
 }
 
 impl<T: BaseHost + ?Sized> BaseHost for &mut T {
@@ -87,6 +96,10 @@ impl<T: BaseHost + ?Sized> BaseHost for &mut T {
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         (**self).resolve_event(event_id)
+    }
+
+    fn resolve_trace(&self, trace_id: EventId) -> Option<&EventName> {
+        (**self).resolve_trace(trace_id)
     }
 }
 
@@ -107,9 +120,25 @@ pub trait SyncHost: BaseHost {
     /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
-    /// - System events (IDs 0-255) are handled by the VM before calling this method
+    /// - System events are handled by the VM before and don't call this method
     fn on_event(&mut self, process: &ProcessorState<'_>)
     -> Result<Vec<AdviceMutation>, EventError>;
+
+    /// Handles a trace event emitted from the VM.
+    ///
+    /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
+    /// position 0 and the user trace event ID is at position 1 when this handler is called. The
+    /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
+    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// a trace event for which no handler is registered.
+    ///
+    /// Return errors without event names or IDs - the caller will enrich them via
+    /// [`BaseHost::resolve_trace()`].
+    ///
+    /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    fn on_trace(&mut self, _process: &ProcessorState<'_>) -> Result<(), TraceError> {
+        Ok(())
+    }
 }
 
 /// Defines an async interface by which the VM can interact with the host during execution.
@@ -136,11 +165,30 @@ pub trait Host: BaseHost {
     /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
-    /// - System events (IDs 0-255) are handled by the VM before calling this method
+    /// - System events are handled by the VM before and don't call this method
     fn on_event(
         &mut self,
         process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+
+    /// Handles a trace event emitted from the VM.
+    ///
+    /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
+    /// position 0 and the user trace event ID is at position 1 when this handler is called. The
+    /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
+    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// a trace event for which no handler is registered.
+    ///
+    /// Return errors without event names or IDs - the caller will enrich them via
+    /// [`BaseHost::resolve_trace()`].
+    ///
+    /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    fn on_trace(
+        &mut self,
+        _process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<(), TraceError>> {
+        async move { Ok(()) }
+    }
 }
 
 impl<T> Host for T
@@ -160,6 +208,14 @@ where
         process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let result = SyncHost::on_event(self, process);
+        async move { result }
+    }
+
+    fn on_trace(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<(), TraceError>> {
+        let result = SyncHost::on_trace(self, process);
         async move { result }
     }
 }

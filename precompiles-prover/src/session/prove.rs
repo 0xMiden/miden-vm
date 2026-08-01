@@ -28,10 +28,25 @@ use miden_lifted_stark::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
+use wincode::io::Reader as _;
 
 use super::preprocessed_cache;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+
+/// Deserializes a serde-backed value and rejects trailing bytes.
+fn deserialize_serde_exact<'de, T, C>(mut bytes: &'de [u8], _: C) -> wincode::ReadResult<T>
+where
+    C: wincode::config::Config,
+    SerdeCompat<T>: wincode::SchemaRead<'de, C, Dst = T>,
+{
+    let value = <SerdeCompat<T> as wincode::SchemaRead<'de, C>>::get(bytes.by_ref())?;
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(wincode::error::trailing_bytes())
+    }
+}
 
 use crate::{
     ProveError,
@@ -343,7 +358,7 @@ impl SessionTraces {
             .expect("chiplet trace shapes are valid");
 
         let mut challenger = config.challenger();
-        observe_protocol_params(&mut challenger);
+        observe_protocol_params(config.pcs(), &mut challenger);
 
         let output: StarkOutput<Felt, QuadFelt, SC> =
             ProverInstance::new(config, &prover_statement, Some(preprocessed))?
@@ -426,10 +441,9 @@ where
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProofData<Felt, QuadFelt, SC> = <SerdeCompat<
-        StarkProofData<Felt, QuadFelt, SC>,
-    > as wincode::config::Deserialize<_>>::deserialize(
-        proof_bytes, proof_encoding_config
+    let proof = deserialize_serde_exact::<StarkProofData<Felt, QuadFelt, SC>, _>(
+        proof_bytes,
+        proof_encoding_config,
     )?;
 
     let statement =
@@ -437,7 +451,7 @@ where
             .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
-    observe_protocol_params(&mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
         .verify(&proof, challenger)?;
