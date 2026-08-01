@@ -2415,6 +2415,7 @@ dependencies = [
  "p3-poseidon2-air",
  "p3-symmetric",
  "p3-util",
+ "proptest",
  "rand 0.10.2",
  "serde",
  "thiserror",

@@ -640,15 +640,18 @@ end
 #! Draws alpha and beta for the LogUp multiset hash
 #! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i`.
 #!
-#! Input: [...]
+#! `aux_rand_ptr` is relation-local because the ACE READ section is one dense vector whose
+#! boundaries depend on the relation's AIR widths and quotient arity.
+#!
+#! Input: [aux_rand_ptr, ...]
 #! Output: [...]
 pub proc generate_aux_randomness
 
     exec.sample_ext
     exec.sample_ext
-    # => [beta0, beta1, alpha0, alpha1, ...]
+    # => [beta0, beta1, alpha0, alpha1, aux_rand_ptr, ...]
 
-    exec.constants::aux_rand_elem_ptr mem_storew_le
+    movup.4 mem_storew_le
     dropw
     # => [...]
 end

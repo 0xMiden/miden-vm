@@ -23,6 +23,7 @@
 - Added a Lychee check for local Markdown links in pull requests and fixed 17 broken links in README and docs files ([#3606](https://github.com/0xMiden/miden-vm/pull/3606)).
 - [BREAKING] `Instruction::EmitImm` now pretty-prints as the equivalent `push.<value> emit drop` sequence instead of `emit.<felt>`, since `emit.<felt>` is invalid MASM which cannot be parsed ([#3567](https://github.com/0xMiden/miden-vm/pull/3567)).
 - Moved operation integration tests out of the obsolete `decorators` module ([#3449](https://github.com/0xMiden/miden-vm/issues/3449)).
+- [BREAKING] Added `miden::core::sys::pvm::verify_proof`, a MASM recursive verifier for the precompile VM, and generalized the shared MASM STARK verifier ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
 - [BREAKING] Factored recursive ACE circuits into per-order and shared sections, generalized the registry infrastructure to arbitrary AIR sets, and added the ten-AIR precompile VM registry. This changes the Miden VM and precompile VM ACE roots, relation digests, circuit shapes, and recursive-proof transcripts ([#3465](https://github.com/0xMiden/miden-vm/pull/3465)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Removed unused Serde support and kept binary roundtrip coverage through `Serializable` and `Deserializable` ([#3578](https://github.com/0xMiden/miden-vm/pull/3578)).

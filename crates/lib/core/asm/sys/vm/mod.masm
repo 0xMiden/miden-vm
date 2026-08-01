@@ -1,8 +1,8 @@
 pub mod aux_trace
 pub mod claim
 pub mod constraints_eval
-pub mod constraints_eval_inputs
 pub mod deep_queries
+pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
@@ -93,25 +93,25 @@ end
 #! Advice supplies log heights in fixed instance order:
 #!   [log_core, log_chiplets, log_poseidon2_permutation]
 #!
-#! Writes per-AIR log heights, the maximum log height, ORDER_TAG, RELATION_DIGEST, and
-#! ACE_REGISTRY_ROOT to memory.
+#! Writes the trace shape, proof-order tag, relation commitments, and fixed OOD/query-row
+#! addresses to verifier memory.
 pub proc load_air_context
     adv_push
     exec.assert_shape_log
-    exec.constants::set_core_trace_length_log
+    exec.layout::set_core_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_chiplets_trace_length_log
+    exec.layout::set_chiplets_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_poseidon2_permutation_trace_length_log
+    exec.layout::set_poseidon2_permutation_trace_length_log
 
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
+    exec.layout::get_core_trace_length_log
+    exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_poseidon2_permutation_trace_length_log
     u32max
     exec.constants::set_trace_length_log
 
@@ -120,6 +120,10 @@ pub proc load_air_context
 
     exec.store_relation_digest
     exec.store_ace_registry_root
+    exec.layout::ood_evaluations_ptr
+    exec.constants::set_ood_evaluations_address
+    exec.layout::current_trace_row_ptr
+    exec.constants::set_current_trace_row_address
 end
 
 proc assert_shape_log
@@ -145,11 +149,10 @@ end
 #! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
 #! factorial argument never underflows the field.
 #!
-#! Adding AIRs needs three coordinated edits, none of which this procedure can detect on its
-#! own: NUM_MIDEN_AIRS here, the matching constant in `public_inputs.masm`, and the per-AIR
-#! log-height cells in `stark/constants.masm` — which this reads as one consecutive array and
-#! where only two spare cells remain before `MAIN_TRACE_COM_PTR` (so beyond 5 AIRs the memory
-#! map has to move).
+#! This VM-local specialization keeps the three-AIR loop bounds compile-time constants. New
+#! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
+#! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
+#! layout accessors, and the public-input schema; regeneration checks pin those copies.
 #!
 #! Input:  []
 #! Output: [tag]
@@ -234,14 +237,14 @@ proc store_relation_digest
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+    dropw
 end
 
 proc store_ace_registry_root
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+    dropw
 end
 
 #! Materializes and authenticates the kernel witness named by the staged claim.
@@ -251,7 +254,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc materialize_kernel_witness
-    padw exec.constants::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+    padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
     # => [K, ...]
     adv.push_mapvaln
     adv_push
@@ -265,10 +268,10 @@ proc materialize_kernel_witness
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::num_kernel_procedures_ptr mem_store
+    dup exec.layout::num_kernel_procedures_ptr mem_store
     # => [num_kernel_procedures, K, ...]
 
-    exec.constants::kernel_witness_ptr swap
+    exec.layout::kernel_witness_ptr swap
     push.KERNEL_DOMAIN_TAG
     exec.mem::pipe_words_to_memory_in_domain
     # => [K', end_ptr, K, ...]
@@ -304,7 +307,7 @@ end
 #! commitment before using these values as AIR public inputs.
 #!
 #! The verifier fetches the kernel digest list from the advice map under K, copies it to
-#! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
+#! `layout::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
 #! claim commitment and checks the kernel-ROM boundary against this list.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
@@ -328,8 +331,8 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
-    exec.constants::claim_commitment_ptr mem_storew_le
-    exec.constants::claim_ptr exec.claim::materialize_claim
+    exec.layout::claim_commitment_ptr mem_storew_le
+    exec.layout::claim_ptr exec.claim::materialize_claim
     # => [...]
 
     # --- Prepare VM verifier state ---------------------------------------------------------------

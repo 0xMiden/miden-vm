@@ -54,6 +54,7 @@ p3-symmetric.workspace   = true
 
 # Third-party
 criterion.workspace          = true
+proptest.workspace           = true
 tracing-subscriber.workspace = true
 
 [features]

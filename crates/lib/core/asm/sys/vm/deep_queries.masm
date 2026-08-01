@@ -32,7 +32,6 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 pub proc compute_deep_composition_polynomial_queries
-
     # Iterate over all FRI query indices and compute the corresponding DEEP query.
     # The verifier checks earlier that there is at least one query.
     push.1

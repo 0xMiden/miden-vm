@@ -21,9 +21,9 @@ help:
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
-	@printf "  make check-pvm-registry          # Check PVM ACE registry constants\n"
+	@printf "  make check-pvm-registry          # Check PVM registry and MASM artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make regenerate-pvm-registry     # Regenerate PVM ACE registry constants\n"
+	@printf "  make regenerate-pvm-registry     # Regenerate PVM registry and MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -309,11 +309,11 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
 
 .PHONY: regenerate-pvm-registry
-regenerate-pvm-registry: ## Regenerate the PVM ACE registry constants (~2 min; protocol break)
+regenerate-pvm-registry: ## Regenerate PVM registry and MASM artifacts (~2 min; protocol break)
 	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --write
 
 .PHONY: check-pvm-registry
-check-pvm-registry: ## Check the PVM ACE registry constants for drift (full recompute)
+check-pvm-registry: ## Check PVM registry and MASM artifacts for drift (full recompute)
 	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --check
 
 .PHONY: check-constraints

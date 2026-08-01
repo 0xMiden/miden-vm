@@ -65,8 +65,9 @@ pub mod stark {
 
     // Top-level types from lifted-stark
     pub use miden_lifted_stark::{
-        GenericStarkConfig, Preprocessed, PreprocessedValidationError, ProverInstance, StarkConfig,
-        VerifierInstance,
+        GenericStarkConfig, Preprocessed, PreprocessedValidationError, ProverInstance,
+        QuotientRecompositionInputs, StarkConfig, VerifierInstance, log_quotient_degree,
+        quotient_recomposition_inputs,
     };
     // Lifted-stark sub-modules (re-exported as-is)
     pub use miden_lifted_stark::{air, debug, hasher, lmcs, pcs, proof, prover, verifier};

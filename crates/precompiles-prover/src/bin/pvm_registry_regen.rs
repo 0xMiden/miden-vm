@@ -1,4 +1,4 @@
-//! Regenerates the PVM ACE registry constants (`src/ace_registry/data.rs`).
+//! Checks or regenerates the PVM ACE registry and its generated MASM artifacts.
 //!
 //! Usage: `cargo run -p miden-precompiles-prover --features registry-tools --release \
 //!         --bin pvm-registry-regen -- [--check | --write]`

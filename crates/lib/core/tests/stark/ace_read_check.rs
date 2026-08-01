@@ -12,11 +12,11 @@ use miden_core::{
 use miden_crypto::field::Field;
 use miden_processor::{ContextId, ExecutionOutput};
 
-// MASM CONSTANTS (must match crates/lib/core/asm/stark/constants.masm)
+// MASM MEMORY LAYOUT
 // ================================================================================================
 
-const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
-const ORDER_TAG_PTR: u32 = 3223322764;
+const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
+const ORDER_TAG_PTR: u32 = 3223322639;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
 const OOD_EVALUATIONS_PTR: u32 = 3225419784;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;

@@ -28,6 +28,7 @@
 //! - `factory`: cached per-order encoding and registry-leaf construction.
 //! - `layout`: READ-section layout and index mapping.
 //! - `encode`: ACE stream encoding + padding rules.
+//! - `masm`: shared renderer for relation-local MASM constraint evaluators.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
 //! - `registry`: order tags, registry layout, subtree construction, and path authentication.
@@ -41,6 +42,7 @@ mod encode;
 mod factored;
 mod factory;
 mod layout;
+mod masm;
 mod quotient;
 mod randomness;
 mod registry;
@@ -79,6 +81,7 @@ pub use crate::{
     factored::ShuffleEncodeBuffer,
     factory::{FactoredCircuitFactory, FactoredEncodedCircuit, PackedLeafScratch},
     layout::{InputCounts, InputKey, InputLayout},
+    masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
     pipeline::{
         AceArtifacts, AceConfig, FactoredMultiAirCircuit, LayoutKind, build_ace_circuit_for_air,
         build_ace_dag_for_air, build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit,

@@ -23,10 +23,13 @@ pub use session::VerifyError;
 pub(crate) mod ace;
 pub(crate) mod ace_registry;
 #[cfg(feature = "registry-tools")]
+#[doc(hidden)]
 pub mod ace_registry_regen;
 pub(crate) mod ec;
 pub(crate) mod hash;
 pub(crate) mod logup;
+#[cfg(feature = "std")]
+pub mod masm_verifier;
 pub(crate) mod math;
 pub(crate) mod primitives;
 pub(crate) mod relations;

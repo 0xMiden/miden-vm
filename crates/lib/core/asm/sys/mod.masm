@@ -1,5 +1,6 @@
 use miden::core::crypto::hashes::poseidon2
 
+pub mod pvm
 pub mod vm
 
 # CONSTANTS

@@ -20,8 +20,15 @@ use miden::core::stark::utils
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
 #!
-#! Precondition: security parameters, relation metadata, and relation-specific state must already
-#! be stored in memory. The relation wrapper owns validation and setup of that state.
+#! Before calling this procedure, a relation wrapper must:
+#!
+#! - validate and store the transcript-bound security parameters;
+#! - store its relation digest, registry root, canonical AIR heights, and proof-order tag;
+#! - stage its fixed OOD and query-row addresses in the generic context cells; and
+#! - supply the five hooks listed above in the documented ABI order.
+#!
+#! Relation-dependent constants live under `sys/<relation>`. Registry geometry and circuit shape
+#! must be derived by regeneration, while any hand-written copy must be pinned to that source.
 #!
 #! Hardcoded protocol parameters:
 #!

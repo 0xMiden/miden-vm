@@ -1,5 +1,49 @@
 use miden::core::stark::constants
 
+# Fixed-point (16 fractional bits) conjectured security bits per FRI query for the shared
+# log_blowup = 3 Goldilocks/QuadFelt PCS, per the random-words formula
+# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
+# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
+const CONJECTURED_BITS_PER_QUERY_FP = 193382
+
+# Number of fractional bits in CONJECTURED_BITS_PER_QUERY_FP.
+const CONJECTURED_SECURITY_FP_SHIFT = 16
+
+# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
+const MAX_SECURITY_LEVEL = 128
+
+#! Loads the proof's security parameters from advice into the generic verifier context.
+#!
+#! Advice order: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
+#! Inputs:  [...]
+#! Outputs: [...]
+pub proc load_security_params
+    adv_push exec.constants::set_number_queries
+    adv_push exec.constants::set_query_pow_bits
+    adv_push exec.constants::set_deep_pow_bits
+    adv_push exec.constants::set_folding_pow_bits
+end
+
+#! Computes the conjectured security level (in bits) attained by the given proof parameters.
+#!
+#! Evaluates `min(((num_queries * 193382) >> 16) + query_pow_bits, 128)`. The fixed-point
+#! coefficient is specific to the shared log_blowup = 3 Goldilocks/QuadFelt PCS. This procedure
+#! holds no policy: the caller applies its own acceptance threshold. A relation using a different
+#! PCS configuration must supply its own estimator.
+#!
+#! PRECONDITION: `num_queries <= 150`, so `num_queries * 193382` fits in a u32 (the `u32shr`
+#! below requires that). Parameters returned by the generic verifier satisfy this bound.
+#!
+#! Inputs:  [num_queries, query_pow_bits, ...]
+#! Outputs: [level, ...]
+pub proc conjectured_security_level
+    push.CONJECTURED_BITS_PER_QUERY_FP mul
+    u32shr.CONJECTURED_SECURITY_FP_SHIFT
+    add
+    push.MAX_SECURITY_LEVEL u32min
+    # => [level, ...]
+end
+
 #! Compute the LDE domain generator from the log2 of its size.
 #!
 #! Input: [log2(domain_size), ..]
@@ -139,4 +183,102 @@ pub proc store_dynamically_executed_procedures
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_le dropw
     exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_le dropw
     # => [...]
+end
+
+#! Derives the Lehmer proof-order tag of the height-sorted proof order over any AIR count.
+#!
+#! The proof order sorts the relation's AIRs by ascending log height, with the canonical
+#! instance order breaking ties (a stable sort). For each canonical AIR k with log
+#! height h_k read from `heights_ptr + k`:
+#!
+#!   inv_k   = #{m < k : h_m > h_k}
+#!   after_k = #{m > k : h_m < h_k}
+#!   pos_k   = k - inv_k + after_k
+#!   tag    += inv_k * (num_airs - 1 - pos_k)!
+#!
+#! The comparisons are branch-free (flag products); the loops are `while`-based so this procedure
+#! can serve any relation (repeat bounds would need compile-time counts). PVM uses this generic
+#! path. The VM uses a fixed-count specialization with compile-time repeat bounds; tests pin
+#! both implementations to the shared Rust `order_tag` convention.
+#!
+#! Preconditions (`num_airs` is the caller's contract): `num_airs <= 12`, or the tag
+#! overflows u32 and the ranking collides once `factorial` wraps the field; `num_airs`
+#! must be a small honest count (it is relation metadata, never prover data). The four
+#! u32 comparisons in each inner iteration reject a height outside the u32 range.
+#!
+#! Input:  [num_airs, heights_ptr]
+#! Output: [tag]
+pub proc derive_order_tag_from_heights
+    push.0.0
+    # => [k = 0, tag = 0, num_airs, heights_ptr]
+
+    dup.2 dup.1 u32gt
+    while.true
+        # => [k, tag, num_airs, heights_ptr]
+        dup.3 dup.1 add mem_load
+        # => [h_k, k, tag, num_airs, heights_ptr]
+
+        push.0.0 push.0
+        # => [m = 0, inv = 0, after = 0, h_k, k, tag, num_airs, heights_ptr]
+
+        dup.6 dup.1 u32gt
+        while.true
+            # => [m, inv, after, h_k, k, tag, num_airs, heights_ptr]
+            dup.7 dup.1 add mem_load
+            # => [h_m, m, inv, after, h_k, k, tag, num_airs, heights_ptr]
+
+            # inv += (m < k) * (h_m > h_k)
+            dup dup.5 u32gt
+            dup.2 dup.7 u32lt
+            mul
+            movup.3 add movdn.2
+            # => [h_m, m, inv', after, h_k, k, tag, num_airs, heights_ptr]
+
+            # after += (m > k) * (h_m < h_k)
+            dup dup.5 u32lt
+            dup.2 dup.7 u32gt
+            mul
+            movup.4 add movdn.3
+            # => [h_m, m, inv, after', h_k, k, tag, num_airs, heights_ptr]
+
+            drop add.1
+            dup.6 dup.1 u32gt
+        end
+        drop
+        # => [inv, after, h_k, k, tag, num_airs, heights_ptr]
+
+        # pos = k - inv + after
+        dup.3 dup.1 sub
+        movup.2 add
+        # => [pos, inv, h_k, k, tag, num_airs, heights_ptr]
+
+        # tag += inv * (num_airs - 1 - pos)!
+        dup.5 sub.1 swap sub
+        exec.factorial
+        mul
+        movup.3 add movdn.2
+        # => [h_k, k, tag', num_airs, heights_ptr]
+
+        drop add.1
+        dup.2 dup.1 u32gt
+    end
+    drop
+    # => [tag, num_airs, heights_ptr]
+    swap drop swap drop
+    # => [tag]
+end
+
+#! Computes x! for small x.
+#!
+#! Input:  [x]
+#! Output: [x!]
+pub proc factorial
+    push.1 swap
+    dup neq.0
+    while.true
+        dup movup.2 mul
+        swap sub.1
+        dup neq.0
+    end
+    drop
 end
