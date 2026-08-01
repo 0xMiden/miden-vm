@@ -26,4 +26,5 @@ wrap_comments = true
 # regen --check mode can byte-compare them; keep rustfmt away.
 ignore = [
     "air/src/constraints/generated.rs",
+    "crates/precompiles-prover/src/ace_registry/data.rs",
 ]

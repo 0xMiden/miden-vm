@@ -56,7 +56,7 @@ use crate::{
 /// The ten chiplet AIRs wrapped into one enum — the heterogeneous
 /// `MultiAir::Air` type. Variant order is the canonical
 /// [`SessionTraces::mains`] order.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChipletAir {
     ChunkNodeSponge,
     Poseidon2,
@@ -483,5 +483,30 @@ mod tests {
 
         assert_eq!(assertions.len(), 1, "the relation exposes exactly one external assertion");
         assert_ne!(assertions[0], QuadFelt::ZERO, "the closure fixture must be non-vacuous");
+    }
+
+    /// The chiplet instance order fixes proof-order tie-breaks, registry tags, and the
+    /// relation digest. Intentional changes require regenerated protocol constants and a
+    /// breaking changelog entry.
+    #[test]
+    fn chiplet_instance_order_is_protocol_pinned() {
+        let pinned = [
+            ChipletAir::ChunkNodeSponge,
+            ChipletAir::Poseidon2,
+            ChipletAir::KeccakRound,
+            ChipletAir::BytePairLut,
+            ChipletAir::TranscriptEval,
+            ChipletAir::UintStoreMul,
+            ChipletAir::UintAdd,
+            ChipletAir::EcPointStoreGroups,
+            ChipletAir::EcGroupAdd,
+            ChipletAir::EcMsm,
+        ];
+        assert_eq!(
+            ChipletAir::all(),
+            pinned,
+            "chiplet instance order moved; regenerate the PVM ACE registry for an intentional \
+             protocol break"
+        );
     }
 }

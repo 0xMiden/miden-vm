@@ -2058,6 +2058,8 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-field",
+ "proptest",
  "thiserror",
 ]
 
@@ -2534,6 +2536,7 @@ dependencies = [
  "miden-precompiles",
  "miden-serde-utils",
  "rand 0.10.2",
+ "rayon",
  "ruint",
  "serde",
  "serde-wincode",

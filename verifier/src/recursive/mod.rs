@@ -401,8 +401,7 @@ fn build_merkle_data(
         advice_map.extend(entries);
     }
 
-    let registry_tree = config::ace_circuit_registry_tree();
-    store.extend(registry_tree.inner_nodes());
+    extend_ace_registry_store(&mut store, proof_order)?;
 
     let circuit = build_recursive_verifier_ace_circuit(proof_order).map_err(|_| {
         RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
@@ -410,6 +409,26 @@ fn build_merkle_data(
     advice_map.push((circuit.commitment, circuit.instructions));
 
     Ok((store, advice_map))
+}
+
+/// Adds the authentication path selected by `proof_order` to the Merkle store.
+///
+/// The verifier reads one registry leaf. Seeding the complete registry is harmless for the six
+/// Miden VM orders but does not scale to the precompile relation's `10!` orders.
+fn extend_ace_registry_store(
+    store: &mut MerkleStore,
+    proof_order: &ProofOrder,
+) -> Result<(), RecursiveVerifierInputsError> {
+    let (leaf, path) = config::ace_registry_path(proof_order.tag()).ok_or(
+        RecursiveVerifierInputsError::InvalidProofShape(
+            "ACE registry has no slot for this order tag",
+        ),
+    )?;
+    store.add_merkle_path(u64::from(proof_order.tag()), leaf, path).map_err(|_| {
+        RecursiveVerifierInputsError::InvalidProofShape("ACE registry path could not be stored")
+    })?;
+
+    Ok(())
 }
 
 /// Converts a `BatchProof` into a `PartialMerkleTree` (for the store) and its

@@ -117,6 +117,12 @@ fn load_air_context_derives_proof_order_tags() {
         ((9, 10, 8), 4), // Poseidon2Permutation, Core, Chiplets
         ((10, 9, 8), 5), // Poseidon2Permutation, Chiplets, Core
         ((8, 8, 8), 0),  // ties use instance order
+        ((8, 8, 9), 0),  // partial tie: Core before Chiplets
+        ((8, 9, 8), 1),  // partial tie: Core before Poseidon2Permutation
+        ((9, 8, 8), 3),  // partial tie: Chiplets before Poseidon2Permutation
+        ((9, 9, 8), 4),  // partial tie: Core before Chiplets after Poseidon2Permutation
+        ((9, 8, 9), 2),  // partial tie: Core before Poseidon2Permutation after Chiplets
+        ((8, 9, 9), 0),  // partial tie: Chiplets before Poseidon2Permutation
     ];
 
     for ((core, chiplets, poseidon2), expected_tag) in cases {

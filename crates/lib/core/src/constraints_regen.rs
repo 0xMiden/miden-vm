@@ -6,9 +6,11 @@ use alloc::{
 };
 use std::{fs, io, println};
 
+use miden_ace_codegen::padding_leaf;
 use miden_air::{
     AIRS, MIDEN_AIR_COUNT, MidenAir, PROOF_ORDER_COUNT, ProofOrder,
-    ace::build_recursive_verifier_ace_circuit, config::ACE_CIRCUIT_REGISTRY_DEPTH,
+    ace::RecursiveAceCircuitFactory,
+    config::{ACE_CIRCUIT_REGISTRY_DEPTH, relation_digest},
 };
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
 use miden_crypto::{merkle::MerkleTree, stark::air::BaseAir};
@@ -21,7 +23,6 @@ pub enum Mode {
 
 const PROTOCOL_ID: u64 = 1;
 const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
-const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
@@ -30,12 +31,7 @@ const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(registry_root: &[Felt; 4]) -> [Felt; 4] {
-    let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
-        .chain(registry_root.iter().copied())
-        .collect();
-    let digest = Poseidon2::hash_elements(&input);
-    let elems = digest.as_elements();
-    [elems[0], elems[1], elems[2], elems[3]]
+    relation_digest(PROTOCOL_ID, &Word::new(*registry_root))
 }
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
@@ -63,14 +59,69 @@ fn check() -> Result<(), String> {
 /// Generate a full computed snapshot from the current AIR.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let mut order_artifacts = Vec::new();
+    // One factored build serves every proof order. Each order still assembles and encodes the
+    // full stream, but the factory avoids rebuilding the composition and rehashing the common
+    // section.
+    let factory = RecursiveAceCircuitFactory::new()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    // Retain the first order's common-section bytes and require exact equality for later orders.
+    // Comparing cached digests alone would not establish that the emitted sections are equal.
+    let mut common_section: Option<Vec<Felt>> = None;
+    let mut leaf_buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
     for order in ProofOrder::variants() {
-        let circuit = build_recursive_verifier_ace_circuit(&order)
+        let circuit = factory
+            .circuit_for_order(&order)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+
+        // Compare the encode-only leaf with the assembled stream for every order before
+        // deriving the root. This catches encoding divergence between the two construction
+        // paths. It is not a hash oracle: both paths share the factory's cached sponge states.
+        // Hash behavior is covered separately by the one-shot builder sweep in
+        // air/tests/ace_codegen.rs and miden-crypto's packed-vs-scalar differential test.
+        let fast_leaf = factory
+            .leaf_for_order(&order, &mut leaf_buffer)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+        if fast_leaf != circuit.commitment {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "encode-only registry leaf diverges from the assembled circuit for {}",
+                    order.file_stem()
+                ),
+            ));
+        }
+
+        let common = &circuit.instructions[circuit.shuffle_prefix_len..];
+        match &common_section {
+            None => {
+                if Poseidon2::hash_elements(common) != circuit.common_commitment {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "ACE common-section digest does not match the emitted common section",
+                    ));
+                }
+                common_section = Some(common.to_vec());
+            },
+            Some(reference) => {
+                if common != reference.as_slice() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "ACE common section is not order-invariant: differs for {}",
+                            order.file_stem()
+                        ),
+                    ));
+                }
+            },
+        }
+
         order_artifacts.push(OrderArtifact {
             order,
             num_inputs: circuit.num_inputs,
             num_eval_gates: circuit.num_eval_gates,
             stream_len: circuit.stream_len,
+            shuffle_prefix_len: circuit.shuffle_prefix_len,
+            common_commitment: word_to_array(circuit.common_commitment),
             circuit_commitment: word_to_array(circuit.commitment),
         });
     }
@@ -84,7 +135,6 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     ensure_uniform_circuit_metadata(&order_artifacts)?;
     let registry = AceCircuitRegistry::from_order_artifacts(&order_artifacts)?;
     let registry_root = registry.root;
-    let registry_leaves = registry.leaves.iter().copied().map(word_to_array).collect::<Vec<_>>();
     let relation_digest = compute_relation_digest(&registry_root);
     let constraints_eval = render_constraints_eval_file(&order_artifacts)?;
     let order_tag_count = PROOF_ORDER_COUNT;
@@ -108,7 +158,6 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let mut air_config = read_file(AIR_CONFIG_PATH)?;
     replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
     replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_REGISTRY_ROOT", &registry_root)?;
-    replace_registry_leaves(&mut air_config, &registry_leaves)?;
 
     let mut stark_constants = read_file(STARK_CONSTANTS_PATH)?;
     replace_masm_const(&mut stark_constants, "ORDER_TAG_COUNT", &order_tag_count.to_string())?;
@@ -120,10 +169,10 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     Ok(ComputedArtifacts {
         num_inputs: first.num_inputs,
         num_eval_gates: first.num_eval_gates,
-        adv_pipe_rows: first.stream_len / 8,
+        prefix_rows: first.shuffle_prefix_len / 8,
+        common_rows: (first.stream_len - first.shuffle_prefix_len) / 8,
         order_tag_count,
         registry_root,
-        registry_leaves,
         relation_digest,
         constraints_eval,
         relation_mod,
@@ -138,8 +187,8 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(AIR_CONFIG_PATH, &artifact.air_config)?;
     write_file(STARK_CONSTANTS_PATH, &artifact.stark_constants)?;
     println!(
-        "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
-        artifact.num_inputs, artifact.num_eval_gates, artifact.adv_pipe_rows
+        "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{}+{})",
+        artifact.num_inputs, artifact.num_eval_gates, artifact.prefix_rows, artifact.common_rows
     );
     println!("wrote asm/sys/vm/mod.masm (relation digest and ACE registry root)");
     println!("wrote asm/stark/constants.masm ({} proof-order tags)", artifact.order_tag_count);
@@ -160,22 +209,22 @@ fn ensure_uniform_circuit_metadata(order_artifacts: &[OrderArtifact]) -> io::Res
         if artifact.num_inputs != first.num_inputs
             || artifact.num_eval_gates != first.num_eval_gates
             || artifact.stream_len != first.stream_len
+            || artifact.shuffle_prefix_len != first.shuffle_prefix_len
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("ACE circuit metadata differs for {}", artifact.order.file_stem()),
             ));
         }
+        if artifact.common_commitment != first.common_commitment {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("ACE common-section digest differs for {}", artifact.order.file_stem()),
+            ));
+        }
     }
 
     Ok(())
-}
-
-fn padding_leaf(index: usize) -> Word {
-    Poseidon2::hash_elements(&[
-        Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN),
-        Felt::new_unchecked(index as u64),
-    ])
 }
 
 fn word_from_array(elements: [Felt; 4]) -> Word {
@@ -187,7 +236,6 @@ fn word_to_array(word: Word) -> [Felt; 4] {
 }
 
 struct AceCircuitRegistry {
-    leaves: Vec<Word>,
     root: [Felt; 4],
 }
 
@@ -201,7 +249,7 @@ impl AceCircuitRegistry {
             ));
         }
 
-        let mut leaves = (0..ACE_REGISTRY_LEAF_COUNT).map(padding_leaf).collect::<Vec<_>>();
+        let mut leaves = alloc::vec![padding_leaf(); ACE_REGISTRY_LEAF_COUNT];
         let mut seen = vec![false; active_leaf_count];
 
         for artifact in order_artifacts {
@@ -237,7 +285,7 @@ impl AceCircuitRegistry {
             )
         })?;
 
-        Ok(Self { leaves, root: word_to_array(tree.root()) })
+        Ok(Self { root: word_to_array(tree.root()) })
     }
 }
 
@@ -254,9 +302,17 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "ACE stream must be 8-felt aligned",
         ));
     }
+    if !first.shuffle_prefix_len.is_multiple_of(8) || first.shuffle_prefix_len >= first.stream_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "ACE shuffle prefix must be a proper 8-felt-aligned stream prefix",
+        ));
+    }
 
-    let adv_pipe_rows = first.stream_len / 8;
+    let prefix_rows = first.shuffle_prefix_len / 8;
+    let common_rows = (first.stream_len - first.shuffle_prefix_len) / 8;
     let max_cycle_len_log = max_periodic_cycle_len_log();
+    let h_common = first.common_commitment;
 
     Ok(format!(
         concat!(
@@ -273,9 +329,17 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "const MAX_CYCLE_LEN_LOG = {max_cycle_len_log}\n\n",
             "# Depth of the ACE circuit registry tree.\n",
             "const ACE_REGISTRY_DEPTH = {ace_registry_depth}\n\n",
+            "# Poseidon2 digest of the order-invariant common section of the ACE circuit stream\n",
+            "# (common ops + root padding). The registry leaf for each ORDER_TAG is\n",
+            "# merge(H(constants | shuffle ops), H_COMMON).\n",
+            "const H_COMMON_0 = {h_common_0}\n",
+            "const H_COMMON_1 = {h_common_1}\n",
+            "const H_COMMON_2 = {h_common_2}\n",
+            "const H_COMMON_3 = {h_common_3}\n\n",
             "# ERRORS\n",
             "# =================================================================================================\n\n",
-            "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"hashed ACE circuit stream does not match registry commitment\"\n\n",
+            "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"merged ACE circuit segment digests do not match the registry commitment\"\n\n",
+            "const ERR_COMMON_SECTION_MISMATCH = \"common ACE circuit section does not match the compiled-in digest\"\n\n",
             "# CONSTRAINT EVALUATION CHECKER\n",
             "# =================================================================================================\n\n",
             "#! Executes the constraints evaluation check for the proof order selected by ORDER_TAG.\n",
@@ -294,17 +358,44 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "    drop drop drop\n",
             "end\n\n",
             "#! Loads and authenticates the ACE circuit selected by ORDER_TAG.\n",
+            "#!\n",
+            "#! The circuit stream is factored into two adv_pipe-aligned segments: a per-order\n",
+            "#! prefix [constants | shuffle ops] and an order-invariant common section\n",
+            "#! [common ops | root padding]. Both are hashed separately; the common digest is\n",
+            "#! pinned to the compiled-in H_COMMON (so a batch verifier may keep the common\n",
+            "#! section resident and re-authenticate only the shuffle), and the registry leaf\n",
+            "#! selected by ORDER_TAG must equal merge(H_PREFIX, H_COMMON).\n",
             "proc load_and_authenticate_ace_circuit\n",
             "    exec.load_ace_registry_commitment\n",
+            "    # => [LEAF]\n",
             "    adv.push_mapval\n",
             "    exec.constants::ace_circuit_stream_ptr\n",
             "    padw padw padw\n",
-            "    repeat.{adv_pipe_rows}\n",
+            "    # => [ZERO, ZERO, ZERO, ptr, LEAF]\n",
+            "    repeat.{prefix_rows}\n",
             "        adv_pipe\n",
             "        exec.poseidon2::permute\n",
             "    end\n",
             "    exec.poseidon2::squeeze_digest\n",
+            "    # => [H_PREFIX, ptr, LEAF]\n",
+            "    movup.4\n",
+            "    # => [ptr, H_PREFIX, LEAF]\n",
+            "    padw padw padw\n",
+            "    repeat.{common_rows}\n",
+            "        adv_pipe\n",
+            "        exec.poseidon2::permute\n",
+            "    end\n",
+            "    exec.poseidon2::squeeze_digest\n",
+            "    # => [H_COMMON, ptr, H_PREFIX, LEAF]\n",
             "    movup.4 drop\n",
+            "    # => [H_COMMON, H_PREFIX, LEAF]\n",
+            "    dupw push.H_COMMON_3.H_COMMON_2.H_COMMON_1.H_COMMON_0\n",
+            "    assert_eqw.err=ERR_COMMON_SECTION_MISMATCH\n",
+            "    # => [H_COMMON, H_PREFIX, LEAF]\n",
+            "    swapw\n",
+            "    # => [H_PREFIX, H_COMMON, LEAF]\n",
+            "    exec.poseidon2::merge\n",
+            "    # => [MERGED, LEAF]\n",
             "    assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH\n",
             "end\n\n",
             "#! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.\n",
@@ -320,7 +411,12 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
         num_eval_gates = first.num_eval_gates,
         max_cycle_len_log = max_cycle_len_log,
         ace_registry_depth = ACE_CIRCUIT_REGISTRY_DEPTH,
-        adv_pipe_rows = adv_pipe_rows,
+        h_common_0 = h_common[0].as_canonical_u64(),
+        h_common_1 = h_common[1].as_canonical_u64(),
+        h_common_2 = h_common[2].as_canonical_u64(),
+        h_common_3 = h_common[3].as_canonical_u64(),
+        prefix_rows = prefix_rows,
+        common_rows = common_rows,
     ))
 }
 
@@ -358,10 +454,11 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
         return Err("RELATION_DIGEST in air/src/config.rs is stale".into());
     }
     if miden_air::config::ACE_CIRCUIT_REGISTRY_ROOT != artifact.registry_root {
-        return Err("ACE_CIRCUIT_REGISTRY_ROOT in air/src/config.rs is stale".into());
-    }
-    if miden_air::config::ACE_CIRCUIT_REGISTRY_LEAVES != artifact.registry_leaves.as_slice() {
-        return Err("ACE_CIRCUIT_REGISTRY_LEAVES in air/src/config.rs is stale".into());
+        return Err(
+            "ACE_CIRCUIT_REGISTRY_ROOT in air/src/config.rs is stale (the root binds every \
+             registry leaf; leaves are recomputed at runtime and are not checked in)"
+                .into(),
+        );
     }
 
     let masm = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
@@ -392,6 +489,44 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
         parse_masm_const::<usize>(&constants, "ORDER_TAG_COUNT", "stark/constants.masm")?;
     if order_tag_count != artifact.order_tag_count {
         return Err("ORDER_TAG_COUNT in stark/constants.masm is stale".into());
+    }
+
+    // `derive_order_tag` sweeps this many AIRs and weights each inversion by
+    // `(NUM_MIDEN_AIRS - 1 - pos)!`, so a stale value silently mis-ranks proof orders.
+    let num_miden_airs = parse_masm_const::<usize>(&masm, "NUM_MIDEN_AIRS", "sys/vm/mod.masm")?;
+    if num_miden_airs != MIDEN_AIR_COUNT {
+        return Err("NUM_MIDEN_AIRS in sys/vm/mod.masm is stale".into());
+    }
+
+    air_log_height_cells_are_consecutive(&constants)?;
+
+    Ok(())
+}
+
+/// Verify the per-AIR log-height cells form one consecutive array in instance order.
+///
+/// `derive_order_tag` reads them as `air_trace_length_logs_ptr + k`, so a reordered or gapped
+/// cell would silently feed it another verifier field (or an uninitialised zero) as a height.
+fn air_log_height_cells_are_consecutive(constants: &str) -> Result<(), String> {
+    const CELL_NAMES: [&str; MIDEN_AIR_COUNT] = [
+        "CORE_TRACE_LENGTH_LOG_PTR",
+        "CHIPLETS_TRACE_LENGTH_LOG_PTR",
+        "POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR",
+    ];
+
+    let mut previous = None;
+    for (index, name) in CELL_NAMES.iter().enumerate() {
+        let address = parse_masm_const::<u64>(constants, name, "stark/constants.masm")?;
+        if let Some(previous) = previous
+            && address != previous + 1
+        {
+            return Err(format!(
+                "{name} must directly follow {} in stark/constants.masm: `derive_order_tag` \
+                 indexes the per-AIR log-height cells as one consecutive array",
+                CELL_NAMES[index - 1]
+            ));
+        }
+        previous = Some(address);
     }
 
     Ok(())
@@ -464,39 +599,6 @@ fn replace_felt_array_const(
     Ok(())
 }
 
-fn replace_registry_leaves(content: &mut String, leaves: &[[Felt; 4]]) -> io::Result<()> {
-    let marker = "pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[";
-    let start = content.find(marker).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "ACE_CIRCUIT_REGISTRY_LEAVES not found in config.rs",
-        )
-    })?;
-    let block_start = start + marker.len();
-    let block_end =
-        content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "ACE_CIRCUIT_REGISTRY_LEAVES terminator not found",
-            )
-        })?;
-    content.replace_range(block_start..block_end, &render_registry_leaves(leaves));
-    Ok(())
-}
-
-fn render_registry_leaves(leaves: &[[Felt; 4]]) -> String {
-    let mut block = String::new();
-    for leaf in leaves {
-        block.push_str("\n    [\n");
-        for elem in leaf {
-            block.push_str(&format!("        Felt::new_unchecked({}),\n", elem.as_canonical_u64()));
-        }
-        block.push_str("    ],");
-    }
-    block.push('\n');
-    block
-}
-
 fn read_file(rel_path: &str) -> io::Result<String> {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
     fs::read_to_string(&path)
@@ -512,10 +614,10 @@ fn write_file(rel_path: &str, contents: &str) -> io::Result<()> {
 struct ComputedArtifacts {
     num_inputs: usize,
     num_eval_gates: usize,
-    adv_pipe_rows: usize,
+    prefix_rows: usize,
+    common_rows: usize,
     order_tag_count: usize,
     registry_root: [Felt; 4],
-    registry_leaves: Vec<[Felt; 4]>,
     relation_digest: [Felt; 4],
     constraints_eval: String,
     relation_mod: String,
@@ -528,5 +630,7 @@ struct OrderArtifact {
     num_inputs: usize,
     num_eval_gates: usize,
     stream_len: usize,
+    shuffle_prefix_len: usize,
+    common_commitment: [Felt; 4],
     circuit_commitment: [Felt; 4],
 }
