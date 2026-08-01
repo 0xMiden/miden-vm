@@ -32,10 +32,7 @@ pub struct RecursiveAceCircuit {
 pub fn build_recursive_verifier_ace_circuit(
     order: &ProofOrder,
 ) -> Result<RecursiveAceCircuit, AceError> {
-    let circuit = build_multi_air_ace_circuit_for_order::<miden_core::field::QuadFelt>(
-        RECURSIVE_VERIFIER_ACE_CONFIG,
-        order,
-    )?;
+    let circuit = build_multi_air_ace_circuit_for_order(RECURSIVE_VERIFIER_ACE_CONFIG, order)?;
     let encoded = circuit.to_ace()?;
     let instructions = encoded.instructions();
     let stream_len = encoded.size_in_felt();

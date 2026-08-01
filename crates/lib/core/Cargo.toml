@@ -35,7 +35,7 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
+constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
 
 [dependencies]
 # Miden dependencies
@@ -47,6 +47,7 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
+miden-constraint-compiler = { workspace = true, optional = true }
 
 # External dependencies
 thiserror.workspace = true
@@ -76,4 +77,9 @@ miden-core-lib-codegen = { workspace = true, features = ["std"] }
 [[bin]]
 name = "regenerate-constraints"
 path = "src/bin/regenerate-constraints.rs"
+required-features = ["constraints-tools"]
+
+[[bin]]
+name = "regenerate-evaluator"
+path = "src/bin/regenerate-evaluator.rs"
 required-features = ["constraints-tools"]

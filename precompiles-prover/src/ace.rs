@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 
 use miden_ace_codegen::{AceCircuit, AceConfig, AceError, build_multi_air_ace_circuit};
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::field::QuadFelt;
 
 use crate::session::ChipletAir;
 
@@ -29,12 +29,7 @@ pub fn build_precompile_multi_air_ace_circuit(
     let airs = ChipletAir::all();
     let proof_order: Vec<_> = (0..airs.len()).collect();
 
-    build_multi_air_ace_circuit::<ChipletAir, Felt, QuadFelt>(
-        &airs,
-        &proof_order,
-        config,
-        LMCS_ALIGNMENT,
-    )
+    build_multi_air_ace_circuit(&airs, &proof_order, config, LMCS_ALIGNMENT)
 }
 
 #[cfg(test)]
