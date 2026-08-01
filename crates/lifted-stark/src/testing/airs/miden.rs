@@ -11,6 +11,21 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Main trace width for the first (shorter) trace.
+pub const TRACE1_WIDTH: usize = 51;
+/// Main trace width for the second (taller) trace.
+pub const TRACE2_WIDTH: usize = 20;
+/// Log₂ height of the first trace (2^18 = 262144 rows).
+pub const TRACE1_LOG_HEIGHT: u8 = 18;
+/// Log₂ height of the second trace (2^19 = 524288 rows).
+pub const TRACE2_LOG_HEIGHT: u8 = 19;
+/// Number of extension-field auxiliary columns.
+pub const NUM_AUX_COLS: usize = 8;
+
+// ---------------------------------------------------------------------------
 // AIR definition
 // ---------------------------------------------------------------------------
 

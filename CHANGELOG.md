@@ -4,6 +4,7 @@
 
 #### Changes
 - [BREAKING] Normalized each AIR's committed LogUp sum by its trace length and changed the running-sum constraint to close cyclically, removing the requirement that lookup activity be absent from the last row ([#3412](https://github.com/0xMiden/miden-vm/pull/3412)).
+- Replaced panics in `OverflowTable::restore_context()`, `get_current_overflow_stack()`, and `get_current_overflow_stack_mut()` with proper `OperationError` returns ([#3370](https://github.com/0xMiden/miden-vm/pull/3370)).
 - `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
 
 - [BREAKING] Sped up constraints evaluation during proving: the prover now runs generated, globally-CSE'd constraint evaluators, and ACE lowering consumes the same captured constraint IR. The public ACE pipeline now targets Miden's `Felt`/`QuadFelt` field pair instead of accepting arbitrary base and extension fields ([#3404](https://github.com/0xMiden/miden-vm/pull/3404)).
@@ -15,6 +16,7 @@
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Aligned workspace crate versions at `0.28.0`, except `midenc-hir-type`, so VM and crypto crates release as one version line.
 - Imported the Miden crypto crates, benches, fuzz targets, and Wycheproof tests into this workspace ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
+- Added optional read-only trace events: processor recognizes `sys::trace_event` and forwards the user trace ID below it to `SyncHost::on_trace`/`Host::on_trace`. Unhandled trace events are no-ops, and `DefaultHost` supports named trace-handler registration ([#3396](https://github.com/0xMiden/miden-vm/pull/3396)).
 - [BREAKING] Restored `AeadPoseidon2::key_from_bytes` to upstream canonical-Felt decoding. The SHA-256 KDF that briefly appeared on this branch is removed; keys persisted under the KDF contract must be re-derived ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Restored the `ExactSizeIterator` impl on `miden-serde-utils::ReadManyIter`, matching upstream, and corrected `size_hint` to advertise the exact remaining count ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Documented the `SharedSecret` zeroization contract on the k256 and x25519 ECDH paths: the type now holds owned `[u8; 32]` bytes and zeroizes on drop ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
@@ -51,9 +53,12 @@
 - [BREAKING] Add dead-node elimination in ACE DAG ([#3408](https://github.com/0xMiden/miden-vm/pull/3408)).
 - [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 - [BREAKING] Bump Plonky3 related dependencies to integrate SVE2 and WASM-SIMD128 speed-ups and include a NEON bugfix. ([#3441](https://github.com/0xMiden/miden-vm/pull/3441)).
+- Bumped the imported crypto crates to 0.28.2 after the standalone crypto repository published different 0.28.1 package contents, and raised the minimum `p3-field` version to match `num-bigint` 0.5.
+- Split dense `MastForest` order helpers and package serialization tests into smaller modules, and routed dense forest finalization and static library setup through dedicated builder and library methods ([#3346](https://github.com/0xMiden/miden-vm/pull/3346)).
 
 #### Fixes
 
+- Restored public `miden-lifted-stark` testing constants to preserve compatibility with version 0.28.1.
 - [BREAKING] Bound MMR peak commitments to the leaf count by hashing `[num_leaves, 0, 0, 0] || padded_peaks`, and updated the core library `mmr::pack`/`mmr::unpack` procedures to use the same preimage ([#3388](https://github.com/0xMiden/miden-vm/pull/3388)).
 - Documented the program-entrypoint locals invariant on `Procedure::set_num_locals` and now assert it at that AST mutation site, so setting locals on an executable module's `begin`..`end` block panics at the producer boundary. The existing assembler assertion is retained as a backstop for entrypoints built directly via `Procedure::new` ([#3382](https://github.com/0xMiden/miden-vm/pull/3382)).
 - Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).

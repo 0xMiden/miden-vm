@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_field::{Field, PrimeField64};
-use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS};
+use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 /// [`KeccakAir`] adapted for the lifted STARK prover.
@@ -61,3 +61,6 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedKeccakAir {
 pub fn generate_keccak_trace<F: PrimeField64>(inputs: Vec<[u64; 25]>) -> RowMajorMatrix<F> {
     p3_keccak_air::generate_trace_rows(inputs, 0)
 }
+
+/// The number of trace rows per Keccak-f permutation (24 rounds).
+pub const ROWS_PER_HASH: usize = NUM_ROUNDS;

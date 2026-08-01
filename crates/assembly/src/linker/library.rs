@@ -32,6 +32,12 @@ impl LinkLibrary {
         self.mast().commitment()
     }
 
+    /// Returns the digest of the package's exported interface.
+    #[inline(always)]
+    pub fn interface_digest(&self) -> Result<Word, ManifestValidationError> {
+        self.package.interface_digest()
+    }
+
     #[inline(always)]
     pub fn mast(&self) -> &Arc<MastForest> {
         self.package.mast_forest()

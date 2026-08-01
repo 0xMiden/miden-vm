@@ -87,7 +87,8 @@ pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
 }
 
