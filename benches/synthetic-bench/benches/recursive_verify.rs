@@ -42,7 +42,7 @@ use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_assembly::Linkage;
 use miden_core::{
-    Felt,
+    Felt, Word,
     crypto::hash::Blake3_256,
     field::QuotientMap,
     program::ExecutionClaim,
@@ -73,7 +73,7 @@ struct TxProofFixture {
 }
 
 struct RecursiveProofAdvice {
-    initial_stack: [u64; 4],
+    claim_commitment: Word,
     advice_inputs: AdviceInputs,
 }
 
@@ -508,11 +508,12 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
 /// MASM for one `exec.vm::verify_vm_proof` call.
 ///
 /// The generated program appends one block like this per inner transaction proof.
-fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
+fn verify_proof_call_masm(claim_commitment: Word) -> String {
     let mut source = String::new();
     // Push the claim commitment with its first element on top.
-    for value in initial_stack.iter().rev() {
-        writeln!(source, "push.{value}").expect("write recursive verifier call source");
+    for value in claim_commitment.into_elements().into_iter().rev() {
+        writeln!(source, "push.{}", value.as_canonical_u64())
+            .expect("write recursive verifier call source");
     }
     writeln!(
         source,
@@ -575,7 +576,7 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
         fixture.stack_outputs,
     );
     let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
-    let initial_stack = verifier_inputs.initial_stack();
+    let claim_commitment = verifier_inputs.claim_commitment;
 
     let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack().iter().copied())
         .expect("recursive advice stack values must be canonical");
@@ -584,7 +585,7 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
         .with_merkle_store(verifier_inputs.store)
         .with_map(verifier_inputs.advice_map);
 
-    RecursiveProofAdvice { initial_stack, advice_inputs }
+    RecursiveProofAdvice { claim_commitment, advice_inputs }
 }
 
 fn build_recursive_verifier_case(
@@ -600,7 +601,7 @@ fn build_recursive_verifier_case(
         // MASM calls and advice segments are appended in lockstep. There is a single advice
         // provider for the outer program; after one verifier call consumes its segment, the next
         // segment is at the top of the same advice stack.
-        verify_calls.push_str(&verify_proof_call_masm(&proof_advice.initial_stack));
+        verify_calls.push_str(&verify_proof_call_masm(proof_advice.claim_commitment));
         advice_inputs.extend(proof_advice.advice_inputs);
     }
 
