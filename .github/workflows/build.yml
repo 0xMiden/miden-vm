@@ -13,27 +13,8 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
-  diffs:
-    name: detect changed areas
-    runs-on: ubuntu-latest
-    outputs:
-      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
-      isVm: ${{ steps.diffs.outputs.isVm }}
-      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
-      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
-      isRelease: ${{ steps.diffs.outputs.isRelease }}
-      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - id: diffs
-        uses: ./.github/actions/diffs
-
   no-std:
     name: Build for no-std
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,8 +35,6 @@ jobs:
 
   target-miden:
     name: Build for Miden target
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,8 +50,6 @@ jobs:
 
   wasm-simd-runtime:
     name: WASM SIMD128 runtime check
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,8 +72,6 @@ jobs:
 
   fuzz-check:
     name: Check fuzz workspaces
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isFuzz == 'true' || needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
