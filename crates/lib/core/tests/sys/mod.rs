@@ -10,27 +10,6 @@ fn truncate_stack() {
         .expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
 }
 
-#[test]
-fn stage_rejects_digest_count_over_bound() {
-    // `stage_boundary_inputs` takes the digest count `N` as an operand and asserts it fits
-    // `Kernel::MAX_NUM_PROCEDURES` (`N < 256`). The bound is its first check, so no caller memory
-    // or advice is required.
-    //
-    // Operands: [claim_ptr, kernel_ptr, N].
-    let source = "
-        use miden::core::sys::vm::public_inputs
-        begin
-            exec.public_inputs::stage_boundary_inputs
-        end
-    ";
-
-    let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
-    let initial_stack = vec![4096_u64, 0, num_kernel_proc_digests];
-
-    let test = build_test!(source, &initial_stack);
-    expect_assert_error_message!(test);
-}
-
 #[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
@@ -215,6 +194,38 @@ fn element_hash_procedures_reject_non_u32_length() {
     }
 }
 
+#[test]
+fn kernel_commitment_rejects_non_u32_procedure_count() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    // For the Goldilocks modulus p, 4 * ((3p + 1) / 4) = 1 mod p. Without validating the
+    // procedure count before multiplication, the helper would hash one element.
+    const WRAPPING_COUNT: u64 = 13_835_058_052_060_938_241;
+    const PTR: u64 = 1000;
+    const ERROR_MSG: &str = "number of kernel procedures must fit in a u32";
+
+    let source = format!(
+        "
+        use miden::core::sys::vm::claim
+
+        begin
+            push.{WRAPPING_COUNT}
+            push.{PTR}
+            exec.claim::kernel_commitment
+        end
+        "
+    );
+    let test = build_test!(source.as_str(), &[]);
+    let err = test.execute().expect_err("a non-u32 procedure count must be rejected");
+    match err {
+        ExecutionError::OperationError {
+            err: OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(ERROR_MSG)),
+        err => panic!("expected a u32 assertion failure, got {err:?}"),
+    }
+}
+
 /// The MASM `sys::vm::claim::request_key` must agree with the native `request_key` on the same
 /// (verifier_root, claim_commitment) pair.
 #[test]
@@ -319,16 +330,19 @@ fn request_round_trip_retrieves_registered_package() {
 
         begin
             {}
+            dupw
             {}
             exec.claim::request_key
-            adv.push_mapval
-            drop drop drop drop
+            adv.push_mapval dropw
+            {}
+            assert_eqw
             adv_push adv_push adv_push adv_push
             exec.sys::truncate_stack
         end
         ",
         push(claim_commitment),
         push(verifier_root),
+        push(claim_commitment),
     );
 
     // Map value the host registered under the request key.
@@ -346,7 +360,7 @@ fn request_round_trip_retrieves_registered_package() {
     .expect_stack(&expected);
 }
 
-/// The MASM `sys::vm::conjectured_security_level` procedure must agree with the native
+/// The MASM `sys::vm::compute_conjectured_security_level` procedure must agree with the native
 /// `miden_air::config::conjectured_security_level` on every input in the verifier's domain:
 /// `num_queries` is effectively a `u8` (the generic verifier bounds it to `<= 150`) and
 /// `query_pow_bits < 32`. One VM run evaluates the whole grid, storing the MASM level for
@@ -354,7 +368,7 @@ fn request_round_trip_retrieves_registered_package() {
 /// native value. This includes the calibration points
 /// (27, 16) -> 95 and (27, 17) -> 96.
 #[test]
-fn masm_conjectured_security_level_matches_native() {
+fn masm_compute_conjectured_security_level_matches_native() {
     use miden_core::Felt;
     use miden_processor::ContextId;
 
@@ -376,7 +390,7 @@ fn masm_conjectured_security_level_matches_native() {
                     # => [pow, nq]
                     dup dup.2
                     # => [nq, pow, pow, nq]
-                    exec.vm::conjectured_security_level
+                    exec.vm::compute_conjectured_security_level
                     # => [level, pow, nq]
                     dup.2 push.{POW_BOUND} mul dup.2 add
                     # => [nq*POW_BOUND + pow, level, pow, nq]
@@ -429,7 +443,7 @@ fn security_level_threshold_rejects_below_target() {
 
         begin
             # Stack: [num_queries, query_pow_bits] - as returned by `verify_vm_proof`.
-            exec.vm::conjectured_security_level
+            exec.vm::compute_conjectured_security_level
             u32lt.{TARGET} assertz
         end
         "

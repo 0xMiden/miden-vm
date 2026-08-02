@@ -2,7 +2,6 @@
 ## miden::core::stark::constants
 | Procedure | Description |
 | ----------- | ------------- |
-| verifier_memory_start | Returns the first verifier-owned memory address.<br /> |
 | set_lde_domain_info_word | Store details about the LDE domain.<br /><br />The info stored is `[lde_size, log(lde_size), lde_g, 0]`.<br /> |
 | get_lde_domain_info_word | Load details about the LDE domain.<br /><br />The info stored is `[lde_size, log(lde_size), lde_g, 0]`.<br /> |
 | get_lde_domain_depth | Returns log(lde_size), i.e., the depth of the LDE domain Merkle tree.<br /> |

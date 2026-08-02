@@ -128,7 +128,7 @@ impl CoreLibrary {
     /// which recursive proofs are content-addressed.
     ///
     /// Operators pass this root when registering a proof package in the advice map
-    /// (`RecursiveVerifierInputs::into_request_package`). A consumer derives the identical value
+    /// (`RecursiveVerifierInputs::for_request`). A consumer derives the identical value
     /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
     /// agree without a shared constant; consumers key their proof fetches by this root.
     pub fn recursive_verifier_root(&self) -> Word {

@@ -63,7 +63,6 @@ use miden_vm::{
 };
 
 const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
-const CLAIM_PTR: u64 = 4096;
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v1";
 
 struct TxProofFixture {
@@ -74,7 +73,7 @@ struct TxProofFixture {
 }
 
 struct RecursiveProofAdvice {
-    initial_stack: Vec<u64>,
+    initial_stack: [u64; 4],
     advice_inputs: AdviceInputs,
 }
 
@@ -511,18 +510,13 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
 /// The generated program appends one block like this per inner transaction proof.
 fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
     let mut source = String::new();
-    // `initial_stack[0]` must be on top when `verify_vm_proof` starts.
+    // Push the claim commitment with its first element on top.
     for value in initial_stack.iter().rev() {
         writeln!(source, "push.{value}").expect("write recursive verifier call source");
     }
     writeln!(
         source,
         "
-        # Copy the claim encoding P | K | I | O (40 felts) into the claim region; the kernel
-        # digest witness travels in the advice map.
-        push.40 push.{CLAIM_PTR}
-        exec.copy_advice_to_mem
-
         exec.vm::verify_vm_proof
         # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
         dropw dropw
@@ -540,27 +534,6 @@ fn recursive_verifier_program_masm(verify_calls: &str) -> String {
     format!(
         "
         use miden::core::sys::vm
-
-        # Copy `count` felts from advice into memory starting at `dst`.
-        # `count` must be a multiple of 4.
-        #   Input:  [dst, count, ...]
-        #   Output: [...]
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                # [dst, count, ...]
-                padw adv_loadw
-                # [w0, w1, w2, w3, dst, count, ...]
-                dup.4 mem_storew_le dropw
-                # [dst, count, ...]
-                add.4
-                # [dst + 4, count, ...]
-                swap sub.4 swap
-                # [dst + 4, count - 4, ...]
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
 
         begin
             {verify_calls}
@@ -602,18 +575,16 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
         fixture.stack_outputs,
     );
     let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
+    let initial_stack = verifier_inputs.initial_stack();
 
-    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack())
+    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack().iter().copied())
         .expect("recursive advice stack values must be canonical");
     let advice_inputs = AdviceInputs::default()
         .with_advice_stack(advice_stack)
         .with_merkle_store(verifier_inputs.store)
         .with_map(verifier_inputs.advice_map);
 
-    RecursiveProofAdvice {
-        initial_stack: verifier_inputs.initial_stack,
-        advice_inputs,
-    }
+    RecursiveProofAdvice { initial_stack, advice_inputs }
 }
 
 fn build_recursive_verifier_case(

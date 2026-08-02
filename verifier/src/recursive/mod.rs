@@ -2,27 +2,25 @@
 //!
 //! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed
 //! order. This module is the producer side of that ABI: it destructures an [`ExecutionProof`]
-//! against its [`ExecutionClaim`] into the advice-stack stream, the Merkle store, and the query
-//! advice-map entries the verifier consumes. The consumption order is exercised end to end by the
+//! against its [`ExecutionClaim`] into the advice-stack stream, Merkle store, and advice-map
+//! entries the verifier consumes. The consumption order is exercised end to end by the
 //! recursive verification tests, which drive the real MASM verifier over this output.
 //!
-//! The stream carries only the proof — the claim is the consumer's and never travels in it:
+//! The advice stack carries only the proof:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
 //!   deferred root -> Miden AIR heights -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
-//! The consumer stages the 40-felt claim encoding into VM memory from its own claim;
-//! `verify_vm_proof` verifies this stream against that claim, so a substituted stream
-//! fails rather than redefining the claim. Everything else is content-addressed in the advice
-//! map and merges across proofs without collision: the kernel digest witness under the kernel
-//! commitment K (`[count, digests..]`), the query rows, Merkle store, and ACE circuit.
+//! The consumer supplies the claim commitment. The advice map stores its 40-felt preimage under
+//! that commitment; `verify_vm_proof` authenticates the preimage before using it. The advice map
+//! also stores the flattened kernel procedure digests under the kernel commitment. Query rows,
+//! the Merkle store, and the ACE circuit are content-addressed as well.
 
 use alloc::{
     string::{String, ToString},
     sync::Arc,
-    vec,
     vec::Vec,
 };
 
@@ -32,6 +30,7 @@ use miden_air::{
 };
 use miden_core::{
     Felt, Word,
+    advice::AdviceInputs,
     crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
     deferred::{DEFAULT_MAX_DEFERRED_ELEMENTS, DeferredState, IntegrityError, TRUE_DIGEST},
     field::QuadFelt,
@@ -61,46 +60,97 @@ type P2Config = config::Poseidon2Config;
 type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
 type P2ProofData = StarkProofData<Felt, Challenge, P2Config>;
 
-/// The advice a MASM recursive verifier consumes to verify one Miden VM proof.
+/// Inputs for MASM recursive verification.
 ///
-/// The `advice_stack` stream feeds `exec.vm::verify_vm_proof` directly;
-/// [`Self::into_request_package`] instead registers it in the advice map under
-/// `request_key(verifier_root, claim_commitment)` for consumers that fetch proofs by content.
+/// Pass [`Self::claim_commitment`] on the operand stack; the advice contains its claim preimage.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
-    /// The advice-stack stream, in the order `verify_vm_proof` (with the standard
-    /// staging prologue) consumes it.
-    pub advice_stack: Vec<Felt>,
-    /// Merkle store backing the query openings (`mtree_get` authentication paths).
-    pub store: MerkleStore,
-    /// Content-addressed advice-map entries: query rows (`leaf_hash -> leaf_data`), the ACE
-    /// circuit, and the kernel digest witness under K.
-    pub advice_map: Vec<(Word, Vec<Felt>)>,
-    /// Commitment to the execution claim: the content address (paired with a verifier root) the
-    /// proof stream is registered under.
-    pub claim_commitment: Word,
+    advice: AdviceInputs,
+    claim_commitment: Word,
 }
 
 impl RecursiveVerifierInputs {
+    /// Builds the advice for directly invoking `exec.vm::verify_vm_proof`.
+    ///
+    /// The proof must be a Poseidon2 proof because the recursive verifier supports only
+    /// Poseidon2 STARKs. Wire-backed deferred state is hydrated with the standard precompile
+    /// registry and [`DEFAULT_MAX_DEFERRED_ELEMENTS`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the proof cannot be converted into verifier advice.
+    pub fn new(
+        proof: &ExecutionProof,
+        claim: &ExecutionClaim,
+    ) -> Result<Self, RecursiveVerifierInputsError> {
+        let stark = proof.miden_proof();
+        if stark.hash_fn() != HashFunction::Poseidon2 {
+            return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
+        }
+        let pub_inputs = PublicInputs::new(
+            claim.to_program_info(),
+            *claim.stack_inputs(),
+            *claim.stack_outputs(),
+            resolve_deferred_root(proof.deferred_proof())?,
+        );
+
+        let claim_commitment = claim.commitment();
+        let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim_commitment)?;
+
+        // The MASM verifier authenticates this preimage against the caller-provided commitment.
+        inputs.advice.map.insert(claim_commitment, claim.to_elements().to_vec());
+
+        let kernel = claim.kernel();
+        // The MASM verifier derives the procedure count from the value length.
+        let kernel_witness = Word::words_as_elements(kernel.proc_hashes()).to_vec();
+        inputs.advice.map.insert(kernel.commitment(), kernel_witness);
+
+        Ok(inputs)
+    }
+
+    /// Builds a proof package addressed by the verifier and claim commitments.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::new`].
+    pub fn for_request(
+        verifier_root: Word,
+        proof: &ExecutionProof,
+        claim: &ExecutionClaim,
+    ) -> Result<Self, RecursiveVerifierInputsError> {
+        Ok(Self::new(proof, claim)?.into_request_package(verifier_root))
+    }
+
+    /// Returns the VM advice inputs.
+    pub fn advice(&self) -> &AdviceInputs {
+        &self.advice
+    }
+
+    /// Returns the execution claim commitment.
+    pub fn claim_commitment(&self) -> Word {
+        self.claim_commitment
+    }
+
+    /// Consumes these inputs into their VM advice and claim commitment.
+    pub fn into_parts(self) -> (AdviceInputs, Word) {
+        (self.advice, self.claim_commitment)
+    }
+
     /// Moves the proof stream into the advice map under
     /// `request_key(verifier_root, claim_commitment)`, leaving the advice stack empty.
-    ///
-    /// All of it (Merkle nodes, query rows, proof stream) is content-addressed, so packages
-    /// for any number of proofs merge into one advice provider in any order. A consumer holding the
-    /// claim commitment fetches the package under this key and verifies it with
-    /// `exec.vm::verify_vm_proof`; the key is addressing, not trust — a package that does not match
-    /// the consumer's claim fails verification.
-    pub fn into_request_package(mut self, verifier_root: Word) -> Self {
+    fn into_request_package(mut self, verifier_root: Word) -> Self {
         let key = request_key(verifier_root, self.claim_commitment);
-        let proof_stream = core::mem::take(&mut self.advice_stack);
-        self.advice_map.push((key, proof_stream));
+        let (proof_stream, map, store) = self.advice.into_parts();
+        self.advice = AdviceInputs::default().with_merkle_store(store);
+        self.advice.map = map;
+        self.advice.map.insert(key, proof_stream.into_elements());
         self
     }
 }
 
 /// Errors returned while building the advice for recursive verification.
 #[derive(Debug, thiserror::Error)]
-pub enum RecursiveAdviceError {
+pub enum RecursiveVerifierInputsError {
     #[error("proof deserialization error: {0}")]
     ProofDeserialization(String),
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
@@ -127,47 +177,11 @@ struct MidenTraceHeights {
     proof_order: ProofOrder,
 }
 
-// PUBLIC API
-// ================================================================================================
-
-/// Builds the advice a MASM recursive verifier consumes to verify a Miden VM proof against
-/// its claim.
-///
-/// The proof must be a Poseidon2 proof — the recursive verifier verifies only Poseidon2 STARKs.
-pub fn advice_inputs(
-    proof: &ExecutionProof,
-    claim: &ExecutionClaim,
-) -> Result<RecursiveVerifierInputs, RecursiveAdviceError> {
-    let stark = proof.miden_proof();
-    if stark.hash_fn() != HashFunction::Poseidon2 {
-        return Err(RecursiveAdviceError::UnsupportedHashFunction(stark.hash_fn()));
-    }
-    let pub_inputs = PublicInputs::new(
-        claim.to_program_info(),
-        *claim.stack_inputs(),
-        *claim.stack_outputs(),
-        resolve_deferred_root(proof.deferred_proof())?,
-    );
-
-    let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim.commitment())?;
-
-    // Content-addressed kernel advice. The verifier checks the fetched witness against K, so
-    // proofs sharing a kernel produce identical entries that merge.
-    let kernel = claim.kernel();
-    let mut kernel_witness = vec![Felt::new_unchecked(kernel.proc_hashes().len() as u64)];
-    for digest in kernel.proc_hashes() {
-        kernel_witness.extend_from_slice(digest.as_elements());
-    }
-    inputs.advice_map.push((kernel.commitment(), kernel_witness));
-
-    Ok(inputs)
-}
-
 /// Resolves the deferred root the outer VM statement binds, from the proof's deferred material:
 /// the canonical TRUE digest when no precompile claims were produced, the nested proof's public
 /// root when STARK-backed, and the hydrated wire's root for partial proofs (standard precompile
 /// registry, default deferred-element budget).
-fn resolve_deferred_root(deferred: &DeferredProof) -> Result<Word, RecursiveAdviceError> {
+fn resolve_deferred_root(deferred: &DeferredProof) -> Result<Word, RecursiveVerifierInputsError> {
     match deferred {
         DeferredProof::Empty => Ok(TRUE_DIGEST),
         DeferredProof::Stark { public_root, .. } => Ok(*public_root),
@@ -187,7 +201,7 @@ fn build_from_proof_bytes(
     proof_bytes: &[u8],
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
-) -> Result<RecursiveVerifierInputs, RecursiveAdviceError> {
+) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
     let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
 
     let proof = deserialize_proof(proof_bytes)?;
@@ -198,7 +212,7 @@ fn build_from_proof_bytes(
 
     let statement =
         Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
-            .map_err(|e| RecursiveAdviceError::StatementAssembly(e.to_string()))?;
+            .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
     let verifier_instance = VerifierInstance::new(&config, &statement, None)
         .expect("Miden AIRs declare no preprocessed columns");
 
@@ -211,9 +225,9 @@ fn build_from_proof_bytes(
 
 /// Deserializes a wincode-encoded Poseidon2 STARK proof, enforcing the total byte limit,
 /// bounding preallocation, and rejecting trailing bytes.
-fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveAdviceError> {
+fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveVerifierInputsError> {
     if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
-        return Err(RecursiveAdviceError::ProofTooLarge {
+        return Err(RecursiveVerifierInputsError::ProofTooLarge {
             size: proof_bytes.len(),
             max: MAX_STARK_PROOF_BYTES,
         });
@@ -222,15 +236,15 @@ fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveAdviceE
     let encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     deserialize_schema_exact::<SerdeCompat<P2ProofData>, _>(proof_bytes, encoding_config)
-        .map_err(|e| RecursiveAdviceError::ProofDeserialization(e.to_string()))
+        .map_err(|e| RecursiveVerifierInputsError::ProofDeserialization(e.to_string()))
 }
 
 fn miden_trace_heights(
     stark: &StarkProof<Challenge, P2Lmcs>,
-) -> Result<MidenTraceHeights, RecursiveAdviceError> {
+) -> Result<MidenTraceHeights, RecursiveVerifierInputsError> {
     let log_heights = stark.log_trace_heights();
     let Ok(log_heights): Result<[u8; MIDEN_AIR_COUNT], _> = log_heights.try_into() else {
-        return Err(RecursiveAdviceError::InvalidProofShape(
+        return Err(RecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of AIR log heights",
         ));
     };
@@ -247,19 +261,17 @@ fn build_advice(
     heights: MidenTraceHeights,
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
-) -> Result<RecursiveVerifierInputs, RecursiveAdviceError> {
+) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
     if stark.all_aux_values.len() != MIDEN_AIR_COUNT {
-        return Err(RecursiveAdviceError::InvalidProofShape(
+        return Err(RecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of aux-final groups",
         ));
     }
 
-    // The stream carries only the proof: the deferred root the execution produced, the proof
-    // shape, and the STARK transcript. The claim itself (kernel witness, program digest, stack
-    // i/o) is the consumer's — it fills those into VM memory from its own inputs, never from this
-    // (untrusted, fetched) stream — so a substituted package fails verification against the
-    // consumer's claim rather than silently redefining it.
+    // The stream carries only the proof: the deferred root, proof shape, and STARK transcript.
+    // The claim preimage and kernel witness live in the advice map and are authenticated by the
+    // verifier against commitments supplied by the consumer.
     //
     // The section order below mirrors the consumption-order list in the module doc; both are
     // pinned against the MASM verifier by the stark e2e differential tests.
@@ -303,12 +315,12 @@ fn build_advice(
 
     let (store, advice_map) = build_merkle_data(config, stark, &heights.proof_order)?;
 
-    Ok(RecursiveVerifierInputs {
-        advice_stack,
-        store,
-        advice_map,
-        claim_commitment,
-    })
+    let advice = AdviceInputs::default()
+        .with_advice_stack(advice_stack.into())
+        .with_map(advice_map)
+        .with_merkle_store(store);
+
+    Ok(RecursiveVerifierInputs { advice, claim_commitment })
 }
 
 /// Returns the proof-package header in the order consumed by the recursive MASM verifier.
@@ -331,7 +343,7 @@ fn security_parameter_words(params: &PcsParams) -> [Felt; 4] {
 fn append_ood_evaluations<L>(
     advice_stack: &mut Vec<Felt>,
     pcs: &PcsProof<Challenge, L>,
-) -> Result<(), RecursiveAdviceError>
+) -> Result<(), RecursiveVerifierInputsError>
 where
     L: Lmcs<F = Felt>,
 {
@@ -345,7 +357,7 @@ where
             let values = matrix.values.as_slice();
             // A matrix carries its local row and, for two-point openings, its next row.
             if values.len() != width && values.len() != 2 * width {
-                return Err(RecursiveAdviceError::InvalidProofShape(
+                return Err(RecursiveVerifierInputsError::InvalidProofShape(
                     "OOD matrix must hold exactly one or two rows",
                 ));
             }
@@ -373,7 +385,7 @@ fn build_merkle_data(
     config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
     proof_order: &ProofOrder,
-) -> Result<MerkleAdvice, RecursiveAdviceError> {
+) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
     let lmcs = config.lmcs();
 
@@ -392,7 +404,7 @@ fn build_merkle_data(
     store.extend(registry_tree.inner_nodes());
 
     let circuit = build_recursive_verifier_ace_circuit(proof_order).map_err(|_| {
-        RecursiveAdviceError::InvalidProofShape("failed to build recursive ACE circuit")
+        RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
     })?;
     advice_map.push((circuit.commitment, circuit.instructions));
 
@@ -404,7 +416,7 @@ fn build_merkle_data(
 fn batch_proof_to_merkle<L>(
     lmcs: &L,
     batch_proof: &L::BatchProof,
-) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveAdviceError>
+) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveVerifierInputsError>
 where
     L: Lmcs<F = Felt>,
     L::Commitment: Copy + PartialEq + Into<[Felt; 4]>,
@@ -414,12 +426,15 @@ where
     let mut advice_entries = Vec::new();
 
     for index in batch_proof.indices() {
-        let rows = batch_proof
-            .opening(index)
-            .ok_or(RecursiveAdviceError::InvalidProofShape("missing opening for query index"))?;
-        let siblings = batch_proof.path(index).ok_or(RecursiveAdviceError::InvalidProofShape(
-            "missing Merkle path for query index",
-        ))?;
+        let rows =
+            batch_proof
+                .opening(index)
+                .ok_or(RecursiveVerifierInputsError::InvalidProofShape(
+                    "missing opening for query index",
+                ))?;
+        let siblings = batch_proof.path(index).ok_or(
+            RecursiveVerifierInputsError::InvalidProofShape("missing Merkle path for query index"),
+        )?;
 
         let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
         let leaf_word: Word = Word::new(lmcs.hash(rows.iter_rows()).into());
@@ -431,7 +446,7 @@ where
     }
 
     let tree = PartialMerkleTree::with_paths(paths)
-        .map_err(|_| RecursiveAdviceError::InvalidProofShape("invalid merkle paths"))?;
+        .map_err(|_| RecursiveVerifierInputsError::InvalidProofShape("invalid merkle paths"))?;
 
     Ok((tree, advice_entries))
 }
@@ -449,14 +464,19 @@ fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs};
+    use alloc::vec;
+
+    use miden_core::{
+        crypto::merkle::InnerNodeInfo,
+        program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+    };
 
     use super::*;
 
     /// The top-level entry rejects non-Poseidon2 proofs up front, before touching the proof
     /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
     #[test]
-    fn advice_inputs_rejects_non_poseidon2_proofs() {
+    fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
         let proof = ExecutionProof::from_parts(
             Vec::new(),
             HashFunction::Blake3_256,
@@ -468,10 +488,11 @@ mod tests {
             StackOutputs::default(),
         );
 
-        let err = advice_inputs(&proof, &claim).expect_err("a Blake3 proof must be rejected");
+        let err = RecursiveVerifierInputs::new(&proof, &claim)
+            .expect_err("a Blake3 proof must be rejected");
         assert!(matches!(
             err,
-            RecursiveAdviceError::UnsupportedHashFunction(HashFunction::Blake3_256)
+            RecursiveVerifierInputsError::UnsupportedHashFunction(HashFunction::Blake3_256)
         ));
     }
 
@@ -491,7 +512,7 @@ mod tests {
         let err = deserialize_proof(&proof_bytes).expect_err("oversized proof must be rejected");
         assert!(matches!(
             err,
-            RecursiveAdviceError::ProofTooLarge {
+            RecursiveVerifierInputsError::ProofTooLarge {
                 size,
                 max: MAX_STARK_PROOF_BYTES,
             } if size == proof_bytes.len()
@@ -510,23 +531,37 @@ mod tests {
             Word::from([31u64, 32, 33, 34].map(Felt::new_unchecked)),
             vec![Felt::new_unchecked(7)],
         );
-
-        let inputs = RecursiveVerifierInputs {
-            advice_stack: proof_stream.clone(),
-            store: MerkleStore::new(),
-            advice_map: vec![query_entry.clone()],
-            claim_commitment,
+        let merkle_node = InnerNodeInfo {
+            value: Word::from([41u64, 42, 43, 44].map(Felt::new_unchecked)),
+            left: Word::from([51u64, 52, 53, 54].map(Felt::new_unchecked)),
+            right: Word::from([61u64, 62, 63, 64].map(Felt::new_unchecked)),
         };
+        let store: MerkleStore = [merkle_node].into_iter().collect();
+
+        let advice = AdviceInputs::default()
+            .with_advice_stack(proof_stream.clone().into())
+            .with_map([query_entry.clone()])
+            .with_merkle_store(store.clone());
+        let inputs = RecursiveVerifierInputs { advice, claim_commitment };
 
         let package = inputs.into_request_package(verifier_root);
 
-        assert!(package.advice_stack.is_empty(), "the proof must leave the advice stack");
-        assert_eq!(package.claim_commitment, claim_commitment);
-        assert_eq!(package.advice_map.len(), 2, "existing entries stay, proof entry added");
-        assert_eq!(package.advice_map[0], query_entry);
+        assert!(
+            package.advice().advice_stack().is_empty(),
+            "the proof must leave the advice stack"
+        );
+        assert_eq!(package.claim_commitment(), claim_commitment);
+        assert_eq!(&package.advice().store, &store);
+        assert_eq!(package.advice().map.len(), 2, "existing entries stay, proof entry added");
+        assert_eq!(package.advice().map.get(&query_entry.0).unwrap().as_ref(), query_entry.1);
         assert_eq!(
-            package.advice_map[1],
-            (request_key(verifier_root, claim_commitment), proof_stream)
+            package
+                .advice()
+                .map
+                .get(&request_key(verifier_root, claim_commitment))
+                .unwrap()
+                .as_ref(),
+            proof_stream
         );
     }
 }
