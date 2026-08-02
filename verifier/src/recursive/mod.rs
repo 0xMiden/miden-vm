@@ -48,9 +48,10 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
-use serde_wincode::wincode;
+use miden_serde_utils::deserialize_schema_exact;
+use serde_wincode::{SerdeCompat, wincode};
 
-use crate::{MAX_STARK_PROOF_BYTES, deserialize_serde_exact};
+use crate::MAX_STARK_PROOF_BYTES;
 
 // TYPES
 // ================================================================================================
@@ -220,7 +221,7 @@ fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveAdviceE
 
     let encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    deserialize_serde_exact::<P2ProofData, _>(proof_bytes, encoding_config)
+    deserialize_schema_exact::<SerdeCompat<P2ProofData>, _>(proof_bytes, encoding_config)
         .map_err(|e| RecursiveAdviceError::ProofDeserialization(e.to_string()))
 }
 

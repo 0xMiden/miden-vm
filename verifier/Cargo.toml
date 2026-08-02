@@ -34,6 +34,7 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-prover.workspace = true
+miden-serde-utils.workspace = true
 
 # External dependencies
 serde.workspace = true

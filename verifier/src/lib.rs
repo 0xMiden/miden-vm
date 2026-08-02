@@ -16,26 +16,12 @@ use miden_core::{
 use miden_crypto::stark::{
     StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
 };
+use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
-use wincode::io::Reader as _;
 
 /// Maximum encoded STARK proof size and per-sequence preallocation.
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
-/// Deserializes a serde-backed value and rejects trailing bytes.
-fn deserialize_serde_exact<'de, T, C>(mut bytes: &'de [u8], _: C) -> wincode::ReadResult<T>
-where
-    C: wincode::config::Config,
-    SerdeCompat<T>: wincode::SchemaRead<'de, C, Dst = T>,
-{
-    let value = <SerdeCompat<T> as wincode::SchemaRead<'de, C>>::get(bytes.by_ref())?;
-    if bytes.is_empty() {
-        Ok(value)
-    } else {
-        Err(wincode::error::trailing_bytes())
-    }
-}
 
 // RE-EXPORTS
 // ================================================================================================
@@ -324,7 +310,7 @@ where
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof = deserialize_serde_exact::<StarkProofData<Felt, QuadFelt, SC>, _>(
+    let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
         proof_bytes,
         proof_encoding_config,
     )?;
@@ -356,20 +342,6 @@ mod tests {
     use miden_core::deferred::DeferredStateWire;
 
     use super::*;
-
-    #[test]
-    fn exact_serde_decoding_rejects_trailing_bytes() {
-        let encoding_config = wincode::config::Configuration::default()
-            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-        let mut encoded =
-            <SerdeCompat<u8> as wincode::config::Serialize<_>>::serialize(&7, encoding_config)
-                .expect("u8 serialization must succeed");
-        encoded.push(0);
-
-        let err = deserialize_serde_exact::<u8, _>(&encoded, encoding_config)
-            .expect_err("trailing bytes must be rejected");
-        assert!(matches!(err, wincode::error::ReadError::TrailingBytes));
-    }
 
     #[test]
     fn final_deferred_root_resolution_accepts_empty_rejects_wire_and_verifies_stark() {

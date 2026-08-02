@@ -2530,6 +2530,7 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
+ "miden-serde-utils",
  "rand 0.10.2",
  "ruint",
  "serde",
@@ -2618,6 +2619,8 @@ version = "0.29.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "serde-wincode",
+ "wincode",
 ]
 
 [[package]]
@@ -2721,6 +2724,7 @@ dependencies = [
  "miden-crypto",
  "miden-precompiles",
  "miden-precompiles-prover",
+ "miden-serde-utils",
  "serde",
  "serde-wincode",
  "thiserror",

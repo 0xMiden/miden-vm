@@ -9,6 +9,7 @@ This crate provides serialization and deserialization utilities for the Miden pr
 - `ByteReader` trait for reading primitive values from byte sources.
 - `SliceReader` struct - a reader implementation for reading `Deserializable` from a slice of bytes.
 - `BudgetedReader` struct - a reader implementation that enforces a byte budget during deserialization.
+- `deserialize_schema_exact` for rejecting trailing bytes after schema-based decoding.
 - Support for both `std` and `no_std` environments.
 
 ## Crate Features
