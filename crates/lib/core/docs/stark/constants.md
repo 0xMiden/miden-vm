@@ -7,7 +7,7 @@
 | get_lde_domain_depth | Returns log(lde_size), i.e., the depth of the LDE domain Merkle tree.<br /> |
 | air_trace_length_logs_ptr | Returns the base pointer of the per-AIR log-height cells.<br /><br />Generic consumers take this pointer and a count as arguments; the relation owns the<br />meaning of each offset.<br /> |
 | air_trace_length_logs_capacity | Number of per-AIR log-height cells reserved in the shared memory map.<br /> |
-| z_ptr | Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.<br /><br />The word stored is `[z_0, z_1, z^n_0, z^n_1]`.<br /> |
+| z_ptr | Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.<br /><br />The word stored is `[z^n_0, z^n_1, z_0, z_1]`.<br /> |
 | c_ptr | Returns the pointer to the capacity word of the Poseidon2-based random coin.<br /> |
 | r1_ptr | Returns the pointer to the first rate word of the Poseidon2-based random coin.<br /> |
 | r2_ptr | Returns the pointer to the second rate word of the Poseidon2-based random coin.<br /> |

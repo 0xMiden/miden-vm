@@ -367,7 +367,7 @@ end
 
 #! Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.
 #!
-#! The word stored is `[z_0, z_1, z^n_0, z^n_1]`.
+#! The word stored is `[z^n_0, z^n_1, z_0, z_1]`.
 pub proc z_ptr
     push.Z_PTR
 end
