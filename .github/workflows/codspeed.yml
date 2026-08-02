@@ -13,9 +13,21 @@ concurrency:
 
 jobs:
   codspeed:
-    name: Run CodSpeed benchmarks
+    name: Run CodSpeed benchmarks (${{ matrix.name }})
     runs-on: codspeed-macro
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: synthetic
+            package: miden-vm-synthetic-bench
+            bench: synthetic_bench
+            timeout: 60
+          - name: SMT
+            package: miden-crypto-smt-codspeed-bench
+            bench: smt_codspeed
+            timeout: 30
     permissions:
       contents: read
       id-token: write
@@ -52,13 +64,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo codspeed build --measurement-mode walltime --profile optimized -p miden-vm-synthetic-bench --bench synthetic_bench
-          cargo codspeed build --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
+          cargo codspeed build --measurement-mode walltime --profile optimized -p ${{ matrix.package }} --bench ${{ matrix.bench }}
 
       - name: Run benchmarks
         uses: CodSpeedHQ/action@f99becdce5e5d51fd556489ebef684f4ecfd6286 # v4.18.5
         with:
           mode: walltime
           run: |
-            cargo codspeed run --measurement-mode walltime -p miden-vm-synthetic-bench --bench synthetic_bench
-            cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
+            cargo codspeed run --measurement-mode walltime -p ${{ matrix.package }} --bench ${{ matrix.bench }}
