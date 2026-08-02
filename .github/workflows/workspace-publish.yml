@@ -199,10 +199,6 @@ jobs:
            miden-format-${{ matrix.target }} \
            miden-registry-${{ matrix.target }}
       # Since the core.masp package is triplet independent, we only build it once.
-      - name: Install nightly
-        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          rustup update --no-self-update nightly
       - name: Build core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |

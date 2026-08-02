@@ -35,10 +35,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install nightly
-        run: |
-          rustup update --no-self-update nightly
-
       - name: Build core.masp
         run: |
           make packages

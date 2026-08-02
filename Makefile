@@ -317,7 +317,7 @@ miden-registry-dist:
 
 .PHONY: packages
 packages: ## Builds .masp packages and store them in target/packages
-	cargo +nightly -Zscript scripts/generate-package.rs
+	cargo run --locked --package miden-core-lib --bin generate-package -- target/packages/miden-core.masp
 
 # --- examples ------------------------------------------------------------------------------------
 
