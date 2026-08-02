@@ -185,26 +185,24 @@ pub proc store_dynamically_executed_procedures
     # => [...]
 end
 
-#! Derives the Lehmer proof-order tag of the height-sorted proof order over any AIR count.
+#! Derives the Lehmer proof-order tag of a height-sorted relation.
 #!
 #! The proof order sorts the relation's AIRs by ascending log height, with the canonical
-#! instance order breaking ties (a stable sort). For each canonical AIR k with log
-#! height h_k read from `heights_ptr + k`:
+#! instance order breaking ties (a stable sort). For each canonical AIR k with log height h_k
+#! read from `heights_ptr + k`:
 #!
 #!   inv_k   = #{m < k : h_m > h_k}
-#!   after_k = #{m > k : h_m < h_k}
-#!   pos_k   = k - inv_k + after_k
+#!   pos_k   = #{m < k : h_m <= h_k} + #{m > k : h_m < h_k}
 #!   tag    += inv_k * (num_airs - 1 - pos_k)!
 #!
-#! The comparisons are branch-free (flag products); the loops are `while`-based so this procedure
-#! can serve any relation (repeat bounds would need compile-time counts). PVM uses this generic
-#! path. The VM uses a fixed-count specialization with compile-time repeat bounds; tests pin
-#! both implementations to the shared Rust `order_tag` convention.
+#! Splitting the scan at k makes the stable tie-break explicit and needs one height comparison per
+#! other AIR. The loops are `while`-based so this procedure can serve any relation (repeat bounds
+#! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
+#! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
 #!
-#! Preconditions (`num_airs` is the caller's contract): `num_airs <= 12`, or the tag
-#! overflows u32 and the ranking collides once `factorial` wraps the field; `num_airs`
-#! must be a small honest count (it is relation metadata, never prover data). The four
-#! u32 comparisons in each inner iteration reject a height outside the u32 range.
+#! Preconditions (`num_airs` is the caller's contract): `2 <= num_airs <= 12`. Twelve is the
+#! largest AIR count whose complete tag range fits in u32. The AIR count is relation metadata,
+#! never prover data. Height comparisons reject out-of-range values.
 #!
 #! Input:  [num_airs, heights_ptr]
 #! Output: [tag]
@@ -218,41 +216,52 @@ pub proc derive_order_tag_from_heights
         dup.3 dup.1 add mem_load
         # => [h_k, k, tag, num_airs, heights_ptr]
 
-        push.0.0 push.0
-        # => [m = 0, inv = 0, after = 0, h_k, k, tag, num_airs, heights_ptr]
+        push.0.0
+        # => [m = 0, inv = 0, h_k, k, tag, num_airs, heights_ptr]
+
+        # Count earlier AIRs that follow k after sorting.
+        dup.3 dup.1 u32gt
+        while.true
+            # => [m, inv, h_k, k, tag, num_airs, heights_ptr]
+            dup.6 dup.1 add mem_load
+            # => [h_m, m, inv, h_k, k, tag, num_airs, heights_ptr]
+
+            dup dup.4 u32gt
+            movup.3 add movdn.2
+            # => [h_m, m, inv', h_k, k, tag, num_airs, heights_ptr]
+
+            drop add.1
+            dup.3 dup.1 u32gt
+        end
+        drop
+        # => [inv, h_k, k, tag, num_airs, heights_ptr]
+
+        # Earlier AIRs precede k exactly when they are not inversions.
+        dup.2 dup.1 sub
+        swap
+        # => [inv, pos = k - inv, h_k, k, tag, num_airs, heights_ptr]
+
+        # Later AIRs precede k exactly when h_m < h_k. Ties stay in instance order.
+        dup.3 add.1
+        # => [m = k + 1, inv, pos, h_k, k, tag, num_airs, heights_ptr]
 
         dup.6 dup.1 u32gt
         while.true
-            # => [m, inv, after, h_k, k, tag, num_airs, heights_ptr]
             dup.7 dup.1 add mem_load
-            # => [h_m, m, inv, after, h_k, k, tag, num_airs, heights_ptr]
+            # => [h_m, m, inv, pos, h_k, k, tag, num_airs, heights_ptr]
 
-            # inv += (m < k) * (h_m > h_k)
-            dup dup.5 u32gt
-            dup.2 dup.7 u32lt
-            mul
-            movup.3 add movdn.2
-            # => [h_m, m, inv', after, h_k, k, tag, num_airs, heights_ptr]
-
-            # after += (m > k) * (h_m < h_k)
             dup dup.5 u32lt
-            dup.2 dup.7 u32gt
-            mul
             movup.4 add movdn.3
-            # => [h_m, m, inv, after', h_k, k, tag, num_airs, heights_ptr]
+            # => [h_m, m, inv, pos', h_k, k, tag, num_airs, heights_ptr]
 
             drop add.1
             dup.6 dup.1 u32gt
         end
         drop
-        # => [inv, after, h_k, k, tag, num_airs, heights_ptr]
-
-        # pos = k - inv + after
-        dup.3 dup.1 sub
-        movup.2 add
-        # => [pos, inv, h_k, k, tag, num_airs, heights_ptr]
+        # => [inv, pos, h_k, k, tag, num_airs, heights_ptr]
 
         # tag += inv * (num_airs - 1 - pos)!
+        swap
         dup.5 sub.1 swap sub
         exec.factorial
         mul
