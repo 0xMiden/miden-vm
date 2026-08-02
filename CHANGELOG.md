@@ -2,6 +2,14 @@
 
 ## v0.29.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Recursive MASM verification now takes a claim commitment and authenticates its advice-map preimage. Kernel witness counts are derived from the value length, and Rust callers use `RecursiveVerifierInputs::{new, for_request}` ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
+
+#### Fixes
+
+- [BREAKING] Fixed an empty field-list hash collision by moving the empty marker from the rate to capacity. This changes empty domain-separated commitments ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
