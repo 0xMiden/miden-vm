@@ -326,8 +326,8 @@ end
 #! Moves an even number of words from the advice stack to memory and asserts that their
 #! domain-tagged sequential hash matches a given commitment.
 #!
-#! Like `pipe_double_words_preimage_to_memory`, but initializes the Poseidon2 capacity word to
-#! `[0, domain, 0, 0]`.
+#! Non-empty input uses capacity `[0, domain, 0, 0]`; empty input under a nonzero domain uses
+#! `[0, domain, 1, 0]`.
 #!
 #! Inputs:  [domain, num_words, write_ptr, COMMITMENT]
 #! Outputs: [write_ptr']
@@ -339,35 +339,47 @@ end
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
 #!
-#! Total cycles: 57 + 3 * num_words
+#! Total cycles:
+#! - empty, zero domain: 89 cycles
+#! - empty, nonzero domain: 88 cycles
+#! - non-empty: 59 cycles + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory_with_domain
   # Bring `num_words` to the top so we can check and consume it below (1 cycle).
   swap
   # => [num_words, domain, write_ptr, COMMITMENT, ...]
 
-  # Assert precondition (8 cycles).
-  dup is_odd assertz.err="pipe_double_words_preimage_to_memory_with_domain: num_words must be even"
-  # => [num_words, domain, write_ptr, COMMITMENT, ...]
+  dup eq.0
+  if.true
+    # Reuse the element hasher's canonical empty-input path while preserving write_ptr.
+    drop dup.1 push.0 swap
+    # => [write_ptr, num_elements=0, domain, write_ptr, COMMITMENT, ...]
+    exec.poseidon2::hash_elements_in_domain
+    # => [DIGEST, write_ptr, COMMITMENT, ...]
+  else
+    # Assert precondition (8 cycles).
+    dup is_odd assertz.err="pipe_double_words_preimage_to_memory_with_domain: num_words must be even"
+    # => [num_words, domain, write_ptr, COMMITMENT, ...]
 
-  # Compute end_ptr = write_ptr + num_words * 4 and reorder the stack (5 cycles).
-  mul.4 dup.2 add movup.2
-  # => [write_ptr, end_ptr, domain, COMMITMENT, ...]
+    # Compute end_ptr = write_ptr + num_words * 4 and reorder the stack (5 cycles).
+    mul.4 dup.2 add movup.2
+    # => [write_ptr, end_ptr, domain, COMMITMENT, ...]
 
-  # Build the capacity word `[0, domain, 0, 0]` on top of the stack (4 cycles).
-  push.0.0 movup.4 push.0
-  # => [C=[0, domain, 0, 0], write_ptr, end_ptr, COMMITMENT, ...]
+    # Build the capacity word `[0, domain, 0, 0]` on top of the stack (4 cycles).
+    push.0.0 movup.4 push.0
+    # => [C=[0, domain, 0, 0], write_ptr, end_ptr, COMMITMENT, ...]
 
-  # Fill in R0 and R1 with zeros (8 cycles).
-  exec.poseidon2::init_with_capacity
-  # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
+    # Fill in R0 and R1 with zeros (8 cycles).
+    exec.poseidon2::init_with_capacity
+    # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
-  # (9 + 3 * num_words cycles)
-  exec.pipe_double_words_to_memory
-  # => [R0', R1', C', write_ptr', COMMITMENT, ...]
+    # (9 + 3 * num_words cycles)
+    exec.pipe_double_words_to_memory
+    # => [R0', R1', C', write_ptr', COMMITMENT, ...]
 
-  # Leave just the digest on the stack (9 cycles).
-  exec.poseidon2::squeeze_digest
-  # => [DIGEST, write_ptr', COMMITMENT, ...]
+    # Leave just the digest on the stack (9 cycles).
+    exec.poseidon2::squeeze_digest
+    # => [DIGEST, write_ptr', COMMITMENT, ...]
+  end
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).
   movup.4 movdn.8

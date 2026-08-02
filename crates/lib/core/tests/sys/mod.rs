@@ -125,8 +125,21 @@ fn masm_claim_commitment_matches_native() {
 fn hash_elements_in_domain_matches_native() {
     use miden_core::{Felt, chiplets::hasher};
 
-    for num_elements in [0usize, 5, 8, 11, 16, 40] {
-        let values: Vec<u64> = (1..=num_elements as u64).collect();
+    let mut marked_rate_block = vec![0; 8];
+    marked_rate_block[0] = 1;
+    let cases = [
+        vec![],
+        vec![0; 8],
+        marked_rate_block,
+        (1..=5).collect(),
+        (1..=8).collect(),
+        (1..=11).collect(),
+        (1..=16).collect(),
+        (1..=40).collect(),
+    ];
+
+    for values in cases {
+        let num_elements = values.len();
         let felts: Vec<Felt> = values.iter().map(|&v| Felt::new_unchecked(v)).collect();
         let domain = miden_core::program::KERNEL_DOMAIN_TAG;
 
@@ -169,6 +182,36 @@ fn hash_elements_in_domain_matches_native() {
             .collect();
         expected.resize(16, 0);
         build_test!(source.as_str(), &[]).expect_stack(&expected);
+    }
+}
+
+#[test]
+fn element_hash_procedures_reject_non_u32_length() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    const NON_U32_LENGTH: u64 = u32::MAX as u64 + 1;
+    const PTR: u64 = 1000;
+    const ERROR_MSG: &str = "num_elements must fit in a u32";
+    let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
+
+    let invocations = [
+        format!("push.0 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::prepare_hasher_state"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements"),
+        format!("push.1 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements_in_domain"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::pad_and_hash_elements"),
+    ];
+
+    for invocation in invocations {
+        let source = format!("use miden::core::crypto::hashes::poseidon2 begin {invocation} end");
+        let test = build_test!(source.as_str(), &[]);
+        let err = test.execute().expect_err("a non-u32 length must be rejected");
+        match err {
+            ExecutionError::OperationError {
+                err: OperationError::U32AssertionFailed { err_code, .. },
+                ..
+            } => assert_eq!(err_code, expected_error_code),
+            err => panic!("expected a u32 assertion failure, got {err:?}"),
+        }
     }
 }
 

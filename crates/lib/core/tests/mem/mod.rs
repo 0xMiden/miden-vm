@@ -379,6 +379,40 @@ fn test_pipe_double_words_preimage_to_memory() {
 }
 
 #[test]
+fn test_pipe_empty_preimage_to_memory_with_domain() {
+    use miden_core::{chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+
+    const MEM_ADDR: u64 = 1000;
+    let source = format!(
+        "
+        use miden::core::mem
+
+        begin
+            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+
+            padw adv_loadw
+            push.{MEM_ADDR}
+            push.0
+            push.{domain}
+            exec.mem::pipe_double_words_preimage_to_memory_with_domain
+            swap drop
+        end
+        ",
+        domain = KERNEL_DOMAIN_TAG.as_canonical_u64(),
+    );
+
+    let commitment = hasher::hash_elements_in_domain(&[], KERNEL_DOMAIN_TAG);
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.append_word(commitment);
+
+    build_test!(source.as_str(), &[], advice_stack).expect_stack_and_memory(
+        &[MEM_ADDR],
+        MEM_ADDR as u32,
+        &[41, 42, 43, 44],
+    );
+}
+
+#[test]
 fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     let four_words = "
     use miden::core::mem

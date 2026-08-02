@@ -10,8 +10,8 @@
 //!
 //! with `domain_id` a registered 24-bit integer (`>= 1`) and `version` an 8-bit per-domain
 //! version (`>= 1`). The selector rides in the second capacity element of the Poseidon2 sponge
-//! (`hash_elements_in_domain`); the first capacity element is hash-owned and carries the padding
-//! rule, mirroring the RFC's frame/selector lane split. Unused parameter lanes are zero.
+//! (`hash_elements_in_domain`); the first capacity element carries the padding rule, and the third
+//! marks empty input. The fourth capacity element is zero in the initial framing state.
 //!
 //! # Provisional registry entries
 //!

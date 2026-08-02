@@ -193,7 +193,8 @@ pub(crate) trait AlgebraicSponge {
     }
 
     /// Hashes the provided `elements` alongside the provided `domain` identifier, allowing for
-    /// domain separation.
+    /// domain separation. Empty input under a nonzero domain is marked in the third capacity
+    /// element before applying the permutation.
     fn hash_elements_in_domain<E>(elements: &[E], domain: Felt) -> Word
     where
         E: BasedVectorSpace<Felt>,
@@ -251,12 +252,10 @@ where
         }
         S::apply_permutation(&mut state);
     } else if total_len == 0 && state[CAPACITY_RANGE.start + 1] != ZERO {
-        // Empty input with a nonzero domain. Absorb a ONE padding marker into the first rate
-        // slot before permuting. Without this marker the pre-permutation state is identical to
-        // the state after absorbing exactly RATE_WIDTH zeros, so hash_elements_in_domain(&[], d)
-        // would collide with hash_elements_in_domain(&[ZERO; RATE_WIDTH], d). This mirrors the
-        // bytes-path fix in `hash_bytes` (see 70dd4b1099): same 10* padding rule, same slot.
-        state[RATE_RANGE.start] = Felt::ONE;
+        // Mark an empty domain-separated input in an otherwise unused capacity element. Putting
+        // this marker in the rate would collide with a full rate block containing ONE followed by
+        // zeroes.
+        state[CAPACITY_RANGE.start + 2] = Felt::ONE;
         S::apply_permutation(&mut state);
     }
 
