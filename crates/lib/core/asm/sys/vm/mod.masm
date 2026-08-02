@@ -7,17 +7,9 @@ pub mod ood_frames
 pub mod public_inputs
 
 use miden::core::mem
+use miden::core::stark::utils
 use miden::core::stark::constants
 use miden::core::stark::verifier
-
-# Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
-# configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
-# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
-# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
-const CONJECTURED_BITS_PER_QUERY_FP = 193382
-
-# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
-const MAX_SECURITY_LEVEL = 128
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
@@ -32,7 +24,6 @@ const FELTS_PER_KERNEL_DIGEST = 4
 
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
-
 # Number of AIR instances contributing to the proof order.
 const NUM_MIDEN_AIRS = 3
 
@@ -47,46 +38,6 @@ const ACE_REGISTRY_ROOT_0 = 4203939832410250299
 const ACE_REGISTRY_ROOT_1 = 12914527915593930096
 const ACE_REGISTRY_ROOT_2 = 3268125648964005028
 const ACE_REGISTRY_ROOT_3 = 5037431390707430717
-
-#! Loads security parameters from the advice stack and stores them in memory.
-#!
-#! The advice stack must contain, in order:
-#!   [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-#!
-#! After this procedure, all four values are available in memory via the corresponding
-#! accessors in constants.masm (get_number_queries, get_query_pow_bits, etc.).
-#!
-#! Input:  [...]
-#! Output: [...]
-proc load_security_params
-    adv_push exec.constants::set_number_queries
-    adv_push exec.constants::set_query_pow_bits
-    adv_push exec.constants::set_deep_pow_bits
-    adv_push exec.constants::set_folding_pow_bits
-end
-
-#! Computes the conjectured security level (in bits) attained by the given proof parameters.
-#!
-#! Evaluates `min(((num_queries * C) >> 16) + query_pow_bits, 128)` using integer fixed point.
-#! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
-#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
-#!
-#! PRECONDITION: `num_queries <= 150`, so `num_queries * C` fits in a u32 (the `u32shr` below
-#! requires that). Parameters returned by `verify_vm_proof` satisfy this bound: the generic
-#! verifier enforces it.
-#!
-#! Inputs:  [num_queries, query_pow_bits, ...]
-#! Outputs: [level, ...]
-pub proc compute_conjectured_security_level(
-    num_queries: u32,
-    query_pow_bits: u32,
-) -> u32
-    push.CONJECTURED_BITS_PER_QUERY_FP mul
-    u32shr.16
-    add
-    push.MAX_SECURITY_LEVEL u32min
-    # => [level, ...]
-end
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
@@ -298,10 +249,10 @@ end
 #! from the advice stack and stored in memory for the generic verifier, which enforces their
 #! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
 #! parameters it was not produced with. This procedure holds no security-estimate formula and
-#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
-#! (e.g. with `compute_conjectured_security_level`) under its own policy. An estimate or policy
-#! change therefore never moves this procedure's root - request keys and registered proof
-#! packages stay valid across such changes.
+#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade (e.g.
+#! with `stark::utils::conjectured_security_level`) under its own policy. An estimate or policy
+#! change therefore never moves this procedure's root - request keys and registered proof packages
+#! stay valid across such changes.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
@@ -337,7 +288,7 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
 
     # --- Prepare VM verifier state ---------------------------------------------------------------
 
-    exec.load_security_params
+    exec.utils::load_security_params
     exec.materialize_kernel_witness
     exec.public_inputs::stage_boundary_inputs
     exec.load_air_context
@@ -356,10 +307,6 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
 
     # --- Return result ---------------------------------------------------------------------------
 
-    exec.constants::get_folding_pow_bits
-    exec.constants::get_deep_pow_bits
-    exec.constants::get_query_pow_bits
-    exec.constants::get_number_queries
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
     exec.public_inputs::load_deferred_root
     # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]

@@ -324,7 +324,7 @@ fn proof_request_round_trip_retrieves_registered_package() {
     .expect_stack(&expected);
 }
 
-/// The MASM `sys::vm::compute_conjectured_security_level` procedure must agree with the native
+/// The MASM `stark::utils::conjectured_security_level` procedure must agree with the native
 /// `miden_air::config::conjectured_security_level` on every input in the verifier's domain:
 /// `num_queries` is effectively a `u8` (the generic verifier bounds it to `<= 150`) and
 /// `query_pow_bits < 32`. One VM run evaluates the whole grid, storing the MASM level for
@@ -341,7 +341,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
 
     let source = format!(
         "
-        use miden::core::sys::vm
+        use miden::core::stark::utils
 
         begin
             push.0
@@ -354,7 +354,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
                     # => [pow, nq]
                     dup dup.2
                     # => [nq, pow, pow, nq]
-                    exec.vm::compute_conjectured_security_level
+                    exec.utils::conjectured_security_level
                     # => [level, pow, nq]
                     dup.2 push.{POW_BOUND} mul dup.2 add
                     # => [nq*POW_BOUND + pow, level, pow, nq]
@@ -403,11 +403,11 @@ fn security_level_threshold_rejects_below_target() {
 
     let source = format!(
         "
-        use miden::core::sys::vm
+        use miden::core::stark::utils
 
         begin
             # Stack: [num_queries, query_pow_bits] - as returned by `verify_vm_proof`.
-            exec.vm::compute_conjectured_security_level
+            exec.utils::conjectured_security_level
             u32lt.{TARGET} assertz
         end
         "

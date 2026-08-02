@@ -15,6 +15,7 @@ use miden_core::{
     crypto::merkle::MerkleStore,
     deferred::DeferredRoot,
     field::{BasedVectorSpace, QuadFelt},
+    program::proof_request_key,
     proof::{HashFunction, StarkProof as SerializedStarkProof},
 };
 use miden_crypto::{
@@ -28,6 +29,7 @@ use miden_crypto::{
 };
 use miden_lifted_air::Statement;
 use miden_lifted_stark::VerifierInstance;
+use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
 use crate::{
@@ -46,13 +48,52 @@ type P2Lmcs = <Poseidon2Config as StarkConfig<Felt, Challenge>>::Lmcs;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MasmVerifierInputs {
     /// Deferred-root limbs, in the order expected by `StackInputs::try_from_ints`.
-    pub initial_stack: Vec<u64>,
+    initial_stack: [u64; 4],
     /// Sequential advice tape consumed by the verifier.
     pub advice_stack: Vec<u64>,
     /// Partial DEEP/FRI/setup/registry trees needed by `mtree_get`.
     pub store: MerkleStore,
     /// Opened row data and the selected ACE instruction stream, keyed by commitment.
     pub advice_map: Vec<(Word, Vec<Felt>)>,
+}
+
+impl MasmVerifierInputs {
+    /// Returns the canonical deferred-root limbs for the verifier's initial stack.
+    pub fn initial_stack(&self) -> &[u64; 4] {
+        &self.initial_stack
+    }
+
+    /// Moves the proof stream into the advice map under
+    /// `proof_request_key(verifier_root, deferred_root)`, leaving the advice stack empty.
+    ///
+    /// The deferred root serves directly as the PVM claim commitment. The request key only
+    /// addresses the package; `pvm::verify_proof` still verifies its contents against the caller's
+    /// root.
+    /// Merkle nodes, opened rows, the ACE circuit, and the proof stream can therefore be merged
+    /// with other packages in one advice provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MasmVerifierInputError::NonCanonicalAdviceValue`] if the public advice stack was
+    /// modified to contain an integer outside the base field.
+    pub fn into_request_package(
+        mut self,
+        verifier_root: Word,
+    ) -> Result<Self, MasmVerifierInputError> {
+        let deferred_root = Word::try_from(self.initial_stack)
+            .expect("the generated deferred-root stack is canonical");
+        let key = proof_request_key(verifier_root, deferred_root);
+        let proof_stream = core::mem::take(&mut self.advice_stack)
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                Felt::try_from(value)
+                    .map_err(|_| MasmVerifierInputError::NonCanonicalAdviceValue { index, value })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.advice_map.push((key, proof_stream));
+        Ok(self)
+    }
 }
 
 /// Failures while parsing and adapting a PVM proof for the MASM verifier.
@@ -64,6 +105,9 @@ pub enum MasmVerifierInputError {
     /// The serialized proof exceeds the adapter's allocation limit.
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
     ProofTooLarge { size: usize, max: usize },
+    /// A caller modified the generated advice stack with a non-canonical field element.
+    #[error("advice stack value at index {index} is not a canonical field element: {value}")]
+    NonCanonicalAdviceValue { index: usize, value: u64 },
     /// The serialized proof could not be decoded.
     #[error("proof deserialization error: {0}")]
     ProofDeserialization(String),
@@ -79,27 +123,7 @@ pub enum MasmVerifierInputError {
 }
 
 type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
-type BatchMerkleResult = (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>);
-
-// `wincode::config::deserialize_exact` requires the schema type and decoded type to match;
-// `SerdeCompat<T>` decodes to `T`, so enforce EOF around its reader directly.
-fn deserialize_serde_exact<'de, T, C>(
-    mut source: &'de [u8],
-    _config: C,
-) -> wincode::error::ReadResult<T>
-where
-    C: wincode::config::Config,
-    T: serde::Deserialize<'de>,
-{
-    use wincode::{SchemaRead, io::Reader};
-
-    let value = <SerdeCompat<T> as SchemaRead<'de, C>>::get(source.by_ref())?;
-    if source.is_empty() {
-        Ok(value)
-    } else {
-        Err(wincode::error::trailing_bytes())
-    }
-}
+type BatchMerkleResult = (PartialMerkleTree, Vec<(Word, Vec<Felt>)>);
 
 /// Deserialize a Poseidon2 PVM STARK proof and build the nondeterministic inputs for the MASM
 /// verifier.
@@ -111,7 +135,10 @@ pub fn generate_masm_verifier_inputs(
         return Err(MasmVerifierInputError::UnsupportedHashFunction);
     }
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
-        return Err(MasmVerifierInputError::InvalidProofShape("serialized proof exceeds 64 MiB"));
+        return Err(MasmVerifierInputError::ProofTooLarge {
+            size: proof.bytes().len(),
+            max: MAX_STARK_PROOF_BYTES,
+        });
     }
 
     let config = poseidon2_config(
@@ -121,9 +148,14 @@ pub fn generate_masm_verifier_inputs(
     let preprocessed = preprocessed_cache::poseidon2(&config);
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof_data: StarkProofData<Felt, Challenge, Poseidon2Config> =
-        deserialize_serde_exact(proof.bytes(), proof_encoding_config)
-            .map_err(|err| MasmVerifierInputError::ProofDeserialization(err.to_string()))?;
+    let proof_data: StarkProofData<Felt, Challenge, Poseidon2Config> = deserialize_schema_exact::<
+        SerdeCompat<StarkProofData<Felt, Challenge, Poseidon2Config>>,
+        _,
+    >(
+        proof.bytes(),
+        proof_encoding_config,
+    )
+    .map_err(|err| MasmVerifierInputError::ProofDeserialization(err.to_string()))?;
 
     let statement =
         Statement::new(ChipletMultiAir::new(), public_root.as_elements().to_vec(), Vec::new())
@@ -171,7 +203,7 @@ fn build_inputs(
     }
 
     let params = config.pcs();
-    let initial_stack = public_root.as_elements().iter().map(Felt::as_canonical_u64).collect();
+    let initial_stack = public_root.into();
     let mut advice_stack = vec![
         params.num_queries() as u64,
         params.query_pow_bits() as u64,
@@ -191,7 +223,7 @@ fn build_inputs(
     let deep_alpha = pcs.deep_proof.challenge_columns;
     let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
     advice_stack.extend([deep_coeffs[1].as_canonical_u64(), deep_coeffs[0].as_canonical_u64()]);
-    append_ood_evaluations(&mut advice_stack, pcs);
+    append_ood_evaluations(&mut advice_stack, pcs)?;
     advice_stack.push(pcs.deep_proof.pow_witness.as_canonical_u64());
 
     for round in &pcs.fri_proof.rounds {
@@ -214,7 +246,10 @@ fn build_inputs(
     })
 }
 
-fn append_ood_evaluations<L>(advice_stack: &mut Vec<u64>, pcs: &PcsProof<Challenge, L>)
+fn append_ood_evaluations<L>(
+    advice_stack: &mut Vec<u64>,
+    pcs: &PcsProof<Challenge, L>,
+) -> Result<(), MasmVerifierInputError>
 where
     L: Lmcs<F = Felt>,
 {
@@ -224,14 +259,20 @@ where
         for matrix in group {
             let width = matrix.width;
             let values = matrix.values.as_slice();
+            if values.len() != width && values.len() != 2 * width {
+                return Err(MasmVerifierInputError::InvalidProofShape(
+                    "OOD matrix must hold exactly one or two rows",
+                ));
+            }
             local_values.extend_from_slice(&values[..width]);
-            if values.len() > width {
-                next_values.extend_from_slice(&values[width..2 * width]);
+            if values.len() == 2 * width {
+                next_values.extend_from_slice(&values[width..]);
             }
         }
     }
     advice_stack.extend(challenges_to_u64s(&local_values));
     advice_stack.extend(challenges_to_u64s(&next_values));
+    Ok(())
 }
 
 fn build_merkle_data(
@@ -241,25 +282,15 @@ fn build_merkle_data(
     proof_order: &[usize; NUM_CHIPLETS],
 ) -> Result<MerkleAdvice, MasmVerifierInputError> {
     let lmcs = config.lmcs();
-    let mut partial_trees = Vec::new();
+    let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
 
     // The first DEEP witness is the setup-fixed preprocessed tree. The remaining witnesses are
-    // main, auxiliary, and quotient; preserving the parsed group order is part of the ABI.
-    for batch_proof in stark.pcs_proof.deep_witnesses.iter() {
-        let (trees, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
-        partial_trees.extend(trees);
-        advice_map.extend(entries);
-    }
-    for batch_proof in stark.pcs_proof.fri_witnesses.iter() {
-        let (trees, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
-        partial_trees.extend(trees);
-        advice_map.extend(entries);
-    }
-
-    let mut store = MerkleStore::new();
-    for tree in &partial_trees {
+    // main, auxiliary, and quotient. FRI witnesses follow them in proof order.
+    for batch_proof in stark.pcs_proof.deep_witnesses.iter().chain(&stark.pcs_proof.fri_witnesses) {
+        let (tree, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
         store.extend(tree.inner_nodes());
+        advice_map.extend(entries);
     }
 
     let order_tag = order_tag_from_log_heights(log_heights);
@@ -319,12 +350,12 @@ where
     }
     let tree = PartialMerkleTree::with_paths(paths)
         .map_err(|_| MasmVerifierInputError::InvalidProofShape("invalid Merkle paths"))?;
-    Ok((vec![tree], advice_entries))
+    Ok((tree, advice_entries))
 }
 
-fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
+fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> [u64; 4] {
     let felts: [Felt; 4] = commitment.into();
-    felts.iter().map(Felt::as_canonical_u64).collect()
+    felts.map(|felt| felt.as_canonical_u64())
 }
 
 fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
@@ -360,4 +391,53 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn request_package_moves_the_proof_under_the_pvm_claim_key() {
+        let proof_stream = vec![1, 2, 3, 4];
+        let deferred_root = Word::from([11u64, 12, 13, 14].map(Felt::new_unchecked));
+        let verifier_root = Word::from([21u64, 22, 23, 24].map(Felt::new_unchecked));
+        let existing = (
+            Word::from([31u64, 32, 33, 34].map(Felt::new_unchecked)),
+            vec![Felt::new_unchecked(7)],
+        );
+        let inputs = MasmVerifierInputs {
+            initial_stack: deferred_root.into(),
+            advice_stack: proof_stream.clone(),
+            store: MerkleStore::new(),
+            advice_map: vec![existing.clone()],
+        };
+
+        let package = inputs
+            .into_request_package(verifier_root)
+            .expect("canonical generated advice must package");
+
+        assert!(package.advice_stack.is_empty());
+        assert_eq!(package.advice_map[0], existing);
+        assert_eq!(
+            package.advice_map[1],
+            (
+                proof_request_key(verifier_root, deferred_root),
+                proof_stream.into_iter().map(Felt::new_unchecked).collect(),
+            )
+        );
+    }
+
+    #[test]
+    fn request_package_rejects_noncanonical_advice_values() {
+        let invalid = u64::MAX;
+        let inputs = MasmVerifierInputs {
+            initial_stack: [0; 4],
+            advice_stack: vec![invalid],
+            store: MerkleStore::new(),
+            advice_map: Vec::new(),
+        };
+
+        assert!(matches!(
+            inputs.into_request_package(Word::default()),
+            Err(MasmVerifierInputError::NonCanonicalAdviceValue {
+                index: 0,
+                value,
+            }) if value == invalid
+        ));
+    }
 }

@@ -6,8 +6,8 @@ claims for Miden VM execution proofs.
 The crate is primarily a workspace component. Its supported integration entry
 points are the root-level deferred proving and verification helpers used by
 `miden-prover` and `miden-verifier`, plus the `masm_verifier` host adapter for
-`miden::core::sys::pvm::verify_proof`; the chiplet/session modules remain
-crate-private.
+`miden::core::sys::pvm::verify_proof` when `std` is enabled; the chiplet/session
+modules remain crate-private.
 
 ## What's here
 

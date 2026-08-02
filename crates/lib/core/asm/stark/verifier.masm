@@ -22,7 +22,7 @@ use miden::core::stark::utils
 #!
 #! Before calling this procedure, a relation wrapper must:
 #!
-#! - validate and store the transcript-bound security parameters;
+#! - store the transcript-bound security parameters, which this procedure validates;
 #! - store its relation digest, registry root, canonical AIR heights, and proof-order tag;
 #! - stage its fixed OOD and query-row addresses in the generic context cells; and
 #! - supply the five hooks listed above in the documented ABI order.
@@ -37,7 +37,7 @@ use miden::core::stark::utils
 #! - Constraint folding, OOD evaluations, and aux-trace values use the quadratic extension field.
 #!
 #! Inputs:  [D0, D1, D2, D3, D4]
-#! Outputs: []
+#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 pub proc verify
 
     #==============================================================================================
@@ -183,4 +183,10 @@ pub proc verify
     #============================================
 
     exec.frie2f4::verify
+
+    # Return the transcript-bound parameters for the relation wrapper's caller to grade.
+    exec.constants::get_folding_pow_bits
+    exec.constants::get_deep_pow_bits
+    exec.constants::get_query_pow_bits
+    exec.constants::get_number_queries
 end

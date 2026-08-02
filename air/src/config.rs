@@ -75,7 +75,7 @@ const QUERY_POW_BITS: usize = 17;
 /// this configuration's blowup (8) and challenge field (~128 bits):
 /// `floor(-log2(rho + eta) * 2^16)` with `rho = 1/8` and the random-words cutoff
 /// `eta = log2(e/rho) * rho / 128` (<https://eprint.iacr.org/2025/2010>, section 1.5), i.e.
-/// ~2.9508 bits per query. Must match the constant in `crates/lib/core/asm/sys/vm/mod.masm`
+/// ~2.9508 bits per query. Must match the constant in `crates/lib/core/asm/stark/utils.masm`
 /// (enforced by cross-tests).
 pub const CONJECTURED_BITS_PER_QUERY_FP: u64 = 193_382;
 
@@ -87,7 +87,7 @@ pub const MAX_SECURITY_LEVEL: u32 = 128;
 /// query count and query-phase grinding bits, under this configuration's fixed blowup and
 /// challenge field.
 ///
-/// The computation is integer fixed-point — `min((num_queries * C) >> 16 + query_pow, 128)` —
+/// The computation is integer fixed-point — `min(((num_queries * C) >> 16) + query_pow, 128)` —
 /// so the MASM mirror can match it bit-for-bit; the constant is floored, so the result never
 /// exceeds the real-valued formula (conservative by at most one bit). `num_queries` is a FRI
 /// query count (the verifier bounds it to `<= 150`), so the product fits comfortably in a `u32`.

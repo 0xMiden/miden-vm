@@ -2210,18 +2210,22 @@ dependencies = [
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",
+ "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
  "miden-precompiles-prover",
  "miden-processor",
+ "miden-prover",
  "miden-test-utils",
  "miden-utils-sync",
+ "miden-verifier",
  "num",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rstest",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

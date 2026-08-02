@@ -38,6 +38,20 @@ use crate::handlers::{
     u256_div::{U256_DIV_EVENT_NAME, handle_u256_div},
 };
 
+/// Event emitted by `sys::pvm::request_proof` to request an asynchronously supplied PVM proof
+/// package. The PVM verifier root is at stack positions 1 through 4 and the deferred root is at
+/// positions 5 through 8.
+///
+/// Emitting the event does not authenticate the root. The calling program must establish it before
+/// making the request and must verify the returned PVM proof against the unchanged value.
+///
+/// The core library does not register a default handler. Hosts that support on-demand settlement
+/// should handle this event and return advice-map and Merkle-store mutations containing a package
+/// keyed by `proof_request_key(pvm_verifier_root, deferred_root)`. The procedure fetches that
+/// package after the handler returns.
+pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
+    EventName::new("miden::core::sys::pvm::request_proof");
+
 // CORE LIBRARY
 // ================================================================================================
 
@@ -154,6 +168,17 @@ impl CoreLibrary {
         self.core_package
             .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
             .expect("verify_vm_proof is exported from the core library")
+    }
+
+    /// Returns the MAST root of `sys::pvm::verify_proof` — the verifier identity under which PVM
+    /// proof packages are content-addressed.
+    ///
+    /// A host passes this root to the PVM advice builder when registering a package. A consumer
+    /// derives the same root in-VM with `procref`, avoiding a duplicated constant.
+    pub fn pvm_recursive_verifier_root(&self) -> Word {
+        self.core_package
+            .get_procedure_root_by_path("::miden::core::sys::pvm::verify_proof")
+            .expect("pvm::verify_proof is exported from the core library")
     }
 
     /// Returns the default event handlers required by the core library.

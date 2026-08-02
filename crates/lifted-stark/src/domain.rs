@@ -619,8 +619,8 @@ pub struct QuotientRecompositionInputs<F> {
 ///
 /// The result is independent of the trace height: the canonical LDE shift changes with the trace
 /// height in exactly the inverse way to the final `N`-th power. The implementation constructs the
-/// height-one canonical domain and delegates to [`EvaluationDomain`], the same domain object used
-/// by the verifier's quotient reconstruction.
+/// height-one canonical domain and delegates to the same evaluation-domain implementation used by
+/// the verifier's quotient reconstruction.
 pub fn quotient_recomposition_inputs<F: TwoAdicField>(
     log_quotient_degree: u8,
     log_blowup: u8,

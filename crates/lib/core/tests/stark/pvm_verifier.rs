@@ -8,11 +8,13 @@ use miden_core::{
     deferred::{DeferredRoot, DeferredState, Node, PrecompileRegistry},
     proof::{DeferredProof, HashFunction, StarkProof},
 };
+use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
 use miden_precompiles_prover::{
     masm_verifier::{MasmVerifierInputError, MasmVerifierInputs, generate_masm_verifier_inputs},
     prove_deferred_state,
 };
+use miden_processor::ExecutionOutput;
 use miden_utils_testing::recursive_verifier::VerifierData;
 
 use super::{EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data};
@@ -44,13 +46,17 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         pvm_order_tag(&long),
         "fixtures must exercise distinct registry leaves",
     );
-    run_pvm_verifier(&short).expect("PVM MASM verifier must accept the short proof");
-    run_pvm_verifier(&long).expect("PVM MASM verifier must accept the long proof");
+    let short_output =
+        run_pvm_verifier(&short).expect("PVM MASM verifier must accept the short proof");
+    assert_pvm_security_params(&short, &short_output);
+    let long_output =
+        run_pvm_verifier(&long).expect("PVM MASM verifier must accept the long proof");
+    assert_pvm_security_params(&long, &long_output);
 
-    let mut wrong_root = short.clone();
-    wrong_root.initial_stack[0] ^= 1;
+    let mut wrong_root = *short.initial_stack();
+    wrong_root[0] ^= 1;
     assert!(
-        run_pvm_verifier(&wrong_root).is_err(),
+        run_pvm_verifier_with_stack(&short, &wrong_root).is_err(),
         "the proof must not authenticate a different deferred root",
     );
 
@@ -60,6 +66,15 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         run_pvm_verifier(&wrong_shape).is_err(),
         "the proof must not authenticate different trace-shape metadata",
     );
+
+    for index in 0..4 {
+        let mut wrong_params = short.clone();
+        wrong_params.advice_stack[index] ^= 1;
+        assert!(
+            run_pvm_verifier(&wrong_params).is_err(),
+            "security parameter {index} must be bound into the transcript",
+        );
+    }
 
     let mut corrupt_circuit = short.clone();
     let circuit_stream = &mut corrupt_circuit
@@ -76,6 +91,40 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
     run_interleaved_verifiers(&vm, &short)
         .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
+}
+
+#[test]
+fn pvm_proof_package_can_be_fetched_by_content() {
+    let (proof, root) = prove_keccak_claim(b"content-addressed PVM proof fixture");
+    let direct =
+        generate_masm_verifier_inputs(&proof, root).expect("host adapter must parse proof");
+    let verifier_root = CoreLibrary::default().pvm_recursive_verifier_root();
+    let package = direct
+        .clone()
+        .into_request_package(verifier_root)
+        .expect("generated advice values must be canonical");
+
+    let source = "
+        use miden::core::sys
+        use miden::core::sys::pvm
+        begin
+            dupw
+            procref.pvm::verify_proof
+            exec.sys::build_proof_request_key
+            adv.push_mapval dropw
+            exec.pvm::verify_proof
+            exec.sys::truncate_stack
+        end
+    ";
+    let test = build_test!(
+        source,
+        package.initial_stack(),
+        &package.advice_stack,
+        package.store,
+        package.advice_map,
+    );
+    let (output, _) = test.execute_for_output().expect("fetched PVM proof must verify");
+    assert_pvm_security_params(&direct, &output);
 }
 
 fn prove_keccak_claim(input: &[u8]) -> (StarkProof, DeferredRoot) {
@@ -118,21 +167,45 @@ fn prove_keccak_claim(input: &[u8]) -> (StarkProof, DeferredRoot) {
     }
 }
 
-fn run_pvm_verifier(inputs: &MasmVerifierInputs) -> Result<(), miden_processor::ExecutionError> {
+fn run_pvm_verifier(
+    inputs: &MasmVerifierInputs,
+) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
+    run_pvm_verifier_with_stack(inputs, inputs.initial_stack())
+}
+
+fn run_pvm_verifier_with_stack(
+    inputs: &MasmVerifierInputs,
+    initial_stack: &[u64; 4],
+) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
     let source = "
+        use miden::core::sys
         use miden::core::sys::pvm
         begin
             exec.pvm::verify_proof
+            exec.sys::truncate_stack
         end
     ";
     let test = build_test!(
         source,
-        &inputs.initial_stack,
+        initial_stack,
         &inputs.advice_stack,
         inputs.store.clone(),
         inputs.advice_map.clone(),
     );
-    test.execute().map(|_| ())
+    test.execute_for_output().map(|(output, _)| output)
+}
+
+fn assert_pvm_security_params(inputs: &MasmVerifierInputs, output: &ExecutionOutput) {
+    let mut expected: Vec<Felt> =
+        inputs.advice_stack[..4].iter().copied().map(Felt::new_unchecked).collect();
+    // The root occupied the next stack word before verification. Requiring zero padding beneath
+    // the returned parameters proves that the verifier consumed it instead of returning it too.
+    expected.extend([Felt::ZERO; 4]);
+    assert_eq!(
+        output.stack.get_num_elements(expected.len()),
+        expected,
+        "the verifier must consume the root and return only its transcript-bound security parameters",
+    );
 }
 
 fn pvm_order_tag(inputs: &MasmVerifierInputs) -> u32 {
@@ -150,9 +223,9 @@ fn run_interleaved_verifiers(
     pvm: &MasmVerifierInputs,
 ) -> Result<(), miden_processor::ExecutionError> {
     let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(&vm.advice_stack());
+    advice_stack.extend_from_slice(vm.advice_stack());
     advice_stack.extend_from_slice(&pvm.advice_stack);
-    advice_stack.extend_from_slice(&vm.advice_stack());
+    advice_stack.extend_from_slice(vm.advice_stack());
     advice_stack.extend_from_slice(&pvm.advice_stack);
 
     let mut store = vm.store.clone();
@@ -161,27 +234,13 @@ fn run_interleaved_verifiers(
     advice_map.extend_from_slice(&pvm.advice_map);
 
     let vm_operands = push_operands(&vm.initial_stack());
-    let pvm_operands = push_operands(&pvm.initial_stack);
+    let pvm_operands = push_operands(pvm.initial_stack());
     let source = format!(
         "
         use miden::core::sys::pvm
         use miden::core::sys::vm
 
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                padw adv_loadw
-                dup.4 mem_storew_le dropw
-                add.4
-                swap sub.4 swap
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
-
         proc verify_vm
-            push.40 push.4096
-            exec.copy_advice_to_mem
             exec.vm::verify_vm_proof
             dropw dropw
         end
@@ -191,10 +250,12 @@ fn run_interleaved_verifiers(
             exec.verify_vm
             {pvm_operands}
             exec.pvm::verify_proof
+            dropw
             {vm_operands}
             exec.verify_vm
             {pvm_operands}
             exec.pvm::verify_proof
+            dropw
         end
         "
     );

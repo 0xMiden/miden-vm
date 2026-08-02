@@ -523,19 +523,15 @@ mod tests {
     }
 
     #[test]
-    fn pvm_wrapper_matches_the_registry_and_pcs_policy() {
+    fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
         use miden_lifted_air::{BaseAir, LiftedAir};
 
-        use crate::{
-            ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_RELATION_DIGEST},
-            stark_config::precompile_pcs_params,
-        };
+        use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_RELATION_DIGEST};
 
         const WRAPPER_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
-        let params = precompile_pcs_params();
         assert_eq!(masm_const(WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let derived_minima: Vec<u64> = ChipletAir::all()
             .iter()
@@ -552,20 +548,6 @@ mod tests {
             .map(|i| masm_const(WRAPPER_PATH, &alloc::format!("MIN_LOG_HEIGHT_{i}")))
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
-        assert_eq!(masm_const(WRAPPER_PATH, "ACCEPTABLE_NUM_QUERIES"), params.num_queries() as u64);
-        assert_eq!(
-            masm_const(WRAPPER_PATH, "ACCEPTABLE_QUERY_POW_BITS"),
-            params.query_pow_bits() as u64
-        );
-        assert_eq!(
-            masm_const(WRAPPER_PATH, "ACCEPTABLE_DEEP_POW_BITS"),
-            params.deep_pow_bits() as u64
-        );
-        assert_eq!(
-            masm_const(WRAPPER_PATH, "ACCEPTABLE_FOLDING_POW_BITS"),
-            params.folding_pow_bits() as u64
-        );
-
         for (prefix, expected) in [
             ("RELATION_DIGEST", PVM_RELATION_DIGEST),
             ("ACE_REGISTRY_ROOT", PVM_ACE_REGISTRY_ROOT),

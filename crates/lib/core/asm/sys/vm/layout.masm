@@ -17,7 +17,8 @@ use miden::core::stark::constants
 ### Number of kernel procedures in the authenticated witness.
 const NUM_KERNEL_PROCEDURES_PTR = 3223322764
 
-### Gap at 3223322765..3223322767 keeps the following scratch words aligned.
+### Reserved alignment cells before the word-aligned scratch region.
+const CONTROL_ALIGNMENT_PADDING_PTR = 3223322765
 
 ### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
 ### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
@@ -36,7 +37,8 @@ const CLAIM_COMMITMENT_PTR = 3223322776
 ### Verifier-owned claim preimage (40 felts: P | K | I | O).
 const CLAIM_PTR = 3223322780
 
-### Gap at 3223322820..3223322835 preserves the established boundary and witness anchors.
+### Reserved cells preserving the established boundary and witness anchors.
+const BOUNDARY_ANCHOR_PADDING_PTR = 3223322820
 
 ### Boundary block [program_digest | deferred_root].
 const BOUNDARY_INPUTS_PTR = 3223322836
@@ -61,8 +63,7 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##                           [ chiplets selectors       ]  slots 14..16
 ##                           [ Poseidon2 selectors      ]  slots 17..19
 ##   ACE_CIRCUIT_STREAM_PTR
-##                       --> [ ACE circuit stream       ]  6008 felts
-##                           [ reserved guard band      ]    32 felts
+##                       --> [ stream + reserved tail   ]  6040 felts
 
 ### Two extension-field elements: beta followed by alpha, four base felts total.
 const AUX_RAND_ELEM_PTR = 3225419776
@@ -78,9 +79,9 @@ const AUX_BUS_BOUNDARY_PTR = 3225420328
 ### for each of the VM's core, chiplets, and Poseidon2-permutation AIRs.
 const AUXILIARY_ACE_INPUTS_PTR = 3225420336
 
-### Factored ACE circuit stream: 104 order-dependent prefix blocks followed by 647 common blocks.
-### The VM region reserves 6040 felts. Its final 32 felts form a guard band before the adjacent
-### PVM allocation.
+### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
+### `ACE_COMMON_BLOCKS`. The region reserves 6040 felts; the tail beyond the stream keeps the
+### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
 const ACE_CIRCUIT_STREAM_PTR = 3225420376
 
 ### Scratch row for DEEP query openings: 96 main, 24 auxiliary-coordinate, and 16 quotient felts.

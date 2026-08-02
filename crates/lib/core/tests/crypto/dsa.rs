@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
-    Felt, Word,
+    Felt,
     deferred::DeferredState,
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
@@ -22,7 +22,13 @@ use miden_processor::{
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-use crate::helpers::masm_store_felts;
+use crate::{
+    helpers::{masm_push_word, masm_store_felts},
+    support::ecdsa::{
+        EcdsaFixture as Fixture, fixture_from_signing_key, generator_public_key_fixture,
+        valid_fixture,
+    },
+};
 
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
 const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
@@ -157,7 +163,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
 #[test]
 fn core_ecdsa_k256_keccak_verify_traps_on_wrong_pk_comm() {
     let mut fixture = valid_fixture();
-    tamper_felt(&mut fixture.pk_comm[0]);
+    tamper_felt(&mut fixture.public_key_commitment[0]);
 
     run_verify(&fixture).expect_err("wrong public key commitment must trap");
 }
@@ -166,7 +172,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_wrong_pk_comm() {
 fn core_ecdsa_k256_keccak_verify_traps_on_off_curve_public_key() {
     let mut fixture = valid_fixture();
     fixture.advice[8..16].copy_from_slice(&[Felt::from_u32(0); 8]);
-    fixture.pk_comm = Poseidon2::hash_elements(&fixture.advice[..16]);
+    fixture.public_key_commitment = Poseidon2::hash_elements(&fixture.advice[..16]);
 
     run_verify(&fixture).expect_err("off-curve public key advice must trap");
 }
@@ -177,7 +183,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_non_u32_limb() {
 
     let mut pubkey_fixture = valid_fixture();
     pubkey_fixture.advice[0] = non_u32;
-    pubkey_fixture.pk_comm = Poseidon2::hash_elements(&pubkey_fixture.advice[..16]);
+    pubkey_fixture.public_key_commitment = Poseidon2::hash_elements(&pubkey_fixture.advice[..16]);
     run_verify(&pubkey_fixture).expect_err("non-u32 public-key limb must trap");
 
     let mut r_fixture = valid_fixture();
@@ -232,7 +238,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_valid_but_wrong_public_key() {
     );
 
     fixture.advice[..16].copy_from_slice(&wrong_public_key_elements);
-    fixture.pk_comm = ecdsa_k256_keccak::public_key_commitment(&wrong_public_key);
+    fixture.public_key_commitment = ecdsa_k256_keccak::public_key_commitment(&wrong_public_key);
 
     run_verify(&fixture).expect_err("valid signature under wrong public key must trap");
 }
@@ -270,63 +276,6 @@ fn run_verify_bytes(
 
     run_core_program_with_advice(&source, &advice)
 }
-
-struct Fixture {
-    public_key: PublicKey,
-    signature: Signature,
-    pk_comm: Word,
-    message: Word,
-    advice: Vec<Felt>,
-}
-
-fn valid_fixture() -> Fixture {
-    fixture_from_signing_key(default_signing_key())
-}
-
-fn default_signing_key() -> SigningKey {
-    let mut rng = ChaCha20Rng::from_seed([0xe5; 32]);
-    SigningKey::with_rng(&mut rng)
-}
-
-fn generator_public_key_fixture() -> Fixture {
-    let mut secret_key_bytes = [0u8; 32];
-    secret_key_bytes[31] = 1;
-    let sk = SigningKey::read_from_bytes(&secret_key_bytes).expect("scalar 1 is a valid key");
-
-    fixture_from_signing_key(sk)
-}
-
-fn fixture_from_signing_key(sk: SigningKey) -> Fixture {
-    let message = fixed_message();
-    let public_key = sk.public_key();
-    let signature = sk.sign(message);
-
-    assert!(
-        public_key.verify(message, &signature),
-        "Rust fixture signature must verify before passing it to MASM",
-    );
-
-    let pk_comm = ecdsa_k256_keccak::public_key_commitment(&public_key);
-    let advice = ecdsa_k256_keccak::encode_signature(&public_key, &signature);
-
-    Fixture {
-        public_key,
-        signature,
-        pk_comm,
-        message,
-        advice,
-    }
-}
-
-fn fixed_message() -> Word {
-    Word::new([
-        Felt::new_unchecked(0x0001_0203_0405_0607),
-        Felt::new_unchecked(0x0809_0a0b_0c0d_0e0f),
-        Felt::new_unchecked(0x1011_1213_1415_1617),
-        Felt::new_unchecked(0x1819_1a1b_1c1d_1e1f),
-    ])
-}
-
 fn public_key_elements(public_key: &PublicKey) -> [Felt; 16] {
     public_key
         .to_elements()
@@ -420,7 +369,7 @@ fn verify_cycle_source(fixture: &Fixture) -> String {
 
 fn verify_setup(fixture: &Fixture) -> String {
     let message = masm_push_word(&fixture.message);
-    let pk_comm = masm_push_word(&fixture.pk_comm);
+    let pk_comm = masm_push_word(&fixture.public_key_commitment);
 
     format!(
         r#"
@@ -428,16 +377,6 @@ fn verify_setup(fixture: &Fixture) -> String {
         {pk_comm}
         "#,
     )
-}
-
-fn masm_push_word(word: &Word) -> String {
-    let felts = word
-        .iter()
-        .rev()
-        .map(|felt| felt.as_canonical_u64().to_string())
-        .collect::<Vec<_>>()
-        .join(".");
-    format!("push.{felts}")
 }
 
 fn run_core_program_with_advice(
