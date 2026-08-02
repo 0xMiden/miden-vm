@@ -9,6 +9,9 @@ const MAX_AUX_INPUTS = 0
 const NUM_AUX_INPUTS = 0
 const NUM_CHIPLETS = 10
 
+# After two full rate blocks, `h4..h9` remain in the challenger input buffer.
+const BUFFERED_SHAPE_VALUE_COUNT = 6
+
 # Trusted setup commitment observed by the lifted STARK verifier before the statement.
 # Pinned against PVM_PREPROCESSED_COMMITMENT by a Rust/MASM oracle.
 const PREPROCESSED_COMMITMENT_0 = 7881474831680931516
@@ -73,27 +76,32 @@ pub proc process_public_inputs
     exec.layout::aux_rand_elem_ptr
     exec.public_inputs::compute_and_store_public_inputs_address
 
-    # Default Statement::observe: length-prefixed public inputs, then empty aux-input metadata.
-    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.2 mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.4 mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.6 mem_load exec.random_coin::observe_felt
-    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
-    push.NUM_AUX_INPUTS exec.random_coin::observe_felt
+    # Complete the first rate block with `[4, D0, D1, D2]`.
+    exec.layout::public_inputs_ptr add.4 mem_load
+    exec.layout::public_inputs_ptr add.2 mem_load
+    exec.layout::public_inputs_ptr mem_load
+    push.NUM_PUBLIC_VALUES
+    exec.random_coin::observe_word_and_flush_buffer
 
-    # TraceOrder::observe_shape: relation count followed by heights in canonical instance order.
-    push.NUM_CHIPLETS exec.random_coin::observe_felt
-    push.0
-    repeat.NUM_CHIPLETS
-        dup exec.constants::air_trace_length_logs_ptr add mem_load
-        exec.random_coin::observe_felt
-        add.1
-    end
-    drop
+    # The second block is `[D3, max_aux_inputs, aux_inputs.len(), 10, h0, ..., h3]`.
+    push.NUM_CHIPLETS
+    push.NUM_AUX_INPUTS
+    push.MAX_AUX_INPUTS
+    exec.layout::public_inputs_ptr add.6 mem_load
+    exec.random_coin::observe_word
+
+    padw exec.constants::air_trace_length_logs_ptr mem_loadw_le
+    exec.random_coin::observe_word_and_flush_buffer
+
+    # Buffer the remaining shape values `[h4, ..., h9]`.
+    padw exec.constants::air_trace_length_logs_ptr add.4 mem_loadw_le
+    exec.random_coin::observe_word
+    exec.constants::air_trace_length_logs_ptr add.9 mem_load
+    exec.constants::air_trace_length_logs_ptr add.8 mem_load
+    exec.random_coin::observe_pair
 
     exec.constants::random_coin_input_len_ptr mem_load
-    push.6 assert_eq.err="PVM process_public_inputs: transcript framing drifted"
+    push.BUFFERED_SHAPE_VALUE_COUNT assert_eq.err="PVM process_public_inputs: transcript framing drifted"
     exec.constants::random_coin_output_len_ptr mem_load
     assertz.err="PVM process_public_inputs: observed input exposed stale output"
 end

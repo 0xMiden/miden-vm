@@ -89,6 +89,35 @@ fn transcript_source() -> String {
     )
 }
 
+/// Guards the batched transcript against regression to scalar observation. The 650-cycle budget
+/// leaves headroom above the measured 535 cycles and rejects the 1,161-cycle scalar path.
+#[test]
+fn pvm_public_input_hook_cycle_budget() {
+    let setup = stage_statement_and_shape();
+    let source = format!(
+        r#"
+        use miden::core::stark::constants
+        use miden::core::sys::pvm::public_inputs
+
+        begin
+            {setup}
+
+            clk movdn.2
+            exec.public_inputs::process_public_inputs
+            clk movup.2 sub
+            swap drop
+            swap drop
+        end
+        "#,
+    );
+    let (output, _) = build_test!(&source, &[])
+        .execute_for_output()
+        .expect("PVM public-input cycle probe must execute");
+    let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
+    const MAX_CYCLES: u64 = 650;
+    assert!(cycles <= MAX_CYCLES, "PVM public-input hook regressed: {cycles} cycles");
+}
+
 #[test]
 fn pvm_public_input_hook_matches_the_rust_challenger() {
     let (output, _) = build_test!(&transcript_source(), &[])

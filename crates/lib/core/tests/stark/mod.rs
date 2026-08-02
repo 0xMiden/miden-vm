@@ -153,14 +153,15 @@ fn folding_reseed_helper_matches_reference_sampler() {
 }
 
 #[test]
-fn word_observe_helpers_match_scalar_observe() {
+fn word_and_pair_observe_helpers_match_scalar_observe() {
     fn source(use_word_helpers: bool) -> String {
         let observe = if use_word_helpers {
             "
             push.11.7.5.3
             exec.random_coin::observe_word
-            push.23.19.17.13
-            exec.random_coin::observe_word_and_flush_buffer
+            push.17.13
+            exec.random_coin::observe_pair
+            exec.random_coin::flush_buffer
             "
         } else {
             "
@@ -170,8 +171,7 @@ fn word_observe_helpers_match_scalar_observe() {
             push.11 exec.random_coin::observe_felt
             push.13 exec.random_coin::observe_felt
             push.17 exec.random_coin::observe_felt
-            push.19 exec.random_coin::observe_felt
-            push.23 exec.random_coin::observe_felt
+            exec.random_coin::flush_buffer
             "
         };
 
@@ -206,9 +206,20 @@ fn word_observe_helpers_match_scalar_observe() {
     assert_eq!(
         optimized.stack.get_num_elements(13),
         reference.stack.get_num_elements(13),
-        "word observe helpers changed random coin state"
+        "batched observe helpers changed random coin state"
     );
     assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+
+    let invalid = build_test!(
+        "
+        use miden::core::stark::random_coin
+        begin
+            push.2.1 exec.random_coin::observe_pair
+        end
+        ",
+        &[]
+    );
+    expect_assert_error_message!(invalid);
 }
 
 #[test]
