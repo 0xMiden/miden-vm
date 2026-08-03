@@ -81,6 +81,9 @@ fn assert_valid_package_type_alignments(package: &Package) {
 }
 
 fn assert_valid_debug_policy(debug_info: &PackageDebugInfo) {
+    for string in debug_info.strings() {
+        assert!(!string.chars().any(char::is_control));
+    }
     for location in debug_info.locations() {
         assert!(location.start.to_usize() <= location.end.to_usize());
     }

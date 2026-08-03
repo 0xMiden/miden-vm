@@ -636,6 +636,7 @@ impl Package {
         &self,
         debug_info: &PackageDebugInfo,
     ) -> Result<(), PackageDebugInfoError> {
+        self.validate_debug_strings(debug_info)?;
         self.validate_debug_sources(debug_info)?;
         self.validate_debug_types(debug_info)?;
         self.validate_debug_functions(debug_info)?;
@@ -802,6 +803,20 @@ impl Package {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_debug_strings(
+        &self,
+        debug_info: &PackageDebugInfo,
+    ) -> Result<(), PackageDebugInfoError> {
+        for (string_index, string) in debug_info.strings().iter().enumerate() {
+            if string.chars().any(char::is_control) {
+                return Err(PackageDebugInfoError::InvalidValue {
+                    message: format!("debug string {string_index} contains a control character"),
+                });
+            }
+        }
         Ok(())
     }
 

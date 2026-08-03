@@ -309,6 +309,14 @@ fn generate_fuzz_seeds() {
         .copy_from_slice(&2u32.to_le_bytes());
     write_seed("debug_info", "package_with_inverted_location.bin", &inverted_location_package);
 
+    let mut control_character_package = package_with_debug_info.to_bytes();
+    let error_message_offset = control_character_package
+        .windows(b"seed error".len())
+        .position(|window| window == b"seed error")
+        .expect("seed package should contain its debug error message");
+    control_character_package[error_message_offset] = b'\n';
+    write_seed("debug_info", "package_with_control_character.bin", &control_character_package);
+
     let file_path_offset = debug_info_bytes
         .windows(file_checksum.len())
         .position(|window| window == file_checksum)
