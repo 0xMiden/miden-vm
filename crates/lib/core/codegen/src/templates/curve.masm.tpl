@@ -46,6 +46,7 @@ const MSM_TAG = {{MSM_TAG}}
 # Registered digests for CurvePrecompile init constants.
 const IDENTITY_DIGEST = {{IDENTITY_DIGEST}}
 const GENERATOR_DIGEST = {{GENERATOR_DIGEST}}
+{{EXTRA_CONSTANTS}}
 
 #! Constructs an affine curve VALUE node from two coordinate digests.
 #! Input:  [X_DIGEST, Y_DIGEST, ...]
@@ -130,6 +131,7 @@ end
 pub proc push_generator
     push.GENERATOR_DIGEST
 end
+{{EXTRA_PROCS}}
 
 
 #! Registers `lhs + rhs` and returns the result expression digest.

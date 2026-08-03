@@ -26,6 +26,16 @@ pub(crate) fn fixed_uints() -> impl Iterator<Item = (u32, u32, Limbs)> {
                 (curve.b_ptr(), bound_ptr, curve.b_value()),
             ]
         }))
+        .chain(CurveId::ALL.into_iter().flat_map(|curve| {
+            let base_bound_ptr = curve.base_domain().bound_ptr();
+            let scalar_bound_ptr = curve.scalar_domain().bound_ptr();
+            curve.endomorphisms().iter().flat_map(move |endo| {
+                [
+                    (endo.beta_ptr, base_bound_ptr, endo.beta),
+                    (endo.lambda_ptr, scalar_bound_ptr, endo.lambda),
+                ]
+            })
+        }))
 }
 
 /// Verifier-side `UintVal` consumes for the fixed uint environment.
@@ -39,11 +49,19 @@ pub(crate) fn fixed_uintval_msgs() -> impl Iterator<Item = UintValMsg<Felt>> {
 
 /// Verifier-side `EcGroup` consumes for the fixed curve groups.
 pub(crate) fn fixed_ecgroup_msgs() -> impl Iterator<Item = EcGroupMsg<Felt>> {
-    CurveId::ALL.into_iter().map(|curve| EcGroupMsg {
-        group_ptr: Felt::from(curve.group_ptr()),
-        a_ptr: Felt::from(curve.a_ptr()),
-        b_ptr: Felt::from(curve.b_ptr()),
-        bound_ptr: Felt::from(curve.base_domain().bound_ptr()),
-        scalar_bound_ptr: Felt::from(curve.scalar_domain().bound_ptr()),
+    CurveId::ALL.into_iter().map(|curve| {
+        let (beta_ptr, lambda_ptr) = match curve.endomorphisms().first() {
+            Some(endo) => (endo.beta_ptr, endo.lambda_ptr),
+            None => (0, 0),
+        };
+        EcGroupMsg {
+            group_ptr: Felt::from(curve.group_ptr()),
+            a_ptr: Felt::from(curve.a_ptr()),
+            b_ptr: Felt::from(curve.b_ptr()),
+            bound_ptr: Felt::from(curve.base_domain().bound_ptr()),
+            scalar_bound_ptr: Felt::from(curve.scalar_domain().bound_ptr()),
+            beta_ptr: Felt::from(beta_ptr),
+            lambda_ptr: Felt::from(lambda_ptr),
+        }
     })
 }

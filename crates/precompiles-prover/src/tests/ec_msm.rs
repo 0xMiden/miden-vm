@@ -14,14 +14,17 @@ use std::{format, string::String};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_core::{Felt, utils::Matrix};
-use miden_precompiles::CurveId;
+use miden_precompiles::{CurveId, CurvePoint};
 
 use crate::{
     ec::msm::EcMsmAir,
-    math::{U256, from_hex},
+    math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
         EcNode, Session,
-        strategies::{joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table},
+        strategies::{
+            glv_joint_wnaf, glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm,
+            wnaf_table, wnaf_table_endo,
+        },
         verify_deferred,
     },
     tests::check_local_inputs,
@@ -176,6 +179,126 @@ fn msm_intro_neg_checks() {
 fn msm_intro_neg_proves() {
     verify_deferred(&msm_intro_neg_traces().prove())
         .expect("EcMsm intro+neg round-trip must verify");
+}
+
+/// `⟨G × λ⟩` — GLV's endomorphism leaf, value `φ(G)`. Unused (mult 0): it
+/// consumes `G` and routes the coordinate/`UintMul`/on-curve-cert demand,
+/// closing the bus. Cross-checks the in-circuit value against
+/// [`CurveId::endomorphisms`]'s independently-defined `φ(G)` (itself tested
+/// against the β-orbit in `glv.rs`), so this is a correctness check of
+/// `require::intro_endo`'s native math, not just its local constraints.
+fn msm_intro_endo_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let _e = s.msm_intro_endo(&g_pt);
+
+    let claim_g = s.ec_is(&g_pt, &g_pt);
+    let root = s.assert_and_fold([claim_g]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_intro_endo_checks() {
+    let traces = msm_intro_endo_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_intro_endo_proves() {
+    verify_deferred(&msm_intro_endo_traces().prove())
+        .expect("EcMsm intro_endo round-trip must verify");
+}
+
+#[test]
+fn msm_intro_endo_value_matches_endomorphism_image() {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let expr = s.msm_intro_endo(&g_pt);
+    let (x, y) = s.msm_value_coords(expr);
+
+    let (_, phi_g) = CurveId::Secp256k1
+        .extra_points()
+        .into_iter()
+        .find(|&(name, _)| name == "PHI_GENERATOR")
+        .expect("secp256k1 has a PHI_GENERATOR extra point");
+    let CurvePoint::Affine { x: expected_x, y: expected_y } = phi_g else {
+        panic!("PHI_GENERATOR must be an affine point");
+    };
+    assert_eq!(x, from_limbs32(&expected_x), "intro_endo's φ(G).x must match PHI_GENERATOR");
+    assert_eq!(y, from_limbs32(&expected_y), "intro_endo's φ(G).y must match PHI_GENERATOR");
+}
+
+/// `glv_joint_wnaf`'s value for a genuinely large (not 1, not small) scalar
+/// `u·G`, cross-checked against `CurveId::mul_scalar`'s independent native
+/// reference — the real correctness check that the GLV split
+/// (`glv_decompose`), the two per-half wNAF ladders (plain + endomorphism),
+/// and `msm_combine`'s shared-base merge back onto `⟨G × u⟩` all land on
+/// the same value a plain double-and-add would.
+#[test]
+fn glv_joint_wnaf_value_matches_native_mul_scalar() {
+    let curve = CurveId::Secp256k1;
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    // An arbitrary large scalar, safely canonical under n (n's top byte is
+    // 0xff, so any 256-bit value with a smaller top byte is < n).
+    let u = from_hex("89abcdef0123456789abcdef0123456789abcdef0123456789abcdef012345");
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let expr = glv_joint_wnaf(&mut s, curve, &[(g_pt, u)], 5);
+    let (x, y) = s.msm_value_coords(expr);
+
+    let expected = curve
+        .mul_scalar(curve.generator(), to_limbs32(u))
+        .expect("valid scalar multiplication");
+    let CurvePoint::Affine { x: expected_x, y: expected_y } = expected else {
+        panic!("u·G must be finite for this u");
+    };
+    assert_eq!(x, from_limbs32(&expected_x), "GLV value.x must match the native reference");
+    assert_eq!(y, from_limbs32(&expected_y), "GLV value.y must match the native reference");
+}
+
+/// `glv_joint_wnaf_with_tables`'s cached-table path — the shape `translate_ec_msm` uses across a
+/// signature batch: `G`'s plain/endo tables are built once, then reused across several claims
+/// with different scalars (and hence different GLV split signs, since each half's sign rides the
+/// digit selection, not the table's seed). Each claim's value is checked against the native
+/// reference, so this exercises every sign combination `glv_decompose` can hand back against the
+/// same positive-only tables.
+#[test]
+fn glv_joint_wnaf_with_tables_reused_across_scalars() {
+    let curve = CurveId::Secp256k1;
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+    let g_pt = create(&mut s, gx, gy);
+    let plain = wnaf_table(&mut s, &g_pt, 5);
+    let endo = wnaf_table_endo(&mut s, &g_pt, 5);
+
+    for u in [
+        from_hex("1"),
+        from_hex("89abcdef0123456789abcdef0123456789abcdef0123456789abcdef012345"),
+        from_hex("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+        from_hex("123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"),
+    ] {
+        let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, &endo, u)]);
+        let (x, y) = s.msm_value_coords(expr);
+        let expected =
+            curve.mul_scalar(curve.generator(), to_limbs32(u)).expect("valid scalar mul");
+        let CurvePoint::Affine { x: expected_x, y: expected_y } = expected else {
+            panic!("u·G must be finite for this u");
+        };
+        assert_eq!(x, from_limbs32(&expected_x), "cached GLV value.x must match for u={u:?}");
+        assert_eq!(y, from_limbs32(&expected_y), "cached GLV value.y must match for u={u:?}");
+    }
 }
 
 /// In-circuit resolve of the 1-term claim `R = 1·G` (`R = G`): `msm_intro`

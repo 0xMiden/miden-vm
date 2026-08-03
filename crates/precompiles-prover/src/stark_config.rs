@@ -48,10 +48,10 @@ const COMPRESSION_INPUTS: usize = 2;
 /// the lifted STARK protocol outside this circuit hash.
 /// Keep this in sync with [`crate::ace::build_precompile_multi_air_ace_circuit`].
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(14908530032554120817),
-    Felt::new_unchecked(6253902297572432860),
-    Felt::new_unchecked(17042470880692173314),
-    Felt::new_unchecked(1364863901074227591),
+    Felt::new_unchecked(3077183552914900088),
+    Felt::new_unchecked(3413333010039164498),
+    Felt::new_unchecked(8142685882183338816),
+    Felt::new_unchecked(4483408415715481879),
 ];
 /// Default hash function for compatibility APIs such as
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
