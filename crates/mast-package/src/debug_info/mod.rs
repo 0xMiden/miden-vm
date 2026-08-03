@@ -468,14 +468,12 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
 
     /// Returns the first assembly operation row for `source_node`, if present.
     pub fn first_asm_op_for_source_node(&self, source_node: Src) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_ops.first())
     }
 
     /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(&self, source_node: Src, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node)
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_op_for_operation(op_idx))
     }
 
     /// Returns debug variable rows for a source/debug occurrence.

@@ -431,10 +431,8 @@ pub struct SourceNode<Exec: Idx, Src: Idx> {
 
 impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
     pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops
-            .iter()
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        let insertion_index = self.asm_ops.partition_point(|row| row.op_idx <= op_idx);
+        insertion_index.checked_sub(1).and_then(|index| self.asm_ops.get(index))
     }
 
     pub fn debug_vars_for_operation(

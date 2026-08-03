@@ -88,6 +88,9 @@ fn assert_valid_debug_policy(debug_info: &PackageDebugInfo) {
     for location in debug_info.locations() {
         assert!(location.start.to_usize() <= location.end.to_usize());
     }
+    for source_node in debug_info.nodes() {
+        assert!(source_node.asm_ops.windows(2).all(|rows| rows[0].op_idx < rows[1].op_idx));
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -114,6 +117,9 @@ fuzz_target!(|data: &[u8]| {
     } else if let Ok(debug_info) = debug_info {
         assert!(debug_info.strings().len() <= MAX_DEBUG_INFO_STRING_ROWS);
         assert!(debug_info.types().len() <= MAX_DEBUG_INFO_TYPE_ROWS);
+        for source_node in debug_info.nodes() {
+            assert!(source_node.asm_ops.windows(2).all(|rows| rows[0].op_idx < rows[1].op_idx));
+        }
         exercise_debug_info(&debug_info);
     }
 });

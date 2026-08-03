@@ -267,6 +267,12 @@ impl Deserializable for DebugSourceNode {
         let asm_ops_len = source.read_u32()? as usize;
         let asm_ops =
             source.read_pod_rows::<DebugSourceAsmOp>(asm_ops_len, "debug assembly operations")?;
+        if let Some(rows) = asm_ops.windows(2).find(|rows| rows[0].op_idx >= rows[1].op_idx) {
+            return Err(DeserializationError::InvalidValue(format!(
+                "debug assembly operation indices are not strictly increasing at {} and {}",
+                rows[0].op_idx, rows[1].op_idx,
+            )));
+        }
 
         let debug_vars = Vec::read_from(&mut source)?;
         let inline_calls = Vec::read_from(&mut source)?;

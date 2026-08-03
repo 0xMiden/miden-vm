@@ -397,9 +397,10 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
 impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     /// Add `node` to the set of sources nodes in the debug info source graph
-    pub fn add_node(&mut self, node: SourceNode<Exec, Src>) -> Result<Src, IndexedVecError> {
+    pub fn add_node(&mut self, mut node: SourceNode<Exec, Src>) -> Result<Src, IndexedVecError> {
         assert!(node.op_end >= node.op_start);
         assert!(node.children.iter().copied().all(|n| self.debug_info.source_node(n).is_some()));
+        node.asm_ops.sort_unstable_by_key(|row| row.op_idx);
         self.debug_info.nodes.push(node)
     }
 

@@ -69,12 +69,13 @@ fn build_package(signature: Option<FunctionType>) -> Package {
 fn build_package_with_debug_info(
     signature: Option<FunctionType>,
 ) -> (Package, Vec<u8>, DebugSourceAsmOp, DebugSourceVar) {
-    build_package_with_debug_error(signature, Arc::from("seed error"))
+    build_package_with_debug_options(signature, Arc::from("seed error"), 1)
 }
 
-fn build_package_with_debug_error(
+fn build_package_with_debug_options(
     signature: Option<FunctionType>,
     error_message: Arc<str>,
+    asm_op_repetitions: usize,
 ) -> (Package, Vec<u8>, DebugSourceAsmOp, DebugSourceVar) {
     let mut package = build_package(signature);
     let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
@@ -104,7 +105,7 @@ fn build_package_with_debug_error(
             children: Vec::new(),
             op_start: 0,
             op_end: 1,
-            asm_ops: vec![asm_op],
+            asm_ops: vec![asm_op; asm_op_repetitions],
             debug_vars: vec![debug_var.clone()],
             inline_calls: Vec::new(),
         })
@@ -326,11 +327,20 @@ fn generate_fuzz_seeds() {
     write_seed("debug_info", "package_with_control_character.bin", &control_character_package);
 
     let oversized_string: Arc<str> = "x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1).into();
-    let (oversized_string_package, ..) = build_package_with_debug_error(None, oversized_string);
+    let (oversized_string_package, ..) =
+        build_package_with_debug_options(None, oversized_string, 1);
     write_seed(
         "debug_info",
         "package_with_oversized_string.bin",
         &oversized_string_package.to_bytes(),
+    );
+
+    let (duplicate_asm_op_package, ..) =
+        build_package_with_debug_options(None, Arc::from("seed error"), 2);
+    write_seed(
+        "debug_info",
+        "package_with_duplicate_assembly_op.bin",
+        &duplicate_asm_op_package.to_bytes(),
     );
 
     let file_path_offset = debug_info_bytes

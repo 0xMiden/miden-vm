@@ -711,6 +711,16 @@ impl Package {
                     });
                 }
             }
+            if let Some(rows) =
+                source_node.asm_ops.windows(2).find(|rows| rows[0].op_idx >= rows[1].op_idx)
+            {
+                return Err(PackageDebugInfoError::InvalidValue {
+                    message: format!(
+                        "debug source node {source_id:?} assembly operation indices are not strictly increasing at {} and {}",
+                        rows[0].op_idx, rows[1].op_idx,
+                    ),
+                });
+            }
             for row in source_node.asm_ops.iter() {
                 self.validate_source_map_row(source_id, source_node, row.op_idx, "assembly op")?;
                 self.validate_string_index(row.context_name_idx, debug_info, || {
