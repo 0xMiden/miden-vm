@@ -12,6 +12,25 @@ const CONJECTURED_SECURITY_FP_SHIFT = 16
 # Cap on any reported security level: min(challenge-field bits, hash collision resistance).
 const MAX_SECURITY_LEVEL = 128
 
+# Largest AIR count whose complete proof-order tag range fits in u32. The factorial table in
+# `derive_order_tag_from_heights` reserves one felt per supported AIR.
+const MAX_ORDER_AIRS = 12
+
+# Factorials used by the Lehmer order-tag weights. MAX_ORDER_AIRS=12 requires 0! through 11!;
+# each value fits in u32.
+const FACTORIAL_0 = 1
+const FACTORIAL_1 = 1
+const FACTORIAL_2 = 2
+const FACTORIAL_3 = 6
+const FACTORIAL_4 = 24
+const FACTORIAL_5 = 120
+const FACTORIAL_6 = 720
+const FACTORIAL_7 = 5040
+const FACTORIAL_8 = 40320
+const FACTORIAL_9 = 362880
+const FACTORIAL_10 = 3628800
+const FACTORIAL_11 = 39916800
+
 #! Loads the proof's security parameters from advice into the generic verifier context.
 #!
 #! Advice order: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
@@ -200,13 +219,28 @@ end
 #! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
 #! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
 #!
-#! Preconditions (`num_airs` is the caller's contract): `2 <= num_airs <= 12`. Twelve is the
-#! largest AIR count whose complete tag range fits in u32. The AIR count is relation metadata,
-#! never prover data. Height comparisons reject out-of-range values.
+#! This procedure uses `tmp1..tmp3` as a twelve-entry factorial table and clobbers
+#! their previous contents.
+#!
+#! Precondition: `num_airs >= 2`. The procedure rejects counts above `MAX_ORDER_AIRS = 12`, the
+#! largest count whose complete tag range fits in u32. The AIR count is relation metadata, never
+#! prover data. Height comparisons reject out-of-range values.
 #!
 #! Input:  [num_airs, heights_ptr]
 #! Output: [tag]
 pub proc derive_order_tag_from_heights
+    dup u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported order-tag range"
+
+    # Store 0! through 11! in tmp1..tmp3. The complete table is fixed by MAX_ORDER_AIRS and avoids
+    # rebuilding the same weights for every proof. These scratch words are not live here.
+    push.FACTORIAL_3.FACTORIAL_2.FACTORIAL_1.FACTORIAL_0
+    exec.constants::tmp1 mem_storew_le dropw
+    push.FACTORIAL_7.FACTORIAL_6.FACTORIAL_5.FACTORIAL_4
+    exec.constants::tmp2 mem_storew_le dropw
+    push.FACTORIAL_11.FACTORIAL_10.FACTORIAL_9.FACTORIAL_8
+    exec.constants::tmp3 mem_storew_le dropw
+    # => [num_airs, heights_ptr]
+
     push.0.0
     # => [k = 0, tag = 0, num_airs, heights_ptr]
 
@@ -263,7 +297,7 @@ pub proc derive_order_tag_from_heights
         # tag += inv * (num_airs - 1 - pos)!
         swap
         dup.5 sub.1 swap sub
-        exec.factorial
+        exec.constants::tmp1 add mem_load
         mul
         movup.3 add movdn.2
         # => [h_k, k, tag', num_airs, heights_ptr]
