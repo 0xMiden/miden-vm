@@ -161,6 +161,23 @@ fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
     package_bytes.insert(variant_type_offset + 1, 15);
     packages.push(("list_enum_variant.bin", package_bytes));
 
+    let struct_type = StructType::new([Type::Felt, Type::Felt]);
+    let signature = FunctionType::new(CallConv::Fast, [Type::from(struct_type)], []);
+    let signature_bytes = signature.to_bytes();
+    let (package, ..) = build_package_with_debug_info(Some(signature));
+    let mut package_bytes = package.to_bytes();
+    let signature_offset = package_bytes
+        .windows(signature_bytes.len())
+        .position(|window| window == signature_bytes)
+        .expect("seed package should contain its two-field struct signature");
+    let repr_offset = signature_bytes
+        .windows(8)
+        .position(|window| window == [17, 0, 0, 2, 0, 15, 0, 15])
+        .expect("seed signature should contain its default two-field struct")
+        + 2;
+    package_bytes[signature_offset + repr_offset] = 3;
+    packages.push(("multi_field_transparent_struct.bin", package_bytes));
+
     packages
 }
 

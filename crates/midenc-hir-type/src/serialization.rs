@@ -311,6 +311,14 @@ impl Type {
                     }
                     fields.push(NameAndType { name, ty });
                 }
+                if repr == TypeRepr::Transparent
+                    && fields.iter().filter(|field| field.ty.size_in_bytes() != 0).count() != 1
+                {
+                    return Err(DeserializationError::InvalidValue(
+                        "invalid transparent struct: expected exactly one non-zero-sized field"
+                            .to_string(),
+                    ));
+                }
                 Type::Struct(Arc::new(StructType::from_parts(name, repr, fields)))
             },
             18 => {
