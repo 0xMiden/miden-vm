@@ -284,11 +284,15 @@ fn generate_fuzz_seeds() {
         "invalid_assembly_location_option.bin",
         &invalid_asm_location_debug_info,
     );
-    for (name, field_offset) in [
-        ("dangling_assembly_context_string.bin", 12),
-        ("dangling_assembly_op_string.bin", 16),
+    for (name, field_offset, expected) in [
+        ("dangling_assembly_context_string.bin", 12, 0u32),
+        ("dangling_assembly_op_string.bin", 16, 1u32),
     ] {
         let mut bytes = debug_info_bytes.clone();
+        assert_eq!(
+            &bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4],
+            &expected.to_le_bytes(),
+        );
         bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4]
             .copy_from_slice(&u32::MAX.to_le_bytes());
         write_seed("debug_info", name, &bytes);
@@ -320,11 +324,15 @@ fn generate_fuzz_seeds() {
         "package_with_invalid_assembly_location_option.bin",
         &invalid_asm_location_package,
     );
-    for (name, field_offset) in [
-        ("package_with_dangling_assembly_context_string.bin", 12),
-        ("package_with_dangling_assembly_op_string.bin", 16),
+    for (name, field_offset, expected) in [
+        ("package_with_dangling_assembly_context_string.bin", 12, 0u32),
+        ("package_with_dangling_assembly_op_string.bin", 16, 1u32),
     ] {
         let mut bytes = package_with_debug_info.to_bytes();
+        assert_eq!(
+            &bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4],
+            &expected.to_le_bytes(),
+        );
         bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4]
             .copy_from_slice(&u32::MAX.to_le_bytes());
         write_seed("debug_info", name, &bytes);
