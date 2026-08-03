@@ -26,6 +26,12 @@ type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
 pub const DEBUG_INFO_VERSION: u8 = 2;
 
+/// Maximum encoded payload size accepted for package-owned debug information.
+///
+/// Decoding temporarily retains the encoded section, an aligned copy, and decoded table storage,
+/// so this cap bounds peak memory before any package-level validation can run.
+pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
+
 // PACKAGE DEBUG INFO
 // ================================================================================================
 

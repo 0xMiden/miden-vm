@@ -243,6 +243,13 @@ fn generate_fuzz_seeds() {
     let (package_with_debug_info, debug_info_bytes, asm_op, debug_var) =
         build_package_with_debug_info(None);
     write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
+    let mut oversized_debug_info = PackageDebugInfoBuilder::default();
+    oversized_debug_info.add_string("x".repeat(16 * 1024 * 1024));
+    write_seed(
+        "debug_info",
+        "oversized_debug_info.bin",
+        &oversized_debug_info.build().to_bytes(),
+    );
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
         "package_deserialize",

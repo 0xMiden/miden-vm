@@ -10,7 +10,10 @@
 use libfuzzer_sys::fuzz_target;
 use miden_assembly_syntax::ast::types::Type;
 use miden_core::serde::{Deserializable, SliceReader};
-use miden_mast_package::{Package, debug_info::PackageDebugInfo};
+use miden_mast_package::{
+    Package,
+    debug_info::{MAX_DEBUG_INFO_PAYLOAD_SIZE, PackageDebugInfo},
+};
 
 fn exercise_debug_info(debug_info: &PackageDebugInfo) {
     for (index, _) in debug_info.locations().iter().enumerate() {
@@ -85,7 +88,10 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let mut reader = SliceReader::new(data);
-    if let Ok(debug_info) = PackageDebugInfo::read_from(&mut reader) {
+    let debug_info = PackageDebugInfo::read_from(&mut reader);
+    if data.len() > MAX_DEBUG_INFO_PAYLOAD_SIZE + 10 {
+        assert!(debug_info.is_err());
+    } else if let Ok(debug_info) = debug_info {
         exercise_debug_info(&debug_info);
     }
 });

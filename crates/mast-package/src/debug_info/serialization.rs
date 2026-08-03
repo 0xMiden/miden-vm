@@ -20,7 +20,8 @@ use super::{
     DEBUG_INFO_VERSION, DebugErrorMessage, DebugFieldInfo, DebugFileIdx, DebugFileInfo,
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
     DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-    DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, OptionalIndex, PackageDebugInfo,
+    DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE,
+    OptionalIndex, PackageDebugInfo,
 };
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
@@ -117,6 +118,11 @@ impl Deserializable for PackageDebugInfo {
         }
 
         let data_len = read_bounded_len(source, "package debug info", 1)?;
+        if data_len > MAX_DEBUG_INFO_PAYLOAD_SIZE {
+            return Err(DeserializationError::InvalidValue(format!(
+                "package debug info payload size {data_len} exceeds limit {MAX_DEBUG_INFO_PAYLOAD_SIZE}"
+            )));
+        }
         let data = source.read_slice(data_len)?;
         let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
         let mut source = PodSliceReader::new(aligned.as_slice());
