@@ -16,6 +16,7 @@ use super::{
     MODULUS,
     keys::{WIDTH_BIG_POLY_COEFFICIENT, WIDTH_SMALL_POLY_COEFFICIENT},
 };
+use crate::utils::zeroize::Zeroizing;
 
 mod fft;
 pub use fft::{CyclotomicFourier, FastFft};
@@ -87,8 +88,9 @@ impl Inverse for f64 {
 /// [1]: <https://falcon-sign.info/falcon.pdf>
 pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
     loop {
-        let f = gen_poly(n, rng);
-        let g = gen_poly(n, rng);
+        // Wrap the sampled secrets so rejected candidates are wiped on every `continue`.
+        let f = Zeroizing::new(gen_poly(n, rng));
+        let mut g = Zeroizing::new(gen_poly(n, rng));
 
         // we do bound checks on the coefficients of the sampled polynomials in order to make sure
         // that they will be encodable/decodable
@@ -98,7 +100,8 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
             continue;
         }
 
-        let f_ntt = f.map(|&i| FalconFelt::new(i)).fft();
+        let f_felt = Zeroizing::new(f.map(|&i| FalconFelt::new(i)));
+        let f_ntt = Zeroizing::new(f_felt.fft());
         if f_ntt.coefficients.iter().any(Zero::is_zero) {
             continue;
         }
@@ -112,14 +115,22 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
         {
             // we do bound checks on the coefficients of the solution polynomials in order to make
             // sure that they will be encodable/decodable
-            let capital_f = capital_f.map(|i| i.try_into().unwrap());
-            let capital_g = capital_g.map(|i| i.try_into().unwrap());
+            let capital_f = Zeroizing::new(capital_f.map(|i| i.try_into().unwrap()));
+            let mut capital_g = Zeroizing::new(capital_g.map(|i| i.try_into().unwrap()));
             if !(check_coefficients_bound(&capital_f, MAX_BIG_POLY_COEFFICIENT_SIZE)
                 && check_coefficients_bound(&capital_g, MAX_BIG_POLY_COEFFICIENT_SIZE))
             {
                 continue;
             }
-            return [g, -f, capital_g, -capital_f];
+            // Move the kept polynomials out (the wrappers then wipe empty vecs) and negate
+            // through references so the un-negated copies are wiped too. The returned basis
+            // is owned by `SecretKey`, which wipes it on drop.
+            return [
+                core::mem::take(&mut *g),
+                -(&*f),
+                core::mem::take(&mut *capital_g),
+                -(&*capital_f),
+            ];
         }
     }
 }
@@ -168,13 +179,11 @@ fn ntru_solve(
 fn gen_poly<R: Rng>(n: usize, rng: &mut R) -> Polynomial<i16> {
     let mu = 0.0;
     let sigma_star = 1.43300980528773;
+    let samples: Zeroizing<Vec<i16>> = Zeroizing::new(
+        (0..4096).map(|_| sampler_z(mu, sigma_star, sigma_star - 0.001, rng)).collect(),
+    );
     Polynomial {
-        coefficients: (0..4096)
-            .map(|_| sampler_z(mu, sigma_star, sigma_star - 0.001, rng))
-            .collect::<Vec<i16>>()
-            .chunks(4096 / n)
-            .map(|ch| ch.iter().sum())
-            .collect(),
+        coefficients: samples.chunks(4096 / n).map(|ch| ch.iter().sum()).collect(),
     }
 }
 
@@ -320,5 +329,9 @@ fn xgcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 /// Asserts that the balanced values of the coefficients of a polynomial are within the interval
 /// [-bound, bound].
 fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16) -> bool {
-    polynomial.to_balanced_values().iter().all(|c| *c <= bound && *c >= -bound)
+    polynomial
+        .coefficients
+        .iter()
+        .map(|&c| FalconFelt::new(c).balanced_value())
+        .all(|c| c <= bound && c >= -bound)
 }

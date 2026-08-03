@@ -21,7 +21,8 @@ use crate::{
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_sensitive_array, zeroize::ZeroizeOnDrop,
+        read_sensitive_array,
+        zeroize::{ZeroizeOnDrop, Zeroizing},
     },
 };
 
@@ -96,20 +97,25 @@ impl SecretKey {
 // which ensures that the secret key material is securely zeroized when dropped.
 impl ZeroizeOnDrop for SecretKey {}
 
+#[cfg(test)]
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
         use subtle::ConstantTimeEq;
-        self.to_bytes().ct_eq(&other.to_bytes()).into()
+        let self_bytes = Zeroizing::new(self.inner.to_bytes());
+        let other_bytes = Zeroizing::new(other.inner.to_bytes());
+        self_bytes[..].ct_eq(&other_bytes[..]).into()
     }
 }
 
+#[cfg(test)]
 impl Eq for SecretKey {}
 
 // SIGNING KEY
 // ================================================================================================
 
 /// A secret key for ECDSA signature verification over the secp256k1 curve.
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
 pub struct SigningKey(SecretKey);
 
 impl SigningKey {
@@ -170,7 +176,8 @@ impl Deserializable for SigningKey {
 // ================================================================================================
 
 /// A secret key for ECDH key-exchange over the secp256k1 curve.
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
 pub struct KeyExchangeKey(SecretKey);
 
 impl KeyExchangeKey {
@@ -448,9 +455,10 @@ impl Signature {
 
 impl Serializable for SecretKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let mut buffer = Vec::with_capacity(SECRET_KEY_BYTES);
-        let sk_bytes: [u8; SECRET_KEY_BYTES] = self.inner.to_bytes().into();
-        buffer.extend_from_slice(&sk_bytes);
+        let mut buffer = Zeroizing::new(Vec::with_capacity(SECRET_KEY_BYTES));
+        let sk_bytes: Zeroizing<[u8; SECRET_KEY_BYTES]> =
+            Zeroizing::new(self.inner.to_bytes().into());
+        buffer.extend_from_slice(&sk_bytes[..]);
 
         target.write_bytes(&buffer);
     }

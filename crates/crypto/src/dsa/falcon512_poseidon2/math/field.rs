@@ -4,6 +4,7 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAss
 use num::{One, Zero};
 
 use super::{Inverse, MODULUS, fft::CyclotomicFourier};
+use crate::utils::zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FalconFelt(u32);
@@ -111,6 +112,12 @@ impl Zero for FalconFelt {
 
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl Zeroize for FalconFelt {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
 

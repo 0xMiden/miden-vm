@@ -2,6 +2,19 @@
 
 ## v0.29.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
+  non-test builds so production comparisons cannot materialize encoded private-key copies
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
+
+#### Fixes
+
+- Wiped Falcon secret-polynomial and encoded-key temporaries during key generation,
+  deserialization, serialization, public-key derivation, and signing. ECDSA-k256 and EdDSA
+  serialization temporaries are also wiped
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
