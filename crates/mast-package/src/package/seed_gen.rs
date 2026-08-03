@@ -14,6 +14,7 @@ use miden_core::{
     serde::Serializable,
 };
 use miden_debug_types::{ByteIndex, Uri};
+use zerocopy::IntoBytes;
 
 use super::{PackageId, TargetType};
 use crate::{
@@ -61,7 +62,9 @@ fn build_package(signature: Option<FunctionType>) -> Package {
     .expect("seed package should be valid")
 }
 
-fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, Vec<u8>) {
+fn build_package_with_debug_info(
+    signature: Option<FunctionType>,
+) -> (Package, Vec<u8>, DebugSourceAsmOp) {
     let mut package = build_package(signature);
     let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
 
@@ -69,18 +72,19 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
     let context_name = debug_info.add_string("seed::test");
     let op_name = debug_info.add_string("add");
     let file_idx = debug_info.add_file(Uri::new("file:///seed/source.masm"), Some([0xa5; 32]));
-    debug_info.add_location_info(crate::debug_info::DebugLoc {
+    let location_idx = debug_info.add_location_info(crate::debug_info::DebugLoc {
         file_idx,
         start: ByteIndex::new(0),
         end: ByteIndex::new(1),
     });
+    let asm_op = DebugSourceAsmOp::new(0, Some(location_idx), context_name, op_name, 1);
     let source_node = debug_info
         .add_node(DebugSourceNode {
             exec_node,
             children: Vec::new(),
             op_start: 0,
             op_end: 1,
-            asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name, op_name, 1)],
+            asm_ops: vec![asm_op],
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
         })
@@ -93,14 +97,14 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
         .sections
         .push(Section::new(SectionId::DEBUG_INFO, debug_info_bytes.clone()));
 
-    (package, debug_info_bytes)
+    (package, debug_info_bytes, asm_op)
 }
 
 fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
     let struct_type = StructType::new_with_repr(TypeRepr::align(8), [Type::Felt]);
     let signature = FunctionType::new(CallConv::Fast, [Type::from(struct_type)], []);
     let signature_bytes = signature.to_bytes();
-    let (package, _) = build_package_with_debug_info(Some(signature));
+    let (package, ..) = build_package_with_debug_info(Some(signature));
     let package_bytes = package.to_bytes();
 
     let signature_offset = package_bytes
@@ -141,7 +145,7 @@ fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
             .expect("seed enum should be valid");
     let signature = FunctionType::new(CallConv::Fast, [Type::Enum(Arc::new(enum_type))], []);
     let signature_bytes = signature.to_bytes();
-    let (package, _) = build_package_with_debug_info(Some(signature));
+    let (package, ..) = build_package_with_debug_info(Some(signature));
     let mut package_bytes = package.to_bytes();
     let signature_offset = package_bytes
         .windows(signature_bytes.len())
@@ -184,7 +188,7 @@ fn generate_fuzz_seeds() {
         &package_with_signature.to_bytes(),
     );
 
-    let (package_with_debug_info, debug_info_bytes) = build_package_with_debug_info(None);
+    let (package_with_debug_info, debug_info_bytes, asm_op) = build_package_with_debug_info(None);
     write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
@@ -262,6 +266,44 @@ fn generate_fuzz_seeds() {
         "package_semantic_deserialize",
         "package_with_dangling_source_root.bin",
         &dangling_root_package,
+    );
+
+    let asm_op_offset = debug_info_bytes
+        .windows(asm_op.as_bytes().len())
+        .position(|window| window == asm_op.as_bytes())
+        .expect("seed debug info should contain its assembly operation")
+        + 4;
+    let mut invalid_asm_location_debug_info = debug_info_bytes.clone();
+    invalid_asm_location_debug_info[asm_op_offset..asm_op_offset + 4]
+        .copy_from_slice(&2u32.to_le_bytes());
+    write_seed(
+        "debug_info",
+        "invalid_assembly_location_option.bin",
+        &invalid_asm_location_debug_info,
+    );
+
+    let mut invalid_asm_location_package = package_with_debug_info.to_bytes();
+    let asm_op_offset = invalid_asm_location_package
+        .windows(asm_op.as_bytes().len())
+        .position(|window| window == asm_op.as_bytes())
+        .expect("seed package should contain its debug assembly operation")
+        + 4;
+    invalid_asm_location_package[asm_op_offset..asm_op_offset + 4]
+        .copy_from_slice(&2u32.to_le_bytes());
+    write_seed(
+        "debug_info",
+        "package_with_invalid_assembly_location_option.bin",
+        &invalid_asm_location_package,
+    );
+    write_seed(
+        "package_deserialize",
+        "package_with_invalid_assembly_location_option.bin",
+        &invalid_asm_location_package,
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_invalid_assembly_location_option.bin",
+        &invalid_asm_location_package,
     );
 
     let mut dangling_error_debug_info = debug_info_bytes;

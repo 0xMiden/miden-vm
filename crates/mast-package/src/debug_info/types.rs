@@ -529,11 +529,15 @@ impl DebugSourceAsmOp {
         }
     }
 
-    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> AssemblyOp {
-        let location = self.location_idx.into_option().and_then(|loc| debug_info.get_location(loc));
-        let context_name = debug_info[self.context_name_idx].clone();
-        let op = debug_info[self.op_name_idx].clone();
-        AssemblyOp::new(location, context_name, self.num_cycles, op)
+    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> Option<AssemblyOp> {
+        let location = self
+            .location_idx
+            .try_into_option()
+            .ok()?
+            .and_then(|loc| debug_info.get_location(loc));
+        let context_name = debug_info.get_string(self.context_name_idx)?;
+        let op = debug_info.get_string(self.op_name_idx)?;
+        Some(AssemblyOp::new(location, context_name, self.num_cycles, op))
     }
 }
 
