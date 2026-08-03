@@ -12,7 +12,9 @@ use miden_assembly_syntax::ast::types::Type;
 use miden_core::serde::{ByteReader, Deserializable, SliceReader};
 use miden_mast_package::{
     Package,
-    debug_info::{MAX_DEBUG_INFO_PAYLOAD_SIZE, PackageDebugInfo},
+    debug_info::{
+        MAX_DEBUG_INFO_PAYLOAD_SIZE, MAX_DEBUG_INFO_TYPE_ROWS, PackageDebugInfo,
+    },
 };
 
 fn exercise_debug_info(debug_info: &PackageDebugInfo) {
@@ -97,6 +99,7 @@ fuzz_target!(|data: &[u8]| {
     if declared_payload_len.is_some_and(|len| len > MAX_DEBUG_INFO_PAYLOAD_SIZE) {
         assert!(debug_info.is_err());
     } else if let Ok(debug_info) = debug_info {
+        assert!(debug_info.types().len() <= MAX_DEBUG_INFO_TYPE_ROWS);
         exercise_debug_info(&debug_info);
     }
 });

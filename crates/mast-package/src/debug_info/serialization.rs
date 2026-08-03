@@ -21,7 +21,7 @@ use super::{
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
     DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
     DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE,
-    OptionalIndex, PackageDebugInfo,
+    MAX_DEBUG_INFO_TYPE_ROWS, OptionalIndex, PackageDebugInfo,
 };
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
@@ -137,7 +137,18 @@ impl Deserializable for PackageDebugInfo {
         let locations =
             source.read_pod_rows::<DebugLoc>(locations_len as usize, "debug locations")?;
 
-        let types = IndexVec::read_from_bounded(&mut source, "debug_info types")?;
+        let types_len = read_bounded_len(
+            &mut source,
+            "debug_info types",
+            DebugTypeInfo::min_serialized_size(),
+        )?;
+        if types_len > MAX_DEBUG_INFO_TYPE_ROWS {
+            return Err(DeserializationError::InvalidValue(format!(
+                "debug_info types count {types_len} exceeds limit {MAX_DEBUG_INFO_TYPE_ROWS}"
+            )));
+        }
+        let types = source.read_many_iter(types_len)?.collect::<Result<Vec<DebugTypeInfo>, _>>()?;
+        let types = IndexVec::try_from(types).expect("limited debug type count fits in u32");
 
         let functions_len = source.read_u32()?;
         let functions = source.read_pod_rows_with::<WireDebugFunctionInfo, _, _>(

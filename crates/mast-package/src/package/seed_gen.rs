@@ -19,7 +19,10 @@ use zerocopy::IntoBytes;
 use super::{PackageId, TargetType};
 use crate::{
     Package, PackageExport, ProcedureExport, Section, SectionId,
-    debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, PackageDebugInfoBuilder},
+    debug_info::{
+        DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo, MAX_DEBUG_INFO_TYPE_ROWS,
+        PackageDebugInfoBuilder,
+    },
 };
 
 fn build_forest() -> (MastForest, MastNodeId) {
@@ -249,6 +252,15 @@ fn generate_fuzz_seeds() {
         "debug_info",
         "oversized_debug_info.bin",
         &oversized_debug_info.build().to_bytes(),
+    );
+    let mut oversized_type_table = PackageDebugInfoBuilder::default();
+    for _ in 0..=MAX_DEBUG_INFO_TYPE_ROWS {
+        oversized_type_table.push_type(DebugTypeInfo::Unknown);
+    }
+    write_seed(
+        "debug_info",
+        "oversized_debug_type_table.bin",
+        &oversized_type_table.build().to_bytes(),
     );
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
