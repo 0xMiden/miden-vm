@@ -450,14 +450,14 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
         debug_info: &DebugInfo<Exec, Src>,
     ) -> impl Iterator<Item = DebugVarInfo> {
         let mut type_cache = FxHashMap::<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>::default();
-        self.debug_vars_for_operation(op_idx).map(move |source_var| {
-            let name = debug_info[source_var.name_idx].clone();
+        self.debug_vars_for_operation(op_idx).filter_map(move |source_var| {
+            let name = debug_info.get_string(source_var.name_idx)?;
             let mut info = DebugVarInfo::new(name, source_var.value_location.clone());
             if let Some(arg_idx) = source_var.arg_idx {
                 info.set_arg_index(arg_idx.get())
             }
             if let Some(loc) = source_var.location_idx {
-                info.set_location(debug_info.get_location(loc).unwrap())
+                info.set_location(debug_info.get_location(loc)?)
             }
             if let Some(tid) = source_var.type_id {
                 if let Some((ty, declared_ty)) = type_cache.get(&tid) {
@@ -470,7 +470,7 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
                     info.set_ty(ty, declared_type);
                 }
             }
-            info
+            Some(info)
         })
     }
 }

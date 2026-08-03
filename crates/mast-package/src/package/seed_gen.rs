@@ -3,7 +3,7 @@ use std::{fs, path::Path, println};
 
 use miden_assembly_syntax::{
     ast::{
-        Path as AstPath, PathBuf,
+        DebugVarLocation, Path as AstPath, PathBuf,
         types::{CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
     },
     semver::Version,
@@ -19,7 +19,7 @@ use zerocopy::IntoBytes;
 use super::{PackageId, TargetType};
 use crate::{
     Package, PackageExport, ProcedureExport, Section, SectionId,
-    debug_info::{DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder},
+    debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, PackageDebugInfoBuilder},
 };
 
 fn build_forest() -> (MastForest, MastNodeId) {
@@ -64,13 +64,14 @@ fn build_package(signature: Option<FunctionType>) -> Package {
 
 fn build_package_with_debug_info(
     signature: Option<FunctionType>,
-) -> (Package, Vec<u8>, DebugSourceAsmOp) {
+) -> (Package, Vec<u8>, DebugSourceAsmOp, DebugSourceVar) {
     let mut package = build_package(signature);
     let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
 
     let mut debug_info = PackageDebugInfoBuilder::default();
     let context_name = debug_info.add_string("seed::test");
     let op_name = debug_info.add_string("add");
+    let var_name = debug_info.add_string("seed_var");
     let file_idx = debug_info.add_file(Uri::new("file:///seed/source.masm"), Some([0xa5; 32]));
     let location_idx = debug_info.add_location_info(crate::debug_info::DebugLoc {
         file_idx,
@@ -78,6 +79,14 @@ fn build_package_with_debug_info(
         end: ByteIndex::new(1),
     });
     let asm_op = DebugSourceAsmOp::new(0, Some(location_idx), context_name, op_name, 1);
+    let debug_var = DebugSourceVar {
+        op_idx: 0,
+        name_idx: var_name,
+        type_id: None,
+        arg_idx: None,
+        location_idx: Some(location_idx),
+        value_location: DebugVarLocation::Stack(0),
+    };
     let source_node = debug_info
         .add_node(DebugSourceNode {
             exec_node,
@@ -85,7 +94,7 @@ fn build_package_with_debug_info(
             op_start: 0,
             op_end: 1,
             asm_ops: vec![asm_op],
-            debug_vars: Vec::new(),
+            debug_vars: vec![debug_var.clone()],
             inline_calls: Vec::new(),
         })
         .expect("seed debug info has one source node");
@@ -97,7 +106,7 @@ fn build_package_with_debug_info(
         .sections
         .push(Section::new(SectionId::DEBUG_INFO, debug_info_bytes.clone()));
 
-    (package, debug_info_bytes, asm_op)
+    (package, debug_info_bytes, asm_op, debug_var)
 }
 
 fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
@@ -205,7 +214,8 @@ fn generate_fuzz_seeds() {
         &package_with_signature.to_bytes(),
     );
 
-    let (package_with_debug_info, debug_info_bytes, asm_op) = build_package_with_debug_info(None);
+    let (package_with_debug_info, debug_info_bytes, asm_op, debug_var) =
+        build_package_with_debug_info(None);
     write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
@@ -255,22 +265,33 @@ fn generate_fuzz_seeds() {
     );
 
     let error_code = 0x0123_4567_89ab_cdef_u64.to_le_bytes();
-    let root_offset = debug_info_bytes
+    let error_code_offset = debug_info_bytes
         .windows(error_code.len())
         .position(|window| window == error_code)
-        .expect("seed debug info should contain its error code")
-        - 12;
+        .expect("seed debug info should contain its error code");
+    let mut root_section = [0u8; 12];
+    root_section[..4].copy_from_slice(&1u32.to_le_bytes());
+    root_section[8..].copy_from_slice(&1u32.to_le_bytes());
+    let root_offset = debug_info_bytes[..error_code_offset]
+        .windows(root_section.len())
+        .rposition(|window| window == root_section)
+        .expect("seed debug info should contain one root before one error message")
+        + 4;
     let mut dangling_root_debug_info = debug_info_bytes.clone();
     assert_eq!(&dangling_root_debug_info[root_offset..root_offset + 4], &0u32.to_le_bytes());
     dangling_root_debug_info[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     write_seed("debug_info", "dangling_source_root.bin", &dangling_root_debug_info);
 
     let mut dangling_root_package = package_with_debug_info.to_bytes();
-    let root_offset = dangling_root_package
+    let error_code_offset = dangling_root_package
         .windows(error_code.len())
         .position(|window| window == error_code)
-        .expect("seed package should contain its debug error code")
-        - 12;
+        .expect("seed package should contain its debug error code");
+    let root_offset = dangling_root_package[..error_code_offset]
+        .windows(root_section.len())
+        .rposition(|window| window == root_section)
+        .expect("seed package should contain one debug root before one error message")
+        + 4;
     assert_eq!(&dangling_root_package[root_offset..root_offset + 4], &0u32.to_le_bytes());
     dangling_root_package[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     write_seed("debug_info", "package_with_dangling_source_root.bin", &dangling_root_package);
@@ -351,6 +372,46 @@ fn generate_fuzz_seeds() {
             &expected.to_le_bytes(),
         );
         bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        write_seed("debug_info", name, &bytes);
+        write_seed("package_deserialize", name, &bytes);
+        write_seed("package_semantic_deserialize", name, &bytes);
+    }
+
+    let debug_var_bytes = debug_var.to_bytes();
+    let debug_var_offset = debug_info_bytes
+        .windows(debug_var_bytes.len())
+        .position(|window| window == debug_var_bytes)
+        .expect("seed debug info should contain its debug variable");
+    for (name, field_offset, expected) in [
+        ("dangling_debug_var_name.bin", 4, 2u32),
+        ("dangling_debug_var_location.bin", 14, 0u32),
+    ] {
+        let mut bytes = debug_info_bytes.clone();
+        assert_eq!(
+            &bytes[debug_var_offset + field_offset..debug_var_offset + field_offset + 4],
+            &expected.to_le_bytes(),
+        );
+        bytes[debug_var_offset + field_offset..debug_var_offset + field_offset + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        write_seed("debug_info", name, &bytes);
+    }
+
+    let debug_var_offset = package_with_debug_info
+        .to_bytes()
+        .windows(debug_var_bytes.len())
+        .position(|window| window == debug_var_bytes)
+        .expect("seed package should contain its debug variable");
+    for (name, field_offset, expected) in [
+        ("package_with_dangling_debug_var_name.bin", 4, 2u32),
+        ("package_with_dangling_debug_var_location.bin", 14, 0u32),
+    ] {
+        let mut bytes = package_with_debug_info.to_bytes();
+        assert_eq!(
+            &bytes[debug_var_offset + field_offset..debug_var_offset + field_offset + 4],
+            &expected.to_le_bytes(),
+        );
+        bytes[debug_var_offset + field_offset..debug_var_offset + field_offset + 4]
             .copy_from_slice(&u32::MAX.to_le_bytes());
         write_seed("debug_info", name, &bytes);
         write_seed("package_deserialize", name, &bytes);
