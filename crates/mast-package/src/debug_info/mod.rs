@@ -35,6 +35,9 @@ pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 /// Maximum number of rows accepted in the variable-width debug string table.
 pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
 
+/// Maximum encoded byte length accepted for one debug string.
+pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
+
 /// Maximum number of rows accepted in the variable-width debug type table.
 pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 

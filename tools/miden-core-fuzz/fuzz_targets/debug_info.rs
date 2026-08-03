@@ -13,8 +13,8 @@ use miden_core::serde::{ByteReader, Deserializable, SliceReader};
 use miden_mast_package::{
     Package,
     debug_info::{
-        MAX_DEBUG_INFO_PAYLOAD_SIZE, MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_TYPE_ROWS,
-        PackageDebugInfo,
+        MAX_DEBUG_INFO_PAYLOAD_SIZE, MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE,
+        MAX_DEBUG_INFO_TYPE_ROWS, PackageDebugInfo,
     },
 };
 
@@ -82,6 +82,7 @@ fn assert_valid_package_type_alignments(package: &Package) {
 
 fn assert_valid_debug_policy(debug_info: &PackageDebugInfo) {
     for string in debug_info.strings() {
+        assert!(string.len() <= MAX_DEBUG_INFO_STRING_SIZE);
         assert!(!string.chars().any(char::is_control));
     }
     for location in debug_info.locations() {

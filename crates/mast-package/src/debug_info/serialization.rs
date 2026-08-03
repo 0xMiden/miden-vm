@@ -21,7 +21,8 @@ use super::{
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
     DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
     DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE,
-    MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_TYPE_ROWS, OptionalIndex, PackageDebugInfo,
+    MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
+    OptionalIndex, PackageDebugInfo,
 };
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
@@ -797,6 +798,11 @@ fn read_wire_felt(value: u64) -> Result<Felt, DeserializationError> {
 
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
     let len = read_bounded_len(source, "debug string bytes", 1)?;
+    if len > MAX_DEBUG_INFO_STRING_SIZE {
+        return Err(DeserializationError::InvalidValue(alloc::format!(
+            "debug string size {len} exceeds limit {MAX_DEBUG_INFO_STRING_SIZE}"
+        )));
+    }
     let bytes = source.read_slice(len)?;
     let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))

@@ -21,7 +21,8 @@ use crate::{
     Package, PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
         DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo,
-        MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_TYPE_ROWS, PackageDebugInfoBuilder,
+        MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
+        PackageDebugInfoBuilder,
     },
 };
 
@@ -68,6 +69,13 @@ fn build_package(signature: Option<FunctionType>) -> Package {
 fn build_package_with_debug_info(
     signature: Option<FunctionType>,
 ) -> (Package, Vec<u8>, DebugSourceAsmOp, DebugSourceVar) {
+    build_package_with_debug_error(signature, Arc::from("seed error"))
+}
+
+fn build_package_with_debug_error(
+    signature: Option<FunctionType>,
+    error_message: Arc<str>,
+) -> (Package, Vec<u8>, DebugSourceAsmOp, DebugSourceVar) {
     let mut package = build_package(signature);
     let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
 
@@ -102,7 +110,7 @@ fn build_package_with_debug_info(
         })
         .expect("seed debug info has one source node");
     debug_info.add_root(source_node);
-    debug_info.add_error_message(0x0123_4567_89ab_cdef, Arc::from("seed error"));
+    debug_info.add_error_message(0x0123_4567_89ab_cdef, error_message);
 
     let debug_info_bytes = debug_info.build().to_bytes();
     package
@@ -316,6 +324,14 @@ fn generate_fuzz_seeds() {
         .expect("seed package should contain its debug error message");
     control_character_package[error_message_offset] = b'\n';
     write_seed("debug_info", "package_with_control_character.bin", &control_character_package);
+
+    let oversized_string: Arc<str> = "x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1).into();
+    let (oversized_string_package, ..) = build_package_with_debug_error(None, oversized_string);
+    write_seed(
+        "debug_info",
+        "package_with_oversized_string.bin",
+        &oversized_string_package.to_bytes(),
+    );
 
     let file_path_offset = debug_info_bytes
         .windows(file_checksum.len())
