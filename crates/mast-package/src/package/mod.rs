@@ -899,6 +899,15 @@ impl Package {
             })?;
         }
         for (location_index, location) in debug_info.locations().iter().enumerate() {
+            if location.start.to_usize() > location.end.to_usize() {
+                return Err(PackageDebugInfoError::InvalidValue {
+                    message: format!(
+                        "debug source location {location_index} starts at byte {} after ending at byte {}",
+                        location.start.to_usize(),
+                        location.end.to_usize(),
+                    ),
+                });
+            }
             if debug_info.get_file(location.file_idx).is_none() {
                 return Err(PackageDebugInfoError::InvalidReference {
                     message: format!(

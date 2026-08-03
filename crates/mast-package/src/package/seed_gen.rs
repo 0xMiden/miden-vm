@@ -293,6 +293,22 @@ fn generate_fuzz_seeds() {
     );
 
     let file_checksum = [0xa5; 32];
+    let location_pattern = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
+    let mut inverted_location_package = package_with_debug_info.to_bytes();
+    let checksum_offset = inverted_location_package
+        .windows(file_checksum.len())
+        .position(|window| window == file_checksum)
+        .expect("seed package should contain its debug file checksum");
+    let location_offset = checksum_offset
+        + file_checksum.len()
+        + inverted_location_package[checksum_offset + file_checksum.len()..]
+            .windows(location_pattern.len())
+            .position(|window| window == location_pattern)
+            .expect("seed package should contain its debug location");
+    inverted_location_package[location_offset + 4..location_offset + 8]
+        .copy_from_slice(&2u32.to_le_bytes());
+    write_seed("debug_info", "package_with_inverted_location.bin", &inverted_location_package);
+
     let file_path_offset = debug_info_bytes
         .windows(file_checksum.len())
         .position(|window| window == file_checksum)

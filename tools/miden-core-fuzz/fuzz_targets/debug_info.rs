@@ -80,6 +80,12 @@ fn assert_valid_package_type_alignments(package: &Package) {
     }
 }
 
+fn assert_valid_debug_policy(debug_info: &PackageDebugInfo) {
+    for location in debug_info.locations() {
+        assert!(location.start.to_usize() <= location.end.to_usize());
+    }
+}
+
 fuzz_target!(|data: &[u8]| {
     if let Ok(package) = Package::read_from_bytes(data) {
         assert_valid_package_type_alignments(&package);
@@ -87,7 +93,9 @@ fuzz_target!(|data: &[u8]| {
     }
     if let Ok(package) = Package::read_from_bytes_trusted(data) {
         assert_valid_package_type_alignments(&package);
-        let _ = package.debug_info();
+        if let Ok(Some(debug_info)) = package.debug_info() {
+            assert_valid_debug_policy(&debug_info);
+        }
     }
 
     let mut framing_reader = SliceReader::new(data);

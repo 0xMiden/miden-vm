@@ -45,6 +45,8 @@ pub enum PackageDebugInfoError {
     },
     #[error("invalid package debug info: {message}")]
     InvalidReference { message: String },
+    #[error("invalid package debug info value: {message}")]
+    InvalidValue { message: String },
     #[error("invalid optional field discriminant for {context}: {err}")]
     InvalidOptionField {
         #[source]
