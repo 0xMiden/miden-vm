@@ -8,7 +8,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::serde::{Deserializable, SliceReader};
+use miden_core::serde::{Deserializable, Serializable, SliceReader};
 use miden_mast_package::{Package, SectionId, TargetType, debug_info::PackageDebugInfo};
 
 fuzz_target!(|data: &[u8]| {
@@ -34,6 +34,17 @@ fuzz_target!(|data: &[u8]| {
     };
 
     validate_debug_sections(&package);
+
+    let expected_debug_info = package
+        .debug_info()
+        .expect("untrusted admission should leave no deferred debug validation errors");
+    let encoded = package.to_bytes();
+    let round_tripped = Package::read_from_bytes(&encoded)
+        .expect("an admitted package should survive serialization and re-admission");
+    let actual_debug_info = round_tripped
+        .debug_info()
+        .expect("round-tripped debug info should remain valid");
+    assert_eq!(actual_debug_info, expected_debug_info);
 
     let _ = package.kernel_runtime_dependency();
     let _ = package.try_embedded_kernel_package();
