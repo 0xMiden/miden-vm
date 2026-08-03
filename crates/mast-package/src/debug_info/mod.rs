@@ -32,6 +32,9 @@ pub const DEBUG_INFO_VERSION: u8 = 2;
 /// so this cap bounds peak memory before any package-level validation can run.
 pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
+/// Maximum number of rows accepted in the variable-width debug string table.
+pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
+
 /// Maximum number of rows accepted in the variable-width debug type table.
 pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 

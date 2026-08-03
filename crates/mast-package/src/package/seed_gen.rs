@@ -11,7 +11,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId},
     operations::Operation,
-    serde::Serializable,
+    serde::{ByteReader, ByteWriter, Serializable, SliceReader},
 };
 use miden_debug_types::{ByteIndex, Uri};
 use zerocopy::IntoBytes;
@@ -20,8 +20,8 @@ use super::{PackageId, TargetType};
 use crate::{
     Package, PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
-        DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo, MAX_DEBUG_INFO_TYPE_ROWS,
-        PackageDebugInfoBuilder,
+        DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo,
+        MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_TYPE_ROWS, PackageDebugInfoBuilder,
     },
 };
 
@@ -246,6 +246,24 @@ fn generate_fuzz_seeds() {
     let (package_with_debug_info, debug_info_bytes, asm_op, debug_var) =
         build_package_with_debug_info(None);
     write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
+    let empty_debug_info = PackageDebugInfoBuilder::default().build().to_bytes();
+    let mut empty_reader = SliceReader::new(&empty_debug_info);
+    assert_eq!(empty_reader.read_u8().unwrap(), crate::debug_info::DEBUG_INFO_VERSION);
+    let empty_payload_len = empty_reader.read_usize().unwrap();
+    let empty_payload_offset = 1 + empty_payload_len.to_bytes().len();
+    let mut oversized_string_payload = empty_debug_info[empty_payload_offset..].to_vec();
+    let oversized_string_rows = MAX_DEBUG_INFO_STRING_ROWS + 6;
+    let oversized_string_count = oversized_string_rows.to_bytes();
+    oversized_string_payload.splice(0..1, oversized_string_count.iter().copied());
+    oversized_string_payload.splice(
+        oversized_string_count.len()..oversized_string_count.len(),
+        0usize.to_bytes().repeat(oversized_string_rows),
+    );
+    let mut oversized_string_table = Vec::new();
+    oversized_string_table.write_u8(crate::debug_info::DEBUG_INFO_VERSION);
+    oversized_string_table.write_usize(oversized_string_payload.len());
+    oversized_string_table.write_bytes(&oversized_string_payload);
+    write_seed("debug_info", "oversized_debug_string_table.bin", &oversized_string_table);
     let mut oversized_debug_info = PackageDebugInfoBuilder::default();
     oversized_debug_info.add_string("x".repeat(16 * 1024 * 1024));
     write_seed(

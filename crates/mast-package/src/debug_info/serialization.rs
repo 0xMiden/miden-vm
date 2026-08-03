@@ -21,7 +21,7 @@ use super::{
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
     DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
     DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE,
-    MAX_DEBUG_INFO_TYPE_ROWS, OptionalIndex, PackageDebugInfo,
+    MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_TYPE_ROWS, OptionalIndex, PackageDebugInfo,
 };
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
@@ -127,8 +127,17 @@ impl Deserializable for PackageDebugInfo {
         let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
         let mut source = PodSliceReader::new(aligned.as_slice());
 
-        let strings =
-            IndexVec::read_from_bounded_with(&mut source, "debug_info strings", 1, read_string)?;
+        let strings_len = read_bounded_len(&mut source, "debug_info strings", 1)?;
+        if strings_len > MAX_DEBUG_INFO_STRING_ROWS {
+            return Err(DeserializationError::InvalidValue(format!(
+                "debug_info strings count {strings_len} exceeds limit {MAX_DEBUG_INFO_STRING_ROWS}"
+            )));
+        }
+        let mut strings = Vec::new();
+        for _ in 0..strings_len {
+            strings.push(read_string(&mut source)?);
+        }
+        let strings = IndexVec::try_from(strings).expect("limited debug string count fits in u32");
 
         let files_len = source.read_u32()?;
         let files = source.read_pod_rows::<DebugFileInfo>(files_len as usize, "debug files")?;
