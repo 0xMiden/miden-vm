@@ -263,11 +263,8 @@ impl Type {
                                 "invalid type repr: alignment must be a power of two".to_string(),
                             ));
                         }
-                        let align = NonZeroU16::new(align).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: alignment must be a non-zero value".to_string(),
-                            )
-                        })?;
+                        let align =
+                            NonZeroU16::new(align).expect("power-of-two alignment is non-zero");
                         TypeRepr::Align(align)
                     },
                     2 => {
@@ -278,12 +275,8 @@ impl Type {
                                     .to_string(),
                             ));
                         }
-                        let align = NonZeroU16::new(align).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: packed alignment must be a non-zero value"
-                                    .to_string(),
-                            )
-                        })?;
+                        let align =
+                            NonZeroU16::new(align).expect("power-of-two alignment is non-zero");
                         TypeRepr::Packed(align)
                     },
                     3 => TypeRepr::Transparent,

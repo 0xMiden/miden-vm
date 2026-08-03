@@ -4,7 +4,7 @@ use std::{fs, path::Path, println};
 use miden_assembly_syntax::{
     ast::{
         Path as AstPath, PathBuf,
-        types::{CallConv, FunctionType, Type},
+        types::{CallConv, FunctionType, StructType, Type, TypeRepr},
     },
     semver::Version,
 };
@@ -60,8 +60,8 @@ fn build_package(signature: Option<FunctionType>) -> Package {
     .expect("seed package should be valid")
 }
 
-fn build_package_with_debug_info() -> (Package, Vec<u8>) {
-    let mut package = build_package(None);
+fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, Vec<u8>) {
+    let mut package = build_package(signature);
     let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
 
     let mut debug_info = PackageDebugInfoBuilder::default();
@@ -88,6 +88,36 @@ fn build_package_with_debug_info() -> (Package, Vec<u8>) {
     (package, debug_info_bytes)
 }
 
+fn build_packages_with_invalid_struct_alignments() -> [(&'static str, Vec<u8>); 2] {
+    let struct_type = StructType::new_with_repr(TypeRepr::align(8), [Type::Felt]);
+    let signature = FunctionType::new(CallConv::Fast, [Type::from(struct_type)], []);
+    let signature_bytes = signature.to_bytes();
+    let (package, _) = build_package_with_debug_info(Some(signature));
+    let package_bytes = package.to_bytes();
+
+    let signature_offset = package_bytes
+        .windows(signature_bytes.len())
+        .position(|window| window == signature_bytes)
+        .expect("seed package should contain its procedure signature");
+    let repr_offset = signature_bytes
+        .windows(5)
+        .position(|window| window == [17, 0, 1, 8, 0])
+        .expect("seed signature should contain the aligned struct type");
+    let repr_offset = signature_offset + repr_offset + 2;
+
+    let mut non_power_of_two = package_bytes.clone();
+    non_power_of_two[repr_offset + 1..repr_offset + 3].copy_from_slice(&3u16.to_le_bytes());
+
+    let mut zero_packed = package_bytes;
+    zero_packed[repr_offset] = 2;
+    zero_packed[repr_offset + 1..repr_offset + 3].copy_from_slice(&0u16.to_le_bytes());
+
+    [
+        ("non_power_of_two_struct_align.bin", non_power_of_two),
+        ("zero_packed_struct_align.bin", zero_packed),
+    ]
+}
+
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
@@ -112,7 +142,7 @@ fn generate_fuzz_seeds() {
         &package_with_signature.to_bytes(),
     );
 
-    let (package_with_debug_info, debug_info_bytes) = build_package_with_debug_info();
+    let (package_with_debug_info, debug_info_bytes) = build_package_with_debug_info(None);
     write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
@@ -125,6 +155,12 @@ fn generate_fuzz_seeds() {
         "package_with_debug_info.bin",
         &package_with_debug_info.to_bytes(),
     );
+
+    for (name, bytes) in build_packages_with_invalid_struct_alignments() {
+        write_seed("debug_info", name, &bytes);
+        write_seed("package_deserialize", name, &bytes);
+        write_seed("package_semantic_deserialize", name, &bytes);
+    }
 
     println!("\nSeed corpus generated in ../../tools/miden-core-fuzz/corpus");
 }
