@@ -11,7 +11,8 @@ use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
 };
-use miden_precompiles::K1Scalar;
+use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
+use miden_precompiles_prover::{HashFunction, prove_deferred_state, verify_deferred};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::{AdviceInputs, AdviceStack},
@@ -19,7 +20,7 @@ use miden_processor::{
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-const VERIFY_EXPECTED_CYCLES: u64 = 1_453;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_465;
 const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 
@@ -35,12 +36,61 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
 }
 
+/// Full round trip through the real precompile side prover: `verify` logs a plain 2-base MSM
+/// claim (`R = u1*G + u2*Q`), and the side prover satisfies it with a GLV-decomposed addition
+/// chain internally (`intro_endo`'s in-circuit `phi(G)`/`phi(Q)` certs, no untrusted advice) --
+/// this proves those claims the deferred state above only checked structurally, then verifies the
+/// resulting STARK proof against the same root the main VM committed.
 #[test]
-fn core_ecdsa_k256_keccak_verify_accepts_generator_public_key() {
-    let fixture = generator_public_key_fixture();
+fn core_ecdsa_k256_keccak_verify_glv_claim_proves_and_verifies() {
+    let fixture = valid_fixture();
+    let output = run_verify(&fixture).expect("valid core ECDSA K256/Keccak signature must verify");
 
-    let output = run_verify(&fixture).expect("generator public key must verify");
-    assert_deferred_state_round_trips(&output);
+    let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
+        .expect("the GLV-decomposed deferred claims must be provable");
+    let verified_root =
+        verify_deferred(&proof).expect("the GLV-decomposed deferred proof must verify");
+    assert_eq!(
+        verified_root,
+        output.deferred_state.root(),
+        "verified root must match the root the main VM committed",
+    );
+}
+
+/// A public key whose x-coordinate is `G_x`, `beta*G_x`, or `beta^2*G_x` puts it on the secp256k1
+/// GLV endomorphism's orbit of the generator -- `Q` coincides with `G`, `phi(G)`, or `phi^2(G)` as
+/// a point value. `verify` logs the same plain `u1*G + u2*Q` claim regardless; on the prover side,
+/// `intro_endo`'s in-circuit value relation means a coincidence like this is ordinary point-store
+/// dedup, not a forgery surface, so it needs no special-casing -- each such key must verify (and
+/// prove) like any other.
+///
+/// Their discrete logs are `1`, `lambda`, `lambda^2` and the negations thereof, so no such key has
+/// practical use. They are valid curve points all the same, and a verifier that traps on a valid
+/// key decides it by accident rather than on the signature.
+#[test]
+fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
+    let one = core::array::from_fn(|i| u32::from(i == 0));
+    let lambda_squared = scalar_mul_mod_n(SECP256K1_LAMBDA, SECP256K1_LAMBDA);
+
+    for (name, secret_scalar) in [
+        ("Q == G", one),
+        ("Q == -G", negate_scalar_mod_n(one)),
+        ("Q == phi(G)", SECP256K1_LAMBDA),
+        ("Q == phi^2(G)", lambda_squared),
+    ] {
+        let sk = SigningKey::read_from_bytes(&le_limbs_to_be_bytes(secret_scalar))
+            .unwrap_or_else(|_| panic!("{name}: the secret scalar must be a valid key"));
+        let fixture = fixture_from_signing_key(sk);
+
+        let output = run_verify(&fixture)
+            .unwrap_or_else(|e| panic!("{name} must verify through the 2-base fallback: {e}"));
+
+        let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
+            .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
+        let verified_root = verify_deferred(&proof)
+            .unwrap_or_else(|_| panic!("{name}: the fallback's deferred proof must verify"));
+        assert_eq!(verified_root, output.deferred_state.root(), "{name}");
+    }
 }
 
 #[test]
@@ -63,7 +113,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_high_s_untrusted_witness() {
         "miden-crypto Rust verification must reject high-s",
     );
 
-    set_s(&mut fixture, high_s);
+    fixture.advice = ecdsa_k256_keccak::encode_signature(&fixture.public_key, &high_s_signature);
     run_verify(&fixture)
         .expect("high-s remains an equivalent witness when signature advice is not committed");
 }
@@ -170,17 +220,12 @@ struct Fixture {
 }
 
 fn valid_fixture() -> Fixture {
-    let mut rng = ChaCha20Rng::from_seed([0xe5; 32]);
-    let sk = SigningKey::with_rng(&mut rng);
-    fixture_from_signing_key(sk)
+    fixture_from_signing_key(default_signing_key())
 }
 
-fn generator_public_key_fixture() -> Fixture {
-    let mut secret_key_bytes = [0u8; 32];
-    secret_key_bytes[31] = 1;
-    let sk = SigningKey::read_from_bytes(&secret_key_bytes).expect("scalar 1 is a valid key");
-
-    fixture_from_signing_key(sk)
+fn default_signing_key() -> SigningKey {
+    let mut rng = ChaCha20Rng::from_seed([0xe5; 32]);
+    SigningKey::with_rng(&mut rng)
 }
 
 fn fixture_from_signing_key(sk: SigningKey) -> Fixture {

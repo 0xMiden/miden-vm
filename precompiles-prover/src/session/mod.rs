@@ -309,6 +309,14 @@ impl Session {
         require::intro(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
 
+    /// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
+    /// (value `= φ(P)`) — GLV's endomorphism leaf. Chiplet-internal, like
+    /// [`msm_intro`](Self::msm_intro). Mechanism in
+    /// [`msm::require::intro_endo`](crate::ec::msm::require::intro_endo).
+    pub fn msm_intro_endo(&mut self, point: &EcNode) -> EcExprPtr {
+        require::intro_endo(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
+    }
+
     /// Combine two MSM expressions: union their term multisets (shared-base
     /// scalars merge `mod` the scalar bound) and add their values; the
     /// operands' use counts are bumped. Mechanism in

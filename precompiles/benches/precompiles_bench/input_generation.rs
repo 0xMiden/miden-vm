@@ -43,7 +43,14 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
         advice_stack.append_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
     }
 
-    assert_eq!(advice_stack.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");
+    // The message and public-key commitment words, plus `encode_signature`'s output (32 felts of
+    // PK/SIG, already a multiple of 8 -- no padding needed).
+    let felts_per_ecdsa = 8 + 32;
+    assert_eq!(
+        advice_stack.len(),
+        workload.ecdsas * felts_per_ecdsa,
+        "unexpected ECDSA advice length",
+    );
     AdviceInputs::default().with_advice_stack(advice_stack)
 }
 

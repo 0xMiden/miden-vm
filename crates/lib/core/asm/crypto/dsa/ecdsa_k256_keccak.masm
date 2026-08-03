@@ -98,27 +98,27 @@ pub proc verify
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 
     exec.prepare_verify_inputs
-    # => [U1, Q, U2, SIG_R, ...]
+    # => [U1, U2, SIG_R, pubkey_ptr, ...]
 
-    dupw.1
-    # => [Q, U1, Q, U2, SIG_R, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, SIG_R, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, SIG_R, ...]
-    if.true
-        movupw.2 swapw
-        # => [U1, U2, Q, SIG_R, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, Q, SIG_R, ...]
-        swapw dropw
-        # => [U1_PLUS_U2, SIG_R, ...]
-        exec.secp256k1::mul_scalar_generator
-    else
-        exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, SIG_R, ...]
-        exec.secp256k1::msm2
-    end
+    movup.12
+    # => [pubkey_ptr, U1, U2, SIG_R, ...]
+    dup add.8
+    # => [pubkey_ptr+8, pubkey_ptr, U1, U2, SIG_R, ...]
+    exec.k1_base::load_mem_stream
+    # => [BY, pubkey_ptr+16, pubkey_ptr, U1, U2, SIG_R, ...]
+    movup.5
+    # => [pubkey_ptr, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
+    exec.k1_base::load_mem_stream
+    # => [BX, pubkey_ptr+8, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
+    movup.4 drop
+    # => [BX, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
+    movup.8 drop
+    # => [BX, BY, U1, U2, SIG_R, ...]
+    exec.secp256k1::load_digest_pair
+    # => [Q, U1, U2, SIG_R, ...]
+    movdnw.2
+    # => [U1, U2, Q, SIG_R, ...]
+    exec.verify_point_2base
     # => [VERIFY_POINT, SIG_R, ...]
     exec.assert_x_eq_scalar_k1
     # => [...]
@@ -127,11 +127,38 @@ end
 # INTERNAL PROCEDURES — ECDSA
 # ================================================================================================
 
+#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
+#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
+#!
+#! Input:  [U1, U2, Q, ...]
+#! Output: [VERIFY_POINT, ...]
+proc verify_point_2base
+    dupw.2
+    # => [Q, U1, U2, Q, ...]
+    exec.secp256k1::push_generator
+    # => [G, Q, U1, U2, Q, ...]
+    exec.word::eq
+    # => [is_q_generator, U1, U2, Q, ...]
+    if.true
+        exec.k1_scalar::add
+        # => [U1_PLUS_U2, Q, ...]
+        swapw dropw
+        # => [U1_PLUS_U2, ...]
+        exec.secp256k1::mul_scalar_generator
+    else
+        exec.secp256k1::msm2_generator
+    end
+    # => [VERIFY_POINT, ...]
+end
+
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#! Output: [U1_DIGEST, U2_DIGEST, SIG_R_DIGEST, pubkey_ptr, ...]
+#!
+#! `pubkey_ptr` rides through unread: the public key is loaded once, by the verification-point
+#! procedure that also needs `Q`'s raw coordinate digests.
 #!
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
@@ -141,36 +168,26 @@ proc prepare_verify_inputs
     exec.k1_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
 
-    movup.4
-    # => [pubkey_ptr, Z, ...]
-    exec.secp256k1::load_mem
-    # => [Q, Z, ...]
-    swapw
-    # => [Z, Q, ...]
-
     exec.load_signature_k1
-    # => [SIG_S, SIG_R, Z, Q, ...]
+    # => [SIG_S, SIG_R, Z, pubkey_ptr, ...]
 
     exec.k1_scalar::inv
-    # => [S_INV, SIG_R, Z, Q, ...]
+    # => [S_INV, SIG_R, Z, pubkey_ptr, ...]
 
     dupw
     movupw.3
     exec.k1_scalar::mul
-    # => [U1 = Z*S_INV, S_INV, SIG_R, Q, ...]
+    # => [U1 = Z*S_INV, S_INV, SIG_R, pubkey_ptr, ...]
 
     dupw.1
     dupw.3
     exec.k1_scalar::mul
-    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
+    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, pubkey_ptr, ...]
 
     swapw.2
-    # => [S_INV, U1, U2, SIG_R, Q, ...]
+    # => [S_INV, U1, U2, SIG_R, pubkey_ptr, ...]
     dropw
-    # => [U1, U2, SIG_R, Q, ...]
-
-    movupw.3 swapw
-    # => [U1, Q, U2, SIG_R, ...]
+    # => [U1, U2, SIG_R, pubkey_ptr, ...]
 end
 
 #! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests, checks SIG_R != 0,

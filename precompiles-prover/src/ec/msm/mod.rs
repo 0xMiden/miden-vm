@@ -52,7 +52,7 @@ use crate::{
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    uint::{UintValMsg, add::UintAddMsg},
+    uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
     utils::{current_main, next_main},
 };
 
@@ -251,9 +251,36 @@ pub const COL_NEG_YR: usize = 36;
 /// the `EcOnCurveCert(group, R)` provide that vouches R's (trio-free)
 /// membership — R on-curve because `val_a` is.
 pub const COL_NEG_MINTED: usize = 37;
-pub const NUM_MAIN_COLS: usize = 38;
+/// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
+/// boundary's `EcGroup` consume; the none-sentinel 0 for a group with no
+/// endomorphism). Combine/neg-boundary-only, like [`COL_A_PTR`] /
+/// [`COL_B_PTR`] / [`COL_BOUND_PTR`].
+pub const COL_BETA_PTR: usize = 38;
+pub const COL_LAMBDA_PTR: usize = 39;
 
-// Aux: 11 columns, flattened via `frac_col!` over the 20 fractions so
+// --- intro_endo-only columns (0 on intro / combine / neg / pad rows) --
+/// Op-family flag for `intro_endo` — the fourth one-hot member (`is_intro +
+/// is_intro_endo + is_combine + is_neg = act`). An `intro_endo(φ(P), P)` is
+/// a 1-row run recording the term `⟨P × λ⟩` with value `φ(P)` — GLV's
+/// endomorphism leaf, mirroring plain `intro`'s `⟨P × 1⟩` / `val = P` but
+/// with the value relation `x_φ = β·x_P`, `y_φ = y_P` in place of a ptr
+/// equality (see [`msm::require::intro_endo`](crate::ec::msm::require::intro_endo)).
+pub const COL_IS_INTRO_ENDO: usize = 40;
+/// `P`'s x ptr (from the `EcPoint(base)` consume).
+pub const COL_ENDO_BASE_X: usize = 41;
+/// The shared y ptr: both the `EcPoint(base)` and `EcPoint(val)` consumes
+/// carry it, so they pin `y_φ = y_P` for free.
+pub const COL_ENDO_Y: usize = 42;
+/// `φ(P)`'s x ptr (from the `EcPoint(val)` consume; tied to `β·x_P` by the
+/// `UintMul` consume).
+pub const COL_ENDO_VAL_X: usize = 43;
+/// Mint flag: 1 iff this row freshly mints `φ(P)`, gating the
+/// `EcOnCurveCert(group, val)` provide that vouches its (trio-free)
+/// membership — `φ(P)` on-curve because `P` is.
+pub const COL_ENDO_MINTED: usize = 44;
+pub const NUM_MAIN_COLS: usize = 45;
+
+// Aux: 13 columns, flattened via `frac_col!` over the 24 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
 // 1 (folding the intermediate 12-column flatten and the follow-on
 // singleton-pack into one step):
@@ -265,12 +292,14 @@ pub const NUM_MAIN_COLS: usize = 38;
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
 //  col 7:  EcGroupAdd (combine value) + EcPoint(val_a) (neg value coord).
-//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin).
+//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin — combine, neg, and intro_endo).
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
-const NUM_LOGUP_COLS: usize = 11;
-const AUX_WIDTH: usize = 11;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2];
+//  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
+//  col 12: UintMul (intro_endo's x_φ = β·x_P) + EcOnCurveCert provide (intro_endo value).
+const NUM_LOGUP_COLS: usize = 13;
+const AUX_WIDTH: usize = 13;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -321,15 +350,18 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let act_next: AB::Expr = next[COL_ACT].into();
         let is_boundary: AB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: AB::Expr = local[COL_IS_INTRO].into();
+        let is_intro_endo: AB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: AB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: AB::Expr = local[COL_IS_NEG].into();
         let neg_minted: AB::Expr = local[COL_NEG_MINTED].into();
+        let endo_minted: AB::Expr = local[COL_ENDO_MINTED].into();
         let idx: AB::Expr = local[COL_IDX].into();
 
         // Booleans.
         builder.assert_bool(local[COL_ACT]);
         builder.assert_bool(local[COL_IS_BOUNDARY]);
         builder.assert_bool(local[COL_IS_INTRO]);
+        builder.assert_bool(local[COL_IS_INTRO_ENDO]);
         builder.assert_bool(local[COL_IS_COMBINE]);
         builder.assert_bool(local[COL_IS_NEG]);
         // The neg-value mint flag is boolean and lives only on neg rows — so a
@@ -337,12 +369,18 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // (the provide is gated `−neg_minted · is_boundary`).
         builder.assert_bool(local[COL_NEG_MINTED]);
         builder.assert_zero((AB::Expr::ONE - is_neg.clone()) * neg_minted);
+        // Likewise the intro_endo value mint flag.
+        builder.assert_bool(local[COL_ENDO_MINTED]);
+        builder.assert_zero((AB::Expr::ONE - is_intro_endo.clone()) * endo_minted);
 
         // Activity is sticky-downward (pads are a tail), and the op-family
         // one-hot sums to `act` (so every active row is exactly one op and
         // pads are no op).
         builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
-        builder.assert_zero(is_intro.clone() + is_combine.clone() + is_neg.clone() - act.clone());
+        builder.assert_zero(
+            is_intro.clone() + is_intro_endo.clone() + is_combine.clone() + is_neg.clone()
+                - act.clone(),
+        );
         // A boundary only on active rows; pads carry `is_boundary = 0` so
         // the allocator freezes `expr_ptr` across the tail.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * is_boundary.clone());
@@ -382,6 +420,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_MULT,
             COL_CLAIM_MULT,
             COL_IS_INTRO,
+            COL_IS_INTRO_ENDO,
             COL_IS_COMBINE,
             COL_IS_NEG,
             COL_A_EXPR,
@@ -391,6 +430,8 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_A_PTR,
             COL_B_PTR,
             COL_BOUND_PTR,
+            COL_BETA_PTR,
+            COL_LAMBDA_PTR,
         ] {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
@@ -404,6 +445,17 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let base: AB::Expr = local[COL_BASE].into();
         let val: AB::Expr = local[COL_VAL].into();
         builder.assert_zero(is_intro * (val - base));
+
+        // intro_endo: also a 1-row run (boundary). The value relation is
+        // *not* `val = base` (that's plain intro's) — it's proved by the
+        // LogUp coordinate relation below (§ intro_endo). The only native
+        // constraint here is the scalar pin: the term's scalar is the
+        // group's λ, never an AIR-known constant (see
+        // [`msm::require::intro_endo`](crate::ec::msm::require::intro_endo)).
+        builder.assert_zero(is_intro_endo.clone() * (AB::Expr::ONE - is_boundary.clone()));
+        let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].into();
+        let scalar: AB::Expr = local[COL_SCALAR].into();
+        builder.assert_zero(is_intro_endo * (scalar - lambda_ptr));
 
         // ---- combine ----------------------------------------------------
         // Per-row take one-hot: each combine row emits one output term.
@@ -514,6 +566,7 @@ where
         let neg_claim_mult: LB::Expr = LB::Expr::ZERO - local[COL_CLAIM_MULT].into();
         let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: LB::Expr = local[COL_IS_INTRO].into();
+        let is_intro_endo: LB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: LB::Expr = local[COL_IS_NEG].into();
 
@@ -541,6 +594,8 @@ where
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
         let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
+        let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
+        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
         let a_lo: LB::Expr = local[COL_A_DIFF_LO].into();
         let a_hi: LB::Expr = local[COL_A_DIFF_HI].into();
         let b_lo: LB::Expr = local[COL_B_DIFF_LO].into();
@@ -551,18 +606,29 @@ where
         let neg_ya: LB::Expr = local[COL_NEG_YA].into();
         let neg_yr: LB::Expr = local[COL_NEG_YR].into();
         let neg_minted: LB::Expr = local[COL_NEG_MINTED].into();
+        // intro_endo coordinate cells (always the boundary — intro_endo is
+        // a 1-row run): P's x, the shared y (P.y = φ(P).y), φ(P)'s x, and
+        // the mint flag gating φ(P)'s cert.
+        let endo_base_x: LB::Expr = local[COL_ENDO_BASE_X].into();
+        let endo_y: LB::Expr = local[COL_ENDO_Y].into();
+        let endo_val_x: LB::Expr = local[COL_ENDO_VAL_X].into();
+        let endo_minted: LB::Expr = local[COL_ENDO_MINTED].into();
 
         // Cursor advances (= the MsmTerm consume gates) and the boundary
         // gates for expression-level traffic. A neg advances cursor i every
         // row (no take flags), so `adv_i` carries `is_neg`. The a-side
-        // boundary traffic (operand-A head, ordering, the `EcGroup` pin)
-        // fires for combine AND neg; the b-side and the combine value for
-        // combine only; the neg value for neg only.
+        // boundary traffic (operand-A head, ordering) fires for combine AND
+        // neg; the b-side and the combine value for combine only; the neg
+        // value for neg only. `bnd_group` is the wider `EcGroup`-pin gate:
+        // combine, neg, AND intro_endo (which has no operand head / ordering
+        // of its own, only the group pin authenticating β/λ).
         let adv_i = take_a + take_both.clone() + is_neg.clone();
         let adv_j = take_b + take_both.clone();
         let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
-        let bnd_b = is_combine * is_boundary.clone();
+        let bnd_b = is_combine.clone() * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
+        let bnd_group = (is_combine + is_neg.clone() + is_intro_endo.clone()) * is_boundary.clone();
+        let bnd_endo = is_intro_endo * is_boundary.clone();
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
@@ -825,13 +891,15 @@ where
             ),
             (
                 "consume-ecgroup",
-                bnd_a.clone(),
+                bnd_group,
                 EcGroupMsg {
                     group_ptr: group_ptr.clone(),
                     a_ptr: a_ptr.clone(),
                     b_ptr: b_ptr.clone(),
                     bound_ptr: bound_ptr.clone(),
                     scalar_bound_ptr: sbound_ptr.clone(),
+                    beta_ptr: beta_ptr.clone(),
+                    lambda_ptr: lambda_ptr.clone(),
                 },
                 two_deg
             ),
@@ -853,6 +921,70 @@ where
             pair_deg,
             ("range-b-lo", bnd_b.clone(), Range16Msg { w: b_lo }, two_deg),
             ("range-b-hi", bnd_b, Range16Msg { w: b_hi }, two_deg),
+        );
+
+        // col 11 (paired, lqd-1): intro_endo's coordinate relation — `P`'s
+        // and `φ(P)`'s `EcPoint` consumes, sharing `endo_y` so the store's
+        // provides pin `y_φ = y_P` for free (mirroring `neg`'s shared-x
+        // trick, transposed to the shared coordinate GLV needs).
+        frac_col!(
+            builder,
+            "ec-msm-endo",
+            pair_deg,
+            (
+                "consume-ecpoint-endo-base",
+                bnd_endo.clone(),
+                EcPointMsg {
+                    point_ptr: base.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: endo_base_x.clone(),
+                    y_ptr: endo_y.clone(),
+                    is_pai: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+            (
+                "consume-ecpoint-endo-val",
+                bnd_endo.clone(),
+                EcPointMsg {
+                    point_ptr: val.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: endo_val_x.clone(),
+                    y_ptr: endo_y,
+                    is_pai: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+        );
+        // col 12 (paired, lqd-1): the value relation's only genuinely new
+        // certificate — `x_φ = β·x_P` — paired with the on-curve cert
+        // provide for a freshly-minted `φ(P)` (φ(P) on-curve because P is,
+        // same closure-cert idiom `neg` uses for its value).
+        frac_col!(
+            builder,
+            "ec-msm-endo",
+            pair_deg,
+            (
+                "consume-uintmul-endo",
+                bnd_endo,
+                UintMulMsg {
+                    kappa_a: LB::Expr::ONE,
+                    kappa_c: LB::Expr::ZERO,
+                    a_ptr: beta_ptr,
+                    b_ptr: endo_base_x,
+                    c_ptr: bound_ptr.clone(),
+                    r_ptr: endo_val_x,
+                    bound_ptr,
+                    is_sub: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
+            (
+                "provide-oncurvecert-endo",
+                LB::Expr::ZERO - endo_minted,
+                EcOnCurveCertMsg { group_ptr, r_ptr: val },
+                two_deg
+            ),
         );
     }
 }

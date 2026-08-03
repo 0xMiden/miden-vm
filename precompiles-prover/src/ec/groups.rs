@@ -71,7 +71,13 @@ pub const COL_SBOUND_PTR: usize = 4;
 /// group + every live-case add op); 0 on pad rows — the only liveness
 /// signal this chiplet needs.
 pub const COL_MULT: usize = 5;
-pub const NUM_MAIN_COLS: usize = 6;
+/// The GLV endomorphism base-field constant `β`'s uint ptr (the
+/// none-sentinel 0 for a group with no endomorphism).
+pub const COL_BETA_PTR: usize = 6;
+/// The GLV endomorphism scalar `λ`'s uint ptr (the none-sentinel 0 for a
+/// group with no endomorphism).
+pub const COL_LAMBDA_PTR: usize = 7;
+pub const NUM_MAIN_COLS: usize = 8;
 
 // Aux: the single LogUp running-sum column (one fraction).
 const NUM_LOGUP_COLS: usize = 1;
@@ -188,6 +194,8 @@ where
                                         b_ptr: local[COL_B_PTR].into(),
                                         bound_ptr: local[COL_BOUND_PTR].into(),
                                         scalar_bound_ptr: local[COL_SBOUND_PTR].into(),
+                                        beta_ptr: local[COL_BETA_PTR].into(),
+                                        lambda_ptr: local[COL_LAMBDA_PTR].into(),
                                     },
                                     provide_deg,
                                 );
