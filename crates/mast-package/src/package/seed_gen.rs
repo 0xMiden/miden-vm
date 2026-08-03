@@ -13,6 +13,7 @@ use miden_core::{
     operations::Operation,
     serde::Serializable,
 };
+use miden_debug_types::Uri;
 
 use super::{PackageId, TargetType};
 use crate::{
@@ -67,6 +68,7 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
     let mut debug_info = PackageDebugInfoBuilder::default();
     let context_name = debug_info.add_string("seed::test");
     let op_name = debug_info.add_string("add");
+    debug_info.add_file(Uri::new("file:///seed/source.masm"), Some([0xa5; 32]));
     let source_node = debug_info
         .add_node(DebugSourceNode {
             exec_node,
@@ -189,6 +191,41 @@ fn generate_fuzz_seeds() {
         "package_semantic_deserialize",
         "package_with_debug_info.bin",
         &package_with_debug_info.to_bytes(),
+    );
+
+    let file_checksum = [0xa5; 32];
+    let file_path_offset = debug_info_bytes
+        .windows(file_checksum.len())
+        .position(|window| window == file_checksum)
+        .expect("seed debug info should contain its file checksum")
+        - 4;
+    let mut dangling_file_debug_info = debug_info_bytes.clone();
+    dangling_file_debug_info[file_path_offset..file_path_offset + 4]
+        .copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed("debug_info", "dangling_file_path_string.bin", &dangling_file_debug_info);
+
+    let mut dangling_file_package = package_with_debug_info.to_bytes();
+    let file_path_offset = dangling_file_package
+        .windows(file_checksum.len())
+        .position(|window| window == file_checksum)
+        .expect("seed package should contain its debug file checksum")
+        - 4;
+    dangling_file_package[file_path_offset..file_path_offset + 4]
+        .copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed(
+        "debug_info",
+        "package_with_dangling_file_path_string.bin",
+        &dangling_file_package,
+    );
+    write_seed(
+        "package_deserialize",
+        "package_with_dangling_file_path_string.bin",
+        &dangling_file_package,
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_dangling_file_path_string.bin",
+        &dangling_file_package,
     );
 
     let mut dangling_error_debug_info = debug_info_bytes;

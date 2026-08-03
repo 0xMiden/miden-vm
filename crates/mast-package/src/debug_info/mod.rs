@@ -307,7 +307,9 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
             let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
                 *new_path_idx
             } else {
-                let path = self.strings[old_path_idx].clone();
+                let Some(path) = self.strings.get(old_path_idx).cloned() else {
+                    continue;
+                };
                 let new_path_idx = match trimmer(path.as_ref()) {
                     None => old_path_idx,
                     Some(new_path) => match string_indices.entry(new_path.clone()) {
