@@ -233,8 +233,36 @@ fn generate_fuzz_seeds() {
         &dangling_file_package,
     );
 
-    let mut dangling_error_debug_info = debug_info_bytes;
     let error_code = 0x0123_4567_89ab_cdef_u64.to_le_bytes();
+    let root_offset = debug_info_bytes
+        .windows(error_code.len())
+        .position(|window| window == error_code)
+        .expect("seed debug info should contain its error code")
+        - 8;
+    let mut dangling_root_debug_info = debug_info_bytes.clone();
+    dangling_root_debug_info[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed("debug_info", "dangling_source_root.bin", &dangling_root_debug_info);
+
+    let mut dangling_root_package = package_with_debug_info.to_bytes();
+    let root_offset = dangling_root_package
+        .windows(error_code.len())
+        .position(|window| window == error_code)
+        .expect("seed package should contain its debug error code")
+        - 8;
+    dangling_root_package[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed("debug_info", "package_with_dangling_source_root.bin", &dangling_root_package);
+    write_seed(
+        "package_deserialize",
+        "package_with_dangling_source_root.bin",
+        &dangling_root_package,
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_dangling_source_root.bin",
+        &dangling_root_package,
+    );
+
+    let mut dangling_error_debug_info = debug_info_bytes;
     let error_message_offset = dangling_error_debug_info
         .windows(error_code.len())
         .position(|window| window == error_code)

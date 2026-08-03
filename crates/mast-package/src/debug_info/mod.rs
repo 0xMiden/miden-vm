@@ -400,7 +400,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         exec_node: Exec,
     ) -> impl Iterator<Item = (Src, &SourceNode<Exec, Src>)> {
         self.roots.iter().copied().filter_map(move |source_node_id| {
-            let source_node = &self.nodes[source_node_id];
+            let source_node = self.nodes.get(source_node_id)?;
             if source_node.exec_node == exec_node {
                 Some((source_node_id, source_node))
             } else {
