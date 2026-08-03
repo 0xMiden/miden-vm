@@ -99,9 +99,26 @@ pub proc verify
 
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
+
+    dupw.1
+    # => [Q, U1, Q, U2, SIG_R, ...]
     exec.secp256k1::push_generator
-    # => [G, U1, Q, U2, SIG_R, ...]
-    exec.secp256k1::msm2
+    # => [G, Q, U1, Q, U2, SIG_R, ...]
+    exec.word::eq
+    # => [is_q_generator, U1, Q, U2, SIG_R, ...]
+    if.true
+        movupw.2 swapw
+        # => [U1, U2, Q, SIG_R, ...]
+        exec.k1_scalar::add
+        # => [U1_PLUS_U2, Q, SIG_R, ...]
+        swapw dropw
+        # => [U1_PLUS_U2, SIG_R, ...]
+        exec.secp256k1::mul_scalar_generator
+    else
+        exec.secp256k1::push_generator
+        # => [G, U1, Q, U2, SIG_R, ...]
+        exec.secp256k1::msm2
+    end
     # => [VERIFY_POINT, SIG_R, ...]
     exec.assert_x_eq_scalar_k1
     # => [...]

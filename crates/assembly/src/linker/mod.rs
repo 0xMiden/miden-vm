@@ -60,7 +60,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::{ItemInfo, ModuleDescriptor},
 };
-use miden_core::{Word, advice::AdviceMap, mast::MastNodeId, program::KernelDescriptor};
+use miden_core::{Word, advice::AdviceMap, program::KernelDescriptor};
 use miden_mast_package::Package as MastPackage;
 use smallvec::{SmallVec, smallvec};
 
@@ -179,12 +179,13 @@ impl Linker {
                 reason: err.to_string(),
             }
         })?;
-        let library_interface_digest = library.package.interface_digest().map_err(|err| {
-            LinkerError::InvalidPackageModuleSurface {
-                package: library.package.name.to_string(),
-                reason: err.to_string(),
-            }
-        })?;
+        let library_interface_digest =
+            library
+                .interface_digest()
+                .map_err(|err| LinkerError::InvalidPackageModuleSurface {
+                    package: library.package.name.to_string(),
+                    reason: err.to_string(),
+                })?;
 
         let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
         let result = match self.libraries.entry(library_interface_digest) {
@@ -755,34 +756,6 @@ impl Linker {
         procedure_digest: &Word,
     ) -> Option<GlobalItemIndex> {
         self.procedures_by_mast_root.get(procedure_digest).map(|indices| indices[0])
-    }
-
-    /// Returns a conflicting export root when a dynamic library cannot identify an exact procedure
-    /// by digest alone.
-    pub fn conflicting_dynamic_procedure_export_root(
-        &self,
-        source_library_commitment: Word,
-        mast_root: Word,
-        selected_root_id: MastNodeId,
-    ) -> Option<MastNodeId> {
-        let library = self.libraries.get(&source_library_commitment)?;
-        if !matches!(library.linkage, Linkage::Dynamic) {
-            return None;
-        }
-
-        library
-            .module_descriptors()
-            .ok()?
-            .into_iter()
-            .flat_map(|module| {
-                module
-                    .procedures()
-                    .filter_map(|(_, proc)| {
-                        (proc.digest == mast_root).then(|| proc.source_root_id()).flatten()
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .find(|&root_id| root_id != selected_root_id)
     }
 
     /// Resolves `target` from the perspective of `caller`.

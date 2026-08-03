@@ -142,10 +142,8 @@ assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 
 To verify program execution, use `Verifier::new().verify(...)`. The verifier takes the following parameters:
 
-- `program_info: ProgramInfo` - a structure containing the hash of the program to be verified (represented as a 32-byte digest), and the hashes of the Kernel procedures used to execute the program.
-- `stack_inputs: StackInputs` - a list of the values with which the stack was initialized prior to the program's execution..
-- `stack_outputs: StackOutputs` - a list of the values returned from the stack after the program completed execution.
 - `proof: ExecutionProof` - the proof generated during program execution.
+- `claim: ExecutionClaim` - the claimed program information, stack inputs, and stack outputs.
 
 Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the `stack_inputs` is expected to be the value at the top of the stack.
 
@@ -162,16 +160,21 @@ Notice how the verifier needs to know only the hash of the program - not what th
 Here is a simple example of verifying execution of the program from the previous example:
 
 ```rust,ignore
-use miden_vm::{field::Felt, ProgramInfo, StackInputs, StackOutputs, Verifier};
+use miden_vm::{ExecutionClaim, ProgramInfo, StackInputs, StackOutputs, Verifier, field::Felt};
 
 let program =   /* value from previous example */;
 let proof =     /* value from previous example */;
 let expected_outputs = StackOutputs::new(&[Felt::new(8).unwrap()]).unwrap();
+let claim = ExecutionClaim::from_program_info(
+    ProgramInfo::from(program),
+    StackInputs::default(),
+    expected_outputs,
+);
 
-// let's verify program execution
-match Verifier::new().verify(ProgramInfo::from(program), StackInputs::default(), expected_outputs, proof) {
+// Verify the execution claim.
+match Verifier::new().verify(proof, claim) {
     Ok(_) => println!("Execution verified!"),
-    Err(msg) => println!("Something went terribly wrong: {}", msg),
+    Err(err) => eprintln!("Verification failed: {err}"),
 }
 ```
 

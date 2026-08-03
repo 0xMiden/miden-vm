@@ -10,7 +10,7 @@
 //!
 //! Where miden's stock
 //! [`ConstraintLookupBuilder`](miden_air::lookup::ConstraintLookupBuilder)
-//! reserves a dead last row, this adapter closes the running sum on the
+//! uses a normalized cyclic recurrence, this adapter closes the unnormalized running sum on the
 //! **live last row**:
 //!
 //! ```text
@@ -30,11 +30,10 @@
 //! transition/last gate costs +1 degree over the older ungated σ/n-cyclic
 //! form; 0.26's per-AIR quotient coset absorbs it.
 //!
-//! Prover-side: [`build_logup_aux_trace`] runs miden's stock
-//! `build_lookup_fractions` + `accumulate` to produce the multi-column
-//! aux trace and reads the running sum's terminal as σ. Column 0 is the
-//! plain running sum (`aux[r] = Σ_{i<r} delta_i`); no correction is
-//! applied. Fraction columns are kept verbatim.
+//! Prover-side: [`build_logup_aux_trace`] runs miden's stock `build_lookup_fractions` +
+//! normalized `accumulate`, adds `r * sigma_prime` back to column 0 to recover the plain running
+//! sum (`aux[r] = Σ_{i<r} delta_i`), and commits `sigma = n * sigma_prime`. Fraction columns are
+//! kept verbatim.
 //!
 //! ## Encoding
 //!

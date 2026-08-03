@@ -75,7 +75,7 @@ pub use miden_core::{
 pub use trace::{TraceBuildInputs, TraceGenerationContext};
 
 pub mod advice {
-    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
 
     pub use super::host::{
         AdviceMutation,
@@ -87,7 +87,8 @@ pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
 }
 

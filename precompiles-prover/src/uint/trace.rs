@@ -50,13 +50,6 @@ impl UintPtr {
     pub fn from_addr(addr: u32) -> Self {
         Self(addr)
     }
-
-    /// Mint a handle from a raw address, bypassing the store — for
-    /// bare-chiplet tests that lay rows with no backing store.
-    #[cfg(test)]
-    pub(crate) fn forged(addr: u32) -> Self {
-        Self(addr)
-    }
 }
 
 /// An interned uint: its 256-bit value, its handle, and the handle of

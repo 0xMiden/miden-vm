@@ -117,13 +117,24 @@ impl MmrPeaks {
         (self.forest, self.peaks)
     }
 
-    /// Hashes the peaks.
+    /// Hashes the forest leaf count and peaks.
     ///
     /// The procedure will:
+    /// - Prefix the preimage with `[num_leaves, 0, 0, 0]` to bind the forest shape.
     /// - Flatten and pad the peaks to a vector of Felts.
     /// - Hash the vector of Felts.
     pub fn hash_peaks(&self) -> Word {
-        Poseidon2::hash_elements(&self.flatten_and_pad_peaks())
+        let padded_peaks = self.flatten_and_pad_peaks();
+        let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peaks.len());
+        elements.extend_from_slice(&[
+            Felt::new_unchecked(self.num_leaves() as u64),
+            ZERO,
+            ZERO,
+            ZERO,
+        ]);
+        elements.extend_from_slice(&padded_peaks);
+
+        Poseidon2::hash_elements(&elements)
     }
 
     /// Verifies the Merkle opening proof.

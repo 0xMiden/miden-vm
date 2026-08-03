@@ -10,6 +10,7 @@ use crate::{
 /// Minimal layout with only public inputs populated.
 fn minimal_layout(num_public: usize) -> InputLayout {
     let counts = InputCounts {
+        preprocessed_width: 0,
         width: 0,
         aux_width: 0,
         num_aux_boundary: 0,
@@ -99,6 +100,126 @@ fn ace_simple_circuit_with_shared_terms() {
 
     let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero());
+}
+
+#[test]
+fn compact_removes_dead_nodes() {
+    // add(const_3, const_5) folds to const_8, leaving const_3 and const_5
+    // orphaned since nothing else references them.
+    let layout = minimal_layout(1);
+
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let three = builder.constant(QuadFelt::from(Felt::new_unchecked(3)));
+    let five = builder.constant(QuadFelt::from(Felt::new_unchecked(5)));
+    let eight = builder.add(three, five);
+    let root = builder.mul(a, eight);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    let after = dag.nodes().len();
+
+    assert!(
+        after < before,
+        "compact should remove dead nodes: before={before}, after={after}"
+    );
+    // Only Input(Public(0)), Constant(8), and the Mul remain reachable.
+    assert_eq!(after, 3);
+
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    // Without compaction the orphaned Constant(3) and Constant(5) would still be
+    // deduplicated into the emitted circuit's constant pool alongside Constant(8).
+    assert_eq!(
+        circuit.constants.len(),
+        1,
+        "orphaned constants must not reach the emitted circuit"
+    );
+
+    let a_val = QuadFelt::from(Felt::new_unchecked(2));
+    let inputs = build_inputs(&layout, &[(InputKey::Public(0), a_val)]);
+    let result = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(result, a_val * QuadFelt::from(Felt::new_unchecked(8)));
+}
+
+#[test]
+fn compact_removes_dead_operation_subtree() {
+    // A Mul built on top of `root` but never wired into anything else is a dead
+    // subtree: compaction must drop it, not just fold away dead constants.
+    let layout = minimal_layout(2);
+
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let b = builder.input(InputKey::Public(1));
+    let root = builder.add(a, b);
+    let _dead = builder.mul(root, b);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    let after = dag.nodes().len();
+
+    assert!(
+        after < before,
+        "compact should remove the dead Mul subtree: before={before}, after={after}"
+    );
+    // Only Input(Public(0)), Input(Public(1)), and the Add remain reachable.
+    assert_eq!(after, 3);
+
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    // Without compaction the dead Mul would still be emitted as a second operation.
+    assert_eq!(circuit.operations.len(), 1, "dead Mul must not reach the emitted circuit");
+
+    let a_val = QuadFelt::from(Felt::new_unchecked(4));
+    let b_val = QuadFelt::from(Felt::new_unchecked(9));
+    let inputs =
+        build_inputs(&layout, &[(InputKey::Public(0), a_val), (InputKey::Public(1), b_val)]);
+    let result = circuit.eval(&inputs).expect("circuit eval");
+    assert_eq!(result, a_val + b_val);
+}
+
+#[test]
+#[should_panic(expected = "DAG node must come from this DagBuilder")]
+fn compact_rejects_stale_node_ids() {
+    // A NodeId issued before a compaction that removes nodes must not resolve
+    // afterwards: such a compaction renumbers indices and stamps a fresh
+    // dag_id, so provenance checks reject the stale id instead of resolving it
+    // to whichever node now sits at its old index.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let three = builder.constant(QuadFelt::from(Felt::new_unchecked(3)));
+    let five = builder.constant(QuadFelt::from(Felt::new_unchecked(5)));
+    let eight = builder.add(three, five);
+    let root = builder.mul(a, eight);
+    // Constant folding orphans `three` at build time and compaction removes
+    // it, while its old index stays in range afterwards — the exact shape
+    // that would alias a different node.
+    let stale = three;
+
+    let mut dag = builder.build(root);
+    dag.compact();
+    assert!(
+        stale.index() < dag.nodes().len(),
+        "test premise broken: the stale index must stay in range so the \
+         provenance check, not the bounds check, is what rejects it"
+    );
+
+    let mut resumed = DagBuilder::from_dag(dag);
+    let _ = resumed.neg(stale);
+}
+
+#[test]
+fn compact_preserves_already_compact_dag() {
+    // A DAG with no dead nodes must be unchanged by compaction.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let b = builder.input(InputKey::Public(1));
+    let root = builder.add(a, b);
+
+    let mut dag = builder.build(root);
+    let before = dag.nodes().len();
+    dag.compact();
+    assert_eq!(dag.nodes().len(), before);
 }
 
 #[test]

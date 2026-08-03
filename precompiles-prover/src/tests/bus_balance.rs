@@ -58,13 +58,6 @@ pub(crate) fn fold_fixed_boundary_external_balance(
     fold_fixed_messages(challenges, net, fixed_ecgroup_msgs());
 }
 
-pub(crate) fn fold_fixed_group_external_balance(
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, (Felt, String)>,
-) {
-    fold_fixed_messages(challenges, net, fixed_ecgroup_msgs());
-}
-
 fn fold_fixed_messages<M>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, (Felt, String)>,

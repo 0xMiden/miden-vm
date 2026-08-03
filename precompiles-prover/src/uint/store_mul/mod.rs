@@ -270,6 +270,11 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
             let bound_own: AB::ExprEF = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
             builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
 
+            // Root the bounded positive pointer-gap chain at 1. Even a maximum
+            // 2³²-row trace grows by < 2⁴⁶, so it cannot wrap through 0.
+            let ptr: AB::Expr = local[COL_PTR].into();
+            builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
+
             for &cell in
                 [CARRY_LO_BEGIN, CARRY_LO_BEGIN + 1, CARRY_LO_BEGIN + 2, CARRY_LO_BEGIN + 3].iter()
             {

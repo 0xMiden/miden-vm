@@ -1,10 +1,12 @@
 use alloc::vec::Vec;
-use core::fmt;
 
 use miden_core::{
     Word,
     mast::{MastNode, OpBatch},
-    utils::Idx,
+    utils::newtype_id,
+};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar, SourceNodeIdMarker,
 };
 
 /// Content-equivalence key used while interning pending MAST nodes.
@@ -13,129 +15,42 @@ use miden_core::{
 /// which is a builder-local handle, and [`MastNodeId`], which is a final forest position.
 pub(super) type MastNodeKey = Word;
 
-/// Stable assembly-time reference to a MAST node.
-///
-/// This is a builder-local dense arena handle, not a positional [`MastNodeId`] in the final
-/// [`miden_core::mast::MastForest`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct MastNodeRef(u32);
+newtype_id!(
+    /// Stable assembly-time reference to a MAST node.
+    ///
+    /// This is a builder-local dense arena handle, not a positional [`MastNodeId`] in the final
+    /// [`miden_core::mast::MastForest`].
+    pub(crate) struct MastNodeRef;
+);
 
-impl From<u32> for MastNodeRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
+newtype_id!(
+    /// Stable assembly-time reference to a source/debug occurrence of a MAST node.
+    ///
+    /// Multiple source occurrences may point at the same [`MastNodeRef`] when they have identical
+    /// execution content but distinct source metadata.
+    pub(crate) struct SourceNodeRef;
+);
 
-impl From<MastNodeRef> for u32 {
-    fn from(value: MastNodeRef) -> Self {
-        value.0
-    }
-}
-
-impl fmt::Display for MastNodeRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MastNodeRef({})", self.0)
-    }
-}
-
-impl Idx for MastNodeRef {}
-
-/// Stable assembly-time reference to a source/debug occurrence of a MAST node.
-///
-/// Multiple source occurrences may point at the same [`MastNodeRef`] when they have identical
-/// execution content but distinct source metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct SourceNodeRef(u32);
-
-impl From<u32> for SourceNodeRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<SourceNodeRef> for u32 {
-    fn from(value: SourceNodeRef) -> Self {
-        value.0
-    }
-}
-
-impl fmt::Display for SourceNodeRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SourceNodeRef({})", self.0)
-    }
-}
-
-impl Idx for SourceNodeRef {}
-
-/// Stable assembly-time reference to assembly operation metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct AsmOpRef(u32);
-
-impl From<u32> for AsmOpRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<AsmOpRef> for u32 {
-    fn from(value: AsmOpRef) -> Self {
-        value.0
-    }
-}
-
-impl Idx for AsmOpRef {}
-
-/// Stable assembly-time reference to debug variable metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct DebugVarRef(u32);
-
-impl From<u32> for DebugVarRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<DebugVarRef> for u32 {
-    fn from(value: DebugVarRef) -> Self {
-        value.0
-    }
-}
-
-impl Idx for DebugVarRef {}
+impl SourceNodeIdMarker for SourceNodeRef {}
 
 /// Builder-owned node record used before final [`MastNodeId`]s exist.
 ///
-/// The record keeps the node content, child refs, and debug metadata refs together so
-/// cloning, merging, and finalization do not need to coordinate side tables.
+/// The record keeps execution-node content, child refs, and operation metadata together.
+/// Occurrence-specific inline calls and function associations remain on source nodes.
 #[derive(Clone, Debug)]
 pub(super) struct PendingMastNode {
     pub(super) key: MastNodeKey,
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,
     pub(super) child_refs: Vec<MastNodeRef>,
-    pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
-    pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
-}
-
-/// Builder-owned source/debug occurrence record used before final source IDs exist.
-#[derive(Clone, Debug)]
-pub(super) struct PendingSourceNode {
-    pub(super) exec_ref: MastNodeRef,
-    pub(super) child_refs: Vec<SourceNodeRef>,
-    pub(super) op_start: usize,
-    pub(super) op_end: usize,
-    pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
-    pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
+    pub(super) asm_ops: Vec<DebugSourceAsmOp>,
+    pub(super) debug_vars: Vec<DebugSourceVar>,
 }
 
 /// Compact representation of a pending node's structural variant.
 ///
-/// Child and metadata references live on [`PendingMastNode`]; this enum stores only the data
-/// needed to materialize the final node variant.
+/// Child and operation-metadata references live on [`PendingMastNode`]; this enum stores only the
+/// data needed to materialize the final node variant.
 #[derive(Clone, Debug)]
 pub(super) enum PendingMastNodeKind {
     BasicBlock { op_batches: Vec<OpBatch> },
@@ -196,8 +111,10 @@ pub(super) struct PendingMastNodeDraft {
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,
     pub(super) child_refs: Vec<MastNodeRef>,
-    pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
-    pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
+    pub(super) asm_ops: Vec<DebugSourceAsmOp>,
+    pub(super) debug_vars: Vec<DebugSourceVar>,
+    pub(super) inline_calls: Vec<DebugSourceInlineCall>,
+    pub(super) functions: Vec<DebugFunctionIdx>,
 }
 
 impl PendingMastNodeDraft {
@@ -212,6 +129,8 @@ impl PendingMastNodeDraft {
             child_refs,
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+            functions: Vec::new(),
         }
     }
 }

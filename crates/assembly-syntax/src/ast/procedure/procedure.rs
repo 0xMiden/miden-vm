@@ -117,7 +117,18 @@ impl Procedure {
     }
 
     /// Override the number of locals allocated by this procedure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_locals` is non-zero and this procedure is the program entrypoint (the
+    /// `begin`..`end` block of an executable module). The entrypoint executes on a fresh frame and
+    /// cannot allocate locals; producing one with locals is an unrecoverable bug in the AST
+    /// producer.
     pub fn set_num_locals(&mut self, num_locals: u16) {
+        assert!(
+            num_locals == 0 || !self.is_entrypoint(),
+            "program entrypoint cannot have locals"
+        );
         self.num_locals = num_locals;
     }
 }
@@ -288,7 +299,7 @@ impl crate::prettier::PrettyPrint for Procedure {
             if self.visibility.is_public() {
                 doc += display(self.visibility) + const_text(" ");
             }
-            doc += const_text("proc") + const_text(" ") + display(&self.name);
+            doc += const_text("proc") + const_text(" ") + display(self.name.as_ident());
             if let Some(sig) = self.signature() {
                 doc += sig.render();
             }

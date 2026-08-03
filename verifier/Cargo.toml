@@ -1,6 +1,6 @@
 [package]
 name = "miden-verifier"
-version = "0.28.0"
+version = "0.29.0"
 description = "Miden VM execution verifier"
 documentation = "https://docs.rs/miden-verifier"
 readme = "README.md"
@@ -39,4 +39,3 @@ miden-precompiles-prover.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
-wincode.workspace = true

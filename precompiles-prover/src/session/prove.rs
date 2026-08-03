@@ -28,16 +28,25 @@ use miden_lifted_stark::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
+use wincode::io::Reader as _;
 
 use super::preprocessed_cache;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
-/// Temporary relation digest for the precompile chiplet AIR set.
-///
-/// This is intentionally private: until the generated precompile/ACE relation digest exists,
-/// callers should not treat the all-zero placeholder as a stable protocol parameter.
-const PLACEHOLDER_RELATION_DIGEST: RelationDigest = [Felt::ZERO; 4];
+/// Deserializes a serde-backed value and rejects trailing bytes.
+fn deserialize_serde_exact<'de, T, C>(mut bytes: &'de [u8], _: C) -> wincode::ReadResult<T>
+where
+    C: wincode::config::Config,
+    SerdeCompat<T>: wincode::SchemaRead<'de, C, Dst = T>,
+{
+    let value = <SerdeCompat<T> as wincode::SchemaRead<'de, C>>::get(bytes.by_ref())?;
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(wincode::error::trailing_bytes())
+    }
+}
 
 use crate::{
     ProveError,
@@ -50,7 +59,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     session::{NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs},
     stark_config::{
-        DEFAULT_HASH_FUNCTION, RelationDigest, blake3_256_config, keccak_config,
+        DEFAULT_HASH_FUNCTION, PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config,
         observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
         test_challenger,
     },
@@ -296,27 +305,27 @@ impl SessionTraces {
         let params = precompile_pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
-                let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::blake3(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpo256 => {
-                let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::rpo(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpx256 => {
-                let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::rpx(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Poseidon2 => {
-                let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::poseidon2(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
-                let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
+                let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed_cache::keccak(&config);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
@@ -349,7 +358,7 @@ impl SessionTraces {
             .expect("chiplet trace shapes are valid");
 
         let mut challenger = config.challenger();
-        observe_protocol_params(&mut challenger);
+        observe_protocol_params(config.pcs(), &mut challenger);
 
         let output: StarkOutput<Felt, QuadFelt, SC> =
             ProverInstance::new(config, &prover_statement, Some(preprocessed))?
@@ -386,27 +395,27 @@ pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), Ver
     let params = precompile_pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
-            let config = blake3_256_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::blake3(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpo256 => {
-            let config = rpo_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::rpo(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpx256 => {
-            let config = rpx_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::rpx(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::poseidon2(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Keccak => {
-            let config = keccak_config(params, PLACEHOLDER_RELATION_DIGEST);
+            let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
             let preprocessed = preprocessed_cache::keccak(&config);
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
@@ -432,10 +441,9 @@ where
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProofData<Felt, QuadFelt, SC> = <SerdeCompat<
-        StarkProofData<Felt, QuadFelt, SC>,
-    > as wincode::config::Deserialize<_>>::deserialize(
-        proof_bytes, proof_encoding_config
+    let proof = deserialize_serde_exact::<StarkProofData<Felt, QuadFelt, SC>, _>(
+        proof_bytes,
+        proof_encoding_config,
     )?;
 
     let statement =
@@ -443,7 +451,7 @@ where
             .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
-    observe_protocol_params(&mut challenger);
+    observe_protocol_params(config.pcs(), &mut challenger);
 
     VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
         .verify(&proof, challenger)?;

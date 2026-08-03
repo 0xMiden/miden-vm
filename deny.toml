@@ -58,6 +58,11 @@ skip = [
     { name = "rand_chacha" },
     # Allow duplicate itertools versions
     { name = "itertools" },
+    # Allow duplicate num-bigint versions - miden-field depends directly on
+    # 0.5.x to match p3-field's BigUint type, while miden-crypto's `num`
+    # dependency (Falcon signature math, SMT ops; unrelated to p3-field)
+    # still pulls 0.4.x
+    { name = "num-bigint" },
     # Allow duplicate shlex versions from bindgen/librocksdb-sys and cc
     { name = "shlex" },
 ]
@@ -70,6 +75,7 @@ skip-tree = [
     { name = "unicode-width", version = "=0.1.14" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
+    { name = "syn", version = "=2.0.119" },
 ]
 
 # Sources configuration

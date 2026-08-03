@@ -7,18 +7,18 @@ use miden_core::{
         DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
         TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
     },
-    proof::{DeferredProof, HashFunction},
+    proof::{DeferredProof, HashFunction, StarkProof},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 
 use crate::{
-    deferred::{DeferredSession, DeferredSessionError, session_from_deferred_state},
+    deferred::{DeferredSession, session_from_deferred_state},
     hash::keccak::sponge::trace::keccak_oracle,
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
-    session::{Session, SessionTraces, verify_deferred},
+    session::{Session, SessionTraces, VerifyError, verify_deferred},
     transcript::poseidon2::P2Digest,
 };
 
@@ -147,20 +147,6 @@ fn register_curve_msm(state: &mut DeferredState, pairs: Vec<(Digest, Digest)>) -
                 .expect("curve msm pair list is non-empty"),
         )
         .expect("register curve msm node")
-}
-
-fn logged_self_equality_msm_state(num_terms: usize, scalar_value: U256) -> (DeferredState, Digest) {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
-        .expect("full precompile registry initializes");
-
-    let curve = CurveId::Secp256k1;
-    let point = register_curve_generator(&mut state, curve);
-    let scalar = register_uint_value(&mut state, curve.scalar_domain(), scalar_value);
-    let msm = register_curve_msm(&mut state, vec![(point, scalar); num_terms]);
-    let claim = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, msm);
-    state.log_statement(claim).expect("MSM self-equality logs");
-
-    (state, msm)
 }
 
 fn be_to_u256(bytes: impl AsRef<[u8]>) -> U256 {
@@ -388,17 +374,17 @@ fn deferred_session_translates_shared_uint_intermediate() {
 }
 
 #[test]
-fn deferred_session_rejects_msm_with_all_zero_scalars() {
-    let (state, msm) = logged_self_equality_msm_state(1, U256::ZERO);
+fn deferred_state_rejects_msm_with_all_zero_scalars() {
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+        .expect("full precompile registry initializes");
 
-    let error = session_from_deferred_state(&state)
-        .err()
-        .expect("all-zero MSM must return a translation error");
+    let curve = CurveId::Secp256k1;
+    let point = register_curve_generator(&mut state, curve);
+    let scalar = register_uint_value(&mut state, curve.scalar_domain(), U256::ZERO);
+    let msm = VmNode::try_pair_list(CurvePrecompile::msm_tag(), vec![(point, scalar)])
+        .expect("curve msm pair list is non-empty");
 
-    assert!(matches!(
-        error,
-        DeferredSessionError::UnsupportedMsmAllZeroScalars { digest } if digest == msm
-    ));
+    assert!(state.register(msm).is_err(), "all-zero MSM must be rejected");
 }
 
 #[test]
@@ -421,7 +407,7 @@ fn trailing_zero_input_changes_root() {
 }
 
 #[test]
-fn keccak_deferred_state_root_proves_and_verifies() {
+fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     let input = b"abc";
     let synthetic = synthetic_keccak_state(input);
     let DeferredSession { session, root } = session_from_deferred_state(&synthetic.state).unwrap();
@@ -430,11 +416,21 @@ fn keccak_deferred_state_root_proves_and_verifies() {
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
-    let Some((_, public_root)) = proof.as_stark() else {
+    let Some((stark, public_root)) = proof.as_stark() else {
         panic!("precompile session should produce a deferred STARK proof");
     };
     assert_eq!(P2Digest::from(public_root), synthetic.root);
     verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
+
+    // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
+    let mut proof_bytes = stark.bytes().to_vec();
+    proof_bytes.push(0);
+    let trailing = DeferredProof::stark(StarkProof::new(proof_bytes, stark.hash_fn()), public_root);
+    let err = verify_deferred(&trailing).expect_err("trailing proof bytes must be rejected");
+    assert!(matches!(
+        err,
+        VerifyError::Deserialization(wincode::error::ReadError::TrailingBytes)
+    ));
 }
 
 #[test]

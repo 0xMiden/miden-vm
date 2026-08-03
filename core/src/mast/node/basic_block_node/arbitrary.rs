@@ -509,7 +509,7 @@ impl Arbitrary for MastForest {
                         }
                     }
 
-                    forest.finish().expect("generated MAST forest should be valid")
+                    forest.build().expect("generated MAST forest should be valid")
                 },
             )
             .boxed()
@@ -525,10 +525,12 @@ impl Arbitrary for AssemblyOp {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<bool>(),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
+            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
+                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
+            }),
+            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
+                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
+            }),
             any::<u8>(),
         )
             .prop_map(|(has_location, context_name, op, num_cycles)| {
@@ -603,7 +605,7 @@ impl Arbitrary for Program {
             let node_id = builder.push_node(node_builder).expect("Failed to add node");
             builder.mark_root(node_id);
             let (forest, remapping) =
-                builder.finish_with_id_map().expect("generated program forest should be valid");
+                builder.build_with_id_map().expect("generated program forest should be valid");
             let entrypoint = remapping.get(node_id).expect("entrypoint should be retained");
 
             Program::new(Arc::new(forest), entrypoint)

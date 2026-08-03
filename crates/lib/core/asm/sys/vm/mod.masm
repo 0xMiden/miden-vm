@@ -1,32 +1,35 @@
 pub mod aux_trace
+pub mod claim
 pub mod constraints_eval
 pub mod constraints_eval_inputs
 pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 
+use miden::core::mem
 use miden::core::stark::verifier
 use miden::core::stark::constants
 
-# Acceptable security parameters for Miden VM proof verification.
-# These define the security policy enforced by `assert_acceptable_options`.
-# If the protocol security level changes, update these constants accordingly.
-const ACCEPTABLE_NUM_QUERIES = 27
-const ACCEPTABLE_QUERY_POW_BITS = 16
-const ACCEPTABLE_DEEP_POW_BITS = 12
-const ACCEPTABLE_FOLDING_POW_BITS = 4
+# Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
+# configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
+# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
+# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
+const CONJECTURED_BITS_PER_QUERY_FP = 193382
+
+# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
+const MAX_SECURITY_LEVEL = 128
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 1054594910562052599
-const RELATION_DIGEST_1 = 11984096228624862183
-const RELATION_DIGEST_2 = 16222035304856376939
-const RELATION_DIGEST_3 = 17104265933749949296
+const RELATION_DIGEST_0 = 6228634522968454696
+const RELATION_DIGEST_1 = 9493741029039437490
+const RELATION_DIGEST_2 = 16565065039104926463
+const RELATION_DIGEST_3 = 1338979827357058143
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 15847950920222870147
-const ACE_REGISTRY_ROOT_1 = 7047508041269431782
-const ACE_REGISTRY_ROOT_2 = 16167476278294667840
-const ACE_REGISTRY_ROOT_3 = 12153679197399633766
+const ACE_REGISTRY_ROOT_0 = 6703562205535399821
+const ACE_REGISTRY_ROOT_1 = 4902180974408534340
+const ACE_REGISTRY_ROOT_2 = 2376205887554034497
+const ACE_REGISTRY_ROOT_3 = 2131879092839069624
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -45,22 +48,38 @@ proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
-#! Asserts that the security parameters in memory meet the Miden VM security policy.
+#! Checks that the 40-felt claim region is word-aligned and below verifier-owned memory.
+#! Must run before the verifier writes to memory.
 #!
-#! Input:  [...]
-#! Output: [...]
-proc assert_acceptable_options
-    exec.constants::get_number_queries
-    push.ACCEPTABLE_NUM_QUERIES assert_eq.err="num_queries does not match acceptable security policy"
+#! Input:  [claim_ptr, ...]
+#! Output: [claim_ptr, ...]
+proc assert_valid_claim_region
+    # u32mod also validates that claim_ptr is a u32.
+    dup u32mod.4 assertz.err="claim_ptr must be word-aligned"
 
-    exec.constants::get_query_pow_bits
-    push.ACCEPTABLE_QUERY_POW_BITS assert_eq.err="query_pow_bits does not match acceptable security policy"
+    # Require [claim_ptr, claim_ptr + 40) to end before verifier memory.
+    dup add.40 exec.constants::verifier_memory_start
+    u32lte assert.err="claim memory region overlaps verifier-owned memory"
+end
 
-    exec.constants::get_deep_pow_bits
-    push.ACCEPTABLE_DEEP_POW_BITS assert_eq.err="deep_pow_bits does not match acceptable security policy"
-
-    exec.constants::get_folding_pow_bits
-    push.ACCEPTABLE_FOLDING_POW_BITS assert_eq.err="folding_pow_bits does not match acceptable security policy"
+#! Computes the conjectured security level (in bits) attained by the given proof parameters.
+#!
+#! Evaluates the integer fixed-point formula `min((num_queries * C) >> 16 + query_pow_bits, 128)`.
+#! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
+#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
+#!
+#! PRECONDITION: `num_queries <= 150`, so `num_queries * C` fits in a u32 (the `u32shr` below
+#! requires that). Parameters returned by `verify_vm_proof` satisfy this bound: the generic
+#! verifier enforces it.
+#!
+#! Inputs:  [num_queries, query_pow_bits, ...]
+#! Outputs: [level, ...]
+pub proc conjectured_security_level
+    push.CONJECTURED_BITS_PER_QUERY_FP mul
+    u32shr.16
+    add
+    push.MAX_SECURITY_LEVEL u32min
+    # => [level, ...]
 end
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
@@ -172,34 +191,88 @@ proc store_ace_registry_root
     dropw dropw
 end
 
-#! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
+#! Verifies a STARK proof of the caller-staged execution claim and returns the deferred
+#! obligation the proof binds and the proof's transcript-bound security parameters.
 #!
-#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
-#! loaded from the advice stack, validated against the acceptable security policy, and
-#! stored in memory for use by the generic verifier.
+#! The proof is consumed from the advice stack; request keys name this procedure's MAST root
+#! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
+#! proof by content derives the identical root in-VM via `procref` of this procedure, computes
+#! `request_key(verifier_root, claim_commitment)` with `claim::request_key`, and moves the
+#! registered proof package onto the advice stack before calling it.
 #!
-#! - Public inputs contain fixed-size input/output stacks, the program digest, and kernel procedure
-#!   digests.
-#! - The wrapper records the AIR context before calling the generic STARK verifier.
-#! - The constraints evaluator authenticates the ACE program selected by the derived proof order.
+#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
+#! from the advice stack and stored in memory for the generic verifier, which enforces their
+#! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
+#! parameters it was not produced with. This procedure holds no security-estimate formula and
+#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
+#! (e.g. with `conjectured_security_level`) under its own policy. An estimate or policy change
+#! therefore never moves this procedure's root - request keys and registered proof packages
+#! stay valid across such changes.
 #!
-#! The kernel-procedure digests and the stack i/o are read from caller memory at the
-#! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
-#! final deferred root is loaded from the advice stack. `verify_proof` stages the reduced-inputs
-#! block (kernel_H | program_digest | deferred_root | pad) before the transcript starts.
+#! The caller stores the claim as `P (+0) | K (+4) | I (+8) | O (+24)`. The complete 40-felt
+#! region must be below `constants::verifier_memory_start`.
 #!
-#! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
-#! Outputs: []
-pub proc verify_proof
-    # --- Load and validate security parameters from advice stack ---
+#! The verifier fetches the kernel digest list from the advice map under K, copies it to
+#! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
+#! claim commitment and checks the kernel-ROM boundary against this list.
+#!
+#! The returned deferred root is bound by the verified statement. The caller must settle it or
+#! include it in its own statement.
+#!
+#! Inputs:  [claim_ptr, ...]
+#! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#!
+#! Where:
+#! - claim_ptr is word-aligned; its 40-felt region ends at or before
+#!   `constants::verifier_memory_start`.
+#! - D is the deferred root bound by the verified statement.
+#! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
+#!   transcript-bound security parameters.
+pub proc verify_vm_proof
+    # Validate before load_security_params writes verifier memory.
+    exec.assert_valid_claim_region
+
+    # --- Load security parameters from advice stack ---
 
     exec.load_security_params
-    exec.assert_acceptable_options
-    # => [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3]
+    # => [claim_ptr, ...]
 
-    # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
+    # --- Materialize the kernel digest witness from the advice map, keyed by the claim's K ---
 
-    exec.public_inputs::stage_reduced_inputs
+    padw dup.4 add.4 mem_loadw_le
+    # => [K, claim_ptr, ...]
+    adv.push_mapval
+    adv_push
+    # => [num_kernel_digests, K, claim_ptr, ...]   advice: [digest_0, .., digest_{n-1}]
+
+    # The count must be bounded before the copy: it comes from advice and is only bound to K
+    # by the hash check, which runs after the writes.
+    u32assert.err="number of kernel procedure digests must fit in a u32"
+    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+
+    dup exec.constants::kernel_witness_ptr swap
+    # => [num_words = num_kernel_digests, write_ptr, num_kernel_digests, K, claim_ptr, ...]
+    exec.mem::pipe_words_to_memory
+    # The pipe's untagged hash state is unused: the binding check is the domain-tagged kernel
+    # commitment below.
+    # => [R0, R1, C, write_ptr', num_kernel_digests, K, claim_ptr, ...]
+    dropw dropw dropw drop
+    # => [num_kernel_digests, K, claim_ptr, ...]
+
+    dup exec.constants::kernel_witness_ptr
+    # => [kernel_ptr, num_kernel_digests, num_kernel_digests, K, claim_ptr, ...]
+    exec.claim::kernel_commitment
+    # => [K', num_kernel_digests, K, claim_ptr, ...]
+    movup.4 movdn.8
+    # => [K', K, num_kernel_digests, claim_ptr, ...]
+    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    # => [num_kernel_digests, claim_ptr, ...]
+
+    # --- Stage the boundary-inputs block from the claim region and advice ---
+
+    exec.constants::kernel_witness_ptr movup.2
+    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    exec.public_inputs::stage_boundary_inputs
     # => [...]
 
     exec.load_air_context
@@ -218,4 +291,14 @@ pub proc verify_proof
 
     exec.verifier::verify
     # => [...]
+
+    # --- Return the deferred obligation and the transcript-bound security parameters ---
+
+    exec.constants::get_folding_pow_bits
+    exec.constants::get_deep_pow_bits
+    exec.constants::get_query_pow_bits
+    exec.constants::get_number_queries
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    exec.public_inputs::load_deferred_root
+    # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 end

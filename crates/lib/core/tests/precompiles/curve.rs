@@ -27,6 +27,7 @@ fn supported_curves_satisfy_public_contract() {
         assert_constant_digests(curve);
         assert_arithmetic_assertions(curve.module);
         assert_scalar_mul_wrappers(curve);
+        assert_zero_scalar_mul_rejected(curve);
         assert_eval_generator(curve);
         assert_predicates_have_expected_polarity(curve.module);
         assert_identity_assertions_have_expected_polarity(curve.module);
@@ -70,12 +71,6 @@ fn assert_scalar_mul_wrappers(curve: CurveCase) {
         use miden::precompiles::curves::{module}
         use miden::precompiles::fields::{scalar_module}
         begin
-            exec.{scalar_module}::push_zero_digest
-            exec.{module}::push_generator
-            exec.{module}::mul_scalar
-            exec.{module}::push_identity
-            exec.{module}::assert_eq
-
             exec.{scalar_module}::push_one_digest
             exec.{module}::mul_scalar_generator
             exec.{module}::push_generator
@@ -93,6 +88,24 @@ fn assert_scalar_mul_wrappers(curve: CurveCase) {
     run_precompile_program(&source).unwrap_or_else(|err| {
         panic!("{module} curve scalar multiplication wrappers must succeed: {err:?}");
     });
+}
+
+fn assert_zero_scalar_mul_rejected(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    let source = format!(
+        "
+        use miden::precompiles::curves::{module}
+        use miden::precompiles::fields::{scalar_module}
+        begin
+            exec.{scalar_module}::push_zero_digest
+            exec.{module}::push_generator
+            exec.{module}::mul_scalar
+            exec.{module}::eval
+        end
+        ",
+    );
+    expect_precompile_trap(&source);
 }
 
 fn assert_eval_generator(curve: CurveCase) {

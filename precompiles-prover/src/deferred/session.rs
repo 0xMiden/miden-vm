@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec::Vec};
 
 use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
 use miden_precompiles::{
@@ -35,6 +35,9 @@ pub(crate) enum DeferredSessionError {
 
     #[error("malformed deferred node {0:?}")]
     MalformedNode(Digest),
+
+    #[error("unsupported deferred MSM node {digest:?}: {reason}")]
+    UnsupportedMsm { digest: Digest, reason: &'static str },
 
     #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
     RootMismatch { expected: P2Digest, actual: P2Digest },
@@ -260,7 +263,22 @@ impl<'a> DeferredSessionBuilder<'a> {
             return Err(DeferredSessionError::UnsupportedMsmAllZeroScalars { digest });
         }
 
-        // TODO: Normalize duplicate canonical bases before selecting an MSM strategy.
+        let mut bases = BTreeSet::new();
+        for (point, scalar) in &terms {
+            if !bases.insert(point.node.point) {
+                return Err(DeferredSessionError::UnsupportedMsm {
+                    digest,
+                    reason: "duplicate canonical bases are not supported",
+                });
+            }
+            if scalar.value == U256::ZERO {
+                return Err(DeferredSessionError::UnsupportedMsm {
+                    digest,
+                    reason: "zero-scalar terms are not supported",
+                });
+            }
+        }
+
         if let Some((point, _)) = terms.first() {
             self.session
                 .constrain_scalar_bound(&point.node, curve.scalar_domain().bound_ptr());

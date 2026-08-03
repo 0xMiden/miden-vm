@@ -3,6 +3,7 @@ use crate::{InputCounts, InputKey, InputLayout};
 #[test]
 fn masm_layout_aligns_and_maps_aux_inputs() {
     let counts = InputCounts {
+        preprocessed_width: 2,
         width: 3,
         aux_width: 2,
         num_aux_boundary: 2,
@@ -16,6 +17,9 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(public_base % 8, 0);
     let rand_base = layout.index(InputKey::AuxRandBeta).unwrap();
     assert_eq!(rand_base % 2, 0);
+    let preprocessed_curr_base =
+        layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap();
+    assert_eq!(preprocessed_curr_base % 4, 0);
     let main_curr_base = layout.index(InputKey::Main { offset: 0, index: 0 }).unwrap();
     assert_eq!(main_curr_base % 4, 0);
     let aux_curr_base = layout.index(InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }).unwrap();
@@ -24,6 +28,9 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 })
         .unwrap();
     assert_eq!(quotient_curr_base % 4, 0);
+    let preprocessed_next_base =
+        layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap();
+    assert_eq!(preprocessed_next_base % 4, 0);
     let main_next_base = layout.index(InputKey::Main { offset: 1, index: 0 }).unwrap();
     assert_eq!(main_next_base % 4, 0);
     let aux_next_base = layout.index(InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }).unwrap();
@@ -39,14 +46,32 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(layout.index(InputKey::AuxRandBeta), Some(rand_base));
     assert_eq!(layout.index(InputKey::AuxRandAlpha), Some(rand_base + 1));
     assert!(public_base < rand_base);
-    assert!(rand_base < main_curr_base);
+    assert!(rand_base < preprocessed_curr_base);
+    assert!(preprocessed_curr_base < main_curr_base);
     assert!(main_curr_base < aux_curr_base);
     assert!(aux_curr_base < quotient_curr_base);
-    assert!(quotient_curr_base < main_next_base);
+    assert!(quotient_curr_base < preprocessed_next_base);
+    assert!(preprocessed_next_base < main_next_base);
     assert!(main_next_base < aux_next_base);
     assert!(aux_next_base < quotient_next_base);
     assert!(quotient_next_base < aux_bus_base);
     assert!(aux_bus_base < stark_base);
+    assert_eq!(
+        layout.index(InputKey::Preprocessed { offset: 0, index: 0 }),
+        Some(preprocessed_curr_base)
+    );
+    assert_eq!(
+        layout.index(InputKey::Preprocessed { offset: 0, index: 1 }),
+        Some(preprocessed_curr_base + 1)
+    );
+    assert_eq!(
+        layout.index(InputKey::Preprocessed { offset: 1, index: 0 }),
+        Some(preprocessed_next_base)
+    );
+    assert_eq!(
+        layout.index(InputKey::Preprocessed { offset: 1, index: 1 }),
+        Some(preprocessed_next_base + 1)
+    );
 
     // EF values: slots 0-6
     let base = layout.index(InputKey::Alpha).unwrap();

@@ -6,17 +6,16 @@
 
 mod aux_register;
 mod binding;
-mod bootstrap;
 mod bus_balance;
 mod byte_pair_lut;
 mod chunk;
+mod deferred_session;
 mod deferred_state;
 mod ec;
 mod ec_add;
 mod ec_dag;
 mod ec_msm;
 mod eval;
-mod integration;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
