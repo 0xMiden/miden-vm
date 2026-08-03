@@ -4,7 +4,7 @@ use std::{fs, path::Path, println};
 use miden_assembly_syntax::{
     ast::{
         DebugVarLocation, Path as AstPath, PathBuf,
-        types::{CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
+        types::{ArrayType, CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
     },
     semver::Version,
 };
@@ -186,6 +186,26 @@ fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
         + 2;
     package_bytes[signature_offset + repr_offset] = 3;
     packages.push(("multi_field_transparent_struct.bin", package_bytes));
+
+    let struct_type = StructType::new([Type::from(ArrayType::new(Type::Felt, 1))]);
+    let signature = FunctionType::new(CallConv::Fast, [Type::from(struct_type)], []);
+    let signature_bytes = signature.to_bytes();
+    let (package, ..) = build_package_with_debug_info(Some(signature));
+    let mut package_bytes = package.to_bytes();
+    let signature_offset = package_bytes
+        .windows(signature_bytes.len())
+        .position(|window| window == signature_bytes)
+        .expect("seed package should contain its array-field struct signature");
+    let array_len_offset = signature_bytes
+        .windows(3)
+        .position(|window| window == [18, 3, 15])
+        .expect("seed signature should contain its single-Felt array")
+        + 1;
+    package_bytes.splice(
+        signature_offset + array_len_offset..signature_offset + array_len_offset + 1,
+        (u32::MAX as usize).to_bytes(),
+    );
+    packages.push(("oversized_struct_field.bin", package_bytes));
 
     packages
 }

@@ -309,6 +309,11 @@ impl Type {
                             "invalid struct field: type has no defined layout".to_string(),
                         ));
                     }
+                    if u32::try_from(ty.size_in_bytes()).is_err() {
+                        return Err(DeserializationError::InvalidValue(
+                            "invalid struct field: size exceeds u32::MAX bytes".to_string(),
+                        ));
+                    }
                     fields.push(NameAndType { name, ty });
                 }
                 if repr == TypeRepr::Transparent
