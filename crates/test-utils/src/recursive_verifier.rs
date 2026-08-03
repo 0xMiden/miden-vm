@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 
-pub use miden_core::program::request_key;
+pub use miden_core::program::proof_request_key;
 use miden_core::{Felt, Word, program::ExecutionClaim, proof::ExecutionProof};
 pub use miden_verifier::recursive::RecursiveVerifierInputsError;
 

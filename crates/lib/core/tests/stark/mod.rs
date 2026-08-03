@@ -345,7 +345,7 @@ pub(crate) const COPY_ADVICE_TO_MEM: &str = "
 
 /// Builds the consumer program: stage the claim from the consumer's own inputs, derive its
 /// commitment, fetch the proof package registered under
-/// `request_key(verifier_root, claim_commitment)`, verify, then grade the returned security
+/// `proof_request_key(verifier_root, claim_commitment)`, verify, then grade the returned security
 /// parameters and assert an acceptance threshold. `verify_vm_proof` holds no estimate formula
 /// and no policy; both live in the consumer.
 fn request_consumer_source() -> String {
@@ -368,7 +368,7 @@ fn request_consumer_source() -> String {
             # 2) Fetch the registered proof package by content: request keys name
             #    verify_vm_proof's root, derived in-VM via procref.
             dupw
-            procref.vm::verify_vm_proof exec.claim::request_key
+            procref.vm::verify_vm_proof exec.sys::proof_request_key
             adv.push_mapval dropw
             # => [CLAIM_COMMITMENT]
 
@@ -392,19 +392,19 @@ fn request_consumer_source() -> String {
     )
 }
 
-/// The end-to-end guarantee of fetching by content: a proof fetched via `request_key` and
+/// The end-to-end guarantee of fetching by content: a proof fetched via `proof_request_key` and
 /// `adv.push_mapval` verifies when it matches the consumer's claim, and is rejected when it
 /// does not. No separate binding check is needed for the fetched proof package.
 #[test]
 fn request_flow_binds_proof_to_claim() {
-    use miden_utils_testing::recursive_verifier::request_key;
+    use miden_utils_testing::recursive_verifier::proof_request_key;
 
     let intended = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
 
     let source = request_consumer_source();
     let entry = |proof_stream: &[u64]| -> (Word, Vec<Felt>) {
         let felts: Vec<Felt> = proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
-        (request_key(verify_vm_proof_root(), intended.claim_commitment), felts)
+        (proof_request_key(verify_vm_proof_root(), intended.claim_commitment), felts)
     };
 
     // Control: the intended proof, registered under its key, verifies.
@@ -439,14 +439,14 @@ fn request_flow_binds_proof_to_claim() {
 
 /// Two independently proven executions of one program (distinct stack i/o) verified inside a
 /// single consumer program — each proof is registered
-/// under `request_key(verifier_root, claim_commitment)` and fetched by content, independent of
-/// its position in the advice. The consumer stages each claim from its own inputs and derives
+/// under `proof_request_key(verifier_root, claim_commitment)` and fetched by content, independent
+/// of its position in the advice. The consumer stages each claim from its own inputs and derives
 /// the commitment that names the claim and addresses its proof entry, so passing requires the
 /// in-VM claim-commitment, kernel-commitment, and request-key derivations to match their native
 /// mirrors (a mismatch is a missing advice-map key).
 #[test]
 fn stark_verifier_e2f4_request_multi_proof() {
-    use miden_utils_testing::{crypto::MerkleStore, recursive_verifier::request_key};
+    use miden_utils_testing::{crypto::MerkleStore, recursive_verifier::proof_request_key};
 
     let mut inputs = fib_stack_inputs();
     let tx0 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs.clone(), None);
@@ -465,7 +465,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
         store.extend(tx.store.inner_nodes());
         advice_map.extend(tx.advice_map.iter().cloned());
         let stream: Vec<Felt> = tx.proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
-        advice_map.push((request_key(verifier_root, tx.claim_commitment), stream));
+        advice_map.push((proof_request_key(verifier_root, tx.claim_commitment), stream));
     }
 
     let source = format!(
@@ -484,7 +484,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             push.{NUM_CLAIM_ELEMENTS} push.{CONSUMER_CLAIM_PTR} exec.copy_advice_to_mem
             push.{CONSUMER_CLAIM_PTR} exec.claim::claim_commitment # => [CLAIM_COMMITMENT]
             dupw
-            procref.vm::verify_vm_proof exec.claim::request_key
+            procref.vm::verify_vm_proof exec.sys::proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
             exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
             swapw exec.vm::compute_conjectured_security_level # => [level, deep_pow, fold_pow, D]

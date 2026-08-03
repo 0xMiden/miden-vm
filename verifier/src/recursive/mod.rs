@@ -34,7 +34,7 @@ use miden_core::{
     crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
     deferred::{DEFAULT_MAX_DEFERRED_ELEMENTS, DeferredState, IntegrityError, TRUE_DIGEST},
     field::QuadFelt,
-    program::{ExecutionClaim, request_key},
+    program::{ExecutionClaim, proof_request_key},
     proof::{DeferredProof, ExecutionProof, HashFunction},
 };
 use miden_crypto::{
@@ -137,9 +137,9 @@ impl RecursiveVerifierInputs {
     }
 
     /// Moves the proof stream into the advice map under
-    /// `request_key(verifier_root, claim_commitment)`, leaving the advice stack empty.
+    /// `proof_request_key(verifier_root, claim_commitment)`, leaving the advice stack empty.
     fn into_request_package(mut self, verifier_root: Word) -> Self {
-        let key = request_key(verifier_root, self.claim_commitment);
+        let key = proof_request_key(verifier_root, self.claim_commitment);
         let (proof_stream, map, store) = self.advice.into_parts();
         self.advice = AdviceInputs::default().with_merkle_store(store);
         self.advice.map = map;
@@ -520,10 +520,10 @@ mod tests {
     }
 
     /// Request packaging is a pure repackaging: the proof stream moves — unchanged and in
-    /// order — into the advice map under `request_key(verifier_root, claim_commitment)`, and
+    /// order — into the advice map under `proof_request_key(verifier_root, claim_commitment)`, and
     /// everything else is untouched.
     #[test]
-    fn request_package_moves_proof_under_request_key() {
+    fn request_package_uses_proof_request_key() {
         let proof_stream: Vec<Felt> = (1..=8u64).map(Felt::new_unchecked).collect();
         let claim_commitment = Word::from([11u64, 12, 13, 14].map(Felt::new_unchecked));
         let verifier_root = Word::from([21u64, 22, 23, 24].map(Felt::new_unchecked));
@@ -558,7 +558,7 @@ mod tests {
             package
                 .advice()
                 .map
-                .get(&request_key(verifier_root, claim_commitment))
+                .get(&proof_request_key(verifier_root, claim_commitment))
                 .unwrap()
                 .as_ref(),
             proof_stream

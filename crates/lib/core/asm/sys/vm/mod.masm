@@ -231,7 +231,7 @@ end
 #! stack; request keys name this procedure's MAST root
 #! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
 #! proof by content derives the identical root in-VM via `procref` of this procedure, computes
-#! `request_key(verifier_root, claim_commitment)` with `claim::request_key`, and moves the
+#! `proof_request_key(verifier_root, claim_commitment)` with `sys::proof_request_key`, and moves the
 #! registered proof package onto the advice stack before calling it.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded

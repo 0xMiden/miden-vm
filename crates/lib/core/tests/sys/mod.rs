@@ -226,11 +226,11 @@ fn kernel_commitment_rejects_non_u32_procedure_count() {
     }
 }
 
-/// The MASM `sys::vm::claim::request_key` must agree with the native `request_key` on the same
-/// (verifier_root, claim_commitment) pair.
+/// The MASM `sys::proof_request_key` must agree with the native `proof_request_key` on the same
+/// `(verifier_root, claim_commitment)` pair.
 #[test]
-fn masm_request_key_matches_native() {
-    use miden_core::{Felt, Word, program::request_key};
+fn masm_proof_request_key_matches_native() {
+    use miden_core::{Felt, Word, program::proof_request_key};
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [
@@ -258,12 +258,10 @@ fn masm_request_key_matches_native() {
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::sys::vm::claim
-
         begin
             {}
             {}
-            exec.claim::request_key
+            exec.sys::proof_request_key
             exec.sys::truncate_stack
         end
         ",
@@ -271,7 +269,7 @@ fn masm_request_key_matches_native() {
         push(verifier_root),
     );
 
-    let mut expected: Vec<u64> = request_key(verifier_root, claim_commitment)
+    let mut expected: Vec<u64> = proof_request_key(verifier_root, claim_commitment)
         .as_elements()
         .iter()
         .map(Felt::as_canonical_u64)
@@ -281,13 +279,13 @@ fn masm_request_key_matches_native() {
 }
 
 /// End-to-end request round-trip: the host registers a package stream under
-/// `request_key(verifier_root, claim_commitment)`, and a consumer that holds only those two
-/// words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
-/// host helper and the MASM `request_key` address the same advice-map entry.
+/// `proof_request_key(verifier_root, claim_commitment)`, and a consumer that holds only those
+/// two words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
+/// host helper and the MASM `proof_request_key` address the same advice-map entry.
 #[test]
-fn request_round_trip_retrieves_registered_package() {
+fn proof_request_round_trip_retrieves_registered_package() {
     use miden_core::{Felt, Word};
-    use miden_utils_testing::recursive_verifier::request_key;
+    use miden_utils_testing::recursive_verifier::proof_request_key;
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [
@@ -307,7 +305,7 @@ fn request_round_trip_retrieves_registered_package() {
         Felt::new_unchecked(400),
     ];
 
-    let key = request_key(verifier_root, claim_commitment);
+    let key = proof_request_key(verifier_root, claim_commitment);
     let values: Vec<Felt> = stream.to_vec();
 
     let push = |w: Word| -> String {
@@ -321,18 +319,16 @@ fn request_round_trip_retrieves_registered_package() {
         )
     };
     // Consumer holds (claim_commitment, verifier_root) from its own inputs; pushes them in the
-    // request_key contract order (verifier on top), derives the key, fetches the stream, and
+    // proof_request_key contract order (verifier on top), derives the key, fetches the stream, and
     // reads the four values back onto the operand stack.
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::sys::vm::claim
-
         begin
             {}
             dupw
             {}
-            exec.claim::request_key
+            exec.sys::proof_request_key
             adv.push_mapval dropw
             {}
             assert_eqw
