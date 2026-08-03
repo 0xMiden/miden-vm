@@ -107,7 +107,7 @@ miden-core-lib          = { path = "./crates/lib/core", version = "0.29", defaul
 miden-serde-utils       = { path = "./crates/serde-utils", version = "0.29", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.29", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.29", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.9.1", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.10", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.29", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.29", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.29", default-features = false }
