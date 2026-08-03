@@ -25,9 +25,11 @@
 
 use alloc::{vec, vec::Vec};
 
+use miden_precompiles::{CurveId, glv_decompose};
+
 use crate::{
     ec::msm::trace::EcExprPtr,
-    math::U256,
+    math::{U256, from_limbs32, to_limbs32},
     session::{EcNode, Session},
 };
 
@@ -182,15 +184,34 @@ pub struct WnafTable {
 /// `2^{w-2}`-entry table. Precompute a recurring base's table **once** and
 /// share the result across every [`wnaf_scalarmul`] on it.
 pub fn wnaf_table(session: &mut Session, base: &EcNode, w: usize) -> WnafTable {
-    assert!((2..=8).contains(&w), "wNAF window w ∈ [2, 8]");
     let p1 = session.msm_intro(base); // ⟨P×1⟩
-    let two_p = session.msm_combine(p1, p1); // ⟨P×2⟩ — the odd-multiple step
+    wnaf_table_from_seed(session, p1, w)
+}
+
+/// [`wnaf_table`]'s GLV endomorphism-leg twin: precomputes `base`'s **positive-only** endomorphism
+/// table (odd multiples of `φ(P)`, expressed as terms on `P` with scalar `j·λ` via
+/// [`Session::msm_intro_endo`]) instead of the plain `⟨P×1⟩` table. Always seeded `⟨P×λ⟩`, never
+/// `⟨P×−λ⟩` — sign rides the digit selection in [`joint_wnaf_with_signed_tables`], not the seed —
+/// so the same table serves every GLV split's `b` half regardless of its sign, letting a recurring
+/// base's endomorphism table be built once and reused, like [`wnaf_table`]'s plain leg.
+pub fn wnaf_table_endo(session: &mut Session, base: &EcNode, w: usize) -> WnafTable {
+    let e1 = session.msm_intro_endo(base); // ⟨P×λ⟩
+    wnaf_table_from_seed(session, e1, w)
+}
+
+/// [`wnaf_table`]'s stage 1, taking an already-built 1-term seed expression
+/// instead of always `intro`ing `base` fresh — lets a caller drive the
+/// table off a different unit term, e.g. GLV's `⟨P×λ⟩` endomorphism leaf
+/// ([`Session::msm_intro_endo`]) or a negated seed (a signed GLV half).
+fn wnaf_table_from_seed(session: &mut Session, seed: EcExprPtr, w: usize) -> WnafTable {
+    assert!((2..=8).contains(&w), "wNAF window w ∈ [2, 8]");
+    let two_p = session.msm_combine(seed, seed); // ⟨seed×2⟩ — the odd-multiple step
     let n_odds = 1usize << (w - 2);
     let mut odds = Vec::with_capacity(n_odds);
-    odds.push(p1);
-    let mut cur = p1;
+    odds.push(seed);
+    let mut cur = seed;
     for _ in 1..n_odds {
-        cur = session.msm_combine(cur, two_p); // shared base ⇒ +2P → next odd
+        cur = session.msm_combine(cur, two_p); // shared base ⇒ +2·seed → next odd
         odds.push(cur);
     }
     WnafTable { odds, w }
@@ -260,11 +281,44 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 ///
 /// `terms` pairs each base with its **non-negative** scalar (GLV signs ride
 /// the base via transcript `ec_sub(∞, P)` upstream, so the magnitudes land
-/// here); each base's [`WnafTable`] is built per call. Returns the combined
-/// MSM expression. Panics if `terms` is empty or every scalar is zero.
+/// here); each base's [`WnafTable`] is built fresh. Returns the combined MSM
+/// expression. Panics if `terms` is empty or every scalar is zero.
+///
+/// When a base recurs across many calls — the generator across a batch of
+/// signatures — build its table once with [`wnaf_table`] and drive the same
+/// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
+/// recurring base's table is laid once rather than rebuilt per call.
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
     let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
-    let digits: Vec<Vec<i8>> = terms.iter().map(|(_, k)| wnaf(*k, w)).collect();
+    let table_terms: Vec<(&WnafTable, U256)> =
+        tables.iter().zip(terms).map(|(table, &(_, k))| (table, k)).collect();
+    joint_wnaf_with_tables(session, &table_terms)
+}
+
+/// The interleaved wNAF ladder behind [`joint_wnaf`], taking already-built
+/// [`WnafTable`]s instead of building one per base — lets a caller reuse a
+/// recurring base's table (built once via [`wnaf_table`]) across many MSM
+/// claims instead of rebuilding it per claim. Each table drives its own digit
+/// expansion at its own window (`table.w`). Returns the combined MSM
+/// expression. Panics if `terms` is empty or every scalar is zero.
+pub fn joint_wnaf_with_tables(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
+    let signed_terms: Vec<(&WnafTable, U256, bool)> =
+        terms.iter().map(|&(table, k)| (table, k, false)).collect();
+    joint_wnaf_with_signed_tables(session, &signed_terms)
+}
+
+/// [`joint_wnaf_with_tables`]'s general form: each term also carries an overall sign, applied on
+/// top of the digit's own sign (`effective_negative = (digit < 0) XOR negate`) instead of baked
+/// into the table's seed. This is what lets a **positive-only** table — always seeded `⟨P×1⟩`,
+/// never `⟨P×−1⟩` — serve a term whose caller-side scalar is conceptually negative (GLV's signed
+/// halves), so the table stays cacheable across every sign a recurring base's scalar might take.
+/// `joint_wnaf_with_tables` is the `negate = false` special case. Returns the combined MSM
+/// expression. Panics if `terms` is empty or every scalar is zero.
+pub fn joint_wnaf_with_signed_tables(
+    session: &mut Session,
+    terms: &[(&WnafTable, U256, bool)],
+) -> EcExprPtr {
+    let digits: Vec<Vec<i8>> = terms.iter().map(|(table, k, _)| wnaf(*k, table.w)).collect();
     let len = digits.iter().map(Vec::len).max().unwrap_or(0);
 
     let mut acc: Option<EcExprPtr> = None;
@@ -275,11 +329,12 @@ pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> 
             acc = Some(session.msm_combine(a, a));
         }
         // Then each base adds its digit's (signed) table entry at this column.
-        for (table, base_digits) in tables.iter().zip(&digits) {
+        for ((table, _, negate), base_digits) in terms.iter().zip(&digits) {
             let d = base_digits.get(i).copied().unwrap_or(0);
             if d != 0 {
                 let pos = table.odds[(d.unsigned_abs() as usize - 1) / 2];
-                let entry = if d > 0 { pos } else { session.msm_neg(pos) };
+                let want_neg = (d < 0) ^ *negate;
+                let entry = if want_neg { session.msm_neg(pos) } else { pos };
                 acc = Some(match acc {
                     None => entry, // lazy-seed at the first nonzero digit
                     Some(a) => session.msm_combine(a, entry),
@@ -288,6 +343,86 @@ pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> 
         }
     }
     acc.expect("joint_wnaf needs a nonzero scalar")
+}
+
+/// Build `Σ kᵢ·Pᵢ` for a curve with a GLV endomorphism by decomposing each
+/// scalar ([`glv_decompose`]) into a signed pair `k ≡ ka + λ·kb (mod n)`,
+/// each half roughly half `k`'s bit-width, then driving **one** shared
+/// interleaved wNAF ladder ([`joint_wnaf_with_signed_tables`]) over the
+/// `2·terms.len()` resulting virtual bases: `Pᵢ`'s own table (`⟨Pᵢ×1⟩`) and
+/// its endomorphism table (`⟨Pᵢ×λ⟩` via [`Session::msm_intro_endo`], value
+/// `φ(Pᵢ)`) — each half's sign rides the digit selection, not the seed, so
+/// both tables stay positive-only and cacheable (see
+/// [`glv_joint_wnaf_with_tables`]).
+///
+/// Because `intro_endo`'s term rides `Pᵢ` — not `φ(Pᵢ)` — `msm_combine`'s
+/// shared-base merge folds each pair's plain/endo legs back onto **one**
+/// term per real base, `⟨Pᵢ × (ka + λ·kb mod n)⟩`, for free: the caller's
+/// claim still names only the original `m` bases, at roughly half the
+/// ladder height of a plain `2·terms.len()`-base joint wNAF over the full
+/// scalar width. `φ(Pᵢ)`'s on-curve membership is proved in-circuit by
+/// `intro_endo`'s value relation (not trusted host advice), so a
+/// decomposed half landing on zero, or two virtual bases coinciding in
+/// value, are both harmless — a zero-magnitude table's digits are all
+/// zero (contributing nothing, same as any other zero column), and a
+/// coordinate collision is ordinary point-store dedup, not a forgery
+/// surface (see `glv.rs`'s β-orbit note, which is a MASM-side concern
+/// this in-circuit certification closes, not a prover-strategy one).
+///
+/// Builds each base's tables fresh. When a base recurs across many calls —
+/// the generator across a batch of signatures — build its tables once with
+/// [`wnaf_table`] / [`wnaf_table_endo`] and drive the same ladder with
+/// [`glv_joint_wnaf_with_tables`] instead.
+///
+/// Returns the combined MSM expression. Panics if `terms` is empty, any
+/// scalar is zero, or `curve` has no GLV endomorphism.
+pub fn glv_joint_wnaf(
+    session: &mut Session,
+    curve: CurveId,
+    terms: &[(EcNode, U256)],
+    w: usize,
+) -> EcExprPtr {
+    assert!(!curve.endomorphisms().is_empty(), "glv_joint_wnaf needs a GLV endomorphism");
+    assert!(!terms.is_empty(), "an MSM needs at least one base");
+
+    let tables: Vec<(WnafTable, WnafTable)> = terms
+        .iter()
+        .map(|(p, _)| (wnaf_table(session, p, w), wnaf_table_endo(session, p, w)))
+        .collect();
+    let table_terms: Vec<(&WnafTable, &WnafTable, U256)> = tables
+        .iter()
+        .zip(terms)
+        .map(|((plain, endo), &(_, k))| (plain, endo, k))
+        .collect();
+    glv_joint_wnaf_with_tables(session, &table_terms)
+}
+
+/// The interleaved GLV ladder behind [`glv_joint_wnaf`], taking already-built
+/// **positive-only** `(plain_table, endo_table)` pairs instead of building
+/// them per base — lets a caller reuse a recurring base's tables (built once
+/// via [`wnaf_table`] / [`wnaf_table_endo`]) across many MSM claims instead
+/// of rebuilding them per claim, the same way [`joint_wnaf_with_tables`]
+/// does for the non-GLV path. Each call still re-decomposes `k` ([`glv_decompose`])
+/// since the split (and its signs) is scalar-specific; only the tables —
+/// which depend on the base alone — are shared.
+///
+/// `terms` pairs each base's `(plain_table, endo_table, scalar)`. Returns
+/// the combined MSM expression. Panics if `terms` is empty or any scalar is
+/// zero.
+pub fn glv_joint_wnaf_with_tables(
+    session: &mut Session,
+    terms: &[(&WnafTable, &WnafTable, U256)],
+) -> EcExprPtr {
+    assert!(!terms.is_empty(), "an MSM needs at least one base");
+
+    let mut signed_terms: Vec<(&WnafTable, U256, bool)> = Vec::with_capacity(terms.len() * 2);
+    for &(plain, endo, k) in terms {
+        assert_ne!(k, U256::ZERO, "glv_joint_wnaf_with_tables terms must have a nonzero scalar");
+        let [(a_neg, a_mag), (b_neg, b_mag)] = glv_decompose(to_limbs32(k));
+        signed_terms.push((plain, from_limbs32(&a_mag), a_neg));
+        signed_terms.push((endo, from_limbs32(&b_mag), b_neg));
+    }
+    joint_wnaf_with_signed_tables(session, &signed_terms)
 }
 
 /// Non-adjacent form of `k` (digits LSB-first, each in `{−1, 0, 1}`, no two

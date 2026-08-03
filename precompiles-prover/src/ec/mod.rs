@@ -81,11 +81,13 @@ use crate::{
 // ================================================================================================
 
 /// LogUp message for the [`EcGroup`](BusId::EcGroup) relation: the
-/// 5-tuple `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)`
-/// binding a short-Weierstrass group to its curve context — the params
-/// (stored uints sharing `bound_ptr`, which fixes the base field) plus
-/// the scalar-field modulus handle (= `bound_ptr` while nothing
-/// constrains it; see [`groups`]).
+/// 7-tuple `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr,
+/// beta_ptr, lambda_ptr)` binding a short-Weierstrass group to its curve
+/// context — the params (stored uints sharing `bound_ptr`, which fixes
+/// the base field) plus the scalar-field modulus handle (= `bound_ptr`
+/// while nothing constrains it; see [`groups`]) plus the GLV
+/// endomorphism params `β`/`λ` (the none-sentinel 0 for a group with no
+/// endomorphism).
 #[derive(Debug, Clone)]
 pub struct EcGroupMsg<E> {
     pub group_ptr: E,
@@ -93,6 +95,8 @@ pub struct EcGroupMsg<E> {
     pub b_ptr: E,
     pub bound_ptr: E,
     pub scalar_bound_ptr: E,
+    pub beta_ptr: E,
+    pub lambda_ptr: E,
 }
 
 impl<E, EF> LookupMessage<E, EF> for EcGroupMsg<E>
@@ -109,6 +113,8 @@ where
                 self.b_ptr.clone(),
                 self.bound_ptr.clone(),
                 self.scalar_bound_ptr.clone(),
+                self.beta_ptr.clone(),
+                self.lambda_ptr.clone(),
             ],
         )
     }
@@ -183,7 +189,12 @@ pub const COL_ACT: usize = 12;
 /// by its minting `EcGroupAdd` op) *instead of* the MAC trio. Mutually
 /// exclusive with `is_pai`; the trio gate drops on these rows.
 pub const COL_IS_CERT: usize = 13;
-pub const NUM_MAIN_COLS: usize = 14;
+/// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
+/// `EcGroup` consume; the none-sentinel 0 for a group with no
+/// endomorphism).
+pub const COL_BETA_PTR: usize = 14;
+pub const COL_LAMBDA_PTR: usize = 15;
+pub const NUM_MAIN_COLS: usize = 16;
 
 // Aux: five columns, flattened via `frac_col!` so every closing
 // constraint stays at degree ≤ 3 → `log_quotient_degree = 1`. Six
@@ -329,6 +340,8 @@ where
         let is_pai: LB::Expr = local[COL_IS_PAI].into();
         let is_cert: LB::Expr = local[COL_IS_CERT].into();
         let act: LB::Expr = local[COL_ACT].into();
+        let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
+        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
 
         // Pads zero the mult cell, so the provide needs no act gate; the
         // consumes do (an all-zero pad row must touch no bus). The trio fires
@@ -385,6 +398,8 @@ where
                     b_ptr: b_ptr.clone(),
                     bound_ptr: bound_ptr.clone(),
                     scalar_bound_ptr: sbound_ptr.clone(),
+                    beta_ptr: beta_ptr.clone(),
+                    lambda_ptr: lambda_ptr.clone(),
                 },
                 consume_deg
             ),

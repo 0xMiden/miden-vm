@@ -2213,6 +2213,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
+ "miden-precompiles-prover",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
@@ -2515,6 +2516,7 @@ version = "0.29.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "ruint",
 ]
 
 [[package]]
@@ -2803,7 +2805,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",

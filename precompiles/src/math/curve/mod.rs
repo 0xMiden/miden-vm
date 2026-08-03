@@ -36,10 +36,11 @@
 //! This precompile does not provide compressed point encodings, subgroup checks, signature
 //! semantics, or public API stability guarantees beyond this internal precompile contract.
 
+mod glv;
 mod secp256k1;
 mod short_weierstrass;
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt, ZERO,
@@ -50,13 +51,22 @@ use miden_core::{
 };
 
 use self::secp256k1::Secp256k1;
-pub use self::secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID};
+pub use self::{
+    glv::{SECP256K1_BETA, SECP256K1_LAMBDA, glv_decompose, phi_generator, scalar_mul_mod_n},
+    secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID},
+};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
 /// VM-owned store pointer for the secp256k1 curve coefficient `A`.
 pub const K1_A_PTR: u32 = 8;
 /// VM-owned store pointer for the secp256k1 curve coefficient `B`.
 pub const K1_B_PTR: u32 = 9;
+/// VM-owned store pointer for the secp256k1 GLV endomorphism base-field constant `β`
+/// (interned under the base-field bound).
+pub const K1_BETA_PTR: u32 = 10;
+/// VM-owned store pointer for the secp256k1 GLV endomorphism scalar `λ`
+/// (interned under the scalar-field bound).
+pub const K1_LAMBDA_PTR: u32 = 11;
 
 /// VM-owned store pointer for the secp256k1 group configuration.
 pub const K1_GROUP_PTR: u32 = 1;
@@ -88,6 +98,22 @@ pub fn curve_coefficients() -> [CurveCoefficient; 2] {
             value: <Secp256k1 as ShortWeierstrassSpec>::B,
         },
     ]
+}
+
+/// A curve's fixed GLV endomorphism data: the base-field constant `β` with `φ(x, y) = (β·x, y)`,
+/// and the scalar `λ` with `φ(P) = λ·P`. Both are VM-owned, protocol-fixed values — `β` interned
+/// under the curve's base-field bound, `λ` under its scalar-field bound — so the AIR can pin a
+/// claimed relation to them by pointer, never learning (or trusting a prover for) their values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Endomorphism {
+    /// VM-owned pointer for `β`, under the curve's base-field bound.
+    pub beta_ptr: u32,
+    /// Canonical value of `β`, little-endian u32 limbs.
+    pub beta: Limbs,
+    /// VM-owned pointer for `λ`, under the curve's scalar-field bound.
+    pub lambda_ptr: u32,
+    /// Canonical value of `λ`, little-endian u32 limbs.
+    pub lambda: Limbs,
 }
 
 /// Curve-generic point value.
@@ -324,6 +350,52 @@ impl CurveId {
     pub fn generator(self) -> CurvePoint {
         match self {
             Self::Secp256k1 => Secp256k1::generator(),
+        }
+    }
+
+    /// Returns named fixed point constants for this curve beyond identity/generator, e.g. a GLV
+    /// endomorphism image -- empty for curves with no such fixed derived points.
+    ///
+    /// Every entry here needs both (a) seeding into [`CurvePrecompile::init`]'s initial
+    /// deferred-DAG node set, so the point's digest is resolvable with no live registration, and
+    /// (b) a baked-in MASM constant/wrapper proc, emitted by `crates/lib/core/codegen`. Both
+    /// consumers read this single list so they cannot drift apart.
+    pub fn extra_points(self) -> Vec<(&'static str, CurvePoint)> {
+        match self {
+            Self::Secp256k1 => vec![("PHI_GENERATOR", phi_generator())],
+        }
+    }
+
+    /// Returns this curve's fixed GLV endomorphisms -- empty for curves with none. A slice, not
+    /// an `Option`: a higher-dimensional GLV curve would list several, each merging into the same
+    /// base's term the same way one does.
+    pub fn endomorphisms(self) -> &'static [Endomorphism] {
+        match self {
+            Self::Secp256k1 => &[Endomorphism {
+                beta_ptr: K1_BETA_PTR,
+                beta: SECP256K1_BETA,
+                lambda_ptr: K1_LAMBDA_PTR,
+                lambda: SECP256K1_LAMBDA,
+            }],
+        }
+    }
+
+    /// Returns named fixed base-field constants whose canonical VALUE digests the generated MASM
+    /// needs as comparison literals -- empty for curves with no such constants.
+    ///
+    /// Unlike [`Self::extra_points`], these are never precompile operands: MASM only compares a
+    /// runtime coordinate digest against them, so they are deliberately *not* seeded into
+    /// [`CurvePrecompile::init`] and cost nothing outside the generated constant table.
+    pub fn extra_base_constants(self) -> Vec<(&'static str, Limbs)> {
+        match self {
+            Self::Secp256k1 => {
+                let [gx, beta_gx, beta2_gx] = glv::generator_x_phi_orbit();
+                vec![
+                    ("GENERATOR_X", gx),
+                    ("PHI_GENERATOR_X", beta_gx),
+                    ("PHI2_GENERATOR_X", beta2_gx),
+                ]
+            },
         }
     }
 
@@ -772,6 +844,9 @@ impl Precompile for CurvePrecompile {
         for curve in CurveId::ALL {
             nodes.push(Self::identity_node(curve));
             Self::extend_init_nodes_with_point(&mut nodes, curve, curve.generator());
+            for (_, point) in curve.extra_points() {
+                Self::extend_init_nodes_with_point(&mut nodes, curve, point);
+            }
         }
         nodes
     }

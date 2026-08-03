@@ -47,10 +47,10 @@ pub mod ecdsa_k256_keccak {
     /// by `ecdsa_k256_keccak::verify`.
     ///
     /// The encoding is the structural order consumed from the advice stack:
-    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
-    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
-    /// to the supplied signature encoding.
+    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each scalar value is a little-endian
+    /// `u32` limb represented as a field element. The signature portion preserves `r` and `s`
+    /// exactly, omits the recovery ID, and does not normalize or enforce low-s. The result is
+    /// advice witness data, not a commitment to the supplied signature encoding.
     ///
     /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
     /// commitment returned by [`public_key_commitment()`].
@@ -62,7 +62,7 @@ pub mod ecdsa_k256_keccak {
             "ECDSA public key elements must be QX[8] || QY[8] native limbs",
         );
 
-        let mut out = Vec::with_capacity(32);
+        let mut out = Vec::with_capacity(16 + 16);
         out.extend(pk_elements);
         out.extend_from_slice(&signature_felts(sig));
         out

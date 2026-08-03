@@ -218,7 +218,12 @@ pub const COL_RP_HI: usize = 18;
 /// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`.
 pub const COL_RQ_LO: usize = 19;
 pub const COL_RQ_HI: usize = 20;
-pub const NUM_MAIN_COLS: usize = 21;
+/// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
+/// `EcGroup` consume; the none-sentinel 0 for a group with no
+/// endomorphism).
+pub const COL_BETA_PTR: usize = 21;
+pub const COL_LAMBDA_PTR: usize = 22;
+pub const NUM_MAIN_COLS: usize = 23;
 
 /// Block period: one add op = 4 rows.
 pub const PERIOD: usize = 4;
@@ -468,6 +473,8 @@ where
         let a_ptr: LB::Expr = local[COL_A_PTR].into();
         let b_ptr: LB::Expr = local[COL_B_PTR].into();
         let bound: LB::Expr = local[COL_BOUND_PTR].into();
+        let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
+        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
         let pai_p: LB::Expr = local[COL_PAI_P].into();
         let pai_q: LB::Expr = local[COL_PAI_Q].into();
         let cancel: LB::Expr = local[COL_CANCEL].into();
@@ -614,6 +621,8 @@ where
                     b_ptr: b_ptr.clone(),
                     bound_ptr: bound.clone(),
                     scalar_bound_ptr: sbound,
+                    beta_ptr: beta_ptr.clone(),
+                    lambda_ptr: lambda_ptr.clone(),
                 },
                 f2
             ),
