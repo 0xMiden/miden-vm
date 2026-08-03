@@ -271,24 +271,39 @@ fn generate_fuzz_seeds() {
     let asm_op_offset = debug_info_bytes
         .windows(asm_op.as_bytes().len())
         .position(|window| window == asm_op.as_bytes())
-        .expect("seed debug info should contain its assembly operation")
-        + 4;
+        .expect("seed debug info should contain its assembly operation");
     let mut invalid_asm_location_debug_info = debug_info_bytes.clone();
-    invalid_asm_location_debug_info[asm_op_offset..asm_op_offset + 4]
+    assert_eq!(
+        &invalid_asm_location_debug_info[asm_op_offset + 4..asm_op_offset + 8],
+        &1u32.to_le_bytes(),
+    );
+    invalid_asm_location_debug_info[asm_op_offset + 4..asm_op_offset + 8]
         .copy_from_slice(&2u32.to_le_bytes());
     write_seed(
         "debug_info",
         "invalid_assembly_location_option.bin",
         &invalid_asm_location_debug_info,
     );
+    for (name, field_offset) in [
+        ("dangling_assembly_context_string.bin", 12),
+        ("dangling_assembly_op_string.bin", 16),
+    ] {
+        let mut bytes = debug_info_bytes.clone();
+        bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        write_seed("debug_info", name, &bytes);
+    }
 
     let mut invalid_asm_location_package = package_with_debug_info.to_bytes();
     let asm_op_offset = invalid_asm_location_package
         .windows(asm_op.as_bytes().len())
         .position(|window| window == asm_op.as_bytes())
-        .expect("seed package should contain its debug assembly operation")
-        + 4;
-    invalid_asm_location_package[asm_op_offset..asm_op_offset + 4]
+        .expect("seed package should contain its debug assembly operation");
+    assert_eq!(
+        &invalid_asm_location_package[asm_op_offset + 4..asm_op_offset + 8],
+        &1u32.to_le_bytes(),
+    );
+    invalid_asm_location_package[asm_op_offset + 4..asm_op_offset + 8]
         .copy_from_slice(&2u32.to_le_bytes());
     write_seed(
         "debug_info",
@@ -305,6 +320,17 @@ fn generate_fuzz_seeds() {
         "package_with_invalid_assembly_location_option.bin",
         &invalid_asm_location_package,
     );
+    for (name, field_offset) in [
+        ("package_with_dangling_assembly_context_string.bin", 12),
+        ("package_with_dangling_assembly_op_string.bin", 16),
+    ] {
+        let mut bytes = package_with_debug_info.to_bytes();
+        bytes[asm_op_offset + field_offset..asm_op_offset + field_offset + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        write_seed("debug_info", name, &bytes);
+        write_seed("package_deserialize", name, &bytes);
+        write_seed("package_semantic_deserialize", name, &bytes);
+    }
 
     let mut dangling_error_debug_info = debug_info_bytes;
     let error_message_offset = dangling_error_debug_info
