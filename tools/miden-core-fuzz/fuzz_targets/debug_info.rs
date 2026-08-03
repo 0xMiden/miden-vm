@@ -9,7 +9,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_assembly_syntax::ast::types::Type;
-use miden_core::serde::{Deserializable, SliceReader};
+use miden_core::serde::{ByteReader, Deserializable, SliceReader};
 use miden_mast_package::{
     Package,
     debug_info::{MAX_DEBUG_INFO_PAYLOAD_SIZE, PackageDebugInfo},
@@ -87,9 +87,14 @@ fuzz_target!(|data: &[u8]| {
         let _ = package.debug_info();
     }
 
+    let mut framing_reader = SliceReader::new(data);
+    let declared_payload_len = framing_reader
+        .read_u8()
+        .and_then(|_| framing_reader.read_usize())
+        .ok();
     let mut reader = SliceReader::new(data);
     let debug_info = PackageDebugInfo::read_from(&mut reader);
-    if data.len() > MAX_DEBUG_INFO_PAYLOAD_SIZE + 10 {
+    if declared_payload_len.is_some_and(|len| len > MAX_DEBUG_INFO_PAYLOAD_SIZE) {
         assert!(debug_info.is_err());
     } else if let Ok(debug_info) = debug_info {
         exercise_debug_info(&debug_info);
