@@ -256,7 +256,7 @@ mod tests {
 
     use miden_core::{
         Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
+        field::{Field, PrimeCharacteristicRing, QuadFelt},
     };
     use miden_crypto::stark::{
         air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
@@ -395,11 +395,19 @@ mod tests {
         row.chiplets[19] = Felt::new_unchecked(hi);
     }
 
+    fn eval_memory_window(
+        local: &ChipletCols<Felt>,
+        next: &ChipletCols<Felt>,
+        flags: &ChipletFlags<Felt>,
+    ) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        enforce_memory_constraints(&mut builder, local, next, flags);
+        builder.evaluations
+    }
+
     fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {
         let next = memory_row();
-        let mut builder = ConstraintEvalBuilder::new();
-        enforce_memory_constraints(&mut builder, row, &next, &memory_flags());
-        builder.evaluations
+        eval_memory_window(row, &next, &memory_flags())
     }
 
     fn assert_constraints_accept(row: &ChipletCols<Felt>) {
@@ -435,6 +443,167 @@ mod tests {
         assert_constraints_reject(&invalid);
     }
 
+    // SAME-CLOCK ACCESS TESTS
+    // ============================================================================================
+
+    #[derive(Clone, Copy, Debug)]
+    enum AccessType {
+        Read,
+        Write,
+    }
+
+    impl AccessType {
+        fn is_read(self) -> Felt {
+            match self {
+                Self::Read => Felt::ONE,
+                Self::Write => Felt::ZERO,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum AccessSize {
+        Element(u8),
+        Word,
+    }
+
+    fn set_access_size(row: &mut ChipletCols<Felt>, size: AccessSize) {
+        let cols = memory_cols(row);
+        match size {
+            AccessSize::Element(index) => {
+                assert!(index < 4, "element index must be in the range 0..4");
+                cols.is_word = Felt::ZERO;
+                cols.idx0 = Felt::new_unchecked(u64::from(index & 1));
+                cols.idx1 = Felt::new_unchecked(u64::from(index >> 1));
+            },
+            AccessSize::Word => {
+                cols.is_word = Felt::ONE;
+                cols.idx0 = Felt::ZERO;
+                cols.idx1 = Felt::ZERO;
+            },
+        }
+    }
+
+    fn same_key_memory_rows(
+        local_access: AccessType,
+        next_access: AccessType,
+    ) -> (ChipletCols<Felt>, ChipletCols<Felt>) {
+        let mut local = memory_row();
+        let mut next = memory_row();
+        let values = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ];
+
+        for (row, access) in [(&mut local, local_access), (&mut next, next_access)] {
+            let cols = memory_cols(row);
+            cols.is_read = access.is_read();
+            cols.is_word = Felt::ONE;
+            cols.word_addr = Felt::new_unchecked(4);
+            cols.clk = Felt::new_unchecked(7);
+            cols.values = values;
+        }
+        memory_cols(&mut next).is_same_ctx_and_addr = Felt::ONE;
+
+        // word_addr = 4 * (w0 + 2^16 * w1), with (w0, w1) = (1, 0).
+        set_word_addr_limbs(&mut local, 1, 0);
+        set_word_addr_limbs(&mut next, 1, 0);
+
+        (local, next)
+    }
+
+    fn eval_memory_transition(
+        local: &ChipletCols<Felt>,
+        next: &ChipletCols<Felt>,
+    ) -> Vec<QuadFelt> {
+        let flags = ChipletFlags {
+            is_active: Felt::ONE,
+            is_transition: Felt::ONE,
+            is_last: Felt::ZERO,
+            next_is_first: Felt::ZERO,
+        };
+        eval_memory_window(local, next, &flags)
+    }
+
+    /// Ensures that repeating `(ctx, word_addr, clk)` is valid only when both accesses are reads.
+    /// In particular, this prevents overlapping multi-memory operations such as `crypto_stream`
+    /// from reading and writing the same word in one clock cycle.
+    #[test]
+    fn same_key_memory_rows_allow_only_reads() {
+        for (local_access, next_access) in [
+            (AccessType::Read, AccessType::Read),
+            (AccessType::Read, AccessType::Write),
+            (AccessType::Write, AccessType::Read),
+            (AccessType::Write, AccessType::Write),
+        ] {
+            let (local, next) = same_key_memory_rows(local_access, next_access);
+            let evaluations = eval_memory_transition(&local, &next);
+            let accepted = evaluations.iter().all(|value| *value == QuadFelt::ZERO);
+            let should_accept =
+                matches!((local_access, next_access), (AccessType::Read, AccessType::Read));
+            assert_eq!(
+                accepted, should_accept,
+                "unexpected result for {local_access:?}/{next_access:?}",
+            );
+        }
+    }
+
+    /// Repeating `(ctx, word_addr, clk)` is safe for any combination of read access sizes. This is
+    /// required when operations such as `horner_eval_base` or ACE read multiple elements from the
+    /// same word in one clock cycle.
+    #[test]
+    fn same_key_memory_rows_allow_all_read_access_sizes() {
+        for (local_size, next_size) in [
+            (AccessSize::Word, AccessSize::Word),
+            (AccessSize::Word, AccessSize::Element(2)),
+            (AccessSize::Element(1), AccessSize::Word),
+            (AccessSize::Element(0), AccessSize::Element(1)),
+        ] {
+            let (mut local, mut next) = same_key_memory_rows(AccessType::Read, AccessType::Read);
+            set_access_size(&mut local, local_size);
+            set_access_size(&mut next, next_size);
+
+            let evaluations = eval_memory_transition(&local, &next);
+            assert!(
+                evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+                "same-clock {local_size:?}/{next_size:?} reads should be accepted; got \
+                 {evaluations:?}",
+            );
+        }
+    }
+
+    /// Same-clock accesses at different word addresses may contain reads or writes. This covers the
+    /// two distinct word accesses emitted by operations such as `mem_stream` and `adv_pipe`.
+    #[test]
+    fn same_clock_memory_rows_at_different_addresses_allow_reads_and_writes() {
+        for (local_access, next_access) in [
+            (AccessType::Read, AccessType::Read),
+            (AccessType::Read, AccessType::Write),
+            (AccessType::Write, AccessType::Read),
+            (AccessType::Write, AccessType::Write),
+        ] {
+            let (local, mut next) = same_key_memory_rows(local_access, next_access);
+            {
+                let next = memory_cols(&mut next);
+                next.word_addr = Felt::new_unchecked(8);
+                next.values = [Felt::ZERO; 4];
+                next.d0 = Felt::new_unchecked(4);
+                next.d_inv = Felt::new_unchecked(4).inverse();
+                next.is_same_ctx_and_addr = Felt::ZERO;
+            }
+            set_word_addr_limbs(&mut next, 2, 0);
+
+            let evaluations = eval_memory_transition(&local, &next);
+            assert!(
+                evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+                "same-clock accesses to different words should be accepted for \
+                 {local_access:?}/{next_access:?}; got {evaluations:?}",
+            );
+        }
+    }
+
     // EMPTY-SECTION BOUNDARY REGRESSION TESTS
     // ============================================================================================
     // The memory chiplet's first-row initialization ("values not being written must be zero") is
@@ -461,16 +630,6 @@ mod tests {
     ) -> ChipletFlags<Felt> {
         let mut builder = ConstraintEvalBuilder::new();
         build_chiplet_selectors(&mut builder, local, next).memory
-    }
-
-    fn eval_memory_window(
-        local: &ChipletCols<Felt>,
-        next: &ChipletCols<Felt>,
-        flags: &ChipletFlags<Felt>,
-    ) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
-        enforce_memory_constraints(&mut builder, local, next, flags);
-        builder.evaluations
     }
 
     #[test]
