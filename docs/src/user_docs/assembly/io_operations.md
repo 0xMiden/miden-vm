@@ -29,16 +29,16 @@ push.4660.22136.36882.43981
 
 In both case the values must still encode valid field elements.
 
-#### Word literal syntax
+#### Sequential pushes and word literals
 
-The `push.[a,b,c,d]` syntax provides a convenient way to push a word (4 field elements) onto the stack. The elements are pushed such that the first element `a` ends up on top of the stack:
+Dot-delimited values are pushed sequentially from left to right. A bracketed literal instead pushes one word in the listed order:
 
+```masm
+push.1.2.3.4      # [4, 3, 2, 1, ...]; equivalent to push.1 push.2 push.3 push.4
+push.[1,2,3,4]    # [1, 2, 3, 4, ...]; equivalent to push.4 push.3 push.2 push.1
 ```
-push.[1,2,3,4]   # Results in stack: [1, 2, 3, 4, ...]
-                 # where 1 is on top of the stack
-```
 
-This is equivalent to `push.4 push.3 push.2 push.1` but provides a more intuitive syntax when working with words, as the element order in the literal matches the resulting stack order (first element on top).
+Stack diagrams list the top element first.
 
 You can also use slices with word constants to push only a portion of the word:
 
