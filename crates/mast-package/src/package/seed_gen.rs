@@ -15,7 +15,10 @@ use miden_core::{
 };
 
 use super::{PackageId, TargetType};
-use crate::{Package, PackageExport, ProcedureExport};
+use crate::{
+    Package, PackageExport, ProcedureExport, Section, SectionId,
+    debug_info::{DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder},
+};
 
 fn build_forest() -> (MastForest, MastNodeId) {
     let mut builder = DenseMastForestBuilder::new();
@@ -57,6 +60,34 @@ fn build_package(signature: Option<FunctionType>) -> Package {
     .expect("seed package should be valid")
 }
 
+fn build_package_with_debug_info() -> (Package, Vec<u8>) {
+    let mut package = build_package(None);
+    let exec_node = *package.mast.procedure_roots().first().expect("seed package has a root");
+
+    let mut debug_info = PackageDebugInfoBuilder::default();
+    let context_name = debug_info.add_string("seed::test");
+    let op_name = debug_info.add_string("add");
+    let source_node = debug_info
+        .add_node(DebugSourceNode {
+            exec_node,
+            children: Vec::new(),
+            op_start: 0,
+            op_end: 1,
+            asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name, op_name, 1)],
+            debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+        })
+        .expect("seed debug info has one source node");
+    debug_info.add_root(source_node);
+
+    let debug_info_bytes = debug_info.build().to_bytes();
+    package
+        .sections
+        .push(Section::new(SectionId::DEBUG_INFO, debug_info_bytes.clone()));
+
+    (package, debug_info_bytes)
+}
+
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
@@ -79,6 +110,20 @@ fn generate_fuzz_seeds() {
         "package_deserialize",
         "package_with_signature.bin",
         &package_with_signature.to_bytes(),
+    );
+
+    let (package_with_debug_info, debug_info_bytes) = build_package_with_debug_info();
+    write_seed("debug_info", "valid_debug_info.bin", &debug_info_bytes);
+    write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
+    write_seed(
+        "package_deserialize",
+        "package_with_debug_info.bin",
+        &package_with_debug_info.to_bytes(),
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_debug_info.bin",
+        &package_with_debug_info.to_bytes(),
     );
 
     println!("\nSeed corpus generated in ../../tools/miden-core-fuzz/corpus");
