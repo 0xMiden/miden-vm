@@ -329,6 +329,31 @@ impl Type {
             18 => {
                 let arity = source.read_usize()?;
                 let ty = Type::read_from_with_depth(source, next_depth)?;
+                if ty.has_defined_layout() {
+                    let element_size = u64::try_from(ty.size_in_bits()).unwrap_or(u64::MAX);
+                    let element_align =
+                        u64::try_from(ty.min_alignment()).unwrap_or(u64::MAX).saturating_mul(8);
+                    let padded_element_size = element_size
+                        .checked_add(element_align.saturating_sub(1))
+                        .map(|size| size / element_align * element_align);
+                    let size_in_bits = match arity {
+                        0 => Some(0),
+                        1 => Some(element_size),
+                        n => padded_element_size.and_then(|padded_size| {
+                            u64::try_from(n - 1)
+                                .ok()
+                                .and_then(|n| padded_size.checked_mul(n))
+                                .and_then(|tail_size| element_size.checked_add(tail_size))
+                        }),
+                    };
+                    let size_in_bytes =
+                        size_in_bits.and_then(|size| size.checked_add(7)).map(|size| size / 8);
+                    if size_in_bytes.is_none_or(|size| size > u64::from(u32::MAX)) {
+                        return Err(DeserializationError::InvalidValue(
+                            "invalid array: size exceeds u32::MAX bytes".to_string(),
+                        ));
+                    }
+                }
                 Type::Array(Arc::new(ArrayType { ty, len: arity }))
             },
             19 => {

@@ -201,11 +201,17 @@ fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
         .position(|window| window == [18, 3, 15])
         .expect("seed signature should contain its single-Felt array")
         + 1;
+    let mut overflowing_package_bytes = package_bytes.clone();
     package_bytes.splice(
         signature_offset + array_len_offset..signature_offset + array_len_offset + 1,
         (u32::MAX as usize).to_bytes(),
     );
     packages.push(("oversized_struct_field.bin", package_bytes));
+    overflowing_package_bytes.splice(
+        signature_offset + array_len_offset..signature_offset + array_len_offset + 1,
+        usize::MAX.to_bytes(),
+    );
+    packages.push(("overflowing_struct_field.bin", overflowing_package_bytes));
 
     packages
 }
