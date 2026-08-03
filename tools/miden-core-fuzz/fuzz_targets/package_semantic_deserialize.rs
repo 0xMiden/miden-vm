@@ -14,7 +14,19 @@ use miden_mast_package::{Package, SectionId, TargetType, debug_info::PackageDebu
 fuzz_target!(|data: &[u8]| {
     if let Ok(package) = Package::read_from_bytes_trusted(data) {
         validate_debug_sections(&package);
-        let _ = package.debug_info();
+        match package.debug_info() {
+            Ok(Some(expected_debug_info)) => {
+                let untrusted_package = Package::read_from_bytes(data)
+                    .expect("a package with valid debug info should pass untrusted admission");
+                let actual_debug_info = untrusted_package
+                    .debug_info()
+                    .expect("admitted debug info should remain accessible")
+                    .expect("admitted debug info should remain present");
+                assert_eq!(actual_debug_info, expected_debug_info);
+            },
+            Err(_) => assert!(Package::read_from_bytes(data).is_err()),
+            Ok(None) => {},
+        }
     }
 
     let Ok(package) = Package::read_from_bytes(data) else {

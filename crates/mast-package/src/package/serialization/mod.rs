@@ -27,21 +27,21 @@
 //! - whether package-owned debug sections may be exposed to callers.
 //!
 //! [`Package::read_from`] and [`Package::read_from_bytes`] are the normal untrusted readers. They
-//! validate the embedded MAST forest and discard package-owned debug sections before returning the
+//! validate the embedded MAST forest and package-owned debug information before returning the
 //! package. Use them for bytes received across a trust boundary.
 //!
 //! [`Package::read_from_trusted`] and [`Package::read_from_bytes_trusted`] are for local
 //! files/cache entries controlled by the same trusted build or execution system. They validate the
-//! embedded MAST forest, but preserve package-owned debug sections so [`Package::debug_info`] can
-//! decode them.
+//! embedded MAST forest, but defer package-owned debug validation until [`Package::debug_info`] is
+//! called.
 //!
 //! [`Package::read_from_unchecked`] and [`Package::read_from_bytes_unchecked`] are also trusted
 //! same-domain readers, but skip MAST validation. Use them only for bytes that were already
 //! validated before being persisted by the same trusted system.
 //!
-//! Embedded kernel package bytes are stored in the opaque `kernel` custom section. Untrusted
-//! package reads may carry those bytes, but decoding the embedded kernel through the package API
-//! uses the untrusted reader and therefore strips any nested package-owned debug sections.
+//! Embedded kernel package bytes are stored in the opaque `kernel` custom section. Decoding an
+//! embedded kernel through the package API uses the untrusted reader, so nested package-owned debug
+//! information is validated and retained under the same policy.
 
 use alloc::{
     format,
@@ -139,7 +139,7 @@ impl Package {
     ) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, false)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
+        Self::read_from_with_header_and_mast(source, header, mast_forest, false)
     }
 
     /// Reads trusted package bytes without validating the embedded MAST forest.
@@ -159,15 +159,15 @@ impl Package {
 
     /// Reads a trusted local package while validating the embedded MAST forest.
     ///
-    /// This keeps the same structural validation as [`Package::read_from`], but allows
-    /// package-owned debug sections to be decoded as trusted metadata. Use this only for local
-    /// files or cache artifacts controlled by this process or build system. Do not use this for
-    /// inbound artifacts from an untrusted channel; use [`Package::read_from`] instead so debug
-    /// sections are discarded before the package is exposed to callers.
+    /// This keeps the same structural validation as [`Package::read_from`], but defers
+    /// package-owned debug validation until the metadata is used. Use this only for local files or
+    /// cache artifacts controlled by this process or build system. Do not use this for inbound
+    /// artifacts from an untrusted channel; use [`Package::read_from`] instead so debug sections
+    /// are validated before the package is exposed to callers.
     pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, true)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
+        Self::read_from_with_header_and_mast(source, header, mast_forest, false)
     }
 
     /// Reads trusted local package bytes while validating the embedded MAST forest.
@@ -256,7 +256,7 @@ impl Package {
         source: &mut R,
         header: PackageHeader,
         mast: Arc<MastForest>,
-        debug_sections_trusted: bool,
+        validate_debug_sections: bool,
     ) -> Result<Self, DeserializationError> {
         let PackageHeader { name, version, description, kind } = header;
 
@@ -264,13 +264,7 @@ impl Package {
         let manifest = PackageManifest::read_from_safe(source, &mast)?;
 
         // Read custom sections
-        let mut sections = Vec::<Section>::read_from(source)?;
-        if !debug_sections_trusted && sections.iter().any(|section| section.id.is_debug()) {
-            log::warn!(
-                "Package read ignored debug sections from an untrusted artifact; use Package::read_from_trusted for local cache/debug reads"
-            );
-            sections.retain(|section| !section.id.is_debug());
-        }
+        let sections = Vec::<Section>::read_from(source)?;
 
         let mut package = Self {
             name,
@@ -281,8 +275,16 @@ impl Package {
             mast,
             manifest,
             sections,
-            debug_sections_trusted,
+            debug_sections_trusted: true,
         };
+
+        if validate_debug_sections {
+            package.debug_info().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "package contains invalid debug information: {err}"
+                ))
+            })?;
+        }
 
         package
             .compute_interface_digest()
@@ -300,7 +302,7 @@ impl Deserializable for Package {
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast, false)
+        Self::read_from_with_header_and_mast(source, header, mast, true)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {

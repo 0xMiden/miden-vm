@@ -210,24 +210,21 @@ fn executable_package_entrypoint_roundtrips() {
 }
 
 #[test]
-fn package_checked_deserialization_discards_untrusted_debug_sections() {
+fn package_checked_deserialization_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let bytes = package.to_bytes();
 
     let deserialized = Package::read_from_bytes(&bytes).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
     let debug_info_id = SectionId::DEBUG_INFO.as_str().as_bytes();
     assert!(
-        !deserialized
+        deserialized
             .to_bytes()
             .windows(debug_info_id.len())
             .any(|window| window == debug_info_id),
-        "discarded debug sections should not be reserialized"
+        "validated debug sections should be reserialized"
     );
 }
 
@@ -255,7 +252,7 @@ fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
 
 #[cfg(feature = "std")]
 #[test]
-fn package_deserialize_from_file_discards_untrusted_debug_sections() {
+fn package_deserialize_from_file_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let path = std::env::temp_dir().join(format!(
         "miden-package-deserialize-{}-{}.masp",
@@ -267,11 +264,8 @@ fn package_deserialize_from_file_discards_untrusted_debug_sections() {
     let deserialized = Package::deserialize_from_file(&path).unwrap();
     fs::remove_file(&path).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package file reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
 }
 
 #[cfg(feature = "std")]

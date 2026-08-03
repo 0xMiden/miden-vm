@@ -2431,7 +2431,6 @@ version = "0.30.0"
 dependencies = [
  "codspeed-criterion-compat",
  "hashbrown 0.17.1",
- "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",

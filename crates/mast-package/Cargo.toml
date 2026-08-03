@@ -36,7 +36,6 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 hashbrown.workspace = true
-log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 rustc-hash = { version = "2.1", default-features = false }
