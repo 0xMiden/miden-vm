@@ -13,7 +13,7 @@ use miden_core::{
     operations::Operation,
     serde::Serializable,
 };
-use miden_debug_types::Uri;
+use miden_debug_types::{ByteIndex, Uri};
 
 use super::{PackageId, TargetType};
 use crate::{
@@ -68,7 +68,12 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
     let mut debug_info = PackageDebugInfoBuilder::default();
     let context_name = debug_info.add_string("seed::test");
     let op_name = debug_info.add_string("add");
-    debug_info.add_file(Uri::new("file:///seed/source.masm"), Some([0xa5; 32]));
+    let file_idx = debug_info.add_file(Uri::new("file:///seed/source.masm"), Some([0xa5; 32]));
+    debug_info.add_location_info(crate::debug_info::DebugLoc {
+        file_idx,
+        start: ByteIndex::new(0),
+        end: ByteIndex::new(1),
+    });
     let source_node = debug_info
         .add_node(DebugSourceNode {
             exec_node,

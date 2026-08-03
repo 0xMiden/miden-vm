@@ -347,8 +347,8 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
     /// Returns the deduplicated source locations referenced by assembly operation rows.
     pub fn get_location(&self, idx: DebugLocIdx) -> Option<Location> {
         let DebugLoc { file_idx, start, end } = self.locations.get(idx)?;
-        let file = &self.files[*file_idx];
-        let uri = self.strings[file.path_idx].clone();
+        let file = self.files.get(*file_idx)?;
+        let uri = self.strings.get(file.path_idx).cloned()?;
         Some(Location {
             uri: Uri::from(uri),
             start: *start,
