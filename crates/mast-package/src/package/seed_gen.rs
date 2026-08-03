@@ -238,8 +238,9 @@ fn generate_fuzz_seeds() {
         .windows(error_code.len())
         .position(|window| window == error_code)
         .expect("seed debug info should contain its error code")
-        - 8;
+        - 12;
     let mut dangling_root_debug_info = debug_info_bytes.clone();
+    assert_eq!(&dangling_root_debug_info[root_offset..root_offset + 4], &0u32.to_le_bytes());
     dangling_root_debug_info[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     write_seed("debug_info", "dangling_source_root.bin", &dangling_root_debug_info);
 
@@ -248,7 +249,8 @@ fn generate_fuzz_seeds() {
         .windows(error_code.len())
         .position(|window| window == error_code)
         .expect("seed package should contain its debug error code")
-        - 8;
+        - 12;
+    assert_eq!(&dangling_root_package[root_offset..root_offset + 4], &0u32.to_le_bytes());
     dangling_root_package[root_offset..root_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     write_seed("debug_info", "package_with_dangling_source_root.bin", &dangling_root_package);
     write_seed(
