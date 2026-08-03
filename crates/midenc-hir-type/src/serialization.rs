@@ -198,6 +198,14 @@ impl Serializable for Type {
 const MAX_TYPE_NESTING: usize = 128;
 
 impl Type {
+    fn has_defined_layout(&self) -> bool {
+        match self {
+            Self::List(_) => false,
+            Self::Array(array) => array.element_type().has_defined_layout(),
+            _ => true,
+        }
+    }
+
     /// Provides [Type] deserialization support via the miden-serde-utils serializer.
     ///
     /// This is a temporary implementation to allow type information to be serialized with
@@ -296,6 +304,11 @@ impl Type {
                         None
                     };
                     let ty = Type::read_from_with_depth(source, next_depth)?;
+                    if !ty.has_defined_layout() {
+                        return Err(DeserializationError::InvalidValue(
+                            "invalid struct field: type has no defined layout".to_string(),
+                        ));
+                    }
                     fields.push(NameAndType { name, ty });
                 }
                 Type::Struct(Arc::new(StructType::from_parts(name, repr, fields)))
@@ -324,7 +337,13 @@ impl Type {
                 for _ in 0..num_variants {
                     let name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
                     let value_ty = if source.read_bool()? {
-                        Some(Type::read_from_with_depth(source, next_depth)?)
+                        let ty = Type::read_from_with_depth(source, next_depth)?;
+                        if !ty.has_defined_layout() {
+                            return Err(DeserializationError::InvalidValue(
+                                "invalid enum variant: type has no defined layout".to_string(),
+                            ));
+                        }
+                        Some(ty)
                     } else {
                         None
                     };

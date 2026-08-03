@@ -4,7 +4,7 @@ use std::{fs, path::Path, println};
 use miden_assembly_syntax::{
     ast::{
         Path as AstPath, PathBuf,
-        types::{CallConv, FunctionType, StructType, Type, TypeRepr},
+        types::{CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
     },
     semver::Version,
 };
@@ -88,7 +88,7 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
     (package, debug_info_bytes)
 }
 
-fn build_packages_with_invalid_struct_alignments() -> [(&'static str, Vec<u8>); 2] {
+fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
     let struct_type = StructType::new_with_repr(TypeRepr::align(8), [Type::Felt]);
     let signature = FunctionType::new(CallConv::Fast, [Type::from(struct_type)], []);
     let signature_bytes = signature.to_bytes();
@@ -104,18 +104,52 @@ fn build_packages_with_invalid_struct_alignments() -> [(&'static str, Vec<u8>); 
         .position(|window| window == [17, 0, 1, 8, 0])
         .expect("seed signature should contain the aligned struct type");
     let repr_offset = signature_offset + repr_offset + 2;
+    let field_type_offset = signature_offset
+        + signature_bytes
+            .windows(8)
+            .position(|window| window == [17, 0, 1, 8, 0, 1, 0, 15])
+            .expect("seed signature should contain the struct field type")
+        + 7;
 
     let mut non_power_of_two = package_bytes.clone();
     non_power_of_two[repr_offset + 1..repr_offset + 3].copy_from_slice(&3u16.to_le_bytes());
 
-    let mut zero_packed = package_bytes;
+    let mut zero_packed = package_bytes.clone();
     zero_packed[repr_offset] = 2;
     zero_packed[repr_offset + 1..repr_offset + 3].copy_from_slice(&0u16.to_le_bytes());
 
-    [
+    let mut list_field = package_bytes;
+    list_field[field_type_offset] = 19;
+    list_field.insert(field_type_offset + 1, 15);
+
+    let mut packages = vec![
         ("non_power_of_two_struct_align.bin", non_power_of_two),
         ("zero_packed_struct_align.bin", zero_packed),
-    ]
+        ("list_struct_field.bin", list_field),
+    ];
+
+    let enum_type =
+        EnumType::new(Arc::from("E"), Type::U8, [Variant::new(Arc::from("V"), Type::Felt, None)])
+            .expect("seed enum should be valid");
+    let signature = FunctionType::new(CallConv::Fast, [Type::Enum(Arc::new(enum_type))], []);
+    let signature_bytes = signature.to_bytes();
+    let (package, _) = build_package_with_debug_info(Some(signature));
+    let mut package_bytes = package.to_bytes();
+    let signature_offset = package_bytes
+        .windows(signature_bytes.len())
+        .position(|window| window == signature_bytes)
+        .expect("seed package should contain its enum procedure signature");
+    let variant_type_offset = signature_offset
+        + signature_bytes
+            .windows(4)
+            .position(|window| window == [b'V', 1, 15, 0])
+            .expect("seed signature should contain the enum variant type")
+        + 2;
+    package_bytes[variant_type_offset] = 19;
+    package_bytes.insert(variant_type_offset + 1, 15);
+    packages.push(("list_enum_variant.bin", package_bytes));
+
+    packages
 }
 
 #[test]
@@ -156,7 +190,7 @@ fn generate_fuzz_seeds() {
         &package_with_debug_info.to_bytes(),
     );
 
-    for (name, bytes) in build_packages_with_invalid_struct_alignments() {
+    for (name, bytes) in build_packages_with_invalid_struct_types() {
         write_seed("debug_info", name, &bytes);
         write_seed("package_deserialize", name, &bytes);
         write_seed("package_semantic_deserialize", name, &bytes);
