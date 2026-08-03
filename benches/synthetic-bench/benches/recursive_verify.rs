@@ -51,12 +51,10 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
-    advice::{AdviceInputs, AdviceStack},
-    trace::TraceLenSummary,
+    DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs, trace::TraceLenSummary,
 };
 use miden_prover::prove_sync;
-use miden_utils_testing::recursive_verifier::generate_advice_inputs;
+use miden_verifier::recursive::RecursiveVerifierInputs;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackInputs,
     StackOutputs, TraceBuildInputs, trace::build_trace,
@@ -575,15 +573,9 @@ fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
         fixture.stack_inputs,
         fixture.stack_outputs,
     );
-    let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
-    let claim_commitment = verifier_inputs.claim_commitment;
-
-    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack().iter().copied())
-        .expect("recursive advice stack values must be canonical");
-    let advice_inputs = AdviceInputs::default()
-        .with_advice_stack(advice_stack)
-        .with_merkle_store(verifier_inputs.store)
-        .with_map(verifier_inputs.advice_map);
+    let (advice_inputs, claim_commitment) = RecursiveVerifierInputs::new(&fixture.proof, &claim)
+        .expect("recursive advice")
+        .into_parts();
 
     RecursiveProofAdvice { claim_commitment, advice_inputs }
 }

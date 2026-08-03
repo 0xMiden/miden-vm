@@ -2796,7 +2796,7 @@ dependencies = [
  "miden-core-lib",
  "miden-processor",
  "miden-prover",
- "miden-test-utils",
+ "miden-verifier",
  "miden-vm",
  "serde",
  "serde_json",
