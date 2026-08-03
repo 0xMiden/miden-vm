@@ -13,7 +13,7 @@ use miden_core::Felt;
 use super::{
     WitScalarCodec,
     arity::{felt_count, max_for_bits, signed_from_bits, signed_range, slot_bits},
-    codec::{codec_for_struct, type_leaf_name},
+    codec::{StructShape, codec_for_struct, struct_shape},
     errors::TypedError,
 };
 
@@ -38,27 +38,19 @@ pub(super) fn decode_type<'a>(
                 return Ok((codec.decode(chunk)?, rest));
             }
 
-            // Field names give us the shape. No names at all means a tuple, like `(a, b)`. All
-            // names means a record, like `{ x: a, y: b }`. The compiler never mixes the two, so a
-            // mix means the type info is bad. We do not guess.
-            // For a tuple field the compiler writes no name at all, or the position as the name,
-            // like `"0"`. A real field name is never just its own index.
-            let fields = struct_ty.fields();
-            let unnamed = fields
-                .iter()
-                .enumerate()
-                .filter(|(i, field)| match field.name.as_deref() {
-                    None => true,
-                    Some(name) => name.is_empty() || name.parse::<usize>() == Ok(*i),
-                })
-                .count();
-            if unnamed != 0 && unnamed != fields.len() {
-                return Err(TypedError::InvalidTypeInfo("a struct mixes named and unnamed fields"));
-            }
-            // A struct with no fields has no names, so we print it as a tuple, like `name()`,
-            // and not as an empty record, like `name {  }`.
-            let tuple = unnamed != 0 || fields.is_empty();
+            // A struct with mixed field names has no shape, so we cannot tell how it was written.
+            let (name, tuple) = match struct_shape(struct_ty) {
+                Some(StructShape::Tuple { name }) => (name, true),
+                Some(StructShape::Record { name }) => (name, false),
+                None => {
+                    return Err(TypedError::InvalidTypeInfo {
+                        ty: ty.to_string(),
+                        reason: "a struct mixes named and unnamed fields",
+                    });
+                },
+            };
 
+            let fields = struct_ty.fields();
             let mut cursor = felts;
             let mut rendered = Vec::with_capacity(fields.len());
             for field in fields {
@@ -66,7 +58,7 @@ pub(super) fn decode_type<'a>(
                 if tuple {
                     rendered.push(value);
                 } else {
-                    // After the check above, every field here has a real name.
+                    // A record has a name on every field.
                     let name = field.name.as_deref().unwrap_or_default();
                     rendered.push(format!("{name}: {value}"));
                 }
@@ -74,9 +66,7 @@ pub(super) fn decode_type<'a>(
             }
 
             let body = rendered.join(", ");
-            // `name` outlives the borrow `type_leaf_name` returns.
-            let name = struct_ty.name();
-            let out = match (name.as_deref().and_then(type_leaf_name), tuple) {
+            let out = match (name.as_deref(), tuple) {
                 (Some(name), true) => format!("{name}({body})"),
                 (Some(name), false) => format!("{name} {{ {body} }}"),
                 (None, true) => format!("({body})"),
@@ -88,15 +78,9 @@ pub(super) fn decode_type<'a>(
             let mut cursor = felts;
             let mut rendered = Vec::new();
             for _ in 0..array_ty.len {
-                let before = cursor.len();
                 let (value, rest) = decode_type(cursor, &array_ty.ty, codecs)?;
                 rendered.push(value);
                 cursor = rest;
-                // An element of width zero reads nothing. Without this check, a big `len` would
-                // loop and never move forward.
-                if cursor.len() == before {
-                    break;
-                }
             }
             Ok((format!("[{}]", rendered.join(", ")), cursor))
         },

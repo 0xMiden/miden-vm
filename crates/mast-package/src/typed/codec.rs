@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::types::StructType;
+use miden_assembly_syntax::ast::types::{StructField, StructType};
 use miden_core::{Felt, Word};
 
 use super::errors::TypedError;
@@ -164,6 +164,53 @@ pub(super) fn codec_for_struct<'a>(
                 }
         })
         .map(AsRef::as_ref)
+}
+
+/// How a struct is written: with a name or without one, its fields in braces or in parentheses.
+pub(super) enum StructShape {
+    /// Positional fields, like `pair(a, b)` or `(a, b)`.
+    Tuple { name: Option<String> },
+    /// Named fields, like `point { x: a, y: b }` or `{ x: a, y: b }`.
+    Record { name: Option<String> },
+}
+
+/// How a value of `struct_ty` is printed. There are four ways: `point { x: 1, y: 2 }`,
+/// `pair(1, 2)`, `{ x: 1, y: 2 }` and `(1, 2)`.
+///
+/// The name before the fields is the last part of the type name, like `point` in
+/// `miden:shapes/points@0.1.0/point`. An anonymous struct has none.
+///
+/// The field names choose the brackets: no names is a tuple, all names is a record. A struct with
+/// no fields is a tuple. Name and brackets are independent, so an anonymous struct with named
+/// fields still prints braces.
+///
+/// `None` when only some fields have names. No compiler writes that, so the struct says nothing
+/// about the felts, and the decoder rejects it.
+pub(super) fn struct_shape(struct_ty: &StructType) -> Option<StructShape> {
+    let fields = struct_ty.fields();
+    let unnamed = fields
+        .iter()
+        .enumerate()
+        .filter(|(i, field)| field_name(field, *i).is_none())
+        .count();
+    if unnamed != 0 && unnamed != fields.len() {
+        return None;
+    }
+
+    // `name` outlives the borrow `type_leaf_name` returns.
+    let name = struct_ty.name();
+    let name = name.as_deref().and_then(type_leaf_name).map(String::from);
+    Some(match unnamed == fields.len() {
+        true => StructShape::Tuple { name },
+        false => StructShape::Record { name },
+    })
+}
+
+/// The name of the field at position `i`. `None` when the field is positional: it has no name,
+/// an empty name, or its own position as its name, like `"2"` for the third field.
+pub(super) fn field_name(field: &StructField, i: usize) -> Option<&str> {
+    let name = field.name.as_deref()?;
+    (!name.is_empty() && name.parse::<usize>() != Ok(i)).then_some(name)
 }
 
 /// The last part of a type name. We use it so a type matches with any package or version in front

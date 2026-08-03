@@ -6,7 +6,9 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::types::{CallConv, FunctionType, NameAndType, StructType, Type};
+use miden_assembly_syntax::ast::types::{
+    ArrayType, CallConv, FunctionType, NameAndType, StructType, Type,
+};
 use miden_core::Felt;
 
 use super::{MIDEN_CORE_TYPES, TypedError, TypedProcInfo, WitScalarCodec};
@@ -36,6 +38,18 @@ fn named_struct<const N: usize>(name: &str, fields: [(&str, Type); N]) -> Type {
     Type::Struct(Arc::new(StructType::named(
         Arc::from(name),
         fields.map(|(name, ty)| (Arc::<str>::from(name), ty)),
+    )))
+}
+
+/// A struct whose first field has a name and whose second does not, so it is neither a record nor
+/// a tuple. No compiler writes this shape.
+fn half_named_struct(name: &str, named: (&str, Type), unnamed: Type) -> Type {
+    Type::Struct(Arc::new(StructType::named(
+        Arc::from(name),
+        [
+            NameAndType::from((Arc::<str>::from(named.0), named.1)),
+            NameAndType::from(unnamed),
+        ],
     )))
 }
 
@@ -143,6 +157,23 @@ fn signature_renders_bare_type_names() {
 fn signature_strips_the_wit_interface_prefix() {
     let info = proc("take-account-id", [account_id_ty()], [account_id_ty()]);
     assert_eq!(info.to_string(), "take-account-id(account-id) -> account-id");
+}
+
+#[test]
+fn a_codec_names_its_type_in_the_signature_whatever_its_fields_look_like() {
+    // A codec takes one token for the whole type and never reads the fields, so the signature has
+    // to show the name it takes that token for. Printing the fields tells the user to pass one
+    // token per field, and `encode_args` then refuses the count the signature asked for.
+    let account_id = half_named_struct(
+        "miden:base/core-types@1.0.0/account-id",
+        ("prefix", felt_ty()),
+        felt_ty(),
+    );
+    let info = with_account_id(proc("f", [account_id], []));
+
+    assert_eq!(info.expected_token_count(), Some(1));
+    assert_eq!(info.encode_args(&["0x7"]).unwrap(), felts([7, 0]));
+    assert_eq!(info.to_string(), "f(account-id)");
 }
 
 #[test]
@@ -346,6 +377,7 @@ fn an_anonymous_struct_renders_its_body_instead_of_a_name() {
     // signature shows the shape instead of a name.
     let info = proc("f", [], [unnamed_record([("x", felt_ty()), ("y", felt_ty())])]);
     assert_eq!(info.decode_result(&felts([3, 4])).unwrap().unwrap(), "{ x: 3, y: 4 }");
+    assert_eq!(info.to_string(), "f() -> { x: felt, y: felt }");
 
     let info = proc("f", [], [unnamed_tuple([Type::U32, Type::U32])]);
     assert_eq!(info.decode_result(&felts([3, 4])).unwrap().unwrap(), "(3, 4)");
@@ -354,18 +386,31 @@ fn an_anonymous_struct_renders_its_body_instead_of_a_name() {
 
 #[test]
 fn a_struct_mixing_named_and_unnamed_fields_is_invalid_type_info() {
-    // The compiler never writes this shape, so we call the type info bad instead of guessing.
-    let mixed = Type::Struct(Arc::new(StructType::named(
-        Arc::from("half-named"),
-        [
-            NameAndType::from((Arc::<str>::from("x"), Type::U32)),
-            NameAndType::from(Type::U32),
-        ],
-    )));
+    // `x` has a name and the second field does not, so we cannot tell whether this struct is a
+    // record or a tuple.
+    let mixed = half_named_struct("half-named", ("x", Type::U32), Type::U32);
+    // The signature marks the field we could not name with `?`, and keeps the name and the types,
+    // so the reader can tell which type is bad.
+    let info = proc("f", [], [mixed.clone()]);
+    assert_eq!(info.to_string(), "f() -> half-named { x: u32, ?: u32 }");
     assert!(matches!(
-        proc("f", [], [mixed]).decode_result(&felts([3, 4])),
-        Err(TypedError::InvalidTypeInfo(_))
+        info.decode_result(&felts([3, 4])),
+        Err(TypedError::InvalidTypeInfo { .. })
     ));
+
+    // As a parameter it still encodes: field names do not decide where a field sits on the stack,
+    // only how we label it.
+    let info = proc("f", [mixed.clone()], []);
+    assert_eq!(info.to_string(), "f(half-named { x: u32, ?: u32 })");
+    assert_eq!(info.encode_args(&["3", "4"]).unwrap(), felts([3, 4]));
+
+    // Nested one level down, the `?` marker cannot help: `point` has a name, so the signature is
+    // just that name and never shows the field that carries the bad struct. The error is then the
+    // only place it can be named.
+    let info = proc("f", [], [named_struct("point", [("x", mixed), ("y", felt_ty())])]);
+    assert_eq!(info.to_string(), "f() -> point");
+    let err = info.decode_result(&felts([3, 4, 5])).unwrap_err().to_string();
+    assert!(err.contains("half-named"), "the error does not say which struct is bad: {err}");
 }
 
 #[test]
@@ -399,9 +444,55 @@ fn primitive_results_carry_their_type_but_bools_do_not() {
 }
 
 #[test]
-fn a_procedure_with_no_results_decodes_to_nothing() {
-    // The only case that is not a problem: nothing to show, and nothing to report.
-    assert_eq!(proc("reset-count", [], []).decode_result(&felts([1, 2])).unwrap(), None);
+fn a_result_that_takes_no_felts_is_still_a_result() {
+    // `reset-count` declares no results, so there is nothing to show and nothing to report,
+    // whatever is left on the stack: `None`.
+    let info = proc("reset-count", [], []);
+    assert!(!info.returns_value());
+    assert_eq!(info.decode_result(&felts([1, 2])).unwrap(), None);
+
+    // An empty struct takes no room on the stack either, but the procedure does return it, so
+    // `None` is wrong.
+    let info = proc("f", [], [named_struct("empty", [])]);
+    assert_eq!(info.to_string(), "f() -> empty");
+    assert_eq!(info.decode_result(&felts([1, 2])).unwrap().unwrap(), "empty()");
+    assert!(info.returns_value());
+    assert_eq!(info.output_felt_count(), Some(0));
+
+    // Same for an array of length zero: `0 * 1 felt` is still a returned `[u32; 0]`.
+    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(Type::U32, 0)))]);
+    assert_eq!(info.to_string(), "f() -> [u32; 0]");
+    assert_eq!(info.decode_result(&felts([1, 2])).unwrap().unwrap(), "[]");
+
+    // A codec type that occupies no felts is broken debug info, not a procedure that returns
+    // nothing: `felt` must have exactly one field. The error says so instead of printing nothing.
+    let info = proc("f", [], [named_struct("miden:base/core-types@1.0.0/felt", [])]);
+    assert!(matches!(
+        info.decode_result(&felts([1, 2])),
+        Err(TypedError::MalformedResult { .. })
+    ));
+}
+
+#[test]
+fn an_array_of_zero_width_elements_shows_every_element() {
+    // Each element takes no felts, so decoding one leaves the stack where it was. The array
+    // still has as many elements as its length says, and every one of them has to show up.
+    let empty = named_struct("empty", []);
+    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(empty, 5)))]);
+    assert_eq!(
+        info.decode_result(&felts([1, 2])).unwrap().unwrap(),
+        "[empty(), empty(), empty(), empty(), empty()]"
+    );
+
+    // Same one level down: three empty arrays, not one.
+    let inner = Type::Array(Arc::new(ArrayType::new(Type::U32, 0)));
+    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(inner, 3)))]);
+    assert_eq!(info.decode_result(&felts([1, 2])).unwrap().unwrap(), "[[], [], []]");
+
+    // An array whose elements do take felts is unaffected, and still stops at its own length
+    // instead of eating the rest of the stack.
+    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(Type::U32, 3)))]);
+    assert_eq!(info.decode_result(&felts([7, 8, 9, 10])).unwrap().unwrap(), "[7, 8, 9]");
 }
 
 #[test]

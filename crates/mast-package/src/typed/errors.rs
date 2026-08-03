@@ -57,10 +57,10 @@ pub enum TypedError {
     #[error("{ty} result is malformed: {reason}")]
     MalformedResult { ty: String, reason: &'static str },
 
-    /// The signature has a shape the compiler never writes, so we cannot trust it to describe
-    /// the felts on the stack.
-    #[error("type information is invalid: {0}")]
-    InvalidTypeInfo(&'static str),
+    /// `ty` names the type the problem is in. A signature shows a named struct as its name only,
+    /// so a bad struct nested in one never appears there, and this is the only place it is named.
+    #[error("type information for {ty} is invalid: {reason}")]
+    InvalidTypeInfo { ty: String, reason: &'static str },
 
     /// The token count and the encoder do not agree on how many tokens a signature needs. Both
     /// walk the same types, so this is our bug, not bad input.
