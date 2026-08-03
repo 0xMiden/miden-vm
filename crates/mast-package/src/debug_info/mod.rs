@@ -364,7 +364,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         self.error_messages
             .iter()
             .find(|row| row.err_code == err_code)
-            .map(|row| self.strings[row.message].clone())
+            .and_then(|row| self.strings.get(row.message).cloned())
     }
 
     /// Returns source/debug occurrence nodes.

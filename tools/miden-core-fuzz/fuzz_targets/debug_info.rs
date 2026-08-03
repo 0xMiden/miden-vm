@@ -12,6 +12,29 @@ use miden_assembly_syntax::ast::types::Type;
 use miden_core::serde::{Deserializable, SliceReader};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 
+fn exercise_debug_info(debug_info: &PackageDebugInfo) {
+    for (index, _) in debug_info.locations().iter().enumerate() {
+        let _ = debug_info.get_location((index as u32).into());
+    }
+    for message in debug_info.error_messages() {
+        let _ = debug_info.error_message(message.err_code);
+    }
+    for node in debug_info.nodes() {
+        for asm_op in &node.asm_ops {
+            let _ = asm_op.to_assembly_op(debug_info);
+        }
+        for debug_var in &node.debug_vars {
+            let _ = node.debug_infos_for_operation(debug_var.op_idx, debug_info).count();
+        }
+    }
+
+    let _ = debug_info
+        .source_roots_for_exec_node(miden_core::mast::MastNodeId::new_unchecked(0))
+        .count();
+    let mut cloned = debug_info.clone();
+    cloned.trim_file_paths(|_| None);
+}
+
 fn assert_valid_type_alignments(ty: &Type) {
     assert!(ty.min_alignment().is_power_of_two());
 
@@ -62,5 +85,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let mut reader = SliceReader::new(data);
-    let _ = PackageDebugInfo::read_from(&mut reader);
+    if let Ok(debug_info) = PackageDebugInfo::read_from(&mut reader) {
+        exercise_debug_info(&debug_info);
+    }
 });

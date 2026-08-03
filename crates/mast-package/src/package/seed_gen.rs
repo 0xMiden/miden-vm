@@ -79,6 +79,7 @@ fn build_package_with_debug_info(signature: Option<FunctionType>) -> (Package, V
         })
         .expect("seed debug info has one source node");
     debug_info.add_root(source_node);
+    debug_info.add_error_message(0x0123_4567_89ab_cdef, Arc::from("seed error"));
 
     let debug_info_bytes = debug_info.build().to_bytes();
     package
@@ -188,6 +189,41 @@ fn generate_fuzz_seeds() {
         "package_semantic_deserialize",
         "package_with_debug_info.bin",
         &package_with_debug_info.to_bytes(),
+    );
+
+    let mut dangling_error_debug_info = debug_info_bytes;
+    let error_code = 0x0123_4567_89ab_cdef_u64.to_le_bytes();
+    let error_message_offset = dangling_error_debug_info
+        .windows(error_code.len())
+        .position(|window| window == error_code)
+        .expect("seed debug info should contain its error code")
+        + error_code.len();
+    dangling_error_debug_info[error_message_offset..error_message_offset + 4]
+        .copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed("debug_info", "dangling_error_message_string.bin", &dangling_error_debug_info);
+
+    let mut dangling_error_package = package_with_debug_info.to_bytes();
+    let error_message_offset = dangling_error_package
+        .windows(error_code.len())
+        .position(|window| window == error_code)
+        .expect("seed package should contain its debug error code")
+        + error_code.len();
+    dangling_error_package[error_message_offset..error_message_offset + 4]
+        .copy_from_slice(&u32::MAX.to_le_bytes());
+    write_seed(
+        "debug_info",
+        "package_with_dangling_error_message_string.bin",
+        &dangling_error_package,
+    );
+    write_seed(
+        "package_deserialize",
+        "package_with_dangling_error_message_string.bin",
+        &dangling_error_package,
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_dangling_error_message_string.bin",
+        &dangling_error_package,
     );
 
     for (name, bytes) in build_packages_with_invalid_struct_types() {
