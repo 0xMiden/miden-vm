@@ -211,6 +211,11 @@ impl StructType {
                         offset += field_size;
                     }
                 }
+                assert_ne!(
+                    offset, 0,
+                    "invalid transparent representation for struct: repr(transparent) requires a \
+                     non-zero sized field"
+                );
                 offset
             },
             repr => {
