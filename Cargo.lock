@@ -2798,6 +2798,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
+ "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",
  "miden-vm",

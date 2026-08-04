@@ -8,7 +8,7 @@ use miden_processor::ExecutionOutput;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 
-use crate::helpers::{masm_store_felts, read_memory_felt};
+use crate::helpers::read_memory_felt;
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
 const ORDER_TAG_PTR: u32 = 3223322639;
