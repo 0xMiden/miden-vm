@@ -2,6 +2,10 @@
 
 ## v0.29.0 (Unreleased)
 
+#### Changes
+
+- Moved the `miden-precompiles` and `miden-precompiles-prover` crate sources from the repository root into `crates/`, aligning them with the rest of the workspace layout ([#3462](https://github.com/0xMiden/miden-vm/pull/3462)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
