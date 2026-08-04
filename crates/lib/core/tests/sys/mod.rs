@@ -226,10 +226,10 @@ fn kernel_commitment_rejects_non_u32_procedure_count() {
     }
 }
 
-/// The MASM `sys::proof_request_key` must agree with the native `proof_request_key` on the same
-/// `(verifier_root, claim_commitment)` pair.
+/// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
+/// same `(verifier_root, claim_commitment)` pair.
 #[test]
-fn masm_proof_request_key_matches_native() {
+fn masm_build_proof_request_key_matches_native() {
     use miden_core::{Felt, Word, program::proof_request_key};
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
@@ -261,7 +261,7 @@ fn masm_proof_request_key_matches_native() {
         begin
             {}
             {}
-            exec.sys::proof_request_key
+            exec.sys::build_proof_request_key
             exec.sys::truncate_stack
         end
         ",
@@ -281,7 +281,7 @@ fn masm_proof_request_key_matches_native() {
 /// End-to-end request round-trip: the host registers a package stream under
 /// `proof_request_key(verifier_root, claim_commitment)`, and a consumer that holds only those
 /// two words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
-/// host helper and the MASM `proof_request_key` address the same advice-map entry.
+/// host helper and the MASM `build_proof_request_key` address the same advice-map entry.
 #[test]
 fn proof_request_round_trip_retrieves_registered_package() {
     use miden_core::{Felt, Word};
@@ -328,7 +328,7 @@ fn proof_request_round_trip_retrieves_registered_package() {
             {}
             dupw
             {}
-            exec.sys::proof_request_key
+            exec.sys::build_proof_request_key
             adv.push_mapval dropw
             {}
             assert_eqw

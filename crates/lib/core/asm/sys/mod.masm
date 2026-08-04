@@ -60,7 +60,7 @@ end
 #!
 #! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
 #! Outputs: [PROOF_REQUEST_KEY, ...]
-pub proc proof_request_key
+pub proc build_proof_request_key
     # Capacity word [0, PROOF_REQUEST_DOMAIN_TAG, 0, 0]: first element 8 % 8 = 0, domain in the
     # second. Pushed on top, then swapped to the capacity position (state word 2) so the two
     # input words become the rate; absorbing claim ‖ verifier keeps this to a single swap.

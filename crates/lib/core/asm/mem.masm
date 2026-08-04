@@ -340,8 +340,8 @@ end
 #! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
 #!
 #! Total cycles:
-#! - empty, zero domain: 89 cycles
-#! - empty, nonzero domain: 88 cycles
+#! - empty, zero domain: 87 cycles
+#! - empty, nonzero domain: 84 cycles
 #! - non-empty: 59 cycles + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory_with_domain
   # Bring `num_words` to the top so we can check and consume it below (1 cycle).

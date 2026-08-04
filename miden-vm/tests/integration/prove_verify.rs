@@ -79,7 +79,7 @@ fn assert_recursive_verify(
         begin
             # Initial stack: [CLAIM_COMMITMENT].
             dupw
-            procref.vm::verify_vm_proof exec.sys::proof_request_key
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
             exec.vm::verify_vm_proof
             # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]

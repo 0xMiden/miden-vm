@@ -317,7 +317,7 @@ pub fn generate_recursive_verifier_data(
     let program_info = ProgramInfo::from(program);
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
-    generate_advice_inputs(&proof, &claim).unwrap()
+    generate_advice_inputs(verify_vm_proof_root(), &proof, &claim).unwrap()
 }
 
 /// The MAST root of `sys::vm::verify_vm_proof` - the verifier identity request keys
@@ -368,7 +368,7 @@ fn request_consumer_source() -> String {
             # 2) Fetch the registered proof package by content: request keys name
             #    verify_vm_proof's root, derived in-VM via procref.
             dupw
-            procref.vm::verify_vm_proof exec.sys::proof_request_key
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
             # => [CLAIM_COMMITMENT]
 
@@ -484,7 +484,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             push.{NUM_CLAIM_ELEMENTS} push.{CONSUMER_CLAIM_PTR} exec.copy_advice_to_mem
             push.{CONSUMER_CLAIM_PTR} exec.claim::claim_commitment # => [CLAIM_COMMITMENT]
             dupw
-            procref.vm::verify_vm_proof exec.sys::proof_request_key
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
             exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
             swapw exec.vm::compute_conjectured_security_level # => [level, deep_pow, fold_pow, D]

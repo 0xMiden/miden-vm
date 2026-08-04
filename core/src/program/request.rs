@@ -12,8 +12,8 @@ pub const PROOF_REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_
 ///
 /// The key is `H_tag(claim_commitment ‖ verifier_root)` (one rate block, domain-separated). It
 /// is a lookup address, not a trust anchor: the verifier re-checks the retrieved package against
-/// its statement, so a wrong package fails verification. Both inputs are values the requester owns
-/// rather than values taken from advice.
+/// its statement, so a wrong package fails verification. Both inputs are program-owned rather
+/// than values taken from advice.
 pub fn proof_request_key(verifier_root: Word, claim_commitment: Word) -> Word {
     // Absorb claim_commitment first so the MASM mirror needs a single word-swap to place the
     // rate; the order is otherwise arbitrary (a domain-separated hash of the two words).

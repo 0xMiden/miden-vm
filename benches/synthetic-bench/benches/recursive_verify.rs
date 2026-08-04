@@ -5,9 +5,9 @@
 //! the configured number of proofs via `exec.vm::verify_vm_proof`.
 //!
 //! For each requested proof count, the setup builds one recursive-verifier program and one advice
-//! provider. The program contains one verifier call per inner proof. The advice stack segments for
-//! those proofs are concatenated in the same order, so each call consumes the segment generated for
-//! it and leaves the next segment at the top of the advice stack.
+//! provider. The program contains one request lookup and verifier call per inner proof. Each proof
+//! is stored in the advice map under its verifier and claim commitments, matching the production
+//! request flow.
 //!
 //! Env vars:
 //! - `RECURSION_BENCH_MASM`: path to a synthetic transaction MASM fixture. If unset, this bench is
@@ -516,6 +516,9 @@ fn verify_proof_call_masm(claim_commitment: Word) -> String {
     writeln!(
         source,
         "
+        dupw
+        procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+        adv.push_mapval dropw
         exec.vm::verify_vm_proof
         # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
         dropw dropw
@@ -532,6 +535,7 @@ fn verify_proof_call_masm(claim_commitment: Word) -> String {
 fn recursive_verifier_program_masm(verify_calls: &str) -> String {
     format!(
         "
+        use miden::core::sys
         use miden::core::sys::vm
 
         begin
@@ -562,20 +566,17 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
     println!("BENCH_RECURSION_MASM proofs={proof_count} path={}", path.display());
 }
 
-/// Build the advice provider consumed by one recursive verifier call.
-///
-/// `generate_advice_inputs` parses the inner STARK proof and returns the exact advice stack,
-/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
-/// The stack is ordered so its first element is the next value consumed by the VM.
-fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
+/// Builds the request package consumed by one recursive verifier call.
+fn recursive_proof_advice(fixture: &TxProofFixture, verifier_root: Word) -> RecursiveProofAdvice {
     let claim = ExecutionClaim::from_program_info(
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,
     );
-    let (advice_inputs, claim_commitment) = RecursiveVerifierInputs::new(&fixture.proof, &claim)
-        .expect("recursive advice")
-        .into_parts();
+    let (advice_inputs, claim_commitment) =
+        RecursiveVerifierInputs::for_request(verifier_root, &fixture.proof, &claim)
+            .expect("recursive request package")
+            .into_parts();
 
     RecursiveProofAdvice { claim_commitment, advice_inputs }
 }
@@ -587,12 +588,10 @@ fn build_recursive_verifier_case(
 ) -> RecursionCase {
     let mut verify_calls = String::new();
     let mut advice_inputs = AdviceInputs::default();
+    let verifier_root = CoreLibrary::default().recursive_verifier_root();
 
     for fixture in fixtures.iter().take(proof_count) {
-        let proof_advice = recursive_proof_advice(fixture);
-        // MASM calls and advice segments are appended in lockstep. There is a single advice
-        // provider for the outer program; after one verifier call consumes its segment, the next
-        // segment is at the top of the same advice stack.
+        let proof_advice = recursive_proof_advice(fixture, verifier_root);
         verify_calls.push_str(&verify_proof_call_masm(proof_advice.claim_commitment));
         advice_inputs.extend(proof_advice.advice_inputs);
     }

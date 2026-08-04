@@ -6,17 +6,20 @@
 //! entries the verifier consumes. The consumption order is exercised end to end by the
 //! recursive verification tests, which drive the real MASM verifier over this output.
 //!
-//! The advice stack carries only the proof:
+//! Before calling `verify_vm_proof`, the consumer places this proof stream on top of the advice
+//! stack:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
 //!   deferred root -> Miden AIR heights -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
-//! The consumer supplies the claim commitment. The advice map stores its 40-felt preimage under
-//! that commitment; `verify_vm_proof` authenticates the preimage before using it. The advice map
-//! also stores the flattened kernel procedure digests under the kernel commitment. Query rows,
-//! the Merkle store, and the ACE circuit are content-addressed as well.
+//! [`RecursiveVerifierInputs::for_request`] stores this stream in the advice map under the verifier
+//! and claim commitments. The consumer fetches it before calling `verify_vm_proof`. The consumer
+//! also supplies the claim commitment; the advice map stores its 40-felt preimage under that
+//! commitment, and `verify_vm_proof` authenticates the preimage before using it. The advice map
+//! stores the flattened kernel procedure digests under the kernel commitment as well. Query rows,
+//! the Merkle store, and the ACE circuit are content-addressed too.
 
 use alloc::{
     string::{String, ToString},
@@ -60,9 +63,10 @@ type P2Config = config::Poseidon2Config;
 type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
 type P2ProofData = StarkProofData<Felt, Challenge, P2Config>;
 
-/// Inputs for MASM recursive verification.
+/// Request-packaged inputs for MASM recursive verification.
 ///
-/// Pass [`Self::claim_commitment`] on the operand stack; the advice contains its claim preimage.
+/// Pass [`Self::claim_commitment`] on the operand stack. The consumer derives the request key,
+/// fetches the proof stream from the advice map, and then invokes `exec.vm::verify_vm_proof`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
     advice: AdviceInputs,
@@ -70,7 +74,7 @@ pub struct RecursiveVerifierInputs {
 }
 
 impl RecursiveVerifierInputs {
-    /// Builds the advice for directly invoking `exec.vm::verify_vm_proof`.
+    /// Builds a proof package addressed by the verifier and claim commitments.
     ///
     /// The proof must be a Poseidon2 proof because the recursive verifier supports only
     /// Poseidon2 STARKs. Wire-backed deferred state is hydrated with the standard precompile
@@ -79,46 +83,12 @@ impl RecursiveVerifierInputs {
     /// # Errors
     ///
     /// Returns an error if the proof cannot be converted into verifier advice.
-    pub fn new(
-        proof: &ExecutionProof,
-        claim: &ExecutionClaim,
-    ) -> Result<Self, RecursiveVerifierInputsError> {
-        let stark = proof.miden_proof();
-        if stark.hash_fn() != HashFunction::Poseidon2 {
-            return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
-        }
-        let pub_inputs = PublicInputs::new(
-            claim.to_program_info(),
-            *claim.stack_inputs(),
-            *claim.stack_outputs(),
-            resolve_deferred_root(proof.deferred_proof())?,
-        );
-
-        let claim_commitment = claim.commitment();
-        let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim_commitment)?;
-
-        // The MASM verifier authenticates this preimage against the caller-provided commitment.
-        inputs.advice.map.insert(claim_commitment, claim.to_elements().to_vec());
-
-        let kernel = claim.kernel();
-        // The MASM verifier derives the procedure count from the value length.
-        let kernel_witness = Word::words_as_elements(kernel.proc_hashes()).to_vec();
-        inputs.advice.map.insert(kernel.commitment(), kernel_witness);
-
-        Ok(inputs)
-    }
-
-    /// Builds a proof package addressed by the verifier and claim commitments.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`Self::new`].
     pub fn for_request(
         verifier_root: Word,
         proof: &ExecutionProof,
         claim: &ExecutionClaim,
     ) -> Result<Self, RecursiveVerifierInputsError> {
-        Ok(Self::new(proof, claim)?.into_request_package(verifier_root))
+        Ok(build_verifier_inputs(proof, claim)?.into_request_package(verifier_root))
     }
 
     /// Returns the VM advice inputs.
@@ -146,6 +116,36 @@ impl RecursiveVerifierInputs {
         self.advice.map.insert(key, proof_stream.into_elements());
         self
     }
+}
+
+/// Builds the raw advice consumed by `verify_vm_proof` before request packaging.
+fn build_verifier_inputs(
+    proof: &ExecutionProof,
+    claim: &ExecutionClaim,
+) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
+    let stark = proof.miden_proof();
+    if stark.hash_fn() != HashFunction::Poseidon2 {
+        return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
+    }
+    let pub_inputs = PublicInputs::new(
+        claim.to_program_info(),
+        *claim.stack_inputs(),
+        *claim.stack_outputs(),
+        resolve_deferred_root(proof.deferred_proof())?,
+    );
+
+    let claim_commitment = claim.commitment();
+    let mut inputs = build_from_proof_bytes(stark.bytes(), &pub_inputs, claim_commitment)?;
+
+    // The MASM verifier authenticates this preimage against the caller-provided commitment.
+    inputs.advice.map.insert(claim_commitment, claim.to_elements().to_vec());
+
+    let kernel = claim.kernel();
+    // The MASM verifier derives the procedure count from the value length.
+    let kernel_witness = Word::words_as_elements(kernel.proc_hashes()).to_vec();
+    inputs.advice.map.insert(kernel.commitment(), kernel_witness);
+
+    Ok(inputs)
 }
 
 /// Errors returned while building the advice for recursive verification.
@@ -269,9 +269,9 @@ fn build_advice(
         ));
     }
 
-    // The stream carries only the proof: the deferred root, proof shape, and STARK transcript.
-    // The claim preimage and kernel witness live in the advice map and are authenticated by the
-    // verifier against commitments supplied by the consumer.
+    // This stream contains the verifier inputs derived from the proof. The claim preimage and
+    // kernel witness live in the advice map and are authenticated by the verifier against
+    // commitments supplied by the consumer.
     //
     // The section order below mirrors the consumption-order list in the module doc; both are
     // pinned against the MASM verifier by the stark e2e differential tests.
@@ -488,7 +488,7 @@ mod tests {
             StackOutputs::default(),
         );
 
-        let err = RecursiveVerifierInputs::new(&proof, &claim)
+        let err = RecursiveVerifierInputs::for_request(Word::default(), &proof, &claim)
             .expect_err("a Blake3 proof must be rejected");
         assert!(matches!(
             err,

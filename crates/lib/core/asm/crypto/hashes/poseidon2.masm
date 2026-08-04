@@ -138,8 +138,8 @@ end
 #! Output: [H, ...]
 #!
 #! Cycles:
-#! - empty, zero domain: 88 cycles
-#! - empty, nonzero domain: 87 cycles
+#! - empty, zero domain: 86 cycles
+#! - empty, nonzero domain: 83 cycles
 #! - non-empty even words: 56 cycles + 3 * words
 #! - non-empty odd words: 68 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
@@ -217,7 +217,7 @@ end
 #! Output: [H, ...]
 #!
 #! Cycles:
-#! - empty: 89 cycles
+#! - empty: 87 cycles
 #! - non-empty even words: 57 cycles + 3 * words
 #! - non-empty odd words: 69 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
@@ -483,10 +483,10 @@ end
 #! permutation.
 #!
 #! Cycles:
-#! - empty, zero domain: 69 cycles
-#! - empty, nonzero domain: 68 cycles
-#! - non-empty and divisible by 8: 69 cycles + 3 * words
-#! - non-empty and not divisible by 8: 202 cycles + 3 * words
+#! - empty, zero domain: 67 cycles
+#! - empty, nonzero domain: 64 cycles
+#! - non-empty and divisible by 8: 67 cycles + 3 * words
+#! - non-empty and not divisible by 8: 200 cycles + 3 * words
 #! where `words` is the number of four-element words in the input.
 pub proc hash_elements_in_domain
     # => [ptr, num_elements, domain]
@@ -496,7 +496,7 @@ pub proc hash_elements_in_domain
     # => [R0, R1, [num_elements%8, 0, 0, 0], ptr, end_pairs_addr, num_elements%8, domain]
 
     # Move domain into the second capacity element.
-    movup.15 movdn.9 movup.10 drop
+    movup.15 swap.10 drop
     # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 
     # Empty means ptr == end_pairs_addr and num_elements%8 == 0.
@@ -511,7 +511,7 @@ pub proc hash_elements_in_domain
     if.true
         # Mark empty input in the third capacity element. This lane is zero for every non-empty
         # input, so the marker cannot be reproduced by a full rate block.
-        movup.10 drop push.1 movdn.10
+        push.1 swap.11 drop
         # => [R0, R1, C = (0, domain, 1, 0), ptr, end_pairs_addr, num_elements%8]
         hperm
         # => [R0', R1', C', ptr, end_pairs_addr, num_elements%8]

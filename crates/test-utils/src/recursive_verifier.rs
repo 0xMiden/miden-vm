@@ -42,13 +42,26 @@ impl VerifierData {
     }
 }
 
-/// Builds [`VerifierData`] for a proof of the given claim via the production advice builder.
+/// Builds [`VerifierData`] for directly exercising the verifier in tests.
+///
+/// Production construction always creates a request package. This test adapter extracts that
+/// package's proof stream back onto the advice stack so low-level verifier tests can invoke
+/// `verify_vm_proof` without also exercising request lookup.
 pub fn generate_advice_inputs(
+    verifier_root: Word,
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<VerifierData, RecursiveVerifierInputsError> {
-    let inputs = miden_verifier::recursive::RecursiveVerifierInputs::new(proof, claim)?;
-    Ok(verifier_data(inputs, claim))
+    let mut data = generate_request_inputs(verifier_root, proof, claim)?;
+    let request_key = proof_request_key(verifier_root, data.claim_commitment);
+    let request_index = data
+        .advice_map
+        .iter()
+        .position(|(key, _)| *key == request_key)
+        .expect("production request package contains the proof stream");
+    let (_, proof_stream) = data.advice_map.remove(request_index);
+    data.proof_stream = proof_stream.iter().map(Felt::as_canonical_u64).collect();
+    Ok(data)
 }
 
 /// Builds [`VerifierData`] with the proof registered under the verifier and claim commitments.
