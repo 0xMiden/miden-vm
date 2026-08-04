@@ -9,7 +9,14 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_core::serde::{Deserializable, Serializable, SliceReader};
-use miden_mast_package::{Package, SectionId, TargetType, debug_info::PackageDebugInfo};
+use miden_mast_package::{
+    Package, SectionId, TargetType,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
+use miden_processor::{
+    DefaultHost, PackageSourceDebugContext,
+    operation::OperationError,
+};
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(package) = Package::read_from_bytes_trusted(data) {
@@ -46,6 +53,10 @@ fuzz_target!(|data: &[u8]| {
         .expect("round-tripped debug info should remain valid");
     assert_eq!(actual_debug_info, expected_debug_info);
 
+    if let Some(debug_info) = expected_debug_info.as_ref() {
+        exercise_execution_diagnostics(debug_info);
+    }
+
     let _ = package.kernel_runtime_dependency();
     let _ = package.try_embedded_kernel_package();
 
@@ -67,6 +78,29 @@ fn validate_debug_sections(package: &Package) {
         if section.id == SectionId::DEBUG_INFO {
             let mut reader = SliceReader::new(section.data.as_ref());
             let _ = PackageDebugInfo::read_from(&mut reader);
+        }
+    }
+}
+
+fn exercise_execution_diagnostics(debug_info: &PackageDebugInfo) {
+    let host = DefaultHost::default();
+
+    for (source_node_idx, source_node) in debug_info.nodes().iter().enumerate() {
+        let Ok(source_node_idx) = u32::try_from(source_node_idx) else {
+            break;
+        };
+        let context = PackageSourceDebugContext::new(
+            debug_info,
+            DebugSourceNodeId::from(source_node_idx),
+        );
+
+        let _ = context.assembly_location(None);
+        for asm_op in &source_node.asm_ops {
+            let _ = OperationError::DivideByZero.with_package_source_context(
+                context,
+                &host,
+                Some(asm_op.op_idx as usize),
+            );
         }
     }
 }
