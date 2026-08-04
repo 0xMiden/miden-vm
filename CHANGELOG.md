@@ -89,6 +89,10 @@
 - [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
 - Moved the `miden-precompiles` and `miden-precompiles-prover` crate sources from the repository root into `crates/`, aligning them with the rest of the workspace layout ([#3462](https://github.com/0xMiden/miden-vm/pull/3462)).
 
+#### Changes
+
+- Validated and retained `DebugInfo` when reading untrusted packages, with bounds and safe handling for hostile data ([#3460](https://github.com/0xMiden/miden-vm/pull/3460)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
