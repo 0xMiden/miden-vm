@@ -71,7 +71,7 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::NonTracingTestHost;
-    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs, event::SystemEvent};
+    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs};
 
     /// A host which does not implement `on_trace` should still execute trace events gracefully via
     /// the default no-op implementation, and trace events must not be routed to `on_event`.
@@ -80,7 +80,6 @@ mod tests {
         const REGULAR_EVENT_ID_1: u64 = 3000;
         const REGULAR_EVENT_ID_2: u64 = 4000;
         const TRACE_ID: u32 = 1000;
-        let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_u64();
 
         let source = format!(
             "\
@@ -89,9 +88,7 @@ mod tests {
         emit
         drop
         push.{TRACE_ID}
-        push.{trace_sys_event_id}
-        emit
-        drop
+        trace
         drop
         push.{REGULAR_EVENT_ID_2}
         emit

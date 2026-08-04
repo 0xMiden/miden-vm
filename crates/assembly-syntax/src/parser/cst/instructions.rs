@@ -378,6 +378,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Emit,
     },
     PrimitiveSpec {
+        spelling: "trace",
+        build: || Instruction::Trace,
+    },
+    PrimitiveSpec {
         spelling: "eval_circuit",
         build: || Instruction::EvalCircuit,
     },
@@ -1208,6 +1212,7 @@ fn lower_extended_instruction(
         },
 
         ExtendedInstructionKind::Emit => lower_emit_instruction(context, span, &tokens),
+        ExtendedInstructionKind::Trace => lower_trace_instruction(context, span, &tokens),
         ExtendedInstructionKind::ErrorCode(build) => {
             lower_error_code_instruction(context, span, &tokens, spec.keyword, build)
         },
@@ -1224,6 +1229,7 @@ enum ExtendedInstructionKind {
     Push,
     Invocation(fn(ast::InvocationTarget) -> Instruction),
     Emit,
+    Trace,
     ErrorCode(fn(ast::ErrorMsg) -> Instruction),
 }
 
@@ -1251,6 +1257,10 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
     ExtendedInstructionSpec {
         keyword: "emit",
         kind: ExtendedInstructionKind::Emit,
+    },
+    ExtendedInstructionSpec {
+        keyword: "trace",
+        kind: ExtendedInstructionKind::Trace,
     },
     ExtendedInstructionSpec {
         keyword: "assert",
@@ -1377,6 +1387,46 @@ fn lower_emit_instruction(
             Ok(Some(vec![inst_op(
                 instruction_span,
                 Instruction::EmitImm(Immediate::Value(Span::new(instruction_span, event_id))),
+            )]))
+        },
+        _ => Ok(None),
+    }
+}
+
+/// Lowers `trace.<const>` and `trace.event("name")`.
+fn lower_trace_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if tokens.len() < 3
+        || tokens[0].kind() != SyntaxKind::Ident
+        || tokens[0].text() != "trace"
+        || tokens[1].kind() != SyntaxKind::Dot
+    {
+        return Ok(None);
+    }
+
+    match &tokens[2..] {
+        [name] if name.kind() == SyntaxKind::Ident && name.text() != "event" => {
+            let name = context.lower_constant_ident_token(name)?;
+            Ok(Some(vec![inst_op(
+                instruction_span,
+                Instruction::TraceImm(Immediate::Constant(name)),
+            )]))
+        },
+        [event, lparen, string, rparen]
+            if event.kind() == SyntaxKind::Ident
+                && event.text() == "event"
+                && lparen.kind() == SyntaxKind::LParen
+                && matches!(string.kind(), SyntaxKind::QuotedString | SyntaxKind::QuotedIdent)
+                && rparen.kind() == SyntaxKind::RParen =>
+        {
+            let value = unquote_string_token(string, context.parse().span_for_token(string))?;
+            let event_id = EventId::from_name(value.as_ref()).as_felt();
+            Ok(Some(vec![inst_op(
+                instruction_span,
+                Instruction::TraceImm(Immediate::Value(Span::new(instruction_span, event_id))),
             )]))
         },
         _ => Ok(None),

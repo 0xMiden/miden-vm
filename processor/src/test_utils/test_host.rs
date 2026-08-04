@@ -211,26 +211,21 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::TestHost;
-    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs, event::SystemEvent};
+    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs};
 
     #[test]
     fn test_host_records_trace_and_snapshot() {
         const TRACE_ID_1: u64 = 100;
         const TRACE_ID_2: u64 = 200;
-        let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_u64();
 
         let source = format!(
             "\
     begin
         push.{TRACE_ID_1}
-        push.{trace_sys_event_id}
-        emit
-        drop
+        trace
         drop
         push.{TRACE_ID_2}
-        push.{trace_sys_event_id}
-        emit
-        drop
+        trace
         drop
     end"
         );

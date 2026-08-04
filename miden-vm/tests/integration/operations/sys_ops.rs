@@ -1,6 +1,6 @@
 use miden_processor::{
     ExecutionError, ProcessorState, ZERO,
-    event::{EventName, NoopEventHandler, SystemEvent},
+    event::{EventName, NoopEventHandler},
     mast,
     operation::OperationError,
 };
@@ -98,23 +98,19 @@ fn emit() {
 
 #[test]
 fn emit_trace_event_without_handler() {
-    let trace_name = EventName::new("test::emit_trace::no_handler");
-    let trace_id = trace_name.to_event_id().as_felt();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
+    let trace_name = "test::emit_trace::no_handler";
 
-    let source = format!("push.{trace_id} push.{trace_sys_event_id} emit drop drop");
+    let source = format!("trace.event(\"{trace_name}\")");
     let test = build_op_test!(&source, &[0, 0, 0, 0]);
     test.check_constraints();
 }
 
 #[test]
 fn emit_trace_event_with_handler() {
-    let trace_name = EventName::new("test::emit_trace::handler");
-    let trace_id = trace_name.to_event_id();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
+    let trace_name = "test::emit_trace::handler";
 
-    let source = format!("push.{trace_id} push.{trace_sys_event_id} emit drop drop");
+    let source = format!("trace.event(\"{trace_name}\")");
     let test = build_op_test!(&source, &[0, 0, 0, 0])
-        .with_trace_handler(trace_name, |_: &ProcessorState| Ok(()));
+        .with_trace_handler(EventName::new(trace_name), |_: &ProcessorState| Ok(()));
     test.check_constraints();
 }

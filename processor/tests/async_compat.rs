@@ -6,7 +6,7 @@ use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
-    event::{EventError, EventName, SystemEvent, TraceError},
+    event::{EventError, EventName, TraceError},
 };
 
 struct YieldingAsyncHost {
@@ -76,15 +76,10 @@ fn simple_program() -> miden_processor::Program {
 }
 
 fn emit_trace_program() -> miden_processor::Program {
-    let trace_name = EventName::new("test::async::trace_emit");
-    let trace_id = trace_name.to_event_id().as_u64();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
+    let trace_name = "test::async::trace_emit";
 
     Assembler::default()
-        .assemble_program(
-            "program",
-            format!("begin push.{trace_id} push.{trace_sys_event_id} emit drop drop end"),
-        )
+        .assemble_program("program", format!("begin trace.event(\"{trace_name}\") end"))
         .expect("program should compile")
         .unwrap_program()
 }

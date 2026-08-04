@@ -287,6 +287,10 @@ pub enum Instruction {
     // ----- event decorators --------------------------------------------------------------------
     Emit,
     EmitImm(ImmFelt),
+
+    // ----- traces (readonly evens) -------------------------------------------------------------
+    Trace,
+    TraceImm(ImmFelt),
 }
 
 impl Instruction {

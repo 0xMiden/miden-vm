@@ -3855,7 +3855,7 @@ pub proc foo exec.::test::mod1::bar end"
     Ok(())
 }
 
-// EMIT EVENT SYNTAX VALIDATION
+// EVENT SYNTAX VALIDATION
 // ================================================================================================
 
 #[test]
@@ -3895,6 +3895,45 @@ fn emit_const_must_be_event_hash() {
     context
         .assemble(program_source)
         .expect_err(r#"emit.CONST should require const defined via event("...")"#);
+}
+
+#[test]
+fn trace_u32_immediate_is_rejected() {
+    let context = TestContext::new();
+    let program_source = r#"
+        begin
+            trace.32
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"trace.<u32> should be rejected; only event("...") is allowed"#);
+}
+
+#[test]
+fn trace_const_must_be_event_hash() {
+    let context = TestContext::new();
+    // CONST defined as plain number should not be accepted by trace.CONST
+    let program_source = r#"
+        const BAD = 100
+        begin
+            trace.BAD
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"trace.CONST should require const defined via event("...")"#);
+
+    // CONST defined via word("...") should also be rejected by trace.CONST
+    let program_source = r#"
+        const BADW = word("foo")
+        begin
+            trace.BADW
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"trace.CONST should require const defined via event("...")"#);
 }
 
 #[test]
@@ -4140,6 +4179,43 @@ fn emit_instruction_digest() {
     assert_ne!(procedure_digests[1], procedure_digests[2]);
 }
 
+/// Ensures that the arguments of `trace` do indeed modify the digest of a basic block.
+#[test]
+fn trace_instruction_digest() {
+    let context = TestContext::new();
+
+    let program_source = r#"
+        const EVT1 = event("miden::test::trace_one")
+        const EVT2 = event("miden::test::trace_two")
+
+        proc foo
+            trace.EVT1
+        end
+
+        proc bar
+            trace.EVT2
+        end
+
+        begin
+            # specific impl irrelevant
+            exec.foo
+            exec.bar
+        end
+    "#;
+
+    let program = context.assemble(program_source).unwrap();
+
+    let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
+
+    // foo, bar and entrypoint
+    assert_eq!(3, procedure_digests.len());
+
+    // Ensure that foo, bar and entrypoint all have different digests
+    assert_ne!(procedure_digests[0], procedure_digests[1]);
+    assert_ne!(procedure_digests[0], procedure_digests[2]);
+    assert_ne!(procedure_digests[1], procedure_digests[2]);
+}
+
 /// Tests that emitting events with immediate values has the same MAST representation
 /// regardless of whether using emit.value or push.value emit syntax
 #[test]
@@ -4188,6 +4264,66 @@ fn emit_syntax_equivalence() {
     assert_eq!(program1.num_procedures(), 1);
     assert_eq!(program2.num_procedures(), 1);
     assert_eq!(program3.num_procedures(), 1);
+}
+
+/// Tests that trace events have the same MAST representation regardless of whether the trace ID
+/// is provided as a constant, inline event name, stack value, or fully expanded event sequence.
+#[test]
+fn trace_syntax_equivalence() {
+    let context = TestContext::new();
+
+    // First program uses a constant.
+    let program1_source = r#"
+        const EVT = event("miden::test::trace_equiv")
+        begin
+            trace.EVT
+        end
+    "#;
+
+    // Second program uses inline trace.event("...").
+    let program2_source = r#"
+        begin
+            trace.event("miden::test::trace_equiv")
+        end
+    "#;
+
+    // Third program provides the trace ID on the stack.
+    let program3_source = r#"
+        const EVT = event("miden::test::trace_equiv")
+        begin
+            push.EVT
+            trace
+            drop
+        end
+    "#;
+
+    // Fourth program uses the fully expanded trace event sequence.
+    let program4_source = r#"
+        const EVT = event("miden::test::trace_equiv")
+        const SYS_TRACE = event("sys::trace_event")
+        begin
+            push.EVT
+            push.SYS_TRACE
+            emit
+            drop
+            drop
+        end
+    "#;
+
+    let program1 = context.assemble(program1_source).unwrap();
+    let program2 = context.assemble(program2_source).unwrap();
+    let program3 = context.assemble(program3_source).unwrap();
+    let program4 = context.assemble(program4_source).unwrap();
+
+    let digest1 = program1.hash();
+    assert_eq!(digest1, program2.hash(), "constant and inline trace forms differ");
+    assert_eq!(digest1, program3.hash(), "immediate and stack trace forms differ");
+    assert_eq!(digest1, program4.hash(), "trace and expanded emit forms differ");
+
+    assert_eq!(program1.num_procedures(), 1);
+    assert_eq!(program2.num_procedures(), 1);
+    assert_eq!(program3.num_procedures(), 1);
+    assert_eq!(program4.num_procedures(), 1);
 }
 
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.

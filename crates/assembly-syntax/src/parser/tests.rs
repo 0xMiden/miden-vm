@@ -640,6 +640,7 @@ begin
     adv.insert_hdword
     adv.push_mapvaln
     emit
+    trace
     mem_load
     u32div
     add.1
@@ -751,6 +752,8 @@ begin
     procref.foo::bar
     emit.EVENT_ID
     emit.event(\"abc\")
+    trace.EVENT_ID
+    trace.event(\"abc\")
     assert.err=\"oops\"
     u32assert.err=ERR_CODE
 end

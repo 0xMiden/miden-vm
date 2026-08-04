@@ -337,6 +337,12 @@ impl PrettyPrint for Instruction {
             Self::Emit => const_text("emit"),
             Self::EmitImm(value) => inst_with_felt_imm("emit", value),
 
+            // ----- traces (readonly evens) ------------------------------------------------------
+            Self::Trace => const_text("trace"),
+            // Printing `TraceImm` such that it is consistent with `EmitImm`, even though this
+            // does not round-trip. `trace.<FELT_IMM>` is invalid.
+            Self::TraceImm(value) => inst_with_felt_imm("trace", value),
+
             // Handled by the early return for !has_textual_representation()
             Self::DebugVar(_) => unreachable!(),
         }
