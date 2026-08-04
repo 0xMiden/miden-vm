@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.28.1 (Unreleased)
+
+#### Fixes
+
+- [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
