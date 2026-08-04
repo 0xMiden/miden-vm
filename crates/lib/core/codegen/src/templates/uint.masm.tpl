@@ -3,7 +3,6 @@
 # Regenerate with: {{REGENERATE_COMMAND}}
 
 use miden::precompiles
-use miden::core::word
 
 # {{TITLE}} {{DOMAIN_KIND}} PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
@@ -164,12 +163,12 @@ pub proc is_eq
     # Compare the two {{VALUE_KIND}} values one word at a time, consuming each compared pair.
     movupw.2
     # => [LHS_LO, RHS_LO, RHS_HI, LHS_HI, ...]
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [lo_equal, RHS_HI, LHS_HI, ...]
 
     movdn.8
     # => [RHS_HI, LHS_HI, lo_equal, ...]
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [hi_equal, lo_equal, ...]
     and
     # => [is_equal, ...]
@@ -256,7 +255,7 @@ pub proc is_eq_digest
     exec.precompiles::log_deferred
     # => [VALUE_DIGEST, TARGET_DIGEST, ...]
 
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [is_equal, ...]
 end
 

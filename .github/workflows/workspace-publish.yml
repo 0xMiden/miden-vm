@@ -198,21 +198,24 @@ jobs:
            miden-vm-${{ matrix.target }} \
            miden-format-${{ matrix.target }} \
            miden-registry-${{ matrix.target }}
-      # Since the core.masp package is triplet independent, we only build it once.
-      - name: Build core.masp
+      # Since the MASM packages are triplet independent, we only build them once.
+      - name: Build MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           make packages
-      - name: Prepare artifact
+      - name: Prepare MASM package artifacts
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           mv target/packages/miden-core.masp core.masp
-      - name: Attest core.masp
+          mv target/packages/miden-precompiles.masp precompiles.masp
+      - name: Attest MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: core.masp
-      - name: Upload core.masp
+          subject-path: |
+            core.masp
+            precompiles.masp
+      - name: Upload MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
@@ -221,7 +224,7 @@ jobs:
           set -euo pipefail
           # Reruns are safe after partial artifact upload: --clobber replaces
           # existing draft assets instead of failing on "already exists".
-          gh release upload --clobber "${RELEASE_TAG}" core.masp
+          gh release upload --clobber "${RELEASE_TAG}" core.masp precompiles.masp
 
   publish:
     name: publish workspace crates

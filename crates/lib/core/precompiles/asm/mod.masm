@@ -11,12 +11,35 @@ pub mod u256
 # Framework data tag used for generic CHUNKS nodes: Tag::CHUNKS = [2, 0, 0, 0].
 const CHUNKS_TAG = [2, 0, 0, 0]
 
+#! Returns whether two words are equal, consuming both words.
+#!
+#! This helper keeps generated precompile modules independent of `miden-core`. Importing
+#! `miden::core::word::eq` here would create a dependency cycle because `miden-core` dynamically
+#! depends on `miden-precompiles`.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_equal]
+#!
+#! Where:
+#! - RHS is the first word to compare.
+#! - LHS is the second word to compare.
+#! - is_equal is one if the words are equal, and zero otherwise.
+#!
+#! Invocation: exec
+pub proc word_eq
+    movup.4 eq swap
+    movup.4 eq and swap
+    movup.3 eq and
+    movdn.2 eq and
+end
+
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
 # NOTE: `register_value`, `register_mem`, and `log_deferred` are adapted from `miden::core::sys`
 # (crates/lib/core/asm/sys/mod.masm) so the internal `miden::precompiles` support namespace can be
-# assembled inside the aggregate core package. They should be deduplicated against a single shared
-# source once the precompile proof-model migration settles.
+# assembled without depending on `miden-core`. This keeps the package dependency one-way because
+# `miden-core` depends on `miden-precompiles`. These helpers should be deduplicated against a single
+# shared source once the precompile proof-model migration settles.
 #
 # `register_value` / `register_mem` bind their registration inputs by deriving the node digest with
 # VM instructions from the exact same tag and payload. There is intentionally no `evaluate` proc
