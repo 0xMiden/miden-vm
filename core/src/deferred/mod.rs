@@ -8,6 +8,7 @@
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
 //! provides system-event plumbing.
 
+mod claim;
 mod node;
 mod precompile;
 mod precompile_registry;
@@ -17,6 +18,7 @@ mod witness;
 
 use alloc::boxed::Box;
 
+pub use claim::DeferredClaim;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;

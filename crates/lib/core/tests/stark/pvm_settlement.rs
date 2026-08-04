@@ -5,7 +5,6 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    advice::AdviceMap,
     deferred::DeferredState,
     events::{EventId, EventName},
     program::{ExecutionClaim, proof_request_key},
@@ -15,7 +14,7 @@ use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_precompiles_prover::{
     ProveDeferredStateError,
-    masm_verifier::{MasmVerifierInputError, generate_masm_verifier_inputs},
+    masm_verifier::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
     prove_deferred_state,
 };
 use miden_processor::{
@@ -51,7 +50,7 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
     assert!(
         matches!(
             &settlement.deferred_proof,
-            DeferredProof::Stark { public_root, .. } if *public_root == deferred_root
+            DeferredProof::Stark { claim, .. } if claim.root() == deferred_root
         ),
         "the awaited proof must expose the root authenticated by the MVM verifier",
     );
@@ -271,26 +270,25 @@ impl Host for PvmSettlementHost {
             let deferred_proof =
                 prove_deferred_state(&self.deferred_state, HashFunction::Poseidon2)
                     .map_err(SettlementEventError::Proving)?;
-            let (proof, public_root) = match &deferred_proof {
-                DeferredProof::Stark { proof, public_root } => (proof, *public_root),
+            let (proof, claim) = match &deferred_proof {
+                DeferredProof::Stark { proof, claim } => (proof, *claim),
                 DeferredProof::Empty | DeferredProof::Wire(_) => {
                     return Err(SettlementEventError::InvalidProofShape.into());
                 },
             };
-            if public_root != requested_root {
+            if claim.root() != requested_root {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: public_root,
+                    available: claim.root(),
                 }
                 .into());
             }
 
-            let package = generate_masm_verifier_inputs(proof, requested_root)
-                .map_err(SettlementEventError::Advice)?
-                .into_request_package(verifier_root)
+            let package = PvmRecursiveVerifierInputs::for_request(verifier_root, proof, claim)
                 .map_err(SettlementEventError::Advice)?;
-            let advice_map = AdviceMap::from_iter(package.advice_map);
-            let merkle_nodes = package.store.inner_nodes();
+            let (advice, _) = package.into_parts();
+            let (_, advice_map, store) = advice.into_parts();
+            let merkle_nodes = store.inner_nodes();
             self.deferred_proof = Some(deferred_proof);
 
             Ok(vec![
@@ -314,5 +312,5 @@ enum SettlementEventError {
     #[error("non-empty deferred state did not produce a STARK-backed proof")]
     InvalidProofShape,
     #[error("PVM recursive-verifier advice construction failed: {0}")]
-    Advice(#[source] MasmVerifierInputError),
+    Advice(#[source] PvmRecursiveVerifierInputsError),
 }
