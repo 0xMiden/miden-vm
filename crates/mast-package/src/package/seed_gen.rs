@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use std::{fs, path::Path, println};
 
 use miden_assembly_syntax::{
@@ -11,7 +11,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId},
     operations::Operation,
-    serde::{ByteReader, ByteWriter, Serializable, SliceReader},
+    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
 use miden_debug_types::{ByteIndex, Uri};
 use zerocopy::IntoBytes;
@@ -22,7 +22,7 @@ use crate::{
     debug_info::{
         DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo,
         MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
-        PackageDebugInfoBuilder,
+        PackageDebugInfo, PackageDebugInfoBuilder,
     },
 };
 
@@ -260,35 +260,52 @@ fn generate_fuzz_seeds() {
     assert_eq!(empty_reader.read_u8().unwrap(), crate::debug_info::DEBUG_INFO_VERSION);
     let empty_payload_len = empty_reader.read_usize().unwrap();
     let empty_payload_offset = 1 + empty_payload_len.to_bytes().len();
-    let mut oversized_string_payload = empty_debug_info[empty_payload_offset..].to_vec();
-    let oversized_string_rows = MAX_DEBUG_INFO_STRING_ROWS + 6;
-    let oversized_string_count = oversized_string_rows.to_bytes();
-    oversized_string_payload.splice(0..1, oversized_string_count.iter().copied());
-    oversized_string_payload.splice(
-        oversized_string_count.len()..oversized_string_count.len(),
-        0usize.to_bytes().repeat(oversized_string_rows),
-    );
-    let mut oversized_string_table = Vec::new();
-    oversized_string_table.write_u8(crate::debug_info::DEBUG_INFO_VERSION);
-    oversized_string_table.write_usize(oversized_string_payload.len());
-    oversized_string_table.write_bytes(&oversized_string_payload);
-    write_seed("debug_info", "oversized_debug_string_table.bin", &oversized_string_table);
-    let mut oversized_debug_info = PackageDebugInfoBuilder::default();
-    oversized_debug_info.add_string("x".repeat(16 * 1024 * 1024));
-    write_seed(
-        "debug_info",
-        "oversized_debug_info.bin",
-        &oversized_debug_info.build().to_bytes(),
-    );
-    let mut oversized_type_table = PackageDebugInfoBuilder::default();
-    for _ in 0..=MAX_DEBUG_INFO_TYPE_ROWS {
-        oversized_type_table.push_type(DebugTypeInfo::Unknown);
+    let debug_info_with_empty_strings = |rows: usize| {
+        let mut payload = empty_debug_info[empty_payload_offset..].to_vec();
+        let encoded_rows = rows.to_bytes();
+        payload.splice(0..1, encoded_rows.iter().copied());
+        payload.splice(encoded_rows.len()..encoded_rows.len(), 0usize.to_bytes().repeat(rows));
+
+        let mut encoded = Vec::new();
+        encoded.write_u8(crate::debug_info::DEBUG_INFO_VERSION);
+        encoded.write_usize(payload.len());
+        encoded.write_bytes(&payload);
+        encoded
+    };
+    let mut max_string_table = PackageDebugInfoBuilder::default();
+    for index in 0..MAX_DEBUG_INFO_STRING_ROWS {
+        max_string_table.add_string(index.to_string());
     }
-    write_seed(
-        "debug_info",
-        "oversized_debug_type_table.bin",
-        &oversized_type_table.build().to_bytes(),
-    );
+    let max_string_table = max_string_table.build().to_bytes();
+    let decoded = PackageDebugInfo::read_from_bytes(&max_string_table).unwrap();
+    assert_eq!(decoded.strings().len(), MAX_DEBUG_INFO_STRING_ROWS);
+    write_seed("debug_info", "max_debug_string_table.bin", &max_string_table);
+    let oversized_string_table = debug_info_with_empty_strings(MAX_DEBUG_INFO_STRING_ROWS + 1);
+    assert!(PackageDebugInfo::read_from_bytes(&oversized_string_table).is_err());
+    write_seed("debug_info", "oversized_debug_string_table.bin", &oversized_string_table);
+    let mut max_sized_string = PackageDebugInfoBuilder::default();
+    max_sized_string.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE));
+    let max_sized_string = max_sized_string.build().to_bytes();
+    let decoded = PackageDebugInfo::read_from_bytes(&max_sized_string).unwrap();
+    assert_eq!(decoded.strings().iter().next().unwrap().len(), MAX_DEBUG_INFO_STRING_SIZE);
+    write_seed("debug_info", "max_sized_debug_string.bin", &max_sized_string);
+    let mut oversized_debug_info = PackageDebugInfoBuilder::default();
+    oversized_debug_info.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
+    let oversized_debug_info = oversized_debug_info.build().to_bytes();
+    assert!(PackageDebugInfo::read_from_bytes(&oversized_debug_info).is_err());
+    write_seed("debug_info", "oversized_debug_info.bin", &oversized_debug_info);
+    let mut boundary_type_table = PackageDebugInfoBuilder::default();
+    for _ in 0..MAX_DEBUG_INFO_TYPE_ROWS {
+        boundary_type_table.push_type(DebugTypeInfo::Unknown);
+    }
+    let max_type_table = boundary_type_table.debug_info().to_bytes();
+    let decoded = PackageDebugInfo::read_from_bytes(&max_type_table).unwrap();
+    assert_eq!(decoded.types().len(), MAX_DEBUG_INFO_TYPE_ROWS);
+    write_seed("debug_info", "max_debug_type_table.bin", &max_type_table);
+    boundary_type_table.push_type(DebugTypeInfo::Unknown);
+    let oversized_type_table = boundary_type_table.build().to_bytes();
+    assert!(PackageDebugInfo::read_from_bytes(&oversized_type_table).is_err());
+    write_seed("debug_info", "oversized_debug_type_table.bin", &oversized_type_table);
     write_seed("debug_info", "package_with_debug_info.bin", &package_with_debug_info.to_bytes());
     write_seed(
         "package_deserialize",
