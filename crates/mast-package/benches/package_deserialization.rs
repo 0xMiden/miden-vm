@@ -1,7 +1,7 @@
 use std::{hint::black_box, sync::Arc, time::Duration};
 
 use codspeed_criterion_compat as criterion;
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_assembly_syntax::{
     ast::{
         Path as AstPath, PathBuf,
@@ -10,13 +10,16 @@ use miden_assembly_syntax::{
     semver::Version,
 };
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastNodeExt, MastNodeId},
     operations::Operation,
     serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType,
-    debug_info::{DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder},
+    debug_info::{
+        DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfo,
+        PackageDebugInfoBuilder,
+    },
 };
 
 fn absolute_path(name: &str) -> Arc<AstPath> {
@@ -120,5 +123,58 @@ fn package_deserialization(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, package_deserialization);
+fn debug_info_with_asm_ops(row_count: usize) -> (Box<PackageDebugInfo>, DebugSourceNodeId) {
+    let mut debug_info = PackageDebugInfoBuilder::default();
+    let context_name = debug_info.add_string("bench::lookup");
+    let op_name = debug_info.add_string("operation");
+    let source_node = debug_info
+        .add_node(DebugSourceNode {
+            exec_node: MastNodeId::new_unchecked(0),
+            children: Vec::new(),
+            op_start: 0,
+            op_end: row_count as u32,
+            asm_ops: (0..row_count)
+                .map(|index| DebugSourceAsmOp::new(index as u32, None, context_name, op_name, 1))
+                .collect(),
+            debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+        })
+        .expect("benchmark debug node should be valid");
+    debug_info.add_root(source_node);
+    (debug_info.build(), source_node)
+}
+
+fn debug_assembly_lookup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("debug_assembly_lookup");
+    group.warm_up_time(Duration::from_secs(2));
+    group.measurement_time(Duration::from_secs(5));
+    group.sample_size(100);
+
+    for row_count in [16, 1_024, 65_536] {
+        let (debug_info, source_node) = debug_info_with_asm_ops(row_count);
+
+        group.bench_with_input(
+            BenchmarkId::new("linear_scan_control", row_count),
+            &row_count,
+            |bench, _| {
+                bench.iter(|| {
+                    debug_info.source_node(black_box(source_node)).and_then(|node| {
+                        node.asm_ops.iter().rfind(|row| row.op_idx <= black_box(0))
+                    })
+                })
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("public_binary_lookup", row_count),
+            &row_count,
+            |bench, _| {
+                bench.iter(|| debug_info.asm_op_for_operation(black_box(source_node), black_box(0)))
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, package_deserialization, debug_assembly_lookup);
 criterion_main!(benches);
