@@ -35,9 +35,9 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "miden-vm",
-    "precompiles",
+    "crates/precompiles",
     "crates/lib/core/codegen",
-    "precompiles-prover",
+    "crates/precompiles-prover",
     "processor",
     "prover",
     "tests/wycheproof",
@@ -96,8 +96,8 @@ miden-lifted-air        = { path = "./crates/lifted-air", version = "0.29", defa
 miden-lifted-stark      = { path = "./crates/lifted-stark", version = "0.29", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "0.29", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "0.29", default-features = false }
-miden-precompiles       = { path = "./precompiles", version = "0.29", default-features = false }
-miden-precompiles-prover = { path = "./precompiles-prover", version = "0.29", default-features = false }
+miden-precompiles       = { path = "./crates/precompiles", version = "0.29", default-features = false }
+miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "0.29", default-features = false }
 miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.29", default-features = false }
 miden-processor         = { path = "./processor", version = "0.29", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
