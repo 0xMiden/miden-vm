@@ -318,6 +318,35 @@ fn generate_fuzz_seeds() {
         &package_with_debug_info.to_bytes(),
     );
 
+    let mut kernel_with_debug_info = package_with_debug_info.clone();
+    kernel_with_debug_info.name = PackageId::from("seed_kernel");
+    kernel_with_debug_info.kind = TargetType::Kernel;
+    let kernel_dependency = kernel_with_debug_info.to_dependency();
+    let mut package_with_nested_debug_info = build_package(None);
+    package_with_nested_debug_info
+        .manifest
+        .add_dependency(kernel_dependency.clone())
+        .expect("seed package should accept its kernel dependency");
+    package_with_nested_debug_info
+        .sections
+        .push(Section::new(SectionId::KERNEL, kernel_with_debug_info.to_bytes()));
+    let nested_package_bytes = package_with_nested_debug_info.to_bytes();
+    let admitted_nested_package = Package::read_from_bytes(&nested_package_bytes)
+        .expect("valid nested debug seed should pass outer admission");
+    let admitted_kernel = admitted_nested_package
+        .try_embedded_kernel_package()
+        .expect("valid nested debug seed should pass kernel extraction")
+        .expect("valid nested debug seed should contain a kernel");
+    assert_eq!(
+        admitted_kernel.debug_info().unwrap(),
+        kernel_with_debug_info.debug_info().unwrap()
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_nested_debug_info.bin",
+        &nested_package_bytes,
+    );
+
     let file_checksum = [0xa5; 32];
     let location_pattern = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
     let mut inverted_location_package = package_with_debug_info.to_bytes();
@@ -491,6 +520,38 @@ fn generate_fuzz_seeds() {
         "package_semantic_deserialize",
         "package_with_invalid_assembly_location_option.bin",
         &invalid_asm_location_package,
+    );
+
+    let mut invalid_nested_kernel = kernel_with_debug_info.to_bytes();
+    let nested_asm_op_offset = invalid_nested_kernel
+        .windows(asm_op.as_bytes().len())
+        .position(|window| window == asm_op.as_bytes())
+        .expect("nested seed kernel should contain its debug assembly operation");
+    assert_eq!(
+        &invalid_nested_kernel[nested_asm_op_offset + 4..nested_asm_op_offset + 8],
+        &1u32.to_le_bytes(),
+    );
+    invalid_nested_kernel[nested_asm_op_offset + 4..nested_asm_op_offset + 8]
+        .copy_from_slice(&2u32.to_le_bytes());
+    let mut package_with_invalid_nested_debug_info = build_package(None);
+    package_with_invalid_nested_debug_info
+        .manifest
+        .add_dependency(kernel_dependency)
+        .expect("seed package should accept its kernel dependency");
+    package_with_invalid_nested_debug_info
+        .sections
+        .push(Section::new(SectionId::KERNEL, invalid_nested_kernel));
+    let invalid_nested_package_bytes = package_with_invalid_nested_debug_info.to_bytes();
+    let admitted_outer = Package::read_from_bytes(&invalid_nested_package_bytes)
+        .expect("opaque hostile nested debug should not fail outer admission");
+    assert!(
+        admitted_outer.try_embedded_kernel_package().is_err(),
+        "hostile nested debug seed should fail untrusted kernel extraction"
+    );
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_invalid_nested_debug_info.bin",
+        &invalid_nested_package_bytes,
     );
     for (name, field_offset, expected) in [
         ("package_with_dangling_assembly_context_string.bin", 12, 0u32),

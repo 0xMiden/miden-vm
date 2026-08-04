@@ -58,7 +58,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let _ = package.kernel_runtime_dependency();
-    let _ = package.try_embedded_kernel_package();
+    exercise_embedded_kernel(&package);
 
     // These conversion helpers borrow the package, despite the `try_into_*` names.
     match package.kind {
@@ -72,6 +72,48 @@ fuzz_target!(|data: &[u8]| {
         _ => (),
     }
 });
+
+fn exercise_embedded_kernel(package: &Package) {
+    let mut kernel_sections =
+        package.sections.iter().filter(|section| section.id == SectionId::KERNEL);
+    let Some(kernel_section) = kernel_sections.next() else {
+        return;
+    };
+    if kernel_sections.next().is_some() {
+        return;
+    }
+
+    let Ok(trusted_kernel) = Package::read_from_bytes_trusted(kernel_section.data.as_ref()) else {
+        return;
+    };
+
+    let expected_debug_info = match trusted_kernel.debug_info() {
+        Ok(debug_info) => debug_info,
+        Err(_) => {
+            assert!(
+                package.try_embedded_kernel_package().is_err(),
+                "nested debug info rejected on use must not pass untrusted kernel extraction"
+            );
+            return;
+        },
+    };
+
+    let Ok(Some(kernel)) = package.try_embedded_kernel_package() else {
+        return;
+    };
+    let actual_debug_info = kernel
+        .debug_info()
+        .expect("untrusted kernel extraction should leave no deferred debug validation errors");
+    assert_eq!(actual_debug_info, expected_debug_info);
+
+    let encoded = kernel.to_bytes();
+    let round_tripped = Package::read_from_bytes(&encoded)
+        .expect("an admitted embedded kernel should survive serialization and re-admission");
+    assert_eq!(
+        round_tripped.debug_info().expect("round-tripped kernel debug info should remain valid"),
+        actual_debug_info
+    );
+}
 
 fn validate_debug_sections(package: &Package) {
     for section in &package.sections {
