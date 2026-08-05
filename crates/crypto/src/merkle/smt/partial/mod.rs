@@ -1,4 +1,9 @@
-use alloc::{collections::VecDeque, string::ToString, vec::Vec};
+use alloc::{
+    collections::{BinaryHeap, VecDeque},
+    string::ToString,
+    vec::Vec,
+};
+use core::cmp::Reverse;
 
 use super::{EmptySubtreeRoots, LeafIndex, SMT_DEPTH};
 use crate::{
@@ -473,94 +478,84 @@ impl PartialSmt {
             .map(|(ix, v)| (NodeIndex::new_unchecked(SMT_DEPTH, ix), v))
             .collect::<Map<_, _>>();
 
-        // We then want to process leaf by leaf, with a queue of parent nodes that need visiting.
-        // Rather than trying to de-duplicate on the fly, we instead just discard nodes that have
-        // already been processed when we see them.
-        //
-        // It must be ensured that at no point an index that is lower in the tree than any index
-        // preceding it is inserted.
-        let leaf_based_starting_nodes =
-            all_leaves.keys().map(|k| k.parent()).collect::<VecDeque<_>>();
-
-        // We also, however, need to account for inner nodes which are not reachable in a parent
-        // chain from a leaf, such as those from an exclusion proof. These are all nodes that do not
-        // have a (present) child in the set of nodes or leaves, so to enforce our layering
-        // invariant we add them in sorted order from bottom to top, left to right.
-        //
-        // We process these after the leaf-based nodes to avoid issues with the layering invariant.
-        let mut additional_nodes = nodes.keys().map(|ix| ix.parent()).collect::<Vec<_>>();
-        additional_nodes
-            .sort_by(|il, ir| ir.depth().cmp(&il.depth()).then(il.position().cmp(&ir.position())));
-        let additional_nodes = additional_nodes.into_iter().collect::<VecDeque<_>>();
+        // We then want to process the tree from the bottom up, with a queue of parent nodes that
+        // need visiting. The starting points are both materialized leaves and inner nodes which
+        // are not reachable in a parent chain from a leaf, such as those from an exclusion proof.
+        // These must remain sorted together as parents are added: processing all leaf-based
+        // branches first can reach a shared ancestor before a branch based on an inner node has
+        // been reconstructed. The heap prioritizes deeper nodes, then leftmost nodes at the same
+        // depth.
+        let mut active_nodes = all_leaves
+            .keys()
+            .map(|ix| ix.parent())
+            .chain(nodes.keys().map(|ix| ix.parent()))
+            .map(|ix| (ix.depth(), Reverse(ix.position())))
+            .collect::<BinaryHeap<_>>();
 
         // We also track the nodes we have seen to avoid re-doing unnecessary work.
         let mut seen_nodes = Set::new();
 
-        for mut active_nodes in [leaf_based_starting_nodes, additional_nodes] {
-            seen_nodes.clear();
-            while let Some(ix) = active_nodes.pop_front() {
-                // To avoid re-doing work we immediately discard a node that is already in our tree.
-                if smt.inner_nodes.contains_key(&ix) {
-                    continue;
-                }
+        while let Some((depth, Reverse(position))) = active_nodes.pop() {
+            let ix = NodeIndex::new_unchecked(depth, position);
+            // To avoid re-doing work we immediately discard a node that is already in our tree.
+            if smt.inner_nodes.contains_key(&ix) {
+                continue;
+            }
 
-                if ix.depth() + 1 == SMT_DEPTH {
-                    // We have to handle the case where the children are the leaves specially.
-                    //
-                    // If no corresponding leaf is present, then either it was a default value, or
-                    // it exists in the value-only leaves buffer, so we have to check both.
-                    let left_child = ix.left_child();
-                    let left = all_leaves
-                        .get(&left_child)
-                        .map(SmtLeaf::hash)
-                        .or_else(|| value_only_leaves.get(&left_child).copied())
-                        .unwrap_or(
-                            SmtLeaf::new_empty(LeafIndex::new_max_depth(left_child.position()))
-                                .hash(),
-                        );
-                    let right_child = ix.right_child();
-                    let right = all_leaves
-                        .get(&right_child)
-                        .map(SmtLeaf::hash)
-                        .or_else(|| value_only_leaves.get(&right_child).copied())
-                        .unwrap_or(
-                            SmtLeaf::new_empty(LeafIndex::new_max_depth(right_child.position()))
-                                .hash(),
-                        );
+            if ix.depth() + 1 == SMT_DEPTH {
+                // We have to handle the case where the children are the leaves specially.
+                //
+                // If no corresponding leaf is present, then either it was a default value, or
+                // it exists in the value-only leaves buffer, so we have to check both.
+                let left_child = ix.left_child();
+                let left = all_leaves
+                    .get(&left_child)
+                    .map(SmtLeaf::hash)
+                    .or_else(|| value_only_leaves.get(&left_child).copied())
+                    .unwrap_or(
+                        SmtLeaf::new_empty(LeafIndex::new_max_depth(left_child.position())).hash(),
+                    );
+                let right_child = ix.right_child();
+                let right = all_leaves
+                    .get(&right_child)
+                    .map(SmtLeaf::hash)
+                    .or_else(|| value_only_leaves.get(&right_child).copied())
+                    .unwrap_or(
+                        SmtLeaf::new_empty(LeafIndex::new_max_depth(right_child.position())).hash(),
+                    );
 
-                    smt.insert_inner_node(ix, InnerNode { left, right })
-                } else {
-                    // If the children are not in the leaves, they can be either in the tree already
-                    // (having been reconstructed) or as a value in the nodes from the unique nodes
-                    // structure.
-                    let [left, right] = [ix.left_child(), ix.right_child()].map(|ix| {
-                        smt.get_inner_node(ix).map(|n| Ok(n.hash())).unwrap_or_else(|| match nodes
-                            .get(&ix)
-                            .ok_or_else(|| {
-                                DeserializationError::InvalidValue(format!(
-                                    "Node at {ix} not found but is required"
-                                ))
-                            })? {
+                smt.insert_inner_node(ix, InnerNode { left, right })
+            } else {
+                // If the children are not in the leaves, they can be either in the tree already
+                // (having been reconstructed) or as a value in the nodes from the unique nodes
+                // structure.
+                let [left, right] = [ix.left_child(), ix.right_child()].map(|ix| {
+                    smt.get_inner_node(ix).map(|n| Ok(n.hash())).unwrap_or_else(|| {
+                        match nodes.get(&ix).ok_or_else(|| {
+                            DeserializationError::InvalidValue(format!(
+                                "Node at {ix} not found but is required"
+                            ))
+                        })? {
                             NodeValue::EmptySubtreeRoot => {
                                 Ok(*EmptySubtreeRoots::entry(SMT_DEPTH, ix.depth()))
                             },
                             NodeValue::Present(v) => Ok(*v),
-                        })
-                    });
-                    let left = left?;
-                    let right = right?;
+                        }
+                    })
+                });
+                let left = left?;
+                let right = right?;
 
-                    smt.insert_inner_node(ix, InnerNode { left, right });
-                }
+                smt.insert_inner_node(ix, InnerNode { left, right });
+            }
 
-                // Finally, we push the node's parent into the queue if we have not already visited
-                // it. While it would be correct to do unconditionally, we operate over untrusted
-                // input and hence we have to be careful.
-                let parent = ix.parent();
-                if !seen_nodes.contains(&parent) {
-                    active_nodes.push_back(parent);
-                    seen_nodes.insert(parent);
-                }
+            // Finally, we push the node's parent into the queue if we have not already visited
+            // it. While it would be correct to do unconditionally, we operate over untrusted
+            // input and hence we have to be careful.
+            let parent = ix.parent();
+            if !seen_nodes.contains(&parent) {
+                active_nodes.push((parent.depth(), Reverse(parent.position())));
+                seen_nodes.insert(parent);
             }
         }
 

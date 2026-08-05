@@ -787,6 +787,29 @@ fn unique_nodes_of_exclusion_proofs_roundtrips() {
 }
 
 #[test]
+fn unique_nodes_of_mixed_inclusion_and_exclusion_proofs_roundtrips() {
+    let included_key = Word::from([1, 2, 3, 4u32]);
+    let other_key = Word::from([5, 6, 7, 8u32]);
+    let missing_key = Word::from([9, 10, 11, 12u32]);
+    let included_value = Word::from([13, 14, 15, 16u32]);
+    let other_value = Word::from([17, 18, 19, 20u32]);
+    let smt =
+        Smt::with_entries([(included_key, included_value), (other_key, other_value)]).unwrap();
+
+    // Construct a PartialSmt from an inclusion and an exclusion proof.
+    let partial_smt =
+        PartialSmt::from_proofs([smt.open(&included_key), smt.open(&missing_key)]).unwrap();
+
+    // The partial tree itself is valid and tracks both the inclusion and exclusion.
+    assert_eq!(partial_smt.get_value(&included_key).unwrap(), included_value);
+    assert_eq!(partial_smt.get_value(&missing_key).unwrap(), Word::empty());
+
+    // The unique representation should reconstruct both branches.
+    let decoded = PartialSmt::from_unique_nodes(partial_smt.to_unique_nodes()).unwrap();
+    assert_eq!(partial_smt, decoded);
+}
+
+#[test]
 fn unique_nodes_serialization_roundtrips() {
     let mut rng = ContinuousRng::new([0xab; 32]);
 
@@ -818,6 +841,41 @@ proptest! {
 
         let unique = smt.to_unique_nodes();
         prop_assert_eq!(PartialSmt::from_unique_nodes(unique), Ok(smt));
+    }
+
+    /// Unique-node reconstruction should round-trip partial SMTs containing both inclusion and
+    /// exclusion proofs.
+    #[test]
+    fn prop_unique_nodes_of_mixed_inclusion_and_exclusion_proofs_roundtrips(
+        included_key in arbitrary_valid_word(),
+        included_value in arbitrary_valid_word(),
+        other_key in arbitrary_valid_word(),
+        other_value in arbitrary_valid_word(),
+        missing_key in arbitrary_valid_word(),
+        additional_entries in prop::collection::vec(
+            (arbitrary_valid_word(), arbitrary_valid_word()),
+            0..20,
+        ),
+    ) {
+        prop_assume!(included_key != other_key);
+        prop_assume!(included_value != EMPTY_WORD);
+        prop_assume!(other_value != EMPTY_WORD);
+
+        let mut entries = additional_entries.into_iter().collect::<BTreeMap<_, _>>();
+        entries.insert(included_key, included_value);
+        entries.insert(other_key, other_value);
+        prop_assume!(!entries.contains_key(&missing_key));
+
+        let smt = Smt::with_entries(entries).unwrap();
+        let partial_smt = PartialSmt::from_proofs([
+            smt.open(&included_key),
+            smt.open(&missing_key),
+        ])
+        .unwrap();
+
+        let unique_nodes = partial_smt.to_unique_nodes();
+        let decoded = PartialSmt::from_unique_nodes(unique_nodes).unwrap();
+        prop_assert_eq!(decoded, partial_smt);
     }
 
     /// Deserialization of the serialized blob should always result in the same value.
