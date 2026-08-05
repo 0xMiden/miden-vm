@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.29.1 (Unreleased)
+
+#### Fixes
+
+- Fixed `PartialSmt::from_unique_nodes()` reconstruction for partial trees containing both inclusion and exclusion proofs by processing leaf-derived and inner-node-derived branches in a shared bottom-up priority order ([#3470](https://github.com/0xMiden/miden-vm/issues/3470)).
+
 ## v0.29.0 (2026-08-04)
 
 #### Changes
