@@ -56,6 +56,7 @@ xclippy = [
     "-Wclippy::string_add_assign",
     "-Wclippy::todo",
     "-Wclippy::trait_duplication_in_bounds",
+    "-Wclippy::unimplemented",
     "-Wclippy::trivially_copy_pass_by_ref",
     "-Wclippy::uninlined_format_args",
     "-Wclippy::unnested_or_patterns",
@@ -89,7 +90,6 @@ xclippy = [
     # -Wclippy::semicolon_if_nothing_returned (97 warnings)
     # -Wclippy::single_match_else          (54 warnings)
     # -Wclippy::string_lit_as_bytes        (15 warnings)
-    # -Wclippy::unimplemented              (1 warning)
     # -Wclippy::unused_self                (11 warnings)
     # -Wclippy::cast_lossless              (603 warnings)
     # -Wclippy::manual_assert              (17 warnings)
