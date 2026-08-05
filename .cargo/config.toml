@@ -26,6 +26,7 @@ xclippy = [
     "-Wclippy::filter_map_next",
     "-Wclippy::flat_map_option",
     "-Wclippy::float_cmp_const",
+    "-Wclippy::fn_params_excessive_bools",
     "-Wclippy::if_let_mutex",
     "-Wclippy::imprecise_flops",
     "-Wclippy::inefficient_to_string",
@@ -77,7 +78,6 @@ xclippy = [
     # -Wclippy::enum_glob_use              (17 warnings)
     # -Wclippy::explicit_into_iter_loop    (7 warnings)
     # -Wclippy::fallible_impl_from         (3 warnings)
-    # -Wclippy::fn_params_excessive_bools  (1 warning)
     # -Wclippy::from_iter_instead_of_collect (4 warnings)
     # -Wclippy::implicit_clone             (5 warnings)
     # -Wclippy::map_err_ignore             (78 warnings)
