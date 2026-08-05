@@ -374,7 +374,7 @@ fn bench_one_scenario(
                         stack_inputs,
                         stack_outputs,
                     );
-                    black_box(Verifier::new().verify(proof, claim).expect("verify"));
+                    black_box(Verifier::new().verify(&proof, &claim).expect("verify"));
                 },
                 BatchSize::SmallInput,
             );
