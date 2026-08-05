@@ -33,6 +33,7 @@
 #### Changes
 
 - [BREAKING] Recursive MASM verification now accepts a claim commitment and authenticates the advice-supplied claim and kernel witness. Rust callers construct request-addressed inputs with `RecursiveVerifierInputs::for_request` ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
+- Adopted cargo-fixit, aligned clippy lints with crypto, cleared cargo-shear warnings ([#3479](https://github.com/0xMiden/miden-vm/pull/3479))
 
 #### Fixes
 
