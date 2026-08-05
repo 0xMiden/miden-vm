@@ -20,6 +20,7 @@ xclippy = [
     "-Wclippy::disallowed_methods",
     "-Wclippy::empty_enums",
     "-Wclippy::exit",
+    "-Wclippy::expl_impl_clone_on_copy",
     "-Wclippy::explicit_deref_methods",
     "-Wclippy::filter_map_next",
     "-Wclippy::flat_map_option",
@@ -72,7 +73,6 @@ xclippy = [
     # -Wclippy::debug_assert_with_mut_call (3 warnings)
     # -Wclippy::doc_markdown               (1293 warnings)
     # -Wclippy::enum_glob_use              (17 warnings)
-    # -Wclippy::expl_impl_clone_on_copy    (1 warning)
     # -Wclippy::explicit_into_iter_loop    (7 warnings)
     # -Wclippy::fallible_impl_from         (3 warnings)
     # -Wclippy::fn_params_excessive_bools  (1 warning)

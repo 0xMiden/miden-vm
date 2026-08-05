@@ -48,6 +48,7 @@ impl<T: ?Sized + Spanned> Spanned for alloc::sync::Arc<T> {
 
 /// This type is used to wrap any `T` with a [SourceSpan], and is typically used when it is not
 /// convenient to add a [SourceSpan] to the type - most commonly because we don't control the type.
+#[derive(Clone, Copy)]
 pub struct Span<T> {
     span: SourceSpan,
     spanned: T,
@@ -91,17 +92,6 @@ impl<T: Serialize> Serialize for Span<T> {
 impl<T> Spanned for Span<T> {
     fn span(&self) -> SourceSpan {
         self.span
-    }
-}
-
-impl<T: Copy> Copy for Span<T> {}
-
-impl<T: Clone> Clone for Span<T> {
-    fn clone(&self) -> Self {
-        Self {
-            span: self.span,
-            spanned: self.spanned.clone(),
-        }
     }
 }
 
