@@ -2096,7 +2096,7 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     assert_eq!(discriminant, 3, "expected a Block node");
 
     let payload = node_type_u64 & 0x0f_ff_ff_ff_ff_ff_ff_ff;
-    assert!(payload <= u32::MAX as u64, "Block ops_offset payload must fit in u32");
+    assert!(u32::try_from(payload).is_ok(), "Block ops_offset payload must fit in u32");
     let ops_offset = payload as usize;
 
     let digest_offset = view.node_hash_offset().unwrap();
