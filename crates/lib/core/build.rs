@@ -172,6 +172,14 @@ fn local_procedure_docs(module: &Module) -> Vec<(String, Option<String>)> {
     procedures
 }
 
+/// Resolve the documentation for a re-exported item.
+///
+/// The outer `Option` distinguishes "target procedure not found" (skip the
+/// re-export entirely) from "found", and the inner `Option` carries the docs
+/// (`None` when the target has no doc comment). Encoding these three states
+/// without nesting would require a bespoke enum, so we allow `option_option`
+/// here deliberately.
+#[allow(clippy::option_option)]
 fn reexport_target_docs(
     import: &ast::ItemImport,
     current_module_path: &miden_assembly_syntax::Path,

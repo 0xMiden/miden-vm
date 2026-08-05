@@ -46,6 +46,7 @@ xclippy = [
     "-Wclippy::needless_borrow",
     "-Wclippy::needless_collect",
     "-Wclippy::needless_continue",
+    "-Wclippy::option_option",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::rc_mutex",
     "-Wclippy::redundant_clone",
@@ -85,7 +86,6 @@ xclippy = [
     # -Wclippy::match_wild_err_arm         (6 warnings)
     # -Wclippy::match_wildcard_for_single_variants (8 warnings)
     # -Wclippy::needless_for_each          (7 warnings)
-    # -Wclippy::option_option              (6 warnings)
     # -Wclippy::ptr_as_ptr                 (15 warnings)
     # -Wclippy::semicolon_if_nothing_returned (97 warnings)
     # -Wclippy::single_match_else          (54 warnings)
