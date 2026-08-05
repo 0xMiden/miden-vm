@@ -603,13 +603,16 @@ impl Assembler {
                 block_builder.push_ops([Push(event_id_value), Emit, Drop]);
             },
 
-            // TODO doc comment
+            // trace: reads the trace ID from the top of the stack and expands to
+            // `push.<sys::trace_event>, emit, drop`, leaving the stack unchanged.
             Instruction::Trace => {
                 // The trace ID is already on the stack. In addition we need the system event which
                 // triggers traces.
                 let sys_event_id = SystemEvent::TraceEvent.event_id().as_felt();
                 block_builder.push_ops([Push(sys_event_id), Emit, Drop]);
             },
+            // trace.<id>: expands to
+            // `push.<id>, push.<sys::trace_event>, emit, drop, drop`, leaving the stack unchanged.
             Instruction::TraceImm(trace_id) => {
                 let trace_id_value = trace_id.expect_value();
                 let sys_event_id = SystemEvent::TraceEvent.event_id().as_felt();

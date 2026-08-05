@@ -180,10 +180,16 @@ impl Debug for EventHandlerRegistry {
 
 /// Handles an optional, read-only trace event emitted by the VM.
 ///
-/// Trace events are emitted by pushing the user trace event ID and then
-/// [`SystemEvent::TraceEvent`] onto the stack before `emit`. When the handler runs,
-/// [`SystemEvent::TraceEvent`] is at stack position 0 and the user trace event ID is at position
-/// 1. The handler receives a read-only [`ProcessorState`] and cannot return advice mutations.
+/// Assembly programs emit trace events with `trace`, `trace.CONST`, or `trace.event("...")`. When
+/// the handler runs, [`SystemEvent::TraceEvent`] is at stack position 0 and the user trace event ID
+/// is at position 1. The handler receives a read-only [`ProcessorState`] and cannot return advice
+/// mutations.
+///
+/// The instruction expansions are:
+///
+/// - `trace` expands to `push.<sys::trace_event> emit drop`.
+/// - `trace.CONST` and `trace.event("...")` expand to `push.<trace_id> push.<sys::trace_event> emit
+///   drop drop`.
 pub trait TraceHandler: Send + Sync + 'static {
     /// Handles the trace event when triggered.
     fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError>;

@@ -288,7 +288,7 @@ pub enum Instruction {
     Emit,
     EmitImm(ImmFelt),
 
-    // ----- traces (readonly evens) -------------------------------------------------------------
+    // ----- traces (read-only events) -----------------------------------------------------------
     Trace,
     TraceImm(ImmFelt),
 }

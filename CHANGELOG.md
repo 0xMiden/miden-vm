@@ -1,6 +1,10 @@
 # Changelog
 ## v0.30.0 (Unreleased)
 
+#### Features
+
+- Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
+
 ## v0.29.0 (2026-08-04)
 
 #### Changes

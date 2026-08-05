@@ -413,13 +413,14 @@ pub enum SystemEvent {
     // --------------------------------------------------------------------------------------------
     /// Signals an optional, read-only trace event to the host.
     ///
-    /// When `emit` observes this system event ID at stack position 0, the VM forwards the user
-    /// trace event ID at stack position 1 to the host's trace handler. This is typically emitted
-    /// as `push.<user_trace_id> push.<sys::trace_event> emit`. Trace handlers can observe
-    /// the processor state, but cannot mutate VM state or the advice provider. If no handler is
-    /// registered for the user trace event ID, the event is a no-op.
+    /// Assembly programs emit trace events with `trace`, `trace.CONST`, or `trace.event("...")`.
+    /// When the underlying `emit` observes this system event ID at stack position 0, the VM
+    /// forwards the user trace event ID at stack position 1 to the host's trace handler. The
+    /// immediate form lowers to `push.<user_trace_id> push.<sys::trace_event> emit drop drop`.
+    /// Trace handlers can observe the processor state, but cannot mutate VM state or the advice
+    /// provider. If no handler is registered for the user trace event ID, the event is a no-op.
     ///
-    /// Hosts are expected to not raise an error if they encounter a `user_trace_id` for which no
+    /// Hosts are expected not to raise an error if they encounter a `user_trace_id` for which no
     /// trace handler is registered.
     ///
     /// Inputs:
