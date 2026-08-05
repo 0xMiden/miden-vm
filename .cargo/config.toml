@@ -16,6 +16,7 @@ xclippy = [
     "-Wclippy::await_holding_lock",
     "-Wclippy::char_lit_as_u8",
     "-Wclippy::dbg_macro",
+    "-Wclippy::debug_assert_with_mut_call",
     "-Wclippy::derive_partial_eq_without_eq",
     "-Wclippy::disallowed_methods",
     "-Wclippy::empty_enums",
@@ -71,7 +72,6 @@ xclippy = [
     "-Wunused_qualifications",
     # The following lints are disabled because they trigger warnings:
     # -Wclippy::checked_conversions        (12 warnings)
-    # -Wclippy::debug_assert_with_mut_call (3 warnings)
     # -Wclippy::doc_markdown               (1293 warnings)
     # -Wclippy::enum_glob_use              (17 warnings)
     # -Wclippy::explicit_into_iter_loop    (7 warnings)
