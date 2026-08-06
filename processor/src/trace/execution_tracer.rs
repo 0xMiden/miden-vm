@@ -18,7 +18,8 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
+    ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex,
+    Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -161,6 +162,20 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
+    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
+    /// recorded, instead of buffering for post-execution replay. Everything else records as in
+    /// [`Self::new`].
+    #[cfg(feature = "std")]
+    pub(crate) fn new_with_streamed_hasher(
+        fragment_size: usize,
+        max_stack_depth: usize,
+        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
+    ) -> Self {
+        let mut tracer = Self::new(fragment_size, max_stack_depth);
+        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
+        tracer
+    }
+
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -667,7 +682,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node.digest(),
+                        basic_block_node,
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
@@ -920,14 +935,18 @@ impl Tracer for ExecutionTracer {
         processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
         // from start_clock_cycle because finalize_clock_cycle is only called when the operation
         // succeeds (i.e., the stack depth check in processor.restore_context() passes).
         if self.pending_restore_context {
             // Restore context for call/syscall/dyncall: pop the current context's
             // (empty) overflow stack and restore the previous context's overflow state.
-            self.overflow_table.restore_context();
+            self.overflow_table.restore_context().map_err(|_| {
+                ExecutionError::Internal(
+                    "overflow table restore_context failed during trace finalization",
+                )
+            })?;
             self.overflow_replay.record_restore_context_overflow_addr(
                 MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
                 self.overflow_table.last_update_clk_in_current_ctx(),
@@ -968,6 +987,8 @@ impl Tracer for ExecutionTracer {
 
             self.is_eval_circuit_op = false;
         }
+
+        Ok(())
     }
 }
 

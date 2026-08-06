@@ -1128,11 +1128,7 @@ impl Assembler {
                         )));
                     },
                 };
-                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info)
-                    .with_source_library_commitment(lib.commitment())
-                    .with_alternate_source_library_commitment(
-                        lib.package.interface_digest().into_diagnostic()?,
-                    ))
+                StaticLibrary::from_link_library(lib, debug_info).into_diagnostic()
             })
             .collect()
     }

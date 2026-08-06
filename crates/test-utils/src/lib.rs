@@ -26,7 +26,7 @@ pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
+    program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
@@ -43,12 +43,12 @@ pub use miden_processor::{
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
-    event::EventHandler,
+    event::{EventHandler, TraceHandler},
 };
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::Verifier;
+pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -257,6 +257,7 @@ pub struct Test {
     pub in_tracing_mode: bool,
     pub libraries: Vec<Arc<Package>>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+    pub trace_handlers: Vec<(EventName, Arc<dyn TraceHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
@@ -277,6 +278,7 @@ impl Test {
             in_tracing_mode,
             libraries: Vec::default(),
             handlers: Vec::new(),
+            trace_handlers: Vec::new(),
             add_modules: Vec::default(),
         }
     }
@@ -332,6 +334,21 @@ impl Test {
         self
     }
 
+    /// Adds a trace handler for a specific trace event when running the `Host`.
+    pub fn with_trace_handler(mut self, event: EventName, handler: impl TraceHandler) -> Self {
+        self.add_trace_handler(event, handler);
+        self
+    }
+
+    /// Adds trace handlers for specific trace events when running the `Host`.
+    pub fn with_trace_handlers(
+        mut self,
+        handlers: Vec<(EventName, Arc<dyn TraceHandler>)>,
+    ) -> Self {
+        self.add_trace_handlers(handlers);
+        self
+    }
+
     /// Adds an extra module to link in during assembly.
     pub fn with_module(mut self, path: impl AsRef<Path>, source: impl ToString) -> Self {
         self.add_module(path, source);
@@ -362,6 +379,26 @@ impl Test {
                 panic!("handler for event '{event_name}' was already added")
             }
             self.handlers.push((event, handler));
+        }
+    }
+
+    /// Add a trace handler for a specific event when running the `Host`.
+    pub fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
+        self.add_trace_handlers(vec![(event, Arc::new(handler))]);
+    }
+
+    /// Add trace handlers for specific events when running the `Host`.
+    pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
+        for (event, handler) in handlers {
+            let event_name = event.as_str();
+            if SystemEvent::from_name(event_name).is_some() {
+                panic!("tried to register trace handler for reserved system event: {event_name}")
+            }
+            let event_id = event.to_event_id();
+            if self.trace_handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
+                panic!("trace handler for event '{event_name}' was already added")
+            }
+            self.trace_handlers.push((event, handler));
         }
     }
 
@@ -657,13 +694,13 @@ impl Test {
             elements[0] += ONE;
             let stack_outputs =
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
-            assert!(
-                Verifier::new()
-                    .verify(program_info, stack_inputs, stack_outputs, proof)
-                    .is_err()
-            );
+            let claim =
+                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+            assert!(verify(proof, claim).is_err());
         } else {
-            let result = Verifier::new().verify(program_info, stack_inputs, stack_outputs, proof);
+            let claim =
+                ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+            let result = verify(proof, claim);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
@@ -726,6 +763,9 @@ impl Test {
         }
         for (event, handler) in &self.handlers {
             host.register_handler(event.clone(), handler.clone()).unwrap();
+        }
+        for (event, handler) in &self.trace_handlers {
+            host.register_trace_handler(event.clone(), handler.clone()).unwrap();
         }
 
         (program, host, debug_info)

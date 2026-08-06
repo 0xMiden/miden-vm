@@ -54,6 +54,8 @@ In the coming months we plan to finalize the design of the VM and implement supp
 
 Miden VM is written in pure Rust and can be compiled to WebAssembly. Rust's `std` standard library is linked by default for most crates. To compile to one of the two `wasm32` supported targets, use `cargo`'s `--no-default-features` flag to ensure Rust's standard library isn't linked (*i.e. compiling in `no_std`).
 
+This workspace's [`.cargo/config.toml`](.cargo/config.toml) sets `-C target-feature=+simd128` for the `wasm32-unknown-unknown` target, enabling Plonky3's SIMD128 backend for faster hashing (Blake3, Poseidon2) in WASM. Cargo only applies `.cargo/config.toml` to builds run from this workspace (or a directory nested under it); downstream consumers building Miden as a dependency (e.g. via `web-sdk`) must set this flag themselves, for example with `RUSTFLAGS="-C target-feature=+simd128"` or their own `.cargo/config.toml`, to get the same speedup.
+
 #### Concurrent proof generation
 
 When compiled with the `concurrent` feature enabled, the prover will generate STARK proofs using multiple threads. For the benefits of concurrent proof generation, check out benchmarks below.

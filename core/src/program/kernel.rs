@@ -9,6 +9,14 @@ use crate::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+// CONSTANTS
+// ================================================================================================
+
+/// Domain tag for the kernel commitment: the registered selector
+/// `(KERNEL_COMMITMENT_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
+pub const KERNEL_DOMAIN_TAG: crate::Felt =
+    super::domain::domain_selector(super::domain::KERNEL_COMMITMENT_DOMAIN_ID, 1);
+
 // KERNEL
 // ================================================================================================
 
@@ -93,13 +101,17 @@ impl KernelDescriptor {
         &self.0
     }
 
-    /// Returns the canonical commitment to this kernel: `hash_elements` over the flattened
-    /// procedure digests.
+    /// Returns the canonical commitment to this kernel: the domain-tagged sequential hash of the
+    /// flattened procedure digests, `hash_elements_in_domain(flatten(procs), KERNEL_DOMAIN_TAG)`.
     ///
-    /// This matches the kernel commitment computed by the protocol and is the fixed-size
-    /// identifier observed by the recursive verifier in place of the raw digest list.
+    /// This is the fixed-size identifier observed by the recursive verifier in place of the raw
+    /// digest list. The encoding is normative:
+    /// - element order is this descriptor's canonical procedure order (fixed at construction);
+    /// - the Sponge2 padding rule (<https://eprint.iacr.org/2024/911>) places `len % rate` in the
+    ///   first capacity element, preventing ambiguity between a partial block and its zero-padded
+    ///   form.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements(Word::words_as_elements(&self.0))
+        hasher::hash_elements_in_domain(Word::words_as_elements(&self.0), KERNEL_DOMAIN_TAG)
     }
 }
 
@@ -153,11 +165,23 @@ mod tests {
     };
 
     #[test]
-    fn empty_kernel_commitment_matches_hash_of_no_elements() {
-        // The empty kernel is the common case; its commitment must equal the canonical hash of
-        // zero elements, which the recursive verifier mirrors via `hash_elements(ptr, 0)`.
+    fn empty_kernel_commitment_matches_known_vector() {
+        let expected = Word::from(
+            [
+                10_678_183_036_892_554_090,
+                6_699_253_321_301_458_898,
+                8_322_157_849_099_770_532,
+                10_578_726_887_207_403_211,
+            ]
+            .map(Felt::new_unchecked),
+        );
         let empty = KernelDescriptor::default();
-        assert_eq!(empty.commitment(), crate::chiplets::hasher::hash_elements(&[]));
+
+        assert_eq!(empty.commitment(), expected);
+        assert_eq!(
+            empty.commitment(),
+            crate::chiplets::hasher::hash_elements_in_domain(&[], super::KERNEL_DOMAIN_TAG)
+        );
     }
 
     #[test]

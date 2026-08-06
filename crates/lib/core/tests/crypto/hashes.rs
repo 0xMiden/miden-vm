@@ -81,9 +81,10 @@ fn core_hash_wrapper_cycle_baselines() {
     let short = b"core hash compatibility";
 
     let mut mismatches = Vec::new();
+    // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
     for (name, source, expected) in [
-        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 212),
-        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 232),
+        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 221),
+        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 238),
         ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 248),
     ] {
         let output =

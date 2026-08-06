@@ -10,7 +10,7 @@ name                   = "miden-crypto"
 readme.workspace       = true
 repository.workspace   = true
 rust-version.workspace = true
-version = "0.28.1"
+version = "0.30.0"
 
 [[bin]]
 bench             = false
@@ -137,7 +137,6 @@ p3-util.workspace        = true
 
 [dev-dependencies]
 assert_matches = { workspace = true }
-criterion      = { workspace = true }
 hex            = { features = ["alloc"], workspace = true }
 itertools      = { features = ["use_std"], workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
@@ -145,6 +144,9 @@ proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
 shake          = { workspace = true }
 tempfile       = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = { workspace = true }
 
 [build-dependencies]
 cc = { features = ["parallel"], workspace = true }

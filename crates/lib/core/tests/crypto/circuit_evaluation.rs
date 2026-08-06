@@ -97,7 +97,7 @@ fn multi_air_eval_circuit_masm() {
         layout: LayoutKind::Masm,
         num_airs: MIDEN_AIR_COUNT,
     };
-    let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(
+    let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order(
         config,
         &miden_air::ProofOrder::instance_order(),
     )

@@ -247,6 +247,12 @@ build-no-std: ## Builds without the standard library
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
 
+.PHONY: test-wasm-simd
+test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128 (requires wasmtime)
+	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+	RUSTFLAGS="-C target-feature=+simd128" \
+	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
+
 .PHONY: check-fuzz
 check-fuzz: ## Checks standalone fuzz workspaces
 	cd tools/miden-core-fuzz && cargo check --locked
@@ -285,12 +291,14 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
 .PHONY: regenerate-constraints
-regenerate-constraints: ## Regenerate core-lib constraint artifacts
+regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
 
 .PHONY: check-constraints
-check-constraints: ## Check core-lib constraint artifacts for drift
+check-constraints: ## Check the checked-in constraint artifacts for drift
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
@@ -314,7 +322,7 @@ miden-registry-dist:
 
 .PHONY: packages
 packages: ## Builds .masp packages and store them in target/packages
-	cargo +nightly -Zscript scripts/generate-package.rs
+	cargo run --locked --package miden-core-lib --bin generate-package -- target/packages/miden-core.masp
 
 # --- examples ------------------------------------------------------------------------------------
 

@@ -1,6 +1,18 @@
+use miden::core::crypto::hashes::poseidon2
+
 pub mod vm
 
-# ===== SYSTEM PROCEDURES ==========================================================================
+# CONSTANTS
+# =================================================================================================
+
+# Domain tag for proof-request keys: the registered selector
+# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (0x010002 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::PROOF_REQUEST_DOMAIN_TAG (enforced by cross-tests).
+const PROOF_REQUEST_DOMAIN_TAG = 0x01000201
+
+# SYSTEM PROCEDURES
+# =================================================================================================
 
 #! Removes elements deep in the stack until the depth of the stack is exactly 16. The elements
 #! are removed in such a way that the top 16 elements of the stack remain unchanged. If the stack
@@ -35,4 +47,28 @@ end
 #! Drop 16 values from the stack.
 pub proc drop_stack_top()
     dropw dropw dropw dropw
+end
+
+#! Computes the advice-map key addressing a proof package under a verifier.
+#!
+#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one rate
+#! block, so a single permutation with no memory). It is a lookup address, not a trust anchor: the
+#! verifier re-checks the retrieved package, so a wrong package fails verification. Both inputs are
+#! program-owned: the verifier's MAST root comes from `procref`, while the claim commitment
+#! comes from an authenticated verifier output or the program's own inputs. Mirrors
+#! `miden_core::program::proof_request_key`.
+#!
+#! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
+#! Outputs: [PROOF_REQUEST_KEY, ...]
+pub proc build_proof_request_key
+    # Capacity word [0, PROOF_REQUEST_DOMAIN_TAG, 0, 0]: first element 8 % 8 = 0, domain in the
+    # second. Pushed on top, then swapped to the capacity position (state word 2) so the two
+    # input words become the rate; absorbing claim ‖ verifier keeps this to a single swap.
+    push.0.0.PROOF_REQUEST_DOMAIN_TAG.0
+    # => [CAP, VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
+    swapw.2
+    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, CAP, ...] = [R0, R1, C]
+    hperm
+    exec.poseidon2::squeeze_digest
+    # => [PROOF_REQUEST_KEY, ...]
 end

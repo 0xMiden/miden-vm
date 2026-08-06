@@ -21,3 +21,9 @@ struct_variant_width = 40
 use_field_init_shorthand = true
 use_try_shorthand = true
 wrap_comments = true
+
+# Generated constraint evaluators are committed as raw generator output so the
+# regen --check mode can byte-compare them; keep rustfmt away.
+ignore = [
+    "air/src/constraints/generated.rs",
+]

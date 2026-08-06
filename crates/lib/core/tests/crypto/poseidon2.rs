@@ -82,6 +82,34 @@ fn test_hash_empty() {
 }
 
 #[test]
+fn test_hash_empty_words_with_domain() {
+    use miden_core::{Felt, chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+
+    const PTR: u64 = 1000;
+    let source = format!(
+        "
+        use miden::core::crypto::hashes::poseidon2
+
+        begin
+            push.{PTR} # end address
+            push.{PTR} # start address
+            push.{domain}
+            exec.poseidon2::hash_words_with_domain
+            swapw dropw
+        end
+        ",
+        domain = KERNEL_DOMAIN_TAG.as_canonical_u64(),
+    );
+
+    let expected: Vec<u64> = hasher::hash_elements_in_domain(&[], KERNEL_DOMAIN_TAG)
+        .as_elements()
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .collect();
+    build_test!(source.as_str(), &[]).expect_stack(&expected);
+}
+
+#[test]
 fn test_single_iteration() {
     // computes the hash of 1 using mem_stream
     let one_memstream = "

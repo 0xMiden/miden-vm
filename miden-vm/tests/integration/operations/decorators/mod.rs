@@ -3,3 +3,4 @@ pub use miden_processor::TestHost;
 
 mod advice;
 mod events;
+mod trace_events;

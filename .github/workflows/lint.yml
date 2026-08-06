@@ -13,27 +13,8 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
-  diffs:
-    name: detect changed areas
-    runs-on: ubuntu-latest
-    outputs:
-      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
-      isVm: ${{ steps.diffs.outputs.isVm }}
-      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
-      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
-      isRelease: ${{ steps.diffs.outputs.isRelease }}
-      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - id: diffs
-        uses: ./.github/actions/diffs
-
   cargo-deny:
     name: cargo-deny on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,8 +27,6 @@ jobs:
 
   cargo-shear:
     name: cargo-shear on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,8 +39,6 @@ jobs:
 
   workspace-inheritance:
     name: workspace inheritance on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,7 +48,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:
           tool: cargo-binstall
       - name: Install workspace inheritance checker
@@ -81,8 +58,6 @@ jobs:
 
   clippy:
     name: clippy stable on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -100,8 +75,6 @@ jobs:
 
   rustfmt:
     name: rustfmt check nightly on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,8 +90,6 @@ jobs:
 
   doc:
     name: doc stable on ubuntu-latest
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

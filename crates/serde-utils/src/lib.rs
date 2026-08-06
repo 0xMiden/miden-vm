@@ -16,6 +16,50 @@ use alloc::{
 };
 use core::mem::size_of;
 
+/// Deserializes a wincode schema and rejects trailing bytes.
+///
+/// Unlike `wincode::config::deserialize_exact`, this accepts schema adapters whose decoded type
+/// differs from the schema type.
+pub fn deserialize_schema_exact<'de, T, C>(
+    mut bytes: &'de [u8],
+    _config: C,
+) -> wincode::ReadResult<T::Dst>
+where
+    T: wincode::SchemaRead<'de, C>,
+    C: wincode::config::Config,
+{
+    use wincode::io::Reader as _;
+
+    let value = T::get(bytes.by_ref())?;
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(wincode::error::trailing_bytes())
+    }
+}
+
+#[cfg(test)]
+mod wincode_tests {
+    use serde_wincode::SerdeCompat;
+
+    use super::deserialize_schema_exact;
+
+    #[test]
+    fn exact_deserialization_rejects_trailing_bytes() {
+        let config = wincode::config::Configuration::default();
+        let mut bytes =
+            <SerdeCompat<u8> as wincode::config::Serialize<_>>::serialize(&7, config).unwrap();
+
+        assert_eq!(deserialize_schema_exact::<SerdeCompat<u8>, _>(&bytes, config).unwrap(), 7);
+
+        bytes.push(0);
+        assert!(matches!(
+            deserialize_schema_exact::<SerdeCompat<u8>, _>(&bytes, config),
+            Err(wincode::error::ReadError::TrailingBytes)
+        ));
+    }
+}
+
 // ERROR
 // ================================================================================================
 

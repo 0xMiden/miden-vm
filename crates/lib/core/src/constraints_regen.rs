@@ -19,7 +19,7 @@ pub enum Mode {
     Write,
 }
 
-const PROTOCOL_ID: u64 = 0;
+const PROTOCOL_ID: u64 = 1;
 const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
 const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";

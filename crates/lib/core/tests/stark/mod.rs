@@ -1,12 +1,11 @@
-use std::{array, sync::Arc};
+use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::PublicInputs;
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
-    Felt, WORD_SIZE,
-    deferred::{DeferredState, TRUE_DIGEST},
+    Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    proof::{DeferredProof, HashFunction},
+    program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
+    proof::HashFunction,
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
@@ -73,9 +72,18 @@ fn stark_verifier_e2f4_with_kernel_single() {
     run_recursive_verifier(&data);
 }
 
-// TODO: Un-ignore once recursive verifier supports deferred proofs
 #[test]
-#[ignore = "recursive verifier does not yet support verifying deferred proofs"]
+fn stark_verifier_e2f4_with_max_kernel() {
+    let kernel = max_kernel_source();
+    let data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(&kernel),
+    );
+    run_recursive_verifier(&data);
+}
+
+#[test]
 fn stark_verifier_e2f4_with_deferred_root() {
     let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
     run_recursive_verifier(&data);
@@ -307,79 +315,407 @@ pub fn generate_recursive_verifier_data(
     .unwrap();
 
     let program_info = ProgramInfo::from(program);
+    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
-    // Resolve the proof-carried deferred root instead of assuming TRUE. This helper tests the
-    // recursive verifier for the outer VM STARK only; `prove_sync` constructed any nested deferred
-    // STARK proof locally, so its public root is the outer proof's public input.
-    let stark_proof = proof.miden_proof();
-    let deferred_proof = proof.deferred_proof();
-    let final_deferred_root = match deferred_proof {
-        DeferredProof::Empty => TRUE_DIGEST,
-        DeferredProof::Wire(wire) => {
-            DeferredState::from_wire(Arc::new(miden_precompiles::registry()), wire, usize::MAX)
-                .unwrap()
-                .root()
-        },
-        DeferredProof::Stark { public_root, .. } => *public_root,
-    };
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
-
-    generate_advice_inputs(stark_proof.bytes(), pub_inputs).unwrap()
+    generate_advice_inputs(verify_vm_proof_root(), &proof, &claim).unwrap()
 }
 
-/// Run the recursive verifier MASM program with the given VerifierData.
-fn run_recursive_verifier(data: &VerifierData) {
-    let source = "
-        use miden::core::sys::vm
+/// The MAST root of `sys::vm::verify_vm_proof` - the verifier identity request keys
+/// name. The operator side is `CoreLibrary::recursive_verifier_root`; a consumer computes the
+/// identical value in-VM with `procref` (a procedure's root is intrinsic to its own MAST,
+/// independent of the enclosing program), so the two sides agree without any shared constant.
+fn verify_vm_proof_root() -> Word {
+    miden_core_lib::CoreLibrary::default().recursive_verifier_root()
+}
 
-        # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
-        #   Input:  [dst, count, ...]
-        #   Output: [...]
+/// Test helper that copies `count` felts (a multiple of 4) from advice into memory at `dst`.
+pub(crate) const COPY_ADVICE_TO_MEM: &str = "
         proc copy_advice_to_mem
             dup.1 push.0 neq
             while.true
-                # [dst, count, ...]
                 padw adv_loadw
-                # [w0, w1, w2, w3, dst, count, ...]
                 dup.4 mem_storew_le dropw
-                # [dst, count, ...]
                 add.4
-                # [dst+4, count, ...]
                 swap sub.4 swap
-                # [dst+4, count-4, ...]
                 dup.1 push.0 neq
             end
             drop drop
         end
+";
+
+/// Builds the consumer program: stage the claim from the consumer's own inputs, derive its
+/// commitment, fetch the proof package registered under
+/// `proof_request_key(verifier_root, claim_commitment)`, verify, then grade the returned security
+/// parameters and assert an acceptance threshold. `verify_vm_proof` holds no estimate formula
+/// and no policy; both live in the consumer.
+fn request_consumer_source() -> String {
+    format!(
+        "
+        use miden::core::sys
+        use miden::core::sys::vm
+        use miden::core::sys::vm::claim
+
+        {COPY_ADVICE_TO_MEM}
 
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
-
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
-            # (kernel_ptr = 0). Build [dst=0, count=4N].
-            dup.1 mul.4 push.0
+            # 1) Fill the canonical claim encoding into VM memory from the consumer's own inputs
+            #    (the advice tape) and derive the commitment that names it.
+            push.{NUM_CLAIM_ELEMENTS} push.{CONSUMER_CLAIM_PTR}
             exec.copy_advice_to_mem
+            push.{CONSUMER_CLAIM_PTR} exec.claim::claim_commitment
+            # => [CLAIM_COMMITMENT]
 
-            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
-            # Build [dst=4096, count=32].
-            push.32 push.4096
-            exec.copy_advice_to_mem
+            # 2) Fetch the registered proof package by content: request keys name
+            #    verify_vm_proof's root, derived in-VM via procref.
+            dupw
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            adv.push_mapval dropw
+            # => [CLAIM_COMMITMENT]
 
-            exec.vm::verify_proof
+            # 3) Verify the claim; verify_vm_proof returns the deferred obligation and the
+            #    proof's transcript-bound security parameters.
+            exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+
+            # 4) Grade the returned parameters and assert the consumer's acceptance
+            #    threshold (>= 96 conjectured bits).
+            swapw
+            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
+            exec.vm::compute_conjectured_security_level
+            # => [conjectured_level, deep_pow_bits, folding_pow_bits, D]
+            u32lt.96 assertz.err=\"proof security level is below the accepted target\"
+            drop drop
+            # => [D]
+            exec.sys::truncate_stack
         end
-        ";
+        "
+    )
+}
+
+/// The end-to-end guarantee of fetching by content: a proof fetched via `proof_request_key` and
+/// `adv.push_mapval` verifies when it matches the consumer's claim, and is rejected when it
+/// does not. No separate binding check is needed for the fetched proof package.
+#[test]
+fn request_flow_binds_proof_to_claim() {
+    use miden_utils_testing::recursive_verifier::proof_request_key;
+
+    let intended = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+
+    let source = request_consumer_source();
+    let entry = |proof_stream: &[u64]| -> (Word, Vec<Felt>) {
+        let felts: Vec<Felt> = proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
+        (proof_request_key(verify_vm_proof_root(), intended.claim_commitment), felts)
+    };
+
+    // Control: the intended proof, registered under its key, verifies.
+    let (k, v) = entry(&intended.proof_stream);
+    let mut advice_map = intended.advice_map.clone();
+    advice_map.push((k, v));
+    let ok = build_test!(
+        source.as_str(),
+        &[],
+        &intended.claim_advice,
+        intended.store.clone(),
+        advice_map
+    );
+    let (output, _) = ok.execute_for_output().expect("the matching proof must verify");
+    ace_read_check::cross_check_ace_circuit(&output);
+
+    // Substitution: a different claim's proof under the same key fails against the consumer's
+    // claim — the advice provider cannot pass off another proof. The intended claim's own
+    // content-addressed entries stay available so the kernel-witness fetch succeeds and
+    // rejection happens in verification, not because of a missing key.
+    let other = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    let (k, v) = entry(&other.proof_stream);
+    let mut advice_map = other.advice_map.clone();
+    advice_map.extend(intended.advice_map.iter().cloned());
+    advice_map.push((k, v));
+    let bad = build_test!(source.as_str(), &[], &intended.claim_advice, other.store, advice_map);
+    assert!(
+        bad.execute_for_output().is_err(),
+        "a proof for a different claim must be rejected by verification"
+    );
+}
+
+/// Two independently proven executions of one program (distinct stack i/o) verified inside a
+/// single consumer program — each proof is registered
+/// under `proof_request_key(verifier_root, claim_commitment)` and fetched by content, independent
+/// of its position in the advice. The consumer stages each claim from its own inputs and derives
+/// the commitment that names the claim and addresses its proof entry, so passing requires the
+/// in-VM claim-commitment, kernel-commitment, and request-key derivations to match their native
+/// mirrors (a mismatch is a missing advice-map key).
+#[test]
+fn stark_verifier_e2f4_request_multi_proof() {
+    use miden_utils_testing::{crypto::MerkleStore, recursive_verifier::proof_request_key};
+
+    let mut inputs = fib_stack_inputs();
+    let tx0 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs.clone(), None);
+    inputs[13] = 7; // distinct claim: same program, different stack inputs
+    let tx1 = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
+
+    // One advice provider for both proofs: the tape carries the claims from which the consumer
+    // derives the commitments. Claim preimages, proof streams, query rows, and kernel witnesses
+    // are content-addressed in the advice map.
+    let verifier_root = verify_vm_proof_root();
+    let mut tape = Vec::new();
+    let mut store = MerkleStore::new();
+    let mut advice_map = Vec::new();
+    for tx in [&tx0, &tx1] {
+        tape.extend(tx.claim_advice.iter().copied());
+        store.extend(tx.store.inner_nodes());
+        advice_map.extend(tx.advice_map.iter().cloned());
+        let stream: Vec<Felt> = tx.proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
+        advice_map.push((proof_request_key(verifier_root, tx.claim_commitment), stream));
+    }
+
+    let source = format!(
+        "
+        use miden::core::sys
+        use miden::core::sys::vm
+        use miden::core::sys::vm::claim
+
+        {COPY_ADVICE_TO_MEM}
+
+        proc verify_one_claim
+            # Per claim: stage the fields from the consumer's own inputs, derive the
+            # commitment that names the claim, fetch and verify the proof package it
+            # addresses, then grade the returned parameters against the acceptance
+            # threshold.
+            push.{NUM_CLAIM_ELEMENTS} push.{CONSUMER_CLAIM_PTR} exec.copy_advice_to_mem
+            push.{CONSUMER_CLAIM_PTR} exec.claim::claim_commitment # => [CLAIM_COMMITMENT]
+            dupw
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
+            exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
+            swapw exec.vm::compute_conjectured_security_level # => [level, deep_pow, fold_pow, D]
+            u32lt.96 assertz.err=\"proof security level is below the accepted target\"
+            drop drop                                    # => [D]
+        end
+
+        begin
+            exec.verify_one_claim dropw
+            exec.verify_one_claim dropw
+            exec.sys::truncate_stack
+        end
+        "
+    );
+
+    let test = build_test!(source.as_str(), &[], &tape, store, advice_map);
+    test.execute_for_output().expect("both content-addressed proofs must verify");
+}
+
+/// Runs `verify_vm_proof` with the claim commitment on the operand stack and the proof stream on
+/// advice. This directly pins the producer and MASM consumption order.
+fn verify_vm_proof_program() -> String {
+    "
+        use miden::core::sys
+        use miden::core::sys::vm
+
+        begin
+            exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            exec.sys::truncate_stack
+        end
+    "
+    .into()
+}
+
+fn run_recursive_verifier(data: &VerifierData) {
+    let source = verify_vm_proof_program();
     let test = build_test!(
-        source,
-        &data.initial_stack,
-        &data.advice_stack,
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
         data.store.clone(),
         data.advice_map.clone()
     );
     let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
 
+    // `verify_vm_proof` returns [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
+    // Pin D (stack positions 0..4) to the proof-stream value and the parameter tail (positions
+    // 4..8) to the deployed PCS config so a change to the returned tuple's values or order is
+    // caught across every e2e configuration.
+    let params = miden_air::config::pcs_params();
+    let returned = |i: usize| output.stack.get_element(i).map(|f| f.as_canonical_u64());
+    for i in 0..WORD_SIZE {
+        assert_eq!(returned(i), Some(data.proof_stream[4 + i]), "returned deferred root felt {i}");
+    }
+    assert_eq!(returned(4), Some(params.num_queries() as u64), "returned num_queries");
+    assert_eq!(returned(5), Some(params.query_pow_bits() as u64), "returned query_pow_bits");
+    assert_eq!(returned(6), Some(params.deep_pow_bits() as u64), "returned deep_pow_bits");
+    assert_eq!(returned(7), Some(params.folding_pow_bits() as u64), "returned folding_pow_bits");
+
     // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
     ace_read_check::cross_check_ace_circuit(&output);
+}
+
+/// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,
+/// folding_pow_bits) is absorbed into the Fiat-Shamir transcript, so forging any one of them in
+/// the proof stream diverges the transcript and fails verification. They are the first four
+/// advice values `verify_vm_proof` reads, i.e. `proof_stream[0..4]`.
+#[test]
+fn each_security_parameter_is_transcript_bound() {
+    let source = verify_vm_proof_program();
+    let base = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    for param in 0usize..4 {
+        let mut data = base.clone();
+        // Forge the parameter downward. In particular, the proof's original PoW nonces satisfy
+        // the weaker targets, so rejection cannot be explained solely by demanding more work;
+        // the changed transcript/verification schedule must invalidate the proof.
+        data.proof_stream[param] -= 1;
+        let test = build_test!(
+            source.as_str(),
+            &data.initial_stack(),
+            data.advice_stack(),
+            data.store.clone(),
+            data.advice_map.clone()
+        );
+        assert!(
+            test.execute_for_output().is_err(),
+            "verifier accepted a forged security parameter (index {param})"
+        );
+    }
+}
+
+/// The fetched kernel digests must hash to the claim's K before the outer-LogUp fold uses them.
+/// Check the explicit authentication failure because the later boundary check also rejects
+/// tampered digests.
+#[test]
+fn tampered_kernel_witness_is_rejected() {
+    let mut data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(KERNEL_EVEN_NUM_PROC),
+    );
+    let k = claim_kernel_commitment(&data);
+    let witness = advice_map_value_mut(&mut data, k);
+    // Flip one felt of the first digest while preserving the witness length.
+    witness[0] = Felt::new_unchecked(witness[0].as_canonical_u64() ^ 1);
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(
+        test,
+        "fetched kernel digests do not hash to the claim's kernel commitment"
+    );
+}
+
+/// `verify_vm_proof` derives the kernel procedure count from the advice-map value length and
+/// rejects a witness containing more than `KernelDescriptor::MAX_NUM_PROCEDURES` digests before
+/// copying it.
+#[test]
+fn verify_vm_proof_rejects_oversized_kernel_witness() {
+    let mut data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(KERNEL_EVEN_NUM_PROC),
+    );
+    let k = claim_kernel_commitment(&data);
+    *advice_map_value_mut(&mut data, k) = vec![Felt::ZERO; 256 * WORD_SIZE];
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(
+        test,
+        "number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+    );
+}
+
+/// A kernel witness is a list of four-felt procedure digests.
+#[test]
+fn verify_vm_proof_rejects_misaligned_kernel_witness() {
+    let mut data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        fib_stack_inputs(),
+        Some(KERNEL_EVEN_NUM_PROC),
+    );
+    let k = claim_kernel_commitment(&data);
+    advice_map_value_mut(&mut data, k).push(Felt::ZERO);
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(test, "kernel witness length must be word-aligned");
+}
+
+/// The claim preimage is untrusted advice and must match the caller-provided commitment.
+#[test]
+fn tampered_claim_preimage_is_rejected() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let claim_commitment = data.claim_commitment;
+    let preimage = advice_map_value_mut(&mut data, claim_commitment);
+    preimage[0] = Felt::new_unchecked(preimage[0].as_canonical_u64() ^ 1);
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(
+        test,
+        "pipe_double_words_preimage_to_memory_with_domain: COMMITMENT does not match"
+    );
+}
+
+/// The advice-map value under the claim commitment must use the canonical 40-felt encoding.
+#[rstest]
+#[case(NUM_CLAIM_ELEMENTS - 1)]
+#[case(NUM_CLAIM_ELEMENTS + 1)]
+fn malformed_claim_preimage_length_is_rejected(#[case] len: usize) {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let claim_commitment = data.claim_commitment;
+    let preimage = advice_map_value_mut(&mut data, claim_commitment);
+    preimage.resize(len, Felt::ZERO);
+
+    let source = verify_vm_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    expect_assert_error_code_from_msg!(test, "claim preimage has a non-canonical length");
+}
+
+/// The claim's kernel commitment K, read from felts [4, 8) of the canonical claim encoding.
+fn claim_kernel_commitment(data: &VerifierData) -> Word {
+    Word::new([
+        Felt::new_unchecked(data.claim_advice[4]),
+        Felt::new_unchecked(data.claim_advice[5]),
+        Felt::new_unchecked(data.claim_advice[6]),
+        Felt::new_unchecked(data.claim_advice[7]),
+    ])
+}
+
+/// Mutable reference to the advice-map value stored under `key`.
+fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
+    let entry = data
+        .advice_map
+        .iter_mut()
+        .find(|(k, _)| *k == key)
+        .expect("advice map has an entry under the requested key");
+    &mut entry.1
 }
 
 // EXAMPLE PROGRAMS
@@ -434,7 +770,7 @@ fn fib_stack_inputs() -> Vec<u64> {
 // 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
 // accepts.
 #[case(255)]
-fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usize) {
+fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize) {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
@@ -443,61 +779,70 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     let stack_outputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
     let deferred_root: [u64; 4] = array::from_fn(|_| rng.next_u64());
-    let kernel_digest_felts = generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
+    let kernel_digest_felts = generate_kernel_procedure_digests(&mut rng, num_kernel_procedures);
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
-    // Caller-owned memory regions (must match the MASM constants below): kernel digests at 0,
-    // stack i/o at 4096.
-    const KERNEL_PTR: u64 = 0;
-    const STACK_IO_PTR: u64 = 4096;
+    // 2) Initial operand stack: the kernel procedure count used by this test's setup code.
+    let initial_stack = vec![num_kernel_procedures as u64];
 
-    // 2) Initial operand stack: `stage_reduced_inputs` operands.
-    let mut initial_stack = vec![KERNEL_PTR, num_kernel_proc_digests as u64, STACK_IO_PTR];
-    initial_stack.extend_from_slice(&program_digest);
+    // 3) Build the advice stack: kernel digests (4N), the claim encoding (P, K, I, O), the deferred
+    //    root, and the aux randomness used by `compute_outer_logup_correction`.
+    let digest_felts: Vec<Felt> =
+        kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
+    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
+    let mut claim_elements = [Felt::ZERO; NUM_CLAIM_ELEMENTS];
+    claim_elements[..WORD_SIZE].copy_from_slice(&program_digest.map(Felt::new_unchecked));
+    claim_elements[WORD_SIZE..2 * WORD_SIZE].copy_from_slice(&expected_kernel_h);
+    claim_elements[2 * WORD_SIZE..6 * WORD_SIZE]
+        .copy_from_slice(&stack_inputs.map(Felt::new_unchecked));
+    claim_elements[6 * WORD_SIZE..].copy_from_slice(&stack_outputs.map(Felt::new_unchecked));
+    let [claim_c0, claim_c1, claim_c2, claim_c3] =
+        miden_core::program::claim_commitment(&claim_elements)
+            .into_elements()
+            .map(|felt| felt.as_canonical_u64());
 
-    // 3) Build the advice stack: kernel digests (4N) and stack i/o (32) for the marshalling, then
-    //    deferred root for `stage_reduced_inputs`, then the aux randomness consumed by the test
-    //    prologue that drives `compute_outer_logup_correction`.
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&kernel_digest_felts);
+    advice_stack.extend_from_slice(&program_digest);
+    advice_stack.extend(expected_kernel_h.iter().map(Felt::as_canonical_u64));
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
     advice_stack.extend_from_slice(&deferred_root);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
-    // 4) Marshal the caller regions, stage the reduced-inputs block, run process_public_inputs,
-    //    then emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
+    // 4) Populate verifier memory, stage the statement inputs, run process_public_inputs, then
+    //    emulate step II: place the aux randomness at AUX_RAND_ELEM_PTR (where
     //    `generate_aux_randomness` samples it) and compute `c_total`.
-    let source = "
+    let source = format!(
+        "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
         use miden::core::sys::vm::public_inputs
 
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                padw adv_loadw
-                dup.4 mem_storew_le dropw
-                add.4
-                swap sub.4 swap
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
+        {COPY_ADVICE_TO_MEM}
 
         begin
-            dup.1 mul.4 push.0
-            exec.copy_advice_to_mem
-            push.32 push.4096
+            # Initial stack: [num_kernel_procedures].
+
+            # Copy kernel digests (4·num_kernel_procedures felts) from advice into the witness
+            # region. Build [dst=KERNEL_WITNESS_PTR, count=4N].
+            dup mul.4 exec.constants::kernel_witness_ptr
             exec.copy_advice_to_mem
 
-            exec.public_inputs::stage_reduced_inputs
+            # Copy the full claim encoding P | K | I | O into verifier-owned memory.
+            push.{NUM_CLAIM_ELEMENTS} exec.constants::claim_ptr
+            exec.copy_advice_to_mem
+
+            exec.constants::num_kernel_procedures_ptr mem_store
+            exec.public_inputs::stage_boundary_inputs
 
             push.10 exec.constants::set_core_trace_length_log
             push.10 exec.constants::set_chiplets_trace_length_log
             push.10 exec.constants::set_poseidon2_permutation_trace_length_log
             push.10 exec.constants::set_trace_length_log
             push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
+            exec.constants::claim_commitment_ptr mem_storew_le dropw
 
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
@@ -505,9 +850,10 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
             padw adv_loadw exec.constants::aux_rand_elem_ptr mem_storew_le dropw
             exec.public_inputs::compute_outer_logup_correction
         end
-        ";
+        "
+    );
 
-    let test = build_test!(source, &initial_stack, &advice_stack);
+    let test = build_test!(source.as_str(), &initial_stack, &advice_stack);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
     use miden_processor::ContextId;
@@ -520,44 +866,28 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
             .as_canonical_u64()
     };
 
-    // Must match `REDUCED_INPUTS_ADDRESS_PTR` / `PUBLIC_INPUTS_ADDRESS_PTR` / `C_TOTAL_PTR`
-    // in `crates/lib/core/asm/stark/constants.masm`.
-    let reduced_ptr = read_elem(3223322670) as u32;
-    let pi_ptr = read_elem(3223322671) as u32;
-    let c_total_ptr = 3223322704_u32;
+    // Must match `crates/lib/core/asm/stark/constants.masm`.
+    const BOUNDARY_INPUTS_PTR: u32 = 3223322836;
+    const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
+    const C_TOTAL_PTR: u32 = 3223322704;
 
-    // 4) kernel_H at reduced_inputs+0..4 must match the Rust mirror.
-    let digest_felts: Vec<Felt> =
-        kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
-    for (i, expected) in expected_kernel_h.iter().enumerate() {
-        assert_eq!(
-            read_elem(reduced_ptr + i as u32),
-            expected.as_canonical_u64(),
-            "kernel_H felt {i} mismatch (nk={num_kernel_proc_digests})"
-        );
-    }
+    let pi_ptr = read_elem(PUBLIC_INPUTS_ADDRESS_PTR) as u32;
 
-    // 5) program_digest / deferred_root pass through to reduced_inputs+4..12; the trailing pad word
-    //    at +12..16 must be zero.
+    // 4) program_digest and deferred_root pass through to the boundary-inputs block.
     for (i, &v) in program_digest.iter().chain(deferred_root.iter()).enumerate() {
         assert_eq!(
-            read_elem(reduced_ptr + 4 + i as u32),
+            read_elem(BOUNDARY_INPUTS_PTR + i as u32),
             v,
-            "reduced-inputs window felt {i} mismatch"
+            "boundary-inputs window felt {i} mismatch"
         );
     }
-    for i in 12..16 {
-        assert_eq!(read_elem(reduced_ptr + i), 0, "reduced-inputs pad felt {i} must be zero");
-    }
-
-    // 6) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).
+    // 5) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).
     for (i, &v) in stack_inputs.iter().chain(stack_outputs.iter()).enumerate() {
         assert_eq!(read_elem(pi_ptr + 2 * i as u32), v, "FLPI slot {i} value mismatch");
         assert_eq!(read_elem(pi_ptr + 2 * i as u32 + 1), 0, "FLPI slot {i} high coord");
     }
 
-    // 7) Verify the outer-LogUp boundary correction c_total at C_TOTAL_PTR:
+    // 6) Verify the outer-LogUp boundary correction c_total at C_TOTAL_PTR:
     //
     //     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))
     //             + 1 / ((α + 2γ) + msg(program_digest))
@@ -597,41 +927,14 @@ fn reduced_inputs_and_outer_logup_boundary(#[case] num_kernel_proc_digests: usiz
     let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
 
     assert_eq!(
-        read_elem(c_total_ptr),
+        read_elem(C_TOTAL_PTR),
         expected[0].as_canonical_u64(),
-        "c_total coord 0 mismatch (nk={num_kernel_proc_digests})"
+        "c_total coord 0 mismatch (nk={num_kernel_procedures})"
     );
     assert_eq!(
-        read_elem(c_total_ptr + 1),
+        read_elem(C_TOTAL_PTR + 1),
         expected[1].as_canonical_u64(),
-        "c_total coord 1 mismatch (nk={num_kernel_proc_digests})"
-    );
-}
-
-/// The recursive verifier must reject statements with more kernel-procedure digests than a
-/// `KernelDescriptor` can contain. 256 digests is one over the maximum, so
-/// `stage_reduced_inputs` must fail on the digest-count bound before reading caller memory or
-/// advice.
-#[test]
-fn rejects_too_many_kernel_proc_digests() {
-    let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
-
-    // Operands: [kernel_ptr, N, stack_io_ptr, PROG0..3]. The bound on N is the first check in
-    // `stage_reduced_inputs`, so no caller memory or advice is needed.
-    let initial_stack = vec![0_u64, num_kernel_proc_digests, 4096, 1, 2, 3, 4];
-
-    let source = "
-        use miden::core::sys::vm::public_inputs
-
-        begin
-            exec.public_inputs::stage_reduced_inputs
-        end
-        ";
-
-    let test = build_test!(source, &initial_stack);
-    assert!(
-        test.execute_for_output().is_err(),
-        "verifier accepted {num_kernel_proc_digests} kernel digests, exceeding max_aux_inputs"
+        "c_total coord 1 mismatch (nk={num_kernel_procedures})"
     );
 }
 
@@ -690,15 +993,26 @@ fn quotient_recomposition_constants_match_derivation() {
 // ===============================================================================================
 
 /// Generates kernel-procedure digest felts: 4 canonical felts per digest.
-fn generate_kernel_procedures_digests<R: Rng>(
+fn generate_kernel_procedure_digests<R: Rng>(
     rng: &mut R,
-    num_kernel_proc_digests: usize,
+    num_kernel_procedures: usize,
 ) -> Vec<u64> {
-    (0..num_kernel_proc_digests * WORD_SIZE).map(|_| rng.next_u64()).collect()
+    (0..num_kernel_procedures * WORD_SIZE).map(|_| rng.next_u64()).collect()
+}
+
+fn max_kernel_source() -> String {
+    let mut source = KERNEL_SINGLE_PROC.to_owned();
+    for i in 1..KernelDescriptor::MAX_NUM_PROCEDURES {
+        write!(source, "\npub proc unused_{i}\n    push.{i} drop\nend").unwrap();
+    }
+    source
 }
 
 // CONSTANTS
 // ===============================================================================================
+
+/// Memory used by test consumers while deriving a claim commitment.
+const CONSUMER_CLAIM_PTR: u64 = 4096;
 
 const KERNEL_SINGLE_PROC: &str = r#"
         pub proc foo

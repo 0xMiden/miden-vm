@@ -7,12 +7,6 @@ on:
       - next
   pull_request:
     types: [opened, reopened, synchronize]
-    paths:
-      - "**/Cargo.toml"
-      - "Cargo.lock"
-      - ".github/actions/workspace-release/**"
-      - ".github/workflows/workspace-dry-run.yml"
-      - ".github/workflows/workspace-publish.yml"
   workflow_dispatch:
     inputs:
       packages:
@@ -40,6 +34,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Build MASM packages
+        run: |
+          make packages
 
       - name: Dry-run workspace release
         uses: ./.github/actions/workspace-release

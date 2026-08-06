@@ -10,6 +10,7 @@ use crate::{
 /// Minimal layout with only public inputs populated.
 fn minimal_layout(num_public: usize) -> InputLayout {
     let counts = InputCounts {
+        preprocessed_width: 0,
         width: 0,
         aux_width: 0,
         num_aux_boundary: 0,
@@ -175,6 +176,36 @@ fn compact_removes_dead_operation_subtree() {
         build_inputs(&layout, &[(InputKey::Public(0), a_val), (InputKey::Public(1), b_val)]);
     let result = circuit.eval(&inputs).expect("circuit eval");
     assert_eq!(result, a_val + b_val);
+}
+
+#[test]
+#[should_panic(expected = "DAG node must come from this DagBuilder")]
+fn compact_rejects_stale_node_ids() {
+    // A NodeId issued before a compaction that removes nodes must not resolve
+    // afterwards: such a compaction renumbers indices and stamps a fresh
+    // dag_id, so provenance checks reject the stale id instead of resolving it
+    // to whichever node now sits at its old index.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let a = builder.input(InputKey::Public(0));
+    let three = builder.constant(QuadFelt::from(Felt::new_unchecked(3)));
+    let five = builder.constant(QuadFelt::from(Felt::new_unchecked(5)));
+    let eight = builder.add(three, five);
+    let root = builder.mul(a, eight);
+    // Constant folding orphans `three` at build time and compaction removes
+    // it, while its old index stays in range afterwards — the exact shape
+    // that would alias a different node.
+    let stale = three;
+
+    let mut dag = builder.build(root);
+    dag.compact();
+    assert!(
+        stale.index() < dag.nodes().len(),
+        "test premise broken: the stale index must stay in range so the \
+         provenance check, not the bounds check, is what rejects it"
+    );
+
+    let mut resumed = DagBuilder::from_dag(dag);
+    let _ = resumed.neg(stale);
 }
 
 #[test]
