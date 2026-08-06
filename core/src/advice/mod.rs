@@ -37,6 +37,11 @@ impl AdviceInputs {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
+    /// Creates a new advice inputs container from the provided stack, map, and Merkle store.
+    pub fn new(advice_stack: AdviceStack, map: AdviceMap, store: MerkleStore) -> Self {
+        Self { advice_stack, map, store }
+    }
+
     /// Replaces the advice stack with the provided typed stack.
     pub fn with_advice_stack(mut self, stack: AdviceStack) -> Self {
         self.advice_stack = stack;
@@ -79,6 +84,16 @@ impl AdviceInputs {
     }
 }
 
+impl From<AdviceMap> for AdviceInputs {
+    fn from(map: AdviceMap) -> Self {
+        Self {
+            advice_stack: AdviceStack::default(),
+            map,
+            store: MerkleStore::default(),
+        }
+    }
+}
+
 impl Serializable for AdviceInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let Self { advice_stack, map, store } = self;
@@ -105,9 +120,10 @@ impl Deserializable for AdviceInputs {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::{AdviceInputs, AdviceStack};
+    use super::{AdviceInputs, AdviceMap, AdviceStack};
     use crate::{
         Felt, Word,
+        crypto::merkle::MerkleStore,
         serde::{Deserializable, Serializable},
     };
 
@@ -134,6 +150,30 @@ mod tests {
         let advice2 = AdviceInputs::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(advice1, advice2);
+    }
+
+    #[test]
+    fn advice_inputs_new_assembles_parts() {
+        let stack = AdviceStack::try_from_values([1, 2, 3]).unwrap();
+        let map = AdviceMap::from_iter([(Word::default(), vec![Felt::new_unchecked(7)])]);
+        let store = MerkleStore::default();
+
+        let advice = AdviceInputs::new(stack.clone(), map.clone(), store.clone());
+
+        assert_eq!(advice.advice_stack(), stack);
+        assert_eq!(advice.map, map);
+        assert_eq!(advice.store, store);
+    }
+
+    #[test]
+    fn advice_inputs_from_advice_map_defaults_other_parts() {
+        let map = AdviceMap::from_iter([(Word::default(), vec![Felt::new_unchecked(7)])]);
+
+        let advice = AdviceInputs::from(map.clone());
+
+        assert_eq!(advice.advice_stack(), AdviceStack::default());
+        assert_eq!(advice.map, map);
+        assert_eq!(advice.store, MerkleStore::default());
     }
 
     #[test]
