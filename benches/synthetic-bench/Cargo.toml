@@ -24,7 +24,7 @@ miden-assembly = { workspace = true, features = ["std"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
 miden-prover = { workspace = true, features = ["concurrent"] }
-miden-utils-testing = { workspace = true, features = ["std"] }
+miden-verifier = { workspace = true, features = ["std"] }
 
 [[bench]]
 name = "synthetic_bench"

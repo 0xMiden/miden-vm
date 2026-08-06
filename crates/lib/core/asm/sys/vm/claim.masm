@@ -1,4 +1,5 @@
 use miden::core::crypto::hashes::poseidon2
+use miden::core::mem
 
 # EXECUTION CLAIM
 # =================================================================================================
@@ -33,6 +34,29 @@ const KERNEL_DOMAIN_TAG = 0x01000001
 # Number of field elements in the canonical claim encoding.
 const NUM_CLAIM_ELEMENTS = 40
 
+# Number of words in the canonical claim encoding.
+const NUM_CLAIM_WORDS = NUM_CLAIM_ELEMENTS // 4
+
+#! Fetches a claim preimage from the advice map, copies it into memory, and checks its commitment.
+#!
+#! The advice-map value under CLAIM_COMMITMENT must be the canonical 40-felt claim encoding.
+#!
+#! Inputs:  [claim_ptr, CLAIM_COMMITMENT, ...]
+#! Outputs: [...]
+pub proc materialize_claim
+    # Use CLAIM_COMMITMENT as the advice-map key while preserving claim_ptr.
+    movdn.4
+    adv.push_mapvaln
+    adv_push
+    eq.NUM_CLAIM_ELEMENTS assert.err="claim preimage has a non-canonical length"
+    movup.4
+
+    push.NUM_CLAIM_WORDS
+    push.CLAIM_DOMAIN_TAG
+    exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    drop
+end
+
 #! Computes the canonical claim commitment (CLAIM_HASH) over a claim region.
 #!
 #! The region must hold the fully populated 40-felt claim encoding P ‖ K ‖ I ‖ O. The commitment
@@ -58,48 +82,19 @@ end
 #! of the flattened digests, length-bound by the sponge's padding rule, in the descriptor's
 #! canonical order.
 #!
-#! Inputs:  [kernel_ptr, num_kernel_digests, ...]
+#! Inputs:  [kernel_ptr, num_kernel_procedures, ...]
 #! Outputs: [K, ...]
 #!
 #! Where:
 #! - kernel_ptr is the word-aligned address of the digest list.
-#! - num_kernel_digests is the number of digests (words) in the list.
+#! - num_kernel_procedures is the number of procedure digests in the list and must fit in a u32.
 #! - K is the kernel commitment.
 pub proc kernel_commitment
-    swap mul.4 swap
+    swap u32assert.err="number of kernel procedures must fit in a u32"
+    mul.4 swap
     # => [kernel_ptr, num_elements, ...]
     push.KERNEL_DOMAIN_TAG movdn.2
     # => [kernel_ptr, num_elements, KERNEL_DOMAIN_TAG, ...]
     exec.poseidon2::hash_elements_in_domain
     # => [K, ...]
-end
-
-# Domain tag for the proof-request key: the registered selector
-# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (0x010002 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
-# Must match miden_core::program::REQUEST_DOMAIN_TAG (enforced by cross-tests).
-const REQUEST_DOMAIN_TAG = 0x01000201
-
-#! Computes the advice-map key addressing a proof package for a claim under a verifier.
-#!
-#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one rate
-#! block, so a single permutation with no memory). It is a lookup address, not a trust anchor:
-#! the verifier re-checks the retrieved package, so a wrong package fails verification. Both
-#! inputs are program-owned (the verifier's MAST root via `procref`; the claim commitment via
-#! `claim_commitment` or the program's own inputs) — neither comes from advice. Mirrors
-#! miden_core::program::request_key.
-#!
-#! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
-#! Outputs: [REQUEST_KEY, ...]
-pub proc request_key
-    # Capacity word [0, REQUEST_DOMAIN_TAG, 0, 0]: first element 8 % 8 = 0, domain in the
-    # second. Pushed on top, then swapped to the capacity position (state word 2) so the two
-    # input words become the rate; absorbing claim ‖ verifier keeps this to a single swap.
-    push.0.0.REQUEST_DOMAIN_TAG.0
-    # => [CAP, VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
-    swapw.2
-    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, CAP, ...]  = [R0, R1, C]; rate = claim ‖ verifier
-    hperm
-    exec.poseidon2::squeeze_digest
-    # => [REQUEST_KEY, ...]
 end

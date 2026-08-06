@@ -10,27 +10,6 @@ fn truncate_stack() {
         .expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
 }
 
-#[test]
-fn stage_rejects_digest_count_over_bound() {
-    // `stage_boundary_inputs` takes the digest count `N` as an operand and asserts it fits
-    // `Kernel::MAX_NUM_PROCEDURES` (`N < 256`). The bound is its first check, so no caller memory
-    // or advice is required.
-    //
-    // Operands: [claim_ptr, kernel_ptr, N].
-    let source = "
-        use miden::core::sys::vm::public_inputs
-        begin
-            exec.public_inputs::stage_boundary_inputs
-        end
-    ";
-
-    let num_kernel_proc_digests = 256_u64; // one over the maximum (255)
-    let initial_stack = vec![4096_u64, 0, num_kernel_proc_digests];
-
-    let test = build_test!(source, &initial_stack);
-    expect_assert_error_message!(test);
-}
-
 #[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
@@ -125,8 +104,21 @@ fn masm_claim_commitment_matches_native() {
 fn hash_elements_in_domain_matches_native() {
     use miden_core::{Felt, chiplets::hasher};
 
-    for num_elements in [0usize, 5, 8, 11, 16, 40] {
-        let values: Vec<u64> = (1..=num_elements as u64).collect();
+    let mut marked_rate_block = vec![0; 8];
+    marked_rate_block[0] = 1;
+    let cases = [
+        vec![],
+        vec![0; 8],
+        marked_rate_block,
+        (1..=5).collect(),
+        (1..=8).collect(),
+        (1..=11).collect(),
+        (1..=16).collect(),
+        (1..=40).collect(),
+    ];
+
+    for values in cases {
+        let num_elements = values.len();
         let felts: Vec<Felt> = values.iter().map(|&v| Felt::new_unchecked(v)).collect();
         let domain = miden_core::program::KERNEL_DOMAIN_TAG;
 
@@ -172,11 +164,73 @@ fn hash_elements_in_domain_matches_native() {
     }
 }
 
-/// The MASM `sys::vm::claim::request_key` must agree with the native `request_key` on the same
-/// (verifier_root, claim_commitment) pair.
 #[test]
-fn masm_request_key_matches_native() {
-    use miden_core::{Felt, Word, program::request_key};
+fn element_hash_procedures_reject_non_u32_length() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    const NON_U32_LENGTH: u64 = u32::MAX as u64 + 1;
+    const PTR: u64 = 1000;
+    const ERROR_MSG: &str = "num_elements must fit in a u32";
+    let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
+
+    let invocations = [
+        format!("push.0 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::prepare_hasher_state"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements"),
+        format!("push.1 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements_in_domain"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::pad_and_hash_elements"),
+    ];
+
+    for invocation in invocations {
+        let source = format!("use miden::core::crypto::hashes::poseidon2 begin {invocation} end");
+        let test = build_test!(source.as_str(), &[]);
+        let err = test.execute().expect_err("a non-u32 length must be rejected");
+        match err {
+            ExecutionError::OperationError {
+                err: OperationError::U32AssertionFailed { err_code, .. },
+                ..
+            } => assert_eq!(err_code, expected_error_code),
+            err => panic!("expected a u32 assertion failure, got {err:?}"),
+        }
+    }
+}
+
+#[test]
+fn kernel_commitment_rejects_non_u32_procedure_count() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    // For the Goldilocks modulus p, 4 * ((3p + 1) / 4) = 1 mod p. Without validating the
+    // procedure count before multiplication, the helper would hash one element.
+    const WRAPPING_COUNT: u64 = 13_835_058_052_060_938_241;
+    const PTR: u64 = 1000;
+    const ERROR_MSG: &str = "number of kernel procedures must fit in a u32";
+
+    let source = format!(
+        "
+        use miden::core::sys::vm::claim
+
+        begin
+            push.{WRAPPING_COUNT}
+            push.{PTR}
+            exec.claim::kernel_commitment
+        end
+        "
+    );
+    let test = build_test!(source.as_str(), &[]);
+    let err = test.execute().expect_err("a non-u32 procedure count must be rejected");
+    match err {
+        ExecutionError::OperationError {
+            err: OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(ERROR_MSG)),
+        err => panic!("expected a u32 assertion failure, got {err:?}"),
+    }
+}
+
+/// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
+/// same `(verifier_root, claim_commitment)` pair.
+#[test]
+fn masm_build_proof_request_key_matches_native() {
+    use miden_core::{Felt, Word, program::proof_request_key};
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [
@@ -204,12 +258,10 @@ fn masm_request_key_matches_native() {
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::sys::vm::claim
-
         begin
             {}
             {}
-            exec.claim::request_key
+            exec.sys::build_proof_request_key
             exec.sys::truncate_stack
         end
         ",
@@ -217,7 +269,7 @@ fn masm_request_key_matches_native() {
         push(verifier_root),
     );
 
-    let mut expected: Vec<u64> = request_key(verifier_root, claim_commitment)
+    let mut expected: Vec<u64> = proof_request_key(verifier_root, claim_commitment)
         .as_elements()
         .iter()
         .map(Felt::as_canonical_u64)
@@ -227,13 +279,13 @@ fn masm_request_key_matches_native() {
 }
 
 /// End-to-end request round-trip: the host registers a package stream under
-/// `request_key(verifier_root, claim_commitment)`, and a consumer that holds only those two
-/// words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
-/// host helper and the MASM `request_key` address the same advice-map entry.
+/// `proof_request_key(verifier_root, claim_commitment)`, and a consumer that holds only those
+/// two words computes the same key and retrieves the stream with `adv.push_mapval`. Proves the
+/// host helper and the MASM `build_proof_request_key` address the same advice-map entry.
 #[test]
-fn request_round_trip_retrieves_registered_package() {
+fn proof_request_round_trip_retrieves_registered_package() {
     use miden_core::{Felt, Word};
-    use miden_utils_testing::recursive_verifier::request_key;
+    use miden_utils_testing::recursive_verifier::proof_request_key;
 
     let word = |a: u64, b: u64, c: u64, d: u64| -> Word {
         [
@@ -253,7 +305,7 @@ fn request_round_trip_retrieves_registered_package() {
         Felt::new_unchecked(400),
     ];
 
-    let key = request_key(verifier_root, claim_commitment);
+    let key = proof_request_key(verifier_root, claim_commitment);
     let values: Vec<Felt> = stream.to_vec();
 
     let push = |w: Word| -> String {
@@ -267,25 +319,26 @@ fn request_round_trip_retrieves_registered_package() {
         )
     };
     // Consumer holds (claim_commitment, verifier_root) from its own inputs; pushes them in the
-    // request_key contract order (verifier on top), derives the key, fetches the stream, and
+    // proof_request_key contract order (verifier on top), derives the key, fetches the stream, and
     // reads the four values back onto the operand stack.
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::sys::vm::claim
-
         begin
             {}
+            dupw
             {}
-            exec.claim::request_key
-            adv.push_mapval
-            drop drop drop drop
+            exec.sys::build_proof_request_key
+            adv.push_mapval dropw
+            {}
+            assert_eqw
             adv_push adv_push adv_push adv_push
             exec.sys::truncate_stack
         end
         ",
         push(claim_commitment),
         push(verifier_root),
+        push(claim_commitment),
     );
 
     // Map value the host registered under the request key.
@@ -303,7 +356,7 @@ fn request_round_trip_retrieves_registered_package() {
     .expect_stack(&expected);
 }
 
-/// The MASM `sys::vm::conjectured_security_level` procedure must agree with the native
+/// The MASM `sys::vm::compute_conjectured_security_level` procedure must agree with the native
 /// `miden_air::config::conjectured_security_level` on every input in the verifier's domain:
 /// `num_queries` is effectively a `u8` (the generic verifier bounds it to `<= 150`) and
 /// `query_pow_bits < 32`. One VM run evaluates the whole grid, storing the MASM level for
@@ -311,7 +364,7 @@ fn request_round_trip_retrieves_registered_package() {
 /// native value. This includes the calibration points
 /// (27, 16) -> 95 and (27, 17) -> 96.
 #[test]
-fn masm_conjectured_security_level_matches_native() {
+fn masm_compute_conjectured_security_level_matches_native() {
     use miden_core::Felt;
     use miden_processor::ContextId;
 
@@ -333,7 +386,7 @@ fn masm_conjectured_security_level_matches_native() {
                     # => [pow, nq]
                     dup dup.2
                     # => [nq, pow, pow, nq]
-                    exec.vm::conjectured_security_level
+                    exec.vm::compute_conjectured_security_level
                     # => [level, pow, nq]
                     dup.2 push.{POW_BOUND} mul dup.2 add
                     # => [nq*POW_BOUND + pow, level, pow, nq]
@@ -386,7 +439,7 @@ fn security_level_threshold_rejects_below_target() {
 
         begin
             # Stack: [num_queries, query_pow_bits] - as returned by `verify_vm_proof`.
-            exec.vm::conjectured_security_level
+            exec.vm::compute_conjectured_security_level
             u32lt.{TARGET} assertz
         end
         "

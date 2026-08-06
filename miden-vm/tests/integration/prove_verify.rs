@@ -13,7 +13,7 @@ use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, StackInputs, StackOutputs, prove_partial_sync,
     prove_sync,
 };
-use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
+use miden_utils_testing::{recursive_verifier::generate_request_inputs, stack_inputs_from_ints};
 use miden_verifier::{VerificationError, Verifier, verify};
 use miden_vm::{DefaultHost, HashFunction};
 
@@ -68,41 +68,19 @@ fn assert_recursive_verify(
     proof: &ExecutionProof,
 ) {
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-    let verifier_inputs = generate_advice_inputs(proof, &claim)
-        .expect("recursive verifier advice construction failed");
+    let verifier_root = CoreLibrary::default().recursive_verifier_root();
+    let verifier_inputs = generate_request_inputs(verifier_root, proof, &claim)
+        .expect("recursive verifier request construction failed");
 
     let source = "
         use miden::core::sys
         use miden::core::sys::vm
 
-        # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
-        #   Input:  [dst, count, ...]
-        #   Output: [...]
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                # [dst, count, ...]
-                padw adv_loadw
-                # [w0, w1, w2, w3, dst, count, ...]
-                dup.4 mem_storew_le dropw
-                # [dst, count, ...]
-                add.4
-                # [dst+4, count, ...]
-                swap sub.4 swap
-                # [dst+4, count-4, ...]
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
-
         begin
-            # Initial stack: [claim_ptr].
-
-            # Copy the claim encoding P | K | I | O (40 felts) into the claim region
-            # (claim_ptr = 4096); the kernel digest witness travels in the advice map.
-            push.40 push.4096
-            exec.copy_advice_to_mem
-
+            # Initial stack: [CLAIM_COMMITMENT].
+            dupw
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            adv.push_mapval dropw
             exec.vm::verify_vm_proof
             # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
             exec.sys::truncate_stack
@@ -111,8 +89,8 @@ fn assert_recursive_verify(
 
     let mut test = crate::build_test!(
         source,
-        &verifier_inputs.initial_stack,
-        &verifier_inputs.advice_stack(),
+        &verifier_inputs.initial_stack(),
+        verifier_inputs.advice_stack(),
         verifier_inputs.store,
         verifier_inputs.advice_map
     );

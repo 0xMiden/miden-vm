@@ -5,9 +5,9 @@
 //! the configured number of proofs via `exec.vm::verify_vm_proof`.
 //!
 //! For each requested proof count, the setup builds one recursive-verifier program and one advice
-//! provider. The program contains one verifier call per inner proof. The advice stack segments for
-//! those proofs are concatenated in the same order, so each call consumes the segment generated for
-//! it and leaves the next segment at the top of the advice stack.
+//! provider. The program contains one request lookup and verifier call per inner proof. Each proof
+//! is stored in the advice map under its verifier and claim commitments, matching the production
+//! request flow.
 //!
 //! Env vars:
 //! - `RECURSION_BENCH_MASM`: path to a synthetic transaction MASM fixture. If unset, this bench is
@@ -42,7 +42,7 @@ use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_assembly::Linkage;
 use miden_core::{
-    Felt,
+    Felt, Word,
     crypto::hash::Blake3_256,
     field::QuotientMap,
     program::ExecutionClaim,
@@ -51,19 +51,16 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
-    advice::{AdviceInputs, AdviceStack},
-    trace::TraceLenSummary,
+    DefaultHost, ExecutionOptions, FastProcessor, advice::AdviceInputs, trace::TraceLenSummary,
 };
 use miden_prover::prove_sync;
-use miden_utils_testing::recursive_verifier::generate_advice_inputs;
+use miden_verifier::recursive::RecursiveVerifierInputs;
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackInputs,
     StackOutputs, TraceBuildInputs, trace::build_trace,
 };
 
 const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
-const CLAIM_PTR: u64 = 4096;
 const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v1";
 
 struct TxProofFixture {
@@ -74,7 +71,7 @@ struct TxProofFixture {
 }
 
 struct RecursiveProofAdvice {
-    initial_stack: Vec<u64>,
+    claim_commitment: Word,
     advice_inputs: AdviceInputs,
 }
 
@@ -509,20 +506,19 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
 /// MASM for one `exec.vm::verify_vm_proof` call.
 ///
 /// The generated program appends one block like this per inner transaction proof.
-fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
+fn verify_proof_call_masm(claim_commitment: Word) -> String {
     let mut source = String::new();
-    // `initial_stack[0]` must be on top when `verify_vm_proof` starts.
-    for value in initial_stack.iter().rev() {
-        writeln!(source, "push.{value}").expect("write recursive verifier call source");
+    // Push the claim commitment with its first element on top.
+    for value in claim_commitment.into_elements().into_iter().rev() {
+        writeln!(source, "push.{}", value.as_canonical_u64())
+            .expect("write recursive verifier call source");
     }
     writeln!(
         source,
         "
-        # Copy the claim encoding P | K | I | O (40 felts) into the claim region; the kernel
-        # digest witness travels in the advice map.
-        push.40 push.{CLAIM_PTR}
-        exec.copy_advice_to_mem
-
+        dupw
+        procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+        adv.push_mapval dropw
         exec.vm::verify_vm_proof
         # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
         dropw dropw
@@ -539,28 +535,8 @@ fn verify_proof_call_masm(initial_stack: &[u64]) -> String {
 fn recursive_verifier_program_masm(verify_calls: &str) -> String {
     format!(
         "
+        use miden::core::sys
         use miden::core::sys::vm
-
-        # Copy `count` felts from advice into memory starting at `dst`.
-        # `count` must be a multiple of 4.
-        #   Input:  [dst, count, ...]
-        #   Output: [...]
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                # [dst, count, ...]
-                padw adv_loadw
-                # [w0, w1, w2, w3, dst, count, ...]
-                dup.4 mem_storew_le dropw
-                # [dst, count, ...]
-                add.4
-                # [dst + 4, count, ...]
-                swap sub.4 swap
-                # [dst + 4, count - 4, ...]
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
 
         begin
             {verify_calls}
@@ -590,30 +566,19 @@ fn dump_recursive_program_source(proof_count: usize, source: &str) {
     println!("BENCH_RECURSION_MASM proofs={proof_count} path={}", path.display());
 }
 
-/// Build the advice provider consumed by one recursive verifier call.
-///
-/// `generate_advice_inputs` parses the inner STARK proof and returns the exact advice stack,
-/// Merkle store, and advice-map entries expected by `exec.vm::verify_vm_proof`.
-/// The stack is ordered so its first element is the next value consumed by the VM.
-fn recursive_proof_advice(fixture: &TxProofFixture) -> RecursiveProofAdvice {
+/// Builds the request package consumed by one recursive verifier call.
+fn recursive_proof_advice(fixture: &TxProofFixture, verifier_root: Word) -> RecursiveProofAdvice {
     let claim = ExecutionClaim::from_program_info(
         fixture.program_info.clone(),
         fixture.stack_inputs,
         fixture.stack_outputs,
     );
-    let verifier_inputs = generate_advice_inputs(&fixture.proof, &claim).expect("recursive advice");
+    let (advice_inputs, claim_commitment) =
+        RecursiveVerifierInputs::for_request(verifier_root, &fixture.proof, &claim)
+            .expect("recursive request package")
+            .into_parts();
 
-    let advice_stack = AdviceStack::try_from_values(verifier_inputs.advice_stack())
-        .expect("recursive advice stack values must be canonical");
-    let advice_inputs = AdviceInputs::default()
-        .with_advice_stack(advice_stack)
-        .with_merkle_store(verifier_inputs.store)
-        .with_map(verifier_inputs.advice_map);
-
-    RecursiveProofAdvice {
-        initial_stack: verifier_inputs.initial_stack,
-        advice_inputs,
-    }
+    RecursiveProofAdvice { claim_commitment, advice_inputs }
 }
 
 fn build_recursive_verifier_case(
@@ -623,13 +588,11 @@ fn build_recursive_verifier_case(
 ) -> RecursionCase {
     let mut verify_calls = String::new();
     let mut advice_inputs = AdviceInputs::default();
+    let verifier_root = CoreLibrary::default().recursive_verifier_root();
 
     for fixture in fixtures.iter().take(proof_count) {
-        let proof_advice = recursive_proof_advice(fixture);
-        // MASM calls and advice segments are appended in lockstep. There is a single advice
-        // provider for the outer program; after one verifier call consumes its segment, the next
-        // segment is at the top of the same advice stack.
-        verify_calls.push_str(&verify_proof_call_masm(&proof_advice.initial_stack));
+        let proof_advice = recursive_proof_advice(fixture, verifier_root);
+        verify_calls.push_str(&verify_proof_call_masm(proof_advice.claim_commitment));
         advice_inputs.extend(proof_advice.advice_inputs);
     }
 

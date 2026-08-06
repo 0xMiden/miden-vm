@@ -174,7 +174,7 @@ mod tests {
     use crate::{ace, session::NUM_CHIPLETS};
 
     const PROTOCOL_ID: u64 = 0;
-    const REGEN_HINT: &str = "update PRECOMPILE_RELATION_DIGEST in precompiles-prover/src/stark_config.rs and accept the insta snapshot";
+    const REGEN_HINT: &str = "update PRECOMPILE_RELATION_DIGEST in crates/precompiles-prover/src/stark_config.rs and accept the insta snapshot";
 
     /// Snapshot test: catches any precompile chiplet AIR change that alters the constraint circuit.
     #[test]

@@ -1,5 +1,5 @@
 ---
-source: precompiles-prover/src/stark_config.rs
+source: crates/precompiles-prover/src/stark_config.rs
 expression: snapshot
 ---
 num_inputs: 3128

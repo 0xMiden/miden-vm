@@ -2,33 +2,27 @@
 //! (`miden_verifier::recursive`).
 //!
 //! The production builder produces the advice-stack stream, Merkle store, and advice map; the
-//! test harness additionally needs the operand-stack pointers for its fixed memory layout and the
-//! stream as `u64`s for `build_test!`. This module bundles those into [`VerifierData`] so the
+//! test harness additionally needs the claim commitment on the operand stack and the proof stream
+//! as `u64`s for `build_test!`. This module bundles those into [`VerifierData`] so the
 //! recursive-verification tests drive the real MASM verifier over production-built advice.
 
 use alloc::vec::Vec;
 
-pub use miden_core::program::request_key;
+pub use miden_core::program::proof_request_key;
 use miden_core::{Felt, Word, program::ExecutionClaim, proof::ExecutionProof};
-pub use miden_verifier::recursive::RecursiveAdviceError;
+pub use miden_verifier::recursive::RecursiveVerifierInputsError;
 
 use crate::crypto::MerkleStore;
 
 /// The advice inputs plus test operand-stack layout for one recursive verification.
 ///
-/// `claim_advice` (the consumer's claim: the canonical 40-felt encoding) and `proof_stream`
-/// (the proof as the verifier consumes it) are kept separate because they feed different
-/// channels: a directly staged run concatenates them on the advice stack; a request-fetched run
-/// keeps the claim on the advice stack and registers the proof in the advice map instead.
+/// `claim_advice` is retained for tests in which a consumer derives the commitment in-VM. The
+/// verifier itself loads the authenticated claim preimage from the advice map.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
-    /// Operand stack for `verify_vm_proof`: `[claim_ptr]`.
-    pub initial_stack: Vec<u64>,
-    /// The consumer's claim, copied into VM memory before verification: the canonical 40-felt
-    /// encoding `P | K | I | O`.
+    /// Canonical claim encoding used by tests that derive the commitment in-VM.
     pub claim_advice: Vec<u64>,
-    /// The proof stream consumed by `verify_vm_proof` (production advice-builder
-    /// output).
+    /// Advice-stack values for a direct verifier call. Empty when the proof is request-addressed.
     pub proof_stream: Vec<u64>,
     pub store: MerkleStore,
     pub advice_map: Vec<(Word, Vec<Felt>)>,
@@ -37,34 +31,69 @@ pub struct VerifierData {
 }
 
 impl VerifierData {
-    /// The full advice stack for a directly staged run: the consumer's claim followed by the
-    /// proof stream, in consumption order — the prologue copies the claim into memory, then
-    /// `verify_vm_proof` consumes the proof.
-    pub fn advice_stack(&self) -> Vec<u64> {
-        [self.claim_advice.as_slice(), self.proof_stream.as_slice()].concat()
+    /// Operand stack for `verify_vm_proof`: `[CLAIM_COMMITMENT]`.
+    pub fn initial_stack(&self) -> [u64; 4] {
+        self.claim_commitment.into_elements().map(|felt| felt.as_canonical_u64())
+    }
+
+    /// The proof stream consumed by a direct verifier invocation.
+    pub fn advice_stack(&self) -> &[u64] {
+        &self.proof_stream
     }
 }
 
-// Caller-owned claim region in the test staging prologue.
-const CLAIM_PTR: u64 = 4096;
-
-/// Builds [`VerifierData`] for a proof of the given claim via the production advice builder.
+/// Builds [`VerifierData`] for directly exercising the verifier in tests.
+///
+/// Production construction always creates a request package. This test adapter extracts that
+/// package's proof stream back onto the advice stack so low-level verifier tests can invoke
+/// `verify_vm_proof` without also exercising request lookup.
 pub fn generate_advice_inputs(
+    verifier_root: Word,
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
-) -> Result<VerifierData, RecursiveAdviceError> {
-    let inputs = miden_verifier::recursive::advice_inputs(proof, claim)?;
+) -> Result<VerifierData, RecursiveVerifierInputsError> {
+    let mut data = generate_request_inputs(verifier_root, proof, claim)?;
+    let request_key = proof_request_key(verifier_root, data.claim_commitment);
+    let request_index = data
+        .advice_map
+        .iter()
+        .position(|(key, _)| *key == request_key)
+        .expect("production request package contains the proof stream");
+    let (_, proof_stream) = data.advice_map.remove(request_index);
+    data.proof_stream = proof_stream.iter().map(Felt::as_canonical_u64).collect();
+    Ok(data)
+}
+
+/// Builds [`VerifierData`] with the proof registered under the verifier and claim commitments.
+pub fn generate_request_inputs(
+    verifier_root: Word,
+    proof: &ExecutionProof,
+    claim: &ExecutionClaim,
+) -> Result<VerifierData, RecursiveVerifierInputsError> {
+    let inputs = miden_verifier::recursive::RecursiveVerifierInputs::for_request(
+        verifier_root,
+        proof,
+        claim,
+    )?;
+    Ok(verifier_data(inputs, claim))
+}
+
+fn verifier_data(
+    inputs: miden_verifier::recursive::RecursiveVerifierInputs,
+    claim: &ExecutionClaim,
+) -> VerifierData {
+    let (advice, claim_commitment) = inputs.into_parts();
+    let (proof_stream, advice_map, store) = advice.into_parts();
 
     // The consumer's claim: the canonical 40-felt encoding. In a real protocol consumer these
     // fields are derived/held; here the test supplies the proof's own claim.
     let claim_advice: Vec<u64> = claim.to_elements().iter().map(Felt::as_canonical_u64).collect();
 
-    Ok(VerifierData {
-        initial_stack: alloc::vec![CLAIM_PTR],
+    VerifierData {
         claim_advice,
-        proof_stream: inputs.advice_stack.iter().map(Felt::as_canonical_u64).collect(),
-        store: inputs.store,
-        advice_map: inputs.advice_map,
-        claim_commitment: inputs.claim_commitment,
-    })
+        proof_stream: proof_stream.iter().map(Felt::as_canonical_u64).collect(),
+        store,
+        advice_map: advice_map.into_iter().map(|(key, value)| (key, value.to_vec())).collect(),
+        claim_commitment,
+    }
 }

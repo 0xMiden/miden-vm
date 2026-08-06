@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "blake3",
  "cc",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -619,15 +619,16 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "wincode",
 ]
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -637,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -948,6 +949,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "pin-project-lite"
@@ -1349,6 +1356,18 @@ checksum = "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
 dependencies = [
  "crypto-common",
  "ctutils",
+]
+
+[[package]]
+name = "wincode"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5d39d1a984eb7ae37afa348f058216d62a6d5f71640f4113a8114386c2a812a"
+dependencies = [
+ "pastey",
+ "proc-macro2",
+ "quote",
+ "thiserror",
 ]
 
 [[package]]

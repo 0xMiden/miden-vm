@@ -19,6 +19,14 @@ const CONJECTURED_BITS_PER_QUERY_FP = 193382
 # Cap on any reported security level: min(challenge-field bits, hash collision resistance).
 const MAX_SECURITY_LEVEL = 128
 
+# Offset of K in the P | K | I | O claim encoding.
+const KERNEL_COMMITMENT_OFFSET = 4
+
+const FELTS_PER_KERNEL_DIGEST = 4
+
+# Must match KernelDescriptor::MAX_NUM_PROCEDURES.
+const MAX_NUM_KERNEL_PROCEDURES = 255
+
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
 const RELATION_DIGEST_0 = 6228634522968454696
 const RELATION_DIGEST_1 = 9493741029039437490
@@ -48,23 +56,9 @@ proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
-#! Checks that the 40-felt claim region is word-aligned and below verifier-owned memory.
-#! Must run before the verifier writes to memory.
-#!
-#! Input:  [claim_ptr, ...]
-#! Output: [claim_ptr, ...]
-proc assert_valid_claim_region
-    # u32mod also validates that claim_ptr is a u32.
-    dup u32mod.4 assertz.err="claim_ptr must be word-aligned"
-
-    # Require [claim_ptr, claim_ptr + 40) to end before verifier memory.
-    dup add.40 exec.constants::verifier_memory_start
-    u32lte assert.err="claim memory region overlaps verifier-owned memory"
-end
-
 #! Computes the conjectured security level (in bits) attained by the given proof parameters.
 #!
-#! Evaluates the integer fixed-point formula `min((num_queries * C) >> 16 + query_pow_bits, 128)`.
+#! Evaluates `min(((num_queries * C) >> 16) + query_pow_bits, 128)` using integer fixed point.
 #! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
 #! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
 #!
@@ -74,7 +68,10 @@ end
 #!
 #! Inputs:  [num_queries, query_pow_bits, ...]
 #! Outputs: [level, ...]
-pub proc conjectured_security_level
+pub proc compute_conjectured_security_level(
+    num_queries: u32,
+    query_pow_bits: u32,
+) -> u32
     push.CONJECTURED_BITS_PER_QUERY_FP mul
     u32shr.16
     add
@@ -191,94 +188,101 @@ proc store_ace_registry_root
     dropw dropw
 end
 
-#! Verifies a STARK proof of the caller-staged execution claim and returns the deferred
-#! obligation the proof binds and the proof's transcript-bound security parameters.
+#! Materializes and authenticates the kernel witness named by the staged claim.
 #!
-#! The proof is consumed from the advice stack; request keys name this procedure's MAST root
+#! The digest list and its validated procedure count are stored for the kernel-ROM boundary check.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc materialize_kernel_witness
+    padw exec.constants::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+    # => [K, ...]
+    adv.push_mapvaln
+    adv_push
+    # => [num_kernel_felts, K, ...]   advice: [digest_0, .., digest_{n-1}]
+
+    u32assert.err="kernel witness length must fit in a u32"
+    dup u32mod.FELTS_PER_KERNEL_DIGEST
+    assertz.err="kernel witness length must be word-aligned"
+    div.FELTS_PER_KERNEL_DIGEST
+    dup u32lte.MAX_NUM_KERNEL_PROCEDURES
+    assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
+    # => [num_kernel_procedures, K, ...]
+
+    dup exec.constants::kernel_witness_ptr swap
+    exec.mem::pipe_words_to_memory
+    # The pipe computes an untagged hash; discard it and check the domain-tagged commitment below.
+    dropw dropw dropw drop
+    # => [num_kernel_procedures, K, ...]
+
+    dup exec.constants::num_kernel_procedures_ptr mem_store
+    exec.constants::kernel_witness_ptr
+    exec.claim::kernel_commitment
+    # => [K', K, ...]
+    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    # => [...]
+end
+
+#! Verifies a STARK proof of the execution claim named by the caller-provided commitment and
+#! returns the deferred obligation and transcript-bound security parameters.
+#!
+#! The claim preimage is fetched from the advice map under the caller-provided claim commitment,
+#! authenticated, and stored in verifier-owned memory. The proof is consumed from the advice
+#! stack; request keys name this procedure's MAST root
 #! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
 #! proof by content derives the identical root in-VM via `procref` of this procedure, computes
-#! `request_key(verifier_root, claim_commitment)` with `claim::request_key`, and moves the
-#! registered proof package onto the advice stack before calling it.
+#! `proof_request_key(verifier_root, claim_commitment)` with `sys::build_proof_request_key`, and
+#! moves the registered proof package onto the advice stack before calling it.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
 #! from the advice stack and stored in memory for the generic verifier, which enforces their
 #! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
 #! parameters it was not produced with. This procedure holds no security-estimate formula and
 #! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
-#! (e.g. with `conjectured_security_level`) under its own policy. An estimate or policy change
-#! therefore never moves this procedure's root - request keys and registered proof packages
-#! stay valid across such changes.
+#! (e.g. with `compute_conjectured_security_level`) under its own policy. An estimate or policy
+#! change therefore never moves this procedure's root - request keys and registered proof
+#! packages stay valid across such changes.
 #!
-#! The caller stores the claim as `P (+0) | K (+4) | I (+8) | O (+24)`. The complete 40-felt
-#! region must be below `constants::verifier_memory_start`.
+#! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
+#! commitment before using these values as AIR public inputs.
 #!
 #! The verifier fetches the kernel digest list from the advice map under K, copies it to
 #! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
 #! claim commitment and checks the kernel-ROM boundary against this list.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
-#! include it in its own statement.
+#! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
 #!
-#! Inputs:  [claim_ptr, ...]
+#! Inputs:  [CLAIM_COMMITMENT, ...]
 #! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #!
 #! Where:
-#! - claim_ptr is word-aligned; its 40-felt region ends at or before
-#!   `constants::verifier_memory_start`.
+#! - CLAIM_COMMITMENT is supplied by the caller and binds the advice-supplied claim preimage.
 #! - D is the deferred root bound by the verified statement.
 #! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
 #!   transcript-bound security parameters.
-pub proc verify_vm_proof
-    # Validate before load_security_params writes verifier memory.
-    exec.assert_valid_claim_region
+pub proc verify_vm_proof(claim_commitment: word) -> (
+    deferred_root: word,
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+)
+    # --- Authenticate execution claim -----------------------------------------------------------
 
-    # --- Load security parameters from advice stack ---
+    # Preserve the commitment until public inputs are absorbed after transcript initialization.
+    exec.constants::claim_commitment_ptr mem_storew_le
+    exec.constants::claim_ptr exec.claim::materialize_claim
+    # => [...]
+
+    # --- Prepare VM verifier state ---------------------------------------------------------------
 
     exec.load_security_params
-    # => [claim_ptr, ...]
-
-    # --- Materialize the kernel digest witness from the advice map, keyed by the claim's K ---
-
-    padw dup.4 add.4 mem_loadw_le
-    # => [K, claim_ptr, ...]
-    adv.push_mapval
-    adv_push
-    # => [num_kernel_digests, K, claim_ptr, ...]   advice: [digest_0, .., digest_{n-1}]
-
-    # The count must be bounded before the copy: it comes from advice and is only bound to K
-    # by the hash check, which runs after the writes.
-    u32assert.err="number of kernel procedure digests must fit in a u32"
-    dup u32lt.256 assert.err="number of kernel procedure digests exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
-
-    dup exec.constants::kernel_witness_ptr swap
-    # => [num_words = num_kernel_digests, write_ptr, num_kernel_digests, K, claim_ptr, ...]
-    exec.mem::pipe_words_to_memory
-    # The pipe's untagged hash state is unused: the binding check is the domain-tagged kernel
-    # commitment below.
-    # => [R0, R1, C, write_ptr', num_kernel_digests, K, claim_ptr, ...]
-    dropw dropw dropw drop
-    # => [num_kernel_digests, K, claim_ptr, ...]
-
-    dup exec.constants::kernel_witness_ptr
-    # => [kernel_ptr, num_kernel_digests, num_kernel_digests, K, claim_ptr, ...]
-    exec.claim::kernel_commitment
-    # => [K', num_kernel_digests, K, claim_ptr, ...]
-    movup.4 movdn.8
-    # => [K', K, num_kernel_digests, claim_ptr, ...]
-    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
-    # => [num_kernel_digests, claim_ptr, ...]
-
-    # --- Stage the boundary-inputs block from the claim region and advice ---
-
-    exec.constants::kernel_witness_ptr movup.2
-    # => [claim_ptr, kernel_ptr, num_kernel_digests, ...]
+    exec.materialize_kernel_witness
     exec.public_inputs::stage_boundary_inputs
-    # => [...]
-
     exec.load_air_context
-    # => [...]
 
-    # --- Load the digests of all dynamically invoked procedures --------------
+    # --- Verify ----------------------------------------------------------------------------------
 
     procref.deep_queries::compute_deep_composition_polynomial_queries
     procref.constraints_eval::execute_constraint_evaluation_check
@@ -287,12 +291,10 @@ pub proc verify_vm_proof
     procref.aux_trace::observe_aux_trace
     # => [D0, D1, D2, D3, D4]
 
-    # --- Call the core verification procedure from `core-lib` ------------------
-
     exec.verifier::verify
     # => [...]
 
-    # --- Return the deferred obligation and the transcript-bound security parameters ---
+    # --- Return result ---------------------------------------------------------------------------
 
     exec.constants::get_folding_pow_bits
     exec.constants::get_deep_pow_bits

@@ -138,8 +138,10 @@ end
 #! Output: [H, ...]
 #!
 #! Cycles:
-#! - even words: 54 cycles + 3 * words
-#! - odd words: 66 cycles + 3 * words
+#! - empty, zero domain: 86 cycles
+#! - empty, nonzero domain: 83 cycles
+#! - non-empty even words: 56 cycles + 3 * words
+#! - non-empty odd words: 68 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
 pub proc hash_words_with_domain
     # Move the domain past the address pair so we can reuse the standard hash_words control flow.
@@ -150,47 +152,58 @@ pub proc hash_words_with_domain
     # enforce `start_addr ≤ end_addr`
     dup.1 dup.1 u32assert2 u32gte assert
 
-    # figure out if the range is for an odd number of words (11 cycles)
-    dup.1 dup.1 sub div.4 is_odd
-    # => [is_odd, start_addr, end_addr, domain, ...]
-
-    # make the start/end range even (6 cycles)
-    movup.2 dup.1 mul.4 sub
-    # => [end_addr, is_odd, start_addr, domain, ...]
-
-    # move start_addr to the right stack position (1 cycle)
-    movup.2
-    # => [start_addr, end_addr, is_odd, domain, ...]
-
-    # prepare hasher state with capacity `[is_odd*4, domain, 0, 0]` (14 cycles)
-    dup.2 mul.4 push.0.0 movup.6 movup.3 padw padw
-    # => [R0=0w, R1=0w, C=[is_odd*4, domain, 0, 0], start_addr, end_addr, is_odd, ...]
-
-    # (4 + 3 * words cycles)
-    exec.absorb_double_words_from_memory
-    # => [R0', R1', C', end_addr, end_addr, is_odd, ...]
-
-    # (1 cycle)
-    movup.14
-    # => [is_odd, R0', R1', C', end_addr, end_addr, ...]
-
-    # handle the odd element, if any (12 cycles)
+    # Derive the word count and handle the canonical empty-input encoding separately.
+    dup.1 dup.1 sub div.4
+    # => [num_words, start_addr, end_addr, domain, ...]
+    dup eq.0
     if.true
-        # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both
-        # point to the last element. Load the last word (6 cycles)
-        dropw dup.9 mem_loadw_le
-        # => [W, C', end_addr, end_addr, ...]
+        # Reuse the element hasher's canonical empty-input path.
+        drop drop push.0 swap
+        # => [end_addr, num_elements=0, domain, ...]
+        exec.hash_elements_in_domain
+        # => [HASH, ...]
+    else
+        is_odd
+        # => [is_odd, start_addr, end_addr, domain, ...]
 
-        # set the padding and compute the permutation (5 cycles)
-        padw swapw exec.permute
+        # make the start/end range even (6 cycles)
+        movup.2 dup.1 mul.4 sub
+        # => [end_addr, is_odd, start_addr, domain, ...]
+
+        # move start_addr to the right stack position (1 cycle)
+        movup.2
+        # => [start_addr, end_addr, is_odd, domain, ...]
+
+        # prepare hasher state with capacity `[is_odd*4, domain, 0, 0]` (14 cycles)
+        dup.2 mul.4 push.0.0 movup.6 movup.3 padw padw
+        # => [R0=0w, R1=0w, C=[is_odd*4, domain, 0, 0], start_addr, end_addr, is_odd, ...]
+
+        # (4 + 3 * words cycles)
+        exec.absorb_double_words_from_memory
+        # => [R0', R1', C', end_addr, end_addr, is_odd, ...]
+
+        # (1 cycle)
+        movup.14
+        # => [is_odd, R0', R1', C', end_addr, end_addr, ...]
+
+        # handle the odd element, if any (12 cycles)
+        if.true
+            # start_addr and end_addr are equal after calling
+            # `absorb_double_words_from_memory`, and both point to the last element.
+            dropw dup.9 mem_loadw_le
+            # => [W, C', end_addr, end_addr, ...]
+
+            # set the padding and compute the permutation (5 cycles)
+            padw swapw exec.permute
+        end
+
+        exec.squeeze_digest
+        # => [HASH, end_addr, end_addr, ...]
+
+        # drop start_addr/end_addr (4 cycles)
+        movup.4 drop movup.4 drop
+        # => [HASH]
     end
-
-    exec.squeeze_digest
-    # => [HASH, end_addr, end_addr, ...]
-
-    # drop start_addr/end_addr (4 cycles)
-    movup.4 drop movup.4 drop
-    # => [HASH]
 end
 
 #! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
@@ -204,8 +217,9 @@ end
 #! Output: [H, ...]
 #!
 #! Cycles:
-#! - even words: 55 cycles + 3 * words
-#! - odd words: 67 cycles + 3 * words
+#! - empty: 87 cycles
+#! - non-empty even words: 57 cycles + 3 * words
+#! - non-empty odd words: 69 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
 pub proc hash_words
     push.0
@@ -229,7 +243,7 @@ end
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed.
+#! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - pad_inputs_flag is the flag which indicates whether the values which will be hashed should be
 #!   padded with zeros to the next multiple of 8.
 #! - R0, R1, C are three words representing the hasher state (R0 on top).
@@ -241,7 +255,9 @@ pub proc prepare_hasher_state
     swap
     # => [num_elements, ptr, pad_inputs_flag]
 
-    # get the number of double words
+    u32assert.err="num_elements must fit in a u32"
+
+    # Get the number of double words.
     u32divmod.8
     swap
     # => [num_elements/8, num_elements%8, ptr, pad_inputs_flag]
@@ -430,12 +446,12 @@ end
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed.
+#! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - HASH is the resulting hash of the provided memory values.
 #!
 #! Cycles:
-#! - If number of elements divides by 8: 52 cycles + 3 * words
-#! - Else: 185 cycles + 3 * words
+#! - If number of elements divides by 8: 55 cycles + 3 * words
+#! - Else: 188 cycles + 3 * words
 #! where `words` is the number of quads of input values.
 pub proc hash_elements
     # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
@@ -460,28 +476,30 @@ end
 #!
 #! Where:
 #! - ptr is the memory address of the first element to be hashed; must be word-aligned.
-#! - num_elements is the number of elements to be hashed.
+#! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - domain is the domain-separation tag placed in the second capacity element.
+#!
+#! For a nonzero domain, empty input is marked in the third capacity element before applying the
+#! permutation.
+#!
+#! Cycles:
+#! - empty, zero domain: 67 cycles
+#! - empty, nonzero domain: 64 cycles
+#! - non-empty and divisible by 8: 67 cycles + 3 * words
+#! - non-empty and not divisible by 8: 200 cycles + 3 * words
+#! where `words` is the number of four-element words in the input.
 pub proc hash_elements_in_domain
     # => [ptr, num_elements, domain]
-    swap u32divmod.8 swap
-    # => [num_elements/8, num_elements%8, ptr, domain]
+    push.0 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag=0, domain]
+    exec.prepare_hasher_state
+    # => [R0, R1, [num_elements%8, 0, 0, 0], ptr, end_pairs_addr, num_elements%8, domain]
 
-    # end address for the double-word absorption loop
-    mul.8 dup.2 add movup.2
-    # => [ptr, end_pairs_addr, num_elements%8, domain]
-
-    # capacity word = [num_elements%8, domain, 0, 0]
-    push.0.0 movup.5 dup.5
-    # => [num_elements%8, domain, 0, 0, ptr, end_pairs_addr, num_elements%8]
-
-    padw padw
+    # Move domain into the second capacity element.
+    movup.15 swap.10 drop
     # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 
-    # Empty input with a nonzero domain absorbs a ONE padding marker into the first rate slot
-    # before permuting, mirroring the native rule (without it, the empty hash would collide with
-    # the hash of eight zeros under the same domain). Empty means ptr == end_pairs_addr and
-    # num_elements%8 == 0.
+    # Empty means ptr == end_pairs_addr and num_elements%8 == 0.
     dup.14 eq.0
     # => [rem_is_zero, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
     dup.13 dup.15 eq
@@ -491,9 +509,10 @@ pub proc hash_elements_in_domain
     dup.10 eq.0 not and
     # => [empty_and_domain_nonzero, R0, R1, C, ptr, end_pairs_addr, num_elements%8]
     if.true
-        # set rate[0] = 1, apply one permutation, and squeeze
-        drop push.1
-        # => [R0 = (1, 0, 0, 0), R1, C, ptr, end_pairs_addr, num_elements%8]
+        # Mark empty input in the third capacity element. This lane is zero for every non-empty
+        # input, so the marker cannot be reproduced by a full rate block.
+        push.1 swap.11 drop
+        # => [R0, R1, C = (0, domain, 1, 0), ptr, end_pairs_addr, num_elements%8]
         hperm
         # => [R0', R1', C', ptr, end_pairs_addr, num_elements%8]
         exec.squeeze_digest
@@ -520,12 +539,12 @@ end
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed.
+#! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - HASH is the resulting hash of the provided memory values.
 #!
 #! Cycles:
-#! - If number of elements divides by 8: 52 cycles + 3 * words
-#! - Else: 185 cycles + 3 * words
+#! - If number of elements divides by 8: 55 cycles + 3 * words
+#! - Else: 188 cycles + 3 * words
 #! where `words` is the number of quads of input values.
 pub proc pad_and_hash_elements
     # push the 1 as the pad_inputs flag: this procedure should pad its inputs

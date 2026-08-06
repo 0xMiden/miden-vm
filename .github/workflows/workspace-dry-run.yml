@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Build core.masp
+      - name: Build MASM packages
         run: |
           make packages
 

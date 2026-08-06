@@ -13,12 +13,12 @@ use crate::{
 };
 
 mod claim;
-pub use claim::{
-    CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS, REQUEST_DOMAIN_TAG, claim_commitment,
-    request_key,
-};
+pub use claim::{CLAIM_DOMAIN_TAG, ExecutionClaim, NUM_CLAIM_ELEMENTS, claim_commitment};
 
 pub mod domain;
+
+mod request;
+pub use request::{PROOF_REQUEST_DOMAIN_TAG, proof_request_key};
 
 mod kernel;
 pub use kernel::{KERNEL_DOMAIN_TAG, KernelDescriptor, KernelError};

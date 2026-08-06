@@ -43,11 +43,10 @@ use crate::handlers::{
 
 /// The Miden core library, providing a set of optimized procedures for Miden programs.
 ///
-/// This library wraps a [`Package`] containing highly-optimized and battle-tested implementations
-/// of commonly-used primitives. When the core library is dynamically linked during assembly time,
-/// procedures can be called from any Miden program and are serialized as 32 bytes, reducing the
-/// amount of code that needs to be shared between parties for proving and verifying program
-/// execution.
+/// This library wraps the `miden-core` [`Package`] and its `miden-precompiles` runtime dependency.
+/// When the core library is dynamically linked during assembly time, procedures can be called from
+/// any Miden program and are serialized as 32 bytes, reducing the amount of code that needs to be
+/// shared between parties for proving and verifying program execution.
 ///
 /// # Contents
 ///
@@ -71,9 +70,10 @@ use crate::handlers::{
 /// use miden_core_lib::CoreLibrary;
 ///
 /// let core_lib = CoreLibrary::default();
-/// let assembler = Assembler::new(source_manager)
-///     .with_package(core_lib.package(), Linkage::Dynamic)
-///     .unwrap();
+/// let mut assembler = Assembler::new(source_manager);
+/// for package in core_lib.packages() {
+///     assembler.link_package(package, Linkage::Dynamic).unwrap();
+/// }
 /// ```
 ///
 /// For program execution, you'll also need to register the event handlers:
@@ -91,18 +91,22 @@ use crate::handlers::{
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
-pub struct CoreLibrary(Arc<Package>);
+pub struct CoreLibrary {
+    core_package: Arc<Package>,
+    precompiles_package: Arc<Package>,
+    mast_forest: Arc<MastForest>,
+}
 
 impl AsRef<Package> for CoreLibrary {
     fn as_ref(&self) -> &Package {
-        &self.0
+        &self.core_package
     }
 }
 
 impl From<&CoreLibrary> for HostLibrary {
     fn from(core_lib: &CoreLibrary) -> Self {
         Self {
-            mast_forest: core_lib.mast_forest().clone(),
+            mast_forest: Arc::clone(core_lib.mast_forest()),
             package_debug_info: Ok(None),
             handlers: core_lib.handlers(),
         }
@@ -114,25 +118,40 @@ impl CoreLibrary {
     pub const SERIALIZED: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-core.masp"));
 
-    /// Returns a reference to the [MastForest] underlying the Miden core library.
+    /// Serialized representation of the `miden-precompiles` package used by the core library.
+    pub const PRECOMPILES_SERIALIZED: &'static [u8] =
+        include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-precompiles.masp"));
+
+    /// Returns a reference to the merged [MastForest] used to execute the core library and its
+    /// precompiles dependency.
     pub fn mast_forest(&self) -> &Arc<MastForest> {
-        self.0.mast_forest()
+        &self.mast_forest
     }
 
-    /// Returns a reference to the underlying [`Arc<Package>`].
+    /// Returns the `miden-core` package.
     pub fn package(&self) -> Arc<Package> {
-        self.0.clone()
+        Arc::clone(&self.core_package)
+    }
+
+    /// Returns the `miden-precompiles` package required by `miden-core`.
+    pub fn precompiles_package(&self) -> Arc<Package> {
+        Arc::clone(&self.precompiles_package)
+    }
+
+    /// Returns the core package followed by its precompiles dependency.
+    pub fn packages(&self) -> [Arc<Package>; 2] {
+        [self.package(), self.precompiles_package()]
     }
 
     /// Returns the MAST root of `sys::vm::verify_vm_proof` — the verifier identity under
     /// which recursive proofs are content-addressed.
     ///
     /// Operators pass this root when registering a proof package in the advice map
-    /// (`RecursiveVerifierInputs::into_request_package`). A consumer derives the identical value
+    /// (`RecursiveVerifierInputs::for_request`). A consumer derives the identical value
     /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
     /// agree without a shared constant; consumers key their proof fetches by this root.
     pub fn recursive_verifier_root(&self) -> Word {
-        self.0
+        self.core_package
             .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
             .expect("verify_vm_proof is exported from the core library")
     }
@@ -167,9 +186,25 @@ impl CoreLibrary {
 impl Default for CoreLibrary {
     fn default() -> Self {
         static CORELIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
-            let contents = Package::read_from_bytes_trusted(CoreLibrary::SERIALIZED)
-                .expect("failed to read core package!");
-            CoreLibrary(Arc::new(contents))
+            let core_package = Arc::new(
+                Package::read_from_bytes_trusted(CoreLibrary::SERIALIZED)
+                    .expect("failed to read core package!"),
+            );
+            let precompiles_package = Arc::new(
+                Package::read_from_bytes_trusted(CoreLibrary::PRECOMPILES_SERIALIZED)
+                    .expect("failed to read precompiles package!"),
+            );
+            let (mast_forest, _) = MastForest::merge([
+                core_package.mast_forest().as_ref(),
+                precompiles_package.mast_forest().as_ref(),
+            ])
+            .expect("failed to merge core and precompiles MAST forests");
+
+            CoreLibrary {
+                core_package,
+                precompiles_package,
+                mast_forest: Arc::new(mast_forest),
+            }
         });
         CORELIB.clone()
     }
@@ -185,22 +220,24 @@ mod tests {
     #[test]
     fn core_package_version_matches_crate_version() {
         let core_lib = CoreLibrary::default();
-        let package = core_lib.package();
         let crate_version = env!("CARGO_PKG_VERSION")
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
-        assert_eq!(
-            &package.version, &crate_version,
-            "embedded core package version should track the miden-core-lib crate version",
-        );
+        for package in core_lib.packages() {
+            assert_eq!(
+                &package.version, &crate_version,
+                "embedded package {} should track the miden-core-lib crate version",
+                package.name,
+            );
+        }
     }
 
     #[test]
     fn test_compile() {
         let core_lib = CoreLibrary::default();
         let exists = core_lib
-            .0
+            .core_package
             .get_procedure_root_by_path("::miden::core::math::u64::overflowing_add")
             .is_some();
 

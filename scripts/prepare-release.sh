@@ -43,6 +43,7 @@ else
         "miden-vm-aarch64-apple-darwin"
         "miden-vm-x86_64-unknown-linux-gnu"
         "core.masp"
+        "precompiles.masp"
     )
 
     missing=0

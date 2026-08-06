@@ -26,27 +26,13 @@ use miden_lifted_stark::{
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
+use miden_serde_utils::deserialize_schema_exact;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
-use wincode::io::Reader as _;
 
 use super::preprocessed_cache;
 
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
-/// Deserializes a serde-backed value and rejects trailing bytes.
-fn deserialize_serde_exact<'de, T, C>(mut bytes: &'de [u8], _: C) -> wincode::ReadResult<T>
-where
-    C: wincode::config::Config,
-    SerdeCompat<T>: wincode::SchemaRead<'de, C, Dst = T>,
-{
-    let value = <SerdeCompat<T> as wincode::SchemaRead<'de, C>>::get(bytes.by_ref())?;
-    if bytes.is_empty() {
-        Ok(value)
-    } else {
-        Err(wincode::error::trailing_bytes())
-    }
-}
 
 use crate::{
     ProveError,
@@ -441,7 +427,7 @@ where
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof = deserialize_serde_exact::<StarkProofData<Felt, QuadFelt, SC>, _>(
+    let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
         proof_bytes,
         proof_encoding_config,
     )?;
