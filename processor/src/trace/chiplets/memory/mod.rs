@@ -165,7 +165,7 @@ impl Memory {
     ///
     /// # Errors
     /// - Returns an error if the address is equal or greater than 2^32.
-    /// - Returns an error if the same address is accessed more than once in the same clock cycle.
+    /// - Returns an error if the addressed word was previously written in the same clock cycle.
     pub fn read(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
             .as_canonical_u64()
@@ -183,7 +183,7 @@ impl Memory {
     /// # Errors
     /// - Returns an error if the address is equal or greater than 2^32.
     /// - Returns an error if the address is not aligned to a word boundary.
-    /// - Returns an error if the same address is accessed more than once in the same clock cycle.
+    /// - Returns an error if the addressed word was previously written in the same clock cycle.
     pub fn read_word(
         &mut self,
         ctx: ContextId,
