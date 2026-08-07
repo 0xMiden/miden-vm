@@ -9,12 +9,12 @@
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 #### Features
 
-- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts.
-- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3538](https://github.com/0xMiden/miden-vm/issues/3538)).
+- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 
 #### Changes
 
-- [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3538](https://github.com/0xMiden/miden-vm/issues/3538)).
+- [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 
 ## v0.29.0 (2026-08-04)
 
