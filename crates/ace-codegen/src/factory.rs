@@ -168,12 +168,12 @@ where
         Ok(Poseidon2::merge(&[shuffle_commitment, self.common_commitment]))
     }
 
-    /// Compute registry leaves for a batch of proof orders, hashing [`LEAF_LANES`]
+    /// Compute registry leaves for a batch of proof orders, hashing `LEAF_LANES`
     /// orders per packed Poseidon2 permutation.
     ///
     /// Produces exactly the leaves [`Self::leaf_for_order`] produces, in order — the
     /// shuffle sections of every proof order have identical length, which is what makes
-    /// lane-lockstep absorption sound. Chunks shorter than [`LEAF_LANES`] (the batch
+    /// lane-lockstep absorption sound. Chunks shorter than `LEAF_LANES` (the batch
     /// tail) pad unused lanes with the last order and discard the duplicates, so the
     /// packed path is the only code path. Equality with the scalar path is pinned by
     /// `packed_leaves_match_the_scalar_path` and, wherever a registry is minted, by the
@@ -202,6 +202,12 @@ where
                 packed.as_slice_mut().fill(self.constants_state[e]);
                 packed
             });
+            // Rate alignment is established at construction; assert rather than debug_assert
+            // so a miscount cannot silently truncate a hashed block in a release build.
+            assert!(
+                scratch.streams[0].len().is_multiple_of(RATE_WIDTH),
+                "shuffle streams must be rate-aligned"
+            );
             let blocks = scratch.streams[0].len() / RATE_WIDTH;
             for block in 0..blocks {
                 for i in 0..RATE_WIDTH {

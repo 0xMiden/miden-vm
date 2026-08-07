@@ -4,6 +4,7 @@ use miden_ace_codegen::{
     AceConfig, AceError, FactoredCircuitFactory, LayoutKind, ShuffleEncodeBuffer,
 };
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_crypto::merkle::MerklePath;
 
 use super::multi_air::build_factored_multi_air_ace_circuit;
 use crate::{MIDEN_AIR_COUNT, ProofOrder};
@@ -97,7 +98,7 @@ impl RecursiveAceCircuitFactory {
     /// Only the shuffle section is hashed live (resuming from the cached post-constants
     /// sponge state); the common-section digest is reused. The resulting commitments are
     /// definitionally equal to hashing the full stream segments, which
-    /// `recursive_ace_circuit_factors_into_shuffle_and_common_segments` pins per order.
+    /// `recursive_ace_factory_and_factoring_match_the_one_shot_builder` pins per order.
     pub fn circuit_for_order(&self, order: &ProofOrder) -> Result<RecursiveAceCircuit, AceError> {
         let circuit = self.inner.circuit_for_order(&Self::order_indices(order))?;
         Ok(RecursiveAceCircuit {
@@ -113,6 +114,70 @@ impl RecursiveAceCircuitFactory {
     }
 }
 
+/// The process-wide factory behind the registry-serving path. The registry tree cache in
+/// `config` initialises from this same factory, so served entries and the cached tree
+/// share one factored composition.
+#[cfg(feature = "std")]
+pub(crate) fn shared_recursive_factory() -> &'static RecursiveAceCircuitFactory {
+    static FACTORY: std::sync::OnceLock<RecursiveAceCircuitFactory> = std::sync::OnceLock::new();
+    FACTORY.get_or_init(|| {
+        RecursiveAceCircuitFactory::new().expect("recursive-verifier ACE composition must build")
+    })
+}
+
+/// One proof order's complete registry entry: the encoded circuit the verifier evaluates
+/// and the leaf-plus-path that authenticates it in the registry tree.
+///
+/// Fields are private so an entry only exists once the constructor's leaf-equals-commitment
+/// check has passed; consume it with [`Self::into_parts`].
+pub struct RecursiveRegistryEntry {
+    /// Encoded circuit for the order.
+    circuit: RecursiveAceCircuit,
+    /// Registry leaf: the circuit's commitment.
+    leaf: Word,
+    /// Authentication path from the leaf to the registry root.
+    path: MerklePath,
+}
+
+impl RecursiveRegistryEntry {
+    /// Consumes the entry into `(circuit, leaf, path)`.
+    pub fn into_parts(self) -> (RecursiveAceCircuit, Word, MerklePath) {
+        (self.circuit, self.leaf, self.path)
+    }
+}
+
+/// Derives circuit, leaf, and path for one proof order from a single factory.
+///
+/// `std` uses the process-wide factory and the cached registry tree; without `std` one
+/// factory and one tree are built for this call and serve both outputs, instead of one
+/// build for the path and another for the circuit.
+pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryEntry, AceError> {
+    #[cfg(feature = "std")]
+    {
+        let circuit = shared_recursive_factory().circuit_for_order(order)?;
+        let (leaf, path) = crate::config::ace_registry_path(order.tag())
+            .expect("proof-order tags always address registry slots");
+        assert_eq!(
+            circuit.commitment, leaf,
+            "ACE registry tree drifted from the factory's circuits"
+        );
+        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let factory = RecursiveAceCircuitFactory::new()?;
+        let circuit = factory.circuit_for_order(order)?;
+        let tree = crate::config::build_miden_vm_ace_registry_with(&factory);
+        let (leaf, path) = crate::config::registry_path_in(&tree, order.tag())
+            .expect("proof-order tags always address registry slots");
+        assert_eq!(
+            circuit.commitment, leaf,
+            "ACE registry tree drifted from the factory's circuits"
+        );
+        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+    }
+}
+
 /// Builds and encodes the recursive-verifier ACE circuit for one proof order.
 ///
 /// Callers that need several orders should hold a [`RecursiveAceCircuitFactory`] instead;
@@ -121,7 +186,7 @@ impl RecursiveAceCircuitFactory {
 /// This path bypasses the factory and hashes both stream segments
 /// from scratch, which is what makes it an independent oracle for the factory's cached
 /// prefix state in
-/// `recursive_ace_factory_matches_the_one_shot_builder_for_every_order`. Reimplementing it
+/// `recursive_ace_factory_and_factoring_match_the_one_shot_builder`. Reimplementing it
 /// in terms of the factory would turn that test into a tautology and retire the only guard
 /// on the sponge-resumption arithmetic.
 pub fn build_recursive_verifier_ace_circuit(

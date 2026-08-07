@@ -180,11 +180,16 @@ const _: () = assert!(
 /// tree. Padding slots (tags at or above [`PROOF_ORDER_COUNT`]) resolve like any other slot;
 /// the MASM verifier's `assert_valid_order_tag` is what keeps them from being opened.
 pub fn ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
-    let index = NodeIndex::new(ACE_CIRCUIT_REGISTRY_DEPTH as u8, u64::from(tag)).ok()?;
     #[cfg(feature = "std")]
     let tree = miden_vm_ace_registry();
     #[cfg(not(feature = "std"))]
-    let tree = build_miden_vm_ace_registry();
+    let tree = &build_miden_vm_ace_registry();
+    registry_path_in(tree, tag)
+}
+
+/// Leaf and path for `tag` in a caller-held registry tree.
+pub(crate) fn registry_path_in(tree: &MerkleTree, tag: u32) -> Option<(Word, MerklePath)> {
+    let index = NodeIndex::new(ACE_CIRCUIT_REGISTRY_DEPTH as u8, u64::from(tag)).ok()?;
     let leaf = tree.get_node(index).ok()?;
     let path = tree.get_path(index).ok()?;
     Some((leaf, path))
@@ -199,16 +204,26 @@ pub fn ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
 #[cfg(feature = "std")]
 fn miden_vm_ace_registry() -> &'static MerkleTree {
     static REGISTRY: std::sync::OnceLock<MerkleTree> = std::sync::OnceLock::new();
-    REGISTRY.get_or_init(build_miden_vm_ace_registry)
+    REGISTRY
+        .get_or_init(|| build_miden_vm_ace_registry_with(crate::ace::shared_recursive_factory()))
 }
 
 /// Rebuilds the Miden VM's eight-leaf ACE registry and authenticates it against the protocol root.
 ///
 /// `std` caches this tree process-wide; `no_std` callers rebuild it on demand so recursive advice
 /// generation remains available without global state or synchronization support.
+#[cfg(not(feature = "std"))]
 fn build_miden_vm_ace_registry() -> MerkleTree {
     let factory = crate::ace::RecursiveAceCircuitFactory::new()
         .expect("recursive-verifier ACE composition must build");
+    build_miden_vm_ace_registry_with(&factory)
+}
+
+/// Builds the eight-leaf registry from an existing factory and authenticates it against
+/// the protocol root, so callers holding a factory pay no second composition build.
+pub(crate) fn build_miden_vm_ace_registry_with(
+    factory: &crate::ace::RecursiveAceCircuitFactory,
+) -> MerkleTree {
     let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
     let mut leaves = vec![miden_ace_codegen::padding_leaf(); ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
     for order in ProofOrder::variants() {

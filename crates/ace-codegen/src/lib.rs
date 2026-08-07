@@ -77,7 +77,7 @@ pub use crate::{
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,
     factored::ShuffleEncodeBuffer,
-    factory::{FactoredCircuitFactory, FactoredEncodedCircuit, LEAF_LANES, PackedLeafScratch},
+    factory::{FactoredCircuitFactory, FactoredEncodedCircuit, PackedLeafScratch},
     layout::{InputCounts, InputKey, InputLayout},
     pipeline::{
         AceArtifacts, AceConfig, FactoredMultiAirCircuit, LayoutKind, build_ace_circuit_for_air,

@@ -340,7 +340,7 @@ mod tests {
     fn registry_layout_matches_the_chiplet_count() {
         assert_eq!(PVM_ORDER_COUNT, 3_628_800);
         assert_eq!(PVM_ACE_REGISTRY_DEPTH, 22);
-        assert_eq!(PVM_REGISTRY_LAYOUT.subtree_leaves(), 1024);
+        assert_eq!(PVM_REGISTRY_LAYOUT.leaves_per_subtree(), 1024);
         assert_eq!(PVM_REGISTRY_LAYOUT.row_len(), 4096);
     }
 

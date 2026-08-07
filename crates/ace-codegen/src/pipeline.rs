@@ -290,6 +290,9 @@ fn reemit_air_root(
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
     debug_assert_eq!(source.root().index() + 1, source.nodes.len());
+    // The right operand is `Mul(q, v)` over quotient inputs, which AIR constraints cannot
+    // reference. It is therefore neither equal nor structurally related to the accumulator,
+    // so none of `DagBuilder::sub`'s simplifications can remove the final `Sub` node.
     let NodeKind::Sub(accumulator, quotient_binding) = source.nodes[source.root().index()] else {
         unreachable!("verifier DAGs always emit an accumulator - q*v root")
     };

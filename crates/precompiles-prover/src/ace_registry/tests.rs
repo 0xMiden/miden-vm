@@ -1,6 +1,6 @@
 use miden_ace_codegen::{ShuffleEncodeBuffer, order_tag, padding_leaf};
 use miden_core::{
-    Felt, Word,
+    Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_lifted_air::MultiAir;
@@ -10,10 +10,6 @@ use crate::{
     ace::PVM_REGISTRY_LAYOUT,
     session::{ChipletMultiAir, NUM_CHIPLETS},
 };
-
-fn root() -> Word {
-    Word::new(PVM_ACE_REGISTRY_ROOT.map(Felt::new_unchecked))
-}
 
 /// The registry does not include statement-level assertions, so each protocol version pins their
 /// result on a fixed, non-zero fixture independently of the implementation helpers.
@@ -42,25 +38,32 @@ fn external_assertion_matches_the_protocol_version() {
     assert_eq!(actual.as_slice(), &[expected]);
 }
 
-/// Exercise the deployed serving path with a non-involutive order. The generic registry
-/// tests cover every path in a materialised toy tree; the release drift gate checks all
-/// `10!` PVM leaves.
+/// Exercise the deployed serving path in distinct active subtrees, including a
+/// non-involutive order. The generic registry tests cover every path in a materialised
+/// toy tree; the release drift gate checks all `10!` PVM leaves.
 #[test]
-fn registry_serves_a_verified_path_for_a_nontrivial_order() {
+fn registry_serves_verified_paths_from_distinct_active_subtrees() {
     let factory = factory();
-    let expected_root = root();
+    let expected_root = registry_root();
     let mut buffer = ShuffleEncodeBuffer::new();
-    let order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
-    let tag = order_tag(&order);
+    let orders = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]];
+    let tags = orders.map(|order| order_tag(&order));
+    assert_ne!(
+        tags[0] as usize / PVM_REGISTRY_LAYOUT.leaves_per_subtree(),
+        tags[1] as usize / PVM_REGISTRY_LAYOUT.leaves_per_subtree(),
+        "fixtures must exercise distinct active subtrees"
+    );
 
-    let (leaf, path) = pvm_ace_registry_path(tag).expect("tag addresses a slot");
-    let assembled = factory.circuit_for_order(&order).expect("assembled circuit");
-    assert_eq!(leaf, assembled.commitment, "served leaf diverges at tag {tag}");
-    let fast = factory.leaf_for_order(&order, &mut buffer).expect("encode-only leaf");
-    assert_eq!(fast, leaf, "encode-only leaf diverges at tag {tag}");
+    for (order, tag) in orders.into_iter().zip(tags) {
+        let (leaf, path) = pvm_ace_registry_path(tag).expect("tag addresses a slot");
+        let assembled = factory.circuit_for_order(&order).expect("assembled circuit");
+        assert_eq!(leaf, assembled.commitment, "served leaf diverges at tag {tag}");
+        let fast = factory.leaf_for_order(&order, &mut buffer).expect("encode-only leaf");
+        assert_eq!(fast, leaf, "encode-only leaf diverges at tag {tag}");
 
-    let computed = path.compute_root(u64::from(tag), leaf).expect("path root computes");
-    assert_eq!(computed, expected_root, "path at tag {tag} does not verify");
+        let computed = path.compute_root(u64::from(tag), leaf).expect("path root computes");
+        assert_eq!(computed, expected_root, "path at tag {tag} does not verify");
+    }
 }
 
 /// Padding slots resolve to the constant padding leaf and verify against the root;
@@ -71,7 +74,7 @@ fn registry_serves_padding_slots_and_rejects_out_of_range_tags() {
     let (leaf, path) = pvm_ace_registry_path(padding_tag).expect("padding slot resolves");
     assert_eq!(leaf, padding_leaf(), "padding slot must hold the padding leaf");
     let computed = path.compute_root(u64::from(padding_tag), leaf).expect("path root computes");
-    assert_eq!(computed, root(), "padding path does not verify");
+    assert_eq!(computed, registry_root(), "padding path does not verify");
 
     let last_tag = (PVM_REGISTRY_LAYOUT.leaf_count() - 1) as u32;
     assert!(pvm_ace_registry_path(last_tag).is_some(), "last slot resolves");
@@ -85,7 +88,7 @@ fn registry_serves_padding_slots_and_rejects_out_of_range_tags() {
 /// root — a hand-checkable binding, independent of the registry build.
 #[test]
 fn relation_digest_matches_the_checked_in_root() {
-    let expected = relation_digest_for_root(&root());
+    let expected = relation_digest_for_root(&registry_root());
     assert_eq!(
         PVM_RELATION_DIGEST.map(Felt::new_unchecked),
         expected,
@@ -97,4 +100,34 @@ fn relation_digest_matches_the_checked_in_root() {
         expected,
         "production configs must use the generated PVM registry digest"
     );
+}
+
+/// Pointer identity confirms that repeated lookups return the same cached allocation.
+#[test]
+fn active_subtree_lookups_reuse_cached_allocation() {
+    let first = cached_leaves_for_subtree(399);
+    let second = cached_leaves_for_subtree(399);
+    assert!(
+        core::ptr::eq(first, second),
+        "repeat active-subtree lookups must return the cached slice"
+    );
+    assert_eq!(first.len(), PVM_REGISTRY_LAYOUT.leaves_per_subtree());
+}
+
+/// All fully padded subtrees share one vector; padding indices are structurally outside
+/// the active cache's range, so they can neither recompute leaves nor occupy entries.
+#[test]
+fn padding_subtrees_share_one_vector() {
+    let boundary = PVM_REGISTRY_LAYOUT
+        .order_count()
+        .div_ceil(PVM_REGISTRY_LAYOUT.leaves_per_subtree());
+    assert_eq!(boundary, 3_544, "10! spans 3,543 full subtrees plus the 768-leaf boundary");
+
+    let first_padding = cached_leaves_for_subtree(boundary);
+    let last_slot = cached_leaves_for_subtree(PVM_REGISTRY_LAYOUT.row_len() - 1);
+    assert!(
+        core::ptr::eq(first_padding, last_slot),
+        "every fully padded subtree must resolve to the shared vector"
+    );
+    assert_eq!(first_padding[0], padding_leaf(), "the shared vector holds padding leaves");
 }

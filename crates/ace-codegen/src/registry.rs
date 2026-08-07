@@ -186,7 +186,7 @@ impl RegistryLayout {
     }
 
     /// Leaves under one row node, i.e. the work one lookup recomputes.
-    pub const fn subtree_leaves(&self) -> usize {
+    pub const fn leaves_per_subtree(&self) -> usize {
         1 << (self.tree_depth() - self.row_depth)
     }
 }
@@ -209,7 +209,7 @@ where
     EF: ExtensionField<Felt>,
 {
     let start = subtree_start(layout, subtree_index)?;
-    let realizable = layout.order_count().saturating_sub(start).min(layout.subtree_leaves());
+    let realizable = layout.order_count().saturating_sub(start).min(layout.leaves_per_subtree());
     let orders: Vec<Vec<usize>> = (0..realizable)
         .map(|offset| {
             order_from_tag((start + offset) as u32, layout.num_airs())
@@ -218,11 +218,11 @@ where
         .collect();
     let order_refs: Vec<&[usize]> = orders.iter().map(Vec::as_slice).collect();
 
-    let mut leaves = Vec::with_capacity(layout.subtree_leaves());
+    let mut leaves = Vec::with_capacity(layout.leaves_per_subtree());
     if !order_refs.is_empty() {
         factory.leaves_for_orders(&order_refs, scratch, &mut leaves)?;
     }
-    leaves.resize(layout.subtree_leaves(), padding_leaf());
+    leaves.resize(layout.leaves_per_subtree(), padding_leaf());
     Ok(leaves)
 }
 
@@ -235,11 +235,11 @@ fn subtree_start(layout: &RegistryLayout, subtree_index: usize) -> Result<usize,
             ),
         });
     }
-    subtree_index
-        .checked_mul(layout.subtree_leaves())
-        .ok_or_else(|| AceError::InvalidInputLayout {
+    subtree_index.checked_mul(layout.leaves_per_subtree()).ok_or_else(|| {
+        AceError::InvalidInputLayout {
             message: "registry subtree offset overflowed".into(),
-        })
+        }
+    })
 }
 
 /// Fold a node row up to the tree root.
@@ -317,7 +317,7 @@ pub fn path_in_verified_tree(
         });
     }
 
-    let subtree_index = tag as usize / layout.subtree_leaves();
+    let subtree_index = tag as usize / layout.leaves_per_subtree();
     assert_eq!(
         subtree.root(),
         pyramid[layout.row_depth()][subtree_index],
@@ -327,7 +327,7 @@ pub fn path_in_verified_tree(
 
     let index = NodeIndex::new(
         (layout.tree_depth() - layout.row_depth()) as u8,
-        (tag as usize % layout.subtree_leaves()) as u64,
+        (tag as usize % layout.leaves_per_subtree()) as u64,
     )
     .map_err(|_| AceError::InvalidInputLayout {
         message: "registry tag does not fit the subtree".into(),
@@ -376,12 +376,12 @@ mod tests {
         assert_eq!(layout.tree_depth(), 22);
         assert_eq!(layout.leaf_count(), 1 << 22);
         assert_eq!(layout.row_len(), 4096);
-        assert_eq!(layout.subtree_leaves(), 1024);
+        assert_eq!(layout.leaves_per_subtree(), 1024);
 
         // row_depth = 0 degenerates to a single whole-tree rebuild per lookup.
         let whole = RegistryLayout::new(3, 0).expect("valid layout");
         assert_eq!(whole.row_len(), 1);
-        assert_eq!(whole.subtree_leaves(), whole.leaf_count());
+        assert_eq!(whole.leaves_per_subtree(), whole.leaf_count());
 
         assert!(RegistryLayout::new(3, 3).is_none(), "row must sit above the leaves");
         assert!(RegistryLayout::new(3, 4).is_none(), "row cannot sit below the leaves");
@@ -444,9 +444,9 @@ mod tests {
         let pyramid = verify_row(&layout, &row, tree.root(), "toy row must authenticate");
 
         for tag in 0..layout.leaf_count() {
-            let subtree_index = tag / layout.subtree_leaves();
-            let start = subtree_index * layout.subtree_leaves();
-            let subtree = MerkleTree::new(&leaves[start..start + layout.subtree_leaves()])
+            let subtree_index = tag / layout.leaves_per_subtree();
+            let start = subtree_index * layout.leaves_per_subtree();
+            let subtree = MerkleTree::new(&leaves[start..start + layout.leaves_per_subtree()])
                 .expect("complete subtree");
             let (leaf, path) =
                 path_in_verified_tree(&layout, &pyramid, &subtree, tag as u32, "toy path")
@@ -460,7 +460,7 @@ mod tests {
         }
 
         let subtree =
-            MerkleTree::new(&leaves[..layout.subtree_leaves()]).expect("complete subtree");
+            MerkleTree::new(&leaves[..layout.leaves_per_subtree()]).expect("complete subtree");
         assert!(
             path_in_verified_tree(
                 &layout,

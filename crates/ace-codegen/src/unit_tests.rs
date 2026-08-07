@@ -396,3 +396,23 @@ fn ace_encoding_rejects_non_final_root() {
         "expected non-final root layout error, got {err:?}"
     );
 }
+
+/// A constant-zero left operand still produces a `Sub` when the right operand is a
+/// non-constant product. This pins the degenerate accumulator case of the root invariant
+/// documented at `reemit_air_root`.
+#[test]
+fn sub_interns_a_real_root_for_a_constant_left_operand() {
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let zero = builder.constant(QuadFelt::ZERO);
+    let q = builder.input(InputKey::Public(0));
+    let v = builder.input(InputKey::Public(1));
+    let qv = builder.mul(q, v);
+    let root = builder.sub(zero, qv);
+    let dag = builder.build(root);
+
+    assert_eq!(dag.root(), root, "the subtraction must be the DAG root");
+    assert!(
+        matches!(dag.nodes[root.index()], crate::dag::NodeKind::Sub(a, b) if a == zero && b == qv),
+        "a constant left operand must not rewrite the root away from Sub"
+    );
+}

@@ -856,7 +856,7 @@ fn factored_circuits_match_unfactored_beyond_three_airs() {
 #[test]
 fn packed_leaves_match_the_scalar_path() {
     use crate::{
-        FactoredCircuitFactory, LEAF_LANES, PackedLeafScratch, ShuffleEncodeBuffer,
+        FactoredCircuitFactory, PackedLeafScratch, ShuffleEncodeBuffer, factory::LEAF_LANES,
         pipeline::build_factored_multi_air_ace_circuit,
     };
 

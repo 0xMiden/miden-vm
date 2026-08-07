@@ -32,6 +32,8 @@ use crate::{
 
 const DATA_PATH: &str = "src/ace_registry/data.rs";
 
+/// Whether [`run`] re-mints the committed artifacts (`Write`) or byte-compares a freshly
+/// built set against them (`Check`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Check,
@@ -102,7 +104,7 @@ fn compute(mode: Mode) -> Result<Computed, String> {
                     subtree_leaves(&factory, &PVM_REGISTRY_LAYOUT, subtree_index, packed_scratch)
                         .map_err(|e| format!("{e}"))?;
 
-                let start = subtree_index * PVM_REGISTRY_LAYOUT.subtree_leaves();
+                let start = subtree_index * PVM_REGISTRY_LAYOUT.leaves_per_subtree();
                 for (offset, leaf) in leaves.iter().enumerate() {
                     let tag = (start + offset) as u32;
                     let Some(order) = order_from_tag(tag, PVM_REGISTRY_LAYOUT.num_airs()) else {

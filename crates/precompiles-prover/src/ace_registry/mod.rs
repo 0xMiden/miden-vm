@@ -10,6 +10,8 @@
 //! against the root, and each lookup rebuilds one 1024-leaf subtree and splices its path
 //! with the nodes above that row.
 
+#[cfg(any(test, feature = "std"))]
+use alloc::vec;
 use alloc::vec::Vec;
 #[cfg(any(test, feature = "std"))]
 use std::sync::OnceLock;
@@ -52,26 +54,26 @@ pub(crate) fn relation_digest_for_root(root: &Word) -> [Felt; 4] {
     miden_air::config::relation_digest(PVM_PROTOCOL_ID, root)
 }
 
-#[cfg(any(test, feature = "std"))]
 /// How to react to a registry-constant mismatch, appended to the panic messages raised
 /// by the generic authentication checks.
+#[cfg(any(test, feature = "std"))]
 const MISMATCH_HINT: &str = "If this protocol change is intentional, run \
      `make regenerate-pvm-registry` and record the break; otherwise inspect the unexpected \
      registry drift before updating constants";
 
-#[cfg(any(test, feature = "std"))]
 /// Authentication data for one PVM registry slot: its leaf and Merkle path.
 ///
 /// Returns `None` when `tag` does not address a slot of the registry tree. Padding slots
 /// (tags at or above `PVM_ORDER_COUNT`) resolve like any other slot. A verifier must reject
 /// those tags before treating the leaf as a circuit commitment.
+#[cfg(any(test, feature = "std"))]
 pub fn pvm_ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
     if (tag as usize) >= PVM_REGISTRY_LAYOUT.leaf_count() {
         return None;
     }
-    let subtree_index = tag as usize / PVM_REGISTRY_LAYOUT.subtree_leaves();
-    let leaves = leaves_for_subtree(subtree_index);
-    let subtree = MerkleTree::new(&leaves).expect("subtree has power-of-two leaves");
+    let subtree_index = tag as usize / PVM_REGISTRY_LAYOUT.leaves_per_subtree();
+    let leaves = cached_leaves_for_subtree(subtree_index);
+    let subtree = MerkleTree::new(leaves).expect("subtree has power-of-two leaves");
     Some(
         path_in_verified_tree(
             &PVM_REGISTRY_LAYOUT,
@@ -84,9 +86,9 @@ pub fn pvm_ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
     )
 }
 
-#[cfg(any(test, feature = "std"))]
 /// The row-and-above node pyramid, authenticated against [`PVM_ACE_REGISTRY_ROOT`]
 /// before anything can read it.
+#[cfg(any(test, feature = "std"))]
 fn verified_pyramid() -> &'static Vec<Vec<Word>> {
     static PYRAMID: OnceLock<Vec<Vec<Word>>> = OnceLock::new();
     PYRAMID.get_or_init(|| {
@@ -103,8 +105,8 @@ pub fn registry_root() -> Word {
     Word::new(PVM_ACE_REGISTRY_ROOT.map(Felt::new_unchecked))
 }
 
-#[cfg(any(test, feature = "std"))]
 /// The factored composition and factory, built once per process.
+#[cfg(any(test, feature = "std"))]
 pub(crate) fn factory() -> &'static FactoredCircuitFactory<QuadFelt> {
     static FACTORY: OnceLock<FactoredCircuitFactory<QuadFelt>> = OnceLock::new();
     FACTORY.get_or_init(|| {
@@ -114,22 +116,65 @@ pub(crate) fn factory() -> &'static FactoredCircuitFactory<QuadFelt> {
     })
 }
 
+/// Subtrees containing at least one active leaf: `ceil(10! / leaves_per_subtree)`. The last of
+/// these holds the 768-leaf active boundary plus padding; everything past it is padding only.
+#[cfg(any(test, feature = "std"))]
+fn active_subtree_count() -> usize {
+    PVM_REGISTRY_LAYOUT
+        .order_count()
+        .div_ceil(PVM_REGISTRY_LAYOUT.leaves_per_subtree())
+}
+
+/// One active subtree's leaves, computed at most once per process.
+///
+/// Entries are per-subtree `OnceLock`s: hits are lock-free, and racing first lookups
+/// block on one computation instead of duplicating it. Leaves are cached, not built
+/// trees, because generating the leaves dominates lookup cost; rebuilding the small
+/// Merkle interior per lookup avoids doubling the cache memory. A fully warmed cache
+/// (every active subtree queried) holds about 111 MiB of leaves.
+#[cfg(any(test, feature = "std"))]
+fn active_subtree_leaves(subtree_index: usize) -> &'static [Word] {
+    static CACHE: OnceLock<Vec<OnceLock<Vec<Word>>>> = OnceLock::new();
+    let cache =
+        CACHE.get_or_init(|| (0..active_subtree_count()).map(|_| OnceLock::new()).collect());
+    cache[subtree_index].get_or_init(|| leaves_for_subtree(subtree_index))
+}
+
+/// The one leaf vector shared by every fully padded subtree.
+#[cfg(any(test, feature = "std"))]
+fn padding_subtree_leaves() -> &'static [Word] {
+    static PADDING: OnceLock<Vec<Word>> = OnceLock::new();
+    PADDING.get_or_init(|| vec![padding_leaf(); PVM_REGISTRY_LAYOUT.leaves_per_subtree()])
+}
+
+/// One subtree's leaves. Active (and the boundary) subtrees cache per index; the
+/// identical fully padded subtrees past [`active_subtree_count`] are structurally out of
+/// the cache's range and share one vector.
+#[cfg(any(test, feature = "std"))]
+fn cached_leaves_for_subtree(subtree_index: usize) -> &'static [Word] {
+    if subtree_index >= active_subtree_count() {
+        padding_subtree_leaves()
+    } else {
+        active_subtree_leaves(subtree_index)
+    }
+}
+
 /// Batch size per worker when a subtree's leaves are computed in parallel.
 #[cfg(all(feature = "concurrent", any(test, feature = "std")))]
 const LEAF_CHUNK: usize = 64;
 
-#[cfg(any(test, feature = "std"))]
 /// Recompute one subtree's leaves.
 ///
-/// Under the `concurrent` feature the subtree is split across the rayon pool: a lookup's
-/// whole cost is this recompute, and it is otherwise a single-core loop.
+/// On a cache miss, the `concurrent` feature splits leaf generation across the rayon pool;
+/// otherwise it runs on one core.
+#[cfg(any(test, feature = "std"))]
 fn leaves_for_subtree(subtree_index: usize) -> Vec<Word> {
     let factory = factory();
     #[cfg(feature = "concurrent")]
     {
         use rayon::prelude::*;
 
-        let leaves = PVM_REGISTRY_LAYOUT.subtree_leaves();
+        let leaves = PVM_REGISTRY_LAYOUT.leaves_per_subtree();
         let start = subtree_index * leaves;
         (0..leaves)
             .into_par_iter()
@@ -148,8 +193,8 @@ fn leaves_for_subtree(subtree_index: usize) -> Vec<Word> {
     }
 }
 
-#[cfg(all(feature = "concurrent", any(test, feature = "std")))]
 /// Leaves for a set of slot offsets within the subtree starting at `start`.
+#[cfg(all(feature = "concurrent", any(test, feature = "std")))]
 fn subtree_leaf_range(
     factory: &FactoredCircuitFactory<QuadFelt>,
     start: usize,
