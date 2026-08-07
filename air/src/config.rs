@@ -52,7 +52,7 @@ const COMPRESSION_INPUTS: usize = 2;
 // ================================================================================================
 
 /// Log2 of the FRI blowup factor (blowup = 8).
-const LOG_BLOWUP: u8 = 3;
+pub(crate) const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
@@ -267,9 +267,9 @@ pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObse
 /// Sponge state width in field elements.
 const SPONGE_WIDTH: usize = 12;
 /// Sponge rate (absorbable elements per permutation).
-const SPONGE_RATE: usize = 8;
+pub(crate) const SPONGE_RATE: usize = 8;
 /// Sponge digest width in field elements.
-const DIGEST_WIDTH: usize = 4;
+pub(crate) const DIGEST_WIDTH: usize = 4;
 /// Range of capacity slots within the sponge state array.
 const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
 

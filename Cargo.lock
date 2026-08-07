@@ -2072,6 +2072,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-security",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "p3-field",
@@ -2621,6 +2622,10 @@ dependencies = [
  "hashbrown 0.17.1",
  "rustc-hash",
 ]
+
+[[package]]
+name = "miden-security"
+version = "0.30.0"
 
 [[package]]
 name = "miden-serde-utils"

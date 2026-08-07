@@ -11,6 +11,33 @@ use miden::core::stark::utils
 use miden::core::stark::constants
 use miden::core::stark::verifier
 
+# Conjectured round budget, in fixed point with 16 fractional bits.
+#
+# Fiat-Shamir security is the minimum over the protocol's rounds. Each algebraic round bounds its
+# error as `coefficient * size / |E|`, i.e. `log2|E| - log2(coefficient) - log2(size)` bits, plus
+# the grinding sited before its challenge. The constants below fold `log2|E| - log2(coefficient)`
+# — and, for the folding round, the fixed blowup — into a single base, leaving only the
+# instance-dependent height and grinding terms for run time.
+#
+# Every value is derived by `miden_air::security`, whose constants carry the same names; the
+# exhaustive cross-test in `crates/lib/core/tests/sys` compares the two implementations over the
+# verifier's whole input domain, so a stale literal here fails as an output mismatch.
+#
+# log2|E| = 8388606 (quadratic extension of Goldilocks, rounded down).
+const BITS_PER_QUERY_FP = 193381        # blowup 8, random-words rate of 2025/2010 section 1.5
+const SECURITY_CAP_FP = 8323072         # min(log2|E|, hash collision resistance) = 127 bits
+const LOOKUP_BASE_FP = 7745871          # 8388606 - 642735 (2 * message width * fractions per row)
+const COMPOSITION_TERM_FP = 7816168     # 8388606 - 572438 (batched constraint slots)
+const OOD_BASE_FP = 8170900             # 8388606 - 217706 (max constraint degree + 1)
+const DEEP_BASE_FP = 7922741            # 8388606 - 465865 (batched DEEP terms)
+const FOLDING_BASE_FP = 8022589         # 8388606 - 169409 (2 * (arity - 1)) - 196608 (blowup)
+
+# Bounds on an AIR log trace height, matching `assert_shape_log`. The upper bound keeps the
+# height-bearing subtractions above well inside the field; the lower one rejects the zero a caller
+# reading uninitialized memory would supply.
+const LOG_HEIGHT_MIN = 6
+const LOG_HEIGHT_BOUND = 30
+
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
 
@@ -38,6 +65,68 @@ const ACE_REGISTRY_ROOT_0 = 4203939832410250299
 const ACE_REGISTRY_ROOT_1 = 12914527915593930096
 const ACE_REGISTRY_ROOT_2 = 3268125648964005028
 const ACE_REGISTRY_ROOT_3 = 5037431390707430717
+
+#! Computes the conjectured security level (in bits) attained by the given proof parameters.
+#!
+#! Takes the minimum over the protocol's rounds — lookup challenge, constraint composition,
+#! out-of-domain evaluation, DEEP composition, FRI folding, FRI queries — and the commitment
+#! collision cap, each in the fixed point described above the constants. The lookup,
+#! out-of-domain, and folding rounds degrade with trace height, so the level is a property of the
+#! proof and not of the parameter preset alone.
+#!
+#! Must match `miden_air::security::conjectured_security_level` bit-for-bit (enforced by
+#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
+#!
+#! Capping only at the end is equivalent to capping every round, because the cap is itself one of
+#! the terms the minimum ranges over.
+#!
+#! PRECONDITION: `num_queries <= 150`, so the query product fits in a u32. Parameters returned by
+#! `verify_vm_proof` satisfy this bound: the generic verifier enforces it.
+#!
+#! `log_max_height` comes from verifier-owned memory, so this must run in the context
+#! `verify_vm_proof` ran in; the height bounds below reject the zero a fresh context would yield.
+#!
+#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_max_height, ...]
+#! Outputs: [level, ...]
+pub proc compute_conjectured_security_level(
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+    log_max_height: u32,
+) -> u32
+    dup.4 u32assert.err="log trace height must be a u32"
+    dup u32lt.LOG_HEIGHT_BOUND assert.err="log trace height above supported maximum"
+    u32gte.LOG_HEIGHT_MIN assert.err="log trace height below supported minimum"
+
+    # Hoist the height in fixed point; the height-bearing rounds all subtract it.
+    dup.4 mul.65536
+    # => [H, nq, query_pow, deep_pow, folding_pow, log_height, ...]
+
+    # FRI queries: each query contributes the random-words rate, plus the query grinding.
+    dup.1 mul.BITS_PER_QUERY_FP dup.3 mul.65536 add
+    # => [query, H, nq, query_pow, deep_pow, folding_pow, log_height, ...]
+
+    # Lookup challenges: sampled once after the main-trace commitment, with no grinding.
+    push.LOOKUP_BASE_FP dup.2 sub u32min
+    # => [min, H, nq, query_pow, deep_pow, folding_pow, log_height, ...]
+
+    # Out-of-domain point: rejection-sampled, with no grinding.
+    push.OOD_BASE_FP dup.2 sub u32min
+
+    # FRI folding: worst at the first round, where the domain is largest.
+    push.FOLDING_BASE_FP dup.2 sub dup.6 mul.65536 add u32min
+
+    # DEEP composition, then the height-independent constraint composition and the collision cap.
+    push.DEEP_BASE_FP dup.5 mul.65536 add u32min
+    push.COMPOSITION_TERM_FP u32min
+    push.SECURITY_CAP_FP u32min
+    u32shr.16
+    # => [level, H, nq, query_pow, deep_pow, folding_pow, log_height, ...]
+
+    movdn.6 dropw drop drop
+    # => [level, ...]
+end
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
@@ -250,7 +339,7 @@ end
 #! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
 #! parameters it was not produced with. This procedure holds no security-estimate formula and
 #! no acceptance policy: it returns the transcript-bound parameters for the caller to grade (e.g.
-#! with `stark::utils::conjectured_security_level`) under its own policy. An estimate or policy
+#! with `compute_conjectured_security_level`) under its own policy. An estimate or policy
 #! change therefore never moves this procedure's root - request keys and registered proof packages
 #! stay valid across such changes.
 #!

@@ -105,6 +105,7 @@ pub mod air {
         AirBuilder,
         AirBuilderWithContext,
         BaseAir,
+        ConstraintCounts,
         ConstraintDegrees,
         ExtensionBuilder,
         FilteredAirBuilder,

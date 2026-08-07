@@ -1,0 +1,23 @@
+[package]
+description            = "Conjectured soundness estimation for the Miden lifted-STARK protocol"
+categories.workspace   = true
+edition.workspace      = true
+homepage.workspace     = true
+keywords.workspace     = true
+license.workspace      = true
+name                   = "miden-security"
+readme.workspace       = true
+repository.workspace   = true
+rust-version.workspace = true
+version.workspace      = true
+
+[lib]
+bench   = false
+doctest = false
+
+[features]
+default = ["std"]
+std     = []
+
+[lints]
+workspace = true

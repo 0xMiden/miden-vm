@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::boxed::Box;
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST, fold_deferred_root},
@@ -194,6 +194,10 @@ impl Verifier {
         Ok(())
     }
 
+    /// Verifies the Miden VM STARK proof and returns its conjectured security level in bits.
+    ///
+    /// The level depends on the proof's largest AIR trace height as well as its PCS parameters, so
+    /// it is computed from the verified proof rather than fixed by the parameter preset.
     fn verify_vm(&self, claim: &ExecutionClaim, proof: &VmProof) -> Result<u32, VerificationError> {
         let program_root = claim.program_root();
         let pub_inputs = PublicInputs::new(
@@ -231,9 +235,16 @@ impl Verifier {
         }
         .map_err(|error| {
             VerificationError::StarkVerificationError(program_root, Box::new(error))
-        })?;
-
-        Ok(STARK_SECURITY_LEVEL)
+        })
+        .map(|log_max_height| {
+            security::conjectured_security_level(
+                params.num_queries() as u32,
+                params.query_pow_bits() as u32,
+                params.deep_pow_bits() as u32,
+                params.folding_pow_bits() as u32,
+                log_max_height,
+            )
+        })
     }
 
     /// Verifies a multi-AIR STARK proof for the Miden VM statement.
@@ -247,7 +258,7 @@ impl Verifier {
         public_values: &[Felt],
         aux_inputs: &[Felt],
         proof_bytes: &[u8],
-    ) -> Result<(), StarkVerificationError>
+    ) -> Result<u32, StarkVerificationError>
     where
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
@@ -283,7 +294,8 @@ impl Verifier {
         VerifierInstance::new(config, &statement, None)
             .expect("Miden AIRs declare no preprocessed columns")
             .verify(&proof, challenger)?;
-        Ok(())
+
+        Ok(u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0)))
     }
 }
 
