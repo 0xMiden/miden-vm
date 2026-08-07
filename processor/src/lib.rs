@@ -34,7 +34,7 @@ use miden_core::{
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
-    errors::{MapExecErr, MapExecErrNoCtx},
+    errors::MapExecErr,
     processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
@@ -99,52 +99,6 @@ pub mod operation {
 }
 
 pub mod trace;
-
-// EXECUTORS
-// ================================================================================================
-
-/// Executes the provided program against the provided inputs and returns the resulting execution
-/// output.
-///
-/// The `host` parameter is used to provide the external environment to the program being executed,
-/// such as access to the advice provider and libraries that the program depends on.
-///
-/// # Errors
-/// Returns an error if program execution fails for any reason.
-#[tracing::instrument("execute_program", skip_all)]
-pub async fn execute(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl Host,
-    options: ExecutionOptions,
-) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_exec_err_no_ctx()?;
-    processor.execute(program, host).await
-}
-
-/// Synchronous wrapper for the async `execute()` function.
-///
-/// This method is only available on non-wasm32 targets. On wasm32, use the async `execute()`
-/// method directly since wasm32 runs in the browser's event loop.
-///
-/// # Panics
-/// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
-/// instead in async contexts.
-#[cfg(not(target_family = "wasm"))]
-#[tracing::instrument("execute_program_sync", skip_all)]
-pub fn execute_sync(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-    options: ExecutionOptions,
-) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_exec_err_no_ctx()?;
-    processor.execute_sync(program, host)
-}
 
 // PROCESSOR STATE
 // ===============================================================================================

@@ -13,13 +13,11 @@ pub use miden_core::{
     program::ExecutionClaim,
     proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof},
 };
-#[cfg(not(target_family = "wasm"))]
-pub use miden_processor::execute_sync;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
     FutureMaybeSend, Host, KernelDescriptor, Program, ProgramInfo, StackInputs, SyncHost,
-    TraceBuildInputs, TraceGenerationContext, ZERO, advice, crypto, execute, field,
-    operation::Operation, serde, trace, trace::ExecutionTrace, utils,
+    TraceBuildInputs, TraceGenerationContext, ZERO, advice, crypto, field, operation::Operation,
+    serde, trace, trace::ExecutionTrace, utils,
 };
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_family = "wasm"))]

@@ -20,15 +20,27 @@ use miden_core_lib::{
     },
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, HostLibrary, MemoryError,
-    StackInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
+    MemoryError, Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
-    execute_sync,
 };
 
 // HARNESS
 // ================================================================================================
+
+/// Runs `program` against `host`, constructing a [`FastProcessor`] the way production callers do.
+fn execute_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ExecutionOptions,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .expect("failed to construct FastProcessor");
+    processor.execute_sync(program, host)
+}
 
 /// A [`fmt::Write`] that appends into a shared, thread-safe string buffer.
 #[derive(Clone)]
