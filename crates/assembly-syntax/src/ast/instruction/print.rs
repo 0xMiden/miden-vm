@@ -339,9 +339,15 @@ impl PrettyPrint for Instruction {
 
             // ----- traces (read-only events) ----------------------------------------------------
             Self::Trace => const_text("trace"),
-            // Printing `TraceImm` such that it is consistent with `EmitImm`, even though this
-            // does not round-trip. `trace.<FELT_IMM>` is invalid.
-            Self::TraceImm(value) => inst_with_felt_imm("trace", value),
+            // `trace.<FELT_IMM>` is invalid syntax, so to support a `print -> parse` round trip
+            // we print the equivalent `push.<value> trace drop` sequence instead.
+            Self::TraceImm(value) => {
+                let value = match value {
+                    Immediate::Value(value) => display(*value),
+                    Immediate::Constant(name) => text(name),
+                };
+                flatten(const_text("push") + const_text(".") + value + const_text(" trace drop"))
+            },
 
             // Handled by the early return for !has_textual_representation()
             Self::DebugVar(_) => unreachable!(),
