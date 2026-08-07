@@ -56,7 +56,7 @@ For example:
 ```rust
 use miden_vm::{
     advice::AdviceInputs,
-    Assembler, execute_sync, ExecutionOptions, DefaultHost, StackInputs
+    Assembler, DefaultHost, ExecutionOptions, FastProcessor, StackInputs
 };
 
 // instantiate the assembler
@@ -81,8 +81,12 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let output =
-    execute_sync(&program.unwrap_program(), stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+let output = FastProcessor::new_with_options(
+    stack_inputs, advice_inputs.clone(), exec_options
+)
+    .unwrap()
+    .execute_sync(&program.unwrap_program(), &mut host)
+    .unwrap();
 ```
 
 ### Proving program execution
