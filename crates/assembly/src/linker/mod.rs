@@ -84,7 +84,7 @@ use self::{
     resolver::*,
 };
 
-/// Selects how [`Linker::link_and_rewrite`] handles a static cycle in the call graph.
+/// Selects how [`Linker::link`] handles a static cycle in the call graph.
 ///
 /// MAST procedures must be built from callees to callers, so a static cycle (recursion that does
 /// not go through a `dynexec`) prevents MAST from being generated. Assembly therefore rejects
