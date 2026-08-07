@@ -245,6 +245,11 @@ pub fn generate_trace(
     requires: UintAddRequires,
     store: &mut UintStoreRequires,
 ) -> RowMajorMatrix<Felt> {
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = requires.ops.len() * PERIOD;
+        std::eprintln!("REAL_HEIGHT UintAdd {real}");
+    }
     let n_ops = requires.ops.len().max(1);
     let height = (n_ops * PERIOD).next_power_of_two();
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);

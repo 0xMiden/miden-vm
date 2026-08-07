@@ -313,6 +313,11 @@ impl Poseidon2Requires {
 /// the design notes); the chiplet consumes no `Range16`.
 pub fn generate_trace(requires: Poseidon2Requires) -> RowMajorMatrix<Felt> {
     let total_cycles = requires.next_seq as usize;
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = total_cycles * PERIOD;
+        std::eprintln!("REAL_HEIGHT Poseidon2 {real}");
+    }
     let height = (total_cycles * PERIOD).next_power_of_two().max(PERIOD);
     let num_cycles = height / PERIOD;
 

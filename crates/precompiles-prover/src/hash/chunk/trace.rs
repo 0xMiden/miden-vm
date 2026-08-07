@@ -181,6 +181,10 @@ pub(crate) fn generate_trace_padded_to(
     min_height: usize,
 ) -> RowMajorMatrix<Felt> {
     let total_chunks = requires.total_chunks() as usize;
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT ChunkNode_chunk {total_chunks}");
+    }
     let height = total_chunks.next_power_of_two().max(2).max(min_height);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);

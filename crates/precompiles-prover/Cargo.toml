@@ -54,4 +54,6 @@ k256 = { workspace = true, features = ["arithmetic"] }
 insta.workspace = true
 miden-air = { workspace = true, features = ["std"] }
 miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-vm = { path = "../miden-vm" }
+miden-vm-precompiles-bench = { path = "../benches/precompiles-bench" }
 rand = { workspace = true, features = ["std_rng"] }

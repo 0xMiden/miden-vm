@@ -396,6 +396,10 @@ pub(crate) fn generate_trace_padded_to(
     min_height: usize,
 ) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_active_rows() as usize;
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        std::eprintln!("REAL_HEIGHT KeccakSponge {active_rows}");
+    }
     let min_height = min_height
         .checked_next_power_of_two()
         .expect("minimum sponge trace height exceeds the host power-of-two range");
