@@ -10,11 +10,8 @@ use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::LiftedAir;
 
 use crate::{
-    ec::{EcPointStoreAir, add::EcGroupAddAir, groups::EcGroupsAir, msm::EcMsmAir},
-    hash::{
-        chunk_node::ChunkNodeAir,
-        keccak::{round::KeccakRoundAir, sponge::KeccakSpongeAir},
-    },
+    ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
+    hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::LookupMessage,
     primitives::byte_pair_lut::BytePairLutAir,
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
@@ -87,18 +84,20 @@ pub(crate) fn session_stack_residual(
             .find_map(|(replacement_idx, main)| (*replacement_idx == idx).then_some(*main))
             .unwrap_or(mains[idx]);
         match air {
-            ChipletAir::ChunkNode => fold_balance(&ChunkNodeAir, main, challenges, &mut net),
+            ChipletAir::ChunkNodeSponge => {
+                fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
+            },
             ChipletAir::Poseidon2 => fold_balance(&Poseidon2Air, main, challenges, &mut net),
             ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
             ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
-            ChipletAir::KeccakSponge => fold_balance(&KeccakSpongeAir, main, challenges, &mut net),
             ChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },
             ChipletAir::UintStoreMul => fold_balance(&UintStoreMulAir, main, challenges, &mut net),
             ChipletAir::UintAdd => fold_balance(&UintAddAir, main, challenges, &mut net),
-            ChipletAir::EcGroups => fold_balance(&EcGroupsAir, main, challenges, &mut net),
-            ChipletAir::EcPointStore => fold_balance(&EcPointStoreAir, main, challenges, &mut net),
+            ChipletAir::EcPointStoreGroups => {
+                fold_balance(&EcPointStoreGroupsAir, main, challenges, &mut net)
+            },
             ChipletAir::EcGroupAdd => fold_balance(&EcGroupAddAir, main, challenges, &mut net),
             ChipletAir::EcMsm => fold_balance(&EcMsmAir, main, challenges, &mut net),
         }

@@ -829,9 +829,10 @@ where
         );
         // col 11: the result-membership cert provide, alone. −1 per mint
         // op (negative ⇒ provide), naming the fresh result `r` and its
-        // group. Consumed by `r`'s point-store row (`EcPointStore`),
-        // discharging its on-curve obligation without the MAC trio; the
-        // bus balances because a fresh result is minted by exactly one op.
+        // group. Consumed by `r`'s point-store row (the point band of
+        // `EcPointStoreGroupsAir`), discharging its on-curve obligation
+        // without the MAC trio; the bus balances because a fresh result
+        // is minted by exactly one op.
         let cert_group: LB::Expr = local[CELL_GROUP].into();
         let cert_r: LB::Expr = local[CELL_R].into();
         frac_col!(

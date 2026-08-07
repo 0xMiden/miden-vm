@@ -3,13 +3,13 @@
 //!
 //! The narrow, central hasher + binder for the transcript DAG. Each
 //! active row evaluates one node: it hashes the node's preimage on
-//! Poseidon2 and settles the node's `Binding`-bus tuple. The eval chip is
-//! the sole provider of the `Binding` bus, except `KeccakNodeAir`, which
-//! fuses its own terminal keccak `True` (there is no transient Keccak —
-//! see the design notes). Domain chiplets (the `UintStore`,
-//! `UintAdd` / `UintMul`, EC store/add/MSM chiplets) stay ptr-only and never
-//! touch `Binding`; this chip hashes their DAG nodes and ptr-references their
-//! relations.
+//! Poseidon2 and settles the node's `Binding`-bus tuple. The eval chip
+//! is the sole provider of the `Binding` bus, except the Keccak-node
+//! band of `ChunkNodeSpongeAir`, which fuses its own terminal keccak
+//! `True` (there is no transient Keccak — see the design notes). Domain
+//! chiplets (the `UintStore`, `UintAdd` / `UintMul`, EC store/add/MSM
+//! chiplets) stay ptr-only and never touch `Binding`; this chip hashes
+//! their DAG nodes and ptr-references their relations.
 //!
 //! Node kinds are dispatched by a uniform one-hot `is_and + is_zero +
 //! is_uint_leaf + Σ op-flags = act`: the **Transcript AND-combinator**
@@ -134,11 +134,10 @@ pub const COL_H_END: usize = COL_H_BEGIN + DIGEST_WIDTH;
 /// consumes — the row provides `Binding(0, True)` only. Boolean.
 pub const COL_IS_ZERO: usize = COL_H_END;
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
-/// parents that consume it (DAG sharing / dedup, mirroring
-/// `KeccakNodeAir`'s `out_mult`). A plain count pinned to the
-/// consumer count by `Binding` bus balance — not range-checked (see
-/// the design notes); `0` on the root (no parent) and on
-/// inactive rows.
+/// parents that consume it (DAG sharing / dedup, mirroring the
+/// Keccak-node band's `out_mult`). A plain count pinned to the consumer
+/// count by `Binding` bus balance — not range-checked (see the design
+/// notes); `0` on the root (no parent) and on inactive rows.
 pub const COL_OUT_MULT: usize = COL_IS_ZERO + 1;
 
 // ================================================================

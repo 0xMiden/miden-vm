@@ -48,10 +48,10 @@ const COMPRESSION_INPUTS: usize = 2;
 /// the lifted STARK protocol outside this circuit hash.
 /// Keep this in sync with [`crate::ace::build_precompile_multi_air_ace_circuit`].
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(15901056294547705196),
-    Felt::new_unchecked(13548154566962352054),
-    Felt::new_unchecked(13148050606838836712),
-    Felt::new_unchecked(2433548564999773594),
+    Felt::new_unchecked(14908530032554120817),
+    Felt::new_unchecked(6253902297572432860),
+    Felt::new_unchecked(17042470880692173314),
+    Felt::new_unchecked(1364863901074227591),
 ];
 /// Default hash function for compatibility APIs such as
 /// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
@@ -69,7 +69,7 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 /// evolve together: every chiplet AIR in
 /// [`ChipletAir`](crate::session::ChipletAir) closes at a `log_quotient_degree`
 /// well under the core VM's degree-8 constraints (see the
-/// `log_quotient_degrees_fit_the_blowup` test), so `log_blowup` could be
+/// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), so `log_blowup` could be
 /// lowered independently of the core VM in the future. That has not been done
 /// here, and doing so would need a dedicated security review of the
 /// resulting FRI parameters before use outside benchmarking.
@@ -168,10 +168,9 @@ mod tests {
     extern crate alloc;
     use alloc::{format, vec::Vec};
 
-    use miden_ace_codegen::{AceConfig, LayoutKind};
     use miden_core::{Felt, crypto::hash::Poseidon2};
 
-    use crate::{ace, session::NUM_CHIPLETS};
+    use crate::ace;
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "update PRECOMPILE_RELATION_DIGEST in crates/precompiles-prover/src/stark_config.rs and accept the insta snapshot";
@@ -179,12 +178,7 @@ mod tests {
     /// Snapshot test: catches any precompile chiplet AIR change that alters the constraint circuit.
     #[test]
     fn precompile_relation_digest_matches_current_air() {
-        let config = AceConfig {
-            num_quotient_chunks: 8,
-            layout: LayoutKind::Masm,
-            num_airs: NUM_CHIPLETS,
-        };
-        let circuit = ace::build_precompile_multi_air_ace_circuit(config).unwrap();
+        let circuit = ace::build_precompile_multi_air_ace_circuit().unwrap();
         let encoded = circuit.to_ace().unwrap();
         let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
 

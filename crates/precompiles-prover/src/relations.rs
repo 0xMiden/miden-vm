@@ -22,13 +22,13 @@
 //! | 6     | `Poseidon2In`   | `poseidon2::Poseidon2Air`       | `(perm_seq_id, tag, c0, c1, c2, c3)`, `tag ∈ {0, 1, 2}` for rate0/rate1/cap |
 //! | 7     | `Poseidon2Out`  | `poseidon2::Poseidon2Air`       | `(perm_seq_id, d0, d1, d2, d3)` — digest = first 4 lanes of post-perm state |
 //! | 8     | `Binding`       | transcript eval chips           | `(h0, h1, h2, h3, value_tag, ptr)` — node hash ↦ typed value (self-referential) |
-//! | 9     | `ChunkChain`    | `chunk::ChunkAir`               | `(chunk_seq_id_head, perm_seq_id_head)` — per-invocation chain head, in chunk's native namespace |
-//! | 10    | `UintVal`      | `uint::UintStoreAir`          | `(ptr, bound_ptr, offset, c0..c3)` — 256-bit uint half: 4×32-bit recombined view at offset ∈ {0, 1} |
+//! | 9     | `ChunkChain`    | `hash::chunk_node_sponge::ChunkNodeSpongeAir` (chunk band) | `(chunk_seq_id_head, perm_seq_id_head)` — per-invocation chain head, in chunk's native namespace |
+//! | 10    | `UintVal`      | `uint::store_mul::UintStoreMulAir` (store band) | `(ptr, bound_ptr, c0..c7)` — complete 256-bit value as 8×32-bit recombined limbs |
 //! | 11    | `UintAdd`      | `uint::add::UintAddAir`       | `(bound_ptr, a_ptr, b_ptr, c_ptr)` — asserts `a + b ≡ c (mod p)` for uints sharing `bound_ptr` |
 //! | 12    | `UintMul`      | `uint::mul::UintMulAir`       | `(kappa_a, kappa_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` — asserts `κₐ·a·b + κ_c·c ≡ r (mod p)` for uints sharing `bound_ptr` |
-//! | 13    | `UintLimbs`    | `uint::UintStoreAir`          | `(ptr, bound_ptr, offset, l0..l7)` — 256-bit uint half: raw 8×16-bit limb view at offset ∈ {0, 1} |
-//! | 14    | `EcGroup`      | `ec::groups::EcGroupsAir`     | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — a short-Weierstrass group binding its curve context (params + base-field modulus + scalar-field modulus, the latter = `bound_ptr` while unconstrained) |
-//! | 15    | `EcPoint`      | `ec::EcPointStoreAir`         | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` — a stored on-curve point (or the group's ∞ when `is_pai`) |
+//! | 13    | `UintLimbs`    | `uint::store_mul::UintStoreMulAir` (store band) | `(ptr, bound_ptr, l0..l15)` — raw 16×16-bit limb view of the complete 256-bit uint |
+//! | 14    | `EcGroup`      | `ec::point_store_groups::EcPointStoreGroupsAir` (group band) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — a short-Weierstrass group binding its curve context (params + base-field modulus + scalar-field modulus, the latter = `bound_ptr` while unconstrained) |
+//! | 15    | `EcPoint`      | `ec::point_store_groups::EcPointStoreGroupsAir` (point band) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` — a stored on-curve point (or the group's ∞ when `is_pai`) |
 //! | 16    | `EcGroupAdd`   | `ec::add::EcGroupAddAir`      | `(group_ptr, p_ptr, q_ptr, r_ptr)` — asserts `R = P + Q` in the group |
 //! | 17    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`, `ec::msm::EcMsmAir` | `(group_ptr, r_ptr)` — an on-curve membership certificate for a fresh point `r`: provided by its minting op (a group-law add result, or an MSM `neg`'s value `−P`), consumed by `r`'s point-store row in place of the on-curve MAC trio |
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |

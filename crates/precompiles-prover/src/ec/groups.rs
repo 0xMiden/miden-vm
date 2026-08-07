@@ -74,9 +74,9 @@ pub const COL_MULT: usize = 5;
 pub const NUM_MAIN_COLS: usize = 6;
 
 // Aux: the single LogUp running-sum column (one fraction).
-const NUM_LOGUP_COLS: usize = 1;
+pub(crate) const NUM_LOGUP_COLS: usize = 1;
 const AUX_WIDTH: usize = 1;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1];
 
 // AIR
 // ================================================================================================
@@ -118,24 +118,32 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let ptr: AB::Expr = local[COL_PTR].into();
-        let ptr_next: AB::Expr = next[COL_PTR].into();
-
-        // The ungated chain: ptr = row + 1 for every prover, pads
-        // included (they are just mult = 0 rows), so ptr → tuple is
-        // injective by construction. The wrap edge is dropped, keeping
-        // the cyclic last → first transition free.
-        builder.when_transition().assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
-        builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
+        eval_main(builder, 0);
 
         // Phase 2: LogUp.
         let mut lb =
             CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
+}
+
+/// Evaluate this component's base constraints in a main-trace column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+
+    let ptr: AB::Expr = local[COL_PTR].into();
+    let ptr_next: AB::Expr = next[COL_PTR].into();
+
+    // The ungated chain: ptr = row + 1 for every prover, pads
+    // included (they are just mult = 0 rows), so ptr → tuple is
+    // injective by construction. The wrap edge is dropped, keeping
+    // the cyclic last → first transition free.
+    builder.when_transition().assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
+    builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
 }
 
 // LOOKUP AIR
@@ -162,43 +170,51 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-
-        // Pads zero the mult cell, so the provide needs no act gate.
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
-
-        let provide_deg = Deg { v: 1, u: 1 };
-        let col_deg = Deg { v: 1, u: 1 };
-
-        builder.next_column(
-            |col| {
-                col.group(
-                    "ec-groups",
-                    |g| {
-                        g.batch(
-                            "ec-groups-fractions",
-                            LB::Expr::ONE,
-                            |b| {
-                                b.insert(
-                                    "provide-ecgroup",
-                                    neg_mult,
-                                    EcGroupMsg {
-                                        group_ptr: local[COL_PTR].into(),
-                                        a_ptr: local[COL_A_PTR].into(),
-                                        b_ptr: local[COL_B_PTR].into(),
-                                        bound_ptr: local[COL_BOUND_PTR].into(),
-                                        scalar_bound_ptr: local[COL_SBOUND_PTR].into(),
-                                    },
-                                    provide_deg,
-                                );
-                            },
-                            col_deg,
-                        );
-                    },
-                    col_deg,
-                );
-            },
-            col_deg,
-        );
+        eval_lookups(builder, 0);
     }
+}
+
+/// Evaluate this component's LogUp columns in a main-trace column band.
+pub(crate) fn eval_lookups<LB>(builder: &mut LB, main_col_offset: usize)
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+
+    // Pads zero the mult cell, so the provide needs no act gate.
+    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
+
+    let provide_deg = Deg { v: 1, u: 1 };
+    let col_deg = Deg { v: 1, u: 1 };
+
+    builder.next_column(
+        |col| {
+            col.group(
+                "ec-groups",
+                |g| {
+                    g.batch(
+                        "ec-groups-fractions",
+                        LB::Expr::ONE,
+                        |b| {
+                            b.insert(
+                                "provide-ecgroup",
+                                neg_mult,
+                                EcGroupMsg {
+                                    group_ptr: local[COL_PTR].into(),
+                                    a_ptr: local[COL_A_PTR].into(),
+                                    b_ptr: local[COL_B_PTR].into(),
+                                    bound_ptr: local[COL_BOUND_PTR].into(),
+                                    scalar_bound_ptr: local[COL_SBOUND_PTR].into(),
+                                },
+                                provide_deg,
+                            );
+                        },
+                        col_deg,
+                    );
+                },
+                col_deg,
+            );
+        },
+        col_deg,
+    );
 }

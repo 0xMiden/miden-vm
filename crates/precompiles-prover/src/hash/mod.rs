@@ -9,5 +9,6 @@
 
 pub mod chunk;
 pub mod chunk_node;
+pub mod chunk_node_sponge;
 pub mod keccak;
 pub mod memory64;

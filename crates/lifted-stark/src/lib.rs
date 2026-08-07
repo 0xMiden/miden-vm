@@ -78,9 +78,10 @@ pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use debug::check_constraints;
-// `domain` and `order` are internal modules, but these error types surface through the public
-// `ProverError` / `VerifierError`, so they need a public path of their own.
-pub use domain::DomainError;
+// `domain` and `order` are internal modules. Their error types surface through the public
+// `ProverError` / `VerifierError`, and quotient-degree derivation is part of the relation
+// configuration contract, so these items need public paths of their own.
+pub use domain::{DomainError, log_quotient_degree};
 pub use order::ShapeError;
 pub use preprocessed::{Preprocessed, PreprocessedValidationError};
 pub use prover::{ProverError, ProverInstance};
