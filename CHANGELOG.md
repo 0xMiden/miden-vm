@@ -10,6 +10,7 @@
 #### Features
 
 - Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts.
+- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3538](https://github.com/0xMiden/miden-vm/issues/3538)).
 
 #### Changes
 

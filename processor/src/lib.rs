@@ -21,6 +21,7 @@ mod continuation_stack;
 mod errors;
 mod execution;
 mod execution_options;
+mod executor;
 mod fast;
 mod host;
 mod processor;
@@ -57,6 +58,7 @@ pub use errors::{
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use executor::ProgramExecutor;
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
