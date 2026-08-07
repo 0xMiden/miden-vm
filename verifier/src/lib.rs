@@ -21,8 +21,6 @@ use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
 
-const STARK_SECURITY_LEVEL: u32 = 96;
-
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
@@ -130,9 +128,7 @@ impl Verifier {
             .copied()
             .reduce(fold_deferred_root)
             .expect("precompile roots were checked to be non-empty");
-        miden_precompiles_prover::verify_deferred(&proof.proof, aggregate_root)?;
-
-        Ok(STARK_SECURITY_LEVEL)
+        Ok(miden_precompiles_prover::verify_deferred(&proof.proof, aggregate_root)?)
     }
 
     fn validate_precompile(
@@ -233,9 +229,7 @@ impl Verifier {
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
         }
-        .map_err(|error| {
-            VerificationError::StarkVerificationError(program_root, Box::new(error))
-        })
+        .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
         .map(|log_max_height| {
             security::conjectured_security_level(
                 params.num_queries() as u32,

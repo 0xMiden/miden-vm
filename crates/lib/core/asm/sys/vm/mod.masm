@@ -26,7 +26,7 @@ use miden::core::stark::verifier
 # log2|E| = 8388606 (quadratic extension of Goldilocks, rounded down).
 const BITS_PER_QUERY_FP = 193381        # blowup 8, random-words rate of 2025/2010 section 1.5
 const SECURITY_CAP_FP = 8323072         # min(log2|E|, hash collision resistance) = 127 bits
-const LOOKUP_BASE_FP = 7745871          # 8388606 - 642735 (2 * message width * fractions per row)
+const LOOKUP_BASE_FP = 7800270          # 8388606 - 588336 ((message width + 2) * fractions per row)
 const COMPOSITION_TERM_FP = 7816168     # 8388606 - 572438 (batched constraint slots)
 const OOD_BASE_FP = 8170900             # 8388606 - 217706 (max constraint degree + 1)
 const DEEP_BASE_FP = 7922741            # 8388606 - 465865 (batched DEEP terms)

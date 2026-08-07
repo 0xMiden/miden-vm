@@ -37,13 +37,31 @@ pub const fn security_report(
     // The lookup challenges are sampled once, right after the main-trace commitment, and shared by
     // every bus. Each bus denominator is affine in the first challenge with total degree at most
     // `max_message_width` in the two challenges jointly. If the bus multiset is unbalanced, the
-    // balance function is a nonzero rational function of the challenges, and the cheat succeeds
-    // only if the sample zeroes the cleared numerator or degenerates some denominator — together
-    // at most `2 · max_message_width · messages` roots by Schwartz-Zippel.
+    // balance function `Φ = Σ mₖ/Dₖ` is a nonzero rational function of the challenges, and the
+    // cheat succeeds on either of two events.
+    //
+    // Each denominator `Dₖ = α + (bus + 1)·β^W + Σ_{j<W} β^j·payloadⱼ` has individual degree 1 in
+    // `α` and `W` in `β`, so the cleared numerator `Σₖ mₖ·Π_{l≠k} D_l` over `M` denominators has
+    // individual degrees `M − 1` and `W(M − 1)`. Sampling the two challenges independently and
+    // uniformly, the per-variable Schwartz-Zippel union bounds a numerator root by
+    // `(W + 1)(M − 1)/|E|`.
+    //
+    // Separately, a vanishing denominator degenerates the batched transition constraint: with
+    // `Dⱼ = 0` the identity collapses to `mⱼ·Π_{s≠j} D_s = 0`, forcing `mⱼ = 0` and letting the
+    // adversary drop message `j` from the bus for free. Each `Dₖ` is *monic* in `α`, so for any
+    // `β` exactly one `α` annihilates it: that event costs only `M/|E|`, not `M·W/|E|`.
+    //
+    // Together `ε ≤ (W + 1)(M − 1)/|E| + M/|E| ≤ (W + 2)·M/|E|`.
+    //
+    // `M` is taken as `fractions_per_row · 2^log_max_height`, charging every AIR the maximum
+    // height. Boundary messages — public-input corrections, one per kernel-ROM digest on the VM
+    // side — are outside `fractions_per_row`, and `(W + 2)M` rounds up from `(W + 2)M − (W + 1)`,
+    // room for under one more. So it is that height over-charge that covers them, and a statement
+    // whose AIRs all sat at the maximum height would grade a fraction of a bit high.
     let lookup = round(
         LOOKUP_LABEL,
         instance,
-        2 * air.lookup.max_message_width as u64 * air.lookup.fractions_per_row as u64,
+        (air.lookup.max_message_width as u64 + 2) * air.lookup.fractions_per_row as u64,
         instance.log_max_height,
         params.lookup_pow_bits,
         cap,

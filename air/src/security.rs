@@ -129,7 +129,7 @@ pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// `log2` of the lookup round's error coefficient, in fixed point.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    2 * AIR_SHAPE.lookup.max_message_width as u64 * AIR_SHAPE.lookup.fractions_per_row as u64,
+    (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
 );
 
 /// `log2` of the constraint-composition round's error coefficient, in fixed point.
@@ -243,9 +243,9 @@ mod tests {
 
         for (log_height, expected_level, expected_binding) in [
             (20, 96, miden_security::report::QUERY_LABEL),
-            (22, 96, miden_security::report::LOOKUP_LABEL),
-            (24, 94, miden_security::report::LOOKUP_LABEL),
-            (29, 89, miden_security::report::LOOKUP_LABEL),
+            (22, 96, miden_security::report::QUERY_LABEL),
+            (24, 95, miden_security::report::LOOKUP_LABEL),
+            (29, 90, miden_security::report::LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height, 128);
             assert_eq!(
@@ -270,7 +270,7 @@ mod tests {
     fn masm_literals_match_the_derived_constants() {
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_323_072;
-        const LOOKUP_BASE_FP: u64 = 7_745_871;
+        const LOOKUP_BASE_FP: u64 = 7_800_270;
         const COMPOSITION_TERM_FP: u64 = 7_816_168;
         const OOD_BASE_FP: u64 = 8_170_900;
         const DEEP_BASE_FP: u64 = 7_922_741;
@@ -314,33 +314,33 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_352_655, 7_816_168, 7_777_684, 8_323_072, 7_891_517, 6_335_399, 8_323_072],
+                [7_407_054, 7_816_168, 7_777_684, 8_323_072, 7_891_517, 6_335_399, 8_323_072],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_435_151, 7_816_168, 6_860_180, 8_323_072, 6_974_013, 6_335_399, 8_323_072],
+                [6_489_550, 7_816_168, 6_860_180, 8_323_072, 6_974_013, 6_335_399, 8_323_072],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_238_543, 7_816_168, 6_663_572, 8_323_072, 6_777_405, 6_335_399, 8_323_072],
-                95,
+                [6_292_942, 7_816_168, 6_663_572, 8_323_072, 6_777_405, 6_335_399, 8_323_072],
+                96,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_845_327, 7_816_168, 6_270_356, 8_323_072, 6_384_189, 6_335_399, 8_323_072],
-                89,
+                [5_899_726, 7_816_168, 6_270_356, 8_323_072, 6_384_189, 6_335_399, 8_323_072],
+                90,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_435_151, 7_816_168, 6_860_180, 7_922_741, 6_711_869, 1_353_667, 8_323_072],
+                [6_489_550, 7_816_168, 6_860_180, 7_922_741, 6_711_869, 1_353_667, 8_323_072],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_845_327, 7_816_168, 6_270_356, 8_323_072, 8_153_661, 8_323_072, 8_323_072],
-                89,
+                [5_899_726, 7_816_168, 6_270_356, 8_323_072, 8_153_661, 8_323_072, 8_323_072],
+                90,
             ),
         ];
 
@@ -386,6 +386,6 @@ mod tests {
             })
             .expect("the lookup round must bind at some supported height");
 
-        assert_eq!(crossover, 22, "lookup/query crossover moved");
+        assert_eq!(crossover, 23, "lookup/query crossover moved");
     }
 }
