@@ -3,7 +3,6 @@ use alloc::{
     string::ToString,
     vec::Vec,
 };
-use core::cmp::Reverse;
 
 use super::{EmptySubtreeRoots, LeafIndex, SMT_DEPTH};
 use crate::{
@@ -483,25 +482,19 @@ impl PartialSmt {
         // are not reachable in a parent chain from a leaf, such as those from an exclusion proof.
         // These must remain sorted together as parents are added: processing all leaf-based
         // branches first can reach a shared ancestor before a branch based on an inner node has
-        // been reconstructed. The heap prioritizes deeper nodes, then leftmost nodes at the same
-        // depth.
+        // been reconstructed. The heap prioritizes deeper nodes; the order of nodes at the same
+        // depth does not affect reconstruction because they cannot depend on each other.
+        //
+        // We also track nodes as soon as they are queued to avoid scheduling duplicates.
+        let mut seen_nodes = Set::new();
         let mut active_nodes = all_leaves
             .keys()
             .map(|ix| ix.parent())
             .chain(nodes.keys().map(|ix| ix.parent()))
-            .map(|ix| (ix.depth(), Reverse(ix.position())))
+            .filter(|ix| seen_nodes.insert(*ix))
             .collect::<BinaryHeap<_>>();
 
-        // We also track the nodes we have seen to avoid re-doing unnecessary work.
-        let mut seen_nodes = Set::new();
-
-        while let Some((depth, Reverse(position))) = active_nodes.pop() {
-            let ix = NodeIndex::new_unchecked(depth, position);
-            // To avoid re-doing work we immediately discard a node that is already in our tree.
-            if smt.inner_nodes.contains_key(&ix) {
-                continue;
-            }
-
+        while let Some(ix) = active_nodes.pop() {
             if ix.depth() + 1 == SMT_DEPTH {
                 // We have to handle the case where the children are the leaves specially.
                 //
@@ -553,9 +546,8 @@ impl PartialSmt {
             // it. While it would be correct to do unconditionally, we operate over untrusted
             // input and hence we have to be careful.
             let parent = ix.parent();
-            if !seen_nodes.contains(&parent) {
-                active_nodes.push((parent.depth(), Reverse(parent.position())));
-                seen_nodes.insert(parent);
+            if seen_nodes.insert(parent) {
+                active_nodes.push(parent);
             }
         }
 
