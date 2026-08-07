@@ -55,6 +55,10 @@ pub struct PackageManifest {
     pub(super) modules: BTreeMap<Arc<Path>, PackageModule>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "arbitrary_dependencies()")
+    )]
     pub(super) dependencies: Vec<Dependency>,
     /// The (optional) entrypoint function for this package, if it is executable
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
@@ -671,6 +675,19 @@ impl fmt::Debug for TypeExport {
             .field("ty", ty)
             .finish()
     }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+fn arbitrary_dependencies() -> impl Strategy<Value = Vec<Dependency>> {
+    proptest::collection::vec(any::<Dependency>(), 0..10).prop_filter(
+        "package dependencies must have unique ids",
+        |dependencies| {
+            use alloc::collections::BTreeSet;
+
+            let mut seen = BTreeSet::new();
+            dependencies.iter().all(|dependency| seen.insert(dependency.id().clone()))
+        },
+    )
 }
 
 fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidationError> {
