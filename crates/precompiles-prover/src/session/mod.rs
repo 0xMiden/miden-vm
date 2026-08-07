@@ -490,16 +490,14 @@ impl Session {
 
         #[cfg(feature = "std")]
         if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
-            std::eprintln!("PADDED_HEIGHT ChunkNode {}", chunk_node.height());
+            std::eprintln!("PADDED_HEIGHT ChunkNodeSponge {}", chunk_node_sponge.height());
             std::eprintln!("PADDED_HEIGHT Poseidon2 {}", p2.height());
             std::eprintln!("PADDED_HEIGHT Round {}", round.height());
             std::eprintln!("PADDED_HEIGHT BytePairLut {}", bpl.height());
-            std::eprintln!("PADDED_HEIGHT KeccakSponge {}", sponge.height());
             std::eprintln!("PADDED_HEIGHT TranscriptEval {}", eval.height());
             std::eprintln!("PADDED_HEIGHT UintStoreMul {}", uint.height());
             std::eprintln!("PADDED_HEIGHT UintAdd {}", add.height());
-            std::eprintln!("PADDED_HEIGHT EcGroups {}", ec_groups.height());
-            std::eprintln!("PADDED_HEIGHT EcPointStore {}", ec.height());
+            std::eprintln!("PADDED_HEIGHT EcPointStoreGroups {}", ec.height());
             std::eprintln!("PADDED_HEIGHT EcGroupAdd {}", ec_add.height());
             std::eprintln!("PADDED_HEIGHT EcMsm {}", msm.height());
         }

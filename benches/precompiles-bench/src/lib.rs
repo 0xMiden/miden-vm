@@ -1,4 +1,4 @@
-#[path = "../../../precompiles/benches/precompiles_bench/support.rs"]
+#[path = "../../../crates/precompiles/benches/precompiles_bench/support.rs"]
 mod support;
 
 pub use support::*;
