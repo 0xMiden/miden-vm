@@ -2182,6 +2182,7 @@ dependencies = [
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
+ "miden-serde-utils",
  "miden-test-serde-macros",
  "miden-test-utils",
  "miden-utils-core-derive",
