@@ -4,7 +4,7 @@ This crate contains Miden assembler.
 
 The purpose of the assembler is to compile/assemble [Miden Assembly (MASM)](https://docs.miden.xyz/miden-vm/user_docs/assembly)
 source code into a Miden VM program (represented by `Program` struct). The program
-can then be executed on Miden VM [processor](../processor).
+can then be executed on Miden VM [processor](../../processor).
 
 ## Compiling Miden Assembly
 
