@@ -97,6 +97,97 @@ pub proc verify
     drop
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 
+    exec.verify_digest_impl
+    # => [...]
+end
+
+#! Verifies a secp256k1 ECDSA witness against a precomputed Keccak256 digest.
+#!
+#! This entrypoint is for callers which hash data outside this procedure, for example with
+#! `crypto::hashes::keccak256::hash_bytes`. It accepts the packed digest limbs returned by that
+#! procedure, converts them to the native little-endian scalar representation, and skips the
+#! internal Keccak step performed by `verify`.
+#!
+#! Inputs:
+#!   Operand stack: [PK_COMM, DIGEST_U32[8], ...]
+#!   Advice stack:  [QX[8] | QY[8] | SIG_R[8] | SIG_S[8] | ...]
+#! Outputs:
+#!   Operand stack: [...]
+#!   Advice stack:  [...]
+#!
+#! Where:
+#! - `PK_COMM`: Poseidon2 hash commitment of `QX[8] || QY[8]`, where coordinates are native
+#!   little-endian numeric u32 limbs, one limb per Felt.
+#! - `DIGEST_U32[8]`: eight packed little-endian u32 limbs containing the 32-byte Keccak256 digest.
+#! - `QX[8]`, `QY[8]`: native public-key coordinates as little-endian u32 limbs.
+#! - `SIG_R[8]`, `SIG_S[8]`: native signature scalars as little-endian u32 limbs.
+#!
+#! Local memory layout (element addresses):
+#!   - loc[0 ..16] : native public key, QX[8] || QY[8].
+#!   - loc[16..24] : Keccak256 digest scratch buffer.
+#!
+#! No result word is pushed. The procedure traps on malformed native limbs, invalid/off-curve public
+#! keys, invalid signature scalars, or failed signature verification.
+#!
+#! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
+#! supplied digest, and signature scalars through the same path as `verify`.
+@locals(24)
+pub proc verify_digest
+    # Load QX || QY from advice into the verifier public-key buffer while absorbing the same
+    # two chunks into the Poseidon2 `hash_elements` state. Since there are exactly 16 elements,
+    # the `hash_elements` capacity word is zero and no partial-block padding is required.
+    # `adv_pipe` exposes each just-written chunk in the rate slots in the same order that
+    # `mem_stream` would read it back from memory.
+    locaddr.0 padw padw padw
+    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[0], PK_COMM, DIGEST_U32[8], ...]
+    adv_pipe
+    # => [QX_RATE[8], C=0w, write_ptr=loc[8], PK_COMM, DIGEST_U32[8], ...]
+    hperm
+    # => [R0, R1, C, write_ptr=loc[8], PK_COMM, DIGEST_U32[8], ...]
+    adv_pipe
+    # => [QY_RATE[8], C, write_ptr=loc[16], PK_COMM, DIGEST_U32[8], ...]
+    hperm
+    # => [R0, R1, C, write_ptr=loc[16], PK_COMM, DIGEST_U32[8], ...]
+    exec.poseidon2::squeeze_digest
+    # => [PK_HASH, write_ptr=loc[16], PK_COMM, DIGEST_U32[8], ...]
+    movup.4 movdn.8
+    # => [PK_HASH, PK_COMM, write_ptr=loc[16], DIGEST_U32[8], ...]
+    assert_eqw.err="invalid public key commitment"
+    # => [write_ptr=loc[16], DIGEST_U32[8], ...]
+
+    # Save the packed digest in local memory so it can be read backwards and converted to the
+    # native little-endian scalar limbs consumed by prepare_verify_inputs.
+    movdn.8
+    # => [DIGEST_U32[8], digest_ptr=loc[16], ...]
+    dup.8 mem_storew_le dropw
+    # => [DIGEST_HI_U32[4], digest_ptr=loc[16], ...]
+    dup.4 add.4 mem_storew_le dropw
+    # => [digest_ptr=loc[16], ...]
+
+    dup sub.16 swap
+    # => [read_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    repeat.8
+        dup mem_load
+        exec.reverse_u32_bytes
+        swap add.1
+    end
+    # => [read_ptr=loc[24], PREHASH_U32[8], pubkey_ptr, ...]
+    drop
+    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(DIGEST_U32[7])
+
+    exec.verify_digest_impl
+    # => [...]
+end
+
+# INTERNAL PROCEDURES — ECDSA
+# ================================================================================================
+
+#! Completes ECDSA verification after the message digest has been converted to native scalar limbs.
+#!
+#! Input:  [Z_U32[8], pubkey_ptr, ...]
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [...]
+proc verify_digest_impl
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
 
@@ -123,9 +214,6 @@ pub proc verify
     exec.assert_x_eq_scalar_k1
     # => [...]
 end
-
-# INTERNAL PROCEDURES — ECDSA
-# ================================================================================================
 
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!

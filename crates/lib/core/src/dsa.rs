@@ -16,9 +16,9 @@
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
 /// Functions in this module generate the public-key commitment and native advice witness expected
-/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
-/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
-/// Rust verifier, the MASM verifier intentionally accepts high-s values.
+/// by the `ecdsa_k256_keccak::verify` and `verify_digest` ABIs. The public-key coordinates are
+/// bound by that commitment, but `r` and `s` are not committed to a particular signature encoding.
+/// Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally accepts high-s values.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 

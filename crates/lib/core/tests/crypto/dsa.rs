@@ -5,11 +5,13 @@ use miden_core::{
     Felt, Word,
     deferred::DeferredState,
     serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{CoreLibrary, dsa::ecdsa_k256_keccak};
 use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
+    hash::keccak::Keccak256,
 };
 use miden_precompiles::K1Scalar;
 use miden_processor::{
@@ -19,10 +21,13 @@ use miden_processor::{
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
+use crate::helpers::masm_store_felts;
+
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
 const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
 const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
+const LONG_PAYLOAD_PTR: u32 = 128;
 
 #[test]
 fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
@@ -34,6 +39,42 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
     assert_eq!(wire.entries.len(), VERIFY_EXPECTED_WIRE_ENTRIES);
     assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_verify_digest_accepts_hash_bytes_output() {
+    let payload: Vec<u8> = (0..240).map(|value| value as u8).collect();
+    let mut rng = ChaCha20Rng::from_seed([0x91; 32]);
+    let signing_key = SigningKey::with_rng(&mut rng);
+    let public_key = signing_key.public_key();
+    let digest: [u8; 32] = Keccak256::hash(&payload).into();
+    let signature = signing_key.sign_prehash(digest);
+
+    assert!(
+        public_key.verify_prehash(digest, &signature),
+        "Rust prehash signature must verify before passing it to MASM",
+    );
+
+    let stores = masm_store_felts(&bytes_to_packed_u32_elements(&payload), LONG_PAYLOAD_PTR);
+    let pk_comm = masm_push_word(&ecdsa_k256_keccak::public_key_commitment(&public_key));
+    let advice = ecdsa_k256_keccak::encode_signature(&public_key, &signature);
+    let source = format!(
+        r#"
+        begin
+            {stores}
+            {pk_comm}
+            push.{}
+            push.{LONG_PAYLOAD_PTR}
+            exec.::miden::core::crypto::hashes::keccak256::hash_bytes
+            movupw.2
+            exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_digest
+        end
+        "#,
+        payload.len(),
+    );
+
+    run_core_program_with_advice(&source, &advice)
+        .expect("digest produced by hash_bytes must verify without rehashing");
 }
 
 #[test]
