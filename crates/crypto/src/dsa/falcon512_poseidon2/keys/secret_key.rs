@@ -199,10 +199,10 @@ impl SecretKey {
     /// Derives the public key corresponding to this secret key using h = g /f [mod ϕ][mod p].
     fn compute_pub_key_poly(&self) -> PublicKey {
         let g: Zeroizing<Polynomial<FalconFelt>> =
-            Zeroizing::new(self.secret_key[0].clone().into());
+            Zeroizing::new(Polynomial::from(&self.secret_key[0]));
         let g_fft = Zeroizing::new(g.fft());
         let minus_f: Zeroizing<Polynomial<FalconFelt>> =
-            Zeroizing::new(self.secret_key[1].clone().into());
+            Zeroizing::new(Polynomial::from(&self.secret_key[1]));
         let f = Zeroizing::new(-(&*minus_f));
         let f_fft = Zeroizing::new(f.fft());
         let f_fft_inv = Zeroizing::new(f_fft.hadamard_inv());
@@ -446,7 +446,7 @@ impl Deserializable for SecretKey {
 
 /// Computes the complex FFT of the secret key polynomials.
 fn to_complex_fft(basis: &[Polynomial<i16>; 4]) -> [Polynomial<Complex<f64>>; 4] {
-    let [g, f, big_g, big_f] = basis.clone();
+    let [g, f, big_g, big_f] = basis;
     let g_fft = g.map(|cc| Complex64::new(*cc as f64, 0.0)).fft();
     let minus_f_fft = f.map(|cc| -Complex64::new(*cc as f64, 0.0)).fft();
     let big_g_fft = big_g.map(|cc| Complex64::new(*cc as f64, 0.0)).fft();
