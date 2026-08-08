@@ -33,6 +33,7 @@
 #### Features
 
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
+- Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
 
 ## v0.29.0 (2026-08-04)
 
