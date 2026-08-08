@@ -126,9 +126,10 @@ fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMa
 // AUX COLUMN LAYOUT
 // ================================================================================================
 
-/// FLATTENED to lqd 1, repeated per lane: each lane's 10-column band holds
-/// 19 fractions (all degree-≤2 multiplicities) split ≤ 2 per column, the
-/// band's col 0 a single fraction:
+/// Flattened running-sum layout, repeated per lane: each lane's 10-column band holds
+/// 19 fractions split ≤ 2 per column, the band's col 0 a single fraction. The flattening does not
+/// bring this AIR to `log_quotient_degree = 1`; it derives 2 because the memory64 destination
+/// fraction carries degree 5 (see `dst_deg` in the lookup evaluator):
 /// - band col 0: memory64 dst provide.
 /// - band col 1: memory64 `src_a` + `src_b` requires.
 /// - band cols 2–5: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
@@ -356,14 +357,14 @@ fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
 // LOOKUP AIR
 // ================================================================================================
 
-/// Aux column shape (FLATTENED to lqd 1), repeated per lane (band-local):
-/// - band col 0: memory64 dst provide (one degree-≤3 fraction; lane 0's is the running sum).
+/// Aux column shape, repeated per lane (band-local):
+/// - band col 0: memory64 dst provide (lane 0's is the running sum).
 /// - band col 1: memory64 `src_a` + `src_b` requires.
 /// - band cols 2–5: 8 `BytePairLut` byte requires, two per column.
 /// - band cols 6–9: 8 `Range16` requires on `rot_limbs`, two per column.
 ///
-/// Every closing constraint is degree ≤ 3, so `log_quotient_degree = 1`
-/// (aux blowup factor = 2). Width disregarded.
+/// This AIR derives `log_quotient_degree = 2`: the memory64 destination fraction below carries
+/// `Deg { v: 5, .. }`. The symbolic derivation is authoritative; trace width does not enter it.
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
 
 const fn build_column_shape() -> [usize; NUM_AUX_COLS] {

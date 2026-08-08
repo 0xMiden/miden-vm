@@ -182,7 +182,7 @@ where:
 - `idx0` and `idx1` are selector columns used to identify which element in the word is being accessed. Specifically, the index within the word is computed as `idx1 * 2 + idx0`.
   - However, when `ew` is set to $1$ (indicating that a word is accessed), these columns are meaningless and are set to $0$.
 - `clk` contains clock cycle at which the memory operation happened. Values in this column must increase monotonically for a given context and memory word but there can be gaps between two consecutive values of up to $2^{32}$.
-  - When the context and word address are unchanged, `clk` may stay the same, but only read operations are allowed.
+  - When the context and word address are unchanged, `clk` may stay the same, but only read operations are allowed. This includes any combination of word and element reads; a write may not share the same `(ctx, word_addr, clk)` tuple with any other access.
 - `v0, v1, v2, v3` columns contain field elements stored at a given context/word/clock cycle after the memory operation.
 - Columns `d0` and `d1` contain lower and upper $16$ bits of the delta between two consecutive context IDs, addresses, or clock cycles. Specifically:
   - When the context changes within a frame, these columns contain $(ctx' - ctx)$ in the "next" row.

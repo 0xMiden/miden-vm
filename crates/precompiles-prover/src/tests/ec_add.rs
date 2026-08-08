@@ -28,14 +28,17 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use crate::logup::{NUM_PUBLIC_VALUES, sigma_sum};
 use crate::{
     ec::{
-        COL_IS_CERT, EcPointStoreAir, EcRequire, NUM_MAIN_COLS as POINT_COLS,
+        COL_IS_CERT, EcRequire,
         add::{
             CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
             NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
             trace::{EcAddRequires, generate_trace as ec_add_trace},
         },
-        groups::EcGroupsAir,
-        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces},
+        point_store_groups::{
+            EcPointStoreGroupsAir, NUM_MAIN_COLS as POINTS_GROUPS_COLS,
+            trace::generate_trace as ec_points_groups_trace,
+        },
+        trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
     },
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
@@ -77,14 +80,14 @@ const FP: u32 = 1000;
 
 /// The arithmetic + EC chiplet subset, in canonical
 /// [`SessionTraces::mains`](crate::session::SessionTraces::mains) order:
-/// byte-pair LUT, uint store+mul, uint add, EC groups, EC points, EC add.
-const NUM_STACK: usize = 6;
+/// byte-pair LUT, uint store+mul, uint add, EC points+groups, EC add.
+const NUM_STACK: usize = 5;
 
 /// Bare-requires stack over the arithmetic + EC chiplet subset — the EC
 /// layer's analogue of the Session sweep, driven through [`EcRequire`].
 /// The subset is bus-closed: `Range16` nets against the LUT, `UintVal` /
 /// `UintLimbs` / `UintAdd` / `UintMul` / `EcGroup` / `EcPoint` all net
-/// within the six chiplets.
+/// within the five chiplets.
 struct EcStack {
     store: UintStoreRequires,
     /// The pinned modulus's handle.
@@ -133,18 +136,18 @@ impl EcStack {
     /// accumulator and routes the demand its rows consume, so relations
     /// run before the store / EC stores read their provide ledgers and
     /// every `Range16` consumer fires before the LUT — and bundle the
-    /// six main traces in [`NUM_STACK`] order.
+    /// five main traces in [`NUM_STACK`] order.
     fn traces(mut self) -> EcStackTraces {
         let mut bpl = BytePairLutRequires::new();
         let add = uint_add_trace(self.adds, &mut self.store);
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut bpl);
         let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
-        let (ec_groups, ec_points) = ec_store_traces(self.ec);
-        EcStackTraces([bpl_trace(bpl), uint, add, ec_groups, ec_points, ec_add])
+        let ec_points_groups = ec_points_groups_trace(self.ec);
+        EcStackTraces([bpl_trace(bpl), uint, add, ec_points_groups, ec_add])
     }
 }
 
-/// The six subset main traces, with the per-chiplet check / balance /
+/// The five subset main traces, with the per-chiplet check / balance /
 /// prove harness over them.
 struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 
@@ -154,13 +157,12 @@ fn stack_airs() -> [ChipletAir; NUM_STACK] {
         ChipletAir::BytePairLut,
         ChipletAir::UintStoreMul,
         ChipletAir::UintAdd,
-        ChipletAir::EcGroups,
-        ChipletAir::EcPointStore,
+        ChipletAir::EcPointStoreGroups,
         ChipletAir::EcGroupAdd,
     ]
 }
 
-/// The subset as a [`MultiAir`] over the seven [`stack_airs`] in
+/// The subset as a [`MultiAir`] over the five [`stack_airs`] in
 /// [`NUM_STACK`] order, closing the same cross-AIR `Σ σ = 0` bus identity
 /// as the full [`ChipletMultiAir`](crate::session::ChipletMultiAir) — the
 /// subset is bus-closed, so the residue sum vanishes. Drives the
@@ -198,18 +200,20 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
 
 impl EcStackTraces {
     fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_STACK] {
-        let [a, b, c, d, e, f] = &self.0;
-        [a, b, c, d, e, f]
+        let [a, b, c, d, e] = &self.0;
+        [a, b, c, d, e]
     }
 
     /// The EcGroupAdd main — the tamper tests' target.
     fn ec_add_main(&self) -> &RowMajorMatrix<Felt> {
-        &self.0[5]
+        &self.0[4]
     }
 
-    /// The EcPointStore main — the closure-cert necessity tests' target.
+    /// The EcPointStoreGroups main — the closure-cert necessity tests'
+    /// target (the point-store band sits at columns 0..14, so the point
+    /// tamper helpers only need the merged row stride).
     fn ec_points_main(&self) -> &RowMajorMatrix<Felt> {
-        &self.0[4]
+        &self.0[3]
     }
 
     /// Per-chiplet local-constraint check (one AIR at a time, no
@@ -230,7 +234,7 @@ impl EcStackTraces {
     }
 
     /// The subset's [`ProverStatement`]: the [`EcStackMultiAir`] + the dummy
-    /// shared `air_inputs` + the seven main traces in [`NUM_STACK`] order.
+    /// shared `air_inputs` + the five main traces in [`NUM_STACK`] order.
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, EcStackMultiAir> {
         let statement =
             Statement::new(EcStackMultiAir::new(), Self::dummy_air_inputs(), Vec::new())
@@ -277,9 +281,8 @@ fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng
     fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
     fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
     fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
-    fold_balance(&EcGroupsAir, mains[3], &challenges, &mut net);
-    fold_balance(&EcPointStoreAir, mains[4], &challenges, &mut net);
-    fold_balance(&EcGroupAddAir, mains[5], &challenges, &mut net);
+    fold_balance(&EcPointStoreGroupsAir, mains[3], &challenges, &mut net);
+    fold_balance(&EcGroupAddAir, mains[4], &challenges, &mut net);
     net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
 }
 
@@ -328,7 +331,8 @@ fn tamper_cell(m: &mut RowMajorMatrix<Felt>, row: usize, cell: usize, v: u32) {
     m.values[row * ADD_COLS + cell] = Felt::from(v);
 }
 
-/// Clone the EcPointStore main and rewrite one column of a given row.
+/// Clone the EcPointStoreGroups main and rewrite one point-store-band
+/// column of a given row.
 fn tamper_ec_points(
     main: &RowMajorMatrix<Felt>,
     row: usize,
@@ -336,7 +340,7 @@ fn tamper_ec_points(
     v: u32,
 ) -> RowMajorMatrix<Felt> {
     let mut m = main.clone();
-    m.values[row * POINT_COLS + col] = Felt::from(v);
+    m.values[row * POINTS_GROUPS_COLS + col] = Felt::from(v);
     m
 }
 
@@ -653,7 +657,7 @@ fn double_forged_as_generic_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -711,7 +715,7 @@ fn finite_forged_as_pai_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -734,7 +738,7 @@ fn double_forged_as_cancel_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -767,7 +771,7 @@ fn ed25519_torsion_forged_as_double_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -790,7 +794,7 @@ fn forged_result_ptr_unbalances() {
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
-    mains[5] = &forged;
+    mains[4] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }
 
@@ -853,9 +857,9 @@ fn cert_point_forged_as_trio_unbalances() {
     let traces = k1.stack.traces();
 
     let forged = tamper_ec_points(traces.ec_points_main(), r.addr() as usize - 1, COL_IS_CERT, 0);
-    crate::tests::check_local(EcPointStoreAir, &forged);
+    crate::tests::check_local(EcPointStoreGroupsAir, &forged);
     let mut rng = StdRng::seed_from_u64(0xecad_dce3);
     let mut mains = traces.mains();
-    mains[4] = &forged;
+    mains[3] = &forged;
     assert_ne!(stack_residual(&mains, &mut rng), 0);
 }

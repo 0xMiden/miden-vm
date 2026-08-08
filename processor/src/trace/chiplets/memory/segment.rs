@@ -114,7 +114,7 @@ impl MemorySegmentTrace {
     /// If the element at the specified address hasn't been previously written to, ZERO is returned.
     ///
     /// # Errors
-    /// - Returns an error if the same address is accessed more than once in the same clock cycle.
+    /// - Returns an error if the addressed word was previously written in the same clock cycle.
     pub fn read(&mut self, ctx: ContextId, addr: u32, clk: Felt) -> Result<Felt, MemoryError> {
         let (word_addr, addr_idx_in_word) = addr_to_word_addr_and_idx(addr);
 
@@ -138,7 +138,7 @@ impl MemorySegmentTrace {
     /// - Assumes that the address is word aligned.
     ///
     /// # Errors
-    /// - Returns an error if the same address is accessed more than once in the same clock cycle.
+    /// - Returns an error if the addressed word was previously written in the same clock cycle.
     pub fn read_word(
         &mut self,
         ctx: ContextId,
@@ -283,7 +283,7 @@ impl MemorySegmentTrace {
     /// was read.
     ///
     /// # Errors
-    /// - Returns an error if the same address is accessed more than once in the same clock cycle.
+    /// - Returns an error if the addressed word was previously written in the same clock cycle.
     fn read_word_helper(
         &mut self,
         ctx: ContextId,

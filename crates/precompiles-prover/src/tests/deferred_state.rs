@@ -1,24 +1,32 @@
 use std::{format, string::String, sync::Arc, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
+use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{
         DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
         TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
     },
+    field::QuadFelt,
     proof::{DeferredProof, HashFunction, StarkProof},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     deferred::{DeferredSession, session_from_deferred_state},
-    hash::keccak::sponge::trace::keccak_oracle,
+    hash::{
+        chunk_node_sponge::SPONGE_COL_OFFSET,
+        keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+    },
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces, VerifyError, verify_deferred},
+    tests::bus_balance::session_stack_residual,
     transcript::poseidon2::P2Digest,
 };
 
@@ -477,4 +485,66 @@ fn prove_deferred_state_round_trips_for_every_hash_function() {
                 .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should verify: {e}"));
         }
     }
+}
+
+/// Reconstruct the full ten-chiplet LogUp balance, including verifier-side fixed-boundary
+/// consumes. This checks the generated traces against each AIR's lookup evaluator;
+/// `eval_external` is tested separately in `session::prove`.
+fn assert_session_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
+    let challenges = Challenges::new(
+        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
+        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let mains = traces.mains();
+    let residual = session_stack_residual(&mains, &[], &challenges);
+    assert!(
+        residual.is_empty(),
+        "session stack imbalance: {} unmatched denom(s); e.g. net {:?} on {}",
+        residual.len(),
+        residual.first().map(|(m, _)| *m),
+        residual.first().map(|(_, s)| s.as_str()).unwrap_or(""),
+    );
+}
+
+/// Exercises the merged sponge band on multi-block (`> 136`-byte) messages.
+/// The default full-proof fixtures use the single-block input `b"abc"`; this
+/// test covers cross-block state, invocation seams, overshoot lanes, padding,
+/// and final squeezing through both constraint and bus-balance checks.
+#[test]
+fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
+    let mut rng = StdRng::seed_from_u64(0xc0de_5b09);
+    // 137: first byte past the rate boundary (2 blocks, pad in block 2).
+    // 271: rate boundary − 1 across two blocks. 300, 407: overshoot variety.
+    for len in [137usize, 271, 300, 407] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let traces = keccak_session_traces(&input);
+        // Inspect the production merged band rather than inferring activity from the input. This
+        // fails if trace construction silently truncates the sponge invocation.
+        let merged = traces.mains()[0];
+        let active_sponge_rows = merged
+            .values
+            .chunks_exact(merged.width)
+            .filter(|row| row[SPONGE_COL_OFFSET + SPONGE_COL_ACT] == Felt::ONE)
+            .count();
+        assert!(
+            active_sponge_rows > SPONGE_PERIOD,
+            "case len={len} must activate more than one sponge block, got {active_sponge_rows} rows"
+        );
+        traces.check();
+        assert_session_balanced(&traces, &mut rng);
+    }
+}
+
+/// Explicit full prove+verify of a multi-block Keccak session — the
+/// end-to-end counterpart to the fast check/balance guard above, closing
+/// the merged-AIR multi-block gap through the real STARK path.
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn prove_deferred_state_round_trips_for_multi_block_keccak() {
+    let synthetic = synthetic_keccak_state(&(0u8..200).collect::<Vec<u8>>());
+    let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+        .expect("multi-block keccak session should prove");
+    verify_deferred(&proof).expect("multi-block keccak session should verify");
 }
