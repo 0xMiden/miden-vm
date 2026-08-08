@@ -729,8 +729,23 @@ fn test_ast_parsing_use() -> Result<(), Report> {
     end"#
     );
     let forms = module!(import!("miden::core::abc::foo"), begin!(exec!(foo::bar)));
-    assert_eq!(context.parse_forms(source)?, forms);
-    // TODO: Assert fully-resolved name is `std::abc::foo::bar`
+    assert_eq!(context.parse_forms(source.clone())?, forms);
+
+    let module = context.parse_program_source_file(source)?;
+    let main_idx = module.index_of(Item::is_main).expect("executable should have entrypoint");
+    let main = module.get(main_idx).expect("entrypoint index should be valid").unwrap_procedure();
+    let invokes: Vec<_> = main.invoked().collect();
+    assert_eq!(invokes.len(), 1, "expected one exec invocation in entrypoint");
+    assert_eq!(invokes[0].kind, InvokeKind::Exec);
+
+    let path = invokes[0].target.unwrap_path();
+    assert!(path.is_absolute(), "import-qualified exec should resolve to an absolute path");
+    assert_eq!(
+        path,
+        Path::new("::miden::core::abc::foo::bar"),
+        "module import should be joined with the invoked procedure suffix"
+    );
+
     Ok(())
 }
 

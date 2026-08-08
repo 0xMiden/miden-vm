@@ -294,9 +294,13 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             && current.is_some_and(|curr| curr.as_str() == path.last().unwrap())
         {
             self.analyzer.error(SemanticAnalysisError::SelfRecursive { span });
-        } else if self.resolve_external(target.span(), &path).is_none() {
-            self.analyzer
-                .error(SemanticAnalysisError::MissingImport { span: target.span() });
+        } else {
+            match self.resolve_external(target.span(), &path) {
+                Some(resolved) => *target = resolved,
+                None => self
+                    .analyzer
+                    .error(SemanticAnalysisError::MissingImport { span: target.span() }),
+            }
         }
         ControlFlow::Continue(())
     }
