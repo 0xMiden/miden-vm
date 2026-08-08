@@ -143,20 +143,23 @@ where
     }
     fn visit_mut_inst(&mut self, inst: &mut Span<Instruction>) -> ControlFlow<()> {
         use crate::ast::Instruction;
-        if let Instruction::EmitImm(Immediate::Constant(name)) = &**inst {
+        if let Instruction::EmitImm(Immediate::Constant(name))
+        | Instruction::TraceImm(Immediate::Constant(name)) = &**inst
+        {
             let span = name.span();
             match self.env.get(name) {
                 Ok(Some(
                     CachedConstantValue::Miss(ConstantExpr::Hash(HashKind::Event, _))
                     | CachedConstantValue::Hit(ConstantValue::Hash(HashKind::Event, _)),
                 )) => {
-                    // CHANGE: allow `emit.EVENT` when `EVENT` was defined via
+                    // CHANGE: allow `emit.EVENT` / `trace.EVENT` when `EVENT` was defined via
                     //   const.EVENT = event("...")
                     // NOTE: This function only validates the kind; the actual resolution to a Felt
                     // happens below in `visit_mut_immediate_felt` just like other Felt immediates.
                     // Enabled syntax:
                     //   const.EVT = event("...")
                     //   emit.EVT
+                    //   trace.EVT
                 },
                 Ok(Some(CachedConstantValue::Miss(expr @ ConstantExpr::Var(_)))) => {
                     // A reference to another constant was used, try to evaluate the expression
@@ -181,12 +184,15 @@ where
                     }
                 },
                 Ok(Some(_)) => {
-                    // CHANGE: disallow `emit.CONST` unless CONST is defined via `event("...")`.
+                    // CHANGE: disallow `emit.CONST` / `trace.CONST` unless CONST is defined via
+                    // `event("...")`.
                     // Examples which now error:
                     //   const.BAD = 42
                     //   emit.BAD
+                    //   trace.BAD
                     //   const.W = word("foo")
                     //   emit.W
+                    //   trace.W
                     self.errors.push(
                         ConstEvalError::InvalidConstant {
                             span,

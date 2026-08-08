@@ -17,7 +17,7 @@ use crate::{
     BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
     Program, StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName, SystemEvent, TraceError, TraceHandler},
+    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
 };
 
@@ -284,18 +284,15 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
 }
 
 #[test]
-fn test_diagnostic_host_trace_error_uses_emit_location() {
+fn test_diagnostic_host_trace_error_uses_trace_location() {
     let trace = EventName::new("test::host_trace_error");
     let trace_id = trace.to_event_id();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let source = format!(
         "
         begin
-            push.{trace_id}
-            push.{trace_sys_event_id}
-            emit
+            trace.event(\"{trace}\")
         end"
     );
     let package = Assembler::new(source_manager.clone())
@@ -319,11 +316,10 @@ fn test_diagnostic_host_trace_error_uses_emit_location() {
         // Name and id of the user defined trace event are shown
         format!("  x error during processing of event '{trace}' (ID: {trace_id})"),
         "  `-> dummy host trace failure",
-        regex!(r#",-\[.*:5:13\]"#),
-        format!(" 4 |             push.{trace_sys_event_id}"),
-        " 5 |             emit",
-        regex!(r#":\s+\^\^\^"#),
-        " 6 |         end",
+        regex!(r#",-\[.*:3:13\]"#),
+      r#" 3 |             trace.event("test::host_trace_error")"#,
+        regex!(r#":\s+\^+"#),
+        " 4 |         end",
         "   `----"
     );
 }

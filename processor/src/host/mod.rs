@@ -129,7 +129,7 @@ pub trait SyncHost: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to not raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
@@ -176,7 +176,7 @@ pub trait Host: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
