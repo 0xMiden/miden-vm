@@ -8,6 +8,10 @@
 
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 
+#### Fixes
+
+- Fixed module-import `exec` paths not being rewritten to absolute paths during semantic analysis ([#3553](https://github.com/0xMiden/miden-vm/pull/3553)).
+
 ## v0.29.0 (2026-08-04)
 
 #### Changes

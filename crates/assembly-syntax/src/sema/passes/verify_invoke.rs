@@ -42,6 +42,16 @@ impl From<&Import> for LocalInvokeTarget {
     }
 }
 
+/// Whether an external invoke path is valid, and if it was resolved through a module import.
+enum ExternalPathResolution {
+    /// `exec` through a `use` module alias; the invoke target should be rewritten.
+    Rewritten(InvocationTarget),
+    /// Path is valid but should keep its original relative form (e.g. intra-package references).
+    Valid,
+    /// Path is invalid; an error has already been reported when applicable.
+    Invalid,
+}
+
 /// This visitor visits every `exec`, `call`, `syscall`, and `procref`, and ensures that the
 /// invocation target for that call is resolvable to the extent possible within the current
 /// module's context.
@@ -155,15 +165,15 @@ impl VerifyInvokeTargets<'_> {
         }
     }
 
-    fn resolve_external(&mut self, span: SourceSpan, path: &Path) -> Option<InvocationTarget> {
+    fn resolve_external(&mut self, span: SourceSpan, path: &Path) -> ExternalPathResolution {
         log::debug!(target: "verify-invoke", "resolving external symbol '{path}'");
         let Some((module, rest)) = path.split_first() else {
             self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
-            return None;
+            return ExternalPathResolution::Invalid;
         };
         if !Self::invoke_path_tail_is_valid(rest) {
             self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
-            return None;
+            return ExternalPathResolution::Invalid;
         }
         log::debug!(target: "verify-invoke", "attempting to resolve '{module}' to local import");
         if let Some(import) = self.module.get_import_mut(module) {
@@ -173,11 +183,10 @@ impl VerifyInvokeTargets<'_> {
                     import.uses += 1;
                     let import_path = import.module_path();
                     match import_path.to_absolute() {
-                        Ok(abs) => Some(InvocationTarget::Path(Span::new(
-                            import_path.span(),
-                            abs.join(rest).into(),
-                        ))),
-                        Err(_) => None,
+                        Ok(abs) => ExternalPathResolution::Rewritten(InvocationTarget::Path(
+                            Span::new(import_path.span(), abs.join(rest).into()),
+                        )),
+                        Err(_) => ExternalPathResolution::Invalid,
                     }
                 },
                 Import::Item(import) => {
@@ -186,13 +195,14 @@ impl VerifyInvokeTargets<'_> {
                         span,
                         import: import.local_name().span(),
                     });
-                    None
+                    ExternalPathResolution::Invalid
                 },
             }
+        } else if path.to_absolute().is_ok() {
+            // Intra-package paths stay relative; only module-import exec paths are rewritten.
+            ExternalPathResolution::Valid
         } else {
-            // We can consider this path fully-resolved, and mark it absolute, if it is not already
-            let abs = path.to_absolute().ok()?;
-            Some(InvocationTarget::Path(Span::new(span, abs.into_owned().into())))
+            ExternalPathResolution::Invalid
         }
     }
 
@@ -296,8 +306,9 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             self.analyzer.error(SemanticAnalysisError::SelfRecursive { span });
         } else {
             match self.resolve_external(target.span(), &path) {
-                Some(resolved) => *target = resolved,
-                None => self
+                ExternalPathResolution::Rewritten(resolved) => *target = resolved,
+                ExternalPathResolution::Valid => {},
+                ExternalPathResolution::Invalid => self
                     .analyzer
                     .error(SemanticAnalysisError::MissingImport { span: target.span() }),
             }

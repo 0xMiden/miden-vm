@@ -734,7 +734,10 @@ fn test_ast_parsing_use() -> Result<(), Report> {
 
     let module = context.parse_program_source_file(source)?;
     let main_idx = module.index_of(Item::is_main).expect("executable should have entrypoint");
-    let main = module.get(main_idx).expect("entrypoint index should be valid").unwrap_procedure();
+    let main = module
+        .get(main_idx)
+        .expect("entrypoint index should be valid")
+        .unwrap_procedure();
     let invokes: Vec<_> = main.invoked().collect();
     assert_eq!(invokes.len(), 1, "expected one exec invocation in entrypoint");
     assert_eq!(invokes[0].kind, InvokeKind::Exec);
