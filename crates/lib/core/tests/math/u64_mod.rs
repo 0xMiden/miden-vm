@@ -1882,3 +1882,53 @@ fn rotr_out_of_range_errors() {
     let test = build_test!(source, &[100u64, a0, a1]);
     expect_assert_error_message!(test);
 }
+
+// ============================================================================
+// Cycle count baseline tests for shift/rotate operations
+//
+// These tests measure the cycle count of each procedure using the `clk`
+// instruction and assert against known baselines. If the cycle count changes
+// (e.g. due to implementation changes), the test fails and the expected
+// value must be updated.
+//
+// The measurement stores the first `clk` value in memory (address 1000) to
+// keep the operand stack layout clean for the procedure call. The measured
+// delta includes the `exec` call overhead and memory instrumentation, which
+// is consistent across runs for the same procedure signature.
+// ============================================================================
+
+#[test]
+fn shift_rotate_cycle_baselines() {
+    let a: u64 = 0x12345678_9abcdef0u64;
+    let (a1, a0) = split_u64(a);
+
+    let mut mismatches = Vec::new();
+
+    for (name, n, proc_name, expected) in [
+        ("shl_n5", 5u64, "shl", 51u64),
+        ("shr_n5", 5u64, "shr", 67u64),
+        ("shr_n33", 33u64, "shr", 67u64),
+        ("rotl_n5", 5u64, "rotl", 51u64),
+        ("rotr_n5", 5u64, "rotr", 67u64),
+    ] {
+        let source = format!(
+            "
+            use miden::core::math::u64
+            begin
+                clk push.1000 mem_store
+                exec.u64::{proc_name}
+                clk push.1000 mem_load sub
+                swap drop swap drop
+            end
+            "
+        );
+        let test = build_test!(&source, &[n, a0, a1]);
+        let result = test.get_last_stack_state();
+        let cycles = result.iter().next().unwrap().as_canonical_u64();
+        if cycles != expected {
+            mismatches.push(format!("{name}: expected {expected}, got {cycles}"));
+        }
+    }
+
+    assert!(mismatches.is_empty(), "cycle count changed:\n{}", mismatches.join("\n"));
+}
