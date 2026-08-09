@@ -1813,4 +1813,28 @@ fn split_u128(value: u128) -> (u64, u64, u64, u64) {
         (value >> 32) as u32 as u64,
         value as u32 as u64,
     )
+    }
+#[test]
+fn wrapping_mul_regression_vectors() {
+    // Run 100 random regression vectors to prove MASM matches Rust
+    for _ in 0..100 {
+        let a: u64 = rand_value();
+        let b: u64 = rand_value();
+        let c = a.wrapping_mul(b);
+
+        let source = "
+            use miden::core::math::u64
+            begin
+                exec.u64::wrapping_mul
+            end";
+
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        let input_stack = stack![a0, a1, b0, b1];
+        let test = build_test!(source, &input_stack);
+        test.expect_stack(&[c0, c1]);
+    }
 }
