@@ -476,6 +476,13 @@ fn vector_karatsuba<
     right: &[F],
 ) -> Vec<F> {
     let n = left.len();
+    
+    // ??? ADD THIS SAFETY NET:
+    assert!(
+        n.is_power_of_two(),
+        "vector_karatsuba only supports power-of-two lengths"
+    );
+    
     if n <= 8 {
         let mut product = vec![F::zero(); left.len() + right.len() - 1];
         for (i, l) in left.iter().enumerate() {
@@ -666,5 +673,17 @@ mod tests {
             prod.reduce_by_cyclotomic(N),
             Polynomial::reduce_negacyclic(&Polynomial::mul_modulo_p(&poly1, &poly2))
         );
+    }
+
+    // ?? PASTE THE NEW TEST RIGHT HERE! ??
+
+    #[test]
+    #[should_panic(expected = "vector_karatsuba only supports power-of-two lengths")]
+    fn karatsuba_panics_on_non_power_of_two() {
+        // We are intentionally using length 9 (not a power of 2)
+        // This should trigger our safety guard and panic!
+        let p1 = Polynomial::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let p2 = Polynomial::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        p1.karatsuba(&p2);
     }
 }
