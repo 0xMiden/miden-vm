@@ -228,7 +228,7 @@ impl SmtForest {
                 // don't use self.contains_root here because we don't remove empty trees
                 self.roots.contains(root)
             })
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
 
         for root in &roots {
             self.roots.remove(root);

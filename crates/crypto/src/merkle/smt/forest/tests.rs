@@ -320,6 +320,33 @@ fn test_pop_and_reinsert_same_tree() -> Result<(), MerkleError> {
 }
 
 #[test]
+fn test_pop_duplicate_roots_does_not_corrupt_shared_nodes() -> Result<(), MerkleError> {
+    let mut forest = SmtForest::new();
+
+    let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
+    let key1 = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let key2 = Word::new([ONE, ZERO, ZERO, ZERO]);
+    let value1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value2 = Word::new([Felt::new_unchecked(2); Word::NUM_ELEMENTS]);
+
+    let root1 = forest.insert(empty_tree_root, key1, value1)?;
+    let duplicate_root1 = forest.insert(empty_tree_root, key1, value1)?;
+    assert_eq!(root1, duplicate_root1);
+
+    let root2 = forest.insert(root1, key2, value2)?;
+
+    forest.pop_smts(vec![root1, root1]);
+
+    let proof1 = forest.open(root2, key1)?;
+    proof1.verify_presence(&key1, &value1, &root2).unwrap();
+
+    let proof2 = forest.open(root2, key2)?;
+    proof2.verify_presence(&key2, &value2, &root2).unwrap();
+
+    Ok(())
+}
+
+#[test]
 fn test_removing_empty_smt_from_forest() {
     let mut forest = SmtForest::new();
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
