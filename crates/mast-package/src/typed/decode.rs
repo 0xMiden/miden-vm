@@ -75,6 +75,11 @@ pub(super) fn decode_type<'a>(
             Ok((out, cursor))
         },
         Type::Array(array_ty) => {
+            // Such an element reads nothing, so the stack does not stop the loop. A small manifest
+            // can ask for a million elements.
+            if array_ty.len > 0 && felt_count(&array_ty.ty) == Some(0) {
+                return Err(TypedError::ZeroWidthArray { ty: ty.to_string() });
+            }
             let mut cursor = felts;
             let mut rendered = Vec::new();
             for _ in 0..array_ty.len {

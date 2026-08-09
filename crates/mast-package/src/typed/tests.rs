@@ -66,20 +66,26 @@ fn unnamed_tuple<const N: usize>(fields: [Type; N]) -> Type {
 }
 
 /// Builds a typed view without a package, so a test can name its own types.
+///
+/// Every fixture is `component-model`. That is the one convention this crate encodes, and the
+/// compiler gives it to every high-level export of a component. See
+/// [`only_the_canonical_calling_convention_has_the_layout_we_encode`].
 fn proc(
     name: &str,
     params: impl IntoIterator<Item = Type>,
     results: impl IntoIterator<Item = Type>,
 ) -> TypedProcInfo {
-    TypedProcInfo::new(name, FunctionType::new(CallConv::Fast, params, results))
+    TypedProcInfo::new(name, FunctionType::new(CallConv::ComponentModel, params, results))
+        .expect("component-model is the convention this crate takes")
 }
 
 fn felts(values: impl IntoIterator<Item = u32>) -> Vec<Felt> {
     values.into_iter().map(Felt::from_u32).collect()
 }
 
-/// Stands in for the `account-id` codec of the CLI: one token in, two felts out. It lives here so
-/// the tests can use the user path without protocol rules.
+/// The normal case: one token in, the two felts of `account-id` out, and its own way to print
+/// them, like `account-id(0x7)`. It stands in for the `account-id` codec of the CLI, without the
+/// protocol rules.
 struct TestAccountIdCodec;
 
 impl WitScalarCodec for TestAccountIdCodec {
@@ -116,7 +122,9 @@ impl WitScalarCodec for TestAccountIdCodec {
     }
 }
 
-/// A codec that takes a type it does not fit. It tests the width check.
+/// A codec that does not fit the type it claims, in both directions: `encode` makes one felt where
+/// `account-id` takes two, and `decode` refuses every value. The first is rejected on the width.
+/// The second has to reach the caller instead of falling back to the fields.
 struct NarrowCodec;
 
 impl WitScalarCodec for NarrowCodec {
@@ -140,8 +148,89 @@ impl WitScalarCodec for NarrowCodec {
     }
 }
 
+/// A codec that takes a token and makes no felts, because its type takes none. It fits its type,
+/// unlike [`NarrowCodec`]. Its type is the struct `empty`, whose name has no WIT interface, so the
+/// codec matches on the bare name.
+struct TokenOnlyCodec;
+
+impl WitScalarCodec for TokenOnlyCodec {
+    fn wit_name(&self) -> &str {
+        "empty"
+    }
+
+    fn wit_interface(&self) -> Option<&str> {
+        None
+    }
+
+    fn encode(&self, _token: &str) -> Result<Vec<Felt>, TypedError> {
+        Ok(Vec::new())
+    }
+
+    fn decode(&self, _felts: &[Felt]) -> Result<String, TypedError> {
+        Ok("empty".to_string())
+    }
+}
+
+fn array_of(ty: Type, len: usize) -> Type {
+    Type::Array(Arc::new(ArrayType::new(ty, len)))
+}
+
 fn with_account_id(info: TypedProcInfo) -> TypedProcInfo {
     info.with_scalar_codec(Box::new(TestAccountIdCodec))
+}
+
+// CALLING CONVENTION
+// ================================================================================================
+
+#[test]
+fn only_the_canonical_calling_convention_has_the_layout_we_encode() {
+    // A signature names its calling convention, and the convention says how a value is laid out in
+    // felts. Under `component-model`, the canonical one, every field of a struct gets its own
+    // stack slot. The reason is the component export: a caller reaches it with the `call`
+    // instruction, which starts a new memory context.
+    //
+    // The `Fast` convention is the other way round. A caller reaches such a procedure with `exec`
+    // instruction , which runs it in the caller's own context and memory, so a struct can travel as
+    // its image in that memory. `pair` is two bytes and a felt holds four, so under `fast` both
+    // fields fit in one stack value.
+    let pair = named_struct("pair", [("a", Type::U8), ("b", Type::U8)]);
+    assert_eq!(pair.size_in_felts(), 1);
+
+    // So the value `pair { a: 1, b: 2 }` is one felt under `Fast` and two felts under the
+    // Canonical convention. We can only make the second, so we refuse every other convention
+    // instead of sending felts of the wrong shape. `Fast` has its own test,
+    // [`a_fast_procedure_reads_our_felts_as_a_different_value`], for what it reads there.
+    for cc in [CallConv::C, CallConv::Wasm] {
+        let refused =
+            TypedProcInfo::new("f", FunctionType::new(cc, [pair.clone()], [pair.clone()]));
+        assert!(matches!(refused, Err(TypedError::UnsupportedCallConv { .. })), "{cc}");
+    }
+
+    // Under `component-model` the two fields really are two stack values, in field order.
+    let info = proc("f", [pair.clone()], [pair]);
+    assert_eq!(info.encode_args(&["1", "2"]).unwrap(), felts([1, 2]));
+    assert_eq!(info.decode_result(&felts([1, 2])).unwrap().unwrap(), "pair { a: 1, b: 2 }");
+}
+
+#[test]
+fn a_fast_procedure_reads_our_felts_as_a_different_value() {
+    // A procedure with the `Fast` calling convention takes `pair` as one felt, the image it has in
+    // memory: `a` in the low byte, `b` in the next. So `pair { a: 1, b: 2 }` is the single value
+    // `2 * 256 + 1`, that is 513, to it, and `[1, 2]` to us.
+    //
+    // If we pushed `[1, 2]`, the procedure would read one felt, our `1`. Its low byte is 1 and the
+    // next byte is 0, so it sees `pair { a: 1, b: 0 }`, and our `2` stays on the stack as an
+    // argument nobody took. Its result goes the same way: `pair { a: 1, b: 0 }` comes back as the
+    // single felt `1`, and we would read a second felt for `b`. That felt is not part of the
+    // result. It is whatever the program left on the stack, and we would print it as the value of
+    // `b`. Nothing reports any of this. A wrong value looks exactly like a right one, so we refuse
+    // the signature.
+    let pair = named_struct("pair", [("a", Type::U8), ("b", Type::U8)]);
+    assert_eq!(pair.size_in_felts(), 1);
+
+    let refused =
+        TypedProcInfo::new("f", FunctionType::new(CallConv::Fast, [pair.clone()], [pair]));
+    assert!(matches!(refused, Err(TypedError::UnsupportedCallConv { .. })));
 }
 
 // SIGNATURE RENDERING
@@ -324,6 +413,59 @@ fn integers_are_range_checked() {
     assert!(matches!(info.encode_args(&["256"]), Err(TypedError::IntOutOfRange { .. })));
 }
 
+#[test]
+fn a_type_that_occupies_no_felts_never_reaches_the_stack() {
+    let empty = named_struct("empty", []);
+
+    // On its own the type asks for nothing: no token to type, no felt on the stack. So a procedure
+    // that takes one takes no arguments.
+    let plain = proc("f", [empty.clone()], []);
+    assert_eq!(plain.expected_token_count(), Some(0));
+    assert_eq!(plain.encode_args::<&str>(&[]).unwrap(), felts([]));
+
+    // A codec takes one token for the whole type, whatever its width. So the same parameter asks
+    // for one token now, and still makes no felts.
+    let with_codec = proc("f", [empty.clone()], []).with_scalar_codec(Box::new(TokenOnlyCodec));
+    assert_eq!(with_codec.expected_token_count(), Some(1));
+    assert_eq!(with_codec.encode_args(&["a"]).unwrap(), felts([]));
+
+    // Once for every field of a struct, the same way.
+    let wrapper = named_struct("wrapper", [("a", empty.clone()), ("b", empty.clone())]);
+    let info = proc("f", [wrapper], []).with_scalar_codec(Box::new(TokenOnlyCodec));
+    assert_eq!(info.expected_token_count(), Some(2));
+    assert_eq!(info.encode_args(&["a", "b"]).unwrap(), felts([]));
+
+    // Five of them in an array are still nothing to type. Decoding such an array is refused
+    // instead, in [`an_array_of_elements_that_take_no_felts_is_not_decoded`].
+    let info = proc("f", [array_of(empty.clone(), 5)], []);
+    assert_eq!(info.expected_token_count(), Some(0));
+    assert_eq!(info.encode_args::<&str>(&[]).unwrap(), felts([]));
+
+    // A million of them are nothing to type either, and the encoder sees that without walking them
+    // one by one.
+    let info = proc("f", [array_of(empty.clone(), 1_000_000)], []);
+    assert_eq!(info.expected_token_count(), Some(0));
+    assert_eq!(info.encode_args::<&str>(&[]).unwrap(), felts([]));
+
+    // The whole round trip: the procedure takes one and returns one, nothing is typed, nothing
+    // goes on the stack, and the result still has a name.
+    let info = proc("f", [empty.clone()], [empty]);
+    assert_eq!(info.to_string(), "f(empty) -> empty");
+    assert_eq!(info.encode_args::<&str>(&[]).unwrap(), felts([]));
+    assert_eq!(info.decode_result(&[]).unwrap().unwrap(), "empty()");
+}
+
+#[test]
+fn a_codec_reads_its_token_for_every_array_element() {
+    // The array skips its elements only when they read no tokens. A codec gives this one a token,
+    // so the loop runs twice and takes both "a" and "b", even though neither makes a felt.
+    let info = proc("f", [array_of(named_struct("empty", []), 2)], [])
+        .with_scalar_codec(Box::new(TokenOnlyCodec));
+
+    assert_eq!(info.expected_token_count(), Some(2));
+    assert_eq!(info.encode_args(&["a", "b"]).unwrap(), felts([]));
+}
+
 // RESULT DECODING
 // ================================================================================================
 
@@ -339,6 +481,9 @@ fn integers_round_trip_through_the_stack() {
     // `i8` at `-1` and `u8` at `255` are left out: `signed_small_integers_fill_their_stack_slot`
     // and `unsigned_small_integers_are_masked_to_their_own_width` pin their exact felts, which
     // says more than a round trip.
+    //
+    // Every value wider than one felt is here twice: once as all ones, once as something else. All
+    // ones reads the same in either limb order, so alone it would let a swapped round trip pass.
     for (ty, token) in [
         (Type::I8, "-128"),
         (Type::I8, "127"),
@@ -346,16 +491,19 @@ fn integers_round_trip_through_the_stack() {
         (Type::I16, "-32768"),
         (Type::I32, "-1"),
         (Type::I64, "-1"),
+        (Type::I64, "-2"),
         (Type::I128, "-1"),
+        (Type::I128, "-2"),
         (Type::U32, "4294967295"),
+        (Type::U64, "4294967303"),
         (Type::U64, "18446744073709551615"),
     ] {
         let info = proc("f", [ty.clone()], [ty.clone()]);
         let encoded = info.encode_args(&[token]).unwrap();
         let decoded = info.decode_result(&encoded).unwrap().unwrap();
 
-        // The text has the type name after it, like `-1i8`, so we compare only the value.
-        assert!(decoded.starts_with(token), "{ty}: encoded {token}, decoded {decoded}");
+        // The text has the type name after it, like `-1i8`, so we build the same thing to compare.
+        assert_eq!(decoded, format!("{token}{ty}"));
     }
 }
 
@@ -474,24 +622,38 @@ fn a_result_that_takes_no_felts_is_still_a_result() {
 }
 
 #[test]
-fn an_array_of_zero_width_elements_shows_every_element() {
-    // Each element takes no felts, so decoding one leaves the stack where it was. The array
-    // still has as many elements as its length says, and every one of them has to show up.
+fn an_array_of_elements_that_take_no_felts_is_not_decoded() {
+    // Such an array reads nothing from the stack, so nothing limits its length. A manifest of a few
+    // bytes asked for a million elements.
     let empty = named_struct("empty", []);
-    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(empty, 5)))]);
+    for len in [5, 1_000_000] {
+        let info = proc("f", [], [array_of(empty.clone(), len)]);
+        assert_eq!(info.output_felt_count(), Some(0));
+        assert!(matches!(info.decode_result(&[]), Err(TypedError::ZeroWidthArray { .. })));
+    }
+
+    // However deep it sits, so nesting does not multiply out either.
+    let nested = proc("f", [], [array_of(array_of(empty.clone(), 1000), 1000)]);
+    assert!(matches!(nested.decode_result(&[]), Err(TypedError::ZeroWidthArray { .. })));
+
+    // An array of empty arrays is the same thing in other words.
+    let of_empty_arrays = proc("f", [], [array_of(array_of(Type::U32, 0), 3)]);
+    assert!(matches!(
+        of_empty_arrays.decode_result(&[]),
+        Err(TypedError::ZeroWidthArray { .. })
+    ));
+
+    // A length of zero is still fine, and so is the type on its own.
+    assert_eq!(proc("f", [], [empty.clone()]).decode_result(&[]).unwrap().unwrap(), "empty()");
+    assert_eq!(proc("f", [], [array_of(empty, 0)]).decode_result(&[]).unwrap().unwrap(), "[]");
     assert_eq!(
-        info.decode_result(&felts([1, 2])).unwrap().unwrap(),
-        "[empty(), empty(), empty(), empty(), empty()]"
+        proc("f", [], [array_of(Type::U32, 0)]).decode_result(&[]).unwrap().unwrap(),
+        "[]"
     );
 
-    // Same one level down: three empty arrays, not one.
-    let inner = Type::Array(Arc::new(ArrayType::new(Type::U32, 0)));
-    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(inner, 3)))]);
-    assert_eq!(info.decode_result(&felts([1, 2])).unwrap().unwrap(), "[[], [], []]");
-
-    // An array whose elements do take felts is unaffected, and still stops at its own length
-    // instead of eating the rest of the stack.
-    let info = proc("f", [], [Type::Array(Arc::new(ArrayType::new(Type::U32, 3)))]);
+    // An array whose elements do take felts still stops at its own length instead of eating the
+    // rest of the stack.
+    let info = proc("f", [], [array_of(Type::U32, 3)]);
     assert_eq!(info.decode_result(&felts([7, 8, 9, 10])).unwrap().unwrap(), "[7, 8, 9]");
 }
 
@@ -541,6 +703,21 @@ fn unsigned_small_integers_are_masked_to_their_own_width() {
         info.decode_result(&felts([256])),
         Err(TypedError::MalformedResult { .. })
     ));
+}
+
+#[test]
+fn a_wide_integer_holds_its_low_limb_on_top_of_the_stack() {
+    // `2^32 + 7` tells the two limb orders apart, which no all-ones value can do. The compiler
+    // pushes the high limb first in `push_u64` (`codegen/masm/src/emit/int64.rs`), so the low limb
+    // ends up on top. miden-debug reads a real run back the same way: `FromMidenRepr for u64` in
+    // `crates/engine/src/felt.rs` takes `lo | (hi << 32)` from `felts[0]` and `felts[1]`.
+    let info = proc("f", [Type::U64], [Type::U64]);
+    assert_eq!(info.encode_args(&["4294967303"]).unwrap(), felts([7, 1]));
+    assert_eq!(info.decode_result(&felts([7, 1])).unwrap().unwrap(), "4294967303u64");
+
+    // Why a test pins the order, and not only a round trip: swapped, the same two felts are
+    // `7 * 2^32 + 1`. That is an ordinary `u64`, and it would print without a word.
+    assert_eq!(info.decode_result(&felts([1, 7])).unwrap().unwrap(), "30064771073u64");
 }
 
 #[test]

@@ -4,6 +4,10 @@
 //! felts. [`TypedProcInfo`] joins the two: it prints the signature, turns argument text into stack
 //! felts, and result felts back into text.
 //!
+//! The felts follow the canonical ABI: one stack slot per leaf field, so `struct { u8, u8 }` is
+//! two felts. This is the layout of a component export, the kind a caller reaches with `call`, and
+//! the only convention this crate takes.
+//!
 //! Types that take one token, like `word` and `felt`, go through a [`WitScalarCodec`]. Those two
 //! are built in; the caller adds others with [`TypedProcInfo::with_scalar_codec`].
 
@@ -15,7 +19,7 @@ use alloc::{
 };
 use core::fmt;
 
-use miden_assembly_syntax::ast::types::{FunctionType, Type};
+use miden_assembly_syntax::ast::types::{CallConv, FunctionType, Type};
 use miden_core::Felt;
 
 use self::{
@@ -62,16 +66,26 @@ impl TypedProcInfo {
     /// The caller picks the export. It knows which one it wants, and it keeps the signature and
     /// anything else it reads from that export, like its digest, on the same procedure.
     ///
+    /// The signature has to be `component-model`. Another convention puts the same value on the
+    /// stack in another shape, and we would read and write felts the procedure never sees.
+    ///
     /// The result has [`WordCodec`] and [`FeltCodec`]. Add more with [`Self::with_scalar_codec`].
-    pub fn new(name: impl Into<String>, signature: FunctionType) -> Self {
-        Self {
-            name: name.into(),
+    pub fn new(name: impl Into<String>, signature: FunctionType) -> Result<Self, TypedError> {
+        let name = name.into();
+        if signature.abi != CallConv::ComponentModel {
+            return Err(TypedError::UnsupportedCallConv {
+                procedure: name,
+                abi: signature.abi.to_string(),
+            });
+        }
+        Ok(Self {
+            name,
             signature,
             codecs: alloc::vec![
                 Box::new(WordCodec) as Box<dyn WitScalarCodec>,
                 Box::new(FeltCodec),
             ],
-        }
+        })
     }
 
     /// Adds a [`WitScalarCodec`]. The codec then handles its own WIT type, instead of the normal
@@ -100,6 +114,10 @@ impl TypedProcInfo {
     }
 
     /// Turns `tokens` into the felts the procedure needs on the stack, in parameter order.
+    ///
+    /// The first felt goes on top of the stack, because the first argument sits on top:
+    /// `f(1u32, 2u32)` gives `[1, 2]`. A caller that pushes them one by one starts at the back.
+    /// See `docs/external/src/appendix/calling-conventions.md` in the compiler.
     ///
     /// We check the count first. So if the caller passes the wrong number of arguments, the error
     /// gives the procedure name and both counts.
@@ -140,7 +158,8 @@ impl TypedProcInfo {
             .try_fold(0usize, |total, result| total.checked_add(felt_count(result)?))
     }
 
-    /// Turns the result felts at the start of `stack` into text.
+    /// Turns the result felts at the start of `stack` into text. `stack[0]` is the top of the
+    /// stack. The first result sits there, and so does the first field of a struct.
     ///
     /// `Ok(None)` means the procedure returns nothing. That is the only case that is not a
     /// problem. Everything else is an error the caller can show: a result type we cannot decode,

@@ -8,7 +8,7 @@ use miden_core::Felt;
 
 use super::{
     WitScalarCodec,
-    arity::{felt_count, max_for_bits, signed_range, slot_bits},
+    arity::{felt_count, max_for_bits, signed_range, slot_bits, token_count},
     codec::{codec_for_struct, parse_felt_token},
     errors::TypedError,
 };
@@ -51,16 +51,12 @@ where
             Ok(felts)
         },
         Type::Array(array_ty) => {
+            if token_count(&array_ty.ty, codecs) == Some(0) {
+                return Ok(Vec::new());
+            }
             let mut felts = Vec::new();
             for _ in 0..array_ty.len {
-                let chunk = encode_type(tokens, &array_ty.ty, codecs)?;
-                // An element of width zero reads no tokens and makes no felts. Without this
-                // check, a big `len` would loop and never move forward.
-                let empty = chunk.is_empty();
-                felts.extend(chunk);
-                if empty {
-                    break;
-                }
+                felts.extend(encode_type(tokens, &array_ty.ty, codecs)?);
             }
             Ok(felts)
         },

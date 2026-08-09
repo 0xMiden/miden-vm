@@ -81,6 +81,16 @@ pub enum TypedError {
         actual: usize,
     },
 
+    /// The calling convention says how a value is laid out in felts. We support one layout: the
+    /// canonical one, with one stack slot per leaf field.
+    #[error("procedure '{procedure}' uses convention '{abi}', only 'component-model' is supported")]
+    UnsupportedCallConv { procedure: String, abi: String },
+
+    /// An array whose elements take no felts. It reads nothing from the stack, so its length comes
+    /// only from the type: `[empty; 1_000_000]` would be a million lines that say nothing.
+    #[error("{ty} is not decoded: its elements take no felts, so there is nothing to print")]
+    ZeroWidthArray { ty: String },
+
     #[error("no typed representation for a value of shape '{0}'")]
     UnsupportedType(&'static str),
 }
