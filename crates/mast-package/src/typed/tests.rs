@@ -359,6 +359,32 @@ fn u256_has_no_token_or_felt_count() {
     assert_eq!(proc("get-u256", [], [Type::U256]).output_felt_count(), None);
 }
 
+#[test]
+fn a_count_that_does_not_fit_a_usize_is_no_count_at_all() {
+    // A `u8` takes one token, so an array of `half` of them takes `half` tokens. Two such
+    // parameters ask for `2 * half`, which is exactly one more than a `usize` holds, and wraps to
+    // `0`. Every count is checked, so we say `None` here instead.
+    //
+    // `0` is what makes this worth a test: `encode_args` would take an empty argument list as the
+    // right count, and the encoder would then walk half of a `usize` worth of elements.
+    let half = usize::MAX / 2 + 1;
+    let huge = array_of(Type::U8, half);
+    let info = proc("f", [huge.clone(), huge.clone()], []);
+    assert_eq!(info.expected_token_count(), None);
+    assert!(matches!(
+        info.encode_args::<&str>(&[]),
+        Err(TypedError::UnsupportedParameter { .. })
+    ));
+
+    // The felts of a result are counted the same way.
+    let info = proc("f", [], [huge.clone(), huge]);
+    assert_eq!(info.output_felt_count(), None);
+    assert!(matches!(
+        info.decode_result(&felts([1])),
+        Err(TypedError::UnsupportedResult { .. })
+    ));
+}
+
 // ENCODING
 // ================================================================================================
 
@@ -366,12 +392,53 @@ fn u256_has_no_token_or_felt_count() {
 fn encoding_flattens_aggregate_fields_in_order() {
     let info = proc("add-points", [point_ty(), point_ty()], [point_ty()]);
     assert_eq!(info.encode_args(&["3", "4", "5", "6"]).unwrap(), felts([3, 4, 5, 6]));
+
+    // An array flattens the same way, one element after another. Its length is part of the type,
+    // so it asks for exactly that many tokens.
+    let info = proc("f", [array_of(Type::U32, 3)], []);
+    assert_eq!(info.expected_token_count(), Some(3));
+    assert_eq!(info.encode_args(&["7", "8", "9"]).unwrap(), felts([7, 8, 9]));
+
+    // Two levels at once: every field of every element takes its own slot, in order.
+    let info = proc("f", [array_of(point_ty(), 2)], []);
+    assert_eq!(info.expected_token_count(), Some(4));
+    assert_eq!(info.encode_args(&["1", "2", "3", "4"]).unwrap(), felts([1, 2, 3, 4]));
 }
 
 #[test]
 fn a_codec_encodes_its_type_from_one_token() {
     let info = with_account_id(proc("take-account-id", [account_id_ty()], []));
     assert_eq!(info.encode_args(&["0x7"]).unwrap(), felts([7, 0]));
+}
+
+#[test]
+fn the_word_codec_reads_one_felt_from_every_eight_bytes_of_the_hex() {
+    // `word` is the built-in codec with a text form of its own, and the form is not obvious. The
+    // hex is four groups of eight bytes, one felt each, and every group is little-endian. So the
+    // felt `1` is written `0100000000000000`, not `0000000000000001`.
+    let word = named_struct(
+        "miden:base/core-types@1.0.0/word",
+        [("a", Type::Felt), ("b", Type::Felt), ("c", Type::Felt), ("d", Type::Felt)],
+    );
+    let info = proc("f", [word.clone()], [word]);
+    let hex = "0x0100000000000000020000000000000003000000000000000400000000000000";
+
+    assert_eq!(info.expected_token_count(), Some(1));
+    assert_eq!(info.encode_args(&[hex]).unwrap(), felts([1, 2, 3, 4]));
+    assert_eq!(
+        info.decode_result(&felts([1, 2, 3, 4])).unwrap().unwrap(),
+        format!("word({hex})")
+    );
+
+    // A token the codec cannot read reaches the caller: too short, not hex at all, or a group that
+    // is no field element.
+    let over_the_modulus = "0xffffffffffffffff000000000000000000000000000000000000000000000000";
+    for bad in ["0xdeadbeef", "not-hex", over_the_modulus] {
+        assert!(
+            matches!(info.encode_args(&[bad]), Err(TypedError::InvalidScalar { .. })),
+            "{bad}"
+        );
+    }
 }
 
 #[test]
@@ -655,6 +722,22 @@ fn an_array_of_elements_that_take_no_felts_is_not_decoded() {
     // rest of the stack.
     let info = proc("f", [], [array_of(Type::U32, 3)]);
     assert_eq!(info.decode_result(&felts([7, 8, 9, 10])).unwrap().unwrap(), "[7, 8, 9]");
+
+    // Elements with fields of their own read the same way: four felts, two points.
+    let info = proc("f", [], [array_of(point_ty(), 2)]);
+    assert_eq!(
+        info.decode_result(&felts([1, 2, 3, 4])).unwrap().unwrap(),
+        "[point { x: 1, y: 2 }, point { x: 3, y: 4 }]"
+    );
+}
+
+#[test]
+fn a_result_that_cannot_be_decoded_names_the_procedure() {
+    let info = proc("get-list", [], [Type::List(Arc::new(Type::U32))]);
+    assert_eq!(
+        info.decode_result(&felts([1])).unwrap_err().to_string(),
+        "procedure 'get-list' returns a value that cannot be decoded"
+    );
 }
 
 #[test]
@@ -672,6 +755,29 @@ fn an_out_of_range_limb_is_reported_as_malformed() {
     let info = proc("f", [], [Type::U8]);
     assert!(matches!(
         info.decode_result(&felts([300])),
+        Err(TypedError::MalformedResult { .. })
+    ));
+}
+
+#[test]
+fn a_bool_is_the_felt_0_or_the_felt_1_and_nothing_else() {
+    // The VM has no bool of its own: `true` is the felt 1 and `false` is the felt 0. A user may
+    // type the word or the digit, in any case.
+    let info = proc("f", [Type::I1], [Type::I1]);
+    for token in ["true", "TRUE", "1"] {
+        assert_eq!(info.encode_args(&[token]).unwrap(), felts([1]), "{token}");
+    }
+    for token in ["false", "False", "0"] {
+        assert_eq!(info.encode_args(&[token]).unwrap(), felts([0]), "{token}");
+    }
+    assert!(matches!(info.encode_args(&["maybe"]), Err(TypedError::InvalidBool(_))));
+
+    // A third value coming back is bad output, not a `true`. Reading every non-zero felt as `true`
+    // would print a wrong result as a right one.
+    assert_eq!(info.decode_result(&felts([0])).unwrap().unwrap(), "false");
+    assert_eq!(info.decode_result(&felts([1])).unwrap().unwrap(), "true");
+    assert!(matches!(
+        info.decode_result(&felts([2])),
         Err(TypedError::MalformedResult { .. })
     ));
 }
