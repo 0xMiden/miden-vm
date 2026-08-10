@@ -1,6 +1,6 @@
 [package]
 name = "miden-debug-types"
-version = "0.29.0"
+version.workspace = true
 description = "Core source-level debugging information types used throughout the Miden toolchain"
 documentation = "https://docs.rs/miden-debug-types"
 readme = "README.md"
