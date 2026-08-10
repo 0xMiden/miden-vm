@@ -16,6 +16,10 @@
 
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 
+#### Fixes
+
+- Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, so a decoded index whose depth disagrees with `DEPTH` is rejected instead of producing an inconsistent value ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
+
 ## v0.29.0 (2026-08-04)
 
 #### Changes
