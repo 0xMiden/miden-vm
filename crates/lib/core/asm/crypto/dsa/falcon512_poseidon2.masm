@@ -160,12 +160,13 @@ end
 #!   Operand stack: []
 #!   Advice stack:  []
 #!
-#! Cycles: 6780
-@locals(8)
+#! Cycles: 6785
+@locals(12)
 pub proc load_h_s2_and_product
     # We will store in local addresses:
     # 1. 0..4 the public key,
-    # 2. 4..8 the inverse of the evaluation point tau as [tau_inv0, tau_inv1, tau0, tau1].
+    # 2. 4..8 the inverse evaluation point as [tau_inv0, tau_inv1, 0, 0],
+    # 3. 8..12 the evaluation point as [tau0, tau1, 0, 0].
 
     # 1) Set up the stack for loading the coefficients of the polynomials, evaluating and hashing them
 
@@ -193,11 +194,13 @@ pub proc load_h_s2_and_product
     ## which simplifies to
     ##
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+    push.0.0
     adv_push adv_push
-    # => [tau0, tau1, ...]
-    dup.1 dup.1 ext2inv         # duplicate tau, compute inverse → [tau_inv0, tau_inv1, tau0, tau1, ...]
-    loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for Horner
-    # => [tau_inv0, tau_inv1, tau0, tau1, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
+    # => [tau0, tau1, 0, 0, ...]
+    loc_storew_le.8
+    ext2inv
+    loc_storew_le.4
+    # => [tau_inv0, tau_inv1, 0, 0, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
 
     # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
     repeat.64
@@ -289,10 +292,9 @@ pub proc load_h_s2_and_product
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between
     ##    the two challenges
-    loc_loadw_le.4              # load [tau_inv0, tau_inv1, tau0, tau1] from local memory
-    # => [tau_inv0, tau_inv1, tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
-
-    drop drop                   # drop tau_inv, keep tau for comparison and later ext2mul
+    loc_loadw_le.8
+    # => [tau0, tau1, 0, 0, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+    movdn.3 movdn.3 drop drop
     # => [tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
 
 
@@ -632,7 +634,7 @@ pub proc verify
 
     locaddr.0
     exec.load_h_s2_and_product
-    #=> [MSG, ...]                                  (Cycles: 6780)
+    #=> [MSG, ...]                                  (Cycles: 6785)
 
     # 2) Load the NONCE from the advice provider. This is encoded as 8 field elements
 

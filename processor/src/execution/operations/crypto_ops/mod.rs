@@ -5,8 +5,8 @@ use miden_core::deferred::Tag;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
+    ContextId, Felt, MemoryError, RowIndex, Word, ZERO,
+    errors::{CryptoError, IoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
@@ -220,6 +220,30 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 // HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
 // ================================================================================================
 
+/// Reads a Horner evaluation point from an aligned memory word encoded as
+/// `[alpha0, alpha1, 0, 0]`.
+fn read_horner_eval_point<P: Processor, T: Tracer>(
+    processor: &mut P,
+    tracer: &mut T,
+    addr: Felt,
+) -> Result<QuadFelt, IoError> {
+    let clk = processor.system().clock();
+    let ctx = processor.system().ctx();
+    let word = processor.memory_mut().read_word(ctx, addr, clk)?;
+
+    if word[2] != ZERO || word[3] != ZERO {
+        return Err(OperationError::InvalidHornerEvaluationPointWord {
+            ctx,
+            addr: addr.as_canonical_u64(),
+        }
+        .into());
+    }
+
+    tracer.record_memory_read_word(word, addr, ctx, clk);
+
+    Ok(QuadFelt::new([word[0], word[1]]))
+}
+
 /// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
 /// the base field using a 3-level computation to reduce constraint degree.
 ///
@@ -262,8 +286,8 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 ///    coefficient (X^7) and s[7] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁). The operation reads α₀
-///    from alpha_addr and α₁ from alpha_addr + 1.
+/// 3. alpha_addr is the word-aligned address of `[alpha0, alpha1, 0, 0]`, which contains the
+///    evaluation point alpha = (alpha0, alpha1).
 ///
 /// The instruction uses helper registers to store intermediate values:
 /// - h₀, h₁: evaluation point α = (α₀, α₁)
@@ -273,32 +297,14 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, MemoryError> {
+) -> Result<OperationHelperRegisters, IoError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clock();
-    let ctx = processor.system().ctx();
-
-    // Read the evaluation point alpha from memory
-    let alpha = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let eval_point_0 = processor.memory_mut().read_element(ctx, addr)?;
-        let eval_point_1 = processor.memory_mut().read_element(ctx, addr + ONE)?;
-
-        tracer.record_memory_read_element_pair(
-            eval_point_0,
-            addr,
-            eval_point_1,
-            addr + ONE,
-            ctx,
-            clk,
-        );
-
-        QuadFelt::from_basis_coefficients_fn(|i: usize| [eval_point_0, eval_point_1][i])
-    };
+    let alpha_addr = processor.stack().get(ALPHA_ADDR_INDEX);
+    let alpha = read_horner_eval_point(processor, tracer, alpha_addr)?;
 
     // Read the coefficients from the stack (top 8 elements)
     let coef: [Felt; 8] = processor.stack().get_double_word(0);
@@ -376,21 +382,19 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 ///    2*i. s[0] is the highest-degree coefficient (X^3) and s[3] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁).
+/// 3. alpha_addr is the word-aligned address of `[alpha0, alpha1, 0, 0]`, which contains the
+///    evaluation point alpha = (alpha0, alpha1).
 ///
 /// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, MemoryError> {
+) -> Result<OperationHelperRegisters, IoError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
-
-    let clk = processor.system().clock();
-    let ctx = processor.system().ctx();
 
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [s0_lo, s0_hi, s1_lo, s1_hi, s2_lo, s2_hi, s3_lo, s3_hi, ...]
@@ -401,23 +405,8 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
         QuadFelt::from_basis_coefficients_fn(|i: usize| [lo, hi][i])
     });
 
-    // Read the evaluation point alpha from memory
-    let (alpha, k0, k1) = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor.memory_mut().read_word(ctx, addr, clk)?;
-        tracer.record_memory_read_word(
-            word,
-            addr,
-            processor.system().ctx(),
-            processor.system().clock(),
-        );
-
-        (
-            QuadFelt::from_basis_coefficients_fn(|i: usize| [word[0], word[1]][i]),
-            word[2],
-            word[3],
-        )
-    };
+    let alpha_addr = processor.stack().get(ALPHA_ADDR_INDEX);
+    let alpha = read_horner_eval_point(processor, tracer, alpha_addr)?;
 
     // Read the current accumulator (LE: low at lower index)
     let acc_low = processor.stack().get(ACC_LOW_INDEX);
@@ -438,7 +427,7 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok(OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, acc_tmp })
+    Ok(OperationHelperRegisters::HornerEvalExt { alpha, acc_tmp })
 }
 
 // LOG DEFERRED OPERATION

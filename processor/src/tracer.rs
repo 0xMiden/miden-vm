@@ -190,7 +190,7 @@ pub trait Tracer {
 
     /// Records the word read from memory at the given address.
     ///
-    /// Called by: `MLOADW`, `HORNER_EVAL_EXT`, `DYN`.
+    /// Called by: `MLOADW`, `HORNER_EVAL_BASE`, `HORNER_EVAL_EXT`, `DYN`.
     fn record_memory_read_word(
         &mut self,
         _word: Word,
@@ -219,20 +219,6 @@ pub trait Tracer {
         &mut self,
         _word: Word,
         _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-    }
-
-    /// Records two element reads at the given addresses.
-    ///
-    /// Called by: `HORNER_EVAL_BASE`.
-    fn record_memory_read_element_pair(
-        &mut self,
-        _element_0: Felt,
-        _addr_0: Felt,
-        _element_1: Felt,
-        _addr_1: Felt,
         _ctx: ContextId,
         _clk: RowIndex,
     ) {
@@ -467,16 +453,9 @@ pub enum OperationHelperRegisters {
     /// on a polynomial with extension-field coefficients.
     ///
     /// - `alpha`: the evaluation point, read from memory.
-    /// - `k0`, `k1`: auxiliary values read from the same memory word as `alpha` (elements 2 and 3
-    ///   of the word).
     /// - `acc_tmp`: the intermediate accumulator after processing the first 2 (highest-degree)
     ///   coefficients: `(acc * alpha + s[0]) * alpha + s[1]`.
-    HornerEvalExt {
-        alpha: QuadFelt,
-        k0: Felt,
-        k1: Felt,
-        acc_tmp: QuadFelt,
-    },
+    HornerEvalExt { alpha: QuadFelt, acc_tmp: QuadFelt },
     /// Helper for the `LOG_DEFERRED` operation, which folds a verified statement digest into
     /// the rolling deferred root via a Poseidon2 permutation.
     ///
@@ -621,11 +600,11 @@ impl OperationHelperRegisters {
                 tmp0.as_basis_coefficients_slice()[0],
                 tmp0.as_basis_coefficients_slice()[1],
             ],
-            Self::HornerEvalExt { alpha, k0, k1, acc_tmp } => [
+            Self::HornerEvalExt { alpha, acc_tmp } => [
                 alpha.as_basis_coefficients_slice()[0],
                 alpha.as_basis_coefficients_slice()[1],
-                *k0,
-                *k1,
+                ZERO,
+                ZERO,
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],
