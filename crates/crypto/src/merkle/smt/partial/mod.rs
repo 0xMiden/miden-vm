@@ -39,7 +39,6 @@ pub use serialization::{NodeValue, UniqueNodes};
 /// Once a partial SMT has been constructed, its root is set in stone. All subsequently added proofs
 /// or merkle paths must match that root, otherwise an error is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct PartialSmt {
     root: Word,
     num_entries: usize,
