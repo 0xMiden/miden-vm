@@ -11,7 +11,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use tempfile::{TempDir, tempdir};
 
-use super::{PersistentBackend, Result};
+use super::{LEAVES_CF, PersistentBackend, Result};
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
@@ -511,6 +511,33 @@ fn entries() -> Result<()> {
     assert!(entries.contains(&TreeEntry { key: key_1_1, value: value_1_1 }));
     assert!(entries.contains(&TreeEntry { key: key_1_2, value: value_1_2 }));
     assert!(entries.contains(&TreeEntry { key: key_1_3, value: value_1_3 }));
+
+    Ok(())
+}
+
+#[test]
+fn entries_stops_at_end_of_lineage_prefix() -> Result<()> {
+    let (_file, mut backend) = default_backend()?;
+
+    // Choose the lowest possible lineage so that any key beginning with a nonzero byte sorts after
+    // all of this lineage's leaves.
+    let lineage = LineageId::new([0; 32]);
+    let key = Word::from([1_u32, 2, 3, 4]);
+    let value = Word::from([5_u32, 6, 7, 8]);
+    backend.add_lineage(lineage, 1, SmtUpdateBatch::from([(key, value)].into_iter()))?;
+
+    // Insert a malformed key outside the requested lineage's prefix. A correctly bounded entries
+    // iterator must stop before inspecting it. An unbounded iterator will try to deserialize it as
+    // a LeafKey and return an error.
+    let leaves_cf = backend.cf(LEAVES_CF)?;
+    backend.db.put_cf(leaves_cf, [1], [])?;
+
+    let entries = backend.entries(lineage)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries, vec![TreeEntry { key, value }]);
+
+    let reader = backend.reader()?;
+    let entries = reader.entries(lineage)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries, vec![TreeEntry { key, value }]);
 
     Ok(())
 }
