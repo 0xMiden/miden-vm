@@ -13,7 +13,7 @@ pub use miden_core::{
     utils::DisplayHex,
 };
 pub use miden_debug_types as debuginfo;
-pub use miden_utils_diagnostics::{self as diagnostics, Report};
+pub use miden_diagnostics::{self as diagnostics, Report};
 pub use semver::{self, Error as VersionError, Version};
 
 #[cfg(feature = "arbitrary")]

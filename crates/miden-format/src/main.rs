@@ -10,9 +10,14 @@ use std::{
 };
 
 use clap::Parser;
+#[cfg(test)]
+use miden_assembly_syntax_cst::diagnostics::{AnnotateRenderer, FmtEmitter};
 use miden_assembly_syntax_cst::{
-    Report,
-    diagnostics::{miette::MietteDiagnostic, reporting::PrintDiagnostic},
+    Outcome,
+    diagnostics::{
+        DiagnosticSet, EmissionFailure, Emitter, IoEmissionError, PanicHookOptions, PrepareError,
+        StderrEmitter, install_panic_hook,
+    },
     parse_source_file,
 };
 use miden_debug_types::{
@@ -78,6 +83,10 @@ enum CliError {
     SourceManagerError(#[from] SourceManagerError),
     #[error(transparent)]
     WalkDir(#[from] walkdir::Error),
+    #[error("failed to prepare syntax diagnostics: {0}")]
+    DiagnosticPreparation(#[from] PrepareError),
+    #[error("failed to emit syntax diagnostics: {0}")]
+    DiagnosticEmission(#[from] EmissionFailure<IoEmissionError>),
 }
 
 fn main() -> ExitCode {
@@ -91,7 +100,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), CliError> {
-    miden_assembly_syntax_cst::diagnostics::reporting::set_panic_hook();
+    let _ = install_panic_hook(PanicHookOptions::default());
 
     let cli = Cli::parse();
     let source_manager = Arc::new(DefaultSourceManager::default());
@@ -116,16 +125,12 @@ fn run() -> Result<(), CliError> {
     let mut has_syntax_errors = false;
     let mut formatted_inputs = Vec::with_capacity(inputs.len());
     for input in inputs {
-        let source = input.source.clone();
-        let mut parse = parse_source_file(source.clone());
-        if parse.has_errors() {
+        let Outcome { value: parse, diagnostics } = parse_source_file(input.source.clone());
+        if !diagnostics.is_empty() {
+            emit_diagnostics(&diagnostics, input.source.as_ref())?;
+        }
+        if diagnostics.has_errors() {
             has_syntax_errors = true;
-            for diagnostic in parse.take_diagnostics() {
-                eprintln!(
-                    "{}",
-                    PrintDiagnostic::new(report_parse_diagnostic(source.clone(), diagnostic))
-                );
-            }
             continue;
         }
 
@@ -328,8 +333,24 @@ fn unique_temp_suffix() -> u128 {
         .unwrap_or_default()
 }
 
-fn report_parse_diagnostic(source: Arc<SourceFile>, diagnostic: MietteDiagnostic) -> Report {
-    Report::from(diagnostic).with_source_code(source)
+fn emit_diagnostics(
+    diagnostics: &DiagnosticSet,
+    source: &dyn miden_assembly_syntax_cst::diagnostics::SourceProvider,
+) -> Result<(), CliError> {
+    let prepared = diagnostics.prepare(source)?;
+    StderrEmitter::default().emit_set(&prepared)?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn render_diagnostics(
+    diagnostics: &DiagnosticSet,
+    source: &dyn miden_assembly_syntax_cst::diagnostics::SourceProvider,
+) -> String {
+    let prepared = diagnostics.prepare(source).expect("diagnostics should prepare");
+    let mut emitter = FmtEmitter::new(String::new(), AnnotateRenderer::default());
+    emitter.emit_set(&prepared).expect("diagnostics should render");
+    emitter.into_inner()
 }
 
 fn collect_inputs(cli: &Cli, source_manager: &dyn SourceManager) -> Result<Vec<Input>, CliError> {
@@ -389,15 +410,9 @@ mod tests {
             "begin".to_string(),
         );
 
-        let mut parse = parse_source_file(source.clone());
-        assert!(parse.has_errors());
-
-        let diagnostic =
-            parse.take_diagnostics().into_iter().next().expect("expected syntax diagnostic");
-        let rendered = format!(
-            "{}",
-            PrintDiagnostic::new_without_color(report_parse_diagnostic(source, diagnostic))
-        );
+        let outcome = parse_source_file(source.clone());
+        assert!(outcome.diagnostics.has_errors());
+        let rendered = render_diagnostics(&outcome.diagnostics, source.as_ref());
 
         assert!(rendered.contains("snippet.masm"));
         assert!(rendered.contains("begin"));

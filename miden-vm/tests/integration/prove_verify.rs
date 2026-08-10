@@ -31,6 +31,7 @@ fn assert_prove_verify(
 ) {
     let program = Assembler::default()
         .assemble_program("program", source)
+        .value
         .unwrap()
         .unwrap_program();
     let stack_inputs = stack_inputs_from_ints([0, 1]);

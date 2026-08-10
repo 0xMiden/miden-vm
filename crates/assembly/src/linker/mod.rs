@@ -72,7 +72,7 @@ use smallvec::{SmallVec, smallvec};
 
 pub use self::{
     callgraph::{CallGraph, CycleError},
-    errors::LinkerError,
+    errors::{LinkerError, PrivateSubmoduleDefinition},
     library::{LinkLibrary, Linkage},
     namespaces::NamespaceGraph,
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
@@ -960,10 +960,7 @@ impl Linker {
                 args.push(arg);
             } else {
                 let span = arg.span();
-                return Err(LinkerError::UndefinedType {
-                    span,
-                    source_file: self.source_manager.get(span.source_id()).ok(),
-                });
+                return Err(LinkerError::UndefinedType { span });
             }
         }
         let mut results = Vec::with_capacity(ty.results.len());
@@ -972,10 +969,7 @@ impl Linker {
                 results.push(result);
             } else {
                 let span = result.span();
-                return Err(LinkerError::UndefinedType {
-                    span,
-                    source_file: self.source_manager.get(span.source_id()).ok(),
-                });
+                return Err(LinkerError::UndefinedType { span });
             }
         }
         Ok(Arc::new(types::FunctionType::new(cc, args, results)))
@@ -1190,6 +1184,8 @@ mod tests {
 
     #[test]
     fn link_library_keeps_same_interface_libraries_with_distinct_forest_commitments() {
+        use crate::testing::TestOutcomeExt;
+
         let context = TestContext::default();
         let module = context
             .parse_module(source_file!(

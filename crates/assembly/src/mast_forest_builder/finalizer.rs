@@ -19,7 +19,7 @@ use super::{
     MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
     compute_operations_and_adjust_mappings,
 };
-use crate::diagnostics::{Diagnostic, Report, miette};
+use crate::diagnostics::{Diagnostic, Report};
 
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {

@@ -111,7 +111,6 @@ impl VerifyInvokeTargets<'_> {
                 SymbolResolutionError::alias_expansion_depth_exceeded(
                     span,
                     MAX_ALIAS_EXPANSION_DEPTH,
-                    &self.analyzer.source_manager(),
                 ),
             )));
             return ControlFlow::Continue(());
@@ -124,7 +123,7 @@ impl VerifyInvokeTargets<'_> {
 
         let Some(item) = self.locals.get(name).cloned() else {
             self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                SymbolResolutionError::undefined(span, &self.analyzer.source_manager()),
+                SymbolResolutionError::undefined(span),
             )));
             return ControlFlow::Continue(());
         };
@@ -137,18 +136,13 @@ impl VerifyInvokeTargets<'_> {
             },
             LocalInvokeTarget::ModuleImport => {
                 self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                    SymbolResolutionError::undefined(span, &self.analyzer.source_manager()),
+                    SymbolResolutionError::undefined(span),
                 )));
                 ControlFlow::Continue(())
             },
             LocalInvokeTarget::Other(actual) => {
                 self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                    SymbolResolutionError::invalid_symbol_type(
-                        span,
-                        "procedure",
-                        *actual,
-                        &self.analyzer.source_manager(),
-                    ),
+                    SymbolResolutionError::invalid_symbol_type(span, "procedure", *actual),
                 )));
                 ControlFlow::Continue(())
             },
@@ -355,7 +349,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
         if let Some(name) = path.as_ident() {
             if matches!(self.locals.get(name.as_str()), Some(LocalInvokeTarget::ModuleImport)) {
                 self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                    SymbolResolutionError::undefined(path.span(), &self.analyzer.source_manager()),
+                    SymbolResolutionError::undefined(path.span()),
                 )));
             }
             self.track_used_alias(&name);

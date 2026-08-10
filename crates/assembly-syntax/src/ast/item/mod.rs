@@ -8,7 +8,8 @@ pub use self::{
     index::{GlobalItemIndex, ItemIndex, ModuleIndex},
     items::Item,
     resolver::{
-        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError, SymbolTable,
+        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError,
+        SymbolResolutionRelated, SymbolTable,
     },
 };
 use super::{Ident, Import, Visibility};

@@ -22,6 +22,7 @@ fn advice_map_loaded_before_execution() {
     // compile and execute program
     let program_without_advice_map: Program = Assembler::default()
         .assemble_program("program", source)
+        .value
         .unwrap()
         .unwrap_program();
 
@@ -41,9 +42,9 @@ fn advice_map_loaded_before_execution() {
             assert_matches!(
                 e,
                 miden_prover::ExecutionError::AdviceError {
-                    err: AdviceError::MapKeyNotFound { .. },
+                    err,
                     ..
-                }
+                } if matches!(*err, AdviceError::MapKeyNotFound { .. })
             );
         },
     }

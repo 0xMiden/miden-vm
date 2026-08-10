@@ -1,109 +1,44 @@
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc};
-use core::{error::Error, fmt::Debug};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use core::{error::Error, fmt::Debug, num::NonZeroU32};
 
-use miden_utils_indexing::IndexVec;
-#[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
+use miden_diagnostics::{LineColumn, Source as DiagnosticSource};
 
 use super::*;
 
-// SOURCE ID
-// ================================================================================================
+pub use miden_diagnostics::{SourceId, SourceKey, SourceNamespace, SourceProvider, SourceRevision};
 
-/// A [SourceId] represents the index/identifier associated with a unique source file in a
-/// [SourceManager] implementation.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serialization_macros::serialization_test
-)]
-pub struct SourceId(u32);
+/// The source namespace used by [`DefaultSourceManager::default`] and by the established VM span
+/// wire codec, whose representation predates namespaced source identities.
+///
+/// Callers that combine multiple independent source universes should construct managers with
+/// [`DefaultSourceManager::new`] and distinct namespaces instead of relying on this default.
+pub const DEFAULT_SOURCE_NAMESPACE: SourceNamespace = SourceNamespace::new(NonZeroU32::MIN);
 
-impl Serializable for SourceId {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target);
+/// Reconstructs a source identity from the historical wire/serde representation, which stores
+/// only the manager-local component.
+pub(crate) const fn source_id_from_wire(local: u32) -> SourceId {
+    if local == u32::MAX {
+        SourceId::UNKNOWN
+    } else {
+        SourceId::new(DEFAULT_SOURCE_NAMESPACE, local)
     }
 }
 
-impl Deserializable for SourceId {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        u32::read_from(source).map(Self)
-    }
+#[cfg(feature = "serde")]
+pub(crate) fn serialize_source_id<S>(id: &SourceId, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serde::Serialize::serialize(&id.local(), serializer)
 }
 
-impl From<u32> for SourceId {
-    fn from(value: u32) -> Self {
-        SourceId::new_unchecked(value)
-    }
-}
-
-impl From<SourceId> for u32 {
-    fn from(value: SourceId) -> Self {
-        value.to_u32()
-    }
-}
-
-impl miden_utils_indexing::Idx for SourceId {}
-
-impl Default for SourceId {
-    fn default() -> Self {
-        Self::UNKNOWN
-    }
-}
-
-impl SourceId {
-    pub const UNKNOWN: Self = Self(u32::MAX);
-
-    /// Create a new [SourceId] from a `u32` value, but assert if the value is reserved
-    pub fn new(id: u32) -> Self {
-        assert_ne!(id, u32::MAX, "u32::MAX is a reserved value for SourceId::default()/UNKNOWN");
-
-        Self(id)
-    }
-
-    /// Create a new [SourceId] from a raw `u32` value
-    #[inline(always)]
-    pub const fn new_unchecked(id: u32) -> Self {
-        Self(id)
-    }
-
-    #[inline(always)]
-    pub const fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-
-    #[inline(always)]
-    pub const fn to_u32(self) -> u32 {
-        self.0
-    }
-
-    pub const fn is_unknown(&self) -> bool {
-        self.0 == u32::MAX
-    }
-}
-
-impl TryFrom<usize> for SourceId {
-    type Error = ();
-
-    #[inline]
-    fn try_from(id: usize) -> Result<Self, Self::Error> {
-        match u32::try_from(id) {
-            Ok(n) if n < u32::MAX => Ok(Self(n)),
-            _ => Err(()),
-        }
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for SourceId {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<u32>().prop_map(Self::from).boxed()
-    }
+#[cfg(feature = "serde")]
+pub(crate) fn deserialize_source_id<'de, D>(deserializer: D) -> Result<SourceId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let local = <u32 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(source_id_from_wire(local))
 }
 
 // SOURCE MANAGER
@@ -143,10 +78,10 @@ impl SourceManagerError {
     }
 }
 
-pub trait SourceManager: Debug {
+pub trait SourceManager: SourceProvider + Debug + Send + Sync {
     /// Returns true if `file` is managed by this source manager
     fn is_manager_of(&self, file: &SourceFile) -> bool {
-        match self.get(file.id()) {
+        match self.get_file(file.id()) {
             Ok(found) => core::ptr::addr_eq(Arc::as_ptr(&found), file),
             Err(_) => false,
         }
@@ -155,7 +90,7 @@ pub trait SourceManager: Debug {
     ///
     /// The returned source file is guaranteed to be owned by this manager.
     fn copy_into(&self, file: &SourceFile) -> Arc<SourceFile> {
-        if let Ok(found) = self.get(file.id())
+        if let Ok(found) = self.get_file(file.id())
             && core::ptr::addr_eq(Arc::as_ptr(&found), file)
         {
             return found;
@@ -191,10 +126,10 @@ pub trait SourceManager: Debug {
         version: i32,
     ) -> Result<(), SourceManagerError>;
     /// Get the [SourceFile] corresponding to `id`
-    fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError>;
+    fn get_file(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError>;
     /// Get the most recent [SourceFile] whose URI is `uri`
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
-        self.find(uri).and_then(|id| self.get(id).ok())
+        self.find(uri).and_then(|id| self.get_file(id).ok())
     }
     /// Search for a source file whose URI is `uri`, and return its [SourceId] if found.
     fn find(&self, uri: &Uri) -> Option<SourceId>;
@@ -240,8 +175,8 @@ impl<T: ?Sized + SourceManager> SourceManager for Arc<T> {
         (**self).update(id, text, range, version)
     }
     #[inline(always)]
-    fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
-        (**self).get(id)
+    fn get_file(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
+        (**self).get_file(id)
     }
     #[inline(always)]
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
@@ -319,29 +254,20 @@ pub trait SourceManagerExt: SourceManager {
 #[cfg(feature = "std")]
 impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 
-/// [SourceManagerSync] is a marker trait for [SourceManager] implementations that are also Send +
-/// Sync, and is automatically implemented for any [SourceManager] that meets those requirements.
-///
-/// [SourceManager] is a supertrait of [SourceManagerSync], so you may use instances of the
-/// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
-/// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
-pub trait SourceManagerSync: SourceManager + Send + Sync {}
-
-impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
-
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
 
 use miden_utils_sync::RwLock;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DefaultSourceManager(RwLock<DefaultSourceManagerImpl>);
 
-impl Default for DefaultSourceManagerImpl {
+impl Default for DefaultSourceManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_SOURCE_NAMESPACE)
     }
 }
+
 impl Clone for DefaultSourceManager {
     fn clone(&self) -> Self {
         let manager = self.0.read();
@@ -352,31 +278,51 @@ impl Clone for DefaultSourceManager {
 impl Clone for DefaultSourceManagerImpl {
     fn clone(&self) -> Self {
         Self {
+            namespace: self.namespace,
             files: self.files.clone(),
             uris: self.uris.clone(),
+            retired: self.retired.clone(),
         }
     }
 }
 
 #[derive(Debug)]
 struct DefaultSourceManagerImpl {
-    files: IndexVec<SourceId, Arc<SourceFile>>,
+    namespace: SourceNamespace,
+    files: Vec<Arc<SourceFile>>,
     uris: BTreeMap<Uri, SourceId>,
+    /// Old revisions are retained so references returned from [`SourceManager::source`] and
+    /// [`SourceProvider::get`] remain valid after an update.
+    retired: Vec<Arc<SourceFile>>,
 }
 
 impl DefaultSourceManagerImpl {
-    fn new() -> Self {
+    fn new(namespace: SourceNamespace) -> Self {
+        assert!(!namespace.is_unknown(), "a source manager requires a valid namespace");
         Self {
-            files: IndexVec::new(),
+            namespace,
+            files: Vec::new(),
             uris: BTreeMap::new(),
+            retired: Vec::new(),
         }
+    }
+
+    fn index_of(&self, id: SourceId) -> Option<usize> {
+        if id.namespace() != self.namespace {
+            return None;
+        }
+        usize::try_from(id.local()).ok().filter(|&index| index < self.files.len())
+    }
+
+    fn file(&self, id: SourceId) -> Option<&Arc<SourceFile>> {
+        self.index_of(id).and_then(|index| self.files.get(index))
     }
 
     fn insert(&mut self, uri: Uri, content: SourceContent) -> Arc<SourceFile> {
         // If we have previously inserted the same content with `name`, return the previously
         // inserted source id
         if let Some(file) = self.uris.get(&uri).copied().and_then(|id| {
-            let file = &self.files[id];
+            let file = self.file(id)?;
             if file.as_str() == content.as_str() {
                 Some(Arc::clone(file))
             } else {
@@ -385,23 +331,23 @@ impl DefaultSourceManagerImpl {
         }) {
             return file;
         }
-        let id = SourceId::try_from(self.files.len())
+        let local = u32::try_from(self.files.len())
+            .ok()
+            .filter(|local| *local != u32::MAX)
             .expect("system limit: source manager has exhausted its supply of source ids");
+        let id = SourceId::new(self.namespace, local);
         let file = Arc::new(SourceFile::from_raw_parts(id, content));
-        let file_clone = Arc::clone(&file);
-        self.files
-            .push(file_clone)
-            .expect("system limit: source manager has exhausted its supply of source ids");
+        self.files.push(Arc::clone(&file));
         self.uris.insert(uri, id);
         file
     }
 
-    fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
-        self.files.get(id).cloned().ok_or(SourceManagerError::InvalidSourceId)
+    fn get_file(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
+        self.file(id).cloned().ok_or(SourceManagerError::InvalidSourceId)
     }
 
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
-        self.find(uri).and_then(|id| self.get(id).ok())
+        self.find(uri).and_then(|id| self.get_file(id).ok())
     }
 
     fn find(&self, uri: &Uri) -> Option<SourceId> {
@@ -409,33 +355,55 @@ impl DefaultSourceManagerImpl {
     }
 
     fn file_line_col_to_span(&self, loc: FileLineCol) -> Option<SourceSpan> {
-        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
+        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.file(id))?;
         file.line_column_to_span(loc.line, loc.column)
     }
 
     fn file_line_col(&self, span: SourceSpan) -> Result<FileLineCol, SourceManagerError> {
-        self.files
-            .get(span.source_id())
+        let SourceKey::Session(id) = span.source() else {
+            return Err(SourceManagerError::InvalidSourceId);
+        };
+        self.file(id)
             .ok_or(SourceManagerError::InvalidSourceId)
             .map(|file| file.location(span))
     }
 
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan> {
-        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
+        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.file(id))?;
 
         let max_len = ByteIndex::from(file.as_str().len() as u32);
         if loc.start >= max_len || loc.end > max_len {
             return None;
         }
 
-        Some(SourceSpan::new(file.id(), loc.start..loc.end))
+        let range = miden_diagnostics::TextRange::new(loc.start.to_u32(), loc.end.to_u32()).ok()?;
+        Some(SourceSpan::session(file.id(), range))
     }
 
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError> {
-        self.files
-            .get(span.source_id())
-            .ok_or(SourceManagerError::InvalidSourceId)
-            .map(|file| Location::new(file.uri().clone(), span.start(), span.end()))
+        let SourceKey::Session(id) = span.source() else {
+            return Err(SourceManagerError::InvalidSourceId);
+        };
+        self.file(id).ok_or(SourceManagerError::InvalidSourceId).map(|file| {
+            let range = span.range();
+            Location::new(
+                file.uri().clone(),
+                ByteIndex::new(range.start()),
+                ByteIndex::new(range.end()),
+            )
+        })
+    }
+}
+
+impl DefaultSourceManager {
+    /// Constructs an empty source manager in `namespace`.
+    pub fn new(namespace: SourceNamespace) -> Self {
+        Self(RwLock::new(DefaultSourceManagerImpl::new(namespace)))
+    }
+
+    /// Returns the namespace allocated to source identities created by this manager.
+    pub fn namespace(&self) -> SourceNamespace {
+        self.0.read().namespace
     }
 }
 
@@ -453,17 +421,21 @@ impl SourceManager for DefaultSourceManager {
         version: i32,
     ) -> Result<(), SourceManagerError> {
         let mut manager = self.0.write();
-        let source_file = &mut manager.files[id];
-        let source_file_cloned = Arc::make_mut(source_file);
-        source_file_cloned
+        let index = manager.index_of(id).ok_or(SourceManagerError::InvalidSourceId)?;
+        let old = Arc::clone(&manager.files[index]);
+        let mut updated = old.as_ref().clone();
+        updated
             .content_mut()
             .update(text, range, version)
-            .map_err(SourceManagerError::InvalidContentUpdate)
+            .map_err(SourceManagerError::InvalidContentUpdate)?;
+        manager.files[index] = Arc::new(updated);
+        manager.retired.push(old);
+        Ok(())
     }
 
-    fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
+    fn get_file(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
         let manager = self.0.read();
-        manager.get(id)
+        manager.get_file(id)
     }
 
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
@@ -499,8 +471,7 @@ impl SourceManager for DefaultSourceManager {
     fn source(&self, id: SourceId) -> Result<&str, SourceManagerError> {
         let manager = self.0.read();
         let ptr = manager
-            .files
-            .get(id)
+            .file(id)
             .ok_or(SourceManagerError::InvalidSourceId)
             .map(|file| file.as_str() as *const str)?;
         drop(manager);
@@ -512,9 +483,43 @@ impl SourceManager for DefaultSourceManager {
     }
 
     fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError> {
-        self.source(span.source_id())?
-            .get(span.into_slice_index())
+        let SourceKey::Session(id) = span.source() else {
+            return Err(SourceManagerError::InvalidSourceId);
+        };
+        self.source(id)?
+            .get(span.range().into_slice_index())
             .ok_or(SourceManagerError::InvalidBounds)
+    }
+}
+
+impl SourceProvider for DefaultSourceManager {
+    fn get(&self, id: SourceId) -> Option<DiagnosticSource<'_>> {
+        let manager = self.0.read();
+        let file = manager.file(id)?;
+        let display_name = file.uri().as_str() as *const str;
+        let text = file.as_str() as *const str;
+        let revision = (file.content().version() >= 0)
+            .then(|| SourceRevision(file.content().version() as u32));
+        let byte_len = u32::try_from(file.len()).ok()?;
+        drop(manager);
+
+        // SAFETY: source file allocations are immutable. Updates replace the current allocation
+        // and retain the old allocation in `retired`; insertions never remove allocations. Both
+        // references remain valid for the lifetime borrowed from this manager.
+        Some(DiagnosticSource {
+            id,
+            display_name: unsafe { &*display_name },
+            byte_len,
+            text: Some(unsafe { &*text }),
+            revision,
+        })
+    }
+
+    fn line_column(&self, id: SourceId, offset: u32) -> Option<LineColumn> {
+        let manager = self.0.read();
+        let file = manager.file(id)?;
+        let location = file.content().location(ByteIndex::new(offset))?;
+        LineColumn::new(location.line.to_u32(), location.column.to_u32())
     }
 }
 
@@ -527,5 +532,49 @@ mod error_assertions {
 
     fn _assert_source_manager_error_bounds(err: SourceManagerError) {
         _assert_error_is_send_sync_static(err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::num::NonZeroU32;
+
+    use super::*;
+
+    #[test]
+    fn managers_reject_foreign_namespaced_ids() {
+        let first = DefaultSourceManager::new(SourceNamespace::new(NonZeroU32::new(2).unwrap()));
+        let second = DefaultSourceManager::new(SourceNamespace::new(NonZeroU32::new(3).unwrap()));
+        let first_file = first.load(SourceLanguage::Masm, Uri::new("first.masm"), "a".into());
+        let second_file = second.load(SourceLanguage::Masm, Uri::new("second.masm"), "b".into());
+
+        assert_eq!(first_file.id().local(), second_file.id().local());
+        assert_ne!(first_file.id(), second_file.id());
+        assert!(matches!(
+            first.get_file(second_file.id()),
+            Err(SourceManagerError::InvalidSourceId)
+        ));
+        assert!(matches!(
+            second.get_file(first_file.id()),
+            Err(SourceManagerError::InvalidSourceId)
+        ));
+    }
+
+    #[test]
+    fn source_provider_tracks_revisions_without_invalidating_old_borrows() {
+        let manager = DefaultSourceManager::default();
+        let file = manager.load(SourceLanguage::Masm, Uri::new("test.masm"), "begin\nend\n".into());
+
+        let before = SourceProvider::get(&manager, file.id()).unwrap();
+        assert_eq!(before.text, Some("begin\nend\n"));
+        assert_eq!(before.revision, Some(SourceRevision(0)));
+
+        manager.update(file.id(), "push.1\n".into(), None, 4).unwrap();
+
+        // The provider contract permits retaining a resolved source while newer revisions arrive.
+        assert_eq!(before.text, Some("begin\nend\n"));
+        let after = SourceProvider::get(&manager, file.id()).unwrap();
+        assert_eq!(after.text, Some("push.1\n"));
+        assert_eq!(after.revision, Some(SourceRevision(4)));
     }
 }

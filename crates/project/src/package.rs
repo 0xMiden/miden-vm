@@ -345,7 +345,7 @@ impl Package {
                         span: profile.span(),
                         prev: prev.span(),
                     }
-                    .into());
+                    .into_report());
                 }
             } else {
                 profiles.push(profile);

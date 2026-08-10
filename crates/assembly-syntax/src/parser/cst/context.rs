@@ -43,7 +43,7 @@ impl<'a> LoweringContext<'a> {
     /// All spans used by CST lowering are expected to come from the same source file as the parse.
     pub(super) fn source_text(&self, span: SourceSpan) -> &str {
         self.source_file()
-            .source_slice(span.into_slice_index())
+            .source_slice(span.range().into_slice_index())
             .expect("cst spans should always refer to valid source slices")
     }
 

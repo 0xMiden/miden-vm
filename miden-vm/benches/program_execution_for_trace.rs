@@ -56,6 +56,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
 
                     let program = assembler
                         .assemble_program("program", &source)
+                        .value
                         .expect("Failed to compile test source.")
                         .unwrap_program();
                     let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();

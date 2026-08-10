@@ -1,7 +1,7 @@
 use miden_assembly_syntax::{
     Felt, ParsingError,
     debuginfo::{SourceSpan, Span},
-    diagnostics::{RelatedError, RelatedLabel, Report},
+    diagnostics::{Report, diagnostic},
 };
 use miden_core::{events::SystemEvent, field::Field, operations::Operation::*};
 
@@ -91,18 +91,12 @@ pub fn mul_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
 /// Returns an error if the immediate value is ZERO.
 pub fn div_imm(
     span_builder: &mut BasicBlockBuilder,
-    proc_ctx: &mut ProcedureContext,
+    _proc_ctx: &mut ProcedureContext,
     imm: Span<Felt>,
 ) -> Result<(), Report> {
     if imm == ZERO {
         let source_span = imm.span();
-        let source_file = proc_ctx.source_manager().get(source_span.source_id()).ok();
-        let error = Report::new(ParsingError::DivisionByZero { span: source_span });
-        return Err(if let Some(source_file) = source_file {
-            RelatedError::new(error.with_source_code(source_file)).into()
-        } else {
-            RelatedError::new(error).into()
-        });
+        return Err(Report::new(ParsingError::DivisionByZero { span: source_span }));
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
@@ -155,16 +149,17 @@ pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
 /// Returns an error if num_pow_bits is greater than 64.
 pub fn exp(
     span_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
     num_pow_bits: u8,
     span: SourceSpan,
 ) -> Result<(), Report> {
     if num_pow_bits > MAX_EXP_BITS {
-        return Err(RelatedLabel::error("invalid argument")
-            .with_labeled_span(span, "this instruction argument is out of range")
-            .with_help(format!("value must be in the range 0..={MAX_EXP_BITS}"))
-            .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
-            .into());
+        return Err(Report::new(diagnostic! {
+            severity: Error,
+            message: "invalid argument",
+            labels: [primary(span, "this instruction argument is out of range")],
+            notes: [help((format!("value must be in the range 0..={MAX_EXP_BITS}")))],
+        }));
     }
 
     // arranging the stack to prepare it for expacc instruction.

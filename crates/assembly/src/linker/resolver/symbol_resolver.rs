@@ -101,13 +101,6 @@ impl<'a> SymbolResolver<'a> {
         }
     }
 
-    fn source_file(
-        &self,
-        span: SourceSpan,
-    ) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
-        self.source_manager().get(span.source_id()).ok()
-    }
-
     fn is_procedure(&self, gid: GlobalItemIndex) -> bool {
         matches!(
             self.graph[gid].item(),
@@ -130,17 +123,11 @@ impl<'a> SymbolResolver<'a> {
     }
 
     fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
-        LinkerError::InvalidConstantRef {
-            span,
-            source_file: self.source_file(span),
-        }
+        LinkerError::InvalidConstantRef { span }
     }
 
     fn invalid_type_ref(&self, span: SourceSpan) -> LinkerError {
-        LinkerError::InvalidTypeRef {
-            span,
-            source_file: self.source_file(span),
-        }
+        LinkerError::InvalidTypeRef { span }
     }
 
     fn ensure_procedure_target(
@@ -156,7 +143,6 @@ impl<'a> SymbolResolver<'a> {
             SymbolResolution::Exact { path, .. } | SymbolResolution::Module { path, .. } => {
                 Err(LinkerError::InvalidInvokeTarget {
                     span: context.span,
-                    source_file: self.source_file(context.span),
                     path: path.into_inner(),
                 })
             },
@@ -235,10 +221,6 @@ impl<'a> SymbolResolver<'a> {
                         } else {
                             Err(LinkerError::InvalidSysCallTarget {
                                 span: context.span,
-                                source_file: self
-                                    .source_manager()
-                                    .get(context.span.source_id())
-                                    .ok(),
                                 callee: self.item_path(gid),
                             })
                         }
@@ -259,7 +241,6 @@ impl<'a> SymbolResolver<'a> {
                     } else {
                         return Err(LinkerError::InvalidSysCallTarget {
                             span: context.span,
-                            source_file: self.source_manager().get(context.span.source_id()).ok(),
                             callee: Path::from_ident(symbol).into_owned().into(),
                         });
                     }
@@ -268,11 +249,6 @@ impl<'a> SymbolResolver<'a> {
                     SymbolResolution::Module { id: _, path: module_path } => {
                         Err(LinkerError::InvalidInvokeTarget {
                             span: symbol.span(),
-                            source_file: self
-                                .graph
-                                .source_manager
-                                .get(symbol.span().source_id())
-                                .ok(),
                             path: module_path.into_inner(),
                         })
                     },
@@ -283,7 +259,6 @@ impl<'a> SymbolResolver<'a> {
                 SymbolResolution::Module { id: _, path: module_path } => {
                     Err(LinkerError::InvalidInvokeTarget {
                         span: path.span(),
-                        source_file: self.graph.source_manager.get(path.span().source_id()).ok(),
                         path: module_path.into_inner(),
                     })
                 },
@@ -293,7 +268,6 @@ impl<'a> SymbolResolver<'a> {
                     } else {
                         Err(LinkerError::InvalidSysCallTarget {
                             span: context.span,
-                            source_file: self.source_manager().get(context.span.source_id()).ok(),
                             callee: path.into_inner(),
                         })
                     }
@@ -311,10 +285,6 @@ impl<'a> SymbolResolver<'a> {
                             } else {
                                 Err(LinkerError::InvalidSysCallTarget {
                                     span: context.span,
-                                    source_file: self
-                                        .source_manager()
-                                        .get(context.span.source_id())
-                                        .ok(),
                                     callee: self.item_path(gid),
                                 })
                             }
@@ -355,7 +325,6 @@ impl<'a> SymbolResolver<'a> {
             if target_is_kernel && !caller_is_kernel {
                 return Err(LinkerError::KernelProcNotSyscall {
                     span: context.span,
-                    source_file: self.graph.source_manager.get(context.span.source_id()).ok(),
                     callee: path.clone().into_inner(),
                 });
             }
@@ -375,7 +344,6 @@ impl<'a> SymbolResolver<'a> {
         if !self.graph.has_nonempty_kernel() {
             return Err(LinkerError::InvalidSysCallTarget {
                 span: context.span,
-                source_file: self.source_manager().get(context.span.source_id()).ok(),
                 callee: Arc::<Path>::from(Path::new("syscall")),
             });
         }
@@ -384,7 +352,6 @@ impl<'a> SymbolResolver<'a> {
             let digest_path = format!("{mast_root}");
             return Err(LinkerError::InvalidSysCallTarget {
                 span: context.span,
-                source_file: self.source_manager().get(context.span.source_id()).ok(),
                 callee: Arc::<Path>::from(Path::new(&digest_path)),
             });
         }
@@ -432,7 +399,6 @@ impl<'a> SymbolResolver<'a> {
                 None => {
                     return Err(LinkerError::InvalidSysCallTarget {
                         span: context.span,
-                        source_file: self.source_manager().get(context.span.source_id()).ok(),
                         callee: Arc::from(Path::new(symbol)),
                     });
                 },

@@ -53,10 +53,7 @@ impl SymbolTable for &crate::module::ModuleDescriptor {
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Self::SymbolIter, SymbolResolutionError> {
         if self.raw_items().len() > ItemIndex::MAX_ITEMS {
-            Err(SymbolResolutionError::too_many_items_in_module(
-                SourceSpan::UNKNOWN,
-                &*source_manager,
-            ))
+            Err(SymbolResolutionError::too_many_items_in_module(SourceSpan::UNKNOWN))
         } else {
             Ok(self.symbols(source_manager))
         }
@@ -102,7 +99,7 @@ impl SymbolTable for &crate::ast::Module {
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Self::SymbolIter, SymbolResolutionError> {
         if self.items.len() + self.imports.len() > ItemIndex::MAX_ITEMS {
-            Err(SymbolResolutionError::too_many_items_in_module(self.span(), &*source_manager))
+            Err(SymbolResolutionError::too_many_items_in_module(self.span()))
         } else {
             Ok(self.symbols(source_manager))
         }
@@ -132,7 +129,6 @@ impl LocalSymbol {
 
 /// The common local symbol table/registry implementation
 pub(super) struct LocalSymbolTable {
-    source_manager: Arc<dyn SourceManager>,
     symbols: BTreeMap<Arc<str>, ItemIndex>,
     items: Vec<LocalSymbol>,
 }
@@ -147,7 +143,7 @@ impl core::ops::Index<ItemIndex> for LocalSymbolTable {
 }
 
 impl LocalSymbolTable {
-    fn build<I>(iter: I, source_manager: Arc<dyn SourceManager>) -> Self
+    fn build<I>(iter: I) -> Self
     where
         I: Iterator<Item = LocalSymbol>,
     {
@@ -187,7 +183,7 @@ impl LocalSymbolTable {
             items.push(symbol);
         }
 
-        Self { source_manager, symbols, items }
+        Self { symbols, items }
     }
 
     pub fn new<S>(
@@ -197,8 +193,8 @@ impl LocalSymbolTable {
     where
         S: SymbolTable,
     {
-        let symbols = iter.checked_symbols(source_manager.clone())?;
-        Ok(Self::build(symbols, source_manager))
+        let symbols = iter.checked_symbols(source_manager)?;
+        Ok(Self::build(symbols))
     }
 }
 
@@ -216,7 +212,7 @@ impl LocalSymbolTable {
         log::debug!(target: "symbol-table", "attempting to resolve '{name}'");
         let (span, name) = name.into_parts();
         let Some(item) = self.symbols.get(name).copied() else {
-            return Err(SymbolResolutionError::undefined(span, &self.source_manager));
+            return Err(SymbolResolutionError::undefined(span));
         };
         match &self.items[item.as_usize()] {
             LocalSymbol::Item { resolved, .. } => {
@@ -282,12 +278,9 @@ mod tests {
 
             fn checked_symbols(
                 &self,
-                source_manager: Arc<dyn SourceManager>,
+                _source_manager: Arc<dyn SourceManager>,
             ) -> Result<Self::SymbolIter, SymbolResolutionError> {
-                Err(SymbolResolutionError::too_many_items_in_module(
-                    SourceSpan::UNKNOWN,
-                    &*source_manager,
-                ))
+                Err(SymbolResolutionError::too_many_items_in_module(SourceSpan::UNKNOWN))
             }
         }
 

@@ -31,7 +31,6 @@ members = [
     "crates/test-serialization-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
-    "crates/utils-diagnostics",
     "crates/utils-indexing",
     "crates/utils-sync",
     "miden-vm",
@@ -109,7 +108,6 @@ miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.30"
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.30", default-features = false }
 midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.11", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.30", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.30", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.30", default-features = false }
 miden-utils-sync        = { path = "./crates/utils-sync", version = "0.30", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
@@ -198,7 +196,7 @@ p3-uni-stark     = { version = "0.6.3", default-features = false }
 p3-util          = { version = "0.6.3", default-features = false }
 
 loom = "0.7"
-miette = { package = "miden-miette", version = "8.0", default-features = false }
+miden-diagnostics = { path = "../miden-diagnostics/crates/diagnostics", default-features = false, features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"

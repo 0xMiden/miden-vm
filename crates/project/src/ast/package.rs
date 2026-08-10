@@ -7,7 +7,7 @@ use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
-use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, Uri};
+use crate::{Map, MetadataSet, SemVer, SourceId, Span, Uri};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -255,14 +255,18 @@ impl ProjectFile {
                 .map(|span| {
                     let start = span.start as u32;
                     let end = span.end as u32;
-                    SourceSpan::new(source_id, start..end)
+                    SourceSpan::session(
+                        source_id,
+                        TextRange::new(start, end).expect("invalid TOML error span"),
+                    )
                 })
                 .unwrap_or_default();
-            Report::from(ProjectFileError::ParseError {
+            ProjectFileError::ParseError {
                 message: err.message().to_string(),
                 source_file: source.clone(),
                 span,
-            })
+            }
+            .into_report()
         })?;
 
         package.source_file = Some(source.clone());
@@ -285,7 +289,9 @@ impl ProjectFile {
             let span = source
                 .line_column_to_span(one.into(), one.into())
                 .unwrap_or(source.source_span());
-            return Err(ProjectFileError::MissingVersion { source_file: source, span }.into());
+            return Err(
+                ProjectFileError::MissingVersion { source_file: source, span }.into_report()
+            );
         };
         match version.inner() {
             MaybeInherit::Value(value) => Ok(Span::new(version.span(), value.clone())),
@@ -298,14 +304,14 @@ impl ProjectFile {
                             source_file: source,
                             span: version.span(),
                         }
-                        .into())
+                        .into_report())
                     }
                 },
                 None => Err(ProjectFileError::NotAWorkspace {
                     source_file: source,
                     span: version.span(),
                 }
-                .into()),
+                .into_report()),
             },
         }
     }
@@ -330,7 +336,7 @@ impl ProjectFile {
                         source_file: source,
                         span: desc.span(),
                     }
-                    .into()),
+                    .into_report()),
                 },
             },
         }
@@ -354,7 +360,8 @@ impl ProjectFile {
                             let version = DependencyVersionScheme::try_from_in_workspace(
                                 dep.as_ref(),
                                 workspace,
-                            )?;
+                            )
+                            .map_err(|err| err.into_report(source.clone()))?;
                             // Prefer the linkage requested by the package, but defer to the
                             // workspace if one is not specified at the package level. Use the
                             // default linkage mode if non is specified
@@ -369,26 +376,29 @@ impl ProjectFile {
                         None => {
                             return Err(ProjectFileError::InvalidPackageDependency {
                                 source_file: source,
-                                label: Label::new(
-                                    dependency.span(),
-                                    format!("'{}' is not a workspace dependency", dependency.name),
+                                message: format!(
+                                    "'{}' is not a workspace dependency",
+                                    dependency.name
                                 ),
+                                span: dependency.span(),
                             }
-                            .into());
+                            .into_report());
                         },
                     }
                 } else {
                     return Err(ProjectFileError::InvalidPackageDependency {
                         source_file: source,
-                        label: Label::new(dependency.span(), "this package is not in a workspace"),
+                        message: "this package is not in a workspace".into(),
+                        span: dependency.span(),
                     }
-                    .into());
+                    .into_report());
                 }
             } else {
                 let linkage = dependency.linkage.as_deref().copied().unwrap_or_default();
                 dependencies.push(Dependency::new(
                     dependency.name.clone(),
-                    DependencyVersionScheme::try_from(dependency.as_ref())?,
+                    DependencyVersionScheme::try_from(dependency.as_ref())
+                        .map_err(|err| err.into_report(source.clone()))?,
                     linkage,
                 ));
             }
@@ -501,16 +511,6 @@ impl SetSourceId for ProjectFile {
     }
 }
 
-/// An internal error type for representing information about build target conflicts
-#[derive(Debug, thiserror::Error, Diagnostic)]
-#[error("build target conflicts found")]
-struct TargetConflictError {
-    #[label]
-    label: Label,
-    #[label(collection)]
-    conflicts: Vec<Label>,
-}
-
 impl Validate for ProjectFile {
     fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
         use miden_assembly_syntax::ast;
@@ -518,26 +518,26 @@ impl Validate for ProjectFile {
         // Validate the project
         // 1. Package name must be a valid identifier
         ast::Ident::validate(&self.package.name).map_err(|err| {
-            Report::from(ProjectFileError::InvalidProjectName {
+            ProjectFileError::InvalidProjectName {
                 source_file: source.clone(),
-                label: Label::new(self.package.name.span(), err.to_string()),
-            })
+                message: err.to_string(),
+                span: self.package.name.span(),
+            }
+            .into_report()
         })?;
 
         // 2. All build targets must have unique paths (if present) and names (and namespaces must
         //    be valid)
-        let mut invalid_config = Vec::<RelatedError>::default();
+        let mut invalid_config = Vec::<BuildTargetDiagnostic>::default();
 
-        let mut target_paths = BTreeMap::<Span<Uri>, Option<TargetConflictError>>::default();
-        let mut target_names = BTreeMap::<Span<Arc<str>>, Option<TargetConflictError>>::default();
+        let mut target_paths = BTreeMap::<Span<Uri>, Option<BuildTargetDiagnostic>>::default();
+        let mut target_names = BTreeMap::<Span<Arc<str>>, Option<BuildTargetDiagnostic>>::default();
         if let Some(lib) = self.lib.as_ref() {
             if let Some(kind) = lib.kind.as_ref()
                 && !kind.is_library()
             {
-                invalid_config.push(RelatedError::wrap(RelatedLabel::error("invalid library target")
-                    .with_labeled_span(kind.span(), "this is not a valid target type for a library")
-                    .with_help("Library targets may only be of kind 'library', 'kernel', 'account-component', 'note-script', or 'tx-script'")
-                    .with_source_file(Some(source.clone()))));
+                invalid_config
+                    .push(BuildTargetDiagnostic::InvalidLibraryTarget { span: kind.span() });
             }
             target_paths.insert(lib.path.clone(), None);
         }
@@ -553,21 +553,20 @@ impl Validate for ProjectFile {
                 },
                 Entry::Occupied(mut entry) => {
                     let path_span = target.path.span();
-                    let conflict_label = Label::new(path_span, "conflict occurs here");
                     let path = entry.key().clone();
                     match entry.get_mut() {
                         Some(error) => {
-                            error.conflicts.push(conflict_label);
+                            error.add_conflict(path_span);
                         },
                         opt => {
-                            let label = Label::new(
-                                path.span(),
-                                format!(
-                                    "the path for this target, `{path}`, conflicts with other targets"
-                                ),
+                            let message = format!(
+                                "the path for this target, `{path}`, conflicts with other targets"
                             );
-                            let conflicts = vec![conflict_label];
-                            *opt = Some(TargetConflictError { label, conflicts });
+                            *opt = Some(BuildTargetDiagnostic::target_conflict(
+                                path.span(),
+                                message,
+                                path_span,
+                            ));
                         },
                     }
                 },
@@ -584,36 +583,35 @@ impl Validate for ProjectFile {
                 },
                 Entry::Occupied(mut entry) => {
                     let ns_span = target.name.as_ref().map(Span::span).unwrap_or(span);
-                    let conflict_label = Label::new(ns_span, "conflict occurs here");
                     let ns = entry.key().clone();
                     match entry.get_mut() {
                         Some(error) => {
-                            error.conflicts.push(conflict_label);
+                            error.add_conflict(ns_span);
                         },
                         opt => {
-                            let label = Label::new(
-                                ns.span(),
-                                format!(
-                                    "the name for this target, `{ns}`, conflicts with other targets"
-                                ),
+                            let message = format!(
+                                "the name for this target, `{ns}`, conflicts with other targets"
                             );
-                            let conflicts = vec![conflict_label];
-                            *opt = Some(TargetConflictError { label, conflicts });
+                            *opt = Some(BuildTargetDiagnostic::target_conflict(
+                                ns.span(),
+                                message,
+                                ns_span,
+                            ));
                         },
                     }
                 },
             }
         }
 
-        invalid_config.extend(target_paths.into_values().flatten().map(RelatedError::wrap));
-        invalid_config.extend(target_names.into_values().flatten().map(RelatedError::wrap));
+        invalid_config.extend(target_paths.into_values().flatten());
+        invalid_config.extend(target_names.into_values().flatten());
 
         if !invalid_config.is_empty() {
             return Err(ProjectFileError::InvalidBuildTargets {
                 source_file: source,
                 related: invalid_config,
             }
-            .into());
+            .into_report());
         }
 
         Ok(())

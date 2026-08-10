@@ -1,7 +1,7 @@
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{Report, diagnostic},
     parser::{IntValue, PushValue},
 };
 use miden_core::{
@@ -676,15 +676,16 @@ fn push_reversew(block_builder: &mut BasicBlockBuilder) {
 /// Returns the validated address as u32 or an error if the address is not a multiple of 4.
 fn validate_local_word_alignment(
     local_addr: &ImmU16,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
 ) -> Result<u32, Report> {
     let addr = local_addr.expect_value();
     if !addr.is_multiple_of(WORD_SIZE as u16) {
-        return Err(RelatedLabel::error("invalid local word index")
-            .with_help("the index to a local word must be a multiple of 4")
-            .with_labeled_span(local_addr.span(), "this index is not word-aligned")
-            .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
-            .into());
+        return Err(Report::new(diagnostic! {
+            severity: Error,
+            message: "invalid local word index",
+            labels: [primary(local_addr.span(), "this index is not word-aligned")],
+            notes: [help("the index to a local word must be a multiple of 4")],
+        }));
     }
     Ok(addr as u32)
 }

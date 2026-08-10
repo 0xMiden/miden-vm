@@ -1,5 +1,4 @@
 use alloc::{
-    boxed::Box,
     collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
@@ -12,7 +11,6 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::Report;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;
@@ -25,7 +23,7 @@ use super::{
 use crate::{
     PathBuf,
     ast::{self, Ident},
-    parser::ModuleParser,
+    parser::{ModuleParseOutcome, ModuleParser},
     sema::{LimitKind, SemanticAnalysisError},
 };
 
@@ -524,7 +522,7 @@ impl Module {
         name: impl AsRef<Path>,
         source_file: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Box<Self>, Report> {
+    ) -> ModuleParseOutcome {
         let name = name.as_ref();
         let kind = if name.is_kernel_path() {
             Some(ModuleKind::Kernel)
@@ -538,7 +536,7 @@ impl Module {
     pub fn parse_kernel(
         source_file: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Box<Self>, Report> {
+    ) -> ModuleParseOutcome {
         let mut parser = Self::parser(Some(ModuleKind::Kernel));
         parser.parse(Some(Path::KERNEL), source_file, source_manager)
     }

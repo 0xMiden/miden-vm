@@ -1,9 +1,7 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::Felt;
-use miden_debug_types::{
-    DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
-};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
     BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
@@ -163,7 +161,7 @@ impl Default for TestHost {
 
 impl<S> BaseHost for TestHost<S>
 where
-    S: SourceManagerSync,
+    S: SourceManager,
 {
     fn get_label_and_source_file(
         &self,
@@ -177,7 +175,7 @@ where
 
 impl<S> SyncHost for TestHost<S>
 where
-    S: SourceManagerSync,
+    S: SourceManager,
 {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
@@ -231,6 +229,7 @@ mod tests {
         );
         let program: Program = Assembler::default()
             .assemble_program("program", &source)
+            .value
             .unwrap()
             .unwrap_program();
         let mut host = TestHost::default();

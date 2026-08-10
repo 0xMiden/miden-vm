@@ -1,6 +1,3 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{sync::Arc, vec::Vec};
 
 use smallvec::SmallVec;
@@ -8,8 +5,8 @@ use smallvec::SmallVec;
 use crate::{
     Felt,
     ast::*,
-    debuginfo::{SourceFile, SourceSpan, Span, Spanned},
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::Diagnostic,
     parser::IntValue,
 };
 
@@ -17,105 +14,79 @@ use crate::{
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ConstEvalError {
     #[error("undefined constant '{symbol}'")]
-    #[diagnostic(help("are you missing an import?"))]
+    #[diagnostic(help = "are you missing an import?")]
     UndefinedSymbol {
         #[label("the constant referenced here is not defined in the current scope")]
         symbol: Ident,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("undefined constant '{path}'")]
-    #[diagnostic(help(
-        "is the constant exported from its containing module? if the referenced module \
+    #[diagnostic(
+        help = "is the constant exported from its containing module? if the referenced module \
         is in another library, make sure you provided it to the assembler"
-    ))]
+    )]
     UndefinedPath {
         path: Arc<Path>,
         #[label("this reference is invalid: no such definition found")]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid immediate: value is larger than expected range")]
-    #[diagnostic()]
     ImmediateOverflow {
         #[label]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant expression: value is larger than expected range")]
-    #[diagnostic()]
     ConstExprOverflow {
         #[label]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
         #[label]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant")]
-    #[diagnostic(help("this constant does not resolve to a value of the right type"))]
+    #[diagnostic(help = "this constant does not resolve to a value of the right type")]
     InvalidConstant {
         expected: &'static str,
         #[label("expected {expected}")]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("constant evaluation failed")]
-    #[diagnostic(help("this constant cannot be evaluated, due to operands of incorrect type"))]
+    #[diagnostic(help = "this constant cannot be evaluated, due to operands of incorrect type")]
     InvalidConstExprOperand {
         #[label]
         span: SourceSpan,
         #[label("expected this operand to produce an integer value, but it does not")]
         operand: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
     },
     #[error("constant evaluation terminated due to infinite recursion")]
-    #[diagnostic(help("dependencies between constants must form an acyclic graph"))]
+    #[diagnostic(help = "dependencies between constants must form an acyclic graph")]
     ConstEvalCycle {
         #[label("occurs while evaluating this expression")]
         start: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
         #[related]
-        detected: [RelatedLabel; 1],
+        detected: ConstEvalCycleDetected,
     },
+}
+
+/// Identifies the recursive reference which closed a constant-evaluation cycle.
+#[derive(Debug, Diagnostic)]
+#[diagnostic(message = "related error")]
+pub struct ConstEvalCycleDetected {
+    #[label("cycle occurs because we attempt to eval this constant recursively")]
+    pub span: SourceSpan,
 }
 
 impl ConstEvalError {
     #[inline]
-    pub fn invalid_constant<Env>(span: SourceSpan, expected: &'static str, env: &Env) -> Self
-    where
-        Env: ?Sized + ConstEnvironment,
-        <Env as ConstEnvironment>::Error: From<Self>,
-    {
-        let source_file = env.get_source_file_for(span);
-        Self::InvalidConstant { expected, span, source_file }
+    pub fn invalid_constant(span: SourceSpan, expected: &'static str) -> Self {
+        Self::InvalidConstant { expected, span }
     }
 
     #[inline]
-    pub fn eval_cycle<Env>(start: SourceSpan, detected: SourceSpan, env: &Env) -> Self
-    where
-        Env: ?Sized + ConstEnvironment,
-        <Env as ConstEnvironment>::Error: From<Self>,
-    {
-        let start_file = env.get_source_file_for(start);
-        let detected_file = env.get_source_file_for(detected);
-        let detected = [RelatedLabel::error("related error")
-            .with_labeled_span(
-                detected,
-                "cycle occurs because we attempt to eval this constant recursively",
-            )
-            .with_source_file(detected_file)];
-        Self::ConstEvalCycle { start, source_file: start_file, detected }
+    pub fn eval_cycle(start: SourceSpan, detected: SourceSpan) -> Self {
+        let detected = ConstEvalCycleDetected { span: detected };
+        Self::ConstEvalCycle { start, detected }
     }
 }
 
@@ -155,9 +126,6 @@ pub trait ConstEnvironment {
     ///
     /// The error type must support infallible conversions from [ConstEvalError].
     type Error: From<ConstEvalError>;
-
-    /// Map a [SourceSpan] to the [SourceFile] to which it refers
-    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>>;
 
     /// Get the constant expression/value bound to `name` in the current scope.
     ///
@@ -234,7 +202,7 @@ where
             let path_span = path.span();
             resolve_error_path(env, Span::new(path_span, path_ref), start, seen)
         },
-        other => Err(ConstEvalError::invalid_constant(other.span(), "a string", env).into()),
+        other => Err(ConstEvalError::invalid_constant(other.span(), "a string").into()),
     }
 }
 
@@ -251,7 +219,7 @@ where
     let path_span = path.span();
     let path_ref = path.into_inner();
     if seen.iter().any(|seen_path| seen_path.as_ref() == path_ref) {
-        return Err(ConstEvalError::eval_cycle(start, path_span, env).into());
+        return Err(ConstEvalError::eval_cycle(start, path_span).into());
     }
     seen.push(Arc::<Path>::from(path_ref));
 
@@ -322,7 +290,7 @@ where
             Cont::Eval(ConstantExpr::Var(path)) => {
                 if evaluating.contains(&path) {
                     return Err(
-                        ConstEvalError::eval_cycle(evaluating[0].span(), path.span(), env).into()
+                        ConstEvalError::eval_cycle(evaluating[0].span(), path.span()).into()
                     );
                 }
 
@@ -360,37 +328,21 @@ where
                         let lhs = lhs.into_inner();
                         let rhs = rhs.into_inner();
                         let result = match op {
-                            ConstantOp::Add => lhs.checked_add(rhs).ok_or_else(|| {
-                                ConstEvalError::ConstExprOverflow {
-                                    span,
-                                    source_file: env.get_source_file_for(span),
-                                }
-                            })?,
-                            ConstantOp::Sub => lhs.checked_sub(rhs).ok_or_else(|| {
-                                ConstEvalError::ConstExprOverflow {
-                                    span,
-                                    source_file: env.get_source_file_for(span),
-                                }
-                            })?,
-                            ConstantOp::Mul => lhs.checked_mul(rhs).ok_or_else(|| {
-                                ConstEvalError::ConstExprOverflow {
-                                    span,
-                                    source_file: env.get_source_file_for(span),
-                                }
-                            })?,
-                            ConstantOp::IntDiv => lhs.checked_div(rhs).ok_or_else(|| {
-                                ConstEvalError::DivisionByZero {
-                                    span,
-                                    source_file: env.get_source_file_for(span),
-                                }
-                            })?,
+                            ConstantOp::Add => lhs
+                                .checked_add(rhs)
+                                .ok_or(ConstEvalError::ConstExprOverflow { span })?,
+                            ConstantOp::Sub => lhs
+                                .checked_sub(rhs)
+                                .ok_or(ConstEvalError::ConstExprOverflow { span })?,
+                            ConstantOp::Mul => lhs
+                                .checked_mul(rhs)
+                                .ok_or(ConstEvalError::ConstExprOverflow { span })?,
+                            ConstantOp::IntDiv => lhs
+                                .checked_div(rhs)
+                                .ok_or(ConstEvalError::DivisionByZero { span })?,
                             ConstantOp::Div => {
                                 if rhs.as_int() == 0 {
-                                    return Err(ConstEvalError::DivisionByZero {
-                                        span,
-                                        source_file: env.get_source_file_for(span),
-                                    }
-                                    .into());
+                                    return Err(ConstEvalError::DivisionByZero { span }.into());
                                 }
                                 let lhs = Felt::new_unchecked(lhs.as_int());
                                 let rhs = Felt::new_unchecked(rhs.as_int());
@@ -409,21 +361,15 @@ where
                     },
                     (lhs, rhs) if is_integer_expr(&lhs) => {
                         let operand = rhs.span();
-                        return Err(ConstEvalError::InvalidConstExprOperand {
-                            span,
-                            operand,
-                            source_file: env.get_source_file_for(operand),
-                        }
-                        .into());
+                        return Err(
+                            ConstEvalError::InvalidConstExprOperand { span, operand }.into()
+                        );
                     },
                     (lhs, _) => {
                         let operand = lhs.span();
-                        return Err(ConstEvalError::InvalidConstExprOperand {
-                            span,
-                            operand,
-                            source_file: env.get_source_file_for(operand),
-                        }
-                        .into());
+                        return Err(
+                            ConstEvalError::InvalidConstExprOperand { span, operand }.into()
+                        );
                     },
                 }
             },

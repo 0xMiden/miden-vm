@@ -12,9 +12,8 @@ use crate::{
         Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
         TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
     },
-    diagnostics::reporting::PrintDiagnostic,
-    sema::{SemanticAnalysisError, SyntaxError},
-    testing::SyntaxTestContext,
+    sema::SemanticAnalysisError,
+    testing::{SyntaxTestContext, TestFailure},
 };
 
 fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
@@ -29,12 +28,9 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
     }
 }
 
-fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str) {
-    let syntax_error = syntax_error(error);
-
-    let (span, prev_span) = syntax_error
-        .errors
-        .iter()
+fn assert_symbol_conflict(error: &TestFailure, symbol: &str) {
+    let (span, prev_span) = error
+        .iter::<SemanticAnalysisError>()
         .find_map(|err| match err {
             SemanticAnalysisError::SymbolConflict { span, prev_span } => Some((span, prev_span)),
             _ => None,
@@ -43,19 +39,14 @@ fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str)
 
     assert_ne!(span, prev_span, "conflicting definitions should point at distinct spans");
     assert_eq!(
-        span.source_id(),
-        prev_span.source_id(),
+        span.source().id(),
+        prev_span.source().id(),
         "conflict spans should refer to the same source file"
     );
 
-    let span_text = syntax_error
-        .source_file
-        .source_slice(*span)
-        .expect("conflict span should be valid");
-    let prev_span_text = syntax_error
-        .source_file
-        .source_slice(*prev_span)
-        .expect("previous conflict span should be valid");
+    let span_text = error.source_slice(*span).expect("conflict span should be valid");
+    let prev_span_text =
+        error.source_slice(*prev_span).expect("previous conflict span should be valid");
 
     assert!(
         span_text.contains(symbol),
@@ -67,14 +58,9 @@ fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str)
     );
 }
 
-fn syntax_error(error: &miden_utils_diagnostics::Report) -> &SyntaxError {
-    error.downcast_ref::<SyntaxError>().expect("expected SyntaxError report")
-}
-
-fn assert_undefined_symbol(error: &miden_utils_diagnostics::Report) {
-    let syntax_error = syntax_error(error);
+fn assert_undefined_symbol(error: &TestFailure) {
     assert!(
-        syntax_error.errors.iter().any(|err| matches!(
+        error.iter::<SemanticAnalysisError>().any(|err| matches!(
             err,
             SemanticAnalysisError::SymbolResolutionError(inner)
                 if matches!(**inner, SymbolResolutionError::UndefinedSymbol { .. })
@@ -82,20 +68,16 @@ fn assert_undefined_symbol(error: &miden_utils_diagnostics::Report) {
             err,
             SemanticAnalysisError::ConstEvalError(ConstEvalError::UndefinedSymbol { .. })
         )),
-        "expected at least one undefined-symbol error, got: {:?}",
-        syntax_error.errors
+        "expected at least one undefined-symbol error, got: {error:?}",
     );
 }
 
-fn unused_import_slices(error: &miden_utils_diagnostics::Report) -> Vec<String> {
-    let syntax_error = syntax_error(error);
-    syntax_error
-        .errors
-        .iter()
+fn unused_import_slices(error: &TestFailure) -> Vec<String> {
+    error
+        .iter::<SemanticAnalysisError>()
         .filter_map(|err| match err {
             SemanticAnalysisError::UnusedImport { span } => Some(
-                syntax_error
-                    .source_file
+                error
                     .source_slice(*span)
                     .expect("unused import span should be valid")
                     .to_string(),
@@ -165,10 +147,7 @@ fn assert_cross_kind_conflict(first: DefinitionKind, second: DefinitionKind) {
     let source = format!("{}\n{}\n", first.declaration(symbol), second.declaration(symbol));
     let message = format!("expected symbol conflict during analysis ({first:?} then {second:?})");
     let error = context.parse_module(&source).expect_err(&message);
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
-    if error.downcast_ref::<SyntaxError>().is_none() {
-        panic!("expected SyntaxError ({first:?} then {second:?}), got: {rendered}");
-    }
+    let rendered = format!("{}", error);
     assert_symbol_conflict(&error, symbol);
     assert!(rendered.contains("symbol conflict"));
     assert!(rendered.contains(symbol));
@@ -240,7 +219,7 @@ enum thing: u8 {}
     let error = context
         .parse_module(source)
         .expect_err("expected symbol conflict when enum name matches existing type");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert_symbol_conflict(&error, "thing");
     assert!(rendered.contains("symbol conflict"));
 }
@@ -251,7 +230,7 @@ fn repeat_count_zero_rejected_in_analysis() {
     let error = context
         .parse_program("begin repeat.0 nop end end")
         .expect_err("expected repeat.0 to be rejected during analysis");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -263,7 +242,7 @@ fn repeat_count_too_large_rejected_in_analysis() {
     let error = context
         .parse_program(&source)
         .expect_err("expected repeat count above limit to be rejected during analysis");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -282,7 +261,7 @@ fn repeat_count_constant_zero_rejected_in_analysis() {
     let error = context
         .parse_program("const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end")
         .expect_err("expected repeat.0 from constant to be rejected during analysis");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -305,7 +284,7 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
     let error = context.parse_program(&source).expect_err(
         "expected repeat count above limit from constant to be rejected during analysis",
     );
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -313,12 +292,12 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
 fn expected_path_is_used_when_namespace_is_omitted() {
     let context = SyntaxTestContext::default();
     let mut parser = Module::parser(None);
-    let module = parser
-        .parse_str(
+    let module = context
+        .assess(parser.parse_str(
             Some(Path::new("app::helpers")),
             "pub proc helper\n    push.1\nend",
             context.source_manager(),
-        )
+        ))
         .expect("expected parser-provided namespace to be applied");
 
     assert_eq!(module.path(), Path::new("::app::helpers"));
@@ -329,12 +308,12 @@ fn expected_path_is_used_when_namespace_is_omitted() {
 fn explicit_namespace_is_normalized_before_expected_path_check() {
     let context = SyntaxTestContext::default();
     let mut parser = Module::parser(None);
-    let module = parser
-        .parse_str(
+    let module = context
+        .assess(parser.parse_str(
             Some(Path::new("app::helpers")),
             "namespace app::helpers\n\npub proc helper\n    push.1\nend",
             context.source_manager(),
-        )
+        ))
         .expect("expected matching relative namespace declaration to be accepted");
 
     assert_eq!(module.path(), Path::new("::app::helpers"));
@@ -344,15 +323,15 @@ fn explicit_namespace_is_normalized_before_expected_path_check() {
 fn explicit_namespace_conflict_still_reports_expected_path() {
     let context = SyntaxTestContext::default();
     let mut parser = Module::parser(None);
-    let error = parser
-        .parse_str(
+    let error = context
+        .assess(parser.parse_str(
             Some(Path::new("app::helpers")),
             "namespace other::helpers\n\npub proc helper\n    push.1\nend",
             context.source_manager(),
-        )
+        ))
         .expect_err("expected mismatched namespace declaration to be rejected");
 
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("conflicting module namespace specification"));
     assert!(rendered.contains("expected '::app::helpers'"));
     assert!(rendered.contains("got '::other::helpers'"));
@@ -428,7 +407,7 @@ end
 ",
         )
         .expect_err("expected exported procedure signature to reject private local type");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("private type in exported procedure signature"));
 }
 
@@ -445,7 +424,7 @@ pub type PublicAlias = PrivateType
 ",
         )
         .expect_err("expected exported type alias to reject private type");
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("private type in exported type declaration"));
 }
 
@@ -453,8 +432,8 @@ pub type PublicAlias = PrivateType
 fn exported_proc_signature_rejects_private_local_type_via_absolute_path() {
     let context = SyntaxTestContext::default();
     let mut parser = Module::parser(None);
-    let error = parser
-        .parse_str(
+    let error = context
+        .assess(parser.parse_str(
             Some(Path::new("wallet::memory")),
             "
 type PrivateType = felt
@@ -464,11 +443,11 @@ pub proc check(value: ::wallet::memory::PrivateType)
 end
 ",
             context.source_manager(),
-        )
+        ))
         .expect_err(
             "expected exported procedure signature to reject private local type via absolute path",
         );
-    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error);
     assert!(rendered.contains("private type in exported procedure signature"));
 }
 
@@ -861,17 +840,14 @@ pub use {foo} from dep
         let error = context
             .parse_module(source)
             .expect_err("doc comments before imports and re-exports should warn");
-        let syntax_error = syntax_error(&error);
         assert!(
-            syntax_error
-                .errors
-                .iter()
+            error
+                .iter::<SemanticAnalysisError>()
                 .any(|err| matches!(err, SemanticAnalysisError::ImportDocstring { .. })),
-            "expected ImportDocstring warning, got: {:?}",
-            syntax_error.errors
+            "expected ImportDocstring warning, got: {error:?}",
         );
 
-        let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+        let rendered = format!("{}", error);
         assert!(rendered.contains("imports and re-exports cannot have docstrings"), "{rendered}");
     }
 }

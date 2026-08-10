@@ -1,12 +1,14 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, Linkage, PathBuf as LibraryPath, ast,
+    Assembler, DefaultSourceManager, Linkage, PathBuf as LibraryPath, ast,
     diagnostics::{IntoDiagnostic, Report},
 };
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
+
+use super::utils::finish_assembly_outcome;
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -43,7 +45,8 @@ impl BundleCmd {
         println!("Build library");
         println!("============================================================");
 
-        let mut assembler = Assembler::default();
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let mut assembler = Assembler::new(source_manager.clone());
 
         if !self.root.is_file() {
             return Err(Report::msg("`root` must be a '.masm' file."));
@@ -65,7 +68,11 @@ impl BundleCmd {
                 Some(ns) => ns,
                 None => ast::Path::KERNEL_PATH,
             };
-            let library = assembler.assemble_kernel_from_root(namespace, &self.root)?;
+            let library = finish_assembly_outcome(
+                assembler.assemble_kernel_from_root(namespace, &self.root),
+                source_manager.as_ref(),
+                "Failed to assemble kernel library",
+            )?;
             library.write_to_file(output_file).into_diagnostic()?;
             println!("Built kernel library {} from {}", library.name, self.root.display());
         } else {
@@ -74,8 +81,11 @@ impl BundleCmd {
                 None => None,
             };
             assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-            let library =
-                assembler.assemble_library_from_root(&self.root, library_namespace.as_deref())?;
+            let library = finish_assembly_outcome(
+                assembler.assemble_library_from_root(&self.root, library_namespace.as_deref()),
+                source_manager.as_ref(),
+                "Failed to assemble library",
+            )?;
             library.write_to_file(output_file).into_diagnostic()?;
             println!("Built package '{}'", library.name);
         }

@@ -2,7 +2,7 @@ use core::{
     borrow::Borrow,
     fmt,
     hash::{Hash, Hasher},
-    ops::{Bound, Deref, DerefMut, Index, Range, RangeBounds},
+    ops::{Deref, DerefMut},
 };
 
 use miden_crypto::utils::{
@@ -11,37 +11,10 @@ use miden_crypto::utils::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{ByteIndex, ByteOffset, SourceId};
+use miden_diagnostics::SourceKey;
+pub use miden_diagnostics::{SourceSpan, Spanned, TextRange, TextRangeError};
 
-/// This trait should be implemented for any type that has an associated [SourceSpan].
-pub trait Spanned {
-    fn span(&self) -> SourceSpan;
-}
-
-impl Spanned for SourceSpan {
-    #[inline(always)]
-    fn span(&self) -> SourceSpan {
-        *self
-    }
-}
-
-impl<T: ?Sized + Spanned> Spanned for alloc::boxed::Box<T> {
-    fn span(&self) -> SourceSpan {
-        (**self).span()
-    }
-}
-
-impl<T: ?Sized + Spanned> Spanned for alloc::rc::Rc<T> {
-    fn span(&self) -> SourceSpan {
-        (**self).span()
-    }
-}
-
-impl<T: ?Sized + Spanned> Spanned for alloc::sync::Arc<T> {
-    fn span(&self) -> SourceSpan {
-        (**self).span()
-    }
-}
+use super::{ByteIndex, ByteOffset, SourceId, source_manager::source_id_from_wire};
 
 // SPAN
 // ================================================================================================
@@ -62,7 +35,10 @@ impl<T> Span<T> {
         let end = range.end as u32;
         let spanned = spanned.into_inner();
         Self {
-            span: SourceSpan::new(source_id, start..end),
+            span: SourceSpan::session(
+                source_id,
+                TextRange::new(start, end).expect("invalid serde source span"),
+            ),
             spanned,
         }
     }
@@ -116,7 +92,7 @@ impl<T> Span<T> {
     pub fn at(source_id: SourceId, offset: usize, spanned: T) -> Self {
         let offset = u32::try_from(offset).expect("invalid source offset: too large");
         Self {
-            span: SourceSpan::at(source_id, offset),
+            span: SourceSpan::at(SourceKey::Session(source_id), None, offset),
             spanned,
         }
     }
@@ -176,20 +152,32 @@ impl<T> Span<T> {
     ///
     /// See also [SourceSpan::set_source_id].
     pub fn set_source_id(&mut self, id: SourceId) {
-        self.span.set_source_id(id);
+        self.span.set_source_key(SourceKey::Session(id));
     }
 
     /// Shifts the span right by `count` units
     #[inline]
     pub fn shift(&mut self, count: ByteOffset) {
-        self.span.start += count;
-        self.span.end += count;
+        let range = self.span.range();
+        let start = ByteIndex::new(range.start()) + count;
+        let end = ByteIndex::new(range.end()) + count;
+        self.span = SourceSpan::new(
+            self.span.source(),
+            self.span.revision(),
+            TextRange::new(start.to_u32(), end.to_u32()).expect("invalid shifted source span"),
+        );
     }
 
     /// Extends the end of the span by `count` units.
     #[inline]
     pub fn extend(&mut self, count: ByteOffset) {
-        self.span.end += count;
+        let range = self.span.range();
+        let end = ByteIndex::new(range.end()) + count;
+        self.span = SourceSpan::new(
+            self.span.source(),
+            self.span.revision(),
+            TextRange::new(range.start(), end.to_u32()).expect("invalid extended source span"),
+        );
     }
 
     /// Consumes this span, returning the component parts, i.e. the [SourceSpan] and value of type
@@ -312,7 +300,7 @@ impl<T: Hash> Hash for Span<T> {
 impl<T: Serializable> Span<T> {
     pub fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, debug: bool) {
         if debug {
-            self.span.write_into(target);
+            write_source_span(self.span, target);
         }
         self.spanned.write_into(target);
     }
@@ -320,7 +308,7 @@ impl<T: Serializable> Span<T> {
 
 impl<T: Serializable> Serializable for Span<T> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.span.write_into(target);
+        write_source_span(self.span, target);
         self.spanned.write_into(target);
     }
 }
@@ -331,7 +319,7 @@ impl<T: Deserializable> Span<T> {
         debug: bool,
     ) -> Result<Self, DeserializationError> {
         let span = if debug {
-            SourceSpan::read_from(source)?
+            read_source_span(source)?
         } else {
             SourceSpan::default()
         };
@@ -342,229 +330,57 @@ impl<T: Deserializable> Span<T> {
 
 impl<T: Deserializable> Deserializable for Span<T> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let span = SourceSpan::read_from(source)?;
+        let span = read_source_span(source)?;
         let spanned = T::read_from(source)?;
         Ok(Self { span, spanned })
     }
 }
 
-// SOURCE SPAN
+// LEGACY SOURCE SPAN CODEC
 // ================================================================================================
 
-/// This represents a span of bytes in a Miden Assembly source file.
+/// Writes a canonical diagnostic span using the established VM wire representation:
+/// `(source-local-id, start, end)`, each encoded as `u32`.
 ///
-/// It is compact, using only 8 bytes to represent the full span. This does, however, come at the
-/// tradeoff of only supporting source files of up to 2^32 bytes.
-///
-/// This type is produced by the lexer and carried through parsing. It can be converted into a
-/// line/column range as well, if needed.
-///
-/// This representation is more convenient to produce, and allows showing source spans in error
-/// messages, whereas line/column information is useful at a glance in debug output, it is harder
-/// to produce nice errors with it compared to this representation.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-pub struct SourceSpan {
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "SourceId::is_unknown"))]
-    source_id: SourceId,
-    start: ByteIndex,
-    end: ByteIndex,
+/// The source namespace, source-key kind, and revision are session metadata and are intentionally
+/// not part of this historical codec. Deserialization places the local ID in the default VM source
+/// namespace as a session span.
+fn write_source_span<W: ByteWriter>(span: SourceSpan, target: &mut W) {
+    target.write_u32(span.source().id().local());
+    target.write_u32(span.range().start());
+    target.write_u32(span.range().end());
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("invalid byte index range: maximum supported byte index is 2^32")]
-pub struct InvalidByteIndexRange;
-
-impl SourceSpan {
-    /// A sentinel [SourceSpan] that indicates the span is unknown/invalid
-    pub const UNKNOWN: Self = Self {
-        source_id: SourceId::UNKNOWN,
-        start: ByteIndex::new(0),
-        end: ByteIndex::new(0),
-    };
-
-    /// A sentinel [SourceSpan] that indicates compiler-generated/synthetic code
-    ///
-    /// This is used to distinguish between:
-    /// - UNKNOWN: debug info missing or failed to parse from DWARF
-    /// - SYNTHETIC: compiler-generated code that doesn't correspond to any user source
-    pub const SYNTHETIC: Self = Self {
-        source_id: SourceId::UNKNOWN,
-        start: ByteIndex::new(u32::MAX),
-        end: ByteIndex::new(u32::MAX),
-    };
-
-    /// Creates a new [SourceSpan] from the given range.
-    pub fn new<B>(source_id: SourceId, range: Range<B>) -> Self
-    where
-        B: Into<ByteIndex>,
-    {
-        Self {
-            source_id,
-            start: range.start.into(),
-            end: range.end.into(),
-        }
-    }
-
-    /// Creates a new [SourceSpan] for a specific offset.
-    pub fn at(source_id: SourceId, offset: impl Into<ByteIndex>) -> Self {
-        let offset = offset.into();
-        Self { source_id, start: offset, end: offset }
-    }
-
-    /// Try to create a new [SourceSpan] from the given range with `usize` bounds.
-    pub fn try_from_range(
-        source_id: SourceId,
-        range: Range<usize>,
-    ) -> Result<Self, InvalidByteIndexRange> {
-        const MAX: usize = u32::MAX as usize;
-        if range.start > MAX || range.end > MAX {
-            return Err(InvalidByteIndexRange);
-        }
-
-        Ok(SourceSpan {
-            source_id,
-            start: ByteIndex::from(range.start as u32),
-            end: ByteIndex::from(range.end as u32),
-        })
-    }
-
-    /// Returns `true` if this [SourceSpan] represents the unknown span
-    pub const fn is_unknown(&self) -> bool {
-        self.source_id.is_unknown() && self.start.to_u32() == 0 && self.end.to_u32() == 0
-    }
-
-    /// Returns `true` if this [SourceSpan] represents synthetic/compiler-generated code
-    pub const fn is_synthetic(&self) -> bool {
-        self.source_id.is_unknown()
-            && self.start.to_u32() == u32::MAX
-            && self.end.to_u32() == u32::MAX
-    }
-
-    /// Get the [SourceId] associated with this source span
-    #[inline(always)]
-    pub fn source_id(&self) -> SourceId {
-        self.source_id
-    }
-
-    /// Manually set the [SourceId] associated with this source span
-    ///
-    /// This is useful in cases where the range of the span is known, but the source id itself
-    /// is not available yet, due to scope or some other limitation. In such cases you might wish
-    /// to visit parsed objects once the source id is available, and update all of their spans
-    /// accordingly.
-    pub fn set_source_id(&mut self, id: SourceId) {
-        self.source_id = id;
-    }
-
-    /// Gets the offset in bytes corresponding to the start of this span (inclusive).
-    #[inline(always)]
-    pub fn start(&self) -> ByteIndex {
-        self.start
-    }
-
-    /// Gets the offset in bytes corresponding to the end of this span (exclusive).
-    #[inline(always)]
-    pub fn end(&self) -> ByteIndex {
-        self.end
-    }
-
-    /// Gets the length of this span in bytes.
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.end.to_usize() - self.start.to_usize()
-    }
-
-    /// Returns true if this span is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Converts this span into a [`Range<u32>`].
-    #[inline]
-    pub fn into_range(self) -> Range<u32> {
-        self.start.to_u32()..self.end.to_u32()
-    }
-
-    /// Converts this span into a [`Range<usize>`].
-    #[inline]
-    pub fn into_slice_index(self) -> Range<usize> {
-        self.start.to_usize()..self.end.to_usize()
-    }
+fn read_source_span<R: ByteReader>(source: &mut R) -> Result<SourceSpan, DeserializationError> {
+    let source_id = source_id_from_wire(source.read_u32()?);
+    let start = source.read_u32()?;
+    let end = source.read_u32()?;
+    let range = TextRange::new(start, end).map_err(|err| {
+        DeserializationError::InvalidValue(alloc::format!("invalid source span: {err}"))
+    })?;
+    Ok(SourceSpan::session(source_id, range))
 }
 
-impl From<SourceSpan> for miette::SourceSpan {
-    fn from(span: SourceSpan) -> Self {
-        Self::new(miette::SourceOffset::from(span.start().to_usize()), span.len())
-    }
-}
+#[cfg(test)]
+mod tests {
+    use miden_crypto::utils::{Deserializable, Serializable};
 
-impl Serializable for SourceSpan {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.source_id.to_u32());
-        target.write_u32(self.start.into());
-        target.write_u32(self.end.into())
-    }
-}
+    use super::*;
+    use crate::DEFAULT_SOURCE_NAMESPACE;
 
-impl Deserializable for SourceSpan {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let source_id = SourceId::new_unchecked(source.read_u32()?);
-        let start = ByteIndex::from(source.read_u32()?);
-        let end = ByteIndex::from(source.read_u32()?);
-        Ok(Self { source_id, start, end })
-    }
-}
+    #[test]
+    fn span_codec_preserves_established_three_u32_layout() {
+        let source_id = SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7);
+        let span =
+            Span::new(SourceSpan::session(source_id, TextRange::new(11, 19).unwrap()), 23_u32);
 
-impl From<SourceSpan> for Range<u32> {
-    #[inline(always)]
-    fn from(span: SourceSpan) -> Self {
-        span.into_range()
-    }
-}
+        let bytes = span.to_bytes();
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(&bytes[..12], &[7, 0, 0, 0, 11, 0, 0, 0, 19, 0, 0, 0]);
 
-impl From<SourceSpan> for Range<usize> {
-    #[inline(always)]
-    fn from(span: SourceSpan) -> Self {
-        span.into_slice_index()
-    }
-}
-
-impl From<Range<u32>> for SourceSpan {
-    #[inline]
-    fn from(range: Range<u32>) -> Self {
-        Self::new(SourceId::UNKNOWN, range)
-    }
-}
-
-impl From<Range<ByteIndex>> for SourceSpan {
-    #[inline]
-    fn from(range: Range<ByteIndex>) -> Self {
-        Self {
-            source_id: SourceId::UNKNOWN,
-            start: range.start,
-            end: range.end,
-        }
-    }
-}
-
-impl Index<SourceSpan> for [u8] {
-    type Output = [u8];
-
-    #[inline]
-    fn index(&self, index: SourceSpan) -> &Self::Output {
-        &self[index.start().to_usize()..index.end().to_usize()]
-    }
-}
-
-impl RangeBounds<ByteIndex> for SourceSpan {
-    #[inline(always)]
-    fn start_bound(&self) -> Bound<&ByteIndex> {
-        Bound::Included(&self.start)
-    }
-
-    #[inline(always)]
-    fn end_bound(&self) -> Bound<&ByteIndex> {
-        Bound::Excluded(&self.end)
+        let decoded = Span::<u32>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.span().source().id(), source_id);
+        assert_eq!(decoded.span().range(), TextRange::new(11, 19).unwrap());
+        assert_eq!(*decoded, 23);
     }
 }

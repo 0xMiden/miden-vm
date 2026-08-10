@@ -19,6 +19,7 @@ fn core_lib(c: &mut Criterion) {
             let mut project_assembler =
                 assembler.for_project_at_path(manifest_path, &mut registry).unwrap();
             black_box(project_assembler.assemble(ProjectTargetSelector::Library, "release"))
+                .value
                 .unwrap();
         });
     });
@@ -54,7 +55,7 @@ fn bench_generated_programs(c: &mut Criterion, group_name: &str, cases: &[(&str,
         group.bench_with_input(BenchmarkId::new(*name, *size), source, |bench, source| {
             bench.iter(|| {
                 let assembler = Assembler::default();
-                black_box(assembler.assemble_program("bench", source.as_str()).unwrap());
+                black_box(assembler.assemble_program("bench", source.as_str()).value.unwrap());
             });
         });
     }

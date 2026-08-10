@@ -11,14 +11,12 @@ use std::{
     process::Command,
 };
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{DefaultSourceManager, SourceManager, Uri},
-};
+use miden_assembly_syntax::debuginfo::{DefaultSourceManager, SourceManager, Uri};
 use miden_core::{
     serde::Deserializable,
     utils::{DisplayHex, hash_string_to_word},
 };
+use miden_diagnostics::Report;
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,

@@ -508,6 +508,7 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
 
     let program = Assembler::default()
         .assemble_program("program", &source)
+        .value
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();

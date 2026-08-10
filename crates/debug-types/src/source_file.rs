@@ -15,6 +15,9 @@ use super::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, FileLineCol, Position, Selection,
     Serializable, SourceId, SourceSpan, Uri,
 };
+use miden_diagnostics::{
+    LineColumn, Source as DiagnosticSource, SourceKey, SourceProvider, SourceRevision, TextRange,
+};
 
 // SOURCE LANGUAGE
 // ================================================================================================
@@ -60,6 +63,13 @@ impl AsRef<str> for SourceLanguage {
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SourceFile {
     /// The unique identifier allocated for this [SourceFile] by its owning [super::SourceManager]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "super::source_manager::serialize_source_id",
+            deserialize_with = "super::source_manager::deserialize_source_id"
+        )
+    )]
     id: SourceId,
     /// The file content
     #[cfg_attr(
@@ -67,40 +77,6 @@ pub struct SourceFile {
         serde(deserialize_with = "SourceContent::deserialize_and_recompute_line_starts")
     )]
     content: SourceContent,
-}
-
-impl miette::SourceCode for SourceFile {
-    fn read_span<'a>(
-        &'a self,
-        span: &miette::SourceSpan,
-        context_lines_before: usize,
-        context_lines_after: usize,
-    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
-        let mut start =
-            u32::try_from(span.offset()).map_err(|_| miette::MietteError::OutOfBounds)?;
-        let len = u32::try_from(span.len()).map_err(|_| miette::MietteError::OutOfBounds)?;
-        let mut end = start.checked_add(len).ok_or(miette::MietteError::OutOfBounds)?;
-        if context_lines_before > 0 {
-            let line_index = self.content.line_index(start.into());
-            let start_line_index = line_index.saturating_sub(context_lines_before as u32);
-            start = self.content.line_start(start_line_index).map(ByteIndex::to_u32).unwrap_or(0);
-        }
-        if context_lines_after > 0 {
-            let line_index = self.content.line_index(end.into());
-            let end_line_index = line_index
-                .checked_add(context_lines_after as u32)
-                .ok_or(miette::MietteError::OutOfBounds)?;
-            end = self
-                .content
-                .line_range(end_line_index)
-                .map(|range| range.end.to_u32())
-                .unwrap_or_else(|| self.content.source_range().end.to_u32());
-        }
-        Ok(Box::new(ScopedSourceFileRef {
-            file: self,
-            span: miette::SourceSpan::new((start as usize).into(), end.abs_diff(start) as usize),
-        }))
-    }
 }
 
 impl SourceFile {
@@ -181,7 +157,22 @@ impl SourceFile {
     #[inline]
     pub fn source_span(&self) -> SourceSpan {
         let range = self.content.source_range();
-        SourceSpan::new(self.id, range.start.0..range.end.0)
+        SourceSpan::session(
+            self.id,
+            TextRange::new(range.start.0, range.end.0).expect("invalid source file range"),
+        )
+    }
+
+    /// Returns an attached-source span covering the entirety of this file.
+    ///
+    /// Use this when the file is carried by an owned diagnostic rather than resolved through the
+    /// session [`SourceManager`](super::SourceManager).
+    pub fn attached_source_span(&self) -> SourceSpan {
+        let range = self.content.source_range();
+        SourceSpan::attached(
+            self.id,
+            TextRange::new(range.start.0, range.end.0).expect("invalid source file range"),
+        )
     }
 
     /// Returns a subset of the underlying content as a string slice.
@@ -209,16 +200,37 @@ impl SourceFile {
         column: ColumnNumber,
     ) -> Option<SourceSpan> {
         let offset = self.content.line_column_to_offset(line.into(), column.into())?;
-        Some(SourceSpan::at(self.id, offset.0))
+        Some(SourceSpan::at(SourceKey::Session(self.id), None, offset.0))
     }
 
     /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan]
     pub fn location(&self, span: SourceSpan) -> FileLineCol {
-        assert_eq!(span.source_id(), self.id, "mismatched source ids");
+        assert_eq!(span.source().id(), self.id, "mismatched source ids");
 
         self.content
-            .location(ByteIndex(span.into_range().start))
+            .location(ByteIndex(span.range().start()))
             .expect("invalid source span: starting byte is out of bounds")
+    }
+}
+
+impl SourceProvider for SourceFile {
+    fn get(&self, id: SourceId) -> Option<DiagnosticSource<'_>> {
+        (id == self.id).then(|| DiagnosticSource {
+            id: self.id,
+            display_name: self.uri().as_str(),
+            byte_len: self.len() as u32,
+            text: Some(self.as_str()),
+            revision: (self.content.version() >= 0)
+                .then(|| SourceRevision(self.content.version() as u32)),
+        })
+    }
+
+    fn line_column(&self, id: SourceId, offset: u32) -> Option<LineColumn> {
+        if id != self.id {
+            return None;
+        }
+        let location = self.content.location(ByteIndex::new(offset))?;
+        LineColumn::new(location.line.to_u32(), location.column.to_u32())
     }
 }
 
@@ -242,9 +254,8 @@ impl AsRef<[u8]> for SourceFile {
 /// A reference to a specific spanned region of a [SourceFile], that provides access to the actual
 /// [SourceFile], but scoped to the span it was created with.
 ///
-/// This is useful in error types that implement [miette::Diagnostic], as it contains all of the
-/// data necessary to render the source code being referenced, without a [super::SourceManager] on
-/// hand.
+/// This is useful when a diagnostic needs to retain its source independently of the session source
+/// manager.
 #[derive(Debug, Clone)]
 pub struct SourceFileRef {
     file: Arc<SourceFile>,
@@ -259,7 +270,10 @@ impl SourceFileRef {
     pub fn new(file: Arc<SourceFile>, span: impl Into<Range<u32>>) -> Self {
         let span = span.into();
         let end = core::cmp::min(span.end, file.len() as u32);
-        let span = SourceSpan::new(file.id(), span.start..end);
+        let span = SourceSpan::attached(
+            file.id(),
+            TextRange::new(span.start, end).expect("invalid source file selection"),
+        );
         Self { file, span }
     }
 
@@ -280,7 +294,7 @@ impl SourceFileRef {
 
     /// Returns the underlying `str` selected by this [SourceFileRef]
     pub fn as_str(&self) -> &str {
-        self.file.source_slice(self.span).unwrap()
+        self.file.source_slice(self.span.range().into_slice_index()).unwrap()
     }
 
     /// Returns the underlying bytes selected by this [SourceFileRef]
@@ -342,69 +356,13 @@ impl AsRef<[u8]> for SourceFileRef {
     }
 }
 
-impl From<&SourceFileRef> for miette::SourceSpan {
-    fn from(source: &SourceFileRef) -> Self {
-        source.span.into()
-    }
-}
-
-/// Used to implement [miette::SpanContents] for [SourceFile] and [SourceFileRef]
-struct ScopedSourceFileRef<'a> {
-    file: &'a SourceFile,
-    span: miette::SourceSpan,
-}
-
-impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
-    #[inline]
-    fn data(&self) -> &'a [u8] {
-        let start = self.span.offset();
-        let end = start + self.span.len();
-        &self.file.as_bytes()[start..end]
+impl SourceProvider for SourceFileRef {
+    fn get(&self, id: SourceId) -> Option<DiagnosticSource<'_>> {
+        self.file.get(id)
     }
 
-    #[inline]
-    fn span(&self) -> &miette::SourceSpan {
-        &self.span
-    }
-
-    fn line(&self) -> usize {
-        let offset = self.span.offset() as u32;
-        self.file.content.line_index(offset.into()).to_usize()
-    }
-
-    fn column(&self) -> usize {
-        let start = self.span.offset() as u32;
-        let end = start + self.span.len() as u32;
-        let span = SourceSpan::new(self.file.id(), start..end);
-        let loc = self.file.location(span);
-        loc.column.to_index().to_usize()
-    }
-
-    #[inline]
-    fn line_count(&self) -> usize {
-        self.file.line_count()
-    }
-
-    #[inline]
-    fn name(&self) -> Option<&str> {
-        Some(self.file.uri().as_ref())
-    }
-
-    #[inline]
-    fn language(&self) -> Option<&str> {
-        None
-    }
-}
-
-impl miette::SourceCode for SourceFileRef {
-    #[inline]
-    fn read_span<'a>(
-        &'a self,
-        span: &miette::SourceSpan,
-        context_lines_before: usize,
-        context_lines_after: usize,
-    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
-        self.file.read_span(span, context_lines_before, context_lines_after)
+    fn line_column(&self, id: SourceId, offset: u32) -> Option<LineColumn> {
+        self.file.line_column(id, offset)
     }
 }
 

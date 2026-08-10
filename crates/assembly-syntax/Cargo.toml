@@ -20,7 +20,7 @@ std = [
     "miden-assembly-syntax-cst/std",
     "miden-core/std",
     "miden-debug-types/std",
-    "miden-utils-diagnostics/std",
+    "miden-diagnostics/std",
     "thiserror/std",
     "proptest?/std",
 ]
@@ -34,7 +34,7 @@ logging = ["dep:env_logger"]
 miden-assembly-syntax-cst = { workspace = true, default-features = false }
 miden-core.workspace = true
 miden-debug-types.workspace = true
-miden-utils-diagnostics.workspace = true
+miden-diagnostics.workspace = true
 midenc-hir-type = { workspace = true, features = ["serde"] }
 
 # External dependencies

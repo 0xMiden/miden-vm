@@ -74,14 +74,18 @@ impl WorkspaceFile {
                 .map(|span| {
                     let start = span.start as u32;
                     let end = span.end as u32;
-                    SourceSpan::new(source_id, start..end)
+                    SourceSpan::session(
+                        source_id,
+                        TextRange::new(start, end).expect("invalid TOML error span"),
+                    )
                 })
                 .unwrap_or_default();
-            Report::from(ProjectFileError::ParseError {
+            ProjectFileError::ParseError {
                 message: err.message().to_string(),
                 source_file: source.clone(),
                 span,
-            })
+            }
+            .into_report()
         })?;
 
         workspace.source_file = Some(source.clone());
@@ -110,7 +114,7 @@ impl Validate for WorkspaceFile {
                 None
             }
         }) {
-            return Err(ProjectFileError::NotAWorkspace { source_file: source, span }.into());
+            return Err(ProjectFileError::NotAWorkspace { source_file: source, span }.into_report());
         }
 
         if let Some(description) = self.workspace.package.description.as_ref()
@@ -120,7 +124,7 @@ impl Validate for WorkspaceFile {
                 source_file: source,
                 span: description.span(),
             }
-            .into());
+            .into_report());
         }
 
         // Validate that workspace-level dependencies are all valid at that level
@@ -134,10 +138,12 @@ impl Validate for WorkspaceFile {
                 } else {
                     "cannot use the 'workspace' option in a workspace-level dependency spec"
                 };
-                return Err(Report::from(ProjectFileError::InvalidWorkspaceDependency {
+                return Err(ProjectFileError::InvalidWorkspaceDependency {
                     source_file: source,
-                    label: Label::new(dependency.span(), label),
-                }));
+                    message: label.into(),
+                    span: dependency.span(),
+                }
+                .into_report());
             }
         }
 

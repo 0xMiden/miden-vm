@@ -1,16 +1,4 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
-
-use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
-use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
-use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_mast_package::{
-    PackageDebugInfoError,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
-};
-use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
     BaseHost, ContextId, Felt, Word,
@@ -18,6 +6,14 @@ use crate::{
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
     utils::to_hex,
+};
+use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
+use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_diagnostics::{Diagnostic, Report};
+use miden_mast_package::{
+    PackageDebugInfoError,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 
 // EXECUTION ERROR
@@ -27,22 +23,19 @@ use crate::{
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
-    #[diagnostic()]
     AceChipError {
         #[label("this call failed")]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
     },
     #[error("{err}")]
-    #[diagnostic(forward(err))]
     AdviceError {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        err: AdviceError,
+        #[diagnostic_source]
+        err: Box<AdviceError>,
     },
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
@@ -50,24 +43,20 @@ pub enum ExecutionError {
         Some(name) => format!("'{name}' (ID: {event_id})"),
         None => format!("with ID: {event_id}"),
     })]
-    #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         event_id: EventId,
         event_name: Option<EventName>,
-        #[source]
+        #[note]
         error: EventError,
     },
     /// Deferred system event failed while validating or evaluating a committed node.
     #[error("{err}")]
-    #[diagnostic()]
     DeferredError {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: PrecompileError,
     },
@@ -84,12 +73,11 @@ pub enum ExecutionError {
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
     #[error("{err}")]
-    #[diagnostic(forward(err))]
     MemoryError {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        #[diagnostic_source]
         err: MemoryError,
     },
     /// Memory error without source context (for internal operations like FMP initialization).
@@ -100,22 +88,19 @@ pub enum ExecutionError {
     #[diagnostic(transparent)]
     MemoryErrorNoCtx(MemoryError),
     #[error("{err}")]
-    #[diagnostic(forward(err))]
     OperationError {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        #[diagnostic_source]
         err: OperationError,
     },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("procedure with root digest {root_digest} could not be found")]
-    #[diagnostic()]
     ProcedureNotFound {
         #[label]
         label: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
     },
@@ -133,7 +118,39 @@ impl ExecutionError {
         Self::AdviceError {
             label: SourceSpan::UNKNOWN,
             source_file: None,
-            err,
+            err: Box::new(err),
+        }
+    }
+
+    /// Returns the source provider associated with this diagnostic occurrence, if available.
+    ///
+    /// The diagnostic's spans use the session source universe, so callers rendering this error
+    /// should pass the returned file to `miden_diagnostics` as the session source provider.
+    pub fn source_file(&self) -> Option<&SourceFile> {
+        self.source_file_arc().map(Arc::as_ref)
+    }
+
+    /// Converts this execution failure into a report that retains any source provider required by
+    /// its session spans.
+    pub fn into_report(self) -> Report {
+        let source_file = self.source_file_arc().cloned();
+        let report = Report::new(self);
+        match source_file {
+            Some(source_file) => report.attach_session_sources(source_file),
+            None => report,
+        }
+    }
+
+    fn source_file_arc(&self) -> Option<&Arc<SourceFile>> {
+        match self {
+            Self::AceChipError { source_file, .. }
+            | Self::AdviceError { source_file, .. }
+            | Self::EventError { source_file, .. }
+            | Self::DeferredError { source_file, .. }
+            | Self::MemoryError { source_file, .. }
+            | Self::OperationError { source_file, .. }
+            | Self::ProcedureNotFound { source_file, .. } => source_file.as_ref(),
+            _ => None,
         }
     }
 }
@@ -240,9 +257,9 @@ pub enum MemoryError {
     #[error(
         "writing to memory address {addr} in context {ctx} would exceed the maximum number of memory elements {max}"
     )]
-    #[diagnostic(help(
-        "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
-    ))]
+    #[diagnostic(
+        help = "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
+    )]
     MemoryElementLimitExceeded { ctx: ContextId, addr: u32, max: usize },
 }
 
@@ -538,7 +555,7 @@ fn get_label_and_source_file() -> (SourceSpan, Option<Arc<SourceFile>>) {
 /// where the extension traits cannot be used directly.
 pub fn advice_error_with_context(err: AdviceError) -> ExecutionError {
     let (label, source_file) = get_label_and_source_file();
-    ExecutionError::AdviceError { label, source_file, err }
+    ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
 }
 
 /// Wraps an `AdviceError` with package-owned source-occurrence execution context.
@@ -550,7 +567,7 @@ pub fn advice_error_with_package_source_context(
 ) -> ExecutionError {
     let (label, source_file) =
         label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
-    ExecutionError::AdviceError { label, source_file, err }
+    ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
 }
 
 /// Wraps an `EventError` with execution context to produce an `ExecutionError`.
@@ -751,7 +768,7 @@ impl<T> MapExecErrNoCtx<T> for Result<T, AdviceError> {
             Err(err) => Err(ExecutionError::AdviceError {
                 label: SourceSpan::UNKNOWN,
                 source_file: None,
-                err,
+                err: Box::new(err),
             }),
         }
     }
@@ -817,7 +834,7 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -843,7 +860,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -875,7 +892,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                 );
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -892,7 +909,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -918,7 +935,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
             Err(err) => {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                    },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
                     IoError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -946,7 +965,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                     host,
                 );
                 Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                    },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
                     IoError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -957,7 +978,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
             (Err(err), None) => {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                    },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
                     IoError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -979,7 +1002,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -1005,7 +1028,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
                 );
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => ExecutionError::OperationError {
                         label,
@@ -1018,7 +1041,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
                 let (label, source_file) = get_label_and_source_file();
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
+                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => {
                         ExecutionError::OperationError { label, source_file, err }
@@ -1095,7 +1118,9 @@ mod error_assertions {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastNodeId;
-    use miden_debug_types::{ByteIndex, SourceId, Uri};
+    use miden_debug_types::{
+        ByteIndex, DEFAULT_SOURCE_NAMESPACE, SourceId, SourceLanguage, TextRange, Uri,
+    };
     use miden_mast_package::debug_info::{
         DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder,
     };
@@ -1107,6 +1132,11 @@ mod error_assertions {
 
     fn _assert_execution_error_bounds(err: ExecutionError) {
         _assert_error_is_send_sync_static(err);
+    }
+
+    #[test]
+    fn execution_error_remains_compact() {
+        assert!(core::mem::size_of::<ExecutionError>() < 128);
     }
 
     fn debug_asm_op(
@@ -1136,6 +1166,27 @@ mod error_assertions {
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
         }
+    }
+
+    #[test]
+    fn execution_error_report_retains_session_sources() {
+        let source_id = SourceId::new(DEFAULT_SOURCE_NAMESPACE, 0);
+        let source = Arc::new(SourceFile::new(
+            source_id,
+            SourceLanguage::Masm,
+            Uri::new("memory:///execution-error.masm"),
+            "begin\n    call.missing\nend",
+        ));
+        let error = ExecutionError::ProcedureNotFound {
+            label: SourceSpan::session(source_id, TextRange::new(10, 22).unwrap()),
+            source_file: Some(source),
+            root_digest: Word::default(),
+        };
+
+        let rendered = format!("{:?}", error.into_report());
+        assert!(rendered.contains("execution-error.masm"));
+        assert!(rendered.contains("call.missing"));
+        assert!(!rendered.contains("diagnostic preparation failed"));
     }
 
     struct RecordingHost {
@@ -1182,7 +1233,10 @@ mod error_assertions {
         let debug_info = *builder.build();
         let host = RecordingHost {
             expected_location: location_b,
-            returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+            returned_span: SourceSpan::session(
+                SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
+                TextRange::new(20, 24).unwrap(),
+            ),
         };
         let context = PackageSourceDebugContext::new(&debug_info, source_b);
 
@@ -1212,7 +1266,10 @@ mod error_assertions {
                 ByteIndex::new(0),
                 ByteIndex::new(0),
             ),
-            returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+            returned_span: SourceSpan::session(
+                SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
+                TextRange::new(20, 24).unwrap(),
+            ),
         };
         let context = PackageSourceDebugContext::new(&debug_info, source_node_id);
 
@@ -1227,7 +1284,7 @@ mod error_assertions {
             ExecutionError::AdviceError { label, source_file, err } => {
                 assert_eq!(label, SourceSpan::UNKNOWN);
                 assert!(source_file.is_none());
-                assert!(matches!(err, AdviceError::StackReadFailed));
+                assert!(matches!(*err, AdviceError::StackReadFailed));
             },
             err => panic!("expected advice error, got {err:?}"),
         }
@@ -1251,7 +1308,10 @@ mod error_assertions {
                     ByteIndex::new(0),
                     ByteIndex::new(0),
                 ),
-                returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+                returned_span: SourceSpan::session(
+                    SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
+                    TextRange::new(20, 24).unwrap(),
+                ),
             },
             0,
         )

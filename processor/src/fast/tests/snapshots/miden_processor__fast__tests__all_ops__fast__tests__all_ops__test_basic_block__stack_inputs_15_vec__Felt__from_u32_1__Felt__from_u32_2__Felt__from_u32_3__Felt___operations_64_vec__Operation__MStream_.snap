@@ -1,19 +1,24 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 134
 expression: fast_stack_outputs
 ---
 Err(
     MemoryError {
         label: SourceSpan {
-            source_id: SourceId(
-                4294967295,
+            source: Session(
+                SourceId {
+                    namespace: SourceNamespace(
+                        None,
+                    ),
+                    local: 4294967295,
+                },
             ),
-            start: ByteIndex(
-                0,
-            ),
-            end: ByteIndex(
-                0,
-            ),
+            revision: None,
+            range: TextRange {
+                start: 0,
+                end: 0,
+            },
         },
         source_file: None,
         err: UnalignedWordAccess {

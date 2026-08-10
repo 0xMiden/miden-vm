@@ -64,10 +64,8 @@ impl ProcedureContext {
     /// Call [`Self::with_span`] first so the error can point at the procedure definition.
     pub fn with_num_locals(mut self, num_locals: u16) -> Result<Self, Report> {
         if num_locals > MAX_PROC_LOCALS {
-            let source_file = self.source_manager.get(self.span.source_id()).ok();
             return Err(Report::new(AssemblerError::TooManyProcedureLocals {
                 span: self.span,
-                source_file,
                 max_locals: MAX_PROC_LOCALS,
                 num_locals,
             }));

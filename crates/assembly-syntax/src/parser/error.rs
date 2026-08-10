@@ -1,11 +1,8 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, ops::Range};
 
 use miden_debug_types::SourceSpan;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_diagnostics::Diagnostic;
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -96,10 +93,8 @@ impl fmt::Display for BinErrorKind {
 pub enum ParsingError {
     #[default]
     #[error("parsing failed due to unexpected input")]
-    #[diagnostic()]
     Failed = 0,
     #[error("expected input to be valid utf8, but invalid byte sequences were found")]
-    #[diagnostic()]
     InvalidUtf8 {
         #[label("invalid byte sequence starts here")]
         span: SourceSpan,
@@ -107,26 +102,23 @@ pub enum ParsingError {
     #[error(
         "expected input to be valid utf8, but end-of-file was reached before final codepoint was read"
     )]
-    #[diagnostic()]
     IncompleteUtf8 {
         #[label("the codepoint starting here is incomplete")]
         span: SourceSpan,
     },
     #[error("invalid syntax")]
-    #[diagnostic()]
     InvalidToken {
         #[label("occurs here")]
         span: SourceSpan,
     },
     #[error("invalid syntax: {message}")]
-    #[diagnostic()]
     InvalidSyntax {
         #[label("{message}")]
         span: SourceSpan,
         message: String,
     },
     #[error("invalid syntax")]
-    #[diagnostic(help("expected {}", expected.as_slice().join(", or ")))]
+    #[diagnostic(help = "expected one of {expected:?}")]
     UnrecognizedToken {
         #[label("found a {token} here")]
         span: SourceSpan,
@@ -134,44 +126,40 @@ pub enum ParsingError {
         expected: Vec<String>,
     },
     #[error("unexpected trailing tokens")]
-    #[diagnostic()]
     ExtraToken {
         #[label("{token} was found here, but was not expected")]
         span: SourceSpan,
         token: String,
     },
     #[error("unexpected end of file")]
-    #[diagnostic(help("expected {}", expected.as_slice().join(", or ")))]
+    #[diagnostic(help = "expected one of {expected:?}")]
     UnrecognizedEof {
         #[label("reached end of file here")]
         span: SourceSpan,
         expected: Vec<String>,
     },
     #[error("{error}")]
-    #[diagnostic(help(
-        "bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
-    ))]
+    #[diagnostic(
+        help = "bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
+    )]
     InvalidIdentifier {
         #[source]
-        #[diagnostic(source)]
         error: crate::ast::IdentError,
         #[label]
         span: SourceSpan,
     },
     #[error("unclosed quoted identifier")]
-    #[diagnostic()]
     UnclosedQuote {
         #[label("no match for quotation mark starting here")]
         start: SourceSpan,
     },
     #[error("too many instructions in a single code block")]
-    #[diagnostic()]
     CodeBlockTooBig {
         #[label]
         span: SourceSpan,
     },
     #[error("control-flow nesting depth exceeded")]
-    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    #[diagnostic(help = "control-flow nesting exceeded the maximum depth of {max_depth}")]
     ControlFlowNestingDepthExceeded {
         #[label("control-flow nesting exceeded the configured depth limit here")]
         span: SourceSpan,
@@ -183,27 +171,24 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("doc comment is too large")]
-    #[diagnostic(help("make sure it is less than u16::MAX bytes in length"))]
+    #[diagnostic(help = "make sure it is less than u16::MAX bytes in length")]
     DocsTooLarge {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidLiteral {
         #[label]
         span: SourceSpan,
         kind: LiteralErrorKind,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidHexLiteral {
         #[label]
         span: SourceSpan,
         kind: HexErrorKind,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidBinaryLiteral {
         #[label]
         span: SourceSpan,
@@ -227,13 +212,11 @@ pub enum ParsingError {
         range: Range<usize>,
     },
     #[error("too many procedures in this module")]
-    #[diagnostic()]
     ModuleTooLarge {
         #[label]
         span: SourceSpan,
     },
     #[error("too many re-exported procedures in this module")]
-    #[diagnostic()]
     ModuleTooManyReexports {
         #[label]
         span: SourceSpan,
@@ -242,7 +225,6 @@ pub enum ParsingError {
         "too many operands for `push`: tried to push {} elements, but only 16 can be pushed at one time",
         count
     )]
-    #[diagnostic()]
     PushOverflow {
         #[label]
         span: SourceSpan,
@@ -261,7 +243,6 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("conflicting attributes for procedure definition")]
-    #[diagnostic()]
     AttributeConflict {
         #[label(
             "conflict occurs because an attribute with the same name has already been defined"
@@ -271,7 +252,6 @@ pub enum ParsingError {
         prev: SourceSpan,
     },
     #[error("conflicting key-value attributes for procedure definition")]
-    #[diagnostic()]
     AttributeKeyValueConflict {
         #[label(
             "conflict occurs because a key with the same name has already been set in a previous declaration"
@@ -281,7 +261,6 @@ pub enum ParsingError {
         prev: SourceSpan,
     },
     #[error("invalid Advice Map key")]
-    #[diagnostic()]
     InvalidAdvMapKey {
         #[label(
             "an Advice Map key must be a word, either in 64-character hex format or in array-like format `[f0,f1,f2,f3]`"
@@ -289,48 +268,44 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid slice constant")]
-    #[diagnostic()]
     InvalidSliceConstant {
         #[label("slices are only supported over word-sized constants")]
         span: SourceSpan,
     },
     #[error("invalid slice: expected valid range")]
-    #[diagnostic()]
     InvalidRange {
         #[label("range used for the word constant slice is malformed: `{range:?}`")]
         span: SourceSpan,
         range: Range<usize>,
     },
     #[error("invalid slice: expected non-empty range")]
-    #[diagnostic()]
     EmptySlice {
         #[label("range used for the word constant slice is empty: `{range:?}`")]
         span: SourceSpan,
         range: Range<usize>,
     },
     #[error("unrecognized calling convention")]
-    #[diagnostic(help("expected one of: 'fast', 'C', 'wasm', 'canon-lift', or 'canon-lower'"))]
+    #[diagnostic(help = "expected one of: 'fast', 'C', 'wasm', 'canon-lift', or 'canon-lower'")]
     UnrecognizedCallConv {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help(
-        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
-    ))]
+    #[diagnostic(
+        help = "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
+    )]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid struct representation")]
-    #[diagnostic()]
     InvalidStructRepr {
         #[label("{message}")]
         span: SourceSpan,
         message: String,
     },
     #[error("deprecated instruction: `{instruction}` has been removed")]
-    #[diagnostic(help("use `{}` instead", replacement))]
+    #[diagnostic(help = "use `{replacement}` instead")]
     DeprecatedInstruction {
         #[label("this instruction is no longer supported")]
         span: SourceSpan,
@@ -338,14 +313,13 @@ pub enum ParsingError {
         replacement: String,
     },
     #[error("invalid procedure @locals attribute")]
-    #[diagnostic()]
     InvalidLocalsAttr {
         #[label("{message}")]
         span: SourceSpan,
         message: String,
     },
     #[error("invalid padding value for the `adv.push_mapvaln` instruction: {padding}")]
-    #[diagnostic(help("valid padding values are 0, 4, and 8"))]
+    #[diagnostic(help = "valid padding values are 0, 4, and 8")]
     InvalidPadValue {
         #[label]
         span: SourceSpan,
@@ -357,16 +331,14 @@ pub enum ParsingError {
     UndefinedSubmodule {
         name: crate::ast::Ident,
         basename: alloc::boxed::Box<str>,
-        directory: miden_debug_types::Uri,
+        directory: Box<miden_debug_types::Uri>,
         #[label]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
     #[error(
         "invalid submodule declaration '{name}': submodules must not have the same name as their parent"
     )]
-    #[diagnostic(help("occurred while parsing {parent_module_uri}"))]
+    #[diagnostic(help = "occurred while parsing {parent_module_uri}")]
     SelfReferentialSubmodule {
         name: crate::ast::Ident,
         parent_module_uri: miden_debug_types::Uri,
@@ -374,32 +346,26 @@ pub enum ParsingError {
             "module source resolution rules require this declaration to resolve to the current source file"
         )]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
     #[error(
         "conflicting submodule paths detected: '{name}' can be parsed from either '{first}' and '{second}', but not both"
     )]
     AmbiguousSubmoduleLocation {
         name: crate::ast::Ident,
-        first: miden_debug_types::Uri,
-        second: miden_debug_types::Uri,
+        first: Box<miden_debug_types::Uri>,
+        second: Box<miden_debug_types::Uri>,
         #[label]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
     #[error(
         "invalid submodule declaration '{name}': module source '{module_uri}' is already reachable through another submodule declaration"
     )]
-    #[diagnostic(help("each module source file can only be owned by one module in a module tree"))]
+    #[diagnostic(help = "each module source file can only be owned by one module in a module tree")]
     DuplicateSubmoduleSource {
         name: crate::ast::Ident,
         module_uri: miden_debug_types::Uri,
         #[label("this declaration resolves to an already visited module source")]
         span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
 }
 

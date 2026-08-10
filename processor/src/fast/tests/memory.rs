@@ -261,6 +261,7 @@ fn test_memory_element_limit_enforced_during_execution() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program("program", program_source)
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -304,6 +305,7 @@ fn test_memory_element_limit_enforced_via_with_options() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program("program", program_source)
+        .value
         .expect("program should assemble")
         .unwrap_program();
 

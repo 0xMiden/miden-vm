@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
+use miden_processor::{DefaultHost, ExecutionError, ExecutionOptions, FastProcessor};
 use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
@@ -152,12 +152,15 @@ impl ProveCmd {
                     entrypoint_source_node_id,
                     &mut host,
                 )
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
             (Some(debug_info), None) => processor
                 .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
             (None, _) => processor
                 .execute_for_proving_sync(&program, &mut host)
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
         };
         let stack_outputs = *witness.claim().stack_outputs();

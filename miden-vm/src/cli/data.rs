@@ -9,7 +9,6 @@ use miden_assembly::{
     Assembler, DefaultSourceManager, Path as LibraryPath, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
-    report,
     serde::Deserializable,
 };
 use miden_core::{Felt, field::QuotientMap};
@@ -18,6 +17,8 @@ use miden_mast_package::Package;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::{field::Empty, instrument};
+
+use super::utils::finish_assembly_outcome;
 
 // HELPERS
 // ================================================================================================
@@ -120,9 +121,11 @@ where
         // parse the program into an AST
         let path = path.as_ref();
         let mut parser = Module::parser(Some(ModuleKind::Executable));
-        let ast = parser
-            .parse_file(Some(LibraryPath::exec_path()), path, source_manager.clone())
-            .wrap_err_with(|| format!("Failed to parse program file `{}`", path.display()))?;
+        let ast = finish_assembly_outcome(
+            parser.parse_file(Some(LibraryPath::exec_path()), path, source_manager.clone()),
+            source_manager.as_ref(),
+            "Failed to parse program file",
+        )?;
 
         Ok(Self { ast, source_manager })
     }
@@ -144,9 +147,11 @@ where
                 .wrap_err("Failed to load libraries")?;
         }
 
-        assembler
-            .assemble_program("program", self.ast.clone())
-            .wrap_err("Failed to compile program")
+        finish_assembly_outcome(
+            assembler.assemble_program("program", self.ast.clone()),
+            self.source_manager.as_ref(),
+            "Failed to compile program",
+        )
     }
 
     /// Compiles this program file into a [Program].
@@ -276,7 +281,7 @@ impl Libraries {
             let path_str = path.as_ref().to_string_lossy().into_owned();
 
             let library = Package::deserialize_from_file(path).map(Arc::new).map_err(|err| {
-                report!("Failed to read package from file `{}`: {}", path_str, err)
+                Report::msg(format!("Failed to read package from file `{path_str}`: {err}"))
             })?;
 
             libraries.push(library);

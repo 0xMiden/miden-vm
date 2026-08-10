@@ -259,7 +259,7 @@ fn assemble_project(manifest_path: &Path, target: ProjectTargetSelector<'_>, pro
     else {
         return;
     };
-    let Ok(package) = project_assembler.assemble(target, profile) else {
+    let Some(package) = project_assembler.assemble(target, profile).value else {
         return;
     };
 

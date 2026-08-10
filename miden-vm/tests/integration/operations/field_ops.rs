@@ -1,15 +1,13 @@
-#[cfg(feature = "testing")]
-use miden_assembly::testing::regex;
 use miden_core::field::Field;
 use miden_processor::{ExecutionError, operation::OperationError};
+#[cfg(feature = "testing")]
+use miden_utils_testing::assert_diagnostic_lines;
 use miden_utils_testing::{
     Felt, ONE, PrimeField64, ZERO, build_op_test, build_test, expect_exec_error_matches,
     rand::rand_value,
 };
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::{WORD_SIZE, prop_randw, proptest::prelude::*};
-#[cfg(feature = "testing")]
-use miden_utils_testing::{assert_assembler_diagnostic, assert_diagnostic_lines};
 
 // FIELD OPS ARITHMETIC - MANUAL TESTS
 // ================================================================================================
@@ -191,14 +189,11 @@ fn div_b() {
     {
         let test = build_op_test!(build_asm_op(0), &[14]);
 
-        assert_assembler_diagnostic!(
+        assert_op_assembler_diagnostic!(
             test,
             "invalid constant expression: division by zero",
-            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-            "12 |",
             "13 | begin div.0 exec.truncate_stack end",
-            "   :           ^",
-            "   `----"
+            "|           ^"
         );
     }
 
@@ -257,15 +252,11 @@ fn neg_fail() {
     // --- test illegal argument -------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1]);
 
-    assert_assembler_diagnostic!(
+    assert_op_assembler_diagnostic!(
         test,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "12 |",
         "13 | begin neg.1 exec.truncate_stack end",
-        "   :       ^^|^^",
-        "   :         `-- invalid instruction `neg` or malformed operands",
-        "   `----"
+        "|       ^^^^^ invalid instruction `neg` or malformed operands"
     );
 }
 
@@ -299,15 +290,11 @@ fn inv_fail() {
     // --- test illegal argument -----------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1]);
 
-    assert_assembler_diagnostic!(
+    assert_op_assembler_diagnostic!(
         test,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "12 |",
         "13 | begin inv.1 exec.truncate_stack end",
-        "   :       ^^|^^",
-        "   :         `-- invalid instruction `inv` or malformed operands",
-        "   `----"
+        "|       ^^^^^ invalid instruction `inv` or malformed operands"
     );
 }
 
@@ -377,14 +364,11 @@ fn exp_bits_length_fail() {
         let pow = 1021; // pow is a 10 bit number
         let test = build_op_test!(build_asm_op(65), &[pow, base]);
 
-        assert_assembler_diagnostic!(
+        assert_op_assembler_diagnostic!(
             test,
             "invalid literal: expected value to be a valid bit size, e.g. 0..63",
-            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-            "12 |",
             "13 | begin exp.u65 exec.truncate_stack end",
-            "   :            ^^",
-            "   `----"
+            "|            ^^"
         );
     }
 }

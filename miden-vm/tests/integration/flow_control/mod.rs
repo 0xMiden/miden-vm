@@ -675,12 +675,15 @@ fn procref() -> Result<(), Report> {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(Some(ModuleKind::Library));
-        let module =
-            parser.parse_str(Some(module_path.as_path()), module_source, source_manager.clone())?;
+        let module = parser
+            .parse_str(Some(module_path.as_path()), module_source, source_manager.clone())
+            .value
+            .ok_or_else(|| Report::msg("failed to parse procref test module"))?;
         let library = Assembler::new(source_manager)
             .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .unwrap()
             .assemble_library("test", module, None::<Box<Module>>)
+            .value
             .unwrap();
 
         let module_descriptor = library.module_descriptors().next().unwrap();

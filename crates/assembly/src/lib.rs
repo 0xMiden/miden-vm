@@ -43,7 +43,7 @@ pub use miden_core::{mast, serde, utils};
 pub use miden_mast_package as package;
 
 #[doc(hidden)]
-pub use self::linker::LinkerError;
+pub use self::linker::{LinkerError, PrivateSubmoduleDefinition};
 #[cfg(feature = "std")]
 pub use self::project::{
     AssemblyInterrupted, InterruptedTargetRole, MasmSourceProvider, ProjectAssembler,
@@ -52,7 +52,7 @@ pub use self::project::{
     TargetAssemblyContext,
 };
 pub use self::{
-    assembler::Assembler,
+    assembler::{Assembler, AssemblyOutcome},
     linker::Linkage,
     procedure::{Procedure, ProcedureContext},
 };

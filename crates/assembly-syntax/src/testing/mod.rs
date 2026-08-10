@@ -3,8 +3,46 @@ mod context;
 mod pattern;
 
 #[cfg(test)]
-pub use self::context::SyntaxTestContext;
+pub use self::context::{SyntaxTestContext, TestFailure, render_diagnostic_set};
 pub use self::pattern::Pattern;
+
+use alloc::string::String;
+
+use crate::diagnostics::Report;
+
+/// Renders values accepted by the diagnostic assertion macros.
+///
+/// Reports use their rich debug representation, including any retained session source provider.
+/// Pre-rendered strings pass through unchanged.
+#[doc(hidden)]
+pub trait RenderDiagnosticForTest {
+    fn render_diagnostic_for_test(&self) -> String;
+}
+
+impl RenderDiagnosticForTest for Report {
+    fn render_diagnostic_for_test(&self) -> String {
+        alloc::format!("{self:?}")
+    }
+}
+
+impl RenderDiagnosticForTest for String {
+    fn render_diagnostic_for_test(&self) -> String {
+        self.clone()
+    }
+}
+
+impl RenderDiagnosticForTest for str {
+    fn render_diagnostic_for_test(&self) -> String {
+        self.into()
+    }
+}
+
+#[cfg(test)]
+impl RenderDiagnosticForTest for TestFailure {
+    fn render_diagnostic_for_test(&self) -> String {
+        alloc::format!("{self}")
+    }
+}
 
 /// Create a [Pattern::Regex] from the given input
 #[macro_export]
@@ -44,18 +82,14 @@ macro_rules! source_file {
 #[macro_export]
 macro_rules! assert_diagnostic {
     ($diagnostic:expr, $expected:literal) => {{
-        let actual = format!(
-            "{}",
-            $crate::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic)
-        );
+        use $crate::testing::RenderDiagnosticForTest as _;
+        let actual = ($diagnostic).render_diagnostic_for_test();
         $crate::testing::Pattern::from($expected).assert_match(actual);
     }};
 
     ($diagnostic:expr, $expected:expr) => {{
-        let actual = format!(
-            "{}",
-            $crate::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic)
-        );
+        use $crate::testing::RenderDiagnosticForTest as _;
+        let actual = ($diagnostic).render_diagnostic_for_test();
         $crate::testing::Pattern::from($expected).assert_match(actual);
     }};
 }
@@ -67,7 +101,8 @@ macro_rules! assert_diagnostic {
 #[macro_export]
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected_lines:expr),+) => {{
-        let full_output = format!("{}", $crate::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
+        use $crate::testing::RenderDiagnosticForTest as _;
+        let full_output = ($diagnostic).render_diagnostic_for_test();
         let lines: Vec<_> = full_output.lines().filter(|l| !l.trim().is_empty()).collect();
         let patterns = [$($crate::testing::Pattern::from($expected_lines)),*];
         if lines.len() != patterns.len() {
@@ -96,6 +131,7 @@ macro_rules! parse_module {
         let mut parser = $crate::ast::Module::parser(None);
         parser
             .parse(None, source_file, $context.source_manager())
+            .value
             .expect("failed to parse module")
     }};
 }

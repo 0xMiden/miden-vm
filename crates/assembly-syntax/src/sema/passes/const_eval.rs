@@ -72,7 +72,6 @@ where
                                     ConstEvalError::InvalidConstant {
                                         span,
                                         expected: "an integer",
-                                        source_file: self.env.get_source_file_for(span),
                                     }
                                     .into(),
                                 );
@@ -89,7 +88,6 @@ where
                             ConstEvalError::InvalidConstant {
                                 span,
                                 expected: core::any::type_name::<T>(),
-                                source_file: self.env.get_source_file_for(span),
                             }
                             .into(),
                         );
@@ -106,13 +104,7 @@ where
                         *imm = Immediate::Value(Span::new(span, value));
                     },
                     Err(_) => {
-                        self.errors.push(
-                            ConstEvalError::ImmediateOverflow {
-                                span,
-                                source_file: self.env.get_source_file_for(span),
-                            }
-                            .into(),
-                        );
+                        self.errors.push(ConstEvalError::ImmediateOverflow { span }.into());
                     },
                 }
                 ControlFlow::Continue(())
@@ -170,12 +162,8 @@ where
                         Ok(ConstantExpr::Var(_)) => return ControlFlow::Continue(()),
                         Ok(_) => {
                             self.errors.push(
-                                ConstEvalError::InvalidConstant {
-                                    span,
-                                    expected: "an event name",
-                                    source_file: self.env.get_source_file_for(span),
-                                }
-                                .into(),
+                                ConstEvalError::InvalidConstant { span, expected: "an event name" }
+                                    .into(),
                             );
                         },
                         Err(err) => {
@@ -194,12 +182,7 @@ where
                     //   emit.W
                     //   trace.W
                     self.errors.push(
-                        ConstEvalError::InvalidConstant {
-                            span,
-                            expected: "an event name",
-                            source_file: self.env.get_source_file_for(span),
-                        }
-                        .into(),
+                        ConstEvalError::InvalidConstant { span, expected: "an event name" }.into(),
                     );
                 },
                 // The value is not yet available, proceed for now
@@ -292,12 +275,8 @@ where
                             Ok(ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }) => (),
                             Ok(_) => {
                                 self.errors.push(
-                                    ConstEvalError::InvalidConstant {
-                                        span,
-                                        expected: "a felt",
-                                        source_file: self.env.get_source_file_for(span),
-                                    }
-                                    .into(),
+                                    ConstEvalError::InvalidConstant { span, expected: "a felt" }
+                                        .into(),
                                 );
                             },
                             Err(err) => {
@@ -308,12 +287,7 @@ where
                     // Invalid value
                     Ok(Some(_)) => {
                         self.errors.push(
-                            ConstEvalError::InvalidConstant {
-                                span,
-                                expected: "a felt",
-                                source_file: self.env.get_source_file_for(span),
-                            }
-                            .into(),
+                            ConstEvalError::InvalidConstant { span, expected: "a felt" }.into(),
                         );
                     },
                     // The constant expression references an externally-defined symbol which is
@@ -417,7 +391,6 @@ where
                                     ConstEvalError::InvalidConstant {
                                         span,
                                         expected: "an integer or word",
-                                        source_file: self.env.get_source_file_for(span),
                                     }
                                     .into(),
                                 );
@@ -432,7 +405,6 @@ where
                             ConstEvalError::InvalidConstant {
                                 span,
                                 expected: "an integer or word",
-                                source_file: self.env.get_source_file_for(span),
                             }
                             .into(),
                         );
@@ -490,12 +462,8 @@ where
                             Ok(ConstantExpr::Var(_)) => (),
                             Ok(_) => {
                                 self.errors.push(
-                                    ConstEvalError::InvalidConstant {
-                                        span,
-                                        expected: "a word",
-                                        source_file: self.env.get_source_file_for(span),
-                                    }
-                                    .into(),
+                                    ConstEvalError::InvalidConstant { span, expected: "a word" }
+                                        .into(),
                                 );
                             },
                             Err(err) => {
@@ -505,12 +473,7 @@ where
                     },
                     Ok(Some(_)) => {
                         self.errors.push(
-                            ConstEvalError::InvalidConstant {
-                                span,
-                                expected: "a word",
-                                source_file: self.env.get_source_file_for(span),
-                            }
-                            .into(),
+                            ConstEvalError::InvalidConstant { span, expected: "a word" }.into(),
                         );
                     },
                     // The constant references an externally-defined symbol which is not yet

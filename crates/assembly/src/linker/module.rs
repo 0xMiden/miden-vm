@@ -324,7 +324,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                 .first()
                 .map(|symbol| symbol.name().span())
                 .unwrap_or(SourceSpan::UNKNOWN);
-            Err(SymbolResolutionError::too_many_items_in_module(span, &*source_manager))
+            Err(SymbolResolutionError::too_many_items_in_module(span))
         } else {
             Ok(self.symbols(source_manager))
         }

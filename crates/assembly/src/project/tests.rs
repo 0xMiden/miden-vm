@@ -18,7 +18,7 @@ use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
 use super::*;
-use crate::testing::{TestContext, TestRegistry};
+use crate::testing::{TestContext, TestOutcomeExt, TestRegistry};
 
 #[test]
 fn builds_library_package_from_project_profiles() {

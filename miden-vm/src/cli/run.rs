@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor,
     trace::{VmTrace, build_trace},
 };
 use miden_vm::internal::InputFile;
@@ -151,6 +151,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 
     let witness = processor
         .execute_for_proving_sync(&program, &mut host)
+        .map_err(ExecutionError::into_report)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
     let trace = build_trace(vm_witness).wrap_err("Failed to build trace")?;
@@ -216,12 +217,15 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
                 entrypoint_source_node_id,
                 &mut host,
             )
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
         (Some(debug_info), None) => processor
             .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
         (None, _) => processor
             .execute_for_proving_sync(&program, &mut host)
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
     };
     let (vm_witness, _) = execution_witness.into_parts();

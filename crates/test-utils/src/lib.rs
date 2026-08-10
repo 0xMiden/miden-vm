@@ -14,7 +14,7 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::Linkage;
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -30,6 +30,10 @@ pub use miden_core::{
 use miden_core::{
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
+};
+use miden_diagnostics::{
+    AnnotateRenderer, DefaultFailurePolicy, Diagnostic, LayeredSourceProvider, LineColumn, Outcome,
+    OwnedDiagnostic, PreparedDiagnostic, Source, SourceId, SourceProvider, prepare_ref,
 };
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
@@ -70,6 +74,63 @@ mod test_builders;
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
 pub use test_builders::{IntoAdviceStackInput, advice_stack_from};
+
+struct EmptySourceProvider;
+
+impl SourceProvider for EmptySourceProvider {
+    fn get(&self, _id: SourceId) -> Option<Source<'_>> {
+        None
+    }
+
+    fn line_column(&self, _id: SourceId, _offset: u32) -> Option<LineColumn> {
+        None
+    }
+}
+
+static EMPTY_SOURCE_PROVIDER: EmptySourceProvider = EmptySourceProvider;
+
+#[derive(Debug, Diagnostic)]
+#[diagnostic(message = "test compilation produced diagnostics")]
+struct TestCompilationDiagnostics {
+    #[related]
+    diagnostics: Vec<OwnedDiagnostic>,
+}
+
+fn require_test_outcome<T>(
+    outcome: Outcome<Option<T>>,
+    sources: Arc<dyn SourceManager>,
+) -> Result<T, Report> {
+    if !outcome.diagnostics.assess(&DefaultFailurePolicy)
+        && let Some(value) = outcome.value
+    {
+        return Ok(value);
+    }
+
+    let diagnostics = outcome
+        .diagnostics
+        .into_vec()
+        .into_iter()
+        .map(|entry| entry.diagnostic)
+        .collect::<Vec<_>>();
+    let report = if diagnostics.is_empty() {
+        Report::msg("test compilation failed without producing a diagnostic")
+    } else {
+        Report::new(TestCompilationDiagnostics { diagnostics })
+    };
+    Err(report.attach_session_sources(sources))
+}
+
+fn render_execution_error(error: &ExecutionError) -> String {
+    let snapshot = prepare_ref(error).expect("diagnostic should prepare");
+    let sources = error
+        .source_file()
+        .map_or(&EMPTY_SOURCE_PROVIDER as &dyn SourceProvider, |source| source);
+    let prepared = PreparedDiagnostic {
+        snapshot,
+        sources: LayeredSourceProvider::new(sources, None),
+    };
+    AnnotateRenderer::default().render(&prepared).expect("diagnostic should render")
+}
 
 pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
@@ -192,7 +253,8 @@ macro_rules! expect_exec_error_matches {
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected:expr),+) => {{
         use $crate::DiagnosticPattern as Pattern;
-        let actual = format!("{}", miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
+        let diagnostic = $diagnostic;
+        let actual = format!("{}", diagnostic.display());
         let expected = [$(Pattern::from($expected)),*];
         let actual_line_count = actual.lines().filter(|line| !line.trim().is_empty()).count();
         ::core::assert_eq!(
@@ -485,7 +547,7 @@ impl Test {
             .execute_with_stack_inputs(stack_inputs)
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
-                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+                std::eprintln!("{}", render_execution_error(_err))
             })
             .expect("failed to execute");
 
@@ -528,10 +590,15 @@ impl Test {
 
         let (mut assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
             let mut parser = Module::parser(Some(ModuleKind::Kernel));
-            let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
-            let kernel_lib = Assembler::new(self.source_manager.clone())
-                .assemble_kernel("kernel", kernel, None)
-                .map(Arc::<Package>::from)?;
+            let kernel = require_test_outcome(
+                parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone()),
+                self.source_manager.clone(),
+            )?;
+            let kernel_lib = require_test_outcome(
+                Assembler::new(self.source_manager.clone()).assemble_kernel("kernel", kernel, None),
+                self.source_manager.clone(),
+            )
+            .map(Arc::<Package>::from)?;
 
             (
                 Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
@@ -542,19 +609,28 @@ impl Test {
         };
 
         for (path, source) in &self.add_modules {
-            let module = Module::parser(None).parse_str(
-                Some(path.as_ref()),
-                source,
+            let module = require_test_outcome(
+                Module::parser(None).parse_str(
+                    Some(path.as_ref()),
+                    source,
+                    self.source_manager.clone(),
+                ),
                 self.source_manager.clone(),
             )?;
-            assembler.compile_and_statically_link(module)?;
+            require_test_outcome(
+                assembler.compile_and_statically_link(module),
+                self.source_manager.clone(),
+            )?;
         }
         // Debug mode is now always enabled
         for package in &self.libraries {
             assembler.link_package(package.clone(), Linkage::Dynamic)?;
         }
 
-        let package = assembler.assemble_program("program", self.source.clone())?;
+        let package = require_test_outcome(
+            assembler.assemble_program("program", self.source.clone()),
+            self.source_manager.clone(),
+        )?;
         let debug_info = package
             .debug_info()
             .map_err(|err| Report::msg(format!("failed to decode test debug info: {err}")))?;
@@ -725,7 +801,7 @@ impl Test {
             .execute()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
-                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+                std::eprintln!("{}", render_execution_error(_err))
             })
             .expect("failed to execute");
         trace.check_constraints();
@@ -739,7 +815,7 @@ impl Test {
             .execute()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
-                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+                std::eprintln!("{}", render_execution_error(_err))
             })
             .expect("failed to execute");
 
@@ -799,10 +875,8 @@ impl Test {
                     }
 
                     // assert that diagnostics match
-                    let right_diagnostic =
-                        format!("{}", PrintDiagnostic::new_without_color(right_err));
-                    let left_diagnostic =
-                        format!("{}", PrintDiagnostic::new_without_color(left_err));
+                    let right_diagnostic = render_execution_error(right_err);
+                    let left_diagnostic = render_execution_error(left_err);
 
                     assert_eq!(
                         left_diagnostic, right_diagnostic,
@@ -811,8 +885,7 @@ impl Test {
                     );
                 },
                 (Ok(_), Err(right_err)) => {
-                    let right_diagnostic =
-                        format!("{}", PrintDiagnostic::new_without_color(right_err));
+                    let right_diagnostic = render_execution_error(right_err);
                     panic!(
                         "expected error, but {left_name} succeeded. {right_name} error:\n{right_diagnostic}"
                     );
@@ -910,7 +983,7 @@ mod tests {
     #[should_panic(expected = "diagnostic line count mismatch")]
     fn assert_diagnostic_lines_rejects_missing_actual_lines() {
         crate::assert_diagnostic_lines!(
-            miden_assembly::report!("the error string"),
+            Report::msg("the error string"),
             "the error string",
             "other",
             "lines"
@@ -921,7 +994,7 @@ mod tests {
     #[should_panic(expected = "diagnostic line count mismatch")]
     fn assert_diagnostic_lines_rejects_extra_actual_lines() {
         crate::assert_diagnostic_lines!(
-            miden_assembly::report!("the first line\nthe second line"),
+            Report::msg("the first line\nthe second line"),
             "the first line"
         );
     }

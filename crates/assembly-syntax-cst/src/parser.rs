@@ -1,26 +1,34 @@
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
+use core::num::NonZeroU32;
 
-use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
-use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
+use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceNamespace, SourceSpan, Uri};
+use rowan::{GreenNodeBuilder, NodeOrToken, TextRange as RowanTextRange};
 
 use crate::{
     MAX_CONTROL_FLOW_NESTING, MasmLanguage,
     ast::AstNode,
-    diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
+    diagnostics::{DiagnosticCollector, Outcome, SourceKey, TextRange, diagnostic},
     lexer::{Token, tokenize},
     syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
 
 /// The result of parsing a MASM source file into a lossless CST.
 ///
-/// This type owns the green tree, retains the originating [`SourceFile`], and exposes both
-/// diagnostics and span helpers for later lowering.
+/// This type owns the green tree, retains the originating [`SourceFile`], and exposes span helpers
+/// for later lowering. Diagnostics produced while constructing the tree are returned separately in
+/// the [`ParseOutcome`].
 #[derive(Debug, Clone)]
 pub struct Parse {
     source: Arc<SourceFile>,
     green_node: rowan::GreenNode,
-    diagnostics: Vec<Diagnostic>,
 }
+
+/// The recovered syntax tree and all diagnostics produced while parsing it.
+///
+/// The presence of diagnostics does not by itself imply failure. Callers can inspect
+/// [`miden_diagnostics::DiagnosticSet::has_errors`] or apply a
+/// [`miden_diagnostics::FailurePolicy`] with [`Outcome::into_result`].
+pub type ParseOutcome = Outcome<Parse>;
 
 impl Parse {
     /// Returns the raw rowan syntax tree rooted at [`SyntaxKind::SourceFile`].
@@ -34,16 +42,6 @@ impl Parse {
             .expect("parse root kind should always be SourceFile")
     }
 
-    /// Returns any syntax diagnostics emitted while building the CST.
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
-    }
-
-    /// Removes and returns any syntax diagnostics emitted while building the CST.
-    pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
-        core::mem::take(&mut self.diagnostics)
-    }
-
     /// Returns the source file used to produce this parse result.
     pub fn source_file(&self) -> Arc<SourceFile> {
         Arc::clone(&self.source)
@@ -52,11 +50,6 @@ impl Parse {
     /// Returns the source file used to produce this parse result by shared reference.
     pub fn source(&self) -> &SourceFile {
         self.source.as_ref()
-    }
-
-    /// Returns `true` when the parse emitted at least one syntax diagnostic.
-    pub fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
     }
 
     /// Maps a rowan node back to a [`SourceSpan`] in the originating source file.
@@ -86,22 +79,22 @@ impl Parse {
     }
 
     /// Converts a rowan [`TextRange`] to a [`SourceSpan`] in the originating source file.
-    pub fn span_for_range(&self, range: TextRange) -> SourceSpan {
+    pub fn span_for_range(&self, range: RowanTextRange) -> SourceSpan {
         source_span_from_text_range(self.source.id(), range)
     }
 }
 
 /// Parses a source-managed MASM file into a lossless CST.
-pub fn parse_source_file(source: Arc<SourceFile>) -> Parse {
+pub fn parse_source_file(source: Arc<SourceFile>) -> ParseOutcome {
     let parser_source = Arc::clone(&source);
     Parser::new(parser_source.as_ref()).parse(source)
 }
 
-/// Parses raw MASM text into a detached CST with [`SourceId::UNKNOWN`] spans.
+/// Parses raw MASM text into a detached CST with spans in a reserved in-memory namespace.
 ///
 /// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
 /// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
-pub fn parse_text(input: &str) -> Parse {
+pub fn parse_text(input: &str) -> ParseOutcome {
     parse_source_file(detached_source_file(input))
 }
 
@@ -109,7 +102,7 @@ pub fn parse_text(input: &str) -> Parse {
 ///
 /// Content of an inline MASM block is parsed like the body block of a procedure - it is not
 /// supported to define top-level items in an inline MASM block
-pub fn parse_inline_masm(source: Arc<SourceFile>, bounds: Option<SourceSpan>) -> Parse {
+pub fn parse_inline_masm(source: Arc<SourceFile>, bounds: Option<SourceSpan>) -> ParseOutcome {
     let parser_source = Arc::clone(&source);
     if let Some(bounds) = bounds {
         Parser::new_bounded(parser_source.as_ref(), bounds).parse_inline_masm(source)
@@ -122,10 +115,14 @@ pub fn parse_inline_masm(source: Arc<SourceFile>, bounds: Option<SourceSpan>) ->
 ///
 /// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
 /// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
-pub fn parse_inline_masm_text(input: &str, bounds: Option<core::ops::Range<usize>>) -> Parse {
+pub fn parse_inline_masm_text(
+    input: &str,
+    bounds: Option<core::ops::Range<usize>>,
+) -> ParseOutcome {
     let file = detached_source_file(input);
     let bounds = bounds.map(|range| {
-        SourceSpan::try_from_range(file.id(), range).expect("invalid inline masm bounds")
+        SourceSpan::try_from_range(SourceKey::Session(file.id()), None, range)
+            .expect("invalid inline masm bounds")
     });
     parse_inline_masm(file, bounds)
 }
@@ -134,7 +131,7 @@ struct Parser<'input> {
     tokens: Vec<Token<'input>>,
     pos: usize,
     builder: GreenNodeBuilder<'static>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: DiagnosticCollector,
     eof_span: SourceSpan,
 }
 
@@ -227,39 +224,42 @@ impl<'input> Parser<'input> {
             tokens: tokenize(source),
             pos: 0,
             builder: GreenNodeBuilder::new(),
-            diagnostics: Vec::new(),
+            diagnostics: DiagnosticCollector::new(),
             eof_span,
         }
     }
 
     fn new_bounded(source: &'input SourceFile, bounds: SourceSpan) -> Self {
-        assert_eq!(source.id(), bounds.source_id());
+        assert_eq!(source.id(), bounds.source().id());
 
-        let eof_span = eof_anchor_span(source, Some(bounds.into_slice_index()));
+        let eof_span = eof_anchor_span(source, Some(bounds.range().into_slice_index()));
         Self {
             tokens: tokenize(source),
             pos: 0,
             builder: GreenNodeBuilder::new(),
-            diagnostics: Vec::new(),
+            diagnostics: DiagnosticCollector::new(),
             eof_span,
         }
     }
 
-    fn parse(mut self, source: Arc<SourceFile>) -> Parse {
+    fn parse(mut self, source: Arc<SourceFile>) -> ParseOutcome {
         self.start_node(SyntaxKind::SourceFile);
         while !self.eof() {
             self.parse_source_item();
         }
         self.finish_node();
 
-        Parse {
-            source,
-            green_node: self.builder.finish(),
-            diagnostics: self.diagnostics,
+        let diagnostics = self.diagnostics.finish().attach_session_sources(source.clone());
+        Outcome {
+            value: Parse {
+                source,
+                green_node: self.builder.finish(),
+            },
+            diagnostics,
         }
     }
 
-    fn parse_inline_masm(mut self, source: Arc<SourceFile>) -> Parse {
+    fn parse_inline_masm(mut self, source: Arc<SourceFile>) -> ParseOutcome {
         match self.parse_block_unterminated(0) {
             BlockParseOutcome::ReachedEof => (),
             BlockParseOutcome::FoundTerminator => self.error_here("unexpected 'end'"),
@@ -267,10 +267,13 @@ impl<'input> Parser<'input> {
                 self.error_here("unclosed nested block: expected 'end' but reached eof")
             },
         }
-        Parse {
-            source,
-            green_node: self.builder.finish(),
-            diagnostics: self.diagnostics,
+        let diagnostics = self.diagnostics.finish().attach_session_sources(source.clone());
+        Outcome {
+            value: Parse {
+                source,
+                green_node: self.builder.finish(),
+            },
+            diagnostics,
         }
     }
 
@@ -1581,11 +1584,11 @@ impl<'input> Parser<'input> {
             let span = token.span();
             let text = token.text();
             if kind == SyntaxKind::Error {
-                self.diagnostics.push(diagnostic!(
-                    severity = Severity::Error,
-                    labels = vec![LabeledSpan::at(span, format!("unrecognized token `{text}`"))],
-                    "syntax error"
-                ));
+                let _ = self.diagnostics.add(diagnostic! {
+                    severity: Error,
+                    message: "syntax error",
+                    labels: [primary(span, (format!("unrecognized token `{text}`")))],
+                });
             }
             self.builder.token(kind.into(), text);
             self.pos += 1;
@@ -1610,25 +1613,31 @@ impl<'input> Parser<'input> {
     }
 
     fn error_at_span(&mut self, span: SourceSpan, message: impl Into<String>) {
-        self.diagnostics.push(diagnostic!(
-            severity = Severity::Error,
-            labels = vec![LabeledSpan::at(span, message.into())],
-            "syntax error"
-        ));
+        let message = message.into();
+        let _ = self.diagnostics.add(diagnostic! {
+            severity: Error,
+            message: "syntax error",
+            labels: [primary(span, (message))],
+        });
     }
 
     fn error_at_eof(&mut self, message: impl Into<String>) {
-        self.diagnostics.push(diagnostic!(
-            severity = Severity::Error,
-            labels = vec![LabeledSpan::at(self.eof_span, message.into())],
-            "syntax error"
-        ));
+        let message = message.into();
+        let _ = self.diagnostics.add(diagnostic! {
+            severity: Error,
+            message: "syntax error",
+            labels: [primary(self.eof_span, (message))],
+        });
     }
 }
 
 fn detached_source_file(input: &str) -> Arc<SourceFile> {
+    // UNKNOWN is a semantic sentinel which diagnostics intentionally never resolve. Detached
+    // parser sources still need to render, including zero-length labels, so give them a valid
+    // namespace distinct from source-manager allocations.
+    const DETACHED_SOURCE_ID: SourceId = SourceId::new(SourceNamespace::new(NonZeroU32::MAX), 0);
     Arc::new(SourceFile::new(
-        SourceId::UNKNOWN,
+        DETACHED_SOURCE_ID,
         SourceLanguage::Masm,
         Uri::new("memory:///inline.masm"),
         input.to_owned().into_boxed_str(),
@@ -1645,19 +1654,26 @@ fn eof_anchor_span(source: &SourceFile, bounds: Option<core::ops::Range<usize>>)
         .char_indices()
         .last()
         .map(|(offset, _)| {
-            SourceSpan::at(
+            let offset = start.checked_add(offset).expect("source offset cannot overflow usize");
+            let offset =
+                u32::try_from(offset).expect("source files larger than 4GiB are not supported");
+            SourceSpan::session(
                 source.id(),
-                u32::try_from(offset).expect("source files larger than 4GiB are not supported"),
+                TextRange::new(offset, offset).expect("an empty source range is valid"),
             )
         })
         .unwrap_or_else(|| {
-            SourceSpan::try_from_range(source.id(), start..start)
+            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, start..start)
                 .expect("source files larger than 4GiB are not supported")
         })
 }
 
-fn source_span_from_text_range(source_id: SourceId, range: TextRange) -> SourceSpan {
-    SourceSpan::new(source_id, u32::from(range.start())..u32::from(range.end()))
+fn source_span_from_text_range(source_id: SourceId, range: RowanTextRange) -> SourceSpan {
+    SourceSpan::session(
+        source_id,
+        TextRange::new(u32::from(range.start()), u32::from(range.end()))
+            .expect("rowan text ranges are ordered"),
+    )
 }
 
 fn closing_delimiter_text(kind: SyntaxKind) -> &'static str {
@@ -1747,6 +1763,10 @@ mod tests {
     use miden_debug_types::{
         SourceFile as ManagedSourceFile, SourceId, SourceLanguage, SourceSpan, Uri,
     };
+    use miden_diagnostics::{
+        DefaultFailurePolicy, DiagnosticCollector, DiagnosticSet, DiagnosticSnapshot, Outcome,
+        SourceKey, SourceNamespace, TextRange, WarningsAsErrors, diagnostic, prepare_ref,
+    };
     use rowan::ast::AstNode;
 
     use crate::{
@@ -1762,6 +1782,19 @@ mod tests {
             .and_then(Path::parent)
             .expect("workspace root should be two levels above crates/assembly-syntax-cst")
             .to_path_buf()
+    }
+
+    fn source_id(local: u32) -> SourceId {
+        SourceId::new(SourceNamespace::new_unchecked(1), local)
+    }
+
+    #[test]
+    fn detached_empty_source_span_is_not_the_unknown_sentinel() {
+        let Outcome { value: parse, diagnostics } = parse_text("");
+        assert!(diagnostics.is_empty());
+        let span = parse.source().source_span();
+        assert_ne!(span, SourceSpan::UNKNOWN);
+        assert!(!span.source().id().is_unknown());
     }
 
     fn checked_in_masm_corpus() -> Vec<PathBuf> {
@@ -1837,7 +1870,7 @@ adv_map TABLE = [
     }
 
     fn assert_lossless_parse(input: &str, label: impl core::fmt::Display) {
-        let parse = parse_text(input);
+        let Outcome { value: parse, .. } = parse_text(input);
         assert_eq!(
             parse.syntax().text().to_string(),
             input,
@@ -1845,13 +1878,21 @@ adv_map TABLE = [
         );
     }
 
-    fn diagnostic_labels(parse: &super::Parse) -> Vec<String> {
-        parse
-            .diagnostics()
+    fn diagnostic_snapshots(diagnostics: &DiagnosticSet) -> Vec<DiagnosticSnapshot> {
+        diagnostics
             .iter()
-            .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-            .filter_map(|label| label.label())
-            .map(ToString::to_string)
+            .map(|entry| {
+                prepare_ref(entry.diagnostic.as_diagnostic())
+                    .expect("parser diagnostics should prepare successfully")
+            })
+            .collect()
+    }
+
+    fn diagnostic_labels(diagnostics: &DiagnosticSet) -> Vec<String> {
+        diagnostic_snapshots(diagnostics)
+            .into_iter()
+            .flat_map(|diagnostic| diagnostic.labels)
+            .filter_map(|label| label.message)
             .collect()
     }
 
@@ -1871,14 +1912,35 @@ adv_map TABLE = [
     }
 
     fn assert_import_rejected(source: &str, expected_label: &str) {
-        let parse = parse_text(source);
-        assert!(parse.has_errors(), "expected {source:?} to be rejected");
-        let labels = diagnostic_labels(&parse);
+        let Outcome { value: _, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors(), "expected {source:?} to be rejected");
+        let labels = diagnostic_labels(&diagnostics);
         assert!(
             labels.iter().any(|label| label.contains(expected_label)),
             "expected {source:?} to report {expected_label:?}, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
+    }
+
+    #[test]
+    fn warnings_are_output_but_not_parse_failure_by_default() {
+        fn parse_with_warning() -> super::ParseOutcome {
+            let Outcome { value, diagnostics } = parse_text("begin end\n");
+            assert!(diagnostics.is_empty());
+
+            let mut diagnostics = DiagnosticCollector::new();
+            let _ = diagnostics.add(diagnostic! {
+                severity: Warning,
+                message: "accepted with a warning",
+            });
+            Outcome { value, diagnostics: diagnostics.finish() }
+        }
+
+        let outcome = parse_with_warning();
+        assert_eq!(outcome.diagnostics.counts().warnings(), 1);
+        assert!(!outcome.diagnostics.has_errors());
+        assert!(outcome.into_result_with_policy(&DefaultFailurePolicy).is_ok());
+        assert!(parse_with_warning().into_result_with_policy(&WarningsAsErrors).is_err());
     }
 
     #[test]
@@ -1932,8 +1994,8 @@ adv_map TABLE = [
                 end
             end
         ";
-        let parse = parse_inline_masm_text(source, None);
-        assert!(!parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_inline_masm_text(source, None);
+        assert!(!diagnostics.has_errors());
         let root = parse.syntax();
         assert_eq!(root.kind(), SyntaxKind::Block);
 
@@ -1955,9 +2017,7 @@ adv_map TABLE = [
                 dup.0 lt.10
             end
         ";
-        let parse = parse_inline_masm_text(source, None);
-        let mut parse = parse;
-        let diagnostics = parse.take_diagnostics();
+        let Outcome { value: parse, diagnostics } = parse_inline_masm_text(source, None);
         assert!(diagnostics.is_empty(), "unexpected parse errors: {diagnostics:?}");
         let root = parse.syntax();
         let child_kinds = root.children().map(|child| child.kind()).collect::<Vec<_>>();
@@ -1983,9 +2043,7 @@ adv_map TABLE = [
                 eq.0
             end
         ";
-        let parse = parse_inline_masm_text(source, None);
-        let mut parse = parse;
-        let diagnostics = parse.take_diagnostics();
+        let Outcome { value: parse, diagnostics } = parse_inline_masm_text(source, None);
         assert!(diagnostics.is_empty(), "unexpected parse errors: {diagnostics:?}");
         let root = parse.syntax();
         let child_kinds = root.children().map(|child| child.kind()).collect::<Vec<_>>();
@@ -2007,8 +2065,7 @@ adv_map TABLE = [
             while .true
             end
         ";
-        let mut parse = parse_inline_masm_text(source, None);
-        let diagnostics = parse.take_diagnostics();
+        let Outcome { value: parse, diagnostics } = parse_inline_masm_text(source, None);
         assert!(!diagnostics.is_empty(), "expected a syntax error for the stray `.true`");
 
         // The construct is still recognized as a do-while loop (the body terminated at `while`).
@@ -2043,8 +2100,8 @@ pub proc foo(a) -> (b)
     exec.bar
 end
 ";
-        let parse = parse_text(source);
-        assert!(!parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors());
         let root = parse.syntax();
         assert_eq!(root.kind(), SyntaxKind::SourceFile);
 
@@ -2087,8 +2144,8 @@ pub enum Bool : u8 {
 adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000) = [0x01, 0x02]
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
@@ -2186,8 +2243,8 @@ pub proc println(message: ptr<u8, addrspace(byte)>) -> ptr<u8, addrspace(byte)>
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let root = parse.syntax();
         let source_file = AstSourceFile::cast(root).expect("source file");
@@ -2212,8 +2269,8 @@ pub proc foo()
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
@@ -2240,8 +2297,8 @@ pub proc foo()
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
@@ -2260,8 +2317,8 @@ use ::miden::core::collections::sorted_array::lowerbound_key_value
     as lowerbound_key_value
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
@@ -2282,8 +2339,8 @@ use some::module
 use some::module as sm
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let imports = source_file
@@ -2343,8 +2400,8 @@ use {foo, bar as baz} from some::module
 pub use {alpha} from core
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let imports = source_file
@@ -2407,8 +2464,8 @@ use \"as\"::\"from\" as \"module\"
 use {as, from as as, \"as\" as \"from\", $kernel} from \"from\"::\"as\"
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let imports = source_file
@@ -2491,13 +2548,13 @@ use {as, from as as, \"as\" as \"from\", $kernel} from \"from\"::\"as\"
         ];
 
         for (source, expected) in cases {
-            let parse = parse_text(source);
-            assert!(parse.has_errors(), "expected {source:?} to be rejected");
-            let labels = diagnostic_labels(&parse);
+            let Outcome { value: parse, diagnostics } = parse_text(source);
+            assert!(diagnostics.has_errors(), "expected {source:?} to be rejected");
+            let labels = diagnostic_labels(&diagnostics);
             assert!(
                 labels.iter().any(|label| label.contains(expected)),
                 "expected {source:?} to report {expected:?}, got {:?}",
-                parse.diagnostics()
+                diagnostics
             );
 
             let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
@@ -2549,8 +2606,8 @@ begin # begin
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
 
         let root = parse.syntax();
         let procedure = root
@@ -2601,17 +2658,14 @@ proc foo
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors());
         assert!(
-            parse
-                .diagnostics()
+            diagnostic_labels(&diagnostics)
                 .iter()
-                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                .filter_map(|label| label.label())
                 .any(|label| label.contains("doc comments are only allowed")),
             "expected block-local doc comments before block keywords to be rejected, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
 
         let root = parse.syntax();
@@ -2631,17 +2685,14 @@ proc foo
 end
 ";
 
-        let parse = parse_text(source);
-        assert!(parse.has_errors());
+        let Outcome { value: _, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors());
         assert!(
-            parse
-                .diagnostics()
+            diagnostic_labels(&diagnostics)
                 .iter()
-                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                .filter_map(|label| label.label())
                 .any(|label| label.contains("doc comments are only allowed")),
             "expected block-local doc comments before instructions to remain invalid, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
     }
 
@@ -2653,17 +2704,14 @@ proc foo
     pub const X = 1
 ";
 
-        let parse = parse_text(source);
-        assert!(parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors());
         assert!(
-            parse
-                .diagnostics()
+            diagnostic_labels(&diagnostics)
                 .iter()
-                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                .filter_map(|label| label.label())
                 .any(|label| label.contains("before top-level item")),
             "expected block recovery before a top-level item, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
 
         let root = parse.syntax();
@@ -2690,38 +2738,31 @@ proc foo
         ];
 
         for (source, delimiter) in cases {
-            let parse = parse_text(source);
-            assert!(parse.has_errors(), "expected {source:?} to be rejected");
+            let Outcome { value: _, diagnostics } = parse_text(source);
+            assert!(diagnostics.has_errors(), "expected {source:?} to be rejected");
             let expected = format!("unexpected closing delimiter `{delimiter}`");
             assert!(
-                parse
-                    .diagnostics()
-                    .iter()
-                    .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                    .filter_map(|label| label.label())
-                    .any(|label| label.contains(&expected)),
+                diagnostic_labels(&diagnostics).iter().any(|label| label.contains(&expected)),
                 "expected {source:?} to report {expected:?}, got {:?}",
-                parse.diagnostics()
+                diagnostics
             );
         }
     }
 
     #[test]
     fn recovers_from_missing_end_tokens() {
-        let parse = parse_text("begin\n    if.true\n        add\n");
-        assert!(parse.has_errors());
-        let end_labels = parse
-            .diagnostics()
+        let Outcome { value: parse, diagnostics } = parse_text("begin\n    if.true\n        add\n");
+        assert!(diagnostics.has_errors());
+        let labels = diagnostic_labels(&diagnostics);
+        let end_labels = labels
             .iter()
-            .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-            .filter_map(|label| label.label())
             .filter(|label| label.contains("expected `end`"))
             .collect::<Vec<_>>();
         assert_eq!(
             end_labels.len(),
             1,
             "expected exactly one missing-`end` diagnostic, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
         assert!(
             end_labels[0].contains("`if`"),
@@ -2741,17 +2782,14 @@ proc foo
         add
 pub const X = 1
 ";
-        let parse = parse_text(source);
-        assert!(parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors());
         assert!(
-            parse
-                .diagnostics()
+            diagnostic_labels(&diagnostics)
                 .iter()
-                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                .filter_map(|label| label.label())
                 .any(|label| label.contains("before top-level item")),
             "expected block recovery before a top-level item, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
@@ -2774,17 +2812,14 @@ proc foo
     end
 end
 ";
-        let parse = parse_text(source);
-        assert!(parse.has_errors());
+        let Outcome { value: parse, diagnostics } = parse_text(source);
+        assert!(diagnostics.has_errors());
         assert!(
-            parse
-                .diagnostics()
+            diagnostic_labels(&diagnostics)
                 .iter()
-                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
-                .filter_map(|label| label.label())
                 .any(|label| label.contains("close `while` before `else`")),
             "expected the nested `while` to recover before `else`, got {:?}",
-            parse.diagnostics()
+            diagnostics
         );
 
         let if_node = parse
@@ -2801,15 +2836,13 @@ end
 
     #[test]
     fn surfaces_invalid_tokens_as_diagnostics() {
-        let parse = parse_text("proc foo\n    §\nend\n");
-        assert!(parse.has_errors());
-        assert!(parse.diagnostics().iter().any(|diag| diag.labels.as_ref().is_some_and(
-            |labels| {
-                labels
-                    .iter()
-                    .any(|l| l.label().is_some_and(|label| label.contains("unrecognized token")))
-            }
-        )));
+        let Outcome { value: _, diagnostics } = parse_text("proc foo\n    §\nend\n");
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostic_labels(&diagnostics)
+                .iter()
+                .any(|label| label.contains("unrecognized token"))
+        );
     }
 
     #[test]
@@ -2820,29 +2853,30 @@ end
             "begin\n    exec.$execFoo::bar\nend\n",
             "begin\n    exec.$kernelFoo::bar\nend\n",
         ] {
-            let parse = parse_text(source);
-            assert!(parse.has_errors(), "expected {source:?} to reject unknown special ident");
-            assert!(parse.diagnostics().iter().any(|diag| diag.labels.as_ref().is_some_and(
-                |labels| {
-                    labels.iter().any(|l| {
-                        l.label().is_some_and(|label| label.contains("unrecognized token"))
-                    })
-                }
-            )));
+            let Outcome { value: _, diagnostics } = parse_text(source);
+            assert!(
+                diagnostics.has_errors(),
+                "expected {source:?} to reject unknown special ident"
+            );
+            assert!(
+                diagnostic_labels(&diagnostics)
+                    .iter()
+                    .any(|label| label.contains("unrecognized token"))
+            );
         }
     }
 
     #[test]
     fn parse_source_file_tracks_source_aware_spans() {
         let source = Arc::new(ManagedSourceFile::new(
-            SourceId::new(11),
+            source_id(11),
             SourceLanguage::Masm,
             Uri::new("memory:///parser-span-test.masm"),
             "begin\n    nop\nend\n".to_string().into_boxed_str(),
         ));
 
-        let parse = parse_source_file(source.clone());
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let Outcome { value: parse, diagnostics } = parse_source_file(source.clone());
+        assert!(!diagnostics.has_errors(), "{:?}", diagnostics);
         assert_eq!(parse.source_file().id(), source.id());
 
         let nop = parse
@@ -2852,66 +2886,66 @@ end
             .find(|token| token.text() == "nop")
             .expect("nop token");
         let offset = source.as_str().find("nop").expect("nop offset");
-        let expected = SourceSpan::try_from_range(source.id(), offset..offset + 3).unwrap();
+        let expected =
+            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, offset..offset + 3)
+                .unwrap();
         assert_eq!(parse.span_for_token(&nop), expected);
     }
 
     #[test]
     fn diagnostics_keep_source_ids_from_managed_source_files() {
         let source = Arc::new(ManagedSourceFile::new(
-            SourceId::new(12),
+            source_id(12),
             SourceLanguage::Masm,
             Uri::new("memory:///parser-diagnostic-span-test.masm"),
             "proc foo\n    §\nend\n".to_string().into_boxed_str(),
         ));
 
-        let parse = parse_source_file(source.clone());
-        assert!(parse.has_errors());
+        let Outcome { value: _, diagnostics } = parse_source_file(source.clone());
+        assert!(diagnostics.has_errors());
 
-        let diagnostic = parse
-            .diagnostics()
-            .iter()
-            .find(|diag| {
-                diag.labels.as_ref().is_some_and(|labels| {
-                    labels.iter().any(|l| {
-                        l.label().is_some_and(|label| label.contains("unrecognized token"))
-                    })
+        let diagnostic = diagnostic_snapshots(&diagnostics)
+            .into_iter()
+            .find(|diagnostic| {
+                diagnostic.labels.iter().any(|label| {
+                    label
+                        .message
+                        .as_deref()
+                        .is_some_and(|message| message.contains("unrecognized token"))
                 })
             })
             .expect("invalid-token diagnostic");
         let offset = source.as_str().find('§').expect("invalid token offset");
-        let expected =
-            SourceSpan::try_from_range(source.id(), offset..offset + '§'.len_utf8()).unwrap();
-        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
-        let actual = SourceSpan::new(
-            source.id(),
-            (label_span.offset() as u32)..((label_span.offset() + label_span.len()) as u32),
-        );
-        assert_eq!(actual, expected);
+        let expected = SourceSpan::try_from_range(
+            SourceKey::Session(source.id()),
+            None,
+            offset..offset + '§'.len_utf8(),
+        )
+        .unwrap();
+        assert_eq!(diagnostic.labels[0].span, expected);
     }
 
     #[test]
     fn eof_diagnostics_anchor_to_the_last_character_offset() {
         let source = Arc::new(ManagedSourceFile::new(
-            SourceId::new(13),
+            source_id(13),
             SourceLanguage::Masm,
             Uri::new("memory:///parser-eof-span-test.masm"),
             "begin\n    if.true\n        add\n".to_string().into_boxed_str(),
         ));
 
-        let parse = parse_source_file(source.clone());
-        assert!(parse.has_errors());
+        let Outcome { value: _, diagnostics } = parse_source_file(source.clone());
+        assert!(diagnostics.has_errors());
 
-        let diagnostic = parse
-            .diagnostics()
-            .iter()
-            .find(|diag| {
-                diag.labels
-                    .as_deref()
-                    .unwrap_or(&[])
-                    .iter()
-                    .filter_map(|label| label.label())
-                    .any(|label| label.contains("expected `end`"))
+        let diagnostic = diagnostic_snapshots(&diagnostics)
+            .into_iter()
+            .find(|diagnostic| {
+                diagnostic.labels.iter().any(|label| {
+                    label
+                        .message
+                        .as_deref()
+                        .is_some_and(|message| message.contains("expected `end`"))
+                })
             })
             .expect("missing-end diagnostic");
 
@@ -2921,9 +2955,9 @@ end
             .last()
             .map(|(offset, _)| offset)
             .expect("source should be non-empty");
-        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
-        assert_eq!(label_span.offset(), last_char_offset);
-        assert_eq!(label_span.len(), 0);
+        let label_span = diagnostic.labels[0].span;
+        assert_eq!(label_span.range().start(), last_char_offset as u32);
+        assert!(label_span.is_empty());
     }
 
     #[test]
@@ -2933,7 +2967,7 @@ use lib::a
 use {foo} from lib::b
 begin end
 ";
-        let parse = parse_text(source);
+        let Outcome { value: parse, diagnostics: _ } = parse_text(source);
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
         let Item::Import(module_import) = &items[0] else {
@@ -2942,7 +2976,10 @@ begin end
         let module_path = module_import.module_path().expect("module path");
         let start = source.find("lib::a").expect("path start") as u32;
         let end = start + "lib::a".len() as u32;
-        let expected = SourceSpan::new(parse.source().id(), start..end);
+        let expected = SourceSpan::session(
+            parse.source().id(),
+            TextRange::new(start, end).expect("source range is ordered"),
+        );
         assert_eq!(parse.span_for_node(module_path.syntax()), expected);
 
         let Item::Import(item_import) = &items[1] else {
@@ -2951,14 +2988,36 @@ begin end
         let item_path = item_import.module_path().expect("item import module path");
         let start = source.find("lib::b").expect("path start") as u32;
         let end = start + "lib::b".len() as u32;
-        let expected = SourceSpan::new(parse.source().id(), start..end);
+        let expected = SourceSpan::session(
+            parse.source().id(),
+            TextRange::new(start, end).expect("source range is ordered"),
+        );
         assert_eq!(parse.span_for_node(item_path.syntax()), expected);
 
         let spec = item_import.item_specs().next().expect("item specifier");
         let name = spec.name_token().expect("item name");
         let start = source.find("foo").expect("item start") as u32;
         let end = start + "foo".len() as u32;
-        let expected = SourceSpan::new(parse.source().id(), start..end);
+        let expected = SourceSpan::session(
+            parse.source().id(),
+            TextRange::new(start, end).expect("source range is ordered"),
+        );
         assert_eq!(parse.span_for_token(&name), expected);
+    }
+
+    #[test]
+    fn deeply_nested_control_flow_parses_on_the_default_test_stack() {
+        let mut source = String::from("begin\n");
+        for _ in 0..=256 {
+            source.push_str("push.1\nif.true\n");
+        }
+        source.push_str("push.1\n");
+        for _ in 0..=256 {
+            source.push_str("end\n");
+        }
+        source.push_str("end\n");
+
+        let Outcome { diagnostics, .. } = parse_text(&source);
+        assert!(!diagnostics.has_errors(), "{diagnostics:?}");
     }
 }

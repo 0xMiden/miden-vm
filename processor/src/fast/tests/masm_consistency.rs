@@ -243,11 +243,13 @@ fn test_masm_consistency(
                 let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
                 let kernel_lib = Assembler::new(source_manager.clone())
                     .assemble_kernel("kernel", kernel, None)
+                    .value
                     .map(Arc::<Package>::from)
                     .unwrap();
                 let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
                     .unwrap()
                     .assemble_program("program", program_source)
+                    .value
                     .unwrap()
                     .unwrap_program();
 
@@ -256,6 +258,7 @@ fn test_masm_consistency(
             None => {
                 let program = Assembler::new(source_manager)
                     .assemble_program("program", program_source)
+                    .value
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -329,11 +332,13 @@ fn test_masm_errors_consistency(
                 let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
                 let kernel_lib = Assembler::new(source_manager.clone())
                     .assemble_kernel("kernel", kernel, None)
+                    .value
                     .map(Arc::<Package>::from)
                     .unwrap();
                 let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
                     .unwrap()
                     .assemble_program("program", program_source)
+                    .value
                     .unwrap()
                     .unwrap_program();
 
@@ -342,6 +347,7 @@ fn test_masm_errors_consistency(
             None => {
                 let program = Assembler::new(source_manager)
                     .assemble_program("program", program_source)
+                    .value
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -407,6 +413,7 @@ fn test_log_deferred_correctness() {
         let source_manager = Arc::new(DefaultSourceManager::default());
         Assembler::new(source_manager)
             .assemble_program("program", program_source)
+            .value
             .unwrap()
             .unwrap_program()
     };

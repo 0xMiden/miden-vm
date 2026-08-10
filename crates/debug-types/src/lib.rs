@@ -35,9 +35,10 @@ pub use self::{
         SourceContentUpdateError, SourceFile, SourceFileRef, SourceLanguage,
     },
     source_manager::{
-        DefaultSourceManager, SourceId, SourceManager, SourceManagerError, SourceManagerSync,
+        DEFAULT_SOURCE_NAMESPACE, DefaultSourceManager, SourceId, SourceKey, SourceManager,
+        SourceManagerError, SourceNamespace, SourceProvider, SourceRevision,
     },
-    span::{SourceSpan, Span, Spanned},
+    span::{SourceSpan, Span, Spanned, TextRange, TextRangeError},
 };
 
 // URI

@@ -10,7 +10,10 @@ use miden_vm::{
     ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile, serde::Deserializable,
 };
 
-use super::data::{OutputFile, ProgramHash, ProofFile};
+use super::{
+    data::{OutputFile, ProgramHash, ProofFile},
+    utils::finish_assembly_outcome,
+};
 
 #[derive(Debug, Clone, Parser)]
 #[command(about = "Verify a Miden program")]
@@ -140,12 +143,13 @@ fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Rep
         "masm" => {
             // Compile kernel from assembly source
             let source_manager = Arc::new(DefaultSourceManager::default());
-            Assembler::new(source_manager)
-                .assemble_kernel_from_root("kernel", kernel_path)
-                .map(Arc::<Package>::from)
-                .wrap_err_with(|| {
-                    format!("Failed to compile kernel from `{}`", kernel_path.display())
-                })?
+            finish_assembly_outcome(
+                Assembler::new(source_manager.clone())
+                    .assemble_kernel_from_root("kernel", kernel_path),
+                source_manager.as_ref(),
+                "Failed to compile kernel",
+            )
+            .map(Arc::<Package>::from)?
         },
         _ => {
             return Err(Report::msg(format!(

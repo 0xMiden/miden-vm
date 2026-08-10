@@ -10,6 +10,7 @@ use miden_assembly_syntax_cst::{
     rowan,
 };
 use miden_debug_types::{SourceSpan, Span};
+use miden_diagnostics::TextRange;
 
 use super::{
     context::LoweringContext,
@@ -1495,7 +1496,12 @@ fn lower_push_list(
         };
 
         let span = if ops.is_empty() {
-            SourceSpan::new(instruction_span.source_id(), instruction_span.start()..imm_span.end())
+            SourceSpan::new(
+                instruction_span.source(),
+                instruction_span.revision(),
+                TextRange::new(instruction_span.range().start(), imm_span.range().end())
+                    .expect("an instruction immediate must follow the instruction name"),
+            )
         } else {
             imm_span
         };
@@ -1710,7 +1716,12 @@ fn unquote_string_token(token: &SyntaxToken, span: SourceSpan) -> Result<Arc<str
 }
 
 fn join_spans(start: SourceSpan, end: SourceSpan) -> SourceSpan {
-    SourceSpan::new(start.source_id(), start.start()..end.end())
+    SourceSpan::new(
+        start.source(),
+        start.revision(),
+        TextRange::new(start.range().start(), end.range().end())
+            .expect("ordered tokens must produce an ordered span"),
+    )
 }
 
 /// Lowers felt-comparison instructions
@@ -1941,7 +1952,12 @@ fn lower_decimal_u8_literal(token: &SyntaxToken) -> Option<u8> {
 
 /// Returns the suffix subspan of a token span, used for diagnostics like `exp.u65 -> 65`.
 fn token_suffix_span(span: SourceSpan, prefix_len: u32) -> SourceSpan {
-    SourceSpan::new(span.source_id(), span.start() + prefix_len..span.end())
+    SourceSpan::new(
+        span.source(),
+        span.revision(),
+        TextRange::new(span.range().start() + prefix_len, span.range().end())
+            .expect("an instruction prefix must fit within its span"),
+    )
 }
 
 /// Parses a decimal `u64` from a number token if the token is decimal-shaped.

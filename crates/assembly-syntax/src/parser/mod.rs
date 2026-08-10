@@ -7,14 +7,22 @@ mod value;
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
-use miden_utils_diagnostics::{IntoDiagnostic, Report};
+#[cfg(feature = "std")]
+use miden_diagnostics::Report;
+use miden_diagnostics::{DiagnosticCollector, IntoDiagnostic, Outcome};
 
 pub use self::{
-    cst::parse_inline_masm,
+    cst::{ParseInlineMasmOutcome, parse_inline_masm},
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     value::{IntValue, PushValue, WordValue},
 };
 use crate::{Path, ast, sema};
+
+/// The diagnostic-preserving result of parsing and analyzing a module.
+///
+/// A missing module indicates that an error prevented construction of a usable AST. Diagnostics
+/// remain available regardless of whether a module was produced.
+pub type ModuleParseOutcome = Outcome<Option<Box<ast::Module>>>;
 
 // MODULE PARSER
 // ================================================================================================
@@ -45,23 +53,12 @@ pub struct ModuleParser {
     /// a better interner, we will also want to update those types to be in terms of whatever
     /// the handle type of the interner is.
     interned: BTreeSet<Arc<str>>,
-    /// When true, all warning diagnostics are promoted to error severity
-    warnings_as_errors: bool,
 }
 
 impl ModuleParser {
     /// Construct a new parser for the given `kind` of [ast::Module].
     pub fn new(kind: Option<ast::ModuleKind>) -> Self {
-        Self {
-            kind,
-            interned: Default::default(),
-            warnings_as_errors: false,
-        }
-    }
-
-    /// Configure this parser so that any warning diagnostics are promoted to errors.
-    pub fn set_warnings_as_errors(&mut self, yes: bool) {
-        self.warnings_as_errors = yes;
+        Self { kind, interned: Default::default() }
     }
 
     /// Parse a [ast::Module] from `source`, and give it the provided `path`.
@@ -78,27 +75,54 @@ impl ModuleParser {
         path: Option<&Path>,
         source: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Box<ast::Module>, Report> {
+    ) -> ModuleParseOutcome {
         use alloc::borrow::Cow;
 
+        let mut diagnostics = DiagnosticCollector::new();
         let path = match path {
-            Some(path) => Some(Arc::<Path>::from(
-                path.canonicalize()
-                    .and_then(|p| p.to_absolute().map(Cow::into_owned))
-                    .into_diagnostic()?,
-            )),
+            Some(path) => match path
+                .canonicalize()
+                .and_then(|p| p.to_absolute().map(Cow::into_owned))
+                .into_diagnostic()
+            {
+                Ok(path) => Some(Arc::<Path>::from(path)),
+                Err(error) => {
+                    let _ = diagnostics.add_report(error);
+                    return Outcome {
+                        value: None,
+                        diagnostics: diagnostics
+                            .finish()
+                            .attach_session_sources(source_manager.clone()),
+                    };
+                },
+            },
             None => None,
         };
-        let forms = parse_forms_internal(source.clone(), &mut self.interned)?;
-        sema::analyze(
-            source,
-            self.kind,
-            path.as_deref(),
-            forms,
-            self.warnings_as_errors,
-            source_manager,
-        )
-        .map_err(Report::new)
+        let Outcome {
+            value: forms,
+            diagnostics: parse_diagnostics,
+        } = parse_forms_internal(source.clone(), &mut self.interned);
+        let _ = diagnostics.merge(parse_diagnostics);
+
+        let value = match forms {
+            Some(forms) => {
+                let Outcome { value, diagnostics: sema_diagnostics } = sema::analyze(
+                    source,
+                    self.kind,
+                    path.as_deref(),
+                    forms,
+                    source_manager.clone(),
+                );
+                let _ = diagnostics.merge(sema_diagnostics);
+                value
+            },
+            None => None,
+        };
+
+        Outcome {
+            value,
+            diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+        }
     }
 
     /// Parse a [ast::Module], `name`, from `path`.
@@ -108,18 +132,30 @@ impl ModuleParser {
         path: Option<&Path>,
         file_path: P,
         source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Box<ast::Module>, Report>
+    ) -> ModuleParseOutcome
     where
         P: AsRef<std::path::Path>,
     {
         use miden_debug_types::SourceManagerExt;
-        use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
+        use miden_diagnostics::{IntoDiagnostic, WrapErr};
 
         let file_path = file_path.as_ref();
         let source_file =
-            source_manager.load_file(file_path).into_diagnostic().wrap_err_with(|| {
+            match source_manager.load_file(file_path).into_diagnostic().wrap_err_with(|| {
                 format!("failed to load source file from '{}'", file_path.display())
-            })?;
+            }) {
+                Ok(source_file) => source_file,
+                Err(error) => {
+                    let mut diagnostics = DiagnosticCollector::new();
+                    let _ = diagnostics.add_report(error);
+                    return Outcome {
+                        value: None,
+                        diagnostics: diagnostics
+                            .finish()
+                            .attach_session_sources(source_manager.clone()),
+                    };
+                },
+            };
         self.parse(path, source_file, source_manager)
     }
 
@@ -129,7 +165,7 @@ impl ModuleParser {
         path: Option<&Path>,
         source: impl ToString,
         source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Box<ast::Module>, Report> {
+    ) -> ModuleParseOutcome {
         use miden_debug_types::SourceContent;
 
         let source = source.to_string();
@@ -151,7 +187,7 @@ impl ModuleParser {
 ///
 /// NOTE: This does _not_ run semantic analysis.
 #[cfg(any(test, feature = "testing"))]
-pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, Report> {
+pub fn parse_forms(source: Arc<SourceFile>) -> Outcome<Option<Vec<ast::Form>>> {
     let mut interned = BTreeSet::default();
     parse_forms_internal(source, &mut interned)
 }
@@ -163,7 +199,7 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, Report> {
 fn parse_forms_internal(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
-) -> Result<Vec<ast::Form>, Report> {
+) -> Outcome<Option<Vec<ast::Form>>> {
     cst::parse_forms(source, interned)
 }
 
@@ -183,15 +219,17 @@ pub fn read_modules_from_root(
     namespace: Option<Arc<Path>>,
     kind: Option<ast::ModuleKind>,
     source_manager: Arc<dyn SourceManager>,
-    warnings_as_errors: bool,
-) -> Result<(Box<ast::Module>, Vec<Box<ast::Module>>), Report> {
-    use miden_utils_diagnostics::report;
+) -> Result<Outcome<Option<(Box<ast::Module>, Vec<Box<ast::Module>>)>>, Report> {
+    use miden_diagnostics::report;
 
     let root = root.as_ref();
     let root = Arc::<std::path::Path>::from(
         root.canonicalize()
             .map_err(|err| {
-                Report::msg(format!("invalid root module path '{}': {err}", root.display()))
+                report!(message: (format!(
+                    "invalid root module path '{}': {err}",
+                    root.display()
+                )))
             })?
             .into_boxed_path(),
     );
@@ -201,59 +239,74 @@ pub fn read_modules_from_root(
         .extension()
         .is_none_or(|ext| !ext.eq_ignore_ascii_case(ast::Module::FILE_EXTENSION))
     {
-        return Err(Report::msg(format!(
+        return Err(report!(message: (format!(
             "invalid root module path '{}': expected a .masm file",
             root.display()
-        )));
+        ))));
     }
 
     // Make sure it is a file
     if !root.is_file() {
-        return Err(Report::msg(format!(
+        return Err(report!(message: (format!(
             "invalid root module path '{}': not a file",
             root.display()
-        )));
+        ))));
     }
 
     // Capture the parent directory for resolving submodules
     let root_dir = root
         .parent()
         .ok_or_else(|| {
-            Report::msg(format!(
+            report!(message: (format!(
                 "invalid root module path '{}': expected path to have a parent directory",
                 root.display()
-            ))
+            )))
         })?
         .to_path_buf();
 
     let mut seen = BTreeSet::<Arc<Path>>::new();
     let mut modules = Vec::new();
+    let mut diagnostics = DiagnosticCollector::new();
 
     let mut parser = ModuleParser::new(kind);
-    parser.set_warnings_as_errors(warnings_as_errors);
-    let root_ast = parser.parse_file(namespace.as_deref(), &root, source_manager.clone())?;
+    let Outcome {
+        value: root_ast,
+        diagnostics: root_diagnostics,
+    } = parser.parse_file(namespace.as_deref(), &root, source_manager.clone());
+    let _ = diagnostics.merge(root_diagnostics);
+    let Some(root_ast) = root_ast else {
+        return Ok(Outcome {
+            value: None,
+            diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+        });
+    };
 
     let namespace = Arc::<Path>::from(root_ast.path().to_path_buf().into_boxed_path());
     let submodules = root_ast.submodules().to_vec();
     seen.insert(namespace.clone());
-    walk_module_tree(
-        namespace,
-        root,
-        root_dir,
-        submodules,
-        source_manager,
-        warnings_as_errors,
-        |module| {
-            if !seen.insert(module.path().into()) {
-                Err(report!("duplicate module '{0}'", module.path()))
-            } else {
-                modules.push(module);
-                Ok(())
-            }
-        },
-    )?;
+    let Outcome {
+        value: walked,
+        diagnostics: walk_diagnostics,
+    } = walk_module_tree(namespace, root, root_dir, submodules, source_manager.clone(), |module| {
+        if !seen.insert(module.path().into()) {
+            Err(report!(message: (format!("duplicate module '{}'", module.path()))))
+        } else {
+            modules.push(module);
+            Ok(())
+        }
+    });
+    let _ = diagnostics.merge(walk_diagnostics);
+    if walked.is_none() {
+        return Ok(Outcome {
+            value: None,
+            diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+        });
+    }
 
-    Ok((root_ast, modules))
+    Ok(Outcome {
+        value: Some((root_ast, modules)),
+        diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+    })
 }
 
 #[cfg(feature = "std")]
@@ -263,9 +316,8 @@ pub fn walk_module_tree<F>(
     current_dir: std::path::PathBuf,
     submodules: Vec<ast::SubmoduleDecl>,
     source_manager: Arc<dyn SourceManager>,
-    warnings_as_errors: bool,
     mut callback: F,
-) -> Result<(), Report>
+) -> Outcome<Option<()>>
 where
     F: FnMut(Box<ast::Module>) -> Result<(), Report>,
 {
@@ -279,6 +331,7 @@ where
     }
 
     let current_dir = Arc::<std::path::Path>::from(current_dir.into_boxed_path());
+    let mut diagnostics = DiagnosticCollector::new();
     let mut visited = BTreeSet::<Arc<std::path::Path>>::from_iter([root.clone()]);
     let mut worklist = submodules
         .iter()
@@ -303,62 +356,77 @@ where
         // but that may not be intended.
         if mod_file.as_path() == &*entry.parent {
             let span = entry.name.span();
-            let source_file = source_manager.get(span.source_id()).ok();
-            return Err(ParsingError::SelfReferentialSubmodule {
+            let _ = diagnostics.add(ParsingError::SelfReferentialSubmodule {
                 name: entry.name.clone(),
                 parent_module_uri: Uri::from(entry.parent),
                 span,
-                source_file,
-            }
-            .into());
+            });
+            return Outcome {
+                value: None,
+                diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+            };
         }
 
         let actual_path = if mod_file.is_file() {
             if mod_dir_mod_masm.is_file() {
                 let span = entry.name.span();
-                let source_file = source_manager.get(span.source_id()).ok();
-                return Err(ParsingError::AmbiguousSubmoduleLocation {
+                let _ = diagnostics.add(ParsingError::AmbiguousSubmoduleLocation {
                     name: entry.name,
-                    first: Uri::from(mod_file),
-                    second: Uri::from(mod_dir_mod_masm),
+                    first: Box::new(Uri::from(mod_file)),
+                    second: Box::new(Uri::from(mod_dir_mod_masm)),
                     span,
-                    source_file,
-                }
-                .into());
+                });
+                return Outcome {
+                    value: None,
+                    diagnostics: diagnostics
+                        .finish()
+                        .attach_session_sources(source_manager.clone()),
+                };
             }
             mod_file
         } else if mod_dir_mod_masm.is_file() {
             mod_dir_mod_masm
         } else {
             let span = entry.name.span();
-            let source_file = source_manager.get(span.source_id()).ok();
-            return Err(ParsingError::UndefinedSubmodule {
+            let _ = diagnostics.add(ParsingError::UndefinedSubmodule {
                 name: entry.name,
                 basename: basename.into_boxed_str(),
-                directory: Uri::from(mod_dir),
+                directory: Box::new(Uri::from(mod_dir)),
                 span,
-                source_file,
-            }
-            .into());
+            });
+            return Outcome {
+                value: None,
+                diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+            };
         };
 
         let actual_path = Arc::<std::path::Path>::from(actual_path);
         if !visited.insert(actual_path.clone()) {
             let span = entry.name.span();
-            let source_file = source_manager.get(span.source_id()).ok();
-            return Err(ParsingError::DuplicateSubmoduleSource {
+            let _ = diagnostics.add(ParsingError::DuplicateSubmoduleSource {
                 name: entry.name,
                 module_uri: Uri::from(actual_path.as_ref()),
                 span,
-                source_file,
-            }
-            .into());
+            });
+            return Outcome {
+                value: None,
+                diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+            };
         }
 
         let mut parser = ModuleParser::new(Some(ast::ModuleKind::Library));
-        parser.set_warnings_as_errors(warnings_as_errors);
         let module_path = Arc::<Path>::from(entry.namespace.join(&entry.name).into_boxed_path());
-        let ast = parser.parse_file(Some(&module_path), &actual_path, source_manager.clone())?;
+        let Outcome {
+            value: ast,
+            diagnostics: module_diagnostics,
+        } = parser.parse_file(Some(&module_path), &actual_path, source_manager.clone());
+        let _ = diagnostics.merge(module_diagnostics);
+        let Some(ast) = ast else {
+            return Outcome {
+                value: None,
+                diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+            };
+        };
 
         let directory = Arc::<std::path::Path>::from(mod_dir);
         worklist.extend(ast.submodules().iter().map(|sm| ModuleEntry {
@@ -368,8 +436,17 @@ where
             parent: actual_path.clone(),
         }));
 
-        callback(ast)?;
+        if let Err(error) = callback(ast) {
+            let _ = diagnostics.add_report(error);
+            return Outcome {
+                value: None,
+                diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+            };
+        }
     }
 
-    Ok(())
+    Outcome {
+        value: Some(()),
+        diagnostics: diagnostics.finish().attach_session_sources(source_manager.clone()),
+    }
 }

@@ -7,7 +7,7 @@ use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
 
 use self::symbol_table::LocalSymbolTable;
 pub use self::{
-    error::SymbolResolutionError,
+    error::{SymbolResolutionError, SymbolResolutionRelated},
     symbol_table::{LocalSymbol, SymbolTable},
 };
 use super::{GlobalItemIndex, ModuleIndex};
@@ -126,11 +126,7 @@ impl LocalSymbolResolver {
 
                 // This is an invalid subpath reference
                 log::error!(target: "local-symbol-resolver", "cannot resolve '{subpath}' relative to non-module item");
-                Err(SymbolResolutionError::invalid_sub_path(
-                    path.span(),
-                    item.span(),
-                    &*self.source_manager,
-                ))
+                Err(SymbolResolutionError::invalid_sub_path(path.span(), item.span()))
             },
             SymbolResolution::MastRoot(digest) => {
                 log::debug!(target: "local-symbol-resolver", "resolved '{ns}' to procedure root '{digest}'");
@@ -140,11 +136,7 @@ impl LocalSymbolResolver {
 
                 // This is an invalid subpath reference
                 log::error!(target: "local-symbol-resolver", "cannot resolve '{subpath}' relative to procedure");
-                Err(SymbolResolutionError::invalid_sub_path(
-                    path.span(),
-                    digest.span(),
-                    &*self.source_manager,
-                ))
+                Err(SymbolResolutionError::invalid_sub_path(path.span(), digest.span()))
             },
             SymbolResolution::Module { id, path, .. } => {
                 if subpath.is_empty() {

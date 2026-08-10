@@ -3,15 +3,14 @@ mod symbol_resolver;
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc};
 
 use miden_assembly_syntax::{
-    Report,
     ast::{
         self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, Path, SymbolResolution,
         SymbolResolutionError,
         constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
         types,
     },
-    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
-    diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::{OwnedDiagnostic, diagnostic},
     module::ItemInfo,
 };
 use smallvec::SmallVec;
@@ -43,10 +42,7 @@ pub struct ResolverCache {
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
     fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
-        LinkerError::InvalidConstantRef {
-            span,
-            source_file: self.get_source_file_for(span),
-        }
+        LinkerError::InvalidConstantRef { span }
     }
 
     pub(super) fn materialize_constant_by_gid(
@@ -64,7 +60,7 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
                 let expr = item.value.clone();
                 let eval_span = item.value.span();
                 if let Some(start) = self.cache.evaluating_constants.get(&gid).copied() {
-                    return Err(ConstEvalError::eval_cycle(start, span, self).into());
+                    return Err(ConstEvalError::eval_cycle(start, span).into());
                 }
 
                 self.cache.evaluating_constants.insert(gid, eval_span);
@@ -106,10 +102,6 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
 
 impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
     type Error = LinkerError;
-
-    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>> {
-        self.resolver.source_manager().get(span.source_id()).ok()
-    }
 
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let context = SymbolResolutionContext {
@@ -192,15 +184,14 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                         ast::ConstantValue::Int(v) => Some(v.as_canonical_u64() as u128),
                         invalid => {
                             return Err(LinkerError::Related {
-                                errors: vec![RelatedError::new(Report::from(diagnostic!(
-                                    severity = Severity::Error,
-                                    labels = vec![LabeledSpan::at(
+                                errors: vec![OwnedDiagnostic::new(diagnostic! {
+                                    severity: Error,
+                                    message: "invalid enum type",
+                                    labels: [primary(
                                         invalid.span(),
                                         "invalid enum discriminant: expected an integer"
                                     )],
-                                    "invalid enum type"
-                                )))]
-                                .into_boxed_slice(),
+                                })],
                             });
                         },
                     };
@@ -216,22 +207,18 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                 types::EnumType::new(ty.name().clone().into_inner(), ty.ty().clone(), variants)
                     .map(|t| types::Type::Enum(Arc::new(t)))
                     .map_err(|err| LinkerError::Related {
-                        errors: vec![RelatedError::from(Report::from(diagnostic!(
-                            severity = Severity::Error,
-                            labels = vec![LabeledSpan::at(context, err.to_string())],
-                            "invalid enum type"
-                        )))]
-                        .into_boxed_slice(),
+                        errors: vec![OwnedDiagnostic::new(diagnostic! {
+                            severity: Error,
+                            message: "invalid enum type",
+                            labels: [primary(context, (err.to_string()))],
+                        })],
                     })
             },
             SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
                 Ok(ty.ty.resolve_type(self)?.expect("unreachable"))
             },
             SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Procedure(_) => {
-                Err(LinkerError::InvalidTypeRef {
-                    span: context,
-                    source_file: self.get_source_file_for(context),
-                })
+                Err(LinkerError::InvalidTypeRef { span: context })
             },
         }
     }

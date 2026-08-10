@@ -158,20 +158,9 @@ pub fn main() -> Result<(), Report> {
 }
 
 fn initialize_diagnostics() {
-    use miden_assembly::diagnostics::reporting::{self, ReportHandlerOpts};
+    use miden_assembly::diagnostics::{PanicHookOptions, install_panic_hook};
 
-    #[cfg(feature = "std")]
-    {
-        let result = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        if result.is_ok() {
-            reporting::set_panic_hook();
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-    }
+    let _ = install_panic_hook(PanicHookOptions::default());
 }
 
 // TESTS

@@ -34,8 +34,6 @@ pub struct TargetAssemblyContext<'a> {
     pub source_manager: Arc<dyn SourceManager>,
     /// The current package store of the assembler
     pub package_registry: &'a dyn PackageRegistryAndProvider,
-    /// The assembler-wide `warnings_as_errors` flag
-    pub warnings_as_errors: bool,
 }
 
 impl<'a> TargetAssemblyContext<'a> {
@@ -75,7 +73,6 @@ impl<'a> TargetAssemblyContext<'a> {
             dependency_graph,
             source_manager,
             package_registry,
-            warnings_as_errors: false,
         })
     }
 
@@ -110,14 +107,7 @@ impl<'a> TargetAssemblyContext<'a> {
             dependency_graph,
             source_manager,
             package_registry,
-            warnings_as_errors: false,
         })
-    }
-
-    #[inline]
-    pub fn with_warnings_as_errors(&mut self, yes: bool) -> &mut Self {
-        self.warnings_as_errors = yes;
-        self
     }
 }
 
@@ -143,14 +133,18 @@ pub trait ProjectSourceProvider {
     fn provide_sources(
         &self,
         context: &TargetAssemblyContext<'_>,
-    ) -> Result<ProjectSourceInputs, Report>;
+    ) -> AssemblyOutcome<ProjectSourceInputs>;
 
     /// Same as `provide_sources`, but allows the provider to interrupt the build and exit early
     fn provide_sources_interruptible(
         &self,
         context: &TargetAssemblyContext<'_>,
-    ) -> Result<ControlFlow<(), ProjectSourceInputs>, Report> {
-        self.provide_sources(context).map(ControlFlow::Continue)
+    ) -> AssemblyOutcome<ControlFlow<(), ProjectSourceInputs>> {
+        let Outcome { value, diagnostics } = self.provide_sources(context);
+        Outcome {
+            value: value.map(ControlFlow::Continue),
+            diagnostics,
+        }
     }
 
     /// Called to request the source files that are inputs to assembly of the current target, so
@@ -169,7 +163,7 @@ pub trait ProjectSourceProvider {
     fn provide_source_provenance(
         &self,
         context: &TargetAssemblyContext<'_>,
-    ) -> Result<ProjectSourceProvenanceInputs, Report>;
+    ) -> AssemblyOutcome<ProjectSourceProvenanceInputs>;
 
     /// Called after a project target - whose sources were provided via this trait- has been
     /// assembled to a package, so that the provider can do any language-specific post-processing

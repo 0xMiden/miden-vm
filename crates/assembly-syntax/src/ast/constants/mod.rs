@@ -8,7 +8,7 @@ use core::fmt;
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 pub use self::{
-    eval::{ConstEnvironment, ConstEvalError},
+    eval::{ConstEnvironment, ConstEvalCycleDetected, ConstEvalError},
     expr::{ConstantExpr, ConstantOp, HashKind},
     value::ConstantValue,
 };

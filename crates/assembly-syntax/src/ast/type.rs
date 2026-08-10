@@ -297,12 +297,10 @@ impl TypeExpr {
         R: ?Sized + TypeResolver<E>,
     {
         if depth > MAX_TYPE_EXPR_NESTING {
-            let source_manager = resolver.source_manager();
             return Err(resolver.resolve_local_failed(
                 SymbolResolutionError::type_expression_depth_exceeded(
                     self.span(),
                     MAX_TYPE_EXPR_NESTING,
-                    source_manager.as_ref(),
                 ),
             ));
         }
@@ -331,7 +329,6 @@ impl TypeExpr {
                                     path.span(),
                                     "type",
                                     module_path.span(),
-                                    &resolver.source_manager(),
                                 ),
                             ));
                         },
@@ -341,7 +338,6 @@ impl TypeExpr {
                                     path.span(),
                                     "type",
                                     item.span(),
-                                    &resolver.source_manager(),
                                 ),
                             ));
                         },
@@ -1219,7 +1215,7 @@ mod tests {
             context: SourceSpan,
             _gid: GlobalItemIndex,
         ) -> Result<Type, SymbolResolutionError> {
-            Err(SymbolResolutionError::undefined(context, self.source_manager.as_ref()))
+            Err(SymbolResolutionError::undefined(context))
         }
 
         fn get_local_type(
@@ -1234,7 +1230,7 @@ mod tests {
             &mut self,
             ty: Span<&Path>,
         ) -> Result<SymbolResolution, SymbolResolutionError> {
-            Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
+            Err(SymbolResolutionError::undefined(ty.span()))
         }
     }
 
@@ -1267,8 +1263,9 @@ mod tests {
     }
 
     fn parse_type_alias_expr(source: &str) -> TypeExpr {
-        let mut forms =
-            crate::parser::parse_forms(test_source_file(source)).expect("type alias should parse");
+        let mut forms = crate::parser::parse_forms(test_source_file(source))
+            .value
+            .expect("type alias should parse");
         assert_eq!(forms.len(), 1, "expected exactly one parsed form");
         match forms.pop().expect("expected parsed form") {
             Form::Type(alias) => alias.ty,

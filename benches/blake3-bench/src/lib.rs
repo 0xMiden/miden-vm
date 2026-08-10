@@ -60,8 +60,9 @@ impl Blake3Fixture {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
         let ast = parser
             .parse_file(Some(LibraryPath::exec_path()), &program_path, source_manager.clone())
-            .unwrap_or_else(|err| {
-                panic!("failed to parse Blake3 program at {}: {err}", program_path.display())
+            .value
+            .unwrap_or_else(|| {
+                panic!("failed to parse Blake3 program at {}", program_path.display())
             });
 
         let mut assembler = Assembler::new(source_manager.clone());
@@ -70,6 +71,7 @@ impl Blake3Fixture {
             .expect("failed to load core library");
         let package = assembler
             .assemble_program("program", ast)
+            .value
             .expect("failed to assemble Blake3 benchmark program");
         let debug_info = package.debug_info().expect("failed to read Blake3 debug info");
         let entrypoint_source_node = package.entrypoint_source_node();

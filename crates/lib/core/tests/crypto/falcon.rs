@@ -508,6 +508,7 @@ fn falcon_prove_verify() {
         .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
         .expect("failed to load core library")
         .assemble_program("program", source)
+        .value
         .expect("failed to compile test source")
         .unwrap_program();
 

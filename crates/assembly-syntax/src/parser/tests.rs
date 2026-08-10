@@ -2,6 +2,10 @@ use alloc::{string::String, sync::Arc};
 use core::assert_matches;
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+use miden_diagnostics::{
+    AnnotateRenderer, DefaultFailurePolicy, DiagnosticSet, Outcome, SourceProvider,
+    WarningsAsErrors,
+};
 
 use super::*;
 use crate::{
@@ -76,8 +80,72 @@ fn load_source_file(path: &std::path::Path) -> Arc<SourceFile> {
     ))
 }
 
-fn render_diagnostic(diag: impl AsRef<dyn crate::diagnostics::Diagnostic>) -> String {
-    crate::diagnostics::reporting::PrintDiagnostic::new_without_color(diag).to_string()
+fn render_diagnostic_set(diagnostics: &DiagnosticSet, sources: &dyn SourceProvider) -> String {
+    let prepared = diagnostics.prepare(sources).expect("diagnostics should prepare");
+    let renderer = AnnotateRenderer::default();
+    let mut output = String::new();
+    for diagnostic in &prepared {
+        output.push_str(&renderer.render(diagnostic).expect("diagnostic should render"));
+        output.push('\n');
+    }
+    output
+}
+
+struct TestParseOutcome<T> {
+    outcome: Outcome<Option<T>>,
+    source: Arc<SourceFile>,
+}
+
+impl<T> TestParseOutcome<T> {
+    fn expect(self, message: &str) -> T {
+        self.outcome.value.unwrap_or_else(|| panic!("{message}"))
+    }
+
+    fn expect_err(self, message: &str) -> TestParseFailure {
+        if self.outcome.value.is_some() {
+            panic!("{message}");
+        }
+        TestParseFailure {
+            diagnostics: self.outcome.diagnostics,
+            source: self.source,
+        }
+    }
+
+    fn is_err(&self) -> bool {
+        self.outcome.value.is_none()
+    }
+}
+
+struct TestParseFailure {
+    diagnostics: DiagnosticSet,
+    source: Arc<SourceFile>,
+}
+
+fn render_diagnostics(failure: &TestParseFailure) -> String {
+    render_diagnostic_set(&failure.diagnostics, failure.source.as_ref())
+}
+
+fn parse_forms(source: Arc<SourceFile>) -> TestParseOutcome<Vec<ast::Form>> {
+    let outcome = super::parse_forms(source.clone());
+    TestParseOutcome { outcome, source }
+}
+
+trait ExpectOutcome<T> {
+    fn expect(self, message: &str) -> T;
+    fn expect_err(self, message: &str) -> DiagnosticSet;
+}
+
+impl<T> ExpectOutcome<T> for Outcome<Option<T>> {
+    fn expect(self, message: &str) -> T {
+        self.value.unwrap_or_else(|| panic!("{message}"))
+    }
+
+    fn expect_err(self, message: &str) -> DiagnosticSet {
+        if self.value.is_some() {
+            panic!("{message}");
+        }
+        self.diagnostics
+    }
 }
 
 fn assert_parses(source: Arc<SourceFile>) {
@@ -111,12 +179,34 @@ fn overlong_path_component_is_rejected_without_panic() {
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        ModuleParser::new(None).parse_str(None, source, source_manager)
+        ModuleParser::new(None).parse_str(None, source, source_manager.clone())
     }));
 
     assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
     let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
-    crate::assert_diagnostic!(err, "invalid item path: too long (max 65535 bytes)");
+    let rendered = render_diagnostic_set(&err, source_manager.as_ref());
+    assert!(rendered.contains("invalid item path: too long (max 65535 bytes)"), "{rendered}");
+}
+
+#[test]
+fn module_parser_preserves_warning_diagnostics_with_a_usable_module() {
+    use crate::debuginfo::DefaultSourceManager;
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let outcome = ModuleParser::new(Some(ast::ModuleKind::Library)).parse_str(
+        Some(Path::new("example")),
+        "use foo\n",
+        source_manager.clone(),
+    );
+
+    assert!(outcome.value.is_some(), "warnings must not discard the parsed module");
+    assert_eq!(outcome.diagnostics.counts().warnings(), 1);
+    assert!(!outcome.diagnostics.assess(&DefaultFailurePolicy));
+    assert!(outcome.diagnostics.assess(&WarningsAsErrors));
+
+    let rendered = render_diagnostic_set(&outcome.diagnostics, source_manager.as_ref());
+    assert!(rendered.contains("unused import"), "{rendered}");
+    assert!(rendered.contains("use foo"), "{rendered}");
 }
 
 #[test]
@@ -156,7 +246,9 @@ end
     .unwrap_or_else(|error| panic!("failed to write {}: {error}", child_path.display()));
 
     let source_manager = Arc::new(DefaultSourceManager::default());
-    let (root, support) = read_modules_from_root(&root_path, None, None, source_manager, false)
+    let parsed = read_modules_from_root(&root_path, None, None, source_manager)
+        .expect("valid root module tree should be readable");
+    let (root, support) = parsed
         .expect("valid root module with one declared submodule should parse without panicking");
 
     assert_eq!(root.path(), Path::new("::parser::root"));
@@ -367,7 +459,7 @@ fn parse_import_rejects_pub_module_import() {
 
     let err = parse_forms(source).expect_err("expected public module import error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("`pub use` is only supported for braced item imports"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("`pub use` is only supported for braced item imports"));
 }
 
 #[test]
@@ -376,7 +468,7 @@ fn parse_import_rejects_source_digest_import_but_allows_direct_digest_target() {
 
     let err = parse_forms(source).expect_err("expected digest import error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("digest imports are not supported"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("digest imports are not supported"));
 
     let source = test_source_file(
         "\
@@ -394,7 +486,7 @@ fn parse_import_old_arrow_syntax_rejected() {
 
     let err = parse_forms(source).expect_err("expected old arrow syntax error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("import aliases use `as`; `->` is no longer supported"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("import aliases use `as`; `->` is no longer supported"));
 }
 
 #[test]
@@ -794,9 +886,12 @@ fn parser_accepts_checked_in_masm_corpus() {
 
     for path in files {
         let source = load_source_file(&path);
-        parse_forms(source).map_err(render_diagnostic).unwrap_or_else(|diagnostic| {
-            panic!("parser failed for {}:\n{diagnostic}", path.display())
-        });
+        let parsed = parse_forms(source);
+        if parsed.is_err() {
+            let diagnostic =
+                render_diagnostics(&parsed.expect_err("checked-in source should parse"));
+            panic!("parser failed for {}:\n{diagnostic}", path.display());
+        }
     }
 }
 
@@ -819,7 +914,7 @@ fn parser_reports_invalid_struct_repr_from_direct_type_lowering() {
 
     let err = parse_forms(source).expect_err("parser should reject invalid struct repr");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("invalid struct representation"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid struct representation"));
 }
 
 #[test]
@@ -828,7 +923,7 @@ fn parser_rejects_non_power_of_two_struct_packed_alignment() {
 
     let err = parse_forms(source).expect_err("parser should reject invalid packed alignment");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("power-of-two"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("power-of-two"));
 }
 
 #[test]
@@ -837,7 +932,7 @@ fn parser_rejects_non_power_of_two_struct_align_alignment() {
 
     let err = parse_forms(source).expect_err("parser should reject invalid struct alignment");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("power-of-two"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("power-of-two"));
 }
 
 #[test]
@@ -861,7 +956,7 @@ end
 
     let err = parse_forms(source).expect_err("parser should reject conflicting attribute keys");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("conflicting key-value attributes"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("conflicting key-value attributes"));
 }
 
 #[test]
@@ -870,7 +965,7 @@ fn parser_reports_invalid_advice_map_keys() {
 
     let err = parse_forms(source).expect_err("parser should reject invalid advice-map keys");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("invalid Advice Map key"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid Advice Map key"));
 }
 
 #[test]
@@ -936,7 +1031,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid pad value error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid padding value"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid padding value"));
 }
 
 #[test]
@@ -951,7 +1046,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid immediate error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid immediate"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid immediate"));
 }
 
 #[test]
@@ -966,7 +1061,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid bit-size error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid literal: expected value to be a valid bit size"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid literal: expected value to be a valid bit size"));
 }
 
 #[test]
@@ -985,7 +1080,7 @@ end
     assert!(parsed.is_ok(), "parser panicked for oversized bit-size");
 
     let cst = parsed.unwrap().expect_err("expected invalid bit-size error");
-    let rendered = render_diagnostic(&cst);
+    let rendered = render_diagnostics(&cst);
 
     assert!(
         rendered.contains("invalid literal: expected value to be a valid bit size"),
@@ -1006,7 +1101,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid syntax error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid syntax") || diag.contains("invalid instruction"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid syntax") || diag.contains("invalid instruction"));
 }
 
 #[test]
@@ -1021,7 +1116,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid mast root error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid MAST root literal"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid MAST root literal"));
 }
 
 #[test]
@@ -1036,7 +1131,7 @@ end
 
     let err = parse_forms(source).expect_err("expected push overflow error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("too many operands for `push`"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("too many operands for `push`"));
 }
 
 #[test]
@@ -1057,7 +1152,7 @@ end
         let source = test_source_file(source);
         let err = parse_forms(source).expect_err("expected malformed push slice error");
 
-        assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid syntax"));
+        assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid syntax"));
     }
 }
 
@@ -1073,7 +1168,7 @@ end
 
     let err = parse_forms(source).expect_err("expected deprecated instruction error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("deprecated instruction"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("deprecated instruction"));
 }
 
 #[test]
@@ -1088,7 +1183,7 @@ end
 
     let err = parse_forms(source).expect_err("expected deprecated instruction error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("deprecated instruction"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("deprecated instruction"));
 }
 
 #[test]
@@ -1103,7 +1198,7 @@ end
 
     let err = parse_forms(source).expect_err("expected invalid instruction error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid instruction"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("invalid instruction"));
 }
 
 #[test]
@@ -1119,7 +1214,7 @@ end
 
     let err = parse_forms(source).expect_err("expected empty while block error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("expected a non-empty `while` block"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("expected a non-empty `while` block"));
 }
 
 #[test]
@@ -1144,7 +1239,7 @@ fn parser_reports_parse_errors() {
 
     let err = parse_forms(source).expect_err("parser should surface a parse error");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("expected `end`"));
+    assert_matches!(render_diagnostics(&err), diag if diag.contains("expected `end`"));
 }
 
 #[test]
@@ -1153,8 +1248,23 @@ fn parser_rejects_debug_instructions() {
         let source = test_source_file(&format!("begin\n    {spelling}\nend\n"));
         let err = parse_forms(source).expect_err("debug.* should be rejected");
         assert_matches!(
-            render_diagnostic(err),
+            render_diagnostics(&err),
             diag if diag.contains("invalid syntax") || diag.contains("invalid instruction")
         );
     }
+}
+
+#[test]
+fn deeply_nested_control_flow_lowers_on_the_default_test_stack() {
+    let mut source = String::from("begin\n");
+    for _ in 0..=256 {
+        source.push_str("push.1\nif.true\n");
+    }
+    source.push_str("push.1\n");
+    for _ in 0..=256 {
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+
+    parse_forms(test_source_file(&source)).expect("deeply nested control flow should lower");
 }

@@ -11,8 +11,9 @@ use miden_assembly_syntax::{
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
-        Report,
-        reporting::{ReportHandlerOpts, set_hook},
+        DefaultFailurePolicy, Diagnostic, DiagnosticCodeRef, DiagnosticDescriptor, DiagnosticSet,
+        DiagnosticTag, FailurePolicy, Outcome, OwnedDiagnostic, Report, Severity, VisitDiagnostic,
+        WarningsAsErrors,
     },
 };
 pub use miden_assembly_syntax::{
@@ -26,19 +27,18 @@ use miden_mast_package::PackageId;
 use miden_project::TargetType;
 
 use crate::assembler::Assembler;
-#[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
 /// It is used by constructing it with `TestContext::default()`, which will initialize the
-/// diagnostic reporting infrastructure, and construct a default [Assembler] instance for you. You
-/// can then optionally customize the context, or start invoking any of its test helpers.
+/// source manager, and construct a default [Assembler] instance for you. You can then optionally
+/// customize the context, or start invoking any of its test helpers.
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
     source_manager: Arc<dyn SourceManager>,
     assembler: Assembler,
+    warnings_as_errors: bool,
     #[cfg(feature = "std")]
     registry: TestRegistry,
 }
@@ -57,51 +57,45 @@ impl TestContext {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        #[cfg(feature = "std")]
-        {
-            let result = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-            #[cfg(feature = "std")]
-            if result.is_ok() {
-                set_panic_hook();
-            }
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        }
         let source_manager = Arc::new(DefaultSourceManager::default());
-        let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
+        let assembler = Assembler::new(source_manager.clone());
         #[cfg(feature = "std")]
         {
             Self {
                 source_manager,
                 assembler,
+                warnings_as_errors: true,
                 registry: Default::default(),
             }
         }
         #[cfg(not(feature = "std"))]
         {
-            Self { source_manager, assembler }
+            Self {
+                source_manager,
+                assembler,
+                warnings_as_errors: true,
+            }
         }
     }
 
     #[cfg(feature = "std")]
     pub fn with_warnings_as_errors(self, yes: bool) -> Self {
-        let Self { source_manager, assembler, registry } = self;
+        let Self { source_manager, assembler, registry, .. } = self;
         Self {
             source_manager,
-            assembler: assembler.with_warnings_as_errors(yes),
+            assembler,
+            warnings_as_errors: yes,
             registry,
         }
     }
 
     #[cfg(not(feature = "std"))]
     pub fn with_warnings_as_errors(self, yes: bool) -> Self {
-        let Self { source_manager, assembler } = self;
+        let Self { source_manager, assembler, .. } = self;
         Self {
             source_manager,
-            assembler: assembler.with_warnings_as_errors(yes),
+            assembler,
+            warnings_as_errors: yes,
         }
     }
 
@@ -115,6 +109,10 @@ impl TestContext {
         self.source_manager.clone()
     }
 
+    fn assess<T>(&self, outcome: Outcome<Option<T>>) -> Result<T, Report> {
+        assess_test_outcome(outcome, self.source_manager(), self.warnings_as_errors)
+    }
+
     /// Parse the given source file into a vector of top-level [Form]s.
     ///
     /// This does not run semantic analysis, or construct a [Module] from the parsed
@@ -122,7 +120,7 @@ impl TestContext {
     #[cfg(feature = "testing")]
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        parser::parse_forms(source)
+        self.assess(parser::parse_forms(source))
     }
 
     /// Parse the given source file into an executable [Module].
@@ -131,7 +129,7 @@ impl TestContext {
     /// valid.
     #[track_caller]
     pub fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
+        self.assess(source.parse(self.source_manager()))
     }
 
     /// Parse the given source file into a kernel [Module].
@@ -141,8 +139,7 @@ impl TestContext {
     #[track_caller]
     pub fn parse_kernel(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Kernel));
-        parser.set_warnings_as_errors(self.assembler.warnings_as_errors());
-        parser.parse(Some(Path::KERNEL), source, self.source_manager())
+        self.assess(parser.parse(Some(Path::KERNEL), source, self.source_manager()))
     }
 
     /// Parse the given source file into an anonymous library [Module].
@@ -151,14 +148,17 @@ impl TestContext {
     /// valid.
     #[track_caller]
     pub fn parse_module(&self, source: impl Parse) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
+        self.assess(source.parse(self.source_manager()))
     }
 
     /// Add `module` to the [Assembler] constructed by this context, making it available to
     /// other modules.
     #[track_caller]
     pub fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
-        self.assembler.compile_and_statically_link(module).map(|_| ())
+        let source_manager = self.source_manager();
+        let warnings_as_errors = self.warnings_as_errors;
+        let outcome = self.assembler.compile_and_statically_link(module);
+        assess_test_outcome(outcome, source_manager, warnings_as_errors).map(|_| ())
     }
 
     /// Add the modules of `library` to the [Assembler] constructed by this context.
@@ -173,7 +173,8 @@ impl TestContext {
     /// module represented in `source`.
     #[track_caller]
     pub fn assemble(&self, source: impl Parse) -> Result<Program, Report> {
-        Ok(self.assembler().assemble_program("test", source)?.unwrap_program())
+        self.assess(self.assembler().assemble_program("test", source))
+            .map(|package| package.unwrap_program())
     }
 
     /// Compile a library package from `modules` using the [Assembler] constructed by this context.
@@ -188,7 +189,7 @@ impl TestContext {
         support: impl IntoIterator<Item = Box<Module>>,
     ) -> Result<Box<miden_mast_package::Package>, Report> {
         let version = version.unwrap_or("0.0.0").parse().unwrap();
-        let mut package = self.assembler().assemble_library(name, root, support)?;
+        let mut package = self.assess(self.assembler().assemble_library(name, root, support))?;
         package.version = version;
         Ok(package)
     }
@@ -397,9 +398,13 @@ mod package_features {
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
+            let source_manager = self.source_manager();
+            let warnings_as_errors = self.warnings_as_errors;
             let mut project_assembler =
                 assembler.for_project_at_path(manifest_path, &mut self.registry)?;
-            project_assembler.assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"))
+            let outcome = project_assembler
+                .assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"));
+            assess_test_outcome(outcome, source_manager, warnings_as_errors)
         }
 
         /// Assembles the executable target `name` of the package from `manifest_path`, using
@@ -418,12 +423,15 @@ mod package_features {
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
+            let source_manager = self.source_manager();
+            let warnings_as_errors = self.warnings_as_errors;
             let mut project_assembler =
                 assembler.for_project_at_path(manifest_path, &mut self.registry)?;
-            project_assembler.assemble(
+            let outcome = project_assembler.assemble(
                 ProjectTargetSelector::Executable(name.unwrap_or(Path::EXEC_PATH)),
                 profile.unwrap_or("dev"),
-            )
+            );
+            assess_test_outcome(outcome, source_manager, warnings_as_errors)
         }
 
         /// Assembles a package named `name` with `version` and `dependencies`, containing a single
@@ -457,8 +465,7 @@ mod package_features {
             let module = self.parse_module(source_file).unwrap();
             let name = PackageId::from(name);
             let mut package = self
-                .assembler()
-                .assemble_library(name, module, None::<Box<Module>>)
+                .assess(self.assembler().assemble_library(name, module, None::<Box<Module>>))
                 .expect("failed to assemble library");
             package.version = version.parse().unwrap();
             for (name, version, kind, digest) in dependencies {
@@ -474,5 +481,165 @@ mod package_features {
             }
             package
         }
+    }
+}
+
+fn assess_test_outcome<T>(
+    outcome: Outcome<Option<T>>,
+    source_manager: Arc<dyn SourceManager>,
+    warnings_as_errors: bool,
+) -> Result<T, Report> {
+    let policy_failed = if warnings_as_errors {
+        outcome.diagnostics.assess(&WarningsAsErrors)
+    } else {
+        outcome.diagnostics.assess(&DefaultFailurePolicy)
+    };
+    if !policy_failed && let Some(value) = outcome.value {
+        return Ok(value);
+    }
+
+    let report = if warnings_as_errors {
+        report_for_failed_test_outcome(outcome.diagnostics, &WarningsAsErrors)
+    } else {
+        report_for_failed_test_outcome(outcome.diagnostics, &DefaultFailurePolicy)
+    };
+    Err(report.attach_session_sources(source_manager))
+}
+
+fn report_for_failed_test_outcome<P>(diagnostics: DiagnosticSet, policy: &P) -> Report
+where
+    P: FailurePolicy + ?Sized,
+{
+    let mut entries = diagnostics.into_vec();
+    let primary_index = entries
+        .iter()
+        .position(|entry| policy.is_failure(entry.metadata()))
+        .or((!entries.is_empty()).then_some(0));
+    let Some(primary_index) = primary_index else {
+        return Report::msg("test operation failed without producing a diagnostic");
+    };
+    let primary = entries.remove(primary_index).diagnostic;
+    if entries.is_empty() {
+        return Report::from_diagnostic(primary);
+    }
+
+    let related = entries.into_iter().map(|entry| entry.diagnostic).collect();
+    Report::new(TestDiagnosticBundle { primary, related })
+}
+
+/// Adapts a set of independently emitted diagnostics to the single-report shape expected by
+/// legacy test helpers without discarding any occurrences.
+#[derive(Debug)]
+struct TestDiagnosticBundle {
+    primary: OwnedDiagnostic,
+    related: Vec<OwnedDiagnostic>,
+}
+
+impl Diagnostic for TestDiagnosticBundle {
+    fn message(&self, out: &mut dyn core::fmt::Write) -> core::fmt::Result {
+        self.primary.message(out)
+    }
+
+    fn descriptor(&self) -> Option<&'static DiagnosticDescriptor> {
+        self.primary.descriptor()
+    }
+
+    fn code(&self) -> Option<DiagnosticCodeRef<'_>> {
+        self.primary.code()
+    }
+
+    fn severity(&self) -> Severity {
+        self.primary.severity()
+    }
+
+    fn tags(&self) -> &[DiagnosticTag] {
+        self.primary.tags()
+    }
+
+    fn visit(&self, visitor: &mut dyn VisitDiagnostic) {
+        self.primary.visit(visitor);
+        for diagnostic in &self.related {
+            visitor.related(diagnostic);
+        }
+    }
+
+    fn cause(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        self.primary.cause()
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.primary.diagnostic_source()
+    }
+}
+
+/// Test-only compatibility helpers for explicitly assessing an assembly outcome.
+///
+/// Production callers should retain the [`Outcome`] and choose a failure policy at their
+/// application boundary. These helpers keep unit tests concise while using the default
+/// error-only policy used by the old direct assembler APIs.
+#[cfg(test)]
+pub(crate) trait TestOutcomeExt<T> {
+    fn into_test_result(self) -> Result<T, Report>;
+
+    #[track_caller]
+    fn unwrap(self) -> T;
+
+    #[track_caller]
+    fn expect(self, message: &str) -> T;
+
+    #[track_caller]
+    fn expect_err(self, message: &str) -> Report;
+
+    fn is_ok(&self) -> bool;
+    fn is_err(&self) -> bool;
+
+    fn map<U>(self, map: impl FnOnce(T) -> U) -> Result<U, Report>;
+
+    fn context(self, message: &'static str) -> Result<T, Report>;
+}
+
+#[cfg(test)]
+impl<T> TestOutcomeExt<T> for Outcome<Option<T>> {
+    fn into_test_result(self) -> Result<T, Report> {
+        let failed = self.value.is_none() || self.diagnostics.assess(&DefaultFailurePolicy);
+        if !failed {
+            return Ok(self.value.expect("a successful test outcome must contain a value"));
+        }
+
+        Err(report_for_failed_test_outcome(self.diagnostics, &DefaultFailurePolicy))
+    }
+
+    #[track_caller]
+    fn unwrap(self) -> T {
+        self.into_test_result().unwrap()
+    }
+
+    #[track_caller]
+    fn expect(self, message: &str) -> T {
+        self.into_test_result().unwrap_or_else(|error| panic!("{message}: {error:?}"))
+    }
+
+    #[track_caller]
+    fn expect_err(self, message: &str) -> Report {
+        match self.into_test_result() {
+            Ok(_) => panic!("{message}"),
+            Err(error) => error,
+        }
+    }
+
+    fn is_ok(&self) -> bool {
+        self.value.is_some() && !self.diagnostics.assess(&DefaultFailurePolicy)
+    }
+
+    fn is_err(&self) -> bool {
+        !self.is_ok()
+    }
+
+    fn map<U>(self, map: impl FnOnce(T) -> U) -> Result<U, Report> {
+        self.into_test_result().map(map)
+    }
+
+    fn context(self, message: &'static str) -> Result<T, Report> {
+        self.into_test_result().map_err(|error| error.context(message))
     }
 }

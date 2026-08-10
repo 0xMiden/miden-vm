@@ -1,6 +1,6 @@
 use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{Report, diagnostic},
 };
 use miden_core::{Felt, WORD_SIZE, operations::Operation::*};
 
@@ -137,14 +137,14 @@ pub fn local_to_absolute_addr(
     instr_span: SourceSpan,
 ) -> Result<(), Report> {
     if num_proc_locals == 0 {
-        return Err(RelatedLabel::error("invalid procedure local reference")
-            .with_labeled_span(
-                proc_ctx.span(),
-                "this procedure definition does not allocate any locals",
-            )
-            .with_labeled_span(instr_span, "the procedure local index referenced here is invalid")
-            .with_source_file(proc_ctx.source_manager().get(instr_span.source_id()).ok())
-            .into());
+        return Err(Report::new(diagnostic! {
+            severity: Error,
+            message: "invalid procedure local reference",
+            labels: [
+                primary(instr_span, "the procedure local index referenced here is invalid"),
+                context(proc_ctx.span(), "this procedure definition does not allocate any locals"),
+            ],
+        }));
     }
 
     // If a single local value is being accessed, then the index can take the full range
@@ -155,13 +155,17 @@ pub fn local_to_absolute_addr(
     } else {
         // If a word local value is used, then the procedure needs at least 4 local values.
         num_proc_locals.checked_sub(4).ok_or_else(|| {
-            RelatedLabel::error("invalid procedure local reference")
-                .with_labeled_span(
-                    proc_ctx.span(),
-                    format!("this procedure only allocates {num_proc_locals} locals"),
-                )
-                .with_labeled_span(instr_span, "but this instruction expects at least 4")
-                .with_source_file(proc_ctx.source_manager().get(instr_span.source_id()).ok())
+            Report::new(diagnostic! {
+                severity: Error,
+                message: "invalid procedure local reference",
+                labels: [
+                    primary(instr_span, "but this instruction expects at least 4"),
+                    context(
+                        proc_ctx.span(),
+                        (format!("this procedure only allocates {num_proc_locals} locals"))
+                    ),
+                ],
+            })
         })?
     };
 
@@ -169,19 +173,23 @@ pub fn local_to_absolute_addr(
     // local value from the frame pointer.
     // The offset is in the range [1, num_proc_locals], which is then subtracted from `fmp`.
     if index_of_local > max {
-        return Err(RelatedLabel::error("invalid procedure local index")
-            .with_help(
-                if is_single {
-                    "the index is greater than the number of allocated locals"
-                } else {
-                    "this instruction expects a word-sized value, so at least 4 locals must be addressable at the given index"
-                }
-            )
-            .with_labeled_span(proc_ctx.span(),  format!("this procedure only allocates {num_proc_locals} locals"))
-            .with_labeled_span(instr_span, "but this local index would reach out of bounds")
-            .with_source_file(proc_ctx.source_manager().get(instr_span.source_id()).ok())
-            .into()
-        );
+        let help = if is_single {
+            "the index is greater than the number of allocated locals"
+        } else {
+            "this instruction expects a word-sized value, so at least 4 locals must be addressable at the given index"
+        };
+        return Err(Report::new(diagnostic! {
+            severity: Error,
+            message: "invalid procedure local index",
+            labels: [
+                primary(instr_span, "but this local index would reach out of bounds"),
+                context(
+                    proc_ctx.span(),
+                    (format!("this procedure only allocates {num_proc_locals} locals"))
+                ),
+            ],
+            notes: [help((help))],
+        }));
     }
 
     // The frame pointer is always incremented by a word-aligned number of locals to ensure

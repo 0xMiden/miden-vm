@@ -17,6 +17,7 @@ use miden_assembly_syntax_cst::{
 };
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::TextRange;
 
 use super::context::LoweringContext;
 use crate::{
@@ -1136,9 +1137,9 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     fn current_span(&self) -> SourceSpan {
-        self.current()
-            .map(|token| self.token_span(&token))
-            .unwrap_or_else(|| SourceSpan::at(self.span.source_id(), self.span.end()))
+        self.current().map(|token| self.token_span(&token)).unwrap_or_else(|| {
+            SourceSpan::at(self.span.source(), self.span.revision(), self.span.range().end())
+        })
     }
 
     /// Constructs a generic syntax error anchored at the current cursor position.
@@ -1364,7 +1365,12 @@ fn parse_u32_literal(span: SourceSpan, text: &str) -> Result<u32, ParsingError> 
 
 /// Joins two spans that are known to belong to the same source file.
 fn join_spans(start: SourceSpan, end: SourceSpan) -> SourceSpan {
-    SourceSpan::new(start.source_id(), start.start()..end.end())
+    SourceSpan::new(
+        start.source(),
+        start.revision(),
+        TextRange::new(start.range().start(), end.range().end())
+            .expect("ordered tokens must produce an ordered span"),
+    )
 }
 
 /// Returns the closing delimiter text corresponding to `kind`.
@@ -1387,6 +1393,7 @@ mod tests {
         parse_source_file,
     };
     use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+    use miden_diagnostics::Outcome;
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -1404,8 +1411,8 @@ pub proc foo(a: felt, b: ptr<u8, addrspace(byte)>) -> (ok: i1, value: [u32; 4])
 end
 ",
         );
-        let parse = parse_source_file(source);
-        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
         let procedure = source_file
@@ -1456,8 +1463,8 @@ end
     fn lowers_named_type_alias_bodies_from_cst_tokens() {
         let source =
             test_source_file("type Point = struct { x: u32, y: ptr<u8, addrspace(byte)> }\n");
-        let parse = parse_source_file(source);
-        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
         let type_decl = source_file
@@ -1511,8 +1518,8 @@ proc foo
 end
 ",
         );
-        let parse = parse_source_file(source);
-        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
         let procedure = source_file
@@ -1563,8 +1570,8 @@ end
     #[test]
     fn lowers_advice_map_decls_from_cst_tokens() {
         let source = test_source_file("adv_map TABLE([1, 2, 3, 4]) = [5, 6, 7]\n");
-        let parse = parse_source_file(source);
-        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
         let advice_map = source_file

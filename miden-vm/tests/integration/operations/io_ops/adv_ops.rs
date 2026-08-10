@@ -35,7 +35,7 @@ fn adv_push_invalid() {
     let test = build_op_test!("adv_push");
     expect_exec_error_matches!(
         test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
+        ExecutionError::AdviceError { err, .. } if matches!(*err, AdviceError::StackReadFailed)
     )
 }
 
@@ -68,7 +68,7 @@ fn adv_loadw_invalid() {
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
+        ExecutionError::AdviceError { err, .. } if matches!(*err, AdviceError::StackReadFailed)
     );
 }
 
@@ -77,7 +77,7 @@ fn adv_pushw_invalid() {
     let test = build_op_test!("adv_pushw", &[], &[1, 2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
+        ExecutionError::AdviceError { err, .. } if matches!(*err, AdviceError::StackReadFailed)
     );
 }
 

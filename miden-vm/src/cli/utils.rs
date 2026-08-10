@@ -2,7 +2,10 @@ use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage,
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
+    diagnostics::{
+        DefaultFailurePolicy, Emitter, IntoDiagnostic, Outcome, Report, SourceProvider,
+        StderrEmitter, WrapErr,
+    },
 };
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
@@ -13,6 +16,23 @@ use miden_mast_package::{
 use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
+
+pub(crate) fn finish_assembly_outcome<T>(
+    outcome: Outcome<Option<T>>,
+    sources: &dyn SourceProvider,
+    context: &'static str,
+) -> Result<T, Report> {
+    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&DefaultFailurePolicy);
+    if !outcome.diagnostics.is_empty() {
+        let prepared = outcome.diagnostics.prepare(sources).map_err(Report::from_error)?;
+        StderrEmitter::default().emit_set(&prepared).map_err(Report::from_error)?;
+    }
+    if failed {
+        Err(Report::msg(context))
+    } else {
+        Ok(outcome.value.expect("a successful assembly outcome must contain a value"))
+    }
+}
 
 /// Returns a `Program` type from a `.masp` package file.
 pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
@@ -62,12 +82,14 @@ pub fn get_masm_program(
             "masm" => {
                 // Compile kernel from assembly source
                 // Assembler debug mode is always enabled (issue #1821)
-                Assembler::new(source_manager.clone())
-                    .assemble_kernel_from_root("kernel", kernel_path)
-                    .map(Arc::from)
-                    .wrap_err_with(|| {
-                        format!("Failed to compile kernel from `{}`", kernel_path.display())
-                    })?
+                let outcome = Assembler::new(source_manager.clone())
+                    .assemble_kernel_from_root("kernel", kernel_path);
+                finish_assembly_outcome(
+                    outcome,
+                    source_manager.as_ref(),
+                    "Failed to compile kernel",
+                )
+                .map(Arc::from)?
             },
             _ => {
                 return Err(Report::msg(format!(
@@ -94,9 +116,11 @@ pub fn get_masm_program(
         }
 
         // Compile the program
-        assembler
-            .assemble_program("program", program_file.ast().clone())
-            .wrap_err("Failed to compile program")?
+        finish_assembly_outcome(
+            assembler.assemble_program("program", program_file.ast().clone()),
+            source_manager.as_ref(),
+            "Failed to compile program",
+        )?
     } else {
         // No kernel, use the standard compilation path
         program_file.compile_package(libraries.libraries.iter().cloned())?

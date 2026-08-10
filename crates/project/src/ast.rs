@@ -32,7 +32,9 @@ pub use self::{
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
 };
-use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
+use miden_diagnostics::{SourceKey, TextRange};
+
+use crate::{Diagnostic, Report, SourceFile, SourceSpan};
 
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]
@@ -83,14 +85,18 @@ impl MidenProject {
                 .map(|span| {
                     let start = span.start as u32;
                     let end = span.end as u32;
-                    SourceSpan::new(source.id(), start..end)
+                    SourceSpan::session(
+                        source.id(),
+                        TextRange::new(start, end).expect("invalid TOML error span"),
+                    )
                 })
                 .unwrap_or_default();
-            Report::from(ProjectFileError::ParseError {
+            ProjectFileError::ParseError {
                 message: err.message().to_string(),
                 source_file: source.clone(),
                 span,
-            })
+            }
+            .into_report()
         })?;
         if toml.contains_key("workspace") {
             Ok(Self::Workspace(Box::new(WorkspaceFile::parse(source)?)))
@@ -107,58 +113,54 @@ pub(crate) enum ProjectFileError {
     #[error("unable to parse project manifest: {message}")]
     ParseError {
         message: String,
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
     },
     #[error("invalid project name")]
-    #[diagnostic(help("The project name must be a valid Miden Assembly namespace identifier"))]
+    #[diagnostic(help = "The project name must be a valid Miden Assembly namespace identifier")]
     InvalidProjectName {
-        #[source_code]
         source_file: Arc<SourceFile>,
-        #[label(primary)]
-        label: Label,
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
     },
     #[error("invalid workspace dependency specification")]
     InvalidWorkspaceDependency {
-        #[source_code]
         source_file: Arc<SourceFile>,
-        #[label(primary)]
-        label: Label,
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
     },
-    #[error("invalid dependency specification: {}", label.label().unwrap_or(""))]
+    #[error("invalid dependency specification: {message}")]
     InvalidPackageDependency {
-        #[source_code]
         source_file: Arc<SourceFile>,
-        #[label(primary)]
-        label: Label,
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
     },
     #[error("invalid build target configuration")]
     InvalidBuildTargets {
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[related]
-        related: Vec<RelatedError>,
+        related: Vec<BuildTargetDiagnostic>,
     },
     #[error("package is not a member of a workspace")]
     NotAWorkspace {
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
     },
-    #[error("failed to load workspace member: {}", span.label().unwrap_or("unknown"))]
+    #[error("failed to load workspace member: {message}")]
     LoadWorkspaceMemberFailed {
-        #[source_code]
         source_file: Arc<SourceFile>,
-        #[label(primary)]
-        span: Label,
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
     },
     #[error("duplicate workspace member package name '{name}'")]
     DuplicateWorkspaceMember {
         name: String,
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary, "duplicate workspace member")]
         span: SourceSpan,
@@ -168,7 +170,6 @@ pub(crate) enum ProjectFileError {
     #[error("no profile named '{name}' has been defined yet")]
     UnknownProfile {
         name: Arc<str>,
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
@@ -176,7 +177,6 @@ pub(crate) enum ProjectFileError {
     #[error("cannot redefine profile '{name}'")]
     DuplicateProfile {
         name: Arc<str>,
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
@@ -185,16 +185,113 @@ pub(crate) enum ProjectFileError {
     },
     #[error("missing required field 'version'")]
     MissingVersion {
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
     },
     #[error("workspace does not define 'version'")]
     MissingWorkspaceVersion {
-        #[source_code]
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: SourceSpan,
     },
+}
+
+impl ProjectFileError {
+    /// Convert this diagnostic to an owned report that can render its source without a session
+    /// source manager.
+    pub(crate) fn into_report(mut self) -> Report {
+        let source_file = Arc::clone(self.source_file());
+        self.attach_to(source_file.id());
+        Report::new(self).attach_sources(source_file.slice(0..u32::MAX))
+    }
+
+    fn source_file(&self) -> &Arc<SourceFile> {
+        match self {
+            Self::ParseError { source_file, .. }
+            | Self::InvalidProjectName { source_file, .. }
+            | Self::InvalidWorkspaceDependency { source_file, .. }
+            | Self::InvalidPackageDependency { source_file, .. }
+            | Self::InvalidBuildTargets { source_file, .. }
+            | Self::NotAWorkspace { source_file, .. }
+            | Self::LoadWorkspaceMemberFailed { source_file, .. }
+            | Self::DuplicateWorkspaceMember { source_file, .. }
+            | Self::UnknownProfile { source_file, .. }
+            | Self::DuplicateProfile { source_file, .. }
+            | Self::MissingVersion { source_file, .. }
+            | Self::MissingWorkspaceVersion { source_file, .. } => source_file,
+        }
+    }
+
+    fn attach_to(&mut self, source_id: crate::SourceId) {
+        let attach = |span: &mut SourceSpan| span.set_source_key(SourceKey::Attached(source_id));
+        match self {
+            Self::ParseError { span, .. }
+            | Self::InvalidProjectName { span, .. }
+            | Self::InvalidWorkspaceDependency { span, .. }
+            | Self::InvalidPackageDependency { span, .. }
+            | Self::NotAWorkspace { span, .. }
+            | Self::LoadWorkspaceMemberFailed { span, .. }
+            | Self::UnknownProfile { span, .. }
+            | Self::MissingVersion { span, .. }
+            | Self::MissingWorkspaceVersion { span, .. } => attach(span),
+            Self::InvalidBuildTargets { related, .. } => {
+                for diagnostic in related {
+                    diagnostic.attach_to(source_id);
+                }
+            },
+            Self::DuplicateWorkspaceMember { span, prev, .. }
+            | Self::DuplicateProfile { span, prev, .. } => {
+                attach(span);
+                attach(prev);
+            },
+        }
+    }
+}
+
+/// Additional context for one invalid build target or a group of conflicting targets.
+#[derive(Debug, Diagnostic)]
+pub(crate) enum BuildTargetDiagnostic {
+    #[diagnostic(
+        message = "invalid library target",
+        help = "Library targets may only be of kind 'library', 'kernel', 'account-component', 'note-script', or 'tx-script'"
+    )]
+    InvalidLibraryTarget {
+        #[label(primary, "this is not a valid target type for a library")]
+        span: SourceSpan,
+    },
+    #[diagnostic(message = "build target conflicts found")]
+    TargetConflict {
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
+        #[label("conflict occurs here")]
+        conflicts: Vec<SourceSpan>,
+    },
+}
+
+impl BuildTargetDiagnostic {
+    pub(crate) fn target_conflict(span: SourceSpan, message: String, conflict: SourceSpan) -> Self {
+        Self::TargetConflict { message, span, conflicts: vec![conflict] }
+    }
+
+    pub(crate) fn add_conflict(&mut self, conflict: SourceSpan) {
+        let Self::TargetConflict { conflicts, .. } = self else {
+            unreachable!("only target conflict diagnostics collect conflicting spans");
+        };
+        conflicts.push(conflict);
+    }
+
+    fn attach_to(&mut self, source_id: crate::SourceId) {
+        let attach = |span: &mut SourceSpan| span.set_source_key(SourceKey::Attached(source_id));
+        match self {
+            Self::InvalidLibraryTarget { span } => attach(span),
+            Self::TargetConflict { span, conflicts, .. } => {
+                attach(span);
+                for conflict in conflicts {
+                    attach(conflict);
+                }
+            },
+        }
+    }
 }

@@ -18,7 +18,9 @@ use miden_assembly_syntax::{
         SymbolResolution, Visibility, types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
+    diagnostics::{
+        DiagnosticCollector, DiagnosticSet, IntoDiagnostic, Outcome, Report, diagnostic,
+    },
     module::ItemInfo,
 };
 use miden_core::{
@@ -47,6 +49,19 @@ use crate::{
     },
     mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceNodeRef, StaticLibrary},
 };
+
+/// The result of an assembly operation, with diagnostic output kept separate from its value.
+///
+/// A missing value indicates that parsing, linking, or assembly failed. Warning and informational
+/// diagnostics may accompany a successfully produced value.
+pub type AssemblyOutcome<T> = Outcome<Option<T>>;
+
+fn finish_diagnostics(
+    diagnostics: DiagnosticCollector,
+    sources: &Arc<dyn SourceManager>,
+) -> DiagnosticSet {
+    diagnostics.finish().attach_session_sources(sources.clone())
+}
 
 /// Maximum number of locals a single procedure may allocate.
 ///
@@ -165,8 +180,6 @@ pub struct Assembler {
     source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
     linker: Box<Linker>,
-    /// Whether to treat warning diagnostics as errors
-    warnings_as_errors: bool,
     /// Whether to preserve debug information in the assembled artifact.
     pub(super) emit_debug_info: bool,
     /// Whether to trim source file paths in debug information.
@@ -180,7 +193,6 @@ impl Default for Assembler {
         Self {
             source_manager,
             linker,
-            warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
         }
@@ -196,7 +208,6 @@ impl Assembler {
         Self {
             source_manager,
             linker,
-            warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
         }
@@ -215,14 +226,6 @@ impl Assembler {
         })
     }
 
-    /// Sets the default behavior of this assembler with regard to warning diagnostics.
-    ///
-    /// When true, any warning diagnostics that are emitted will be promoted to errors.
-    pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
-        self.warnings_as_errors = yes;
-        self
-    }
-
     /// Configure this assembler based on configuration in `profile`
     pub fn with_profile(mut self, profile: &miden_project::Profile) -> Self {
         self.emit_debug_info = profile.should_emit_debug_info();
@@ -238,7 +241,10 @@ impl Assembler {
     ///
     /// The given module must be a library module, or an error will be returned.
     #[inline]
-    pub fn compile_and_statically_link(&mut self, module: impl Parse) -> Result<&mut Self, Report> {
+    pub fn compile_and_statically_link(
+        &mut self,
+        module: impl Parse,
+    ) -> AssemblyOutcome<&mut Self> {
         self.compile_and_statically_link_all([module])
     }
 
@@ -249,15 +255,23 @@ impl Assembler {
     pub fn compile_and_statically_link_all(
         &mut self,
         modules: impl IntoIterator<Item = impl Parse>,
-    ) -> Result<&mut Self, Report> {
-        let modules = modules
-            .into_iter()
-            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
-            .collect::<Result<Vec<_>, Report>>()?;
+    ) -> AssemblyOutcome<&mut Self> {
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
+        let Some(modules) = self.parse_modules(modules, &mut diagnostics) else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
 
-        self.linker.link_modules(modules)?;
-
-        Ok(self)
+        let value = diagnostics
+            .capture(self.linker.link_modules(modules).map_err(Report::from))
+            .map(|_| self);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     /// Compiles and statically links all Miden Assembly modules reachable from the provided root
@@ -313,18 +327,74 @@ impl Assembler {
         &mut self,
         root: impl AsRef<std::path::Path>,
         namespace: Option<&Path>,
-    ) -> Result<(), Report> {
+    ) -> AssemblyOutcome<()> {
         use miden_assembly_syntax::parser;
 
-        let (root, modules) = parser::read_modules_from_root(
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
+        let Some(outcome) = diagnostics.capture(parser::read_modules_from_root(
             root,
             namespace.map(Into::into),
             None,
             self.source_manager.clone(),
-            self.warnings_as_errors,
-        )?;
-        self.linker.link_modules(core::iter::once(root).chain(modules))?;
-        Ok(())
+        )) else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
+        let has_errors = outcome.diagnostics.has_errors();
+        let _ = diagnostics.merge(outcome.diagnostics);
+        if has_errors {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        }
+        let Some((root, modules)) = outcome.value else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
+        let value = diagnostics
+            .capture(
+                self.linker
+                    .link_modules(core::iter::once(root).chain(modules))
+                    .map_err(Report::from),
+            )
+            .map(|_| ());
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
+    }
+
+    // The parser deliberately returns boxed modules to keep deeply nested ASTs off recursive
+    // caller frames; collecting them must preserve that representation.
+    #[allow(clippy::vec_box)]
+    fn parse_modules<I, P>(
+        &self,
+        modules: I,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Option<Vec<Box<ast::Module>>>
+    where
+        I: IntoIterator<Item = P>,
+        P: Parse,
+    {
+        let mut parsed = Vec::new();
+        let mut complete = true;
+        for module in modules {
+            let outcome = module.parse(self.source_manager.clone());
+            let has_errors = outcome.diagnostics.has_errors();
+            let _ = diagnostics.merge(outcome.diagnostics);
+            match (has_errors, outcome.value) {
+                (true, _) => complete = false,
+                (false, Some(module)) => parsed.push(module),
+                (false, None) => complete = false,
+            }
+        }
+        complete.then_some(parsed)
     }
 
     /// Link against `package` with the specified linkage mode during assembly.
@@ -362,11 +432,6 @@ impl Assembler {
 // ------------------------------------------------------------------------------------------------
 /// Public Accessors
 impl Assembler {
-    /// Returns true if this assembler promotes warning diagnostics as errors by default.
-    pub fn warnings_as_errors(&self) -> bool {
-        self.warnings_as_errors
-    }
-
     /// Returns a reference to the kernel for this assembler.
     ///
     /// If the assembler was instantiated without a kernel, the internal kernel will be empty.
@@ -399,16 +464,31 @@ impl Assembler {
         name: impl Into<PackageId>,
         root: impl Parse,
         support: impl IntoIterator<Item = impl Parse>,
-    ) -> Result<Box<Package>, Report> {
-        let root = root.parse(self.warnings_as_errors, self.source_manager.clone())?;
-        let support = support
-            .into_iter()
-            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
-            .collect::<Result<Vec<_>, Report>>()?;
-
+    ) -> AssemblyOutcome<Box<Package>> {
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
+        let Some(mut modules) = self.parse_modules(core::iter::once(root), &mut diagnostics) else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
+        let root = modules.pop().expect("the root module was parsed");
+        let Some(support) = self.parse_modules(support, &mut diagnostics) else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
         let emit_debug_info = self.emit_debug_info;
-        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact(emit_debug_info)
+        let result = self
+            .assemble_library_modules(name.into(), root, support, TargetType::Library)
+            .and_then(|product| product.into_artifact(emit_debug_info));
+        let value = diagnostics.capture(result);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     /// Assemble a library [`Package`] from the set of modules reachable from `root`.
@@ -420,25 +500,51 @@ impl Assembler {
         self,
         root: impl AsRef<std::path::Path>,
         namespace: Option<&Path>,
-    ) -> Result<Box<Package>, Report> {
+    ) -> AssemblyOutcome<Box<Package>> {
         use miden_assembly_syntax::parser;
 
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
         let root = root.as_ref().to_path_buf();
         let namespace = namespace.map(Into::into);
-        let (root, support) = parser::read_modules_from_root(
+        let Some(outcome) = diagnostics.capture(parser::read_modules_from_root(
             &root,
             namespace,
             Some(ModuleKind::Library),
             self.source_manager.clone(),
-            self.warnings_as_errors,
-        )?;
+        )) else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
+        let has_errors = outcome.diagnostics.has_errors();
+        let _ = diagnostics.merge(outcome.diagnostics);
+        if has_errors {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        }
+        let Some((root, support)) = outcome.value else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
 
         // Derive the package name from the namespace of the root module
         let name = root.path().to_relative().as_str().replace("::", "-");
 
         let emit_debug_info = self.emit_debug_info;
-        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact(emit_debug_info)
+        let result = self
+            .assemble_library_modules(name.into(), root, support, TargetType::Library)
+            .and_then(|product| product.into_artifact(emit_debug_info));
+        let value = diagnostics.capture(result);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     /// Assembles the provided module into a kernel package.
@@ -451,10 +557,18 @@ impl Assembler {
         name: impl Into<PackageId>,
         root: Box<ast::Module>,
         support: impl IntoIterator<Item = Box<ast::Module>>,
-    ) -> Result<Box<Package>, Report> {
+    ) -> AssemblyOutcome<Box<Package>> {
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
         let emit_debug_info = self.emit_debug_info;
-        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact(emit_debug_info)
+        let result = self
+            .assemble_library_modules(name.into(), root, support, TargetType::Kernel)
+            .and_then(|product| product.into_artifact(emit_debug_info));
+        let value = diagnostics.capture(result);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -475,20 +589,48 @@ impl Assembler {
         self,
         name: impl Into<PackageId>,
         sys_module_path: impl AsRef<std::path::Path>,
-    ) -> Result<Box<Package>, Report> {
+    ) -> AssemblyOutcome<Box<Package>> {
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
         let sys_module_path = sys_module_path.as_ref();
         let namespace = Some(Path::KERNEL.into());
-        let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
-            sys_module_path,
-            namespace,
-            Some(ModuleKind::Kernel),
-            self.source_manager.clone(),
-            self.warnings_as_errors,
-        )?;
+        let Some(outcome) =
+            diagnostics.capture(miden_assembly_syntax::parser::read_modules_from_root(
+                sys_module_path,
+                namespace,
+                Some(ModuleKind::Kernel),
+                self.source_manager.clone(),
+            ))
+        else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
+        let has_errors = outcome.diagnostics.has_errors();
+        let _ = diagnostics.merge(outcome.diagnostics);
+        if has_errors {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        }
+        let Some((root, support)) = outcome.value else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
 
         let emit_debug_info = self.emit_debug_info;
-        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact(emit_debug_info)
+        let result = self
+            .assemble_library_modules(name.into(), root, support, TargetType::Kernel)
+            .and_then(|product| product.into_artifact(emit_debug_info));
+        let value = diagnostics.capture(result);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -777,17 +919,43 @@ impl Assembler {
         self,
         name: impl Into<PackageId>,
         source: impl Parse,
-    ) -> Result<Box<Package>, Report> {
-        let program = source.parse(self.warnings_as_errors, self.source_manager.clone())?;
+    ) -> AssemblyOutcome<Box<Package>> {
+        let sources = self.source_manager.clone();
+        let mut diagnostics = DiagnosticCollector::new();
+        let outcome = source.parse(self.source_manager.clone());
+        let has_errors = outcome.diagnostics.has_errors();
+        let _ = diagnostics.merge(outcome.diagnostics);
+        if has_errors {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        }
+        let Some(program) = outcome.value else {
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
+        };
         if !program.is_executable() {
-            return Err(Report::msg(
+            let _ = diagnostics.add_report(Report::msg(
                 "unable to assemble program: source is not an executable module",
             ));
+            return Outcome {
+                value: None,
+                diagnostics: finish_diagnostics(diagnostics, &sources),
+            };
         }
 
         let emit_debug_info = self.emit_debug_info;
-        self.assemble_executable_modules(name.into(), program, [])?
-            .into_artifact(emit_debug_info)
+        let result = self
+            .assemble_executable_modules(name.into(), program, [])
+            .and_then(|product| product.into_artifact(emit_debug_info));
+        let value = diagnostics.capture(result);
+        Outcome {
+            value,
+            diagnostics: finish_diagnostics(diagnostics, &sources),
+        }
     }
 
     pub(crate) fn assemble_library_modules(
@@ -1279,14 +1447,15 @@ impl Assembler {
         let target = import.target_path();
         let span = target.span();
 
-        RelatedLabel::error(format!(
-            "unable to {action} import '{symbol_path}' targeting '{}'",
-            target.inner()
-        ))
-        .with_labeled_span(span, "this import target does not resolve to a concrete item")
-        .with_help("imports must resolve to a concrete item before they can be used")
-        .with_source_file(self.source_manager.get(span.source_id()).ok())
-        .into()
+        Report::new(diagnostic! {
+            severity: Error,
+            message: (format!(
+                "unable to {action} import '{symbol_path}' targeting '{}'",
+                target.inner()
+            )),
+            labels: [primary(span, "this import target does not resolve to a concrete item")],
+            notes: [help("imports must resolve to a concrete item before they can be used")],
+        })
     }
 
     /// Compiles a single Miden Assembly procedure to its MAST representation.
@@ -1384,7 +1553,6 @@ impl Assembler {
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
                         return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
                             span: *span,
-                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
                             max_depth: MAX_CONTROL_FLOW_NESTING,
                         }));
                     }
@@ -1421,7 +1589,6 @@ impl Assembler {
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
                         return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
                             span: *span,
-                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
                             max_depth: MAX_CONTROL_FLOW_NESTING,
                         }));
                     }
@@ -1436,27 +1603,25 @@ impl Assembler {
 
                     let iteration_count = (*count).expect_value();
                     if iteration_count == 0 {
-                        return Err(RelatedLabel::error("invalid repeat count")
-                            .with_help("repeat count must be greater than 0")
-                            .with_labeled_span(count.span(), "repeat count must be at least 1")
-                            .with_source_file(
-                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                            )
-                            .into());
+                        return Err(Report::new(diagnostic! {
+                            severity: Error,
+                            message: "invalid repeat count",
+                            labels: [primary(count.span(), "repeat count must be at least 1")],
+                            notes: [help("repeat count must be greater than 0")],
+                        }));
                     }
                     if iteration_count > MAX_REPEAT_COUNT {
-                        return Err(RelatedLabel::error("invalid repeat count")
-                            .with_help(format!(
-                                "repeat count must be less than or equal to {MAX_REPEAT_COUNT}",
-                            ))
-                            .with_labeled_span(
+                        return Err(Report::new(diagnostic! {
+                            severity: Error,
+                            message: "invalid repeat count",
+                            labels: [primary(
                                 count.span(),
-                                format!("repeat count exceeds {MAX_REPEAT_COUNT}"),
-                            )
-                            .with_source_file(
-                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                            )
-                            .into());
+                                (format!("repeat count exceeds {MAX_REPEAT_COUNT}"))
+                            )],
+                            notes: [help((format!(
+                                "repeat count must be less than or equal to {MAX_REPEAT_COUNT}"
+                            )))],
+                        }));
                     }
 
                     for _ in 0..iteration_count {
@@ -1473,7 +1638,6 @@ impl Assembler {
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
                         return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
                             span: *span,
-                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
                             max_depth: MAX_CONTROL_FLOW_NESTING,
                         }));
                     }
@@ -1523,7 +1687,6 @@ impl Assembler {
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
                         return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
                             span: *span,
-                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
                             max_depth: MAX_CONTROL_FLOW_NESTING,
                         }));
                     }
@@ -1659,9 +1822,6 @@ impl Assembler {
         source_debug_root_id: Option<DebugSourceNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeRef, Report> {
-        // Get the procedure from the assembler
-        let current_source_file = self.source_manager.get(span.source_id()).ok();
-
         if matches!(kind, InvokeKind::SysCall) && self.linker.has_nonempty_kernel() {
             // NOTE: The assembler is expected to know the full set of all kernel
             // procedures at this point, so if the digest is not present in the kernel,
@@ -1678,11 +1838,7 @@ impl Assembler {
                         let digest_path = format!("{mast_root}");
                         Arc::<Path>::from(Path::new(&digest_path))
                     });
-                return Err(Report::new(LinkerError::InvalidSysCallTarget {
-                    span,
-                    source_file: current_source_file,
-                    callee,
-                }));
+                return Err(Report::new(LinkerError::InvalidSysCallTarget { span, callee }));
             }
         }
 

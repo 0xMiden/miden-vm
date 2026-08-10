@@ -1,15 +1,19 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 mod graph;
 
-use alloc::{format, sync::Arc, vec};
+#[cfg(feature = "std")]
+use alloc::format;
+use alloc::sync::Arc;
 use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Spanned;
+#[cfg(feature = "serde")]
+use miden_diagnostics::SourceKey;
 pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
+use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,9 +153,9 @@ pub enum InvalidDependencySpecError {
         span: SourceSpan,
     },
     #[error("digests cannot be used with 'git' dependencies")]
-    #[diagnostic(help(
-        "Package digests are only valid when depending on an already-assembled package"
-    ))]
+    #[diagnostic(
+        help = "Package digests are only valid when depending on an already-assembled package"
+    )]
     GitWithDigest {
         #[label(primary)]
         span: SourceSpan,
@@ -175,6 +179,25 @@ pub enum InvalidDependencySpecError {
         #[label(primary)]
         span: SourceSpan,
     },
+}
+
+#[cfg(feature = "serde")]
+impl InvalidDependencySpecError {
+    pub(crate) fn into_report(mut self, source_file: Arc<crate::SourceFile>) -> crate::Report {
+        let source_id = source_file.id();
+        let attach = |span: &mut SourceSpan| span.set_source_key(SourceKey::Attached(source_id));
+        match &mut self {
+            Self::NotAWorkspace { span }
+            | Self::GitWithDigest { span }
+            | Self::MissingGitRevision { span }
+            | Self::MissingVersion { span } => attach(span),
+            Self::ConflictingGitRevision { first, second } => {
+                attach(first);
+                attach(second);
+            },
+        }
+        crate::Report::new(self).attach_sources(source_file.slice(0..u32::MAX))
+    }
 }
 
 #[cfg(feature = "serde")]

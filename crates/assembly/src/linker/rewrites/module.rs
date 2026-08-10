@@ -1,14 +1,14 @@
-use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeSet, sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_assembly_syntax::{
-    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, module::ItemInfo,
+    ast::constants::eval::CachedConstantValue, diagnostics::OwnedDiagnostic, module::ItemInfo,
     sema::ConstEvalVisitor,
 };
 use miden_core::{Felt, events::EventId};
 
 use crate::{
-    ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
+    ModuleIndex, SourceSpan, Span, Spanned,
     ast::{
         self, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
         constants::ConstEnvironment,
@@ -35,15 +35,16 @@ pub struct ModuleRewriter<'a, 'b: 'a> {
     invoked: BTreeSet<Invoke>,
 }
 
+/// Keep recursive AST visitor frames independent of the size of [`LinkerError`].
+type RewriteBreak = Box<LinkerError>;
+
 macro_rules! wrap_const_control_flow {
     ($visitor:ident) => {
         match $visitor.into_result() {
             Ok(()) => return ControlFlow::Continue(()),
             Err(errs) => {
-                let errors = errs.into_iter().map(RelatedError::wrap).collect::<Vec<_>>();
-                return ControlFlow::Break(LinkerError::Related {
-                    errors: errors.into_boxed_slice(),
-                });
+                let errors = errs.into_iter().map(OwnedDiagnostic::new).collect::<Vec<_>>();
+                return ControlFlow::Break(Box::new(LinkerError::Related { errors }));
             },
         }
     };
@@ -65,10 +66,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
     }
 
     fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
-        LinkerError::InvalidConstantRef {
-            span,
-            source_file: self.get_source_file_for(span),
-        }
+        LinkerError::InvalidConstantRef { span }
     }
 
     fn get_constant_by_gid(
@@ -113,7 +111,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
         &mut self,
         kind: InvokeKind,
         target: &mut InvocationTarget,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         log::debug!(target: "linker", "    * rewriting {kind} target {target}");
         let context = SymbolResolutionContext {
             span: target.span(),
@@ -123,7 +121,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
         match self.resolver.resolve_invoke_target(&context, target) {
             Err(err) => {
                 log::error!(target: "linker", "    | failed to resolve target {target}");
-                return ControlFlow::Break(err);
+                return ControlFlow::Break(Box::new(err));
             },
             Ok(SymbolResolution::MastRoot(_)) => {
                 log::warn!(target: "linker", "    | resolved phantom target {target}");
@@ -153,7 +151,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
+impl<'a, 'b: 'a> VisitMut<RewriteBreak> for ModuleRewriter<'a, 'b> {
     fn visit_mut_inst(&mut self, inst: &mut Span<ast::Instruction>) -> ControlFlow<LinkerError> {
         match &mut **inst {
             ast::Instruction::EmitImm(event) | ast::Instruction::TraceImm(event) => {
@@ -174,7 +172,6 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
 
         visit::visit_mut_inst(self, inst)
     }
-
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<LinkerError> {
         log::debug!(target: "linker", "  | visiting {}", procedure.name());
         self.invoked.clear();
@@ -183,19 +180,22 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
         procedure.extend_invoked(core::mem::take(&mut self.invoked));
         ControlFlow::Continue(())
     }
-    fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
+    fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<RewriteBreak> {
         self.rewrite_target(InvokeKind::SysCall, target)
     }
-    fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
+    fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<RewriteBreak> {
         self.rewrite_target(InvokeKind::Call, target)
     }
     fn visit_mut_invoke_target(
         &mut self,
         target: &mut InvocationTarget,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         self.rewrite_target(InvokeKind::Exec, target)
     }
-    fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
+    fn visit_mut_immediate_u8(
+        &mut self,
+        imm: &mut ast::Immediate<u8>,
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_u8(imm);
         wrap_const_control_flow!(visitor)
@@ -203,7 +203,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_u16(
         &mut self,
         imm: &mut ast::Immediate<u16>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_u16(imm);
         wrap_const_control_flow!(visitor)
@@ -211,7 +211,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_u32(
         &mut self,
         imm: &mut ast::Immediate<u32>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_u32(imm);
         wrap_const_control_flow!(visitor)
@@ -219,7 +219,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_error_message(
         &mut self,
         imm: &mut ast::Immediate<Arc<str>>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_error_message(imm);
         wrap_const_control_flow!(visitor)
@@ -227,7 +227,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_felt(
         &mut self,
         imm: &mut ast::Immediate<Felt>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_felt(imm);
         wrap_const_control_flow!(visitor)
@@ -235,7 +235,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_push_value(
         &mut self,
         imm: &mut ast::Immediate<miden_assembly_syntax::parser::PushValue>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_push_value(imm);
         wrap_const_control_flow!(visitor)
@@ -243,7 +243,7 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_immediate_word_value(
         &mut self,
         imm: &mut ast::Immediate<miden_assembly_syntax::parser::WordValue>,
-    ) -> ControlFlow<LinkerError> {
+    ) -> ControlFlow<RewriteBreak> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_word_value(imm);
         wrap_const_control_flow!(visitor)
@@ -252,10 +252,6 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
 
 impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
     type Error = LinkerError;
-
-    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>> {
-        self.resolver.source_manager().get(span.source_id()).ok()
-    }
 
     fn get(&mut self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let name = Span::new(name.span(), name.as_str());

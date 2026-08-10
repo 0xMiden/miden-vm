@@ -97,6 +97,7 @@ mod tests {
         );
         let program: Program = Assembler::default()
             .assemble_program("program", &source)
+            .value
             .unwrap()
             .unwrap_program();
         let mut host = NonTracingTestHost::default();

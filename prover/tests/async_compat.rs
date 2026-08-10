@@ -69,6 +69,7 @@ fn simple_program() -> miden_processor::Program {
             end
             "#,
         )
+        .value
         .expect("program should compile")
         .unwrap_program()
 }
@@ -112,6 +113,7 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
     let event_id = event_name.to_event_id().as_u64();
     let program = Assembler::default()
         .assemble_program("program", format!("begin push.{event_id} emit drop end"))
+        .value
         .expect("program should compile")
         .unwrap_program();
 

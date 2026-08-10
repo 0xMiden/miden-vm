@@ -1,19 +1,23 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
-assertion_line: 352
+assertion_line: 368
 expression: fast_err
 ---
 OperationError {
     label: SourceSpan {
-        source_id: SourceId(
-            4294967295,
+        source: Session(
+            SourceId {
+                namespace: SourceNamespace(
+                    None,
+                ),
+                local: 4294967295,
+            },
         ),
-        start: ByteIndex(
-            0,
-        ),
-        end: ByteIndex(
-            0,
-        ),
+        revision: None,
+        range: TextRange {
+            start: 0,
+            end: 0,
+        },
     },
     source_file: None,
     err: NotBinaryValue {

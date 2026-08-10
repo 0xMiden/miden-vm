@@ -139,6 +139,7 @@ fn core_packages_do_not_block_sibling_miden_namespaces() {
             "namespace miden::protocol_utils\npub proc identity push.0 drop end",
             source_manager.clone(),
         )
+        .value
         .expect("protocol utility module should parse");
 
     let mut assembler = Assembler::new(source_manager);
@@ -148,6 +149,7 @@ fn core_packages_do_not_block_sibling_miden_namespaces() {
 
     assembler
         .assemble_library("miden-protocol-utils", protocol_utils, None::<Box<Module>>)
+        .value
         .expect("official packages must not claim the parent of miden::protocol_utils");
 }
 

@@ -502,11 +502,9 @@ mod tests {
         let err =
             InputFile::read(&None, &program_path).expect_err("missing input file should fail");
 
-        assert!(err.to_string().contains("Failed to open input file"));
-        assert!(
-            err.to_string()
-                .contains(&program_path.with_extension("inputs").display().to_string())
-        );
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("Failed to open input file"));
+        assert!(rendered.contains(&program_path.with_extension("inputs").display().to_string()));
     }
 
     #[test]
@@ -517,8 +515,9 @@ mod tests {
         let err = InputFile::read(&Some(inputs_path.clone()), &program_path)
             .expect_err("missing explicit input file should fail");
 
-        assert!(err.to_string().contains("Failed to open input file"));
-        assert!(err.to_string().contains(&inputs_path.display().to_string()));
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("Failed to open input file"));
+        assert!(rendered.contains(&inputs_path.display().to_string()));
     }
 
     #[test]

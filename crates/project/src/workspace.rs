@@ -94,36 +94,36 @@ impl Workspace {
             let Some(workspace_root) = workspace.workspace_root() else {
                 return Err(ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
-                    span: Label::new(
-                        member.span(),
-                        "cannot load workspace members for virtual workspace manifest: manifest path must be resolvable",
-                    ),
+                    message: "cannot load workspace members for virtual workspace manifest: manifest path must be resolvable".into(),
+                    span: member.span(),
                 }
-                .into());
+                .into_report());
             };
             let relative_path = Path::new(member.as_str());
             let member_dir = absolutize_path(relative_path, workspace_root).map_err(|err| {
                 ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
-                    span: Label::new(member.span(), err.to_string()),
+                    message: err.to_string(),
+                    span: member.span(),
                 }
+                .into_report()
             })?;
             if member_dir.strip_prefix(workspace_root).is_err() {
                 return Err(ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
-                    span: Label::new(
-                        member.span(),
-                        "workspace members must be located within the workspace root",
-                    ),
+                    message: "workspace members must be located within the workspace root".into(),
+                    span: member.span(),
                 }
-                .into());
+                .into_report());
             }
             let manifest_path = member_dir.join("miden-project.toml");
             let member_manifest = source_manager.load_file(&manifest_path).map_err(|err| {
                 ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
-                    span: Label::new(member.span(), err.to_string()),
+                    message: err.to_string(),
+                    span: member.span(),
                 }
+                .into_report()
             })?;
             let package = Package::load_from_workspace(member_manifest, &file)?;
             let package_name = package.name().inner().to_string();
@@ -134,7 +134,7 @@ impl Workspace {
                     span: member.span(),
                     prev,
                 }
-                .into());
+                .into_report());
             }
             workspace.members.push(Arc::from(package));
         }

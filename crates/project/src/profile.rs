@@ -86,7 +86,7 @@ impl Profile {
                         source_file: source,
                         span: parent.span(),
                     }
-                    .into());
+                    .into_report());
                 }
             },
             None => Profile::new(name.clone()),

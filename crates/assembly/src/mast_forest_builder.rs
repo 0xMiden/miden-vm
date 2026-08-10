@@ -760,10 +760,10 @@ impl MastForestBuilder {
         // then raise an error.
         if let Some(cached) = self.procedures.get(&gid) {
             if cached.mast_root() != procedure.mast_root() {
-                return Err(report!(
+                return Err(report!(message: (format!(
                     "procedure '{}' was compiled more than once with different MAST roots",
                     procedure.path()
-                ));
+                ))));
             }
 
             log::warn!(
@@ -792,11 +792,11 @@ impl MastForestBuilder {
             if !is_valid {
                 let first = cached.path();
                 let second = procedure.path();
-                return Err(report!(
+                return Err(report!(message: (format!(
                     "two procedures found with same mast root, but conflicting definitions ('{}' and '{}')",
                     first,
                     second
-                ));
+                ))));
             }
         }
 

@@ -24,6 +24,7 @@ std = [
     "dep:miden-package-registry",
     "miden-assembly-syntax/std",
     "miden-core/std",
+    "miden-diagnostics/std",
     "miden-mast-package/std",
     "miden-project/std",
     "proptest?/std",
@@ -37,6 +38,7 @@ logging = ["dep:env_logger"]
 # Miden dependencies
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
+miden-diagnostics.workspace = true
 miden-mast-package.workspace = true
 miden-package-registry = { workspace = true, optional = true }
 miden-project = { workspace = true, features = ["serde"] }

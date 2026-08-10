@@ -5,10 +5,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{Diagnostic, Severity};
+use miden_debug_types::{SourceManager, Span, Spanned};
+use miden_diagnostics::{DiagnosticCollector, Outcome};
 
-use super::{SemanticAnalysisError, SyntaxError};
+use super::SemanticAnalysisError;
 use crate::ast::{
     constants::{ConstEvalError, eval::CachedConstantValue},
     *,
@@ -20,22 +20,13 @@ pub struct AnalysisContext {
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
-    errors: Vec<SemanticAnalysisError>,
-    source_file: Arc<SourceFile>,
+    diagnostics: DiagnosticCollector,
     source_manager: Arc<dyn SourceManager>,
-    warnings_as_errors: bool,
 }
 
 impl constants::ConstEnvironment for AnalysisContext {
     type Error = SemanticAnalysisError;
 
-    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>> {
-        if span.source_id() == self.source_file.id() {
-            Some(self.source_file.clone())
-        } else {
-            None
-        }
-    }
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(value) = self.cached_constant_values.get(name) {
@@ -46,11 +37,7 @@ impl constants::ConstEnvironment for AnalysisContext {
             // We don't have the definition available yet
             Ok(None)
         } else {
-            Err(ConstEvalError::UndefinedSymbol {
-                symbol: name.clone(),
-                source_file: self.get_source_file_for(name.span()),
-            }
-            .into())
+            Err(ConstEvalError::UndefinedSymbol { symbol: name.clone() }.into())
         }
     }
     #[inline(always)]
@@ -79,26 +66,15 @@ impl constants::ConstEnvironment for AnalysisContext {
 }
 
 impl AnalysisContext {
-    pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             constants: Default::default(),
             cached_constant_values: Default::default(),
             imported: Default::default(),
             procedures: Default::default(),
-            errors: Default::default(),
-            source_file,
+            diagnostics: DiagnosticCollector::new(),
             source_manager,
-            warnings_as_errors: false,
         }
-    }
-
-    pub fn set_warnings_as_errors(&mut self, yes: bool) {
-        self.warnings_as_errors = yes;
-    }
-
-    #[inline(always)]
-    pub fn warnings_as_errors(&self) -> bool {
-        self.warnings_as_errors
     }
 
     #[inline(always)]
@@ -119,7 +95,7 @@ impl AnalysisContext {
     /// Returns `Err` if a constant with the same name is already defined
     pub fn define_constant(&mut self, module: &mut Module, constant: Constant) {
         if let Err(err) = module.define_constant(constant.clone()) {
-            self.errors.push(err);
+            let _ = self.diagnostics.add(err);
         } else {
             let name = constant.name.clone();
             self.constants.insert(name, constant);
@@ -134,7 +110,7 @@ impl AnalysisContext {
         let name = constant.name.clone();
         self.cached_constant_values.remove(&name);
         if let Some(prev) = self.constants.get(&name) {
-            self.errors.push(SemanticAnalysisError::SymbolConflict {
+            let _ = self.diagnostics.add(SemanticAnalysisError::SymbolConflict {
                 span: constant.span,
                 prev_span: prev.span,
             });
@@ -163,7 +139,7 @@ impl AnalysisContext {
                 },
                 Err(err) => {
                     self.cached_constant_values.remove(constant);
-                    self.errors.push(err);
+                    let _ = self.diagnostics.add(err);
                 },
             }
         }
@@ -182,68 +158,31 @@ impl AnalysisContext {
             Ok(constant.value.clone())
         } else {
             Err(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                SymbolResolutionError::undefined(name.span(), &self.source_manager),
+                SymbolResolutionError::undefined(name.span()),
             )))
         }
     }
 
     pub fn error(&mut self, diagnostic: SemanticAnalysisError) {
-        self.errors.push(diagnostic);
+        let _ = self.diagnostics.add(diagnostic);
     }
 
     pub fn has_errors(&self) -> bool {
-        if self.warnings_as_errors() {
-            return !self.errors.is_empty();
-        }
-        self.errors
-            .iter()
-            .any(|err| matches!(err.severity().unwrap_or(Severity::Error), Severity::Error))
+        self.diagnostics.counts().errors() != 0
     }
 
-    pub fn has_failed(&mut self) -> Result<(), SyntaxError> {
-        if self.has_errors() {
-            Err(SyntaxError {
-                source_file: self.source_file.clone(),
-                errors: core::mem::take(&mut self.errors),
-            })
-        } else {
-            Ok(())
+    /// Finalize semantic analysis without applying an application-level failure policy.
+    pub fn into_outcome<T>(self, value: T) -> Outcome<T> {
+        Outcome {
+            value,
+            diagnostics: self.diagnostics.finish(),
         }
     }
-
-    pub fn into_result(self) -> Result<(), SyntaxError> {
-        if self.has_errors() {
-            Err(SyntaxError {
-                source_file: self.source_file.clone(),
-                errors: self.errors,
-            })
-        } else {
-            self.emit_warnings();
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "std")]
-    fn emit_warnings(self) {
-        use crate::diagnostics::Report;
-
-        if !self.errors.is_empty() {
-            // Emit warnings to stderr
-            let warning = Report::from(super::errors::SyntaxWarning {
-                source_file: self.source_file,
-                errors: self.errors,
-            });
-            std::eprintln!("{warning}");
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    fn emit_warnings(self) {}
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, string::String, sync::Arc};
+    use alloc::{boxed::Box, sync::Arc};
     use core::cell::Cell;
 
     use super::AnalysisContext;
@@ -253,10 +192,7 @@ mod tests {
             Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
-        debuginfo::{
-            DefaultSourceManager, SourceContent, SourceLanguage, SourceManager, SourceSpan, Span,
-            Uri,
-        },
+        debuginfo::{DefaultSourceManager, SourceSpan, Span},
         parser::IntValue,
     };
 
@@ -286,13 +222,6 @@ mod tests {
 
     impl constants::ConstEnvironment for CountingEnv<'_> {
         type Error = super::SemanticAnalysisError;
-
-        fn get_source_file_for(
-            &self,
-            span: SourceSpan,
-        ) -> Option<Arc<crate::debuginfo::SourceFile>> {
-            <AnalysisContext as constants::ConstEnvironment>::get_source_file_for(self.inner, span)
-        }
 
         fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
             let value = <AnalysisContext as constants::ConstEnvironment>::get(self.inner, name)?;
@@ -360,15 +289,7 @@ mod tests {
     #[test]
     fn semantic_const_eval_memoizes_shared_subexpressions() {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        let uri =
-            Uri::from(String::from("mem://const-eval-shared-subexpressions").into_boxed_str());
-        let content = SourceContent::new(
-            SourceLanguage::Masm,
-            uri.clone(),
-            String::from("begin\n    nop\nend\n").into_boxed_str(),
-        );
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        let mut context = AnalysisContext::new(source_file, source_manager);
+        let mut context = AnalysisContext::new(source_manager);
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.

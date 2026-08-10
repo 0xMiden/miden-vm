@@ -194,7 +194,8 @@ mod tests {
             let source = wrap_program(&render(snippet, 4));
             Assembler::default()
                 .assemble_program("program", &source)
-                .unwrap_or_else(|e| panic!("snippet {:?} failed to assemble: {e}", snippet.name));
+                .value
+                .unwrap_or_else(|| panic!("snippet {:?} failed to assemble", snippet.name));
         }
     }
 

@@ -71,7 +71,7 @@ skip-tree = [
     { name = "getrandom", version = "=0.3.4" },
     # Allow rustc_version v0.2.x - build dependency
     { name = "rustc_version", version = "=0.2.3" },
-    # Allow unicode-width v0.1.x - miden-miette vs miden-formatting conflict (complex to fix)
+    # Allow unicode-width v0.1.x while miden-formatting still depends on it
     { name = "unicode-width", version = "=0.1.14" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },

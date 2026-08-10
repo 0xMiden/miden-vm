@@ -1,7 +1,7 @@
 use miden_assembly_syntax::{
     ParsingError,
     debuginfo::{SourceSpan, Span},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{Report, diagnostic},
 };
 use miden_core::{
     Felt, ZERO,
@@ -323,7 +323,7 @@ pub fn u32rotl(
 /// - u32rotr.b: 3 cycles
 pub fn u32rotr(
     span_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
     imm: Option<u8>,
     span: SourceSpan,
 ) -> Result<(), Report> {
@@ -334,11 +334,14 @@ pub fn u32rotr(
         },
         Some(imm) => {
             if imm == 0 || imm > MAX_U32_ROTATE_VALUE {
-                return Err(RelatedLabel::error("invalid argument")
-                    .with_labeled_span(span, "this instruction argument is out of range")
-                    .with_help(format!("value must be in the range 0..={MAX_U32_ROTATE_VALUE}"))
-                    .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
-                    .into());
+                return Err(Report::new(diagnostic! {
+                    severity: Error,
+                    message: "invalid argument",
+                    labels: [primary(span, "this instruction argument is out of range")],
+                    notes: [help((format!(
+                        "value must be in the range 0..={MAX_U32_ROTATE_VALUE}"
+                    )))],
+                }));
             }
             span_builder.push_op(Push(Felt::new_unchecked(1 << (32 - imm))));
             span_builder.push_ops([U32mul, Add]);
@@ -478,19 +481,13 @@ fn handle_arithmetic_operation(
 /// immediate parameters.
 fn handle_division(
     block_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
     imm: Option<Span<u32>>,
 ) -> Result<(), Report> {
     if let Some(imm) = imm {
         if imm == 0 {
             let imm_span = imm.span();
-            let source_file = proc_ctx.source_manager().get(imm_span.source_id()).ok();
-            let error = Report::new(ParsingError::DivisionByZero { span: imm_span });
-            return if let Some(source_file) = source_file {
-                Err(error.with_source_code(source_file))
-            } else {
-                Err(error)
-            };
+            return Err(Report::new(ParsingError::DivisionByZero { span: imm_span }));
         }
         push_u32_value(block_builder, imm.into_inner());
     }
@@ -506,7 +503,7 @@ fn handle_division(
 /// either as a provided immediate value, or as an element that already exists in the stack.
 fn prepare_bitwise<const MAX_VALUE: u8>(
     block_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
     imm: Option<u8>,
     span: SourceSpan,
 ) -> Result<(), Report> {
@@ -517,11 +514,12 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
         },
         Some(imm) => {
             if imm == 0 || imm > MAX_VALUE {
-                return Err(RelatedLabel::error("invalid argument")
-                    .with_labeled_span(span, "this instruction argument is out of range")
-                    .with_help(format!("value must be in the range 0..={MAX_VALUE}"))
-                    .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
-                    .into());
+                return Err(Report::new(diagnostic! {
+                    severity: Error,
+                    message: "invalid argument",
+                    labels: [primary(span, "this instruction argument is out of range")],
+                    notes: [help((format!("value must be in the range 0..={MAX_VALUE}")))],
+                }));
             }
             block_builder.push_op(Push(Felt::new_unchecked(1 << imm)));
         },

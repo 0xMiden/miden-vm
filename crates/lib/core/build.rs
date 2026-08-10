@@ -10,7 +10,10 @@ use miden_assembly::{
     Assembler, Report,
     ast::{self, Module},
     debuginfo::DefaultSourceManager,
-    diagnostics::{IntoDiagnostic, reporting::PrintDiagnostic},
+    diagnostics::{
+        Emitter, IntoDiagnostic, Outcome, PanicHookOptions, SourceProvider, StderrEmitter,
+        WarningsAsErrors, install_panic_hook,
+    },
 };
 // CONSTANTS
 // ================================================================================================
@@ -64,6 +67,22 @@ fn markdown_file_name(ns: &miden_assembly_syntax::Path) -> String {
     buf
 }
 
+fn finish_build_outcome<T>(
+    outcome: Outcome<Option<T>>,
+    sources: &dyn SourceProvider,
+) -> Result<T, Report> {
+    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
+    if !outcome.diagnostics.is_empty() {
+        let prepared = outcome.diagnostics.prepare(sources).map_err(Report::from_error)?;
+        StderrEmitter::default().emit_set(&prepared).map_err(Report::from_error)?;
+    }
+    if failed {
+        Err(Report::msg("diagnostics prevented core library assembly"))
+    } else {
+        Ok(outcome.value.expect("a successful outcome must contain a value"))
+    }
+}
+
 // LIBCORE DOCUMENTATION
 // ================================================================================================
 
@@ -86,14 +105,25 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     // Find all .masm
     let namespace = Arc::<MasmPath>::from(MasmPath::new("::miden::core"));
     let source_manager = Arc::new(DefaultSourceManager::default());
-    let (root, support) = parser::read_modules_from_root(
+    let outcome = parser::read_modules_from_root(
         asm_dir.join("mod.masm"),
         Some(namespace),
         Some(ModuleKind::Library),
-        source_manager,
-        true,
+        source_manager.clone(),
     )
-    .unwrap_or_else(|err| panic!("{}", PrintDiagnostic::new(err)));
+    .unwrap_or_else(|err| panic!("{}", err.display()));
+    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
+    if !outcome.diagnostics.is_empty() {
+        let prepared = outcome
+            .diagnostics
+            .prepare(source_manager.as_ref())
+            .expect("core library diagnostics should prepare");
+        StderrEmitter::default()
+            .emit_set(&prepared)
+            .expect("core library diagnostics should emit");
+    }
+    assert!(!failed, "core library source diagnostics prevented documentation generation");
+    let (root, support) = outcome.value.expect("successful module loading must produce modules");
 
     // Render the modules into markdown
     for module in core::slice::from_ref(&root).iter().chain(support.iter()) {
@@ -207,8 +237,6 @@ fn reexport_target_docs(
 /// Assemble the core and precompiles sources as separate packages and serialize both into the
 /// `assets` folder.
 fn main() -> Result<(), Report> {
-    use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
-
     // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
     // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
@@ -218,11 +246,7 @@ fn main() -> Result<(), Report> {
     // ../../ to reach crates/assembly/src.
     println!("cargo:rerun-if-changed=../../assembly/src");
 
-    miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
-        Box::new(ReportHandlerOpts::new().build())
-    }))
-    .unwrap();
-    miden_assembly::diagnostics::reporting::set_panic_hook();
+    let _ = install_panic_hook(PanicHookOptions::default());
 
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();
@@ -239,8 +263,10 @@ fn main() -> Result<(), Report> {
     let assembler = Assembler::default();
     let mut project_assembler =
         assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
-    let core_package =
-        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
+    let core_package = finish_build_outcome(
+        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release"),
+        source_manager.as_ref(),
+    )?;
 
     core_package.write_masp_file(build_dir.join(PKG_OUT_DIR)).into_diagnostic()?;
 

@@ -8,11 +8,10 @@ use alloc::{
 use miden_assembly_syntax::{
     Path, PathBuf,
     ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    diagnostics::RelatedLabel,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
-use super::{Linker, LinkerError, ModuleSource};
+use super::{Linker, LinkerError, ModuleSource, errors::PrivateSubmoduleDefinition};
 
 /// A graph of modules, concrete items, submodule declarations, and imports known to the linker.
 ///
@@ -162,7 +161,6 @@ impl NamespaceGraph {
                 if matches!(import.kind(), ImportKind::Module) && import.visibility().is_public() {
                     return Err(LinkerError::ModuleReExport {
                         span: import.span(),
-                        source_file: source_file(linker.source_manager.as_ref(), import.span()),
                         path: import.target().inner().clone(),
                     });
                 }
@@ -195,7 +193,6 @@ impl NamespaceGraph {
                 }) {
                     return Err(LinkerError::ImportReExportCycle {
                         span: import.span(),
-                        source_file: source_file(linker.source_manager.as_ref(), import.span()),
                         path: import.target().inner().clone(),
                     });
                 }
@@ -236,7 +233,6 @@ impl NamespaceGraph {
             (ImportKind::Module, ResolvedUse::Item(item)) => {
                 Err(LinkerError::InvalidModuleImportTarget {
                     span: import.span(),
-                    source_file: source_file(linker.source_manager.as_ref(), import.span()),
                     path: item_path(linker, item),
                 })
             },
@@ -249,10 +245,8 @@ impl NamespaceGraph {
                     && import.owner != item.module
                 {
                     let span = import.span();
-                    let source_file = source_file(linker.source_manager.as_ref(), span);
                     Err(LinkerError::InvalidReExportOfKernelSyscall {
                         span,
-                        source_file,
                         path: import.target().inner().clone(),
                     })
                 } else {
@@ -262,7 +256,6 @@ impl NamespaceGraph {
             (ImportKind::Item, ResolvedUse::Module(id)) => {
                 Err(LinkerError::InvalidItemImportTarget {
                     span: import.span(),
-                    source_file: source_file(linker.source_manager.as_ref(), import.span()),
                     path: self.module(id).path.clone(),
                 })
             },
@@ -336,7 +329,6 @@ impl NamespaceGraph {
         {
             return Err(LinkerError::ImportTargetUsesImport {
                 span: path.span(),
-                source_file: source_file(linker.source_manager.as_ref(), path.span()),
                 path: path.into_inner().to_path_buf().into_boxed_path().into(),
                 alias: first.to_string(),
             });
@@ -355,7 +347,7 @@ impl NamespaceGraph {
         owner: ModuleIndex,
         resolved: ResolvedUse,
         path: Span<&Path>,
-        linker: &Linker,
+        _linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
         let ResolvedUse::Module(module) = resolved else {
             return Ok(resolved);
@@ -364,7 +356,6 @@ impl NamespaceGraph {
         if module == owner {
             return Err(LinkerError::SelfReferentialImport {
                 span: path.span(),
-                source_file: source_file(linker.source_manager.as_ref(), path.span()),
                 path: path.into_inner().to_path_buf().into_boxed_path().into(),
             });
         }
@@ -372,7 +363,6 @@ impl NamespaceGraph {
         if self.module(module).parent() == Some(owner) {
             return Err(LinkerError::ImportTargetIsLocalSubmodule {
                 span: path.span(),
-                source_file: source_file(linker.source_manager.as_ref(), path.span()),
                 path: self.module(module).path.clone(),
             });
         }
@@ -415,7 +405,7 @@ impl NamespaceGraph {
         let owner_module = self.module(owner);
         if rest.is_empty() {
             if let Some(item) = owner_module.item(first) {
-                self.ensure_item_visible(owner, item, path.span(), linker)?;
+                self.ensure_item_visible(owner, item, path.span())?;
                 return Ok(ResolvedUse::Item(item.id()));
             }
 
@@ -429,12 +419,9 @@ impl NamespaceGraph {
             }
         } else {
             if let Some(item) = owner_module.item(first) {
-                return Err(SymbolResolutionError::invalid_sub_path(
-                    path.span(),
-                    item.span(),
-                    linker.source_manager.as_ref(),
-                )
-                .into());
+                return Err(
+                    SymbolResolutionError::invalid_sub_path(path.span(), item.span()).into()
+                );
             }
 
             if let Some(resolved) = imports.get(owner, first) {
@@ -450,7 +437,6 @@ impl NamespaceGraph {
                     ResolvedUse::Item(item) => Err(SymbolResolutionError::invalid_sub_path(
                         path.span(),
                         linker[item.module][item.index].name().span(),
-                        linker.source_manager.as_ref(),
                     )
                     .into()),
                 };
@@ -474,7 +460,6 @@ impl NamespaceGraph {
         } else {
             Err(LinkerError::InvalidRelativePath {
                 span: path.span(),
-                source_file: source_file(linker.source_manager.as_ref(), path.span()),
                 path: path.into_inner().to_path_buf().into_boxed_path().into(),
             })
         }
@@ -511,7 +496,7 @@ impl NamespaceGraph {
 
             if rest.is_empty() {
                 if let Some(item) = module.item(component) {
-                    self.ensure_item_visible(owner, item, span, linker)?;
+                    self.ensure_item_visible(owner, item, span)?;
                     return Ok(ResolvedUse::Item(item.id()));
                 }
 
@@ -538,12 +523,7 @@ impl NamespaceGraph {
             }
 
             if let Some(item) = module.item(component) {
-                return Err(SymbolResolutionError::invalid_sub_path(
-                    span,
-                    item.span(),
-                    linker.source_manager.as_ref(),
-                )
-                .into());
+                return Err(SymbolResolutionError::invalid_sub_path(span, item.span()).into());
             }
 
             return Err(undefined_symbol_from_path(linker, span, path));
@@ -572,7 +552,7 @@ impl NamespaceGraph {
         }
 
         let Some(parent) = self.find_global_module_index(parent_path) else {
-            if let Some(err) = self.invalid_global_subpath_error(path, span, linker) {
+            if let Some(err) = self.invalid_global_subpath_error(path, span) {
                 return Err(err);
             }
             return Err(undefined_symbol_from_path(linker, span, path));
@@ -581,7 +561,7 @@ impl NamespaceGraph {
         let module = self.module(parent);
 
         if let Some(item) = module.item(name) {
-            self.ensure_item_visible(owner, item, span, linker)?;
+            self.ensure_item_visible(owner, item, span)?;
             return Ok(ResolvedUse::Item(item.id()));
         }
 
@@ -601,12 +581,7 @@ impl NamespaceGraph {
         Err(undefined_symbol_from_path(linker, span, path))
     }
 
-    fn invalid_global_subpath_error(
-        &self,
-        path: &Path,
-        span: SourceSpan,
-        linker: &Linker,
-    ) -> Option<LinkerError> {
+    fn invalid_global_subpath_error(&self, path: &Path, span: SourceSpan) -> Option<LinkerError> {
         let mut prefix = PathBuf::with_capacity(path.byte_len());
         if path.is_absolute() {
             prefix.push_component("::");
@@ -620,14 +595,7 @@ impl NamespaceGraph {
                 && let Some((next, _)) = rest.split_first()
                 && let Some(item) = self.module(module).item(next)
             {
-                return Some(
-                    SymbolResolutionError::invalid_sub_path(
-                        span,
-                        item.span(),
-                        linker.source_manager.as_ref(),
-                    )
-                    .into(),
-                );
+                return Some(SymbolResolutionError::invalid_sub_path(span, item.span()).into());
             }
 
             remaining = rest;
@@ -680,24 +648,17 @@ impl NamespaceGraph {
         parent: ModuleIndex,
         edge: &ModuleEdge,
         span: SourceSpan,
-        linker: &Linker,
+        _linker: &Linker,
     ) -> Result<(), LinkerError> {
         if edge.visibility().is_public() || self.is_module_in_scope_of(owner, parent) {
             return Ok(());
         }
 
         let child = self.module(edge.child());
-        let defined_source_file = source_file(linker.source_manager.as_ref(), edge.span());
-        let source_file = source_file(linker.source_manager.as_ref(), span);
         Err(LinkerError::PrivateSubmodule {
             span,
-            source_file,
             module: child.path.clone(),
-            defined: Some(
-                RelatedLabel::advice("the referenced submodule is private")
-                    .with_labeled_span(edge.span(), "the referenced submodule is private")
-                    .with_source_file(defined_source_file),
-            ),
+            defined: Some(PrivateSubmoduleDefinition { span: edge.span() }),
         })
     }
 
@@ -718,18 +679,12 @@ impl NamespaceGraph {
         owner: ModuleIndex,
         item: &ItemDef,
         span: SourceSpan,
-        linker: &Linker,
     ) -> Result<(), LinkerError> {
         if owner == item.id().module || item.visibility().is_public() {
             return Ok(());
         }
 
-        Err(SymbolResolutionError::private_symbol(
-            span,
-            item.span(),
-            linker.source_manager.as_ref(),
-        )
-        .into())
+        Err(SymbolResolutionError::private_symbol(span, item.span()).into())
     }
 
     fn connect_submodule_edges(&mut self, linker: &Linker) -> Result<(), LinkerError> {
@@ -745,7 +700,6 @@ impl NamespaceGraph {
                 let child = self.find_module_index(child_path.as_path()).ok_or_else(|| {
                     LinkerError::UndefinedModule {
                         span: decl.name.span(),
-                        source_file: source_file(linker.source_manager.as_ref(), decl.name.span()),
                         path: child_path.into_boxed_path().into(),
                     }
                 })?;
@@ -948,7 +902,7 @@ impl UseDecl {
 }
 
 fn name_conflict(
-    linker: &Linker,
+    _linker: &Linker,
     module: &super::LinkModule,
     name: &str,
     span: SourceSpan,
@@ -956,7 +910,6 @@ fn name_conflict(
 ) -> LinkerError {
     LinkerError::NamespaceNameConflict {
         span,
-        source_file: source_file(linker.source_manager.as_ref(), span),
         module: module.path().clone(),
         name: name.to_string(),
         kind,
@@ -967,23 +920,15 @@ fn undefined_symbol(linker: &Linker, path: Span<&Path>) -> LinkerError {
     undefined_symbol_from_path(linker, path.span(), path.into_inner())
 }
 
-fn undefined_symbol_from_path(linker: &Linker, span: SourceSpan, path: &Path) -> LinkerError {
+fn undefined_symbol_from_path(_linker: &Linker, span: SourceSpan, path: &Path) -> LinkerError {
     LinkerError::UndefinedSymbol {
         span,
-        source_file: source_file(linker.source_manager.as_ref(), span),
         path: path.to_path_buf().into_boxed_path().into(),
     }
 }
 
 fn item_path(linker: &Linker, item: GlobalItemIndex) -> Arc<Path> {
     linker[item.module].path().join(linker[item.module][item.index].name()).into()
-}
-
-fn source_file(
-    source_manager: &dyn SourceManager,
-    span: SourceSpan,
-) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
-    source_manager.get(span.source_id()).ok()
 }
 
 #[cfg(test)]
@@ -996,6 +941,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::testing::TestOutcomeExt;
 
     fn parse_module(
         source_manager: Arc<dyn SourceManager>,
@@ -1004,7 +950,7 @@ mod tests {
     ) -> Box<miden_assembly_syntax::ast::Module> {
         source_manager
             .load(SourceLanguage::Masm, name.into(), source.to_string())
-            .parse(false, source_manager)
+            .parse(source_manager)
             .expect("module should parse")
     }
 

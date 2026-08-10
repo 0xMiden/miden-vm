@@ -10,7 +10,7 @@ use miden_project::Linkage;
 use crate::{
     Assembler,
     diagnostics::{IntoDiagnostic, Report},
-    testing::TestContext,
+    testing::{TestContext, TestOutcomeExt},
 };
 
 fn merge_programs(
@@ -27,7 +27,8 @@ fn merge_programs(
     let mut assembler = Assembler::new(context.source_manager());
     assembler.link_package(Arc::clone(&lib_a), Linkage::Dynamic)?;
     let lib_b = assembler
-        .assemble_library("lib-b", program_b, None::<Box<ast::Module>>)?
+        .assemble_library("lib-b", program_b, None::<Box<ast::Module>>)
+        .into_test_result()?
         .mast_forest()
         .as_ref()
         .clone();

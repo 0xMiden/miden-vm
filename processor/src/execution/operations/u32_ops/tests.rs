@@ -208,6 +208,7 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
             "program",
             format!(r#"begin push.4294967296 push.1 u32assert2.err="{expected_message}" end"#),
         )
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -245,6 +246,7 @@ fn test_u32assert_err_wrapper_assembled() {
             "program",
             format!(r#"begin push.4294967296 u32assert.err="{expected_message}" end"#),
         )
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -281,7 +283,7 @@ fn test_u32assertw_err_wrapper_assembled() {
             format!(
                 r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="{expected_message}" end"#
             ),
-        )
+        ).value
         .expect("program should assemble")
         .unwrap_program();
 

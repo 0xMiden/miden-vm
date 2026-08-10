@@ -1,9 +1,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceFile, SourceId, SourceSpan, Span, Uri},
-};
+use miden_assembly_syntax::debuginfo::{SourceFile, SourceId, SourceKey, SourceSpan, Span, Uri};
+use miden_diagnostics::Report;
 
 /// This type is used to represent package information which may be inherited within a workspace.
 #[derive(Debug, Clone)]
@@ -155,7 +153,7 @@ impl<T: SetSourceId> SetSourceId for Span<T> {
 
 impl SetSourceId for SourceSpan {
     fn set_source_id(&mut self, source_id: SourceId) {
-        SourceSpan::set_source_id(self, source_id);
+        self.set_source_key(SourceKey::Session(source_id));
     }
 }
 

@@ -74,6 +74,7 @@ fn test_memcopy_words() {
 
     let program: Program = assembler
         .assemble_program("program", source)
+        .value
         .expect("Failed to compile test source.")
         .unwrap_program();
 
@@ -192,6 +193,7 @@ fn test_memcopy_elements() {
 
     let program: Program = assembler
         .assemble_program("program", source)
+        .value
         .expect("Failed to compile test source.")
         .unwrap_program();
 

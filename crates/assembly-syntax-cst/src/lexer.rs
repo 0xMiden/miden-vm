@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_debug_types::{SourceFile, SourceId, SourceSpan};
+use miden_diagnostics::SourceKey;
 
 use crate::syntax::SyntaxKind;
 
@@ -97,7 +98,7 @@ impl<'input> Lexer<'input> {
     }
 
     fn token(&self, kind: SyntaxKind, start: usize, end: usize) -> Token<'input> {
-        let span = SourceSpan::try_from_range(self.source_id, start..end)
+        let span = SourceSpan::try_from_range(SourceKey::Session(self.source_id), None, start..end)
             .expect("source files larger than 4GiB are not supported");
         Token::new(kind, span, &self.input[start..end])
     }
@@ -337,7 +338,8 @@ impl<'input> Iterator for Lexer<'input> {
 mod tests {
     use std::{string::ToString, sync::Arc, vec::Vec};
 
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+    use miden_diagnostics::{SourceKey, SourceNamespace, SourceSpan};
     use pretty_assertions::assert_eq;
 
     use super::{tokenize, tokenize_text};
@@ -437,7 +439,7 @@ mod tests {
     #[test]
     fn tracks_source_spans_when_tokenizing_source_files() {
         let source = Arc::new(SourceFile::new(
-            SourceId::new(7),
+            SourceId::new(SourceNamespace::new_unchecked(1), 7),
             SourceLanguage::Masm,
             Uri::new("memory:///lexer-span-test.masm"),
             "proc foo\n".to_string().into_boxed_str(),
@@ -445,8 +447,14 @@ mod tests {
 
         let tokens = tokenize(source.as_ref());
         assert_eq!(tokens[0].text(), "proc");
-        assert_eq!(tokens[0].span(), SourceSpan::new(source.id(), 0u32..4u32));
+        assert_eq!(
+            tokens[0].span(),
+            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, 0..4).unwrap()
+        );
         assert_eq!(tokens[2].text(), "foo");
-        assert_eq!(tokens[2].span(), SourceSpan::new(source.id(), 5u32..8u32));
+        assert_eq!(
+            tokens[2].span(),
+            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, 5..8).unwrap()
+        );
     }
 }

@@ -19,18 +19,13 @@ mod workspace;
 
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
-};
+use miden_assembly_syntax::debuginfo::{SourceSpan, Span};
+use miden_diagnostics::Diagnostic;
+pub use miden_diagnostics::Report;
 // Re-exported for consistency
-pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
 #[cfg(feature = "serde")]
-use miden_assembly_syntax::{
-    debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
-};
+use miden_assembly_syntax::debuginfo::{SourceFile, SourceId};
+pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
 pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

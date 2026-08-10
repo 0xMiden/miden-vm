@@ -21,9 +21,10 @@ pub const CALIBRATION_ITERS: u64 = 1000;
 /// Assemble and execute `source`, returning the shape of the resulting execution trace. Wraps
 /// assembler + fast processor + trace builder.
 pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
-    let program = Assembler::default()
-        .assemble_program("program", source)
-        .map_err(|e| MeasurementError::Assembly(format!("{e}")))?
+    let outcome = Assembler::default().assemble_program("program", source);
+    let program = outcome
+        .value
+        .ok_or_else(|| MeasurementError::Assembly(format!("{:?}", outcome.diagnostics)))?
         .unwrap_program();
 
     let mut host = DefaultHost::default();

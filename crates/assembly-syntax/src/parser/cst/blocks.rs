@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 
 use miden_assembly_syntax_cst::{
     SyntaxElement, SyntaxKind, SyntaxToken,
@@ -17,6 +17,12 @@ use super::{
 };
 use crate::{MAX_CONTROL_FLOW_NESTING, ast, parser::ParsingError};
 
+/// Keep the recursive structured-control-flow lowering stack independent of the size of
+/// [`ParsingError`]. The canonical diagnostics span is intentionally richer than the legacy span,
+/// and storing the full error enum in every recursive `Result` frame otherwise exhausts the
+/// default thread stack before reaching the assembler's supported nesting limit.
+type BlockLoweringResult<T> = Result<T, Box<ParsingError>>;
+
 /// Lowers `block` and rejects source-level empty bodies using `empty_message`.
 ///
 /// Structured forms such as procedures, `while`, and `repeat` distinguish between a missing/empty
@@ -26,12 +32,12 @@ pub(super) fn lower_required_block(
     block: &CstBlock,
     empty_message: &'static str,
     nesting_depth: usize,
-) -> Result<ast::Block, ParsingError> {
+) -> BlockLoweringResult<ast::Block> {
     if !has_source_operations(block) {
-        return Err(ParsingError::InvalidSyntax {
+        return Err(Box::new(ParsingError::InvalidSyntax {
             span: context.parse().span_for_node(block.syntax()),
             message: empty_message.to_string(),
-        });
+        }));
     }
 
     lower_block(context, block, nesting_depth)
@@ -45,13 +51,13 @@ pub(super) fn lower_block(
     context: &mut LoweringContext<'_>,
     block: &CstBlock,
     nesting_depth: usize,
-) -> Result<ast::Block, ParsingError> {
+) -> BlockLoweringResult<ast::Block> {
     let span = context.parse().span_for_node(block.syntax());
     let mut ops = Vec::new();
     for op in block.operations() {
         ops.extend(lower_operation(context, &op, nesting_depth)?);
         if ops.len() > u16::MAX as usize {
-            return Err(ParsingError::CodeBlockTooBig { span });
+            return Err(Box::new(ParsingError::CodeBlockTooBig { span }));
         }
     }
 
@@ -63,7 +69,7 @@ fn lower_operation(
     context: &mut LoweringContext<'_>,
     op: &CstOperation,
     nesting_depth: usize,
-) -> Result<Vec<ast::Op>, ParsingError> {
+) -> BlockLoweringResult<Vec<ast::Op>> {
     match op {
         CstOperation::If(op) => {
             let span = context.parse().span_for_node(op.syntax());
@@ -85,7 +91,7 @@ fn lower_operation(
             let nesting_depth = enter_control_flow(span, nesting_depth)?;
             Ok(vec![lower_repeat_op(context, op, nesting_depth)?])
         },
-        CstOperation::Instruction(op) => lower_instruction(context, op),
+        CstOperation::Instruction(op) => lower_instruction(context, op).map_err(Box::new),
     }
 }
 
@@ -108,7 +114,7 @@ fn lower_if_op(
     context: &mut LoweringContext<'_>,
     op: &CstIfOp,
     nesting_depth: usize,
-) -> Result<ast::Op, ParsingError> {
+) -> BlockLoweringResult<ast::Op> {
     let span = context.parse().span_for_node(op.syntax());
     let cond = parse_if_condition(context, op)?;
 
@@ -126,10 +132,10 @@ fn lower_if_op(
     } else if else_node.is_some() {
         empty_block(span)
     } else {
-        return Err(ParsingError::InvalidSyntax {
+        return Err(Box::new(ParsingError::InvalidSyntax {
             span: context.parse().span_for_node(then_node.syntax()),
             message: "expected a non-empty `if` block".to_string(),
-        });
+        }));
     };
 
     let else_blk = match else_node {
@@ -159,7 +165,7 @@ fn lower_while_op(
     context: &mut LoweringContext<'_>,
     op: &CstWhileOp,
     nesting_depth: usize,
-) -> Result<ast::Op, ParsingError> {
+) -> BlockLoweringResult<ast::Op> {
     let span = context.parse().span_for_node(op.syntax());
     parse_while_condition(context, op)?;
     let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {
@@ -176,7 +182,7 @@ fn lower_do_while_op(
     context: &mut LoweringContext<'_>,
     op: &CstDoWhileOp,
     nesting_depth: usize,
-) -> Result<ast::Op, ParsingError> {
+) -> BlockLoweringResult<ast::Op> {
     let span = context.parse().span_for_node(op.syntax());
     let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {
         span,
@@ -202,7 +208,7 @@ fn lower_repeat_op(
     context: &mut LoweringContext<'_>,
     op: &CstRepeatOp,
     nesting_depth: usize,
-) -> Result<ast::Op, ParsingError> {
+) -> BlockLoweringResult<ast::Op> {
     let span = context.parse().span_for_node(op.syntax());
     let count = parse_repeat_count(context, op)?;
     let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {

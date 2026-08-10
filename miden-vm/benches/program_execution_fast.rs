@@ -50,6 +50,7 @@ fn program_execution_fast(c: &mut Criterion) {
                         .expect("failed to load core library");
                     let program = assembler
                         .assemble_program("program", &source)
+                        .value
                         .expect("Failed to compile test source.")
                         .unwrap_program();
                     let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();

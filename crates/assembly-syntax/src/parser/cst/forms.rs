@@ -11,6 +11,7 @@ use miden_assembly_syntax_cst::ast::{
     Submodule as CstSubmodule, TypeDecl as CstTypeDecl,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::TextRange;
 
 use super::{
     blocks::lower_required_block,
@@ -20,7 +21,7 @@ use super::{
         lower_function_type_from_signature, lower_type_expr_from_alias_body,
     },
 };
-use crate::{Report, ast, parser::ParsingError};
+use crate::{ast, parser::ParsingError};
 
 /// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser
 /// pipeline.
@@ -28,7 +29,7 @@ use crate::{Report, ast, parser::ParsingError};
 /// This is the main top-level bridge from the lossless CST to the historic AST boundary.
 pub(super) fn lower_source_file(
     context: &mut LoweringContext<'_>,
-) -> Result<Vec<ast::Form>, Report> {
+) -> Result<Vec<ast::Form>, ParsingError> {
     let source_file = context.parse().root();
     let items = source_file.items().collect::<Vec<_>>();
     let mut forms = Vec::with_capacity(items.len());
@@ -121,7 +122,7 @@ fn has_blank_line_between(context: &LoweringContext<'_>, lhs: &CstItem, rhs: &Cs
     let rhs = item_span(context, rhs);
     let between = context
         .source_file()
-        .source_slice(lhs.end().to_usize()..rhs.start().to_usize())
+        .source_slice(lhs.range().end() as usize..rhs.range().start() as usize)
         .expect("doc spans should produce valid interstitial text");
     count_line_breaks(between) > 1
 }
@@ -155,10 +156,15 @@ fn lower_doc_group(
     context: &LoweringContext<'_>,
     items: &[CstItem],
     is_module_doc: bool,
-) -> Result<ast::Form, Report> {
+) -> Result<ast::Form, ParsingError> {
     let first_span = item_span(context, &items[0]);
     let last_span = item_span(context, items.last().expect("non-empty doc group"));
-    let span = SourceSpan::new(context.source_file().id(), first_span.start()..last_span.end());
+    let span = SourceSpan::new(
+        first_span.source(),
+        first_span.revision(),
+        TextRange::new(first_span.range().start(), last_span.range().end())
+            .expect("ordered document items must produce an ordered span"),
+    );
 
     let mut text = String::new();
     for item in items {
@@ -171,7 +177,7 @@ fn lower_doc_group(
 
     let docs = Span::new(span, text);
     if docs.len() > u16::MAX as usize {
-        return Err(ParsingError::DocsTooLarge { span }.into());
+        return Err(ParsingError::DocsTooLarge { span });
     }
 
     Ok(if is_module_doc {
@@ -424,9 +430,8 @@ fn lower_begin_block(
 ) -> Result<ast::Form, ParsingError> {
     let span = context.parse().span_for_node(begin.syntax());
     let block = match begin.block() {
-        Some(block) => {
-            lower_required_block(context, &block, "expected a non-empty entry block", 0)?
-        },
+        Some(block) => lower_required_block(context, &block, "expected a non-empty entry block", 0)
+            .map_err(|error| *error)?,
         None => {
             return Err(ParsingError::InvalidSyntax {
                 span,
@@ -448,7 +453,8 @@ fn lower_procedure(
     let (name, signature) = preflight_procedure_header(context, procedure)?;
     let body = match procedure.block() {
         Some(block) => {
-            lower_required_block(context, &block, "expected a non-empty procedure body", 0)?
+            lower_required_block(context, &block, "expected a non-empty procedure body", 0)
+                .map_err(|error| *error)?
         },
         None => {
             return Err(ParsingError::InvalidSyntax {

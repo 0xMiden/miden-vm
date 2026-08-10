@@ -18,7 +18,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
+    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
+    TextRange, Uri,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
@@ -47,7 +48,10 @@ mod memory;
 
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
-    parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+    parser
+        .parse_str(Some(Path::KERNEL), source, source_manager)
+        .value
+        .expect("kernel module should parse")
 }
 
 fn debug_asm_op(
@@ -112,6 +116,7 @@ fn stack_get_word_out_of_bounds_read() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program("program", &program_source)
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -284,6 +289,7 @@ fn validated_debug_child_bearing_package_executes_with_debug_info() {
         end
         ",
         )
+        .value
         .expect("program should assemble");
 
     assert!(package.debug_info().unwrap().is_some());
@@ -323,7 +329,7 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(loaded_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == loaded_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -370,7 +376,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(loaded_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == loaded_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -401,7 +407,7 @@ fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(loaded_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == loaded_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -431,7 +437,7 @@ fn host_loaded_package_debug_info_survives_step_execution() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(loaded_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == loaded_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -470,7 +476,7 @@ fn direct_step_with_package_debug_info_seeds_initial_resume_context() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(loaded_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == loaded_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -526,7 +532,7 @@ fn host_loaded_stripped_package_restores_caller_debug_info() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(caller_source_file.id(), 12u32..23)
+        } if label == SourceSpan::session(caller_source_file.id(), TextRange::new(12, 23).unwrap())
             && actual_source_file.id() == caller_source_file.id()
             && err_code == Felt::from_u32(11)
     );
@@ -561,7 +567,7 @@ fn host_loaded_debug_info_survives_stripped_intermediate_package() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(leaf_source_file.id(), 0u32..11)
+        } if label == SourceSpan::session(leaf_source_file.id(), TextRange::new(0, 11).unwrap())
             && actual_source_file.id() == leaf_source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -646,6 +652,7 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
     );
     let lib = Assembler::new(source_manager.clone())
         .assemble_library("lib", root, [a, b])
+        .value
         .map(Arc::<Package>::from)
         .expect("library should assemble");
     let lib_debug_info = lib
@@ -681,6 +688,7 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         .with_package(lib, Linkage::Static)
         .expect("library should link statically")
         .assemble_program("program", main)
+        .value
         .expect("program should assemble");
     let package_debug_info = package
         .debug_info()
@@ -775,7 +783,7 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(source_file.id(), 6u32..12)
+        } if label == SourceSpan::session(source_file.id(), TextRange::new(6, 12).unwrap())
             && actual_source_file.id() == source_file.id()
             && err_code == Felt::from_u32(7)
     );
@@ -809,7 +817,7 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
+        } if label == SourceSpan::session(fixture.source_file.id(), TextRange::new(9, 17).unwrap())
             && actual_source_file.id() == fixture.source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -855,7 +863,7 @@ async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
             label,
             source_file: Some(actual_source_file),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
+        } if label == SourceSpan::session(fixture.source_file.id(), TextRange::new(9, 17).unwrap())
             && actual_source_file.id() == fixture.source_file.id()
             && err_code == Felt::from_u32(9)
     );
@@ -917,6 +925,7 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
         end
         ",
         )
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -1209,7 +1218,7 @@ fn missing_external_package_source_debug_fixture() -> (
     );
     let host = DefaultHost::default().with_source_manager(source_manager.clone());
 
-    let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
+    let expected_span = SourceSpan::session(source_file.id(), TextRange::new(10, 28).unwrap());
     let mut builder = PackageDebugInfoBuilder::default();
     let external_asm_op = debug_asm_op(
         &mut builder,
@@ -2088,6 +2097,7 @@ fn nested_calls_enforce_aggregate_stack_depth_limit() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program("program", source)
+        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -2169,6 +2179,7 @@ fn nested_calls_within_aggregate_budget_succeed() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program("program", source)
+        .value
         .expect("program should assemble")
         .unwrap_program();
 

@@ -148,11 +148,13 @@ fn test_advice_provider() {
 
         let kernel_lib = Assembler::new(source_manager.clone())
             .assemble_kernel("kernel", kernel, None)
+            .value
             .map(Arc::<Package>::from)
             .unwrap();
         let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
             .unwrap()
             .assemble_program("program", program_source)
+            .value
             .unwrap()
             .unwrap_program();
 
