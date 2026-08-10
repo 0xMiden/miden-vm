@@ -5,7 +5,7 @@ While [Miden](../miden-vm) crate also contains verifier functionality, if a proj
 
 ## Usage
 
-Use `verify(proof, claim)` to verify a final `ExecutionProof`. The `ExecutionClaim` contains the
+Use `verify(&proof, &claim)` to verify a final `ExecutionProof`. The `ExecutionClaim` contains the
 program information and public stack inputs and outputs. The function returns the proof's security
 level, or a `VerificationError` if verification fails.
 

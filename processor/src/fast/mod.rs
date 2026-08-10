@@ -9,7 +9,10 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use miden_mast_package::Package;
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
@@ -146,6 +149,12 @@ pub struct FastProcessor {
 
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
+
+    /// Package debug information configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) package_debug_info: Option<PackageDebugInfo>,
+
+    /// Entrypoint source node configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) entrypoint_source_node: Option<DebugSourceNodeId>,
 }
 
 impl FastProcessor {
@@ -284,6 +293,8 @@ impl FastProcessor {
                 options.max_deferred_elements(),
             )
             .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            package_debug_info: None,
+            entrypoint_source_node: None,
             options,
         })
     }
