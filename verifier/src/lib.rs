@@ -90,8 +90,8 @@ impl Verifier {
     ///   public root.
     pub fn verify(
         &self,
-        proof: ExecutionProof,
-        claim: ExecutionClaim,
+        proof: &ExecutionProof,
+        claim: &ExecutionClaim,
     ) -> Result<u32, VerificationError> {
         let miden_security_level = proof.security_level();
         let (final_deferred_root, precompile_security_level) =
@@ -122,8 +122,8 @@ impl Verifier {
     ///   deferred root.
     pub fn verify_partial(
         &self,
-        proof: ExecutionProof,
-        claim: ExecutionClaim,
+        proof: &ExecutionProof,
+        claim: &ExecutionClaim,
     ) -> Result<(u32, Unsettled), VerificationError> {
         let security_level = proof.security_level();
         let deferred_state =
@@ -167,7 +167,7 @@ impl Unsettled {
 /// - The provided proof does not prove a correct execution of the claim.
 /// - The proof carries wire-backed deferred proof material, which is a partial/delegable form.
 /// - The proof's STARK-backed deferred proof, if present, does not verify against its public root.
-pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
+pub fn verify(proof: &ExecutionProof, claim: &ExecutionClaim) -> Result<u32, VerificationError> {
     Verifier::default().verify(proof, claim)
 }
 
@@ -212,7 +212,7 @@ fn stark_security_level(_proof: &StarkProof) -> u32 {
 }
 
 fn verify_stark(
-    claim: ExecutionClaim,
+    claim: &ExecutionClaim,
     final_deferred_root: Word,
     stark_proof: &StarkProof,
 ) -> Result<(), VerificationError> {

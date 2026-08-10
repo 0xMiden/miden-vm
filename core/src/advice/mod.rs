@@ -28,24 +28,39 @@ pub use stack::AdviceStack;
 ///    with Merkle trees.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdviceInputs {
-    advice_stack: AdviceStack,
-    pub map: AdviceMap,
-    pub store: MerkleStore,
+    stack: AdviceStack,
+    map: AdviceMap,
+    store: MerkleStore,
 }
 
 impl AdviceInputs {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    /// Replaces the advice stack with the provided typed stack.
-    pub fn with_advice_stack(mut self, stack: AdviceStack) -> Self {
-        self.advice_stack = stack;
+    /// Creates a new advice inputs container from the provided stack, map, and Merkle store.
+    pub fn new(stack: AdviceStack, map: AdviceMap, store: MerkleStore) -> Self {
+        Self { stack, map, store }
+    }
+
+    /// Replaces the stack with the provided typed stack.
+    pub fn with_stack(mut self, stack: AdviceStack) -> Self {
+        self.stack = stack;
         self
     }
 
-    /// Returns the advice stack as a typed stack.
-    pub fn advice_stack(&self) -> AdviceStack {
-        self.advice_stack.clone()
+    /// Returns the advice stack.
+    pub fn stack(&self) -> AdviceStack {
+        self.stack.clone()
+    }
+
+    /// Returns the advice map.
+    pub fn map(&self) -> &AdviceMap {
+        &self.map
+    }
+
+    /// Returns the Merkle store.
+    pub fn store(&self) -> &MerkleStore {
+        &self.store
     }
 
     /// Extends the map of values with the given argument, replacing previously inserted items.
@@ -68,21 +83,31 @@ impl AdviceInputs {
 
     /// Extends the contents of this instance with the contents of the other instance.
     pub fn extend(&mut self, other: Self) {
-        self.advice_stack.append_elements(other.advice_stack.into_elements());
+        self.stack.append_elements(other.stack.into_elements());
         self.map.extend(other.map);
         self.store.extend(other.store.inner_nodes());
     }
 
     /// Consumes this instance and returns its parts.
     pub fn into_parts(self) -> (AdviceStack, AdviceMap, MerkleStore) {
-        (self.advice_stack, self.map, self.store)
+        (self.stack, self.map, self.store)
+    }
+}
+
+impl From<AdviceMap> for AdviceInputs {
+    fn from(map: AdviceMap) -> Self {
+        Self {
+            stack: AdviceStack::default(),
+            map,
+            store: MerkleStore::default(),
+        }
     }
 }
 
 impl Serializable for AdviceInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let Self { advice_stack, map, store } = self;
-        let stack: Vec<Felt> = advice_stack.iter().copied().collect();
+        let Self { stack, map, store } = self;
+        let stack: Vec<Felt> = stack.iter().copied().collect();
         stack.write_into(target);
         map.write_into(target);
         store.write_into(target);
@@ -94,7 +119,7 @@ impl Deserializable for AdviceInputs {
         let stack = Vec::<Felt>::read_from(source)?;
         let map = AdviceMap::read_from(source)?;
         let store = MerkleStore::read_from(source)?;
-        Ok(Self { advice_stack: stack.into(), map, store })
+        Ok(Self { stack: stack.into(), map, store })
     }
 }
 
@@ -105,9 +130,10 @@ impl Deserializable for AdviceInputs {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::{AdviceInputs, AdviceStack};
+    use super::{AdviceInputs, AdviceMap, AdviceStack};
     use crate::{
         Felt, Word,
+        crypto::merkle::MerkleStore,
         serde::{Deserializable, Serializable},
     };
 
@@ -118,22 +144,46 @@ mod tests {
 
         assert_eq!(advice1, advice2);
 
-        let advice1 = AdviceInputs::default()
-            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
-        let advice2 = AdviceInputs::default()
-            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
+        let advice1 =
+            AdviceInputs::default().with_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
+        let advice2 =
+            AdviceInputs::default().with_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
 
         assert_eq!(advice1, advice2);
     }
 
     #[test]
     fn test_advice_inputs_serialization() {
-        let advice1 = AdviceInputs::default()
-            .with_advice_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
+        let advice1 =
+            AdviceInputs::default().with_stack(AdviceStack::try_from_values([1, 2, 3]).unwrap());
         let bytes = advice1.to_bytes();
         let advice2 = AdviceInputs::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(advice1, advice2);
+    }
+
+    #[test]
+    fn advice_inputs_new_assembles_parts() {
+        let stack = AdviceStack::try_from_values([1, 2, 3]).unwrap();
+        let map = AdviceMap::from_iter([(Word::default(), vec![Felt::new_unchecked(7)])]);
+        let store = MerkleStore::default();
+
+        let advice = AdviceInputs::new(stack.clone(), map.clone(), store.clone());
+
+        assert_eq!(advice.stack(), stack);
+        assert_eq!(advice.map, map);
+        assert_eq!(advice.store, store);
+    }
+
+    #[test]
+    fn advice_inputs_from_advice_map_defaults_other_parts() {
+        let map = AdviceMap::from_iter([(Word::default(), vec![Felt::new_unchecked(7)])]);
+
+        let advice = AdviceInputs::from(map.clone());
+
+        assert_eq!(advice.stack(), AdviceStack::default());
+        assert_eq!(advice.map, map);
+        assert_eq!(advice.store, MerkleStore::default());
     }
 
     #[test]
@@ -150,9 +200,9 @@ mod tests {
             .into(),
         );
 
-        let advice = AdviceInputs::default().with_advice_stack(stack.clone());
+        let advice = AdviceInputs::default().with_stack(stack.clone());
 
-        assert_eq!(advice.advice_stack(), stack);
+        assert_eq!(advice.stack(), stack);
     }
 
     #[test]

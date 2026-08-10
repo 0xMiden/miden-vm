@@ -352,7 +352,6 @@ fn bench_one_scenario(
     if axes.contains("verify") {
         // Reuse a proof from the `prove` axis when it ran for this scenario. This keeps prove time
         // out of the verify measurement without forcing an extra proof in all-axes runs.
-        let program_info = ProgramInfo::from(program.clone());
         let (stack_outputs, proof) = cached_proof.borrow().clone().unwrap_or_else(|| {
             let mut host = DefaultHost::default();
             prove_sync(
@@ -365,19 +364,13 @@ fn bench_one_scenario(
             )
             .expect("prove for verify setup")
         });
+        let claim = ExecutionClaim::from_program_info(
+            ProgramInfo::from(program.clone()),
+            StackInputs::default(),
+            stack_outputs,
+        );
         group.bench_function("verify", |b| {
-            b.iter_batched(
-                || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
-                |(program_info, stack_inputs, stack_outputs, proof)| {
-                    let claim = ExecutionClaim::from_program_info(
-                        program_info,
-                        stack_inputs,
-                        stack_outputs,
-                    );
-                    black_box(Verifier::new().verify(proof, claim).expect("verify"));
-                },
-                BatchSize::SmallInput,
-            );
+            b.iter(|| black_box(Verifier::new().verify(&proof, &claim).expect("verify")));
         });
     }
 

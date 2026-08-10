@@ -30,8 +30,8 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { stack: AdviceStack },
-    ExtendMap { other: AdviceMap },
-    ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
+    ExtendMap { map: AdviceMap },
+    ExtendMerkleStore { inner_nodes: Vec<InnerNodeInfo> },
 }
 
 impl AdviceMutation {
@@ -39,12 +39,12 @@ impl AdviceMutation {
         Self::ExtendStack { stack }
     }
 
-    pub fn extend_map(other: AdviceMap) -> Self {
-        Self::ExtendMap { other }
+    pub fn extend_map(map: AdviceMap) -> Self {
+        Self::ExtendMap { map }
     }
 
-    pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
-        Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    pub fn extend_merkle_store(inner_nodes: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
+        Self::ExtendMerkleStore { inner_nodes: Vec::from_iter(inner_nodes) }
     }
 }
 // HOST TRAIT
@@ -129,7 +129,7 @@ pub trait SyncHost: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to not raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
@@ -176,7 +176,7 @@ pub trait Host: BaseHost {
     /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
     /// position 0 and the user trace event ID is at position 1 when this handler is called. The
     /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected to nat raise an error on encountering
+    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
     /// a trace event for which no handler is registered.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via

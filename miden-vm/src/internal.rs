@@ -113,7 +113,7 @@ impl InputFile {
             .parse_advice_stack()
             .map_err(|e| format!("failed to parse advice provider: {e}"))?;
         let stack = AdviceStack::try_from_values(stack).map_err(|e| e.to_string())?;
-        advice_inputs = advice_inputs.with_advice_stack(stack);
+        advice_inputs = advice_inputs.with_stack(stack);
 
         if let Some(map) = self
             .parse_advice_map()

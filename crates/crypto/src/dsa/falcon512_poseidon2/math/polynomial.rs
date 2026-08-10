@@ -451,7 +451,7 @@ where
             panic!();
         }
         if self.is_zero() {
-            Self::zero();
+            return Self::zero();
         }
         let mut remainder = self;
         let mut quotient = Polynomial::<F>::zero();
@@ -652,6 +652,15 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 mod tests {
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
+
+    #[test]
+    fn div_zero_by_nonzero_returns_zero() {
+        use num::Zero;
+        let zero = Polynomial::<i64>::zero();
+        let nonzero = Polynomial::new(vec![1, 2, 3]);
+        let result = zero / nonzero;
+        assert!(result.is_zero());
+    }
 
     #[test]
     fn test_negacyclic_reduction() {

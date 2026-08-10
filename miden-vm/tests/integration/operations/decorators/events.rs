@@ -1,5 +1,7 @@
 use miden_assembly::Assembler;
-use miden_processor::{ExecutionOptions, Program, StackInputs, advice::AdviceInputs};
+use miden_processor::{
+    ExecutionOptions, FastProcessor, Program, StackInputs, advice::AdviceInputs,
+};
 
 use super::TestHost;
 
@@ -22,13 +24,13 @@ fn test_event_handling() {
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
-        &program,
+    FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     // make sure events were handled correctly
