@@ -18,7 +18,7 @@
 
 #### Fixes
 
-- Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, so a decoded index whose depth disagrees with `DEPTH` is rejected instead of producing an inconsistent value ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
+- [BREAKING] Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, and the bypassing `serde` derives were removed from `LeafIndex`, `SmtLeaf`, `Smt`, and `PartialSmt` ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
 
 ## v0.29.0 (2026-08-04)
 

@@ -593,7 +593,6 @@ impl InnerNode {
 
 /// The index of a leaf, at a depth known at compile-time.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct LeafIndex<const DEPTH: u8> {
     index: NodeIndex,
 }
