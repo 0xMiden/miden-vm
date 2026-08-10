@@ -7,6 +7,8 @@
 #### Changes
 
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
+- Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
+
 #### Features
 
 - Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
@@ -15,6 +17,8 @@
 #### Changes
 
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- [BREAKING] `verify`, `Verifier::verify`, and `Verifier::verify_partial` now borrow the proof and the claim instead of consuming them.
+- [BREAKING] Renamed the `AdviceMutation::ExtendMap` field `other` to `map` and the `AdviceMutation::ExtendMerkleStore` field `infos` to `inner_nodes`.
 
 #### Fixes
 
