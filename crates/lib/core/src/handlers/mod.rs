@@ -79,10 +79,12 @@ fn memory_region_range(start_ptr: u64, len: u64) -> Option<Range<u32>> {
     let start_addr: u32 = start_ptr.try_into().ok()?;
     let len: u32 = len.try_into().ok()?;
 
+    // Enforce word alignment (required for crypto_stream, mem_stream operations)
     if !start_addr.is_multiple_of(4) {
         return None;
     }
 
+    // Calculate end address with overflow check
     let end_addr = start_addr.checked_add(len)?;
 
     Some(start_addr..end_addr)
