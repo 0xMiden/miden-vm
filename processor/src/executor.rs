@@ -14,7 +14,6 @@ use crate::{
 /// Defaults to [`FastProcessor`]. Alternative implementations can wrap execution in a debugger,
 /// add instrumentation, or redirect to a different backend, while leaving the surrounding
 /// executor wiring untouched.
-///
 pub trait ProgramExecutor {
     /// Creates a new executor configured with the provided inputs and options.
     ///
