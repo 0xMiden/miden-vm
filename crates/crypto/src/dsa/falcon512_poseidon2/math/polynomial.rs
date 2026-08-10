@@ -650,9 +650,10 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 #[cfg(test)]
 mod tests {
+    use num::Zero;
+
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
-    use num::Zero;
 
     #[test]
     fn test_negacyclic_reduction() {
