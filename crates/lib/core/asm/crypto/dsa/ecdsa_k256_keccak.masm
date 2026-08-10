@@ -12,7 +12,7 @@ use miden::core::word
 # - The public-key commitment is `Poseidon2::hash_elements(QX[8] || QY[8])` over the native
 #   coordinate limbs in advice/memory order.
 # - MSG_WORD is a word whose four felts are split into eight little-endian u32 limbs before Keccak256.
-# - MSG_BYTES is stored as packed little-endian u32 limbs in word-aligned memory.
+# - Variable-length messages are stored as packed little-endian u32 limbs in word-aligned memory.
 
 # PROCEDURES
 # ================================================================================================
@@ -49,6 +49,8 @@ use miden::core::word
 #!
 #! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
 #! reduced Keccak prehash, and signature scalars through precompile-backed deferred evaluation.
+#!
+#! Invocation: exec
 @locals(24)
 pub proc verify
     locaddr.0
@@ -93,10 +95,10 @@ end
 #! - `SIG_R[8]`, `SIG_S[8]`: native signature scalars as little-endian u32 limbs.
 #!
 #! No result word is pushed. The procedure traps if:
-#! - `MSG_PTR` is not word-aligned;
-#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit;
-#! - a message-memory felt is not a valid u32;
-#! - unused message bytes or felts in the final 32-byte chunk are nonzero;
+#! - `MSG_PTR` is not word-aligned.
+#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - a message-memory felt is not a valid u32.
+#! - unused message bytes or felts in the final 32-byte chunk are nonzero.
 #! - public-key or signature limbs are malformed, the public key is invalid/off-curve, the signature
 #!   scalars are invalid, or signature verification fails.
 #!
@@ -163,15 +165,13 @@ end
 #! Preconditions:
 #! - digest_ptr = pubkey_ptr + 16 and points to DIGEST_U32[8] packed little-endian u32 limbs.
 proc load_keccak_digest_as_z
-    dup sub.16 swap
-    # => [read_ptr=digest_ptr, pubkey_ptr, ...]
     repeat.8
         dup mem_load
         exec.reverse_u32_bytes
         swap add.1
     end
-    # => [read_ptr=digest_ptr+8, PREHASH_U32[8], pubkey_ptr, ...]
-    drop
+    # => [read_ptr=digest_ptr+8, PREHASH_U32[8], ...]
+    sub.24 movdn.8
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 end
 
