@@ -32,7 +32,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
+    SyncHost,
     advice::AdviceMutation,
     event::EventError,
     operation::OperationError,
@@ -800,6 +801,52 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
             fixture.entrypoint_source_node_id,
             &mut host,
         )
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
+            && actual_source_file.id() == fixture.source_file.id()
+            && err_code == Felt::from_u32(9)
+    );
+}
+
+/// Covers the `Some(entrypoint_source_node)` arm of
+/// [`ProgramExecutor::execute_with_package_debug_info`], so the trait-level dispatch to
+/// [`FastProcessor::execute_with_package_debug_info_at_source_node`] is not left untested. It
+/// mirrors [`package_source_debug_execution_uses_manifest_entrypoint_source_node`] but drives
+/// execution through the trait instead of the inherent method.
+#[tokio::test(flavor = "current_thread")]
+async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
+    let fixture =
+        same_digest_entrypoint_fixture(vec![Operation::Assert(Felt::from_u32(9))], "assert");
+    assert!(
+        fixture
+            .debug_info
+            .unique_source_root_for_exec_node(fixture.program.entrypoint())
+            .is_err(),
+        "debug info alone cannot pick the manifest-selected same-digest entrypoint"
+    );
+
+    let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
+    let processor = <FastProcessor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap();
+    let processor =
+        <FastProcessor as ProgramExecutor>::with_debug_info(processor, fixture.debug_info.clone());
+    let processor = <FastProcessor as ProgramExecutor>::with_entrypoint_source_node(
+        processor,
+        Some(fixture.entrypoint_source_node_id),
+    );
+    let err = <FastProcessor as ProgramExecutor>::execute(processor, &fixture.program, &mut host)
+        .await
         .unwrap_err();
 
     assert_matches!(

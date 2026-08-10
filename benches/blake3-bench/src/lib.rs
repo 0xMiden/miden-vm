@@ -165,7 +165,7 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
         stack_outputs,
     );
     Verifier::new()
-        .verify(proof, claim)
+        .verify(&proof, &claim)
         .expect("failed to verify Blake3 benchmark proof");
 }
 

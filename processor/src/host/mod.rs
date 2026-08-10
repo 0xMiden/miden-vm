@@ -30,8 +30,8 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { stack: AdviceStack },
-    ExtendMap { other: AdviceMap },
-    ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
+    ExtendMap { map: AdviceMap },
+    ExtendMerkleStore { inner_nodes: Vec<InnerNodeInfo> },
 }
 
 impl AdviceMutation {
@@ -39,12 +39,12 @@ impl AdviceMutation {
         Self::ExtendStack { stack }
     }
 
-    pub fn extend_map(other: AdviceMap) -> Self {
-        Self::ExtendMap { other }
+    pub fn extend_map(map: AdviceMap) -> Self {
+        Self::ExtendMap { map }
     }
 
-    pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
-        Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    pub fn extend_merkle_store(inner_nodes: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
+        Self::ExtendMerkleStore { inner_nodes: Vec::from_iter(inner_nodes) }
     }
 }
 // HOST TRAIT

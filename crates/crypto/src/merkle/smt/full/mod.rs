@@ -97,7 +97,6 @@ type Leaves = super::Leaves<SmtLeaf>;
 ///              hash = H(key₁, value₁, key₂, value₂, ...)
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Smt {
     root: Word,
     num_entries: usize,

@@ -91,25 +91,22 @@ async fn execute_async_matches_execute() {
     let advice_inputs = AdviceInputs::default();
 
     let mut sync_host = DefaultHost::default();
-    let sync_output = miden_processor::execute_sync(
-        &program,
+    let sync_output = FastProcessor::new_with_options(
         stack_inputs,
         advice_inputs.clone(),
-        &mut sync_host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut sync_host)
     .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_output = miden_processor::execute(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut async_host,
-        ExecutionOptions::default(),
-    )
-    .await
-    .unwrap();
+    let async_output =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .expect("failed to construct FastProcessor")
+            .execute(&program, &mut async_host)
+            .await
+            .unwrap();
 
     assert_eq!(sync_output.stack, async_output.stack);
 }

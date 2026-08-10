@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Send repository_dispatch to aggregator
-        uses: peter-evans/repository-dispatch@831550845b9842397c9b90c366a610d53f2b846b
+        uses: peter-evans/repository-dispatch@73ca9d9f4f806f6470bf0a2c4245a7d14df16b37
         with:
           # PAT (Personal Access Token) that grants permission to trigger the rebuild workflow at the docs repository
           token: ${{ secrets.DOCS_REPO_TOKEN }}
