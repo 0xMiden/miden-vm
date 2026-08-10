@@ -174,28 +174,28 @@ windows-sys     = { version = "0.61.2" }
 x25519-dalek    = { version = "3.0.0", default-features = false }
 zerocopy        = { version = "0.8", default-features = false, features = ["derive"] }
 
-p3-air           = { version = "0.6", default-features = false }
-p3-batch-stark   = { version = "0.6", default-features = false }
-p3-blake3        = { version = "0.6", default-features = false }
-p3-blake3-air    = { version = "0.6", default-features = false }
-p3-bn254         = { version = "0.6", default-features = false }
-p3-challenger    = { version = "0.6", default-features = false }
-p3-commit        = { version = "0.6", default-features = false }
-p3-dft           = { version = "0.6", default-features = false }
-p3-field         = { version = "0.6", default-features = false }
-p3-fri           = { version = "0.6", default-features = false }
-p3-goldilocks    = { version = "0.6", default-features = false }
-p3-keccak        = { version = "0.6", default-features = false }
-p3-keccak-air    = { version = "0.6", default-features = false }
-p3-lookup        = { version = "0.6", default-features = false }
-p3-matrix        = { version = "0.6", default-features = false }
-p3-maybe-rayon   = { version = "0.6", default-features = false }
-p3-merkle-tree   = { version = "0.6", default-features = false }
-p3-mersenne-31   = { version = "0.6", default-features = false }
-p3-poseidon2-air = { version = "0.6", default-features = false }
-p3-symmetric     = { version = "0.6", default-features = false }
-p3-uni-stark     = { version = "0.6", default-features = false }
-p3-util          = { version = "0.6", default-features = false }
+p3-air           = { version = "0.6.3", default-features = false }
+p3-batch-stark   = { version = "0.6.3", default-features = false }
+p3-blake3        = { version = "0.6.3", default-features = false }
+p3-blake3-air    = { version = "0.6.3", default-features = false }
+p3-bn254         = { version = "0.6.3", default-features = false }
+p3-challenger    = { version = "0.6.3", default-features = false }
+p3-commit        = { version = "0.6.3", default-features = false }
+p3-dft           = { version = "0.6.3", default-features = false }
+p3-field         = { version = "0.6.3", default-features = false }
+p3-fri           = { version = "0.6.3", default-features = false }
+p3-goldilocks    = { version = "0.6.3", default-features = false }
+p3-keccak        = { version = "0.6.3", default-features = false }
+p3-keccak-air    = { version = "0.6.3", default-features = false }
+p3-lookup        = { version = "0.6.3", default-features = false }
+p3-matrix        = { version = "0.6.3", default-features = false }
+p3-maybe-rayon   = { version = "0.6.3", default-features = false }
+p3-merkle-tree   = { version = "0.6.3", default-features = false }
+p3-mersenne-31   = { version = "0.6.3", default-features = false }
+p3-poseidon2-air = { version = "0.6.3", default-features = false }
+p3-symmetric     = { version = "0.6.3", default-features = false }
+p3-uni-stark     = { version = "0.6.3", default-features = false }
+p3-util          = { version = "0.6.3", default-features = false }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
