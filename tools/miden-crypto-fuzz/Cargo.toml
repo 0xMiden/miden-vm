@@ -57,6 +57,13 @@ name  = "partial_smt"
 path  = "fuzz_targets/partial_smt.rs"
 test  = false
 
+[[bin]]
+bench = false
+doc   = false
+name  = "sparse_path"
+path  = "fuzz_targets/sparse_path.rs"
+test  = false
+
 # MMR structures fuzz target
 [[bin]]
 bench = false

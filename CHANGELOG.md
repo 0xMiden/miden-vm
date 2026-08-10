@@ -8,6 +8,10 @@
 
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 
+#### Fixes
+
+- Fixed a panic (`usize` subtraction overflow / out-of-bounds index) reachable by deserializing a malformed `SparseMerklePath` whose `empty_nodes_mask` has a bit set at a position `>= depth`; `Deserializable::read_from` now validates that no such out-of-range bits are present, matching the invariant already enforced by `SparseMerklePath::from_parts`.
+
 ## v0.29.0 (2026-08-04)
 
 #### Changes

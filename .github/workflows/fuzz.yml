@@ -108,6 +108,7 @@ jobs:
           - merkle_store
           - smt_serde
           - partial_smt
+          - sparse_path
           - mmr
           - crypto
           - aead

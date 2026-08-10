@@ -265,6 +265,27 @@ impl Deserializable for SparseMerklePath {
             )));
         }
         let empty_nodes_mask = source.read_u64()?;
+
+        // Reject masks with any bit set at a position >= depth. Bit `i` of the mask represents
+        // the (i + 1)-th depth of the path, so only bits `0..depth` are meaningful; a set bit
+        // beyond that range does not correspond to any node in a path of this depth. Without
+        // this check, `empty_nodes_count` (a plain popcount) can be satisfied by out-of-range
+        // bits, silently reducing the number of nodes read below what `depth` requires. This
+        // desyncs `self.depth()` (derived from `nodes.len() + mask.count_ones()`, which stays
+        // consistent) from the *positions* the mask claims are empty, causing
+        // `get_nonempty_index` to underflow (`normal_index - empty_deeper`) and panic - or, with
+        // overflow checks disabled, to wrap into an out-of-bounds `Vec` index and panic there
+        // instead - the first time the path is queried (e.g. via `at_depth`, `compute_root`, or
+        // `verify`). `SparseMerklePath::from_parts` already rejects this shape (its
+        // `min_path_len` is derived from the mask's highest set bit via `leading_zeros`, not from
+        // an externally supplied `depth`), so this brings deserialization in line with it.
+        let valid_mask = if depth == 64 { u64::MAX } else { (1u64 << depth) - 1 };
+        if empty_nodes_mask & !valid_mask != 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "SparseMerklePath empty_nodes_mask has bits set beyond its declared depth ({depth}): {empty_nodes_mask:#066b}",
+            )));
+        }
+
         let empty_nodes_count = empty_nodes_mask.count_ones();
         if empty_nodes_count > depth as u32 {
             return Err(DeserializationError::InvalidValue(format!(
@@ -517,7 +538,43 @@ mod tests {
             smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt, Smt, SparseMerkleTreeReader},
             sparse_path::path_depth_iter,
         },
+        utils::{ByteWriter, Deserializable, Serializable},
     };
+
+    #[test]
+    fn poc_malformed_mask_bit_beyond_depth_causes_panic_on_at_depth() {
+        // Craft raw bytes for a SparseMerklePath with:
+        //   depth = 4
+        //   empty_nodes_mask = bit 4 set (0b10000) -- a bit position that is OUT OF RANGE
+        //     for a depth-4 path (valid bit positions for depth=4 are bits 0..=3).
+        //   count_ones(mask) = 1, so nodes.len() required = depth - 1 = 3
+        struct RawWriter(Vec<u8>);
+        impl ByteWriter for RawWriter {
+            fn write_bytes(&mut self, bytes: &[u8]) {
+                self.0.extend_from_slice(bytes);
+            }
+        }
+
+        let mut w = RawWriter(Vec::new());
+        w.write_u8(4u8); // depth
+        w.write_u64(0b10000u64); // empty_nodes_mask, bit 4 set (out of range for depth=4)
+        // 3 nodes required (depth=4 - count_ones=1)
+        for i in 0..3u64 {
+            Word::from([Felt::new(i), Felt::new(i), Felt::new(i), Felt::new(i)]).write_into(&mut w);
+        }
+
+        let mut source = w.0.as_slice();
+
+        // With the fix, deserialization must reject this malformed input outright instead of
+        // constructing an inconsistent `SparseMerklePath` that later panics when queried (e.g.
+        // via `at_depth`, `compute_root`, or `verify`).
+        let result = SparseMerklePath::read_from(&mut source);
+        assert!(
+            result.is_err(),
+            "expected out-of-range empty_nodes_mask bit to be rejected during deserialization, \
+             got: {result:?}",
+        );
+    }
 
     fn make_smt(pair_count: u64) -> Smt {
         let entries: Vec<(Word, Word)> = (0..pair_count)
