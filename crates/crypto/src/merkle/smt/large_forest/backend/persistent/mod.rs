@@ -300,11 +300,15 @@ impl BackendReader for PersistentBackend {
 
         let lineage_bytes = lineage.to_bytes();
 
-        // In order to improve iteration performance significantly, we iterate with a prefix. As
-        // leaves are keyed on `LeafKey`, which begins with the bytes of the lineage, we can use the
-        // lineage as our prefix. That means that the iterator should only yield values whose key
-        // begins with the prefix with a high likelihood.
-        let pfx_iterator = self.db.prefix_iterator_cf(self.cf(LEAVES_CF)?, lineage_bytes);
+        // Bound iteration to the lineage's key prefix. `prefix_iterator_cf` cannot enforce this
+        // boundary because `LEAVES_CF` has no prefix extractor.
+        let mut read_opts = db::ReadOptions::default();
+        read_opts.set_iterate_range(db::PrefixRange(lineage_bytes.clone()));
+        let pfx_iterator = self.db.iterator_cf_opt(
+            self.cf(LEAVES_CF)?,
+            read_opts,
+            db::IteratorMode::From(&lineage_bytes, db::Direction::Forward),
+        );
 
         // Data ownership concerns mean we cannot use this iterator directly even if we could change
         // its type, so we delegate to our custom entries iterator impl.

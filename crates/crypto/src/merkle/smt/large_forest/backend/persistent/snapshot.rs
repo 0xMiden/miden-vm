@@ -209,7 +209,7 @@ impl BackendReader for PersistentBackendReader {
         let lineage_bytes = lineage.to_bytes();
         let cf = self.cf(LEAVES_CF)?;
         let mut read_opts = db::ReadOptions::default();
-        read_opts.set_prefix_same_as_start(true);
+        read_opts.set_iterate_range(db::PrefixRange(lineage_bytes.clone()));
         let pfx_iterator = self.inner.snapshot.iterator_cf_opt(
             cf,
             read_opts,

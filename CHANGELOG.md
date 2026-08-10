@@ -4,6 +4,7 @@
 
 #### Fixes
 
+- Bounded persistent `LargeSmtForest` entry iteration to the requested lineage, avoiding scans across later RocksDB leaf ranges ([#3571](https://github.com/0xMiden/miden-vm/issues/3571)).
 - Fixed `PartialSmt::from_unique_nodes()` reconstruction for partial trees containing both inclusion and exclusion proofs by processing leaf-derived and inner-node-derived branches in a shared bottom-up priority order ([#3470](https://github.com/0xMiden/miden-vm/issues/3470)).
 
 ## v0.29.0 (2026-08-04)
