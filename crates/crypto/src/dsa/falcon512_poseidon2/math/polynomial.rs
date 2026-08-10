@@ -476,13 +476,10 @@ fn vector_karatsuba<
     right: &[F],
 ) -> Vec<F> {
     let n = left.len();
-    
+
     // ??? ADD THIS SAFETY NET:
-    assert!(
-        n.is_power_of_two(),
-        "vector_karatsuba only supports power-of-two lengths"
-    );
-    
+    assert!(n.is_power_of_two(), "vector_karatsuba only supports power-of-two lengths");
+
     if n <= 8 {
         let mut product = vec![F::zero(); left.len() + right.len() - 1];
         for (i, l) in left.iter().enumerate() {
