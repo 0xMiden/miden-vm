@@ -5,6 +5,7 @@
 #### Fixes
 
 - Fixed `PartialSmt::from_unique_nodes()` reconstruction for partial trees containing both inclusion and exclusion proofs by processing leaf-derived and inner-node-derived branches in a shared bottom-up priority order ([#3470](https://github.com/0xMiden/miden-vm/issues/3470)).
+- Added `ecdsa_k256_keccak::verify_bytes` for verifying signatures over variable-length Keccak256 message bytes stored in VM memory ([#3563](https://github.com/0xMiden/miden-vm/pull/3563)).
 
 ## v0.29.0 (2026-08-04)
 

@@ -115,6 +115,7 @@ fn core_library_exports_crypto_wrappers() {
         "::miden::core::crypto::hashes::keccak256::hash",
         "::miden::core::crypto::hashes::keccak256::merge",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify",
+        "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_bytes",
     ] {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
