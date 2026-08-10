@@ -23,8 +23,6 @@ pub use miden_assembly_syntax::{
 pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
-#[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::{
@@ -92,32 +90,6 @@ impl PackageRecord {
     /// Returns the dependency metadata for this package.
     pub fn dependencies(&self) -> &PackageRequirements {
         &self.dependencies
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for PackageRecord {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let description = proptest::option::of(
-            proptest::collection::vec(proptest::char::range('a', 'z'), 1..32)
-                .prop_map(|chars| Arc::<str>::from(chars.into_iter().collect::<String>())),
-        );
-        let dependencies =
-            proptest::collection::vec((any::<PackageId>(), any::<VersionRequirement>()), 0..4)
-                .prop_map(|entries| entries.into_iter().collect::<BTreeMap<_, _>>());
-
-        (any::<Version>(), description, dependencies)
-            .prop_map(|(version, description, dependencies)| {
-                let mut record = Self::new(version, dependencies);
-                if let Some(description) = description {
-                    record = record.with_description(description);
-                }
-                record
-            })
-            .boxed()
     }
 }
 

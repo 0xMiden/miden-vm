@@ -3,7 +3,7 @@ use alloc::vec;
 use alloc::{
     borrow::{Cow, ToOwned},
     format,
-    string::ToString,
+    string::{String, ToString},
 };
 use core::{fmt, str::FromStr};
 
@@ -17,6 +17,10 @@ use proptest::prelude::*;
 /// A unique identifier for optional sections of the Miden package format
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(transparent)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SectionId(Cow<'static, str>);
 
 impl SectionId {
@@ -89,6 +93,20 @@ impl FromStr for SectionId {
 impl fmt::Display for SectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl Serializable for SectionId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_str().write_into(target);
+    }
+}
+
+impl Deserializable for SectionId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        String::read_from(source)?
+            .parse()
+            .map_err(|err| DeserializationError::InvalidValue(format!("invalid section id: {err}")))
     }
 }
 

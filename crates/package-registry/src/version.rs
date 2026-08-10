@@ -3,8 +3,6 @@ use core::{borrow::Borrow, fmt, str::FromStr};
 pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer};
 use miden_core::Word;
 #[cfg(feature = "arbitrary")]
-use miden_core::utils::hash_string_to_word;
-#[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
 use super::VersionRequirement;
@@ -172,27 +170,5 @@ impl Ord for Version {
                 (Some(_), None) => Ordering::Greater,
             }
         })
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for Version {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let semver = (0u64..=5, 0u64..=15, 0u64..=31).prop_map(|(major, minor, patch)| {
-            format!("{major}.{minor}.{patch}")
-                .parse::<SemVer>()
-                .expect("generated semantic versions are valid")
-        });
-        let digest = proptest::option::of(
-            proptest::collection::vec(proptest::char::range('a', 'z'), 1..16).prop_map(|chars| {
-                let material = chars.into_iter().collect::<alloc::string::String>();
-                hash_string_to_word(material.as_str())
-            }),
-        );
-
-        (semver, digest).prop_map(|(version, digest)| Self { version, digest }).boxed()
     }
 }
