@@ -148,8 +148,8 @@ assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 
 To verify program execution, use `Verifier::new().verify(...)`. The verifier takes the following parameters:
 
-- `proof: ExecutionProof` is the proof generated during program execution.
-- `claim: ExecutionClaim` contains the claimed program information, stack inputs, and stack outputs.
+- `proof: &ExecutionProof` is the proof generated during program execution.
+- `claim: &ExecutionClaim` contains the claimed program information, stack inputs, and stack outputs.
 
 Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the `stack_inputs` is expected to be the value at the top of the stack.
 
@@ -178,7 +178,7 @@ let claim = ExecutionClaim::from_program_info(
 );
 
 // Verify the execution claim.
-match Verifier::new().verify(proof, claim) {
+match Verifier::new().verify(&proof, &claim) {
     Ok(_) => println!("Execution verified!"),
     Err(err) => eprintln!("Verification failed: {err}"),
 }

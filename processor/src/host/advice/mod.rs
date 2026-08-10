@@ -185,11 +185,11 @@ impl AdviceProvider {
             AdviceMutation::ExtendStack { stack } => {
                 self.extend_advice_stack(stack)?;
             },
-            AdviceMutation::ExtendMap { other } => {
-                self.extend_map(&other)?;
+            AdviceMutation::ExtendMap { map } => {
+                self.extend_map(&map)?;
             },
-            AdviceMutation::ExtendMerkleStore { infos } => {
-                self.extend_merkle_store(infos)?;
+            AdviceMutation::ExtendMerkleStore { inner_nodes } => {
+                self.extend_merkle_store(inner_nodes)?;
             },
         }
         Ok(())

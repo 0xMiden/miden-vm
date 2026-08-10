@@ -34,6 +34,6 @@ pub mod internal;
 ///
 /// Wire-backed deferred proofs are partial/delegable proof material and are rejected here; use
 /// [`Verifier::verify_partial`] to verify and hydrate wire-backed partial proofs.
-pub fn verify(proof: ExecutionProof, claim: ExecutionClaim) -> Result<u32, VerificationError> {
+pub fn verify(proof: &ExecutionProof, claim: &ExecutionClaim) -> Result<u32, VerificationError> {
     miden_verifier::verify(proof, claim)
 }
