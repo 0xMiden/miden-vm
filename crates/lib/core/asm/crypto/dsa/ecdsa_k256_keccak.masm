@@ -11,7 +11,8 @@ use miden::core::word
 # - Native secp256k1 values are stored as little-endian numeric u32 limbs, one limb per Felt.
 # - The public-key commitment is `Poseidon2::hash_elements(QX[8] || QY[8])` over the native
 #   coordinate limbs in advice/memory order.
-# - MSG is a word whose four felts are split into eight little-endian u32 limbs before Keccak256.
+# - MSG_WORD is a word whose four felts are split into eight little-endian u32 limbs before Keccak256.
+# - Variable-length messages are stored as packed little-endian u32 limbs in word-aligned memory.
 
 # PROCEDURES
 # ================================================================================================
@@ -21,7 +22,7 @@ use miden::core::word
 #! Acceptance intentionally differs from the Rust verifier: high-s witnesses are accepted.
 #!
 #! Inputs:
-#!   Operand stack: [PK_COMM, MSG, ...]
+#!   Operand stack: [PK_COMM, MSG_WORD, ...]
 #!   Advice stack:  [QX[8] | QY[8] | SIG_R[8] | SIG_S[8] | ...]
 #! Outputs:
 #!   Operand stack: [...]
@@ -30,7 +31,7 @@ use miden::core::word
 #! Where:
 #! - `PK_COMM`: Poseidon2 hash commitment of `QX[8] || QY[8]`, where coordinates are native
 #!   little-endian numeric u32 limbs, one limb per Felt.
-#! - `MSG`: single word / 4 felts representing the 32-byte message to verify.
+#! - `MSG_WORD`: single word / 4 felts representing the 32-byte message to verify.
 #! - `QX[8]`, `QY[8]`: native public-key coordinates as little-endian u32 limbs.
 #! - `SIG_R[8]`, `SIG_S[8]`: native signature scalars as little-endian u32 limbs.
 #!
@@ -48,36 +49,19 @@ use miden::core::word
 #!
 #! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
 #! reduced Keccak prehash, and signature scalars through precompile-backed deferred evaluation.
+#!
+#! Invocation: exec
 @locals(24)
 pub proc verify
-    # Load QX || QY from advice into the verifier public-key buffer while absorbing the same
-    # two chunks into the Poseidon2 `hash_elements` state. Since there are exactly 16 elements,
-    # the `hash_elements` capacity word is zero and no partial-block padding is required.
-    # `adv_pipe` exposes each just-written chunk in the rate slots in the same order that
-    # `mem_stream` would read it back from memory.
-    locaddr.0 padw padw padw
-    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[0], PK_COMM, MSG, ...]
-    adv_pipe
-    # => [QX_RATE[8], C=0w, write_ptr=loc[8], PK_COMM, MSG, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=loc[8], PK_COMM, MSG, ...]
-    adv_pipe
-    # => [QY_RATE[8], C, write_ptr=loc[16], PK_COMM, MSG, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=loc[16], PK_COMM, MSG, ...]
-    # Assert Poseidon2::hash_elements(QX[8] || QY[8]) == PK_COMM.
-    exec.poseidon2::squeeze_digest
-    # => [PK_HASH, write_ptr=loc[16], PK_COMM, MSG, ...]
-    movup.4 movdn.8
-    # => [PK_HASH, PK_COMM, write_ptr=loc[16], MSG, ...]
-    assert_eqw.err="invalid public key commitment"
-    # => [write_ptr=loc[16], MSG, ...]
+    locaddr.0
+    # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
+    exec.load_and_verify_public_key
+    # => [digest_ptr=loc[16], MSG_WORD, ...]
 
     movdn.4
-    # => [MSG, digest_ptr=loc[16], ...]
+    # => [MSG_WORD, digest_ptr=loc[16], ...]
 
-    # Stage MSG[32] in loc[16..24], hash it in-place via the memory-oriented Keccak precompile,
-    # then convert the digest bytes into the native little-endian scalar limbs used as ECDSA z.
+    # Stage MSG_WORD[32] in loc[16..24], hash it in-place via the memory-oriented Keccak precompile.
     exec.store_word_u32s_le
     # => [digest_ptr, ...]  (MSG_U32[8] written to loc[16..24])
 
@@ -86,17 +70,117 @@ pub proc verify
     exec.keccak256::hash_1_chunk_mem
     # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    dup sub.16 swap
-    # => [read_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    exec.load_keccak_digest_as_z
+    # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
+    exec.verify_digest_impl
+    # => [...]
+end
+
+#! Verifies a secp256k1 ECDSA witness over a variable-length message stored as bytes in memory.
+#!
+#! Inputs:
+#!   Operand stack: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
+#!   Advice stack:  [QX[8] | QY[8] | SIG_R[8] | SIG_S[8] | ...]
+#! Outputs:
+#!   Operand stack: [...]
+#!   Advice stack:  [...]
+#!
+#! Where:
+#! - `PK_COMM`: Poseidon2 hash commitment of `QX[8] || QY[8]`, where coordinates are native
+#!   little-endian numeric u32 limbs, one limb per Felt.
+#! - `MSG_PTR`: word-aligned address containing the message as packed little-endian u32 limbs.
+#! - `MSG_LEN_BYTES`: number of message bytes to hash. Unused bytes in the final u32 and remaining felts
+#!   in the final 32-byte chunk must be zero.
+#! - `QX[8]`, `QY[8]`: native public-key coordinates as little-endian u32 limbs.
+#! - `SIG_R[8]`, `SIG_S[8]`: native signature scalars as little-endian u32 limbs.
+#!
+#! No result word is pushed. The procedure traps if:
+#! - `MSG_PTR` is not word-aligned.
+#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - a message-memory felt is not a valid u32.
+#! - unused message bytes or felts in the final 32-byte chunk are nonzero.
+#! - public-key or signature limbs are malformed, the public key is invalid/off-curve, the signature
+#!   scalars are invalid, or signature verification fails.
+#!
+#! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, hashes the specified memory range,
+#! and validates the reduced Keccak prehash and signature scalars through precompile-backed deferred
+#! evaluation.
+#!
+#! Invocation: exec
+@locals(24)
+pub proc verify_bytes
+    locaddr.0
+    # => [pubkey_ptr=loc[0], PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
+    exec.load_and_verify_public_key
+    # => [out_ptr=loc[16], MSG_PTR, MSG_LEN_BYTES, ...]
+
+    movdn.2
+    # => [MSG_PTR, MSG_LEN_BYTES, out_ptr=loc[16], ...]
+    exec.keccak256::hash_bytes_mem
+    # => [...]
+
+    locaddr.16
+    # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
+    exec.load_keccak_digest_as_z
+    # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
+    exec.verify_digest_impl
+    # => [...]
+end
+
+# INTERNAL PROCEDURES — ECDSA
+# ================================================================================================
+
+#! Loads QX || QY from advice, binds it to PK_COMM, and returns the end of the public-key buffer.
+#!
+#! Input:  [pubkey_ptr, PK_COMM, ...]
+#! Advice: [QX[8] | QY[8] | ...]
+#! Output: [pubkey_ptr + 16, ...]
+proc load_and_verify_public_key
+    # Since there are exactly 16 elements, `hash_elements` has a zero capacity word and requires no
+    # partial-block padding. `adv_pipe` exposes each written chunk in the rate slots in the same
+    # order that `mem_stream` would read it back from memory.
+    padw padw padw
+    # => [R0=0w, R1=0w, C=0w, write_ptr=pubkey_ptr, PK_COMM, ...]
+    adv_pipe
+    # => [QX_RATE[8], C=0w, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    hperm
+    # => [R0, R1, C, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    adv_pipe
+    # => [QY_RATE[8], C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    hperm
+    # => [R0, R1, C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    exec.poseidon2::squeeze_digest
+    # => [PK_HASH, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    movup.4 movdn.8
+    # => [PK_HASH, PK_COMM, write_ptr=pubkey_ptr+16, ...]
+    assert_eqw.err="invalid public key commitment"
+    # => [pubkey_ptr+16, ...]
+end
+
+#! Converts a packed Keccak256 digest in the local scratch buffer to native scalar limbs.
+#!
+#! Input:  [digest_ptr, ...]
+#! Output: [PREHASH_U32[8], pubkey_ptr, ...]
+#!
+#! Preconditions:
+#! - digest_ptr = pubkey_ptr + 16 and points to DIGEST_U32[8] packed little-endian u32 limbs.
+proc load_keccak_digest_as_z
     repeat.8
         dup mem_load
         exec.reverse_u32_bytes
         swap add.1
     end
-    # => [read_ptr=loc[24], PREHASH_U32[8], pubkey_ptr, ...]
-    drop
+    # => [read_ptr=digest_ptr+8, PREHASH_U32[8], ...]
+    sub.24 movdn.8
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
+end
 
+#! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
+#!
+#! Input:  [Z_U32[8], pubkey_ptr, ...]
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [...]
+proc verify_digest_impl
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
 
@@ -124,9 +208,6 @@ pub proc verify
     # => [...]
 end
 
-# INTERNAL PROCEDURES — ECDSA
-# ================================================================================================
-
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
@@ -135,7 +216,7 @@ end
 #!
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
-#! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by `verify`;
+#! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by a public verifier;
 #! - SIG_R/S advice is untrusted and validated by `load_signature_k1`.
 proc prepare_verify_inputs
     exec.k1_scalar::load_reduced_256
