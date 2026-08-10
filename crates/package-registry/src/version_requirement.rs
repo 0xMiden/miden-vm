@@ -1,4 +1,5 @@
-use core::fmt;
+use alloc::string::ToString;
+use core::{fmt, str::FromStr};
 
 use miden_assembly_syntax::debuginfo::Span;
 #[cfg(feature = "arbitrary")]
@@ -79,6 +80,25 @@ impl fmt::Display for VersionRequirement {
                 write!(f, "{version}")
             },
         }
+    }
+}
+
+impl FromStr for VersionRequirement {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "*" {
+            return Ok(Self::from(VersionReq::STAR));
+        }
+        if let Some((version, digest)) = value.split_once('#') {
+            let version = version.parse::<SemVer>().map_err(|error| error.to_string())?;
+            let digest = Word::parse(digest).map_err(ToString::to_string)?;
+            return Ok(Self::Exact(Version::new(version, digest)));
+        }
+        if let Ok(digest) = Word::parse(value) {
+            return Ok(Self::from(digest));
+        }
+        VersionReq::from_str(value).map(Self::from).map_err(|error| error.to_string())
     }
 }
 

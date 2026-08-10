@@ -233,7 +233,8 @@ impl<'de> Deserialize<'de> for PersistedIndex {
                             .dependencies
                             .into_iter()
                             .map(|(name, requirement)| {
-                                parse_version_requirement(&requirement)
+                                requirement
+                                    .parse()
                                     .map(|requirement| (PackageId::from(name), requirement))
                                     .map_err(D::Error::custom)
                             })
@@ -250,28 +251,6 @@ impl<'de> Deserialize<'de> for PersistedIndex {
             .collect::<Result<BTreeMap<_, _>, D::Error>>()?;
         Ok(Self { packages })
     }
-}
-
-fn parse_version_requirement(value: &str) -> Result<VersionRequirement, String> {
-    use core::str::FromStr;
-
-    use miden_core::Word;
-    use miden_package_registry::{SemVer, VersionReq};
-
-    if value == "*" {
-        return Ok(VersionRequirement::from(VersionReq::STAR));
-    }
-    if let Some((version, digest)) = value.split_once('#') {
-        let version = version.parse::<SemVer>().map_err(|error| error.to_string())?;
-        let digest = Word::parse(digest).map_err(str::to_owned)?;
-        return Ok(VersionRequirement::Exact(Version::new(version, digest)));
-    }
-    if let Ok(digest) = Word::parse(value) {
-        return Ok(VersionRequirement::from(digest));
-    }
-    VersionReq::from_str(value)
-        .map(VersionRequirement::from)
-        .map_err(|error| error.to_string())
 }
 
 impl Default for LocalPackageRegistry {
