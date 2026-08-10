@@ -56,7 +56,7 @@ fn assert_prove_verify(
 
     println!("Verifying proof...");
     let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
-    let security_level = verify(proof, claim).expect("Verification failed");
+    let security_level = verify(&proof, &claim).expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
 }
@@ -338,7 +338,7 @@ mod fast_parallel {
         // Verify the proof
         let claim =
             ExecutionClaim::from_program_info(program.into(), stack_inputs, fast_stack_outputs);
-        verify(proof, claim).expect("Verification failed");
+        verify(&proof, &claim).expect("Verification failed");
     }
 
     #[test]
@@ -368,7 +368,7 @@ mod fast_parallel {
         .expect("prove_from_trace_sync failed");
 
         let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
-        verify(proof, claim).expect("Verification failed");
+        verify(&proof, &claim).expect("Verification failed");
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod fast_parallel {
         assert_eq!(proof.deferred_proof().as_wire(), Some(&expected_wire));
         let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
         let (_, pending) = miden_verifier::Verifier::new()
-            .verify_partial(proof, claim)
+            .verify_partial(&proof, &claim)
             .expect("partial verification failed");
         assert_ne!(pending.root(), miden_core::deferred::TRUE_DIGEST);
         let _state = pending.into_state();
@@ -463,18 +463,18 @@ fn prove_partial_fixture() -> (ExecutionClaim, ExecutionProof) {
 fn test_partial_obligation_flow() {
     // the default prover emits final deferred material: `verify` accepts it directly
     let (claim, proof) = prove_fixture();
-    verify(proof, claim).expect("final verification should pass");
+    verify(&proof, &claim).expect("final verification should pass");
 
     // a partial (wire-backed) package is refused by final verification...
     let (claim, partial) = prove_partial_fixture();
     assert!(matches!(
-        verify(partial.clone(), claim.clone()),
+        verify(&partial, &claim),
         Err(VerificationError::UnsupportedDeferredProof)
     ));
 
     // ...and verified by the partial path, which returns the linear obligation
     let (_, pending) = Verifier::new()
-        .verify_partial(partial, claim)
+        .verify_partial(&partial, &claim)
         .expect("partial verification should pass");
     assert_eq!(pending.root(), miden_core::deferred::TRUE_DIGEST);
     let _state = pending.into_state();
@@ -509,7 +509,7 @@ fn test_deferred_stark_proof_requires_exact_encoding_and_bound_root() {
     .expect("Proving failed");
     let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
 
-    verify(proof.clone(), claim.clone()).expect("untampered deferred proof should verify");
+    verify(&proof, &claim).expect("untampered deferred proof should verify");
 
     // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
     let stark = proof.miden_proof();
@@ -519,12 +519,12 @@ fn test_deferred_stark_proof_requires_exact_encoding_and_bound_root() {
         StarkProof::new(proof_bytes, stark.hash_fn()),
         proof.deferred_proof().clone(),
     );
-    verify(trailing, claim.clone()).expect_err("trailing proof bytes must be rejected");
+    verify(&trailing, &claim).expect_err("trailing proof bytes must be rejected");
 
     // The deferred root is statement-bound: replacing it with TRUE must fail.
     let tampered = ExecutionProof::new(
         StarkProof::new(stark.bytes().to_vec(), stark.hash_fn()),
         DeferredProof::empty(),
     );
-    assert!(verify(tampered, claim).is_err());
+    assert!(verify(&tampered, &claim).is_err());
 }

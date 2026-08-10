@@ -113,6 +113,6 @@ pub fn verify_once(
         stack_outputs,
     );
     Verifier::new()
-        .verify(proof, claim)
+        .verify(&proof, &claim)
         .expect("failed to verify precompile benchmark proof");
 }

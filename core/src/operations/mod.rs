@@ -174,7 +174,8 @@ pub enum Operation {
     ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
     /// - System events are identified by reserved [`SystemEvent`](crate::events::SystemEvent) IDs.
     ///   Most are handled by the VM; `SystemEvent::TraceEvent` triggers the host's optional
-    ///   read-only trace handler for the trace event id at stack position 1.
+    ///   read-only trace handler for the trace event id at stack position 1. Assembly exposes this
+    ///   through `trace`, `trace.CONST`, and `trace.event("...")`.
     /// - Any non system event ID is forwarded to the host's regular event handler.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.

@@ -6,7 +6,7 @@ use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
-    event::{EventError, EventName, SystemEvent, TraceError},
+    event::{EventError, EventName, TraceError},
 };
 
 struct YieldingAsyncHost {
@@ -76,15 +76,10 @@ fn simple_program() -> miden_processor::Program {
 }
 
 fn emit_trace_program() -> miden_processor::Program {
-    let trace_name = EventName::new("test::async::trace_emit");
-    let trace_id = trace_name.to_event_id().as_u64();
-    let trace_sys_event_id = SystemEvent::TraceEvent.event_id();
+    let trace_name = "test::async::trace_emit";
 
     Assembler::default()
-        .assemble_program(
-            "program",
-            format!("begin push.{trace_id} push.{trace_sys_event_id} emit drop drop end"),
-        )
+        .assemble_program("program", format!("begin trace.event(\"{trace_name}\") end"))
         .expect("program should compile")
         .unwrap_program()
 }
@@ -96,25 +91,22 @@ async fn execute_async_matches_execute() {
     let advice_inputs = AdviceInputs::default();
 
     let mut sync_host = DefaultHost::default();
-    let sync_output = miden_processor::execute_sync(
-        &program,
+    let sync_output = FastProcessor::new_with_options(
         stack_inputs,
         advice_inputs.clone(),
-        &mut sync_host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut sync_host)
     .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_output = miden_processor::execute(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut async_host,
-        ExecutionOptions::default(),
-    )
-    .await
-    .unwrap();
+    let async_output =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .expect("failed to construct FastProcessor")
+            .execute(&program, &mut async_host)
+            .await
+            .unwrap();
 
     assert_eq!(sync_output.stack, async_output.stack);
 }

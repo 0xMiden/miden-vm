@@ -696,11 +696,11 @@ impl Test {
                 StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             let claim =
                 ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-            assert!(verify(proof, claim).is_err());
+            assert!(verify(&proof, &claim).is_err());
         } else {
             let claim =
                 ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-            let result = verify(proof, claim);
+            let result = verify(&proof, &claim);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }

@@ -22,7 +22,7 @@ Currently, there are 3 ways to get values onto the stack:
 
 1. You can use `push` instruction to push values onto the stack. These values become a part of the program itself, and, therefore, cannot be changed between program executions. You can think of them as constants.
 2. The stack can be initialized to some set of values at the beginning of the program. These inputs are public and must be shared with the verifier for them to verify a proof of the correct execution of a Miden program. At most 16 values could be provided for the stack initialization, attempts to provide more than 16 values will cause an error.
-3. The program may request nondeterministic advice inputs from the prover. These inputs are secret inputs. This means that the prover does not need to share them with the verifier. There are three types of advice inputs: (1) a single advice stack which can contain any number of elements; (2) a key-mapped element lists which can be pushed onto the advice stack; (3) a Merkle store, which is used to provide nondeterministic inputs for instructions which work with Merkle trees. There are no restrictions on the number of advice inputs a program can request.
+3. The program may request nondeterministic advice inputs from the prover. These inputs are secret inputs. This means that the prover does not need to share them with the verifier. Advice can come from a stack, a map of element lists, or a Merkle store used by instructions that work with Merkle trees. There are no restrictions on the number of advice inputs a program can request.
 
 The stack is provided to Miden VM via `StackInputs` struct. These are public inputs of the execution, and should also be provided to the verifier. The secret inputs for the program are provided via the `Host` interface. The default implementation of the host relies on in-memory advice provider (`AdviceProvider`) that can be commonly used for operations that won't require persistence.
 
@@ -39,11 +39,11 @@ Miden crate exposes several functions which can be used to execute programs, gen
 To execute a program on Miden VM, you can use `execute()`. The sync `execute_sync()` variant is
 also available for sync callers. These functions take the following arguments:
 
-- `program: &Program` - a reference to a Miden program to be executed.
-- `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
-- `advice_inputs: AdviceInputs` - the private inputs used to build the advice provider; use `AdviceInputs::default()` when no private inputs are needed.
-- `host` - an instance of `Host` for `execute()` or `SyncHost` for `execute_sync()`, used to supply non-deterministic inputs to the VM and receive messages from the VM.
-- `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
+- `program: &Program` is a reference to the Miden program.
+- `stack_inputs: StackInputs` contains the public inputs.
+- `advice_inputs: AdviceInputs` contains the private inputs used to build the advice provider. Use `AdviceInputs::default()` when no private inputs are needed.
+- `host` is a `Host` for `execute()` or a `SyncHost` for `execute_sync()`. It supplies nondeterministic inputs to the VM and receives messages from it.
+- `options: ExecutionOptions` controls execution settings such as the maximum cycle count.
 
 The function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the final stack
 state and other execution outputs if the execution was successful, or an error if the execution
@@ -56,7 +56,7 @@ For example:
 ```rust
 use miden_vm::{
     advice::AdviceInputs,
-    Assembler, execute_sync, ExecutionOptions, DefaultHost, StackInputs
+    Assembler, DefaultHost, ExecutionOptions, FastProcessor, StackInputs
 };
 
 // instantiate the assembler
@@ -81,8 +81,14 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let output =
-    execute_sync(&program.unwrap_program(), stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+let output = FastProcessor::new_with_options(
+    stack_inputs,
+    advice_inputs.clone(),
+    exec_options,
+)
+.unwrap()
+.execute_sync(&program.unwrap_program(), &mut host)
+.unwrap();
 ```
 
 ### Proving program execution
@@ -91,17 +97,17 @@ To execute a program on Miden VM and generate a proof that the program was execu
 can use the `prove_sync()` function. The async `prove()` variant is also available for async
 callers. `prove_sync()` takes the following arguments:
 
-- `program: &Program` - a reference to a Miden program to be executed.
-- `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
-- `advice_inputs: AdviceInputs` - the initial nondeterministic inputs available to the VM.
-- `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
-- `execution_options: ExecutionOptions` - VM execution parameters such as cycle limits and trace fragmentation.
-- `options: ProvingOptions` - proof-generation parameters. The default options target 96-bit security level.
+- `program: &Program` is a reference to the Miden program.
+- `stack_inputs: StackInputs` contains the public inputs.
+- `advice_inputs: AdviceInputs` contains the initial nondeterministic inputs available to the VM.
+- `host: Host` supplies nondeterministic inputs to the VM and receives messages from it.
+- `execution_options: ExecutionOptions` controls VM execution parameters such as cycle limits and trace fragmentation.
+- `options: ProvingOptions` controls proof generation. The default targets a 96-bit security level.
 
 If the program is executed successfully, the function returns a tuple with 2 elements:
 
-- `outputs: StackOutputs` - the outputs generated by the program.
-- `proof: ExecutionProof` - proof of program execution. `ExecutionProof` can be easily serialized and deserialized using `to_bytes()` and `from_bytes()` functions respectively.
+- `outputs: StackOutputs` contains the outputs generated by the program.
+- `proof: ExecutionProof` proves program execution. It can be serialized and deserialized with `to_bytes()` and `from_bytes()`.
 
 #### Proof generation example
 
@@ -142,8 +148,8 @@ assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 
 To verify program execution, use `Verifier::new().verify(...)`. The verifier takes the following parameters:
 
-- `proof: ExecutionProof` - the proof generated during program execution.
-- `claim: ExecutionClaim` - the claimed program information, stack inputs, and stack outputs.
+- `proof: &ExecutionProof` is the proof generated during program execution.
+- `claim: &ExecutionClaim` contains the claimed program information, stack inputs, and stack outputs.
 
 Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the `stack_inputs` is expected to be the value at the top of the stack.
 
@@ -153,7 +159,7 @@ The verifier returns `Result<u32, VerificationError>` which will be `Ok(security
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
-Notice how the verifier needs to know only the hash of the program - not what the actual program was.
+The verifier needs only the program hash. It does not need the program itself.
 
 #### Proof verification example
 
@@ -172,7 +178,7 @@ let claim = ExecutionClaim::from_program_info(
 );
 
 // Verify the execution claim.
-match Verifier::new().verify(proof, claim) {
+match Verifier::new().verify(&proof, &claim) {
     Ok(_) => println!("Execution verified!"),
     Err(err) => eprintln!("Verification failed: {err}"),
 }
@@ -225,7 +231,7 @@ let program = assembler.assemble_program("prg", &source).unwrap();
 let mut host = DefaultHost::default();
 
 // initialize the stack with values 0 and 1
-let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
+let stack_inputs = StackInputs::new(&[1_u32.into(), 0_u32.into()]).unwrap();
 
 // execute the program
 let (outputs, proof) = miden_vm::prove_sync(
@@ -245,7 +251,7 @@ let stack = outputs.get_num_elements(1);
 assert_eq!(12586269025, stack[0].as_canonical_u64());
 ```
 
-Above, we used public inputs to initialize the stack rather than using `push` operations. This makes the program a bit simpler, and also allows us to run the program from arbitrary starting points without changing program hash.
+Above, we used public inputs to initialize the stack. This keeps the program simpler and lets us run it from arbitrary starting points without changing its hash.
 
 ## CLI interface
 
@@ -295,12 +301,12 @@ Once the executable has been compiled, you can run Miden VM like so:
 
 Currently, Miden VM can be executed with the following subcommands:
 
-- `run` - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.
-- `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
-- `verify` - this will verify a previously generated proof of execution for a given program.
-- `compile` - this will compile a Miden assembly program and outputs stats about the compilation process.
-- `debug` - this will instantiate a CLI debugger against the specified Miden assembly program and inputs.
-- `analyze` - this will run a Miden assembly program against specific inputs and will output stats about its execution.
+- `run` executes a Miden assembly program and outputs the result without generating a proof.
+- `prove` executes a Miden assembly program and generates a STARK proof.
+- `verify` verifies a previously generated proof for a given program.
+- `compile` compiles a Miden assembly program and reports compilation statistics.
+- `debug` starts a CLI debugger for the specified Miden assembly program and inputs.
+- `analyze` runs a Miden assembly program against specific inputs and reports execution statistics.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
 
@@ -328,10 +334,10 @@ This will run the example code to completion and will output the top element rem
 
 Miden VM can be compiled with the following features:
 
-- `std` - enabled by default and relies on the Rust standard library.
-- `concurrent` - implies `std` and also enables multi-threaded proof generation.
-- `executable` - required for building Miden VM binary as described above. Implies `std`.
-- `metal` - enables [Metal](<https://en.wikipedia.org/wiki/Metal_(API)>)-based acceleration of proof generation (for recursive proofs) on supported platforms (e.g., Apple silicon).
+- `std` is enabled by default and relies on the Rust standard library.
+- `concurrent` implies `std` and enables multithreaded proof generation.
+- `executable` is required for building the Miden VM binary as described above. It implies `std`.
+- `metal` enables [Metal](<https://en.wikipedia.org/wiki/Metal_(API)>)-based acceleration of proof generation for recursive proofs on supported platforms such as Apple silicon.
 - `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
   - Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

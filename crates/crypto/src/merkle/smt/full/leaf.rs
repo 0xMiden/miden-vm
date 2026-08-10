@@ -15,7 +15,6 @@ const DOUBLE_WORD_LEN: usize = 8;
 ///
 /// A leaf can be empty, hold a single key-value pair, or multiple key-value pairs.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum SmtLeaf {
     /// An empty leaf at the specified index.
     Empty(LeafIndex<SMT_DEPTH>),

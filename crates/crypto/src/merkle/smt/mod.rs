@@ -1,6 +1,6 @@
 //! Sparse Merkle Tree (SMT) data structures.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::{
     fmt::{self, Display},
     hash::Hash,
@@ -593,7 +593,6 @@ impl InnerNode {
 
 /// The index of a leaf, at a depth known at compile-time.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct LeafIndex<const DEPTH: u8> {
     index: NodeIndex,
 }
@@ -656,7 +655,11 @@ impl<const DEPTH: u8> Serializable for LeafIndex<DEPTH> {
 
 impl<const DEPTH: u8> Deserializable for LeafIndex<DEPTH> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self { index: source.read()? })
+        // A `NodeIndex` is valid on its own terms without knowing `DEPTH`, so route through
+        // `TryFrom` to enforce that its depth matches this type's `DEPTH`.
+        let index: NodeIndex = source.read()?;
+
+        Self::try_from(index).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
     }
 }
 
@@ -859,5 +862,40 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
             new_pairs,
             new_root,
         })
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::{LeafIndex, NodeIndex, SMT_MAX_DEPTH};
+    use crate::utils::{Deserializable, Serializable};
+
+    #[test]
+    fn leaf_index_read_from_rejects_depth_mismatch() {
+        // A depth-3 index is valid on its own terms, but wrong for a `LeafIndex<SMT_MAX_DEPTH>`.
+        let mismatched = NodeIndex::new(3, 5).unwrap();
+        assert!(LeafIndex::<SMT_MAX_DEPTH>::try_from(mismatched).is_err());
+
+        assert!(LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&mismatched.to_bytes()).is_err());
+    }
+
+    #[test]
+    fn leaf_index_read_from_rejects_depth_below_minimum() {
+        assert!(LeafIndex::<0>::new(0).is_err());
+
+        let root = NodeIndex::new(0, 0).unwrap();
+        assert!(LeafIndex::<0>::read_from_bytes(&root.to_bytes()).is_err());
+    }
+
+    #[test]
+    fn leaf_index_round_trips_at_matching_depth() {
+        let leaf = LeafIndex::<SMT_MAX_DEPTH>::new(5).unwrap();
+
+        let decoded = LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&leaf.to_bytes()).unwrap();
+
+        assert_eq!(leaf, decoded);
     }
 }
