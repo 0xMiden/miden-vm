@@ -1813,7 +1813,7 @@ fn split_u128(value: u128) -> (u64, u64, u64, u64) {
         (value >> 32) as u32 as u64,
         value as u32 as u64,
     )
-    }
+}
 #[test]
 fn wrapping_mul_regression_vectors() {
     // Run 100 random regression vectors to prove MASM matches Rust
